@@ -59,13 +59,21 @@ caco import local "MyWad" ~/wads/mywad.wad
 # List all WADs
 caco list
 
-# Filter by status, tag, or source
+# Search with beets-style queries
+caco list scythe                    # Free text (title/author/description)
+caco list id:1                      # By database ID
+caco list title:tnt                 # By title
+caco list author:romero             # By author
+caco list year:2020                 # By year
+caco list tag:megawad               # By tag
+caco list status:playing            # By status
+caco list source:idgames            # By source type
+caco list author:alm title:scythe   # Combine multiple filters
+
+# Filter options (can combine with queries)
 caco list --status backlog
 caco list --tag megawad
 caco list --source idgames
-
-# Search
-caco list "scythe"
 
 # View details
 caco info 1

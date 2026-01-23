@@ -27,7 +27,7 @@
 ### Querying
 - [x] List with filters (status, tag, source)
 - [x] Text search (title, author, description)
-- [ ] Advanced query syntax (e.g., `status:unplayed year:2020..`)
+- [x] Advanced query syntax (e.g., `id:1 author:romero year:2020`)
 - [ ] Sort options (playtime, rating, date added, etc.)
 
 ## UI
