@@ -62,7 +62,7 @@ caco list
 # Search with beets-style queries
 caco list scythe                    # Free text (title/author/description)
 caco list id:1                      # By database ID
-caco list title:tnt                 # By title
+caco list title:tnt                 # By title (or name:tnt)
 caco list author:romero             # By author
 caco list year:2020                 # By year
 caco list tag:megawad               # By tag
