@@ -390,6 +390,16 @@ def get_total_playtime(wad_id: int) -> int:
         return row["total"]
 
 
+def get_last_played(wad_id: int) -> str | None:
+    """Get the last played timestamp for a WAD."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT started_at FROM sessions WHERE wad_id = ? ORDER BY started_at DESC LIMIT 1",
+            (wad_id,),
+        ).fetchone()
+        return row["started_at"] if row else None
+
+
 def get_all_tags() -> list[str]:
     """Get all unique tags."""
     with get_connection() as conn:

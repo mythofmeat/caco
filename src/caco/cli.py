@@ -61,12 +61,13 @@ def list(query: str | None, status: str | None, tag: str | None, source: str | N
     table.add_column("Author")
     table.add_column("Status")
     table.add_column("Playtime", justify="right")
-    table.add_column("Tags", style="dim")
+    table.add_column("Last Played", style="dim")
 
     for wad in wads:
         playtime = db.get_total_playtime(wad["id"])
         playtime_str = format_duration(playtime) if playtime else "-"
-        tags_str = ", ".join(wad.get("tags", [])) or "-"
+        last_played = db.get_last_played(wad["id"])
+        last_played_str = last_played[:10] if last_played else "-"
 
         table.add_row(
             str(wad["id"]),
@@ -74,7 +75,7 @@ def list(query: str | None, status: str | None, tag: str | None, source: str | N
             wad["author"] or "-",
             wad["status"],
             playtime_str,
-            tags_str,
+            last_played_str,
         )
 
     console.print(table)
@@ -118,9 +119,12 @@ def info(wad_id: int):
     # Playtime stats
     playtime = db.get_total_playtime(wad_id)
     sessions = db.get_sessions(wad_id)
+    last_played = db.get_last_played(wad_id)
     if sessions:
         console.print()
         console.print(f"[bold]Playtime:[/bold] {format_duration(playtime)} ({len(sessions)} sessions)")
+        if last_played:
+            console.print(f"[bold]Last played:[/bold] {last_played[:16].replace('T', ' ')}")
 
     if wad["notes"]:
         console.print()
