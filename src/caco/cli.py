@@ -12,7 +12,9 @@ from caco.config import (
     set_default_sourceport,
     get_cache_dir,
     set_cache_dir,
+    set_iwad,
     load_config,
+    save_config,
     CONFIG_FILE,
 )
 from caco.player import play, format_duration
@@ -367,7 +369,13 @@ def config(key: str | None, value: str | None):
         console.print(f"[dim]Config file: {CONFIG_FILE}[/dim]")
         console.print()
         for k, v in cfg.items():
-            console.print(f"[bold]{k}:[/bold] {v or '[dim]not set[/dim]'}")
+            if v == "" or v is None:
+                display = "[dim]not set[/dim]"
+            elif isinstance(v, list):
+                display = ", ".join(v) if v else "[dim]not set[/dim]"
+            else:
+                display = str(v)
+            console.print(f"[bold]{k}:[/bold] {display}")
         return
 
     if value is None:
@@ -381,8 +389,15 @@ def config(key: str | None, value: str | None):
         set_default_sourceport(value)
     elif key == "cache_dir":
         set_cache_dir(value)
+    elif key == "iwad":
+        set_iwad(value)
+    elif key == "download_mirror":
+        cfg = load_config()
+        cfg["download_mirror"] = int(value)
+        save_config(cfg)
     else:
         err_console.print(f"[red]Unknown config key: {key}[/red]")
+        err_console.print("[dim]Valid keys: sourceport, iwad, cache_dir, download_mirror[/dim]")
         sys.exit(1)
 
     console.print(f"[green]Set {key} = {value}[/green]")

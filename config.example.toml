@@ -1,0 +1,22 @@
+# Caco configuration
+# Copy to ~/.config/caco/config.toml
+
+# Default sourceport path
+# sourceport = "/usr/bin/gzdoom"
+
+# Default IWAD for playing WADs (doom.wad, doom2.wad, plutonia.wad, tnt.wad, etc.)
+# iwad = "/usr/share/games/doom/doom2.wad"
+
+# Default arguments passed to sourceport
+# sourceport_args = ["-nomusic", "-nosfx"]
+
+# WAD cache directory (downloaded WADs are stored here)
+# cache_dir = "~/.cache/caco/wads"
+
+# Preferred idgames download mirror (0-4)
+# 0 = youfailit.net (default, fastest)
+# 1 = quaddicted.com
+# 2 = infania.net
+# 3 = braindrainlan.nu
+# 4 = xvertigox.com
+# download_mirror = 0

@@ -5,6 +5,7 @@ from pathlib import Path
 from idgames.client import IdgamesClient
 from idgames.models import FileEntry
 
+from caco.config import get_download_mirror
 from caco.db import SourceType, add_wad
 
 
@@ -62,9 +63,11 @@ class IdgamesSource:
         self,
         entry: FileEntry,
         dest: Path,
-        mirror: int = 0,
+        mirror: int | None = None,
     ) -> Path:
         """Download a WAD file. Returns the path to the downloaded file."""
+        if mirror is None:
+            mirror = get_download_mirror()
         dest_file = dest / entry.filename
         for _ in self.client.download(entry, dest_file, mirror):
             pass  # Could add progress callback here

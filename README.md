@@ -102,16 +102,37 @@ caco play 1 -- -warp 15 -skill 4
 
 ## Configuration
 
-Config file: `~/.config/caco/config.toml`
+Config file: `~/.config/caco/config.toml` (see `config.example.toml` for a template)
+
+### Available Options
+
+| Option | Description |
+|--------|-------------|
+| `sourceport` | Path to default sourceport |
+| `iwad` | Path to default IWAD (doom2.wad, etc.) |
+| `sourceport_args` | Default args passed to sourceport |
+| `cache_dir` | WAD cache directory |
+| `download_mirror` | Preferred idgames mirror (0-4) |
+
+### Example Config
+
+```toml
+sourceport = "/usr/bin/gzdoom"
+iwad = "/usr/share/games/doom/doom2.wad"
+sourceport_args = ["-nomusic"]
+cache_dir = "~/.cache/caco/wads"
+download_mirror = 0
+```
+
+### CLI Commands
 
 ```bash
 # View config
 caco config
 
-# Set default sourceport
+# Set values
 caco config sourceport /usr/bin/gzdoom
-
-# Set cache directory
+caco config iwad /usr/share/games/doom/doom2.wad
 caco config cache_dir ~/.cache/caco/wads
 ```
 

@@ -11,6 +11,9 @@ CACHE_DIR = Path.home() / ".cache" / "caco" / "wads"
 DEFAULT_CONFIG = {
     "sourceport": "",
     "cache_dir": str(CACHE_DIR),
+    "iwad": "",
+    "sourceport_args": [],
+    "download_mirror": 0,
 }
 
 
@@ -41,6 +44,9 @@ def save_config(config: dict[str, Any]) -> None:
             lines.append(f"{key} = {str(value).lower()}")
         elif isinstance(value, (int, float)):
             lines.append(f"{key} = {value}")
+        elif isinstance(value, list):
+            items = ", ".join(f'"{v}"' for v in value)
+            lines.append(f"{key} = [{items}]")
 
     CONFIG_FILE.write_text("\n".join(lines) + "\n")
 
@@ -70,3 +76,37 @@ def set_cache_dir(path: str) -> None:
     config = load_config()
     config["cache_dir"] = path
     save_config(config)
+
+
+def get_iwad() -> str | None:
+    """Get the configured default IWAD path."""
+    config = load_config()
+    iwad = config.get("iwad", "")
+    return iwad if iwad else None
+
+
+def set_iwad(path: str) -> None:
+    """Set the default IWAD path."""
+    config = load_config()
+    config["iwad"] = path
+    save_config(config)
+
+
+def get_sourceport_args() -> list[str]:
+    """Get the default sourceport arguments."""
+    config = load_config()
+    args = config.get("sourceport_args", [])
+    return args if isinstance(args, list) else []
+
+
+def set_sourceport_args(args: list[str]) -> None:
+    """Set the default sourceport arguments."""
+    config = load_config()
+    config["sourceport_args"] = args
+    save_config(config)
+
+
+def get_download_mirror() -> int:
+    """Get the preferred download mirror index."""
+    config = load_config()
+    return int(config.get("download_mirror", 0))

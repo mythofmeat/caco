@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 
 from caco import db
-from caco.config import get_cache_dir, get_default_sourceport
+from caco.config import get_cache_dir, get_default_sourceport, get_iwad, get_sourceport_args
 
 
 def get_wad_path(wad: dict) -> Path | None:
@@ -67,7 +67,22 @@ def play(
         raise ValueError("No sourceport specified and no default configured")
 
     # Build command
-    cmd = [port, "-file", str(wad_path)]
+    cmd = [port]
+
+    # Add IWAD if configured
+    iwad = get_iwad()
+    if iwad:
+        cmd.extend(["-iwad", iwad])
+
+    # Add default sourceport args
+    default_args = get_sourceport_args()
+    if default_args:
+        cmd.extend(default_args)
+
+    # Add the WAD file
+    cmd.extend(["-file", str(wad_path)])
+
+    # Add extra args from command line
     if extra_args:
         cmd.extend(extra_args)
 
