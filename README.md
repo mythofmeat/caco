@@ -136,6 +136,18 @@ caco config iwad /usr/share/games/doom/doom2.wad
 caco config cache_dir ~/.cache/caco/wads
 ```
 
+## Shell Completions
+
+Fish shell completions are available in `completions/caco.fish`.
+
+```bash
+# Install for current user
+cp completions/caco.fish ~/.config/fish/completions/
+
+# Or symlink for automatic updates
+ln -s "$(pwd)/completions/caco.fish" ~/.config/fish/completions/
+```
+
 ## Data Storage
 
 - **Database**: `~/.local/share/caco/library.db`
