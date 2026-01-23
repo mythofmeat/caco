@@ -22,9 +22,11 @@ class IdgamesSource:
 
     def search(self, query: str) -> list[FileEntry]:
         """Search idgames for WADs."""
-        results = self.client.search_all_fields(query)
-        # Return just the FileEntry objects, sorted by relevance
-        return [entry for entry, _ in results]
+        # Search by title first, then filename if no results
+        results = self.client.search(query, type="title")
+        if not results:
+            results = self.client.search(query, type="filename")
+        return results
 
     def get(self, file_id: int) -> FileEntry:
         """Get a specific file by ID."""
