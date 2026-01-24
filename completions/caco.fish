@@ -22,11 +22,25 @@ complete -c caco -n __fish_use_subcommand -a play -d "Play a WAD"
 complete -c caco -n __fish_use_subcommand -a import -d "Import WADs from various sources"
 complete -c caco -n __fish_use_subcommand -a tag -d "Manage tags"
 complete -c caco -n __fish_use_subcommand -a config -d "View or set configuration"
+complete -c caco -n __fish_use_subcommand -a completions -d "Generate shell completions"
+complete -c caco -n __fish_use_subcommand -a pl -d "List playing WADs"
+complete -c caco -n __fish_use_subcommand -a wl -d "List wishlist WADs"
+complete -c caco -n __fish_use_subcommand -a bl -d "List backlog WADs"
 
 # list options
 complete -c caco -n "__fish_seen_subcommand_from list" -s s -l status -d "Filter by status" -xa "wishlist backlog playing finished abandoned"
 complete -c caco -n "__fish_seen_subcommand_from list" -s t -l tag -d "Filter by tag" -xa "(__caco_tags)"
 complete -c caco -n "__fish_seen_subcommand_from list" -l source -d "Filter by source" -xa "idgames doomwiki doomworld url local"
+
+# Query field completions for list, pl, wl, bl
+complete -c caco -n "__fish_seen_subcommand_from list pl wl bl" -a "id:" -d "Filter by ID"
+complete -c caco -n "__fish_seen_subcommand_from list pl wl bl" -a "title:" -d "Filter by title"
+complete -c caco -n "__fish_seen_subcommand_from list pl wl bl" -a "author:" -d "Filter by author"
+complete -c caco -n "__fish_seen_subcommand_from list pl wl bl" -a "year:" -d "Filter by year"
+complete -c caco -n "__fish_seen_subcommand_from list pl wl bl" -a "filename:" -d "Filter by filename"
+complete -c caco -n "__fish_seen_subcommand_from list pl wl bl" -a "tag:" -d "Filter by tag"
+complete -c caco -n "__fish_seen_subcommand_from list pl wl bl" -a "status:" -d "Filter by status"
+complete -c caco -n "__fish_seen_subcommand_from list pl wl bl" -a "source:" -d "Filter by source"
 
 # info, update, delete, play - take WAD ID
 complete -c caco -n "__fish_seen_subcommand_from info update delete play" -xa "(__caco_wads)"
@@ -35,6 +49,12 @@ complete -c caco -n "__fish_seen_subcommand_from info update delete play" -xa "(
 complete -c caco -n "__fish_seen_subcommand_from update" -s s -l status -d "Set status" -xa "wishlist backlog playing finished abandoned"
 complete -c caco -n "__fish_seen_subcommand_from update" -s r -l rating -d "Set rating (1-5)" -xa "1 2 3 4 5"
 complete -c caco -n "__fish_seen_subcommand_from update" -s n -l notes -d "Set notes"
+complete -c caco -n "__fish_seen_subcommand_from update" -l iwad -d "Custom IWAD path" -rF
+complete -c caco -n "__fish_seen_subcommand_from update" -l clear-iwad -d "Clear custom IWAD"
+complete -c caco -n "__fish_seen_subcommand_from update" -l sourceport -d "Custom sourceport" -rF
+complete -c caco -n "__fish_seen_subcommand_from update" -l clear-sourceport -d "Clear custom sourceport"
+complete -c caco -n "__fish_seen_subcommand_from update" -l args -d "Custom arguments"
+complete -c caco -n "__fish_seen_subcommand_from update" -l clear-args -d "Clear custom arguments"
 
 # play options
 complete -c caco -n "__fish_seen_subcommand_from play" -s p -l sourceport -d "Sourceport to use" -rF
@@ -66,3 +86,7 @@ complete -c caco -n "__fish_seen_subcommand_from tag; and __fish_seen_subcommand
 
 # config keys
 complete -c caco -n "__fish_seen_subcommand_from config" -xa "sourceport iwad cache_dir download_mirror sourceport_args"
+
+# completions command
+complete -c caco -n "__fish_seen_subcommand_from completions" -a "bash fish zsh" -d "Shell type"
+complete -c caco -n "__fish_seen_subcommand_from completions" -l install -d "Install completions to config"

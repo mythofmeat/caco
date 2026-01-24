@@ -61,28 +61,13 @@ def cli():
 # =============================================================================
 
 
-@cli.command(name="list")
-@click.argument("query", required=False)
-@click.option("--status", "-s", type=click.Choice([s.value for s in db.Status]))
-@click.option("--tag", "-t", help="Filter by tag")
-@click.option("--source", type=click.Choice([s.value for s in db.SourceType]))
-def list_cmd(query: str | None, status: str | None, tag: str | None, source: str | None):
-    """List WADs in your library."""
-    status_enum = db.Status(status) if status else None
-    source_enum = db.SourceType(source) if source else None
-
-    wads = db.search_wads(
-        query=query,
-        status=status_enum,
-        source_type=source_enum,
-        tag=tag,
-    )
-
+def _render_wad_list(wads: list[dict], title: str | None = None) -> None:
+    """Render a list of WADs as a table."""
     if not wads:
         console.print("[dim]No WADs found[/dim]")
         return
 
-    table = Table(title=f"Library ({len(wads)} WADs)")
+    table = Table(title=title or f"Library ({len(wads)} WADs)")
     table.add_column("ID", style="dim")
     table.add_column("Title", style="cyan")
     table.add_column("Author")
@@ -106,6 +91,25 @@ def list_cmd(query: str | None, status: str | None, tag: str | None, source: str
         )
 
     console.print(table)
+
+
+@cli.command(name="list")
+@click.argument("query", required=False)
+@click.option("--status", "-s", type=click.Choice([s.value for s in db.Status]))
+@click.option("--tag", "-t", help="Filter by tag")
+@click.option("--source", type=click.Choice([s.value for s in db.SourceType]))
+def list_cmd(query: str | None, status: str | None, tag: str | None, source: str | None):
+    """List WADs in your library."""
+    status_enum = db.Status(status) if status else None
+    source_enum = db.SourceType(source) if source else None
+
+    wads = db.search_wads(
+        query=query,
+        status=status_enum,
+        source_type=source_enum,
+        tag=tag,
+    )
+    _render_wad_list(wads)
 
 
 @cli.command()
@@ -158,14 +162,49 @@ def info(wad_id: int):
         console.print("[bold]Notes:[/bold]")
         console.print(wad["notes"])
 
+    # Per-WAD play config
+    if wad.get("custom_iwad") or wad.get("custom_sourceport") or wad.get("custom_args"):
+        import json
+        console.print()
+        console.print("[bold]Custom play config:[/bold]")
+        if wad.get("custom_iwad"):
+            console.print(f"  IWAD: {wad['custom_iwad']}")
+        if wad.get("custom_sourceport"):
+            console.print(f"  Sourceport: {wad['custom_sourceport']}")
+        if wad.get("custom_args"):
+            try:
+                args = json.loads(wad["custom_args"])
+                console.print(f"  Args: {' '.join(args)}")
+            except json.JSONDecodeError:
+                console.print(f"  Args: {wad['custom_args']}")
+
 
 @cli.command()
 @click.argument("wad_ids", type=WAD_IDS)
 @click.option("--status", "-s", type=click.Choice([s.value for s in db.Status]))
 @click.option("--rating", "-r", type=click.IntRange(1, 5))
 @click.option("--notes", "-n")
-def update(wad_ids: list[int], status: str | None, rating: int | None, notes: str | None):
+@click.option("--iwad", help="Custom IWAD path for this WAD")
+@click.option("--clear-iwad", is_flag=True, help="Clear custom IWAD")
+@click.option("--sourceport", help="Custom sourceport for this WAD")
+@click.option("--clear-sourceport", is_flag=True, help="Clear custom sourceport")
+@click.option("--args", "custom_args", help="Custom arguments (JSON array or space-separated)")
+@click.option("--clear-args", is_flag=True, help="Clear custom arguments")
+def update(
+    wad_ids: list[int],
+    status: str | None,
+    rating: int | None,
+    notes: str | None,
+    iwad: str | None,
+    clear_iwad: bool,
+    sourceport: str | None,
+    clear_sourceport: bool,
+    custom_args: str | None,
+    clear_args: bool,
+):
     """Update WAD metadata. WAD_IDS: single ID or range (3-6,9,11)."""
+    import json
+
     updates = {}
     if status:
         updates["status"] = db.Status(status)
@@ -173,6 +212,25 @@ def update(wad_ids: list[int], status: str | None, rating: int | None, notes: st
         updates["rating"] = rating
     if notes:
         updates["notes"] = notes
+
+    # Per-WAD play config
+    if iwad:
+        updates["custom_iwad"] = iwad
+    elif clear_iwad:
+        updates["custom_iwad"] = None
+    if sourceport:
+        updates["custom_sourceport"] = sourceport
+    elif clear_sourceport:
+        updates["custom_sourceport"] = None
+    if custom_args:
+        # Accept JSON array or space-separated string
+        try:
+            args_list = json.loads(custom_args)
+        except json.JSONDecodeError:
+            args_list = custom_args.split()
+        updates["custom_args"] = json.dumps(args_list)
+    elif clear_args:
+        updates["custom_args"] = None
 
     if not updates:
         err_console.print("[yellow]No updates specified[/yellow]")
@@ -393,15 +451,33 @@ def import_local(title: str, path: str, author: str | None, year: int | None,
 
 
 @cli.command()
-@click.argument("wad_id", type=int)
+@click.argument("query")
 @click.option("--sourceport", "-p", help="Sourceport to use")
 @click.argument("extra_args", nargs=-1)
-def play_cmd(wad_id: int, sourceport: str | None, extra_args: tuple[str, ...]):
-    """Play a WAD."""
-    wad = db.get_wad(wad_id)
-    if not wad:
-        err_console.print(f"[red]WAD {wad_id} not found[/red]")
-        sys.exit(1)
+def play_cmd(query: str, sourceport: str | None, extra_args: tuple[str, ...]):
+    """Play a WAD by ID or query (e.g., 'caco play 1' or 'caco play filename:tnto')."""
+    # Try parsing as int first (WAD ID)
+    try:
+        wad_id = int(query)
+        wad = db.get_wad(wad_id)
+        if not wad:
+            err_console.print(f"[red]WAD {wad_id} not found[/red]")
+            sys.exit(1)
+    except ValueError:
+        # Query-based lookup
+        results = db.search_wads(query=query)
+        if not results:
+            err_console.print(f"[red]No WADs matching '{query}'[/red]")
+            sys.exit(1)
+        if len(results) > 1:
+            err_console.print(f"[red]Multiple WADs match '{query}':[/red]")
+            for r in results[:10]:
+                err_console.print(f"  {r['id']}: {r['title']}")
+            if len(results) > 10:
+                err_console.print(f"  ... and {len(results) - 10} more")
+            sys.exit(1)
+        wad = results[0]
+        wad_id = wad["id"]
 
     port = sourceport or get_default_sourceport()
     if not port:
@@ -471,6 +547,99 @@ def config(key: str | None, value: str | None):
         sys.exit(1)
 
     console.print(f"[green]Set {key} = {value}[/green]")
+
+
+# =============================================================================
+# Completions
+# =============================================================================
+
+
+@cli.command()
+@click.argument("shell", required=False, type=click.Choice(["bash", "fish", "zsh"]))
+@click.option("--install", is_flag=True, help="Install completions to shell config")
+def completions(shell: str | None, install: bool):
+    """Generate or install shell completions."""
+    import os
+    from pathlib import Path
+
+    # Auto-detect shell if not specified
+    if not shell:
+        shell_path = os.environ.get("SHELL", "")
+        if "fish" in shell_path:
+            shell = "fish"
+        elif "zsh" in shell_path:
+            shell = "zsh"
+        elif "bash" in shell_path:
+            shell = "bash"
+        else:
+            err_console.print("[red]Could not detect shell. Specify: bash, fish, or zsh[/red]")
+            sys.exit(1)
+
+    # Get completion script
+    from click.shell_completion import get_completion_class
+
+    comp_cls = get_completion_class(shell)
+    if not comp_cls:
+        err_console.print(f"[red]Unsupported shell: {shell}[/red]")
+        sys.exit(1)
+
+    comp = comp_cls(cli, {}, "caco", "_CACO_COMPLETE")
+    script = comp.source()
+
+    if not install:
+        # Just print the script
+        console.print(script)
+        return
+
+    # Install to appropriate location
+    home = Path.home()
+    if shell == "fish":
+        dest = home / ".config" / "fish" / "completions" / "caco.fish"
+    elif shell == "zsh":
+        dest = home / ".zfunc" / "_caco"
+    elif shell == "bash":
+        dest = home / ".local" / "share" / "bash-completion" / "completions" / "caco"
+    else:
+        err_console.print(f"[red]Unknown shell: {shell}[/red]")
+        sys.exit(1)
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(script)
+    console.print(f"[green]Installed completions to {dest}[/green]")
+
+    if shell == "zsh":
+        console.print("[dim]Add 'fpath=(~/.zfunc $fpath)' to ~/.zshrc and run 'compinit'[/dim]")
+    elif shell == "bash":
+        console.print("[dim]Add 'source ~/.local/share/bash-completion/completions/caco' to ~/.bashrc[/dim]")
+
+
+# =============================================================================
+# Shortcut Aliases
+# =============================================================================
+
+
+@cli.command(name="pl")
+@click.argument("query", required=False)
+def playing_alias(query: str | None):
+    """List WADs with 'playing' status (alias for 'list -s playing')."""
+    wads = db.search_wads(query=query, status=db.Status.PLAYING)
+    _render_wad_list(wads, title=f"Playing ({len(wads)} WADs)")
+
+
+@cli.command(name="wl")
+@click.argument("query", required=False)
+def wishlist_alias(query: str | None):
+    """List WADs with 'wishlist' status (alias for 'list -s wishlist')."""
+    wads = db.search_wads(query=query, status=db.Status.WISHLIST)
+    _render_wad_list(wads, title=f"Wishlist ({len(wads)} WADs)")
+
+
+@cli.command(name="bl")
+@click.argument("query", required=False)
+def backlog_alias(query: str | None):
+    """List WADs with 'backlog' status (alias for 'list -s backlog')."""
+    wads = db.search_wads(query=query, status=db.Status.BACKLOG)
+    _render_wad_list(wads, title=f"Backlog ({len(wads)} WADs)")
 
 
 if __name__ == "__main__":

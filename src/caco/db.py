@@ -49,6 +49,11 @@ CREATE TABLE IF NOT EXISTS wads (
     filename TEXT,
     cached_path TEXT,    -- local path if cached
 
+    -- Per-WAD play config (overrides global config)
+    custom_iwad TEXT,
+    custom_sourceport TEXT,
+    custom_args TEXT,    -- JSON array of extra arguments
+
     -- Metadata
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -94,6 +99,20 @@ def init_db() -> None:
     """Initialize the database schema."""
     with get_connection() as conn:
         conn.executescript(SCHEMA)
+        # Migrations for existing databases
+        _migrate_add_custom_play_config(conn)
+
+
+def _migrate_add_custom_play_config(conn: sqlite3.Connection) -> None:
+    """Add custom_iwad, custom_sourceport, custom_args columns if missing."""
+    cursor = conn.execute("PRAGMA table_info(wads)")
+    columns = {row[1] for row in cursor.fetchall()}
+    if "custom_iwad" not in columns:
+        conn.execute("ALTER TABLE wads ADD COLUMN custom_iwad TEXT")
+    if "custom_sourceport" not in columns:
+        conn.execute("ALTER TABLE wads ADD COLUMN custom_sourceport TEXT")
+    if "custom_args" not in columns:
+        conn.execute("ALTER TABLE wads ADD COLUMN custom_args TEXT")
 
 
 def add_wad(
@@ -244,6 +263,10 @@ def search_wads(
             conditions.append("source_type = ?")
             params.append(filters["source"].lower())
 
+        if "filename" in filters:
+            conditions.append("filename LIKE ?")
+            params.append(f"%{filters['filename']}%")
+
         # Free text searches title, author, description
         for term in free_text:
             conditions.append("(title LIKE ? OR author LIKE ? OR description LIKE ?)")
@@ -265,9 +288,33 @@ def search_wads(
 
     where = " AND ".join(conditions) if conditions else "1=1"
 
+    # Custom sort order:
+    # 1. playing - by last played (newest first)
+    # 2. backlog - by created_at (newest first)
+    # 3. wishlist - by created_at (newest first)
+    # 4. abandoned - by last played (newest first)
+    # 5. finished - by last played (newest first)
+    order_by = """
+        CASE status
+            WHEN 'playing' THEN 1
+            WHEN 'backlog' THEN 2
+            WHEN 'wishlist' THEN 3
+            WHEN 'abandoned' THEN 4
+            WHEN 'finished' THEN 5
+            ELSE 6
+        END,
+        CASE status
+            WHEN 'playing' THEN (SELECT MAX(started_at) FROM sessions WHERE sessions.wad_id = wads.id)
+            WHEN 'abandoned' THEN (SELECT MAX(started_at) FROM sessions WHERE sessions.wad_id = wads.id)
+            WHEN 'finished' THEN (SELECT MAX(started_at) FROM sessions WHERE sessions.wad_id = wads.id)
+            ELSE NULL
+        END DESC NULLS LAST,
+        created_at DESC
+    """
+
     with get_connection() as conn:
         rows = conn.execute(
-            f"SELECT * FROM wads WHERE {where} ORDER BY title", params
+            f"SELECT * FROM wads WHERE {where} ORDER BY {order_by}", params
         ).fetchall()
 
         results = []

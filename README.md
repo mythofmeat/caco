@@ -56,8 +56,13 @@ caco import local "MyWad" ~/wads/mywad.wad
 ### Managing Library
 
 ```bash
-# List all WADs
+# List all WADs (sorted by status: playing → backlog → wishlist → abandoned → finished)
 caco list
+
+# Quick status aliases
+caco pl                             # List playing WADs
+caco wl                             # List wishlist WADs
+caco bl                             # List backlog WADs
 
 # Search with beets-style queries
 caco list scythe                    # Free text (title/author/description)
@@ -65,6 +70,7 @@ caco list id:1                      # By database ID
 caco list title:tnt                 # By title (or name:tnt)
 caco list author:romero             # By author
 caco list year:2020                 # By year
+caco list filename:tnto             # By filename
 caco list tag:megawad               # By tag
 caco list status:playing            # By status
 caco list source:idgames            # By source type
@@ -90,8 +96,12 @@ caco tag remove 1 slaughter
 ### Playing
 
 ```bash
-# Play a WAD
+# Play a WAD by ID
 caco play 1
+
+# Play by query (must match exactly one WAD)
+caco play filename:tnto
+caco play "TNT: Overcharged"
 
 # Use a specific sourceport
 caco play 1 --sourceport /usr/bin/dsda-doom
@@ -99,6 +109,26 @@ caco play 1 --sourceport /usr/bin/dsda-doom
 # Pass extra args to sourceport
 caco play 1 -- -warp 15 -skill 4
 ```
+
+### Per-WAD Custom Config
+
+Set WAD-specific IWAD, sourceport, or extra arguments:
+
+```bash
+# Set custom IWAD for a WAD
+caco update 1 --iwad /path/to/tnt.wad
+
+# Set custom sourceport
+caco update 1 --sourceport /usr/bin/dsda-doom
+
+# Set custom arguments
+caco update 1 --args "-complevel 2 -warp 1"
+
+# Clear custom settings
+caco update 1 --clear-iwad --clear-sourceport --clear-args
+```
+
+Priority: CLI arguments > Per-WAD config > Global config
 
 ## Configuration
 
@@ -138,14 +168,26 @@ caco config cache_dir ~/.cache/caco/wads
 
 ## Shell Completions
 
-Fish shell completions are available in `completions/caco.fish`.
+Generate and install shell completions:
 
 ```bash
-# Install for current user
-cp completions/caco.fish ~/.config/fish/completions/
+# Generate completions (auto-detects shell from $SHELL)
+caco completions
 
-# Or symlink for automatic updates
-ln -s "$(pwd)/completions/caco.fish" ~/.config/fish/completions/
+# Generate for specific shell
+caco completions fish
+caco completions bash
+caco completions zsh
+
+# Install completions to shell config
+caco completions --install
+caco completions fish --install
+```
+
+Manual installation (fish):
+
+```bash
+cp completions/caco.fish ~/.config/fish/completions/
 ```
 
 ## Data Storage

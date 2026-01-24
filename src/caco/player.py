@@ -1,5 +1,6 @@
 """Sourceport launcher and playtime tracking."""
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -64,28 +65,37 @@ def play(
     if not wad_path:
         raise ValueError(f"Could not get WAD file for {wad['title']}")
 
-    # Determine sourceport
-    port = sourceport or get_default_sourceport()
+    # Determine sourceport (CLI > WAD-specific > global config)
+    port = sourceport or wad.get("custom_sourceport") or get_default_sourceport()
     if not port:
         raise ValueError("No sourceport specified and no default configured")
 
     # Build command
     cmd = [port]
 
-    # Add IWAD if configured
-    iwad = get_iwad()
+    # Add IWAD (CLI option would be in extra_args, so: WAD-specific > global config)
+    iwad = wad.get("custom_iwad") or get_iwad()
     if iwad:
         cmd.extend(["-iwad", iwad])
 
-    # Add default sourceport args
+    # Add default sourceport args from global config
     default_args = get_sourceport_args()
     if default_args:
         cmd.extend(default_args)
 
+    # Add per-WAD custom args
+    if wad.get("custom_args"):
+        try:
+            wad_args = json.loads(wad["custom_args"])
+            if isinstance(wad_args, list):
+                cmd.extend(wad_args)
+        except json.JSONDecodeError:
+            pass
+
     # Add the WAD file
     cmd.extend(["-file", str(wad_path)])
 
-    # Add extra args from command line
+    # Add extra args from command line (highest priority, can override anything)
     if extra_args:
         cmd.extend(extra_args)
 
