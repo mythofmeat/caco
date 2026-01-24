@@ -23,6 +23,33 @@ console = Console()
 err_console = Console(stderr=True)
 
 
+class WadIdRange(click.ParamType):
+    """Parse WAD ID ranges like '3-6,9,11' into a list of ints."""
+
+    name = "wad_ids"
+
+    def convert(self, value, param, ctx) -> list[int]:
+        if isinstance(value, list):
+            return value
+        try:
+            ids = []
+            for part in value.split(","):
+                part = part.strip()
+                if "-" in part:
+                    start, end = map(int, part.split("-", 1))
+                    if start > end:
+                        self.fail(f"Invalid range: {start}-{end}", param, ctx)
+                    ids.extend(range(start, end + 1))
+                else:
+                    ids.append(int(part))
+            return list(dict.fromkeys(ids))  # dedupe, preserve order
+        except ValueError:
+            self.fail(f"Invalid format: {value}. Use '3-6,9,11'", param, ctx)
+
+
+WAD_IDS = WadIdRange()
+
+
 @click.group()
 def cli():
     """Caco - Personal Doom WAD library manager."""
@@ -34,12 +61,12 @@ def cli():
 # =============================================================================
 
 
-@cli.command()
+@cli.command(name="list")
 @click.argument("query", required=False)
 @click.option("--status", "-s", type=click.Choice([s.value for s in db.Status]))
 @click.option("--tag", "-t", help="Filter by tag")
 @click.option("--source", type=click.Choice([s.value for s in db.SourceType]))
-def list(query: str | None, status: str | None, tag: str | None, source: str | None):
+def list_cmd(query: str | None, status: str | None, tag: str | None, source: str | None):
     """List WADs in your library."""
     status_enum = db.Status(status) if status else None
     source_enum = db.SourceType(source) if source else None
@@ -133,12 +160,12 @@ def info(wad_id: int):
 
 
 @cli.command()
-@click.argument("wad_id", type=int)
+@click.argument("wad_ids", type=WAD_IDS)
 @click.option("--status", "-s", type=click.Choice([s.value for s in db.Status]))
 @click.option("--rating", "-r", type=click.IntRange(1, 5))
 @click.option("--notes", "-n")
-def update(wad_id: int, status: str | None, rating: int | None, notes: str | None):
-    """Update a WAD's metadata."""
+def update(wad_ids: list[int], status: str | None, rating: int | None, notes: str | None):
+    """Update WAD metadata. WAD_IDS: single ID or range (3-6,9,11)."""
     updates = {}
     if status:
         updates["status"] = db.Status(status)
@@ -151,22 +178,41 @@ def update(wad_id: int, status: str | None, rating: int | None, notes: str | Non
         err_console.print("[yellow]No updates specified[/yellow]")
         return
 
-    if db.update_wad(wad_id, **updates):
-        console.print("[green]Updated[/green]")
-    else:
-        err_console.print(f"[red]WAD {wad_id} not found[/red]")
+    success, failed = 0, []
+    for wad_id in wad_ids:
+        if db.update_wad(wad_id, **updates):
+            success += 1
+        else:
+            failed.append(wad_id)
+
+    if success:
+        console.print(f"[green]Updated {success} WAD(s)[/green]")
+    if failed:
+        err_console.print(f"[red]WAD(s) not found: {', '.join(map(str, failed))}[/red]")
         sys.exit(1)
 
 
 @cli.command()
-@click.argument("wad_id", type=int)
-@click.confirmation_option(prompt="Are you sure you want to delete this WAD?")
-def delete(wad_id: int):
-    """Delete a WAD from the library."""
-    if db.delete_wad(wad_id):
-        console.print("[green]Deleted[/green]")
-    else:
-        err_console.print(f"[red]WAD {wad_id} not found[/red]")
+@click.argument("wad_ids", type=WAD_IDS)
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
+def delete(wad_ids: list[int], yes: bool):
+    """Delete WAD(s) from the library. WAD_IDS: single ID or range (3-6,9,11)."""
+    count = len(wad_ids)
+    if not yes:
+        if not click.confirm(f"Delete {count} WAD(s)?"):
+            return
+
+    success, failed = 0, []
+    for wad_id in wad_ids:
+        if db.delete_wad(wad_id):
+            success += 1
+        else:
+            failed.append(wad_id)
+
+    if success:
+        console.print(f"[green]Deleted {success} WAD(s)[/green]")
+    if failed:
+        err_console.print(f"[red]WAD(s) not found: {', '.join(map(str, failed))}[/red]")
         sys.exit(1)
 
 
@@ -182,27 +228,47 @@ def tag():
 
 
 @tag.command(name="add")
-@click.argument("wad_id", type=int)
+@click.argument("wad_ids", type=WAD_IDS)
 @click.argument("tags", nargs=-1, required=True)
-def tag_add(wad_id: int, tags: tuple[str, ...]):
-    """Add tags to a WAD."""
-    for t in tags:
-        if db.add_tag(wad_id, t):
-            console.print(f"[green]Added tag:[/green] {t}")
-        else:
-            console.print(f"[yellow]Already tagged:[/yellow] {t}")
+def tag_add(wad_ids: list[int], tags: tuple[str, ...]):
+    """Add tags to WAD(s). WAD_IDS: single ID or range (3-6,9,11)."""
+    success, failed = 0, []
+    for wad_id in wad_ids:
+        wad = db.get_wad(wad_id)
+        if not wad:
+            failed.append(wad_id)
+            continue
+        for t in tags:
+            db.add_tag(wad_id, t)
+        success += 1
+
+    if success:
+        console.print(f"[green]Added tag(s) to {success} WAD(s)[/green]")
+    if failed:
+        err_console.print(f"[red]WAD(s) not found: {', '.join(map(str, failed))}[/red]")
+        sys.exit(1)
 
 
 @tag.command(name="remove")
-@click.argument("wad_id", type=int)
+@click.argument("wad_ids", type=WAD_IDS)
 @click.argument("tags", nargs=-1, required=True)
-def tag_remove(wad_id: int, tags: tuple[str, ...]):
-    """Remove tags from a WAD."""
-    for t in tags:
-        if db.remove_tag(wad_id, t):
-            console.print(f"[green]Removed tag:[/green] {t}")
-        else:
-            console.print(f"[yellow]Tag not found:[/yellow] {t}")
+def tag_remove(wad_ids: list[int], tags: tuple[str, ...]):
+    """Remove tags from WAD(s). WAD_IDS: single ID or range (3-6,9,11)."""
+    success, failed = 0, []
+    for wad_id in wad_ids:
+        wad = db.get_wad(wad_id)
+        if not wad:
+            failed.append(wad_id)
+            continue
+        for t in tags:
+            db.remove_tag(wad_id, t)
+        success += 1
+
+    if success:
+        console.print(f"[green]Removed tag(s) from {success} WAD(s)[/green]")
+    if failed:
+        err_console.print(f"[red]WAD(s) not found: {', '.join(map(str, failed))}[/red]")
+        sys.exit(1)
 
 
 @tag.command(name="list")
