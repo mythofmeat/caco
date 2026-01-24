@@ -1,6 +1,7 @@
 # TODO
 
 ## User requests
+- [ ] add a `completions` command that will automatically update completions for fish/bash/etc.
 - [ ] have per-game custom arguments
   - for example, if a specific wad requires tnt, i can set that as a wad-specific configuration, so i just have to do `caco play 1` and it launches with the `-iwad tnt` argument
 - [ ] can we please change the way `caco list` sorts files?
