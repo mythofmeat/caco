@@ -31,6 +31,10 @@ complete -c caco -n __fish_use_subcommand -a bl -d "List backlog WADs"
 complete -c caco -n "__fish_seen_subcommand_from list" -s s -l status -d "Filter by status" -xa "wishlist backlog playing finished abandoned"
 complete -c caco -n "__fish_seen_subcommand_from list" -s t -l tag -d "Filter by tag" -xa "(__caco_tags)"
 complete -c caco -n "__fish_seen_subcommand_from list" -l source -d "Filter by source" -xa "idgames doomwiki doomworld url local"
+complete -c caco -n "__fish_seen_subcommand_from list" -l plain -d "Output as TSV for scripting"
+
+# pl, wl, bl options
+complete -c caco -n "__fish_seen_subcommand_from pl wl bl" -l plain -d "Output as TSV for scripting"
 
 # Query field completions for list, pl, wl, bl
 complete -c caco -n "__fish_seen_subcommand_from list pl wl bl" -a "id:" -d "Filter by ID"
@@ -42,8 +46,21 @@ complete -c caco -n "__fish_seen_subcommand_from list pl wl bl" -a "tag:" -d "Fi
 complete -c caco -n "__fish_seen_subcommand_from list pl wl bl" -a "status:" -d "Filter by status"
 complete -c caco -n "__fish_seen_subcommand_from list pl wl bl" -a "source:" -d "Filter by source"
 
-# info, update, delete, play - take WAD ID
+# Query field completions for info, update, delete, play
+complete -c caco -n "__fish_seen_subcommand_from info update delete play" -a "id:" -d "Filter by ID"
+complete -c caco -n "__fish_seen_subcommand_from info update delete play" -a "title:" -d "Filter by title"
+complete -c caco -n "__fish_seen_subcommand_from info update delete play" -a "author:" -d "Filter by author"
+complete -c caco -n "__fish_seen_subcommand_from info update delete play" -a "year:" -d "Filter by year"
+complete -c caco -n "__fish_seen_subcommand_from info update delete play" -a "filename:" -d "Filter by filename"
+complete -c caco -n "__fish_seen_subcommand_from info update delete play" -a "tag:" -d "Filter by tag"
+complete -c caco -n "__fish_seen_subcommand_from info update delete play" -a "status:" -d "Filter by status"
+complete -c caco -n "__fish_seen_subcommand_from info update delete play" -a "source:" -d "Filter by source"
+
+# info, update, delete, play - take WAD ID or query
 complete -c caco -n "__fish_seen_subcommand_from info update delete play" -xa "(__caco_wads)"
+
+# info options
+complete -c caco -n "__fish_seen_subcommand_from info" -l plain -d "Output as key=value for scripting"
 
 # update options
 complete -c caco -n "__fish_seen_subcommand_from update" -s s -l status -d "Set status" -xa "wishlist backlog playing finished abandoned"
@@ -55,6 +72,10 @@ complete -c caco -n "__fish_seen_subcommand_from update" -l sourceport -d "Custo
 complete -c caco -n "__fish_seen_subcommand_from update" -l clear-sourceport -d "Clear custom sourceport"
 complete -c caco -n "__fish_seen_subcommand_from update" -l args -d "Custom arguments"
 complete -c caco -n "__fish_seen_subcommand_from update" -l clear-args -d "Clear custom arguments"
+complete -c caco -n "__fish_seen_subcommand_from update" -s y -l yes -d "Skip confirmation for multi-WAD updates"
+
+# delete options
+complete -c caco -n "__fish_seen_subcommand_from delete" -s y -l yes -d "Skip confirmation prompt"
 
 # play options
 complete -c caco -n "__fish_seen_subcommand_from play" -s p -l sourceport -d "Sourceport to use" -rF
@@ -81,8 +102,15 @@ complete -c caco -n "__fish_seen_subcommand_from tag; and not __fish_seen_subcom
 complete -c caco -n "__fish_seen_subcommand_from tag; and not __fish_seen_subcommand_from add remove list" -a remove -d "Remove tags from a WAD"
 complete -c caco -n "__fish_seen_subcommand_from tag; and not __fish_seen_subcommand_from add remove list" -a list -d "List all tags"
 
-# tag add/remove - take WAD ID then tags
+# tag add/remove - take WAD ID/query then tags
 complete -c caco -n "__fish_seen_subcommand_from tag; and __fish_seen_subcommand_from add remove" -xa "(__caco_wads)"
+complete -c caco -n "__fish_seen_subcommand_from tag; and __fish_seen_subcommand_from add remove" -a "id:" -d "Filter by ID"
+complete -c caco -n "__fish_seen_subcommand_from tag; and __fish_seen_subcommand_from add remove" -a "title:" -d "Filter by title"
+complete -c caco -n "__fish_seen_subcommand_from tag; and __fish_seen_subcommand_from add remove" -a "author:" -d "Filter by author"
+complete -c caco -n "__fish_seen_subcommand_from tag; and __fish_seen_subcommand_from add remove" -a "filename:" -d "Filter by filename"
+complete -c caco -n "__fish_seen_subcommand_from tag; and __fish_seen_subcommand_from add remove" -a "tag:" -d "Filter by tag"
+complete -c caco -n "__fish_seen_subcommand_from tag; and __fish_seen_subcommand_from add remove" -a "status:" -d "Filter by status"
+complete -c caco -n "__fish_seen_subcommand_from tag; and __fish_seen_subcommand_from add remove" -s y -l yes -d "Skip confirmation for multi-WAD updates"
 
 # config keys
 complete -c caco -n "__fish_seen_subcommand_from config" -xa "sourceport iwad cache_dir download_mirror sourceport_args"

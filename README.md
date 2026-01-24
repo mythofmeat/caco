@@ -80,15 +80,24 @@ caco list --status backlog
 caco list --tag megawad
 caco list --source idgames
 
-# View details
+# View details (by ID or query)
 caco info 1
+caco info filename:tnto
+caco info "TNT: Overcharged"
 
-# Update metadata
+# Update metadata (supports ID ranges and queries)
 caco update 1 --status playing
+caco update 1-5 --rating 4                      # ID range
+caco update tag:megawad --rating 5 --yes        # Query with confirmation skip
 caco update 1 --rating 4 --notes "Great level design"
 
-# Manage tags
+# Delete WADs (supports ID ranges and queries)
+caco delete 1                                   # Single ID (prompts)
+caco delete status:abandoned --yes              # Bulk delete
+
+# Manage tags (supports ID ranges and queries)
 caco tag add 1 megawad slaughter
+caco tag add author:romero classic --yes        # Tag all WADs by author
 caco tag remove 1 slaughter
 ```
 
@@ -187,6 +196,33 @@ Manual installation (fish):
 
 ```bash
 cp completions/caco.fish ~/.config/fish/completions/
+```
+
+## Scripting
+
+Use `--plain` for machine-readable output:
+
+```bash
+# List WADs as TSV (tab-separated)
+caco list --plain
+# Output: ID	Title	Author	Status	Playtime	LastPlayed
+
+# Extract titles with standard Unix tools
+caco list --plain | cut -f2
+
+# Count playing WADs
+caco pl --plain | tail -n +2 | wc -l
+
+# Get WAD info as key=value pairs
+caco info 1 --plain
+# Output: id=1
+#         title=Scythe 2
+#         author=Erik Alm
+#         ...
+
+# Bulk operations with queries
+caco update tag:megawad --rating 5 --yes    # Skip confirmation
+caco delete status:abandoned --yes           # Bulk delete
 ```
 
 ## Data Storage

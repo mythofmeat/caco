@@ -15,11 +15,20 @@ Caco is a personal Doom WAD library manager inspired by `beets`. It tracks WADs 
 ## Commands
 
 ```bash
-# Install in development mode
+# Activate the virtual environment (REQUIRED before running caco)
+source .venv/bin/activate
+
+# Install in development mode (only needed once, or after adding dependencies)
 pip install -e .
 
 # Run CLI
 caco <command>
+
+# Example: list library
+caco list
+
+# Example: test with plain output
+caco list --plain
 ```
 
 No test suite exists yet.

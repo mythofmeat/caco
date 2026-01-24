@@ -50,6 +50,128 @@ class WadIdRange(click.ParamType):
 WAD_IDS = WadIdRange()
 
 
+def _parse_id_range(value: str) -> list[int] | None:
+    """Try to parse a value as ID range (3-6,9,11). Returns None if not valid."""
+    try:
+        ids = []
+        for part in value.split(","):
+            part = part.strip()
+            if "-" in part:
+                # Must be start-end format with valid ints
+                pieces = part.split("-", 1)
+                if len(pieces) != 2:
+                    return None
+                start, end = int(pieces[0]), int(pieces[1])
+                if start > end:
+                    return None
+                ids.extend(range(start, end + 1))
+            else:
+                ids.append(int(part))
+        return list(dict.fromkeys(ids))  # dedupe, preserve order
+    except ValueError:
+        return None
+
+
+def resolve_wad_query(
+    query: str, allow_multiple: bool = False, yes: bool = False
+) -> list[dict] | None:
+    """Resolve WAD ID, ID range, or query string to WAD(s).
+
+    Args:
+        query: WAD ID, ID range (3-6,9), or query string (filename:tnto)
+        allow_multiple: If True, allow multiple matches (with confirmation)
+        yes: If True, skip confirmation prompts
+
+    Returns:
+        List of WAD dicts, or None if cancelled/no matches.
+        Exits with error if single match required but multiple found.
+    """
+    # Try parsing as ID range first (backward compat)
+    ids = _parse_id_range(query)
+    if ids is not None:
+        wads = []
+        missing = []
+        for wad_id in ids:
+            wad = db.get_wad(wad_id)
+            if wad:
+                wads.append(wad)
+            else:
+                missing.append(wad_id)
+        if missing:
+            err_console.print(f"[red]WAD(s) not found: {', '.join(map(str, missing))}[/red]")
+            sys.exit(1)
+        return wads
+
+    # Query-based lookup
+    results = db.search_wads(query=query)
+    if not results:
+        err_console.print(f"[red]No WADs matching '{query}'[/red]")
+        sys.exit(1)
+
+    if len(results) == 1:
+        return results
+
+    # Multiple matches
+    if not allow_multiple:
+        err_console.print(f"[red]Multiple WADs match '{query}':[/red]")
+        for r in results[:10]:
+            err_console.print(f"  {r['id']}: {r['title']}")
+        if len(results) > 10:
+            err_console.print(f"  ... and {len(results) - 10} more")
+        sys.exit(1)
+
+    # allow_multiple=True: confirm unless yes
+    if not yes:
+        console.print(f"[yellow]This will affect {len(results)} WAD(s):[/yellow]")
+        for r in results[:10]:
+            console.print(f"  {r['id']}: {r['title']}")
+        if len(results) > 10:
+            console.print(f"  ... and {len(results) - 10} more")
+        if not click.confirm("Continue?"):
+            return None
+
+    return results
+
+
+def _render_wad_list_plain(wads: list[dict]) -> None:
+    """TSV output: ID\tTitle\tAuthor\tStatus\tPlaytime\tLastPlayed."""
+    # Header
+    print("ID\tTitle\tAuthor\tStatus\tPlaytime\tLastPlayed")
+    for wad in wads:
+        playtime = db.get_total_playtime(wad["id"])
+        playtime_str = format_duration(playtime) if playtime else ""
+        last_played = db.get_last_played(wad["id"])
+        last_played_str = last_played[:10] if last_played else ""
+        print(f"{wad['id']}\t{wad['title']}\t{wad['author'] or ''}\t{wad['status']}\t{playtime_str}\t{last_played_str}")
+
+
+def _render_wad_info_plain(wad: dict) -> None:
+    """Key=value output for scripting."""
+    playtime = db.get_total_playtime(wad["id"])
+    sessions = db.get_sessions(wad["id"])
+    last_played = db.get_last_played(wad["id"])
+
+    print(f"id={wad['id']}")
+    print(f"title={wad['title']}")
+    print(f"author={wad['author'] or ''}")
+    print(f"year={wad['year'] or ''}")
+    print(f"status={wad['status']}")
+    print(f"rating={wad['rating'] or ''}")
+    print(f"tags={','.join(wad.get('tags') or [])}")
+    print(f"source_type={wad['source_type']}")
+    print(f"source_url={wad['source_url'] or ''}")
+    print(f"filename={wad.get('filename') or ''}")
+    print(f"playtime={format_duration(playtime) if playtime else ''}")
+    print(f"sessions={len(sessions)}")
+    print(f"last_played={last_played[:10] if last_played else ''}")
+    if wad.get("custom_iwad"):
+        print(f"custom_iwad={wad['custom_iwad']}")
+    if wad.get("custom_sourceport"):
+        print(f"custom_sourceport={wad['custom_sourceport']}")
+    if wad.get("custom_args"):
+        print(f"custom_args={wad['custom_args']}")
+
+
 @click.group()
 def cli():
     """Caco - Personal Doom WAD library manager."""
@@ -98,7 +220,8 @@ def _render_wad_list(wads: list[dict], title: str | None = None) -> None:
 @click.option("--status", "-s", type=click.Choice([s.value for s in db.Status]))
 @click.option("--tag", "-t", help="Filter by tag")
 @click.option("--source", type=click.Choice([s.value for s in db.SourceType]))
-def list_cmd(query: str | None, status: str | None, tag: str | None, source: str | None):
+@click.option("--plain", is_flag=True, help="Output as TSV (for scripting)")
+def list_cmd(query: str | None, status: str | None, tag: str | None, source: str | None, plain: bool):
     """List WADs in your library."""
     status_enum = db.Status(status) if status else None
     source_enum = db.SourceType(source) if source else None
@@ -109,17 +232,24 @@ def list_cmd(query: str | None, status: str | None, tag: str | None, source: str
         source_type=source_enum,
         tag=tag,
     )
-    _render_wad_list(wads)
+    if plain:
+        _render_wad_list_plain(wads)
+    else:
+        _render_wad_list(wads)
 
 
 @cli.command()
-@click.argument("wad_id", type=int)
-def info(wad_id: int):
-    """Show details about a WAD."""
-    wad = db.get_wad(wad_id)
-    if not wad:
-        err_console.print(f"[red]WAD {wad_id} not found[/red]")
-        sys.exit(1)
+@click.argument("query")
+@click.option("--plain", is_flag=True, help="Output as key=value pairs (for scripting)")
+def info(query: str, plain: bool):
+    """Show details about a WAD. QUERY: WAD ID or query (e.g., filename:tnto)."""
+    wads = resolve_wad_query(query, allow_multiple=False)
+    wad = wads[0]
+    wad_id = wad["id"]
+
+    if plain:
+        _render_wad_info_plain(wad)
+        return
 
     console.print(f"[bold cyan]{wad['title']}[/bold cyan]")
     console.print(f"[dim]ID: {wad['id']}[/dim]")
@@ -180,7 +310,7 @@ def info(wad_id: int):
 
 
 @cli.command()
-@click.argument("wad_ids", type=WAD_IDS)
+@click.argument("query")
 @click.option("--status", "-s", type=click.Choice([s.value for s in db.Status]))
 @click.option("--rating", "-r", type=click.IntRange(1, 5))
 @click.option("--notes", "-n")
@@ -190,8 +320,9 @@ def info(wad_id: int):
 @click.option("--clear-sourceport", is_flag=True, help="Clear custom sourceport")
 @click.option("--args", "custom_args", help="Custom arguments (JSON array or space-separated)")
 @click.option("--clear-args", is_flag=True, help="Clear custom arguments")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation for multi-WAD updates")
 def update(
-    wad_ids: list[int],
+    query: str,
     status: str | None,
     rating: int | None,
     notes: str | None,
@@ -201,8 +332,9 @@ def update(
     clear_sourceport: bool,
     custom_args: str | None,
     clear_args: bool,
+    yes: bool,
 ):
-    """Update WAD metadata. WAD_IDS: single ID or range (3-6,9,11)."""
+    """Update WAD metadata. QUERY: ID, ID range (3-6,9), or query (tag:megawad)."""
     import json
 
     updates = {}
@@ -236,42 +368,29 @@ def update(
         err_console.print("[yellow]No updates specified[/yellow]")
         return
 
-    success, failed = 0, []
-    for wad_id in wad_ids:
-        if db.update_wad(wad_id, **updates):
-            success += 1
-        else:
-            failed.append(wad_id)
+    wads = resolve_wad_query(query, allow_multiple=True, yes=yes)
+    if not wads:
+        return  # User cancelled
 
-    if success:
-        console.print(f"[green]Updated {success} WAD(s)[/green]")
-    if failed:
-        err_console.print(f"[red]WAD(s) not found: {', '.join(map(str, failed))}[/red]")
-        sys.exit(1)
+    for wad in wads:
+        db.update_wad(wad["id"], **updates)
+
+    console.print(f"[green]Updated {len(wads)} WAD(s)[/green]")
 
 
 @cli.command()
-@click.argument("wad_ids", type=WAD_IDS)
+@click.argument("query")
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
-def delete(wad_ids: list[int], yes: bool):
-    """Delete WAD(s) from the library. WAD_IDS: single ID or range (3-6,9,11)."""
-    count = len(wad_ids)
-    if not yes:
-        if not click.confirm(f"Delete {count} WAD(s)?"):
-            return
+def delete(query: str, yes: bool):
+    """Delete WAD(s) from the library. QUERY: ID, ID range (3-6,9), or query (status:abandoned)."""
+    wads = resolve_wad_query(query, allow_multiple=True, yes=yes)
+    if not wads:
+        return  # User cancelled
 
-    success, failed = 0, []
-    for wad_id in wad_ids:
-        if db.delete_wad(wad_id):
-            success += 1
-        else:
-            failed.append(wad_id)
+    for wad in wads:
+        db.delete_wad(wad["id"])
 
-    if success:
-        console.print(f"[green]Deleted {success} WAD(s)[/green]")
-    if failed:
-        err_console.print(f"[red]WAD(s) not found: {', '.join(map(str, failed))}[/red]")
-        sys.exit(1)
+    console.print(f"[green]Deleted {len(wads)} WAD(s)[/green]")
 
 
 # =============================================================================
@@ -286,47 +405,37 @@ def tag():
 
 
 @tag.command(name="add")
-@click.argument("wad_ids", type=WAD_IDS)
+@click.argument("query")
 @click.argument("tags", nargs=-1, required=True)
-def tag_add(wad_ids: list[int], tags: tuple[str, ...]):
-    """Add tags to WAD(s). WAD_IDS: single ID or range (3-6,9,11)."""
-    success, failed = 0, []
-    for wad_id in wad_ids:
-        wad = db.get_wad(wad_id)
-        if not wad:
-            failed.append(wad_id)
-            continue
-        for t in tags:
-            db.add_tag(wad_id, t)
-        success += 1
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation for multi-WAD updates")
+def tag_add(query: str, tags: tuple[str, ...], yes: bool):
+    """Add tags to WAD(s). QUERY: ID, ID range (3-6,9), or query (author:romero)."""
+    wads = resolve_wad_query(query, allow_multiple=True, yes=yes)
+    if not wads:
+        return  # User cancelled
 
-    if success:
-        console.print(f"[green]Added tag(s) to {success} WAD(s)[/green]")
-    if failed:
-        err_console.print(f"[red]WAD(s) not found: {', '.join(map(str, failed))}[/red]")
-        sys.exit(1)
+    for wad in wads:
+        for t in tags:
+            db.add_tag(wad["id"], t)
+
+    console.print(f"[green]Added tag(s) to {len(wads)} WAD(s)[/green]")
 
 
 @tag.command(name="remove")
-@click.argument("wad_ids", type=WAD_IDS)
+@click.argument("query")
 @click.argument("tags", nargs=-1, required=True)
-def tag_remove(wad_ids: list[int], tags: tuple[str, ...]):
-    """Remove tags from WAD(s). WAD_IDS: single ID or range (3-6,9,11)."""
-    success, failed = 0, []
-    for wad_id in wad_ids:
-        wad = db.get_wad(wad_id)
-        if not wad:
-            failed.append(wad_id)
-            continue
-        for t in tags:
-            db.remove_tag(wad_id, t)
-        success += 1
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation for multi-WAD updates")
+def tag_remove(query: str, tags: tuple[str, ...], yes: bool):
+    """Remove tags from WAD(s). QUERY: ID, ID range (3-6,9), or query (author:romero)."""
+    wads = resolve_wad_query(query, allow_multiple=True, yes=yes)
+    if not wads:
+        return  # User cancelled
 
-    if success:
-        console.print(f"[green]Removed tag(s) from {success} WAD(s)[/green]")
-    if failed:
-        err_console.print(f"[red]WAD(s) not found: {', '.join(map(str, failed))}[/red]")
-        sys.exit(1)
+    for wad in wads:
+        for t in tags:
+            db.remove_tag(wad["id"], t)
+
+    console.print(f"[green]Removed tag(s) from {len(wads)} WAD(s)[/green]")
 
 
 @tag.command(name="list")
@@ -620,26 +729,38 @@ def completions(shell: str | None, install: bool):
 
 @cli.command(name="pl")
 @click.argument("query", required=False)
-def playing_alias(query: str | None):
+@click.option("--plain", is_flag=True, help="Output as TSV (for scripting)")
+def playing_alias(query: str | None, plain: bool):
     """List WADs with 'playing' status (alias for 'list -s playing')."""
     wads = db.search_wads(query=query, status=db.Status.PLAYING)
-    _render_wad_list(wads, title=f"Playing ({len(wads)} WADs)")
+    if plain:
+        _render_wad_list_plain(wads)
+    else:
+        _render_wad_list(wads, title=f"Playing ({len(wads)} WADs)")
 
 
 @cli.command(name="wl")
 @click.argument("query", required=False)
-def wishlist_alias(query: str | None):
+@click.option("--plain", is_flag=True, help="Output as TSV (for scripting)")
+def wishlist_alias(query: str | None, plain: bool):
     """List WADs with 'wishlist' status (alias for 'list -s wishlist')."""
     wads = db.search_wads(query=query, status=db.Status.WISHLIST)
-    _render_wad_list(wads, title=f"Wishlist ({len(wads)} WADs)")
+    if plain:
+        _render_wad_list_plain(wads)
+    else:
+        _render_wad_list(wads, title=f"Wishlist ({len(wads)} WADs)")
 
 
 @cli.command(name="bl")
 @click.argument("query", required=False)
-def backlog_alias(query: str | None):
+@click.option("--plain", is_flag=True, help="Output as TSV (for scripting)")
+def backlog_alias(query: str | None, plain: bool):
     """List WADs with 'backlog' status (alias for 'list -s backlog')."""
     wads = db.search_wads(query=query, status=db.Status.BACKLOG)
-    _render_wad_list(wads, title=f"Backlog ({len(wads)} WADs)")
+    if plain:
+        _render_wad_list_plain(wads)
+    else:
+        _render_wad_list(wads, title=f"Backlog ({len(wads)} WADs)")
 
 
 if __name__ == "__main__":
