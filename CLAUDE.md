@@ -55,3 +55,11 @@ src/caco/
 - `click` - CLI framework
 - `rich` - Terminal output formatting
 - `httpx` - HTTP client (via idgames dependency)
+
+## Completions
+- Always ensure that completions and `--help` flags are synced with any and all changes to functionality
+
+## Git Instructions
+- Commit working changes to git
+- Update the README.md, CLAUDE.md, TODO.md to document changes, features, and track progress
+

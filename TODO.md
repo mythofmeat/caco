@@ -1,5 +1,23 @@
 # TODO
 
+## User requests
+- [ ] have per-game custom arguments
+  - for example, if a specific wad requires tnt, i can set that as a wad-specific configuration, so i just have to do `caco play 1` and it launches with the `-iwad tnt` argument
+- [ ] can we please change the way `caco list` sorts files?
+  - what i want:
+    - wads with status `playing` listed first and sorted by last played (newest first)
+    - wads with status `backlog` listed second and sorted by time added (newest first)
+    - wads with status `wishlist` listed third and sorted by time added (newest first)
+    - wads with status `abandoned` listed fourth and sorted by last played (newest first)
+    - wads with status `finished` listed last and sorted by last played (newest first)
+- [ ] can we include shortened commands for `caco list [argument]`
+  - `caco list -s playing` -> `caco pl`
+  - `caco list -s wishlist` -> `caco wl`
+- [ ] listing by `filename:` doesn't seem to work
+- [ ] can we add completions for all of the fields we can use to list and sort wads?
+- [ ] can we add the ability to launch a wad by identifying info other than its id?
+  - e.g., `caco play filename:tnto` and `caco play "TNT: Overcharged" both work` but `caco play "Doom 2 in"` does not work because it's ambiguous (list  the results within the error message)
+
 ## Core Features
 
 ### Import Sources
