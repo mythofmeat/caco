@@ -22,31 +22,31 @@
 ## Core Features
 
 ### Import Sources
+- [ ] Doomwiki scraper - parse infoboxes for metadata
 - [x] idgames archive - search and import with metadata
 - [x] Manual URL entry - for Doomworld forums, etc.
 - [x] Local files - track existing WADs
-- [ ] Doomwiki scraper - parse infoboxes for metadata
 
 ### Library Management
+- [ ] Duplicate detection
 - [x] Add/remove/update WADs
 - [x] Tag system
 - [x] Status tracking (wishlist, backlog, playing, finished, abandoned)
 - [x] Star ratings (1-5)
 - [x] Notes field
-- [ ] Duplicate detection
 
 ### Play
+- [ ] Track which maps/levels completed
 - [x] Launch WAD with sourceport
 - [x] Automatic playtime tracking
 - [x] IWAD selection (doom.wad, doom2.wad, etc.)
 - [x] Save sourceport preferences per-WAD
-- [ ] Track which maps/levels completed
 
 ### Querying
+- [ ] Sort options (playtime, rating, date added, etc.)
 - [x] List with filters (status, tag, source)
 - [x] Text search (title, author, description)
 - [x] Advanced query syntax (e.g., `id:1 author:romero year:2020`)
-- [ ] Sort options (playtime, rating, date added, etc.)
 
 ## UI
 
