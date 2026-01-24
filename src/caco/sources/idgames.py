@@ -2,8 +2,7 @@
 
 from pathlib import Path
 
-from idgames.client import IdgamesClient
-from idgames.models import FileEntry
+from caco.idgames import IdgamesClient, FileEntry
 from rich.console import Console
 from rich.progress import Progress, BarColumn, DownloadColumn, TransferSpeedColumn
 

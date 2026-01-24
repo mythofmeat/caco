@@ -15,8 +15,7 @@ Caco is a personal Doom WAD library manager inspired by `beets`. It tracks WADs 
 ## Commands
 
 ```bash
-# Install in development mode (depends on idgames-api)
-pip install -e ../idgames-api
+# Install in development mode
 pip install -e .
 
 # Run CLI
@@ -33,9 +32,11 @@ src/caco/
 ├── db.py           # SQLite database (models, queries)
 ├── config.py       # TOML config in ~/.config/caco/
 ├── player.py       # Sourceport launcher + playtime tracking
+├── idgames/        # Vendored idgames API client
+│   ├── client.py   # HTTP client for doomworld.com/idgames/api
+│   └── models.py   # Pydantic models (FileEntry, etc.)
 └── sources/
-    ├── __init__.py
-    └── idgames.py  # idgames archive adapter (uses idgames-api)
+    └── idgames.py  # idgames archive adapter
 ```
 
 **Data locations:**
@@ -53,10 +54,10 @@ src/caco/
 
 ## Dependencies
 
-- `idgames` - Local package from `../idgames-api` for idgames archive access
 - `click` - CLI framework
 - `rich` - Terminal output formatting
-- `httpx` - HTTP client (via idgames dependency)
+- `httpx` - HTTP client for idgames API
+- `pydantic` - Data validation for API responses
 
 ## Completions
 - Always ensure that completions and `--help` flags are synced with any and all changes to functionality

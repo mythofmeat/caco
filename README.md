@@ -11,10 +11,9 @@ A personal Doom WAD library manager. Track what you've played, what you want to 
 
 ## Installation
 
-Requires Python 3.10+ and the [idgames-api](../idgames-api) package.
+Requires Python 3.10+.
 
 ```bash
-pip install -e ../idgames-api
 pip install -e .
 ```
 
