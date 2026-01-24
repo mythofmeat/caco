@@ -1,6 +1,8 @@
 # TODO
 
 ## User requests
+- [ ] Have an option to plainly print output (for use in scripting)
+  - use a literal tab to separate fields for ease of processing
 - [x] add a `completions` command that will automatically update completions for fish/bash/etc.
 - [x] have per-game custom arguments
   - for example, if a specific wad requires tnt, i can set that as a wad-specific configuration, so i just have to do `caco play 1` and it launches with the `-iwad tnt` argument
