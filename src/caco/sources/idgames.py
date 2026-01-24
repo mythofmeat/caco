@@ -4,6 +4,8 @@ from pathlib import Path
 
 from idgames.client import IdgamesClient
 from idgames.models import FileEntry
+from rich.console import Console
+from rich.progress import Progress, BarColumn, DownloadColumn, TransferSpeedColumn
 
 from caco.config import get_download_mirror
 from caco.db import SourceType, add_wad
@@ -64,11 +66,26 @@ class IdgamesSource:
         entry: FileEntry,
         dest: Path,
         mirror: int | None = None,
+        console: Console | None = None,
     ) -> Path:
         """Download a WAD file. Returns the path to the downloaded file."""
         if mirror is None:
             mirror = get_download_mirror()
         dest_file = dest / entry.filename
-        for _ in self.client.download(entry, dest_file, mirror):
-            pass  # Could add progress callback here
+
+        if console:
+            with Progress(
+                "[progress.description]{task.description}",
+                BarColumn(),
+                DownloadColumn(),
+                TransferSpeedColumn(),
+                console=console,
+            ) as progress:
+                task = progress.add_task(f"Downloading {entry.filename}", total=None)
+                for downloaded, total in self.client.download(entry, dest_file, mirror):
+                    progress.update(task, completed=downloaded, total=total)
+        else:
+            for _ in self.client.download(entry, dest_file, mirror):
+                pass
+
         return dest_file

@@ -3,11 +3,13 @@
 import subprocess
 from pathlib import Path
 
+from rich.console import Console
+
 from caco import db
 from caco.config import get_cache_dir, get_default_sourceport, get_iwad, get_sourceport_args
 
 
-def get_wad_path(wad: dict) -> Path | None:
+def get_wad_path(wad: dict, console: Console | None = None) -> Path | None:
     """Get the local path to a WAD file, downloading if needed."""
     # If already cached, return cached path
     if wad.get("cached_path"):
@@ -26,7 +28,7 @@ def get_wad_path(wad: dict) -> Path | None:
 
         with IdgamesSource() as source:
             entry = source.get(int(wad["source_id"]))
-            dest = source.download(entry, cache_dir)
+            dest = source.download(entry, cache_dir, console=console)
 
             # Update cached path in database
             db.update_wad(wad["id"], cached_path=str(dest))
@@ -46,6 +48,7 @@ def play(
     wad_id: int,
     sourceport: str | None = None,
     extra_args: list[str] | None = None,
+    console: Console | None = None,
 ) -> int | None:
     """
     Play a WAD with the specified sourceport.
@@ -57,7 +60,7 @@ def play(
         raise ValueError(f"WAD {wad_id} not found")
 
     # Get or download WAD file
-    wad_path = get_wad_path(wad)
+    wad_path = get_wad_path(wad, console=console)
     if not wad_path:
         raise ValueError(f"Could not get WAD file for {wad['title']}")
 

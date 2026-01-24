@@ -411,7 +411,7 @@ def play_cmd(wad_id: int, sourceport: str | None, extra_args: tuple[str, ...]):
     console.print(f"[cyan]Playing {wad['title']}...[/cyan]")
 
     try:
-        duration = play(wad_id, sourceport=port, extra_args=list(extra_args))
+        duration = play(wad_id, sourceport=port, extra_args=list(extra_args), console=console)
         if duration:
             console.print(f"[green]Session ended:[/green] {format_duration(duration)}")
     except Exception as e:
