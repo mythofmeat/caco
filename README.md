@@ -4,7 +4,8 @@ A personal Doom WAD library manager. Track what you've played, what you want to 
 
 ## Features
 
-- **Library tracking** - Status (wishlist, backlog, playing, finished), ratings, tags, notes
+- **Library tracking** - Status (to-play, backlog, playing, finished), ratings, tags, notes
+- **Completion tracking** - Track times beaten and map completions with stats snapshots
 - **Multiple sources** - Import from idgames archive, URLs, or local files
 - **Playtime tracking** - Automatically tracks how long you play each WAD
 - **On-demand downloads** - WADs are cached when you play, not stored permanently
@@ -50,18 +51,35 @@ caco import url "Eviternity" "https://www.doomworld.com/forum/topic/..." --autho
 
 # Local file
 caco import local "MyWad" ~/wads/mywad.wad
+
+# Duplicate detection - caco warns if WAD already exists
+caco import idgames 19509           # "Already in library" warning
+caco import idgames 19509 --force   # Import anyway
+
+# Interactive selection with fzf (if installed)
+caco import idgames scythe          # Opens fzf fuzzy picker
+caco import idgames "doom 2" --multi # Multi-select mode
 ```
 
 ### Managing Library
 
 ```bash
-# List all WADs (sorted by status: playing → backlog → wishlist → abandoned → finished)
+# List all WADs (sorted by status: playing → backlog → to-play → abandoned → finished)
 caco list
 
-# Quick status aliases
-caco pl                             # List playing WADs
-caco wl                             # List wishlist WADs
-caco bl                             # List backlog WADs
+# Sort by different fields
+caco list --sort playtime              # Most played first
+caco list --sort rating                # Highest rated first
+caco list --sort -title                # Reverse alphabetical (Z-A)
+caco list --sort last_played           # Recently played first
+
+# Available sort fields: playtime, rating, created, title, author, last_played, year
+# Prefix with - to reverse (e.g., -title for Z-A)
+
+# Filter by status
+caco list --status playing             # List playing WADs
+caco list --status to-play             # List to-play WADs
+caco list --status backlog             # List backlog WADs
 
 # Search with beets-style queries
 caco list scythe                    # Free text (title/author/description)
@@ -138,6 +156,37 @@ caco update 1 --clear-iwad --clear-sourceport --clear-args
 
 Priority: CLI arguments > Per-WAD config > Global config
 
+### Map Completion Tracking
+
+Track which maps you've completed in each WAD. Automatically syncs with nyan-doom/dsda-doom stats files.
+
+```bash
+# Auto-sync happens after every play session (if stats file exists)
+caco play 1                         # Syncs completions on exit
+
+# Manual sync from stats.txt files
+caco map sync 1                     # Sync specific WAD
+caco map sync --all                 # Sync all WADs
+
+# Manual completion tracking (for other sourceports)
+caco map complete 1 MAP01 MAP02 MAP03
+caco map complete 1 MAP01-MAP05     # Range support
+caco map complete 1 MAP01 --skill 4 # Record UV completion
+caco map uncomplete 1 MAP30         # Remove completion
+
+# View completions
+caco map list 1                     # Show all completed maps
+caco map progress 1 --total 32      # Show progress (29/32, 90.6%)
+caco info 1                         # Also shows completion summary
+```
+
+Stats file location: `~/.local/share/nyan-doom/nyan_doom_data/{iwad}/{wad}/stats.txt`
+
+Configure custom stats directory:
+```bash
+caco config stats_dir /path/to/stats
+```
+
 ## Configuration
 
 Config file: `~/.config/caco/config.toml` (see `config.example.toml` for a template)
@@ -150,6 +199,7 @@ Config file: `~/.config/caco/config.toml` (see `config.example.toml` for a templ
 | `iwad` | Path to default IWAD (doom2.wad, etc.) |
 | `sourceport_args` | Default args passed to sourceport |
 | `cache_dir` | WAD cache directory |
+| `stats_dir` | Stats file directory for map completion tracking |
 | `download_mirror` | Preferred idgames mirror (0-4) |
 
 ### Example Config
@@ -159,6 +209,7 @@ sourceport = "/usr/bin/gzdoom"
 iwad = "/usr/share/games/doom/doom2.wad"
 sourceport_args = ["-nomusic"]
 cache_dir = "~/.cache/caco/wads"
+stats_dir = "~/.local/share/nyan-doom/nyan_doom_data"
 download_mirror = 0
 ```
 
@@ -198,6 +249,22 @@ Manual installation (fish):
 cp completions/caco.fish ~/.config/fish/completions/
 ```
 
+### Suggested Shell Aliases
+
+Add these to your shell config for quick access to common status filters:
+
+```bash
+# Bash/Zsh (~/.bashrc or ~/.zshrc)
+alias pl='caco list -s playing'
+alias bl='caco list -s backlog'
+alias tp='caco list -s to-play'
+
+# Fish (~/.config/fish/config.fish)
+alias pl 'caco list -s playing'
+alias bl 'caco list -s backlog'
+alias tp 'caco list -s to-play'
+```
+
 ## Scripting
 
 Use `--plain` for machine-readable output:
@@ -205,13 +272,13 @@ Use `--plain` for machine-readable output:
 ```bash
 # List WADs as TSV (tab-separated)
 caco list --plain
-# Output: ID	Title	Author	Status	Playtime	LastPlayed
+# Output: ID	Title	Author	Status	Maps	Beaten	Playtime	LastPlayed
 
 # Extract titles with standard Unix tools
 caco list --plain | cut -f2
 
 # Count playing WADs
-caco pl --plain | tail -n +2 | wc -l
+caco list -s playing --plain | tail -n +2 | wc -l
 
 # Get WAD info as key=value pairs
 caco info 1 --plain

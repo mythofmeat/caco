@@ -8,12 +8,15 @@ CONFIG_DIR = Path.home() / ".config" / "caco"
 CONFIG_FILE = CONFIG_DIR / "config.toml"
 CACHE_DIR = Path.home() / ".cache" / "caco" / "wads"
 
+STATS_DIR = Path.home() / ".local" / "share" / "nyan-doom" / "nyan_doom_data"
+
 DEFAULT_CONFIG = {
     "sourceport": "",
     "cache_dir": str(CACHE_DIR),
     "iwad": "",
     "sourceport_args": [],
     "download_mirror": 0,
+    "stats_dir": str(STATS_DIR),
 }
 
 
@@ -110,3 +113,16 @@ def get_download_mirror() -> int:
     """Get the preferred download mirror index."""
     config = load_config()
     return int(config.get("download_mirror", 0))
+
+
+def get_stats_dir() -> Path:
+    """Get the stats directory (nyan-doom/dsda-doom stats.txt location)."""
+    config = load_config()
+    return Path(config.get("stats_dir", str(STATS_DIR))).expanduser()
+
+
+def set_stats_dir(path: str) -> None:
+    """Set the stats directory."""
+    config = load_config()
+    config["stats_dir"] = path
+    save_config(config)
