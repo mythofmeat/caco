@@ -1,20 +1,35 @@
 # caco
 
-A personal Doom WAD library manager. Track what you've played, what you want to play, and download WADs on-demand.
+A personal Doom WAD library manager taking inspiration from beets. Track what you've played, what you want to play, and download WADs on-demand.
 
 ## Features
 
-- **Library tracking** - Status (to-play, backlog, playing, finished), ratings, tags, notes
-- **Completion tracking** - Track times beaten and map completions with stats snapshots
-- **Multiple sources** - Import from idgames archive, URLs, or local files
-- **Playtime tracking** - Automatically tracks how long you play each WAD
-- **On-demand downloads** - WADs are cached when you play, not stored permanently
+- **Import WADs from multiple sources**
+  - idgames
+  - Doomwiki *(planned)*
+  - Doomworld forums *(planned)*
+
+- **Lazy downloads**
+  - WADs from idgames are downloaded and cached when you play
+
+- **Library tracking**
+  - Status (to-play, backlog, playing, finished)
+  - Ratings
+  - Custom Tags
+  - Arbitrary Notes
+
+- **Completion tracking**
+  - Automatically track map and WAD completions (if using a sourceport that provides `stats.txt` files such as *dsda-doom* and its forks)
+
+- **Playtime tracking** 
+  - Automatically tracks how long you play each WAD
 
 ## Installation
 
 Requires Python 3.10+.
 
 ```bash
+python -m venv .venv
 pip install -e .
 ```
 
@@ -31,10 +46,10 @@ caco import idgames "scythe 2"
 caco list
 
 # Play a WAD (downloads if needed, tracks playtime)
-caco play 1
+caco play title:"Scythe 2"
 
 # Update status after playing
-caco update 1 --status finished --rating 5
+caco update title:"Scythe 2" --status finished --rating 5
 ```
 
 ## Usage
@@ -84,10 +99,10 @@ caco list --status backlog             # List backlog WADs
 # Search with beets-style queries
 caco list scythe                    # Free text (title/author/description)
 caco list id:1                      # By database ID
-caco list title:tnt                 # By title (or name:tnt)
-caco list author:romero             # By author
+caco list title:"scythe"            # By title (or name:)
+caco list author:"erik alm"         # By author
 caco list year:2020                 # By year
-caco list filename:tnto             # By filename
+caco list filename:scythe2          # By filename
 caco list tag:megawad               # By tag
 caco list status:playing            # By status
 caco list source:idgames            # By source type
@@ -99,7 +114,7 @@ caco list --tag megawad
 caco list --source idgames
 
 # View details (by ID or query)
-caco info 1
+caco info id:1
 caco info filename:tnto
 caco info "TNT: Overcharged"
 
@@ -180,7 +195,7 @@ caco map progress 1 --total 32      # Show progress (29/32, 90.6%)
 caco info 1                         # Also shows completion summary
 ```
 
-Stats file location: `~/.local/share/nyan-doom/nyan_doom_data/{iwad}/{wad}/stats.txt`
+Default Stats file location: `~/.local/share/nyan-doom/nyan_doom_data/{iwad}/{wad}/stats.txt`
 
 Configure custom stats directory:
 ```bash
@@ -205,7 +220,7 @@ Config file: `~/.config/caco/config.toml` (see `config.example.toml` for a templ
 ### Example Config
 
 ```toml
-sourceport = "/usr/bin/gzdoom"
+sourceport = "/usr/bin/nyan-doom"
 iwad = "/usr/share/games/doom/doom2.wad"
 sourceport_args = ["-nomusic"]
 cache_dir = "~/.cache/caco/wads"
@@ -249,36 +264,14 @@ Manual installation (fish):
 cp completions/caco.fish ~/.config/fish/completions/
 ```
 
-### Suggested Shell Aliases
-
-Add these to your shell config for quick access to common status filters:
-
-```bash
-# Bash/Zsh (~/.bashrc or ~/.zshrc)
-alias pl='caco list -s playing'
-alias bl='caco list -s backlog'
-alias tp='caco list -s to-play'
-
-# Fish (~/.config/fish/config.fish)
-alias pl 'caco list -s playing'
-alias bl 'caco list -s backlog'
-alias tp 'caco list -s to-play'
-```
-
 ## Scripting
 
-Use `--plain` for machine-readable output:
+Use `--plain` to output machine-readable text suitable for scripting:
 
 ```bash
 # List WADs as TSV (tab-separated)
 caco list --plain
 # Output: ID	Title	Author	Status	Maps	Beaten	Playtime	LastPlayed
-
-# Extract titles with standard Unix tools
-caco list --plain | cut -f2
-
-# Count playing WADs
-caco list -s playing --plain | tail -n +2 | wc -l
 
 # Get WAD info as key=value pairs
 caco info 1 --plain
@@ -286,13 +279,11 @@ caco info 1 --plain
 #         title=Scythe 2
 #         author=Erik Alm
 #         ...
-
-# Bulk operations with queries
-caco update tag:megawad --rating 5 --yes    # Skip confirmation
-caco delete status:abandoned --yes           # Bulk delete
 ```
 
 ## Data Storage
+
+*Default locations:*
 
 - **Database**: `~/.local/share/caco/library.db`
 - **Config**: `~/.config/caco/config.toml`
