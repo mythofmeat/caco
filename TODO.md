@@ -1,6 +1,11 @@
 # Bugfixes
 
 # Quality-of-life improvements
+- there should be a way to manually adjust the amount of times completed
+  - id:49 and id:63 should only have `1` completion count
+- change default sorting on list to id ascending
+- tag searches should support globs
+  - e.g., `caco list --tag cacowards_2025*` should return items that contain `cacowards_2025_winner` and `cacowards_2025_runnerup`
 
 # New Features
 
