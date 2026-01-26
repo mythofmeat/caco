@@ -1,0 +1,18 @@
+[Desktop Entry]
+Categories=Game
+Comment=
+Exec=/usr/bin/fish -lc doom
+Icon=/home/eshen/.local/repos/caco/src/desktop/icon.png
+Keywords=doom;caco
+MimeType=application/x-doom-wad;
+Name=Caco
+NoDisplay=false
+Path=
+PrefersNonDefaultGPU=false
+StartupNotify=true
+Terminal=true
+TerminalOptions=
+TryExec=nyan-doom
+Type=Application
+X-KDE-SubstituteUID=false
+X-KDE-Username=
