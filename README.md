@@ -36,20 +36,23 @@ pip install -e .
 ## Quick Start
 
 ```bash
-# Set your sourceport
-caco config sourceport /usr/bin/gzdoom
+# Set your sourceport (opens config in your editor)
+caco config --edit
 
-# Import a WAD from idgames
-caco import idgames "scythe 2"
+# Import a WAD (auto-detects source type)
+caco add "scythe 2"           # Search idgames
+caco add 19509                # idgames ID
+caco add ~/Downloads/map.wad  # Local file
 
 # List your library
-caco list
+caco ls                       # Alias for 'list'
 
-# Play a WAD (downloads if needed, tracks playtime)
-caco play title:"Scythe 2"
+# Play a WAD (interactive picker if multiple match)
+caco play scythe
 
 # Update status after playing
-caco update title:"Scythe 2" --status finished --rating 5
+caco update scythe --status finished --rating 5
+caco update scythe -s f -r 5  # Short form (f=finished)
 ```
 
 ## Usage
@@ -57,23 +60,27 @@ caco update title:"Scythe 2" --status finished --rating 5
 ### Importing WADs
 
 ```bash
-# From idgames (search or by ID)
+# Smart import (auto-detects source type)
+caco add "sunlust"                  # Search idgames
+caco add 19509                      # idgames ID
+caco add ~/Downloads/mymap.wad     # Local file (title inferred)
+caco add https://example.com/wad.zip -t "My WAD"  # URL
+
+# Batch local import
+caco import local *.wad --tag new   # Import all WADs, add tag
+
+# Explicit subcommands (if you prefer)
 caco import idgames "sunlust"
-caco import idgames 19509
-
-# From a URL (Doomworld forums, etc.)
-caco import url "Eviternity" "https://www.doomworld.com/forum/topic/..." --author "Dragonfly"
-
-# Local file
-caco import local "MyWad" ~/wads/mywad.wad
+caco import url "Title" "https://..." --author "Author"
+caco import local "Title" ~/path/to/wad.wad
 
 # Duplicate detection - caco warns if WAD already exists
-caco import idgames 19509           # "Already in library" warning
-caco import idgames 19509 --force   # Import anyway
+caco add 19509                      # "Already in library" warning
+caco add 19509 --force              # Import anyway
 
 # Interactive selection with fzf (if installed)
-caco import idgames scythe          # Opens fzf fuzzy picker
-caco import idgames "doom 2" --multi # Multi-select mode
+caco add scythe                     # Opens fzf fuzzy picker
+caco add "doom 2" --multi           # Multi-select mode
 ```
 
 ### Managing Library
@@ -124,9 +131,16 @@ caco update 1-5 --rating 4                      # ID range
 caco update tag:megawad --rating 5 --yes        # Query with confirmation skip
 caco update 1 --rating 4 --notes "Great level design"
 
-# Delete WADs (supports ID ranges and queries)
-caco delete 1                                   # Single ID (prompts)
-caco delete status:abandoned --yes              # Bulk delete
+# Delete WADs (soft delete - can be restored)
+caco rm 1                                       # Move to trash (alias for delete)
+caco delete status:abandoned                    # Shows preview, prompts
+caco delete 1 --dry-run                         # Preview what would be deleted
+caco delete 1 --purge                           # Permanent deletion
+
+# View and restore from trash
+caco list --deleted                             # Show deleted WADs
+caco restore 1                                  # Restore from trash
+caco delete --purge-all                         # Empty trash
 
 # Manage tags (supports ID ranges and queries)
 caco tag add 1 megawad slaughter
@@ -226,18 +240,57 @@ sourceport_args = ["-nomusic"]
 cache_dir = "~/.cache/caco/wads"
 stats_dir = "~/.local/share/nyan-doom/nyan_doom_data"
 download_mirror = 0
+
+# Customize list display
+[list]
+format = ["id", "title", "author", "status", "playtime", "tags"]
+sort = "title+"  # + for ascending, - for descending
+
+[list.colors]
+to-play = "blue"
+playing = "green"
+finished = "dim"
+```
+
+## Command Aliases
+
+Unix-like shortcuts for common commands:
+
+| Alias | Full Command |
+|-------|--------------|
+| `caco add` | `caco import auto` |
+| `caco rm` | `caco delete` |
+| `caco ls` | `caco list` |
+| `caco i` | `caco info` |
+
+## Status Shortcuts
+
+Use single letters or abbreviations for status values:
+
+| Shortcut | Status |
+|----------|--------|
+| `t`, `tp` | to-play |
+| `b`, `back` | backlog |
+| `p`, `play` | playing |
+| `f`, `fin`, `done` | finished |
+| `a`, `drop` | abandoned |
+
+```bash
+caco update 1 -s p     # Set status to "playing"
+caco list -s f         # List finished WADs
 ```
 
 ### CLI Commands
 
 ```bash
-# View config
+# View config file contents
 caco config
 
-# Set values
-caco config sourceport /usr/bin/gzdoom
-caco config iwad /usr/share/games/doom/doom2.wad
-caco config cache_dir ~/.cache/caco/wads
+# Open config in $EDITOR
+caco config --edit
+
+# Get config file path (for scripting)
+caco config --path
 ```
 
 ## Shell Completions

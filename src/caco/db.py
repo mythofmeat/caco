@@ -124,6 +124,7 @@ def init_db() -> None:
         _migrate_add_map_completions(conn)
         _migrate_add_wad_completions(conn)
         _migrate_rename_wishlist_to_toplay(conn)
+        _migrate_add_deleted_at(conn)
 
 
 def _migrate_add_custom_play_config(conn: sqlite3.Connection) -> None:
@@ -181,6 +182,14 @@ def _migrate_rename_wishlist_to_toplay(conn: sqlite3.Connection) -> None:
     conn.execute("UPDATE wads SET status = 'to-play' WHERE status = 'wishlist'")
 
 
+def _migrate_add_deleted_at(conn: sqlite3.Connection) -> None:
+    """Add deleted_at column for soft delete support."""
+    cursor = conn.execute("PRAGMA table_info(wads)")
+    columns = {row[1] for row in cursor.fetchall()}
+    if "deleted_at" not in columns:
+        conn.execute("ALTER TABLE wads ADD COLUMN deleted_at TEXT")
+
+
 def add_wad(
     title: str,
     source_type: SourceType,
@@ -217,10 +226,21 @@ def add_wad(
         return wad_id
 
 
-def get_wad(wad_id: int) -> dict[str, Any] | None:
-    """Get a WAD by ID."""
+def get_wad(wad_id: int, include_deleted: bool = False) -> dict[str, Any] | None:
+    """Get a WAD by ID.
+
+    Args:
+        wad_id: WAD ID to fetch
+        include_deleted: If True, also return deleted WADs
+    """
     with get_connection() as conn:
-        row = conn.execute("SELECT * FROM wads WHERE id = ?", (wad_id,)).fetchone()
+        if include_deleted:
+            row = conn.execute("SELECT * FROM wads WHERE id = ?", (wad_id,)).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT * FROM wads WHERE id = ? AND deleted_at IS NULL",
+                (wad_id,)
+            ).fetchone()
         if row:
             wad = dict(row)
             # Fetch tags
@@ -230,6 +250,31 @@ def get_wad(wad_id: int) -> dict[str, Any] | None:
             wad["tags"] = [t["tag"] for t in tags]
             return wad
         return None
+
+
+def _glob_to_like(pattern: str) -> str:
+    """Convert a glob pattern to SQL LIKE pattern.
+
+    Handles:
+    - * → % (match any characters)
+    - ? → _ (match single character)
+    - Escapes existing % and _ in the pattern
+    """
+    # Check if it's a glob pattern
+    if "*" not in pattern and "?" not in pattern:
+        # Not a glob, return as-is for exact match
+        return pattern
+
+    # Escape existing SQL wildcards
+    result = pattern.replace("%", r"\%").replace("_", r"\_")
+    # Convert glob to LIKE
+    result = result.replace("*", "%").replace("?", "_")
+    return result
+
+
+def _is_glob_pattern(pattern: str) -> bool:
+    """Check if a string contains glob wildcards."""
+    return "*" in pattern or "?" in pattern
 
 
 def parse_query(query: str) -> tuple[dict[str, str], list[str]]:
@@ -281,6 +326,7 @@ def search_wads(
     tag: str | None = None,
     sort_by: str | None = None,
     sort_desc: bool = True,
+    include_deleted: bool = False,
 ) -> list[dict[str, Any]]:
     """
     Search WADs with optional filters.
@@ -291,9 +337,19 @@ def search_wads(
         caco list "tnt evilution"
 
     Sort fields: playtime, rating, created, title, author, last_played, year
+
+    Args:
+        include_deleted: If True, only show deleted WADs. If False (default),
+                        exclude deleted WADs.
     """
     conditions = []
     params = []
+
+    # Filter by deleted status
+    if include_deleted:
+        conditions.append("wads.deleted_at IS NOT NULL")
+    else:
+        conditions.append("wads.deleted_at IS NULL")
 
     if query:
         filters, free_text = parse_query(query)
@@ -322,8 +378,16 @@ def search_wads(
                 pass
 
         if "tag" in filters:
-            conditions.append("wads.id IN (SELECT wad_id FROM tags WHERE tag LIKE ?)")
-            params.append(f"%{filters['tag'].lower()}%")
+            tag_pattern = filters['tag'].lower()
+            if _is_glob_pattern(tag_pattern):
+                # Glob pattern: convert to LIKE
+                like_pattern = _glob_to_like(tag_pattern)
+                conditions.append("wads.id IN (SELECT wad_id FROM tags WHERE tag LIKE ? ESCAPE '\\')")
+                params.append(like_pattern)
+            else:
+                # No glob: substring match
+                conditions.append("wads.id IN (SELECT wad_id FROM tags WHERE tag LIKE ?)")
+                params.append(f"%{tag_pattern}%")
 
         if "status" in filters:
             conditions.append("wads.status = ?")
@@ -353,8 +417,16 @@ def search_wads(
         params.append(source_type.value)
 
     if tag:
-        conditions.append("wads.id IN (SELECT wad_id FROM tags WHERE tag = ?)")
-        params.append(tag.lower())
+        tag_pattern = tag.lower()
+        if _is_glob_pattern(tag_pattern):
+            # Glob pattern: convert to LIKE
+            like_pattern = _glob_to_like(tag_pattern)
+            conditions.append("wads.id IN (SELECT wad_id FROM tags WHERE tag LIKE ? ESCAPE '\\')")
+            params.append(like_pattern)
+        else:
+            # Exact match for non-glob
+            conditions.append("wads.id IN (SELECT wad_id FROM tags WHERE tag = ?)")
+            params.append(tag_pattern)
 
     where = " AND ".join(conditions) if conditions else "1=1"
 
@@ -478,11 +550,41 @@ def update_wad(wad_id: int, **fields) -> bool:
     return updated
 
 
-def delete_wad(wad_id: int) -> bool:
-    """Delete a WAD. Returns True if deleted."""
+def delete_wad(wad_id: int, purge: bool = False) -> bool:
+    """Delete a WAD (soft delete by default).
+
+    Args:
+        wad_id: WAD ID to delete
+        purge: If True, permanently delete. If False (default), soft delete.
+
+    Returns True if deleted/trashed.
+    """
     with get_connection() as conn:
-        cursor = conn.execute("DELETE FROM wads WHERE id = ?", (wad_id,))
+        if purge:
+            cursor = conn.execute("DELETE FROM wads WHERE id = ?", (wad_id,))
+        else:
+            cursor = conn.execute(
+                "UPDATE wads SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL",
+                (datetime.now().isoformat(), wad_id),
+            )
         return cursor.rowcount > 0
+
+
+def restore_wad(wad_id: int) -> bool:
+    """Restore a soft-deleted WAD. Returns True if restored."""
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "UPDATE wads SET deleted_at = NULL WHERE id = ? AND deleted_at IS NOT NULL",
+            (wad_id,),
+        )
+        return cursor.rowcount > 0
+
+
+def purge_all_deleted() -> int:
+    """Permanently delete all soft-deleted WADs. Returns count of purged WADs."""
+    with get_connection() as conn:
+        cursor = conn.execute("DELETE FROM wads WHERE deleted_at IS NOT NULL")
+        return cursor.rowcount
 
 
 def add_tag(wad_id: int, tag: str) -> bool:
@@ -872,3 +974,41 @@ def get_times_beaten_batch(wad_ids: list[int]) -> dict[int, int]:
             wad_ids,
         ).fetchall()
         return {row["wad_id"]: row["count"] for row in rows}
+
+
+def get_wad_stats(wad_id: int) -> dict[str, Any]:
+    """Get deletion-relevant stats for a WAD.
+
+    Returns:
+        Dict with keys:
+        - map_completions: number of map completion records
+        - session_count: number of play sessions
+        - total_playtime: total playtime in seconds
+    """
+    with get_connection() as conn:
+        # Map completions count
+        row = conn.execute(
+            "SELECT COUNT(*) as count FROM map_completions WHERE wad_id = ?",
+            (wad_id,),
+        ).fetchone()
+        map_completions = row["count"]
+
+        # Session count
+        row = conn.execute(
+            "SELECT COUNT(*) as count FROM sessions WHERE wad_id = ?",
+            (wad_id,),
+        ).fetchone()
+        session_count = row["count"]
+
+        # Total playtime
+        row = conn.execute(
+            "SELECT COALESCE(SUM(duration_seconds), 0) as total FROM sessions WHERE wad_id = ?",
+            (wad_id,),
+        ).fetchone()
+        total_playtime = row["total"]
+
+        return {
+            "map_completions": map_completions,
+            "session_count": session_count,
+            "total_playtime": total_playtime,
+        }

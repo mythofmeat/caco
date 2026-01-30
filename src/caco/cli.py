@@ -19,6 +19,7 @@ from caco.config import (
     load_config,
     save_config,
     CONFIG_FILE,
+    get_list_config,
 )
 from caco.player import play, format_duration
 
@@ -145,20 +146,93 @@ def _parse_id_range(value: str) -> list[int] | None:
         return None
 
 
+def _interactive_pick(
+    wads: list[dict],
+    prompt: str = "Select WAD",
+    multi: bool = False,
+) -> list[dict] | None:
+    """
+    Interactive picker for selecting WAD(s) from a list.
+
+    Uses fzf if available and stdout is TTY, otherwise falls back to numbered selection.
+
+    Args:
+        wads: List of WAD dicts to choose from
+        prompt: Prompt to display
+        multi: Allow multiple selections
+
+    Returns:
+        List of selected WAD dicts, or None if cancelled.
+    """
+    if not wads:
+        return None
+
+    # Format items for display: "[ID] Title (Author, Year)"
+    def format_wad(w: dict) -> str:
+        author = w.get("author") or "Unknown"
+        year = w.get("year") or "????"
+        return f"[{w['id']}] {w['title']} ({author}, {year})"
+
+    items = [format_wad(w) for w in wads]
+
+    # Try fzf if available and TTY
+    if _fzf_available() and sys.stdout.isatty():
+        selected_indices = _fzf_select(items, prompt=prompt, multi=multi)
+        if selected_indices is None:
+            return None
+        return [wads[i] for i in selected_indices]
+
+    # Fallback to numbered selection
+    console.print(f"\n[bold]{prompt}:[/bold]")
+    for i, item in enumerate(items[:20], 1):
+        console.print(f"  [{i}] {item}")
+    if len(items) > 20:
+        console.print(f"  [dim]... and {len(items) - 20} more[/dim]")
+
+    if multi:
+        console.print("[dim]Enter numbers separated by commas (e.g., 1,3,5) or 0 to cancel[/dim]")
+        try:
+            choice = click.prompt("Select", default="0")
+            if choice == "0":
+                return None
+            indices = [int(x.strip()) - 1 for x in choice.split(",")]
+            selected = [wads[i] for i in indices if 0 <= i < len(wads)]
+            return selected if selected else None
+        except (ValueError, IndexError):
+            return None
+    else:
+        try:
+            choice = click.prompt("Select [1-{}]".format(min(len(wads), 20)), type=int, default=0)
+            if choice == 0 or choice > len(wads):
+                return None
+            return [wads[choice - 1]]
+        except (ValueError, click.Abort):
+            return None
+
+
 def resolve_wad_query(
-    query: str, allow_multiple: bool = False, yes: bool = False
+    query: str,
+    mode: str = "error",
+    yes: bool = False,
 ) -> list[dict] | None:
     """Resolve WAD ID, ID range, or query string to WAD(s).
 
     Args:
         query: WAD ID, ID range (3-6,9), or query string (filename:tnto)
-        allow_multiple: If True, allow multiple matches (with confirmation)
-        yes: If True, skip confirmation prompts
+        mode: How to handle multiple matches:
+            - "error": Error if multiple matches (default, backward compat)
+            - "single" or "pick": Use interactive picker if multiple
+            - "multiple": Allow multiple with confirmation
+        yes: If True, skip confirmation prompts (selects first for single mode)
 
     Returns:
         List of WAD dicts, or None if cancelled/no matches.
-        Exits with error if single match required but multiple found.
+        Exits with error if mode="error" and multiple found.
     """
+    # Normalize mode aliases
+    if mode == "single":
+        mode = "pick"
+
     # Try parsing as ID range first (backward compat)
     ids = _parse_id_range(query)
     if ids is not None:
@@ -184,8 +258,8 @@ def resolve_wad_query(
     if len(results) == 1:
         return results
 
-    # Multiple matches
-    if not allow_multiple:
+    # Multiple matches - handle based on mode
+    if mode == "error":
         err_console.print(f"[red]Multiple WADs match '{query}':[/red]")
         for r in results[:10]:
             err_console.print(f"  {r['id']}: {r['title']}")
@@ -193,7 +267,14 @@ def resolve_wad_query(
             err_console.print(f"  ... and {len(results) - 10} more")
         sys.exit(1)
 
-    # allow_multiple=True: confirm unless yes
+    if mode == "pick":
+        # Interactive picker for single selection
+        if yes:
+            # Auto-select first match for scripting
+            return [results[0]]
+        return _interactive_pick(results, prompt="Select WAD", multi=False)
+
+    # mode == "multiple": confirm unless yes
     if not yes:
         console.print(f"[yellow]This will affect {len(results)} WAD(s):[/yellow]")
         for r in results[:10]:
@@ -207,6 +288,53 @@ def resolve_wad_query(
 
 
 SORT_FIELDS = ["playtime", "rating", "created", "title", "author", "last_played", "year"]
+
+# Status shortcuts: single letters and common abbreviations
+STATUS_SHORTCUTS = {
+    "t": "to-play", "toplay": "to-play", "tp": "to-play",
+    "b": "backlog", "back": "backlog",
+    "p": "playing", "play": "playing",
+    "f": "finished", "fin": "finished", "done": "finished",
+    "a": "abandoned", "drop": "abandoned", "dropped": "abandoned",
+}
+
+
+def _normalize_status(value: str | None) -> str | None:
+    """Normalize status value, expanding shortcuts."""
+    if value is None:
+        return None
+    lower = value.lower()
+    # Check if it's a shortcut
+    if lower in STATUS_SHORTCUTS:
+        return STATUS_SHORTCUTS[lower]
+    # Check if it's already a valid status
+    try:
+        db.Status(lower)
+        return lower
+    except ValueError:
+        # Return as-is, let Click's Choice handle the error
+        return value
+
+
+class StatusChoice(click.Choice):
+    """A Click Choice that accepts status shortcuts."""
+
+    def __init__(self):
+        super().__init__([s.value for s in db.Status], case_sensitive=False)
+        self.shortcuts = STATUS_SHORTCUTS
+
+    def convert(self, value, param, ctx):
+        if value is None:
+            return None
+        lower = value.lower()
+        # Expand shortcut if present
+        if lower in self.shortcuts:
+            value = self.shortcuts[lower]
+        return super().convert(value, param, ctx)
+
+    def get_metavar(self, param, ctx=None):
+        # Show both full values and shortcuts in help
+        return "[STATUS]"
 
 
 def _parse_sort_option(sort: str | None) -> tuple[str | None, bool]:
@@ -285,66 +413,153 @@ def cli():
 # =============================================================================
 
 
-def _render_wad_list(wads: list[dict], title: str | None = None) -> None:
-    """Render a list of WADs as a table."""
+def _render_wad_list(wads: list[dict], title: str | None = None, list_config: dict | None = None) -> None:
+    """Render a list of WADs as a table.
+
+    Args:
+        wads: List of WAD dicts to display
+        title: Optional table title
+        list_config: Optional config dict with 'format' and 'colors' keys
+    """
     if not wads:
         console.print("[dim]No WADs found[/dim]")
         return
+
+    # Get list config
+    if list_config is None:
+        list_config = get_list_config()
+
+    columns = list_config.get("format", ["id", "title", "author", "status", "maps", "beaten", "playtime", "last_played"])
+    colors = list_config.get("colors", {})
 
     # Batch fetch stats for all WADs
     wad_ids = [w["id"] for w in wads]
     maps_completed = db.get_maps_completed_batch(wad_ids)
     times_beaten = db.get_times_beaten_batch(wad_ids)
 
+    # Column definitions: name -> (header, style, justify)
+    column_defs = {
+        "id": ("ID", "dim", None),
+        "title": ("Title", "cyan", None),
+        "author": ("Author", None, None),
+        "year": ("Year", "dim", "right"),
+        "status": ("Status", None, None),
+        "rating": ("Rating", None, "center"),
+        "maps": ("Maps", None, "right"),
+        "beaten": ("Beaten", None, "right"),
+        "playtime": ("Playtime", None, "right"),
+        "last_played": ("Last Played", "dim", None),
+        "tags": ("Tags", "dim", None),
+        "source": ("Source", "dim", None),
+        "filename": ("Filename", "dim", None),
+    }
+
     table = Table(title=title or f"Library ({len(wads)} WADs)")
-    table.add_column("ID", style="dim")
-    table.add_column("Title", style="cyan")
-    table.add_column("Author")
-    table.add_column("Status")
-    table.add_column("Maps", justify="right")
-    table.add_column("Beaten", justify="right")
-    table.add_column("Playtime", justify="right")
-    table.add_column("Last Played", style="dim")
+
+    # Add columns based on config
+    for col in columns:
+        if col in column_defs:
+            header, style, justify = column_defs[col]
+            table.add_column(header, style=style, justify=justify)
 
     for wad in wads:
+        # Pre-compute values that might be needed
         playtime = db.get_total_playtime(wad["id"])
-        playtime_str = format_duration(playtime) if playtime else "-"
         last_played = db.get_last_played(wad["id"])
-        last_played_str = last_played[:10] if last_played else "-"
-        maps_str = str(maps_completed.get(wad["id"], 0)) if maps_completed.get(wad["id"]) else "-"
-        beaten_str = str(times_beaten.get(wad["id"], 0)) if times_beaten.get(wad["id"]) else "-"
 
-        table.add_row(
-            str(wad["id"]),
-            wad["title"],
-            wad["author"] or "-",
-            wad["status"],
-            maps_str,
-            beaten_str,
-            playtime_str,
-            last_played_str,
-        )
+        # Build row values based on columns
+        row_values = []
+        for col in columns:
+            if col == "id":
+                row_values.append(str(wad["id"]))
+            elif col == "title":
+                row_values.append(wad["title"])
+            elif col == "author":
+                row_values.append(wad["author"] or "-")
+            elif col == "year":
+                row_values.append(str(wad["year"]) if wad.get("year") else "-")
+            elif col == "status":
+                status = wad["status"]
+                status_color = colors.get(status, "")
+                if status_color:
+                    row_values.append(f"[{status_color}]{status}[/{status_color}]")
+                else:
+                    row_values.append(status)
+            elif col == "rating":
+                if wad.get("rating"):
+                    row_values.append("★" * wad["rating"] + "☆" * (5 - wad["rating"]))
+                else:
+                    row_values.append("-")
+            elif col == "maps":
+                count = maps_completed.get(wad["id"], 0)
+                row_values.append(str(count) if count else "-")
+            elif col == "beaten":
+                count = times_beaten.get(wad["id"], 0)
+                row_values.append(str(count) if count else "-")
+            elif col == "playtime":
+                row_values.append(format_duration(playtime) if playtime else "-")
+            elif col == "last_played":
+                row_values.append(last_played[:10] if last_played else "-")
+            elif col == "tags":
+                tags = wad.get("tags", [])
+                if tags:
+                    if len(tags) > 3:
+                        row_values.append(", ".join(tags[:3]) + f" +{len(tags) - 3}")
+                    else:
+                        row_values.append(", ".join(tags))
+                else:
+                    row_values.append("-")
+            elif col == "source":
+                row_values.append(wad.get("source_type", "-"))
+            elif col == "filename":
+                row_values.append(wad.get("filename", "-") or "-")
+            else:
+                row_values.append("-")
+
+        table.add_row(*row_values)
 
     console.print(table)
 
 
 @cli.command(name="list")
 @click.argument("query", required=False)
-@click.option("--status", "-s", type=click.Choice([s.value for s in db.Status]))
+@click.option("--status", "-s", type=StatusChoice(), help="Filter by status")
 @click.option("--tag", "-t", help="Filter by tag")
 @click.option("--source", type=click.Choice([s.value for s in db.SourceType]))
 @click.option("--sort", "-S", help="Sort by: playtime, rating, created, title, author, last_played, year (prefix - to reverse)")
+@click.option("--deleted", is_flag=True, help="Show deleted WADs (trash)")
 @click.option("--plain", is_flag=True, help="Output as TSV (for scripting)")
-def list_cmd(query: str | None, status: str | None, tag: str | None, source: str | None, sort: str | None, plain: bool):
-    """List WADs in your library."""
-    status_enum = db.Status(status) if status else None
-    source_enum = db.SourceType(source) if source else None
+def list_cmd(query: str | None, status: str | None, tag: str | None, source: str | None, sort: str | None, deleted: bool, plain: bool):
+    """List WADs in your library.
+
+    Customize display via config file: columns, colors, default sort.
+    CLI flags override config settings.
+    """
+    # Load list config for defaults
+    list_config = get_list_config()
+
+    # Use config default status if not specified via CLI
+    status_enum = None
+    if status:
+        status_enum = db.Status(status)
+    elif list_config.get("default_status"):
+        # Config can have list of default statuses to show
+        default_statuses = list_config["default_status"]
+        if len(default_statuses) == 1:
+            status_enum = db.Status(default_statuses[0])
+        # Multiple statuses handled via query
+
+    # Use config sort if not specified via CLI
+    if sort is None and list_config.get("sort"):
+        sort = list_config["sort"]
 
     sort_field, sort_desc = _parse_sort_option(sort)
     if sort_field and sort_field not in SORT_FIELDS:
         err_console.print(f"[red]Invalid sort field: {sort_field}[/red]")
         err_console.print(f"[dim]Valid fields: {', '.join(SORT_FIELDS)}[/dim]")
         sys.exit(1)
+
+    source_enum = db.SourceType(source) if source else None
 
     wads = db.search_wads(
         query=query,
@@ -353,19 +568,27 @@ def list_cmd(query: str | None, status: str | None, tag: str | None, source: str
         tag=tag,
         sort_by=sort_field,
         sort_desc=sort_desc,
+        include_deleted=deleted,
     )
+
+    # Adjust title for deleted view
+    title = "Trash" if deleted else None
+
     if plain:
         _render_wad_list_plain(wads)
     else:
-        _render_wad_list(wads)
+        _render_wad_list(wads, title=title, list_config=list_config)
 
 
 @cli.command()
 @click.argument("query")
+@click.option("--yes", "-y", is_flag=True, help="Auto-select first match if multiple")
 @click.option("--plain", is_flag=True, help="Output as key=value pairs (for scripting)")
-def info(query: str, plain: bool):
+def info(query: str, yes: bool, plain: bool):
     """Show details about a WAD. QUERY: WAD ID or query (e.g., filename:tnto)."""
-    wads = resolve_wad_query(query, allow_multiple=False)
+    wads = resolve_wad_query(query, mode="pick", yes=yes)
+    if not wads:
+        return  # User cancelled
     wad = wads[0]
     wad_id = wad["id"]
 
@@ -449,7 +672,7 @@ def info(query: str, plain: bool):
 
 @cli.command()
 @click.argument("query")
-@click.option("--status", "-s", type=click.Choice([s.value for s in db.Status]))
+@click.option("--status", "-s", type=StatusChoice())
 @click.option("--rating", "-r", type=click.IntRange(1, 5))
 @click.option("--notes", "-n")
 @click.option("--iwad", help="Custom IWAD path for this WAD")
@@ -459,6 +682,7 @@ def info(query: str, plain: bool):
 @click.option("--args", "custom_args", help="Custom arguments (JSON array or space-separated)")
 @click.option("--clear-args", is_flag=True, help="Clear custom arguments")
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation for multi-WAD updates")
+@click.option("--dry-run", is_flag=True, help="Show what would change without making changes")
 def update(
     query: str,
     status: str | None,
@@ -471,27 +695,37 @@ def update(
     custom_args: str | None,
     clear_args: bool,
     yes: bool,
+    dry_run: bool,
 ):
     """Update WAD metadata. QUERY: ID, ID range (3-6,9), or query (tag:megawad)."""
     import json
 
     updates = {}
+    update_descriptions = []
+
     if status:
         updates["status"] = db.Status(status)
+        update_descriptions.append(f"status → {status}")
     if rating:
         updates["rating"] = rating
+        update_descriptions.append(f"rating → {'★' * rating}")
     if notes:
         updates["notes"] = notes
+        update_descriptions.append(f"notes → \"{notes[:30]}{'...' if len(notes) > 30 else ''}\"")
 
     # Per-WAD play config
     if iwad:
         updates["custom_iwad"] = iwad
+        update_descriptions.append(f"custom_iwad → {iwad}")
     elif clear_iwad:
         updates["custom_iwad"] = None
+        update_descriptions.append("custom_iwad → (cleared)")
     if sourceport:
         updates["custom_sourceport"] = sourceport
+        update_descriptions.append(f"custom_sourceport → {sourceport}")
     elif clear_sourceport:
         updates["custom_sourceport"] = None
+        update_descriptions.append("custom_sourceport → (cleared)")
     if custom_args:
         # Accept JSON array or space-separated string
         try:
@@ -499,16 +733,30 @@ def update(
         except json.JSONDecodeError:
             args_list = custom_args.split()
         updates["custom_args"] = json.dumps(args_list)
+        update_descriptions.append(f"custom_args → {args_list}")
     elif clear_args:
         updates["custom_args"] = None
+        update_descriptions.append("custom_args → (cleared)")
 
     if not updates:
         err_console.print("[yellow]No updates specified[/yellow]")
         return
 
-    wads = resolve_wad_query(query, allow_multiple=True, yes=yes)
+    wads = resolve_wad_query(query, mode="multiple", yes=yes)
     if not wads:
         return  # User cancelled
+
+    if dry_run:
+        console.print(f"\n[bold]Would update {len(wads)} WAD(s):[/bold]\n")
+        for wad in wads[:10]:
+            console.print(f"  [dim][{wad['id']}][/dim] {wad['title']}")
+        if len(wads) > 10:
+            console.print(f"  [dim]... and {len(wads) - 10} more[/dim]")
+        console.print(f"\n[bold]Changes:[/bold]")
+        for desc in update_descriptions:
+            console.print(f"  • {desc}")
+        console.print("\n[dim]No changes made (dry run)[/dim]")
+        return
 
     for wad in wads:
         db.update_wad(wad["id"], **updates)
@@ -517,18 +765,140 @@ def update(
 
 
 @cli.command()
+@click.argument("query", required=False)
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
+@click.option("--dry-run", is_flag=True, help="Show what would be deleted without deleting")
+@click.option("--purge", is_flag=True, help="Permanently delete (skip trash)")
+@click.option("--purge-all", is_flag=True, help="Permanently delete all items in trash")
+def delete(query: str | None, yes: bool, dry_run: bool, purge: bool, purge_all: bool):
+    """Delete WAD(s) from the library.
+
+    By default, WADs are moved to trash and can be restored with 'caco restore'.
+    Use --purge to permanently delete, or --purge-all to empty the trash.
+
+    QUERY: ID, ID range (3-6,9), or query (status:abandoned).
+    """
+    # Handle --purge-all: empty the trash
+    if purge_all:
+        if dry_run:
+            trash = db.search_wads(include_deleted=True)
+            console.print(f"\n[bold]Would permanently delete {len(trash)} WAD(s) from trash[/bold]")
+            console.print("\n[dim]No changes made (dry run)[/dim]")
+            return
+
+        if not yes:
+            trash = db.search_wads(include_deleted=True)
+            if not trash:
+                console.print("[dim]Trash is empty[/dim]")
+                return
+            console.print(f"[yellow]This will permanently delete {len(trash)} WAD(s) from trash[/yellow]")
+            if not click.confirm("Proceed?"):
+                console.print("[dim]Cancelled[/dim]")
+                return
+
+        count = db.purge_all_deleted()
+        console.print(f"[green]Permanently deleted {count} WAD(s) from trash[/green]")
+        return
+
+    if not query:
+        err_console.print("[red]Query required (or use --purge-all to empty trash)[/red]")
+        sys.exit(1)
+
+    # For dry-run and preview, we want to resolve without the normal confirmation
+    # since we'll show our own detailed preview
+    wads = resolve_wad_query(query, mode="multiple", yes=True)
+    if not wads:
+        return
+
+    # Gather stats for all WADs to be deleted
+    total_completions = 0
+    total_sessions = 0
+    total_playtime = 0
+
+    action = "permanently deleted" if purge else "moved to trash"
+    console.print(f"\n[bold]The following WADs will be {action}:[/bold]\n")
+    for wad in wads:
+        stats = db.get_wad_stats(wad["id"])
+        total_completions += stats["map_completions"]
+        total_sessions += stats["session_count"]
+        total_playtime += stats["total_playtime"]
+
+        # Format WAD info
+        author_year = []
+        if wad.get("author"):
+            author_year.append(wad["author"])
+        if wad.get("year"):
+            author_year.append(str(wad["year"]))
+        info = f" ({', '.join(author_year)})" if author_year else ""
+
+        console.print(f"  [dim][{wad['id']}][/dim] {wad['title']}{info}")
+
+    # Show associated data that will be deleted (only for purge)
+    if purge and (total_completions or total_sessions):
+        console.print(f"\n[dim]This will also delete:[/dim]")
+        if total_completions:
+            console.print(f"  • {total_completions} map completion record(s)")
+        if total_sessions:
+            playtime_str = format_duration(total_playtime) if total_playtime else "0s"
+            console.print(f"  • {total_sessions} play session(s) ({playtime_str})")
+
+    if not purge:
+        console.print(f"\n[dim]Use 'caco restore' to recover, or 'caco delete --purge' to permanently delete[/dim]")
+
+    if dry_run:
+        console.print("\n[dim]No changes made (dry run)[/dim]")
+        return
+
+    # Ask for confirmation unless --yes
+    if not yes:
+        console.print()
+        if not click.confirm(f"Proceed?"):
+            console.print("[dim]Cancelled[/dim]")
+            return
+
+    # Perform deletion
+    for wad in wads:
+        db.delete_wad(wad["id"], purge=purge)
+
+    if purge:
+        console.print(f"\n[green]Permanently deleted {len(wads)} WAD(s)[/green]")
+    else:
+        console.print(f"\n[green]Moved {len(wads)} WAD(s) to trash[/green]")
+
+
+@cli.command()
 @click.argument("query")
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
-def delete(query: str, yes: bool):
-    """Delete WAD(s) from the library. QUERY: ID, ID range (3-6,9), or query (status:abandoned)."""
-    wads = resolve_wad_query(query, allow_multiple=True, yes=yes)
+def restore(query: str, yes: bool):
+    """Restore deleted WAD(s) from trash.
+
+    QUERY: ID, ID range (3-6,9), or query (author:romero).
+    Use 'caco list --deleted' to see items in trash.
+    """
+    # Search only in deleted WADs
+    wads = db.search_wads(query=query, include_deleted=True)
     if not wads:
-        return  # User cancelled
+        err_console.print(f"[red]No deleted WADs matching '{query}'[/red]")
+        sys.exit(1)
 
+    # Preview
+    console.print(f"\n[bold]The following WADs will be restored:[/bold]\n")
     for wad in wads:
-        db.delete_wad(wad["id"])
+        console.print(f"  [dim][{wad['id']}][/dim] {wad['title']}")
 
-    console.print(f"[green]Deleted {len(wads)} WAD(s)[/green]")
+    if not yes and len(wads) > 1:
+        console.print()
+        if not click.confirm(f"Restore {len(wads)} WAD(s)?"):
+            console.print("[dim]Cancelled[/dim]")
+            return
+
+    # Restore
+    restored = 0
+    for wad in wads:
+        if db.restore_wad(wad["id"]):
+            restored += 1
+
+    console.print(f"\n[green]Restored {restored} WAD(s)[/green]")
 
 
 # =============================================================================
@@ -546,11 +916,21 @@ def tag():
 @click.argument("query")
 @click.argument("tags", nargs=-1, required=True)
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation for multi-WAD updates")
-def tag_add(query: str, tags: tuple[str, ...], yes: bool):
+@click.option("--dry-run", is_flag=True, help="Show what would change without making changes")
+def tag_add(query: str, tags: tuple[str, ...], yes: bool, dry_run: bool):
     """Add tags to WAD(s). QUERY: ID, ID range (3-6,9), or query (author:romero)."""
-    wads = resolve_wad_query(query, allow_multiple=True, yes=yes)
+    wads = resolve_wad_query(query, mode="multiple", yes=yes)
     if not wads:
         return  # User cancelled
+
+    if dry_run:
+        console.print(f"\n[bold]Would add tag(s) {', '.join(tags)} to {len(wads)} WAD(s):[/bold]\n")
+        for wad in wads[:10]:
+            console.print(f"  [dim][{wad['id']}][/dim] {wad['title']}")
+        if len(wads) > 10:
+            console.print(f"  [dim]... and {len(wads) - 10} more[/dim]")
+        console.print("\n[dim]No changes made (dry run)[/dim]")
+        return
 
     for wad in wads:
         for t in tags:
@@ -563,11 +943,21 @@ def tag_add(query: str, tags: tuple[str, ...], yes: bool):
 @click.argument("query")
 @click.argument("tags", nargs=-1, required=True)
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation for multi-WAD updates")
-def tag_remove(query: str, tags: tuple[str, ...], yes: bool):
+@click.option("--dry-run", is_flag=True, help="Show what would change without making changes")
+def tag_remove(query: str, tags: tuple[str, ...], yes: bool, dry_run: bool):
     """Remove tags from WAD(s). QUERY: ID, ID range (3-6,9), or query (author:romero)."""
-    wads = resolve_wad_query(query, allow_multiple=True, yes=yes)
+    wads = resolve_wad_query(query, mode="multiple", yes=yes)
     if not wads:
         return  # User cancelled
+
+    if dry_run:
+        console.print(f"\n[bold]Would remove tag(s) {', '.join(tags)} from {len(wads)} WAD(s):[/bold]\n")
+        for wad in wads[:10]:
+            console.print(f"  [dim][{wad['id']}][/dim] {wad['title']}")
+        if len(wads) > 10:
+            console.print(f"  [dim]... and {len(wads) - 10} more[/dim]")
+        console.print("\n[dim]No changes made (dry run)[/dim]")
+        return
 
     for wad in wads:
         for t in tags:
@@ -593,10 +983,250 @@ def tag_list():
 # =============================================================================
 
 
-@cli.group(name="import")
-def import_cmd():
-    """Import WADs from various sources."""
-    pass
+@cli.group(name="import", invoke_without_command=True)
+@click.pass_context
+def import_cmd(ctx):
+    """Import WADs from various sources.
+
+    Without a subcommand, shows help. Use 'caco add <source>' for auto-detection.
+    """
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+
+
+def _detect_source_type(source: str) -> str:
+    """Detect the type of import source.
+
+    Returns: 'url', 'local', 'idgames_id', or 'idgames_search'
+    """
+    from pathlib import Path
+
+    # URL detection
+    if source.startswith(("http://", "https://")):
+        return "url"
+
+    # Local file detection (check if path exists)
+    if Path(source).exists():
+        return "local"
+
+    # idgames ID detection (numeric)
+    if source.isdigit():
+        return "idgames_id"
+
+    # Default to idgames search
+    return "idgames_search"
+
+
+def _infer_title_from_filename(filename: str) -> str:
+    """Infer a reasonable title from a filename."""
+    from pathlib import Path
+
+    # Get base name without extension
+    name = Path(filename).stem
+
+    # Replace underscores and hyphens with spaces
+    name = name.replace("_", " ").replace("-", " ")
+
+    # Title case
+    return name.title()
+
+
+def _infer_title_from_url(url: str) -> str:
+    """Infer a title from a URL by extracting the filename."""
+    from urllib.parse import urlparse, unquote
+
+    parsed = urlparse(url)
+    path = unquote(parsed.path)
+
+    # Get the filename part
+    if "/" in path:
+        filename = path.split("/")[-1]
+    else:
+        filename = path
+
+    return _infer_title_from_filename(filename)
+
+
+@import_cmd.command(name="auto")
+@click.argument("source")
+@click.option("--title", "-t", help="Override title (inferred from filename if not provided)")
+@click.option("--author", "-a", help="Author name")
+@click.option("--year", "-y", type=int, help="Year released")
+@click.option("--tag", "tags", multiple=True, help="Tags to add")
+@click.option("--force", "-f", is_flag=True, help="Import even if duplicate exists")
+@click.option("--multi", "-m", is_flag=True, help="Allow multi-select for idgames search (requires fzf)")
+def import_auto(source: str, title: str | None, author: str | None, year: int | None,
+                tags: tuple[str, ...], force: bool, multi: bool):
+    """Smart import that auto-detects source type.
+
+    SOURCE can be:
+    - A URL (http/https) - imports from URL
+    - A local file path - imports from local filesystem
+    - A number - looks up idgames file ID
+    - Text - searches idgames archive
+
+    \b
+    Examples:
+        caco import auto ~/Downloads/mymap.wad
+        caco import auto https://example.com/map.zip
+        caco import auto 12345
+        caco import auto "scythe 2"
+    """
+    from pathlib import Path
+
+    source_type = _detect_source_type(source)
+
+    if source_type == "url":
+        # URL import - infer title if not provided
+        inferred_title = title or _infer_title_from_url(source)
+
+        existing = db.find_duplicate(
+            db.SourceType.URL,
+            source_url=source,
+            filename=inferred_title,
+            author=author,
+        )
+        if existing and not force:
+            console.print(f"[yellow]Already in library:[/yellow] {existing['title']} (ID: {existing['id']})")
+            console.print("[dim]Use --force to import anyway[/dim]")
+            return
+
+        wad_id = db.add_wad(
+            title=inferred_title,
+            source_type=db.SourceType.URL,
+            source_url=source,
+            author=author,
+            year=year,
+            tags=list(tags) if tags else None,
+        )
+        console.print(f"[green]Added:[/green] {inferred_title} (ID: {wad_id})")
+
+    elif source_type == "local":
+        # Local file import
+        p = Path(source).resolve()
+        inferred_title = title or _infer_title_from_filename(p.name)
+
+        existing = db.find_duplicate(
+            db.SourceType.LOCAL,
+            source_url=str(p),
+            filename=p.name,
+            author=author,
+        )
+        if existing and not force:
+            console.print(f"[yellow]Already in library:[/yellow] {existing['title']} (ID: {existing['id']})")
+            console.print("[dim]Use --force to import anyway[/dim]")
+            return
+
+        wad_id = db.add_wad(
+            title=inferred_title,
+            source_type=db.SourceType.LOCAL,
+            source_url=str(p),
+            filename=p.name,
+            cached_path=str(p),
+            author=author,
+            year=year,
+            tags=list(tags) if tags else None,
+        )
+        console.print(f"[green]Added:[/green] {inferred_title} (ID: {wad_id})")
+
+    elif source_type == "idgames_id":
+        # idgames ID lookup
+        from caco.sources.idgames import IdgamesSource
+
+        with IdgamesSource() as idgames:
+            try:
+                entry = idgames.get(int(source))
+            except Exception as e:
+                err_console.print(f"[red]Failed to fetch idgames ID {source}: {e}[/red]")
+                return
+
+            existing = db.find_duplicate(
+                db.SourceType.IDGAMES,
+                source_id=str(entry.id),
+                filename=entry.filename,
+                author=entry.author,
+            )
+            if existing and not force:
+                console.print(f"[yellow]Already in library:[/yellow] {existing['title']} (ID: {existing['id']})")
+                console.print("[dim]Use --force to import anyway[/dim]")
+                return
+
+            wad_id = idgames.import_wad(entry, tags=list(tags) if tags else None)
+            console.print(f"[green]Imported:[/green] {entry.title} (ID: {wad_id})")
+
+    else:
+        # idgames search - delegate to existing command's logic
+        from caco.sources.idgames import IdgamesSource
+
+        def _check_and_import(entry, tags_list):
+            existing = db.find_duplicate(
+                db.SourceType.IDGAMES,
+                source_id=str(entry.id),
+                filename=entry.filename,
+                author=entry.author,
+            )
+            if existing and not force:
+                console.print(f"[yellow]Already in library:[/yellow] {existing['title']} (ID: {existing['id']})")
+                console.print("[dim]Use --force to import anyway[/dim]")
+                return None
+            return idgames.import_wad(entry, tags=tags_list)
+
+        with IdgamesSource() as idgames:
+            results = idgames.search(source)
+            if not results:
+                console.print("[dim]No results found[/dim]")
+                return
+
+            if multi and not _fzf_available():
+                err_console.print("[red]--multi requires fzf to be installed[/red]")
+                sys.exit(1)
+
+            if _fzf_available():
+                fzf_items = []
+                for entry in results[:50]:
+                    entry_year = entry.date[:4] if entry.date else "????"
+                    fzf_items.append(f"{entry.title} by {entry.author or 'Unknown'} ({entry_year})")
+
+                selected_indices = _fzf_select(
+                    fzf_items,
+                    prompt="Select WAD(s)" if multi else "Select WAD",
+                    multi=multi,
+                )
+
+                if selected_indices is None:
+                    return
+
+                imported = 0
+                for idx in selected_indices:
+                    entry = results[idx]
+                    wad_id = _check_and_import(entry, list(tags) if tags else None)
+                    if wad_id:
+                        console.print(f"[green]Imported:[/green] {entry.title} (ID: {wad_id})")
+                        imported += 1
+
+                if multi and imported > 1:
+                    console.print(f"[green]Imported {imported} WAD(s)[/green]")
+            else:
+                table = Table(title="Search Results")
+                table.add_column("#", style="dim")
+                table.add_column("ID", style="dim")
+                table.add_column("Title", style="cyan")
+                table.add_column("Author")
+                table.add_column("Date")
+
+                for i, entry in enumerate(results[:20], 1):
+                    table.add_row(str(i), str(entry.id), entry.title, entry.author, entry.date or "-")
+
+                console.print(table)
+
+                choice = click.prompt("Enter number to import (or 0 to cancel)", type=int, default=0)
+                if choice == 0 or choice > len(results):
+                    return
+
+                entry = results[choice - 1]
+                wad_id = _check_and_import(entry, list(tags) if tags else None)
+                if wad_id:
+                    console.print(f"[green]Imported:[/green] {entry.title} (ID: {wad_id})")
 
 
 @import_cmd.command(name="idgames")
@@ -741,41 +1371,69 @@ def import_url(title: str, url: str, author: str | None, year: int | None,
 
 
 @import_cmd.command(name="local")
-@click.argument("title")
-@click.argument("path", type=click.Path(exists=True))
+@click.argument("paths", nargs=-1, required=True, type=click.Path(exists=True))
+@click.option("--title", "-t", help="Override title (only for single file imports)")
 @click.option("--author", "-a")
 @click.option("--year", "-y", type=int)
-@click.option("--tag", "-t", "tags", multiple=True)
+@click.option("--tag", "tags", multiple=True, help="Tags to add")
 @click.option("--force", "-f", is_flag=True, help="Import even if duplicate exists")
-def import_local(title: str, path: str, author: str | None, year: int | None,
+def import_local(paths: tuple[str, ...], title: str | None, author: str | None, year: int | None,
                  tags: tuple[str, ...], force: bool):
-    """Import a local WAD file."""
+    """Import local WAD file(s).
+
+    Supports multiple paths for batch import. Titles are inferred from filenames.
+
+    \b
+    Examples:
+        caco import local ~/Downloads/mymap.wad
+        caco import local *.wad --tag new --author "Me"
+        caco import local map1.wad map2.pk3 --tag batch
+    """
     from pathlib import Path as P
-    p = P(path).resolve()
 
-    # Check for duplicate
-    existing = db.find_duplicate(
-        db.SourceType.LOCAL,
-        source_url=str(p),
-        filename=p.name,
-        author=author,
-    )
-    if existing and not force:
-        console.print(f"[yellow]Already in library:[/yellow] {existing['title']} (ID: {existing['id']})")
-        console.print("[dim]Use --force to import anyway[/dim]")
-        return
+    if title and len(paths) > 1:
+        err_console.print("[yellow]--title only works with single file imports[/yellow]")
+        err_console.print("[dim]Titles will be inferred from filenames for batch imports[/dim]")
 
-    wad_id = db.add_wad(
-        title=title,
-        source_type=db.SourceType.LOCAL,
-        source_url=str(p),
-        filename=p.name,
-        cached_path=str(p),
-        author=author,
-        year=year,
-        tags=list(tags) if tags else None,
-    )
-    console.print(f"[green]Added:[/green] {title} (ID: {wad_id})")
+    imported = 0
+    skipped = 0
+
+    for path in paths:
+        p = P(path).resolve()
+
+        # Infer title from filename if not provided (or multiple files)
+        file_title = title if (title and len(paths) == 1) else _infer_title_from_filename(p.name)
+
+        # Check for duplicate
+        existing = db.find_duplicate(
+            db.SourceType.LOCAL,
+            source_url=str(p),
+            filename=p.name,
+            author=author,
+        )
+        if existing and not force:
+            console.print(f"[yellow]Skipped (duplicate):[/yellow] {p.name} → {existing['title']} (ID: {existing['id']})")
+            skipped += 1
+            continue
+
+        wad_id = db.add_wad(
+            title=file_title,
+            source_type=db.SourceType.LOCAL,
+            source_url=str(p),
+            filename=p.name,
+            cached_path=str(p),
+            author=author,
+            year=year,
+            tags=list(tags) if tags else None,
+        )
+        console.print(f"[green]Added:[/green] {file_title} (ID: {wad_id})")
+        imported += 1
+
+    if len(paths) > 1:
+        summary = f"[green]Imported {imported} WAD(s)[/green]"
+        if skipped:
+            summary += f" [dim]({skipped} skipped as duplicates)[/dim]"
+        console.print(summary)
 
 
 # =============================================================================
@@ -786,31 +1444,15 @@ def import_local(title: str, path: str, author: str | None, year: int | None,
 @cli.command()
 @click.argument("query")
 @click.option("--sourceport", "-p", help="Sourceport to use")
+@click.option("--yes", "-y", is_flag=True, help="Auto-select first match if multiple")
 @click.argument("extra_args", nargs=-1)
-def play_cmd(query: str, sourceport: str | None, extra_args: tuple[str, ...]):
+def play_cmd(query: str, sourceport: str | None, yes: bool, extra_args: tuple[str, ...]):
     """Play a WAD by ID or query (e.g., 'caco play 1' or 'caco play filename:tnto')."""
-    # Try parsing as int first (WAD ID)
-    try:
-        wad_id = int(query)
-        wad = db.get_wad(wad_id)
-        if not wad:
-            err_console.print(f"[red]WAD {wad_id} not found[/red]")
-            sys.exit(1)
-    except ValueError:
-        # Query-based lookup
-        results = db.search_wads(query=query)
-        if not results:
-            err_console.print(f"[red]No WADs matching '{query}'[/red]")
-            sys.exit(1)
-        if len(results) > 1:
-            err_console.print(f"[red]Multiple WADs match '{query}':[/red]")
-            for r in results[:10]:
-                err_console.print(f"  {r['id']}: {r['title']}")
-            if len(results) > 10:
-                err_console.print(f"  ... and {len(results) - 10} more")
-            sys.exit(1)
-        wad = results[0]
-        wad_id = wad["id"]
+    wads = resolve_wad_query(query, mode="pick", yes=yes)
+    if not wads:
+        return  # User cancelled
+    wad = wads[0]
+    wad_id = wad["id"]
 
     port = sourceport or get_default_sourceport()
     if not port:
@@ -838,50 +1480,71 @@ cli.add_command(play_cmd, name="play")
 
 
 @cli.command()
-@click.argument("key", required=False)
-@click.argument("value", required=False)
-def config(key: str | None, value: str | None):
-    """View or set configuration."""
-    if key is None:
-        # Show all config
-        cfg = load_config()
-        console.print(f"[dim]Config file: {CONFIG_FILE}[/dim]")
-        console.print()
-        for k, v in cfg.items():
-            if v == "" or v is None:
-                display = "[dim]not set[/dim]"
-            elif isinstance(v, list):
-                display = ", ".join(v) if v else "[dim]not set[/dim]"
-            else:
-                display = str(v)
-            console.print(f"[bold]{k}:[/bold] {display}")
+@click.option("--path", is_flag=True, help="Print config file path")
+@click.option("--edit", "-e", is_flag=True, help="Open config in $EDITOR")
+def config(path: bool, edit: bool):
+    """View or edit configuration.
+
+    Without options, displays the current config file contents.
+    Edit the config file directly for full control over all settings.
+    """
+    import os
+
+    config_path = CONFIG_FILE
+
+    if path:
+        click.echo(config_path)
         return
 
-    if value is None:
-        # Show single value
-        cfg = load_config()
-        console.print(cfg.get(key, "[dim]not set[/dim]"))
+    if edit:
+        editor = os.environ.get("EDITOR", os.environ.get("VISUAL", "nano"))
+        # Create config file with defaults if it doesn't exist
+        if not config_path.exists():
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            default_content = '''# Caco configuration file
+# Edit these settings to customize caco behavior
+
+# Path to your sourceport executable (e.g., gzdoom, dsda-doom)
+sourceport = ""
+
+# Path to your IWAD file (e.g., doom2.wad)
+iwad = ""
+
+# Directory for caching downloaded WADs
+cache_dir = "~/.cache/caco/wads"
+
+# Directory for sourceport stats files (dsda-doom stats.txt location)
+stats_dir = "~/.local/share/nyan-doom/nyan_doom_data"
+
+# idgames download mirror (0-4, see https://www.doomworld.com/idgames/api/)
+download_mirror = 0
+
+# Extra arguments to pass to sourceport
+sourceport_args = []
+
+# [list] section for customizing list output (coming soon)
+# format = ["id", "title", "author", "status"]
+# sort = "id+"
+'''
+            config_path.write_text(default_content)
+            console.print(f"[dim]Created default config at {config_path}[/dim]")
+
+        subprocess.run([editor, str(config_path)])
         return
 
-    # Set value
-    if key == "sourceport":
-        set_default_sourceport(value)
-    elif key == "cache_dir":
-        set_cache_dir(value)
-    elif key == "iwad":
-        set_iwad(value)
-    elif key == "stats_dir":
-        set_stats_dir(value)
-    elif key == "download_mirror":
-        cfg = load_config()
-        cfg["download_mirror"] = int(value)
-        save_config(cfg)
+    # Default: show config contents
+    console.print(f"[dim]Config file: {config_path}[/dim]")
+    console.print()
+
+    if config_path.exists():
+        from rich.panel import Panel
+        from rich.syntax import Syntax
+
+        content = config_path.read_text()
+        syntax = Syntax(content, "toml", theme="monokai", line_numbers=False)
+        console.print(Panel(syntax, title="config.toml", border_style="dim"))
     else:
-        err_console.print(f"[red]Unknown config key: {key}[/red]")
-        err_console.print("[dim]Valid keys: sourceport, iwad, cache_dir, stats_dir, download_mirror[/dim]")
-        sys.exit(1)
-
-    console.print(f"[green]Set {key} = {value}[/green]")
+        console.print("[dim]No config file exists. Run 'caco config --edit' to create one.[/dim]")
 
 
 # =============================================================================
@@ -1005,7 +1668,7 @@ def map_sync(query: str | None, sync_all: bool):
     if sync_all:
         wads = db.search_wads()
     elif query:
-        wads = resolve_wad_query(query, allow_multiple=True, yes=True)
+        wads = resolve_wad_query(query, mode="multiple", yes=True)
         if not wads:
             return
     else:
@@ -1039,9 +1702,12 @@ def map_sync(query: str | None, sync_all: bool):
 @click.argument("maps", nargs=-1, required=True)
 @click.option("--skill", "-s", type=click.IntRange(1, 5), help="Skill level (1-5: ITYTD to NM)")
 @click.option("--notes", "-n", help="Notes for this completion")
-def map_complete(query: str, maps: tuple[str, ...], skill: int | None, notes: str | None):
+@click.option("--yes", "-y", is_flag=True, help="Auto-select first match if multiple")
+def map_complete(query: str, maps: tuple[str, ...], skill: int | None, notes: str | None, yes: bool):
     """Manually mark maps as completed."""
-    wads = resolve_wad_query(query, allow_multiple=False)
+    wads = resolve_wad_query(query, mode="pick", yes=yes)
+    if not wads:
+        return  # User cancelled
     wad = wads[0]
 
     # Parse all map arguments (support ranges)
@@ -1060,9 +1726,12 @@ def map_complete(query: str, maps: tuple[str, ...], skill: int | None, notes: st
 @click.argument("query")
 @click.argument("maps", nargs=-1, required=True)
 @click.option("--skill", "-s", type=click.IntRange(1, 5), help="Only remove specific skill (default: all)")
-def map_uncomplete(query: str, maps: tuple[str, ...], skill: int | None):
+@click.option("--yes", "-y", is_flag=True, help="Auto-select first match if multiple")
+def map_uncomplete(query: str, maps: tuple[str, ...], skill: int | None, yes: bool):
     """Remove map completion records."""
-    wads = resolve_wad_query(query, allow_multiple=False)
+    wads = resolve_wad_query(query, mode="pick", yes=yes)
+    if not wads:
+        return  # User cancelled
     wad = wads[0]
 
     # Parse all map arguments
@@ -1080,10 +1749,13 @@ def map_uncomplete(query: str, maps: tuple[str, ...], skill: int | None):
 
 @map_cmd.command(name="list")
 @click.argument("query")
+@click.option("--yes", "-y", is_flag=True, help="Auto-select first match if multiple")
 @click.option("--plain", is_flag=True, help="Output as TSV (for scripting)")
-def map_list(query: str, plain: bool):
+def map_list(query: str, yes: bool, plain: bool):
     """List completed maps for a WAD."""
-    wads = resolve_wad_query(query, allow_multiple=False)
+    wads = resolve_wad_query(query, mode="pick", yes=yes)
+    if not wads:
+        return  # User cancelled
     wad = wads[0]
 
     completions = db.get_map_completions(wad["id"])
@@ -1119,10 +1791,13 @@ def map_list(query: str, plain: bool):
 @map_cmd.command(name="progress")
 @click.argument("query")
 @click.option("--total", "-t", type=int, help="Total number of maps (for percentage)")
+@click.option("--yes", "-y", is_flag=True, help="Auto-select first match if multiple")
 @click.option("--plain", is_flag=True, help="Output as key=value pairs (for scripting)")
-def map_progress(query: str, total: int | None, plain: bool):
+def map_progress(query: str, total: int | None, yes: bool, plain: bool):
     """Show map completion progress for a WAD."""
-    wads = resolve_wad_query(query, allow_multiple=False)
+    wads = resolve_wad_query(query, mode="pick", yes=yes)
+    if not wads:
+        return  # User cancelled
     wad = wads[0]
 
     stats = db.get_map_completion_stats(wad["id"])
@@ -1161,6 +1836,17 @@ def map_progress(query: str, total: int | None, plain: bool):
                     skill_summary.append(f"{SKILL_NAMES[s]}: {by_skill[s]}")
             if skill_summary:
                 console.print(f"[dim]By highest skill: {', '.join(skill_summary)}[/dim]")
+
+
+# =============================================================================
+# Command Aliases
+# =============================================================================
+
+# Unix-like aliases for common commands
+cli.add_command(import_auto, name="add")  # caco add → caco import auto
+cli.add_command(delete, name="rm")        # caco rm → caco delete
+cli.add_command(list_cmd, name="ls")      # caco ls → caco list
+cli.add_command(info, name="i")           # caco i → caco info
 
 
 if __name__ == "__main__":

@@ -19,6 +19,20 @@ DEFAULT_CONFIG = {
     "stats_dir": str(STATS_DIR),
 }
 
+# Default list configuration
+DEFAULT_LIST_CONFIG = {
+    "format": ["id", "title", "author", "status", "maps", "beaten", "playtime", "last_played"],
+    "sort": None,  # None means use default (status priority)
+    "default_status": [],  # Empty means all statuses
+    "colors": {
+        "to-play": "blue",
+        "backlog": "yellow",
+        "playing": "green",
+        "finished": "dim",
+        "abandoned": "red",
+    },
+}
+
 
 def load_config() -> dict[str, Any]:
     """Load configuration from file, creating defaults if needed."""
@@ -126,3 +140,23 @@ def set_stats_dir(path: str) -> None:
     config = load_config()
     config["stats_dir"] = path
     save_config(config)
+
+
+def get_list_config() -> dict[str, Any]:
+    """Get list display configuration, merging defaults with user config."""
+    config = load_config()
+    list_config = DEFAULT_LIST_CONFIG.copy()
+
+    # Merge user's [list] section if present
+    if "list" in config and isinstance(config["list"], dict):
+        user_list = config["list"]
+        if "format" in user_list:
+            list_config["format"] = user_list["format"]
+        if "sort" in user_list:
+            list_config["sort"] = user_list["sort"]
+        if "default_status" in user_list:
+            list_config["default_status"] = user_list["default_status"]
+        if "colors" in user_list and isinstance(user_list["colors"], dict):
+            list_config["colors"].update(user_list["colors"])
+
+    return list_config

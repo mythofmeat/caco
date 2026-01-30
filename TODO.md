@@ -1,5 +1,3 @@
-# Bugfixes
-
 # Quality-of-life improvements
 
 - [ ] there should be a way to manually adjust the amount of times completed
@@ -7,57 +5,82 @@
 
 - [ ] change default sorting on list to id ascending
 
-- [ ] tag searches should support globs
+- [x] tag searches should support globs
   - e.g., `caco list --tag cacowards_2025*` should return items that contain `cacowards_2025_winner` and `cacowards_2025_runnerup`
-- [ ] tags should be shown when listing WADs
+- [x] tags should be shown when listing WADs
+  - Configurable via `[list]` section in config.toml
 - [ ] tags should have completions
 
-- [ ] ALL search and list fields should be supported in ALL commands, always
-  - there are some commands that do not accept anything other than `id` arguments
+- [x] ALL search and list fields should be supported in ALL commands, always
+  - Universal query support now works across all commands with `resolve_wad_query()`
 
-- [ ] when giving an error that multiple WADs match the search, default behavior should be to do an interactive picker to select which one the user wanted
+- [x] when giving an error that multiple WADs match the search, default behavior should be to do an interactive picker to select which one the user wanted
+  - Interactive picker uses fzf if available, falls back to numbered selection
 
 - [ ] the map progress feature should only apply to WADs that are currently playing. when a WAD is marked as finished, its map progress should be archived and reset to 0
 
 - [ ] there should be a way to view completion details and history
 
 ## I don't like the syntax for a lot of the commands
-- [ ] config
-  - i don't actually like setting any configuration options this way. *all* config options should be set exclusively through a config file that can be overridden by command line flags, but that should be it
+- [x] config
+  - Config command simplified: `caco config` shows config, `caco config --edit` opens in $EDITOR
+  - All configuration should be done through the config file
 
-- [ ] delete
-  - delete commands *really* need to prompt yes/no along with a list of what will actually be deleted. it's way too easy to accidentally delete the wrong thing
+- [x] delete
+  - Delete commands now show preview with stats before prompting
+  - Supports `--dry-run` to see what would be deleted
+  - Soft delete by default: WADs go to trash, use `caco restore` to recover
+  - Use `--purge` for permanent deletion
 
-- [ ] import
-  - the import command currently works like `caco import [idgames|local|url] $arg` and that seems redundant
-  - there should be a way to automatically detect what is being imported
-    - i.e., a string or integer should automatically search idgames
-    - a file path should automatically be a local import
-    - a supported URL should automatically be detected
-      - unsupported URLs should error
+- [x] import
+  - Added `caco import auto` (aliased as `caco add`) for auto-detection:
+    - Integer → idgames ID lookup
+    - URL → URL import
+    - Existing file path → local import
+    - Text → idgames search
 
-- [ ] list
-  - 
-- [ ] map
-- [ ] play
-- [ ] tag
-- [ ] update
+- [x] list
+  - Configurable via `[list]` section in config.toml
+  - Supports custom columns, colors, default sort
+  - Added `--deleted` flag to view trash
+
+- [x] play
+  - Now uses universal query support with interactive picker
+- [x] update
+  - Now supports `--dry-run` to preview changes
 
 ## Configuration file
-- [ ] there should be a way to use the configuration file to specify the default formatting when listing WADs
-  - something like: 
-```
-list_format: [ "id", "title", "author", "last_played" ]
-list_sort:   "id-"
-```
-  - with `id+` meaning id ascending and `id-` meaning id descending
-  - should also
+- [x] there should be a way to use the configuration file to specify the default formatting when listing WADs
+  - Implemented as `[list]` section with `format`, `sort`, `colors` options
 
 # New Features
 
-## Explicit Sourceport Support
-- [ ] Helion
-  - [ ] Map progress detection VIA save file
+## Command Aliases
+- [x] Added Unix-like aliases:
+  - `caco add` → `caco import auto`
+  - `caco rm` → `caco delete`
+  - `caco ls` → `caco list`
+  - `caco i` → `caco info`
+
+## Status Shortcuts
+- [x] Single-letter shortcuts for statuses:
+  - `t` / `tp` → to-play
+  - `b` / `back` → backlog
+  - `p` / `play` → playing
+  - `f` / `fin` / `done` → finished
+  - `a` / `drop` → abandoned
+
+## Batch Import
+- [x] `caco import local` now accepts multiple files:
+  - `caco import local *.wad --tag batch`
+  - Titles inferred from filenames
+
+## Soft Delete / Trash
+- [x] WADs are soft-deleted by default (recoverable)
+- [x] `caco list --deleted` shows trash
+- [x] `caco restore <query>` recovers deleted WADs
+- [x] `caco delete --purge` for permanent deletion
+- [x] `caco delete --purge-all` empties trash
 
 ## Cache management
 - [ ] `caco cache clear` - remove cached WADs
