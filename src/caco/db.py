@@ -705,8 +705,9 @@ def find_duplicate(
 
     Detection strategy (in priority order):
     1. idgames: exact match on source_id
-    2. URL/local: exact match on source_url
-    3. Fallback: normalized filename + author match
+    2. doomwiki: exact match on source_id (wiki page ID)
+    3. URL/local: exact match on source_url
+    4. Fallback: normalized filename + author match
 
     Returns the existing WAD dict if found, or None.
     """
@@ -725,7 +726,21 @@ def find_duplicate(
                 wad["tags"] = [t["tag"] for t in tags]
                 return wad
 
-        # Strategy 2: Match by source_url (for URL and local)
+        # Strategy 2: Match by source_id (for doomwiki - page ID)
+        if source_type == SourceType.DOOMWIKI and source_id:
+            row = conn.execute(
+                "SELECT * FROM wads WHERE source_type = ? AND source_id = ?",
+                (source_type.value, source_id),
+            ).fetchone()
+            if row:
+                wad = dict(row)
+                tags = conn.execute(
+                    "SELECT tag FROM tags WHERE wad_id = ?", (wad["id"],)
+                ).fetchall()
+                wad["tags"] = [t["tag"] for t in tags]
+                return wad
+
+        # Strategy 3: Match by source_url (for URL and local)
         if source_url and source_type in (SourceType.URL, SourceType.LOCAL):
             row = conn.execute(
                 "SELECT * FROM wads WHERE source_type = ? AND source_url = ?",
@@ -739,7 +754,7 @@ def find_duplicate(
                 wad["tags"] = [t["tag"] for t in tags]
                 return wad
 
-        # Strategy 3: Fuzzy match on normalized filename + author
+        # Strategy 4: Fuzzy match on normalized filename + author
         if filename:
             # Normalize filename: lowercase, strip extension
             normalized = filename.lower()

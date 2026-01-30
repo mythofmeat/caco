@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Caco is a personal Doom WAD library manager inspired by `beets`. It tracks WADs you want to play, have played, or are playing, with metadata from multiple sources (idgames, Doomwiki, manual entry). Key features:
 
 - SQLite database for WAD metadata and play history
-- Import from idgames archive, URLs, or local files
+- Import from idgames archive, Doom Wiki, URLs, or local files
 - Automatic playtime tracking via sourceport wrapper
 - Tag-based organization
 - On-demand downloading (WADs are cached, not stored permanently)
@@ -41,11 +41,16 @@ src/caco/
 ├── db.py           # SQLite database (models, queries)
 ├── config.py       # TOML config in ~/.config/caco/
 ├── player.py       # Sourceport launcher + playtime tracking
-├── idgames/        # Vendored idgames API client
+├── idgames/        # idgames API client
 │   ├── client.py   # HTTP client for doomworld.com/idgames/api
 │   └── models.py   # Pydantic models (FileEntry, etc.)
+├── doomwiki/       # Doom Wiki API client
+│   ├── client.py   # HTTP client for doomwiki.org MediaWiki API
+│   ├── models.py   # Pydantic models (WikiEntry, SearchResult)
+│   └── parser.py   # Wikitext parser for {{Wad}} infobox template
 └── sources/
-    └── idgames.py  # idgames archive adapter
+    ├── idgames.py  # idgames archive adapter
+    └── doomwiki.py # Doom Wiki adapter
 ```
 
 **Data locations:**
@@ -65,7 +70,7 @@ src/caco/
 
 - `click` - CLI framework
 - `rich` - Terminal output formatting
-- `httpx` - HTTP client for idgames API
+- `httpx` - HTTP client for idgames and Doomwiki APIs
 - `pydantic` - Data validation for API responses
 
 ## Completions

@@ -5,9 +5,9 @@ A personal Doom WAD library manager taking inspiration from beets. Track what yo
 ## Features
 
 - **Import WADs from multiple sources**
-  - idgames
-  - Doomwiki *(planned)*
-  - Doomworld forums *(planned)*
+  - idgames archive
+  - Doom Wiki (doomwiki.org)
+  - URLs / local files
 
 - **Lazy downloads**
   - WADs from idgames are downloaded and cached when you play
@@ -40,9 +40,10 @@ pip install -e .
 caco config --edit
 
 # Import a WAD (auto-detects source type)
-caco add "scythe 2"           # Search idgames
-caco add 19509                # idgames ID
-caco add ~/Downloads/map.wad  # Local file
+caco add "scythe 2"                              # Search idgames
+caco add 19509                                   # idgames ID
+caco add https://doomwiki.org/wiki/Eviternity   # Doomwiki URL
+caco add ~/Downloads/map.wad                     # Local file
 
 # List your library
 caco ls                       # Alias for 'list'
@@ -61,9 +62,10 @@ caco update scythe -s f -r 5  # Short form (f=finished)
 
 ```bash
 # Smart import (auto-detects source type)
-caco add "sunlust"                  # Search idgames
-caco add 19509                      # idgames ID
-caco add ~/Downloads/mymap.wad     # Local file (title inferred)
+caco add "sunlust"                              # Search idgames
+caco add 19509                                  # idgames ID
+caco add https://doomwiki.org/wiki/Eviternity  # Doomwiki URL
+caco add ~/Downloads/mymap.wad                 # Local file (title inferred)
 caco add https://example.com/wad.zip -t "My WAD"  # URL
 
 # Batch local import
@@ -71,6 +73,7 @@ caco import local *.wad --tag new   # Import all WADs, add tag
 
 # Explicit subcommands (if you prefer)
 caco import idgames "sunlust"
+caco import doomwiki "Scythe"       # Search Doom Wiki
 caco import url "Title" "https://..." --author "Author"
 caco import local "Title" ~/path/to/wad.wad
 
@@ -112,7 +115,7 @@ caco list year:2020                 # By year
 caco list filename:scythe2          # By filename
 caco list tag:megawad               # By tag
 caco list status:playing            # By status
-caco list source:idgames            # By source type
+caco list source:idgames            # By source type (idgames, doomwiki, url, local)
 caco list author:alm title:scythe   # Combine multiple filters
 
 # Filter options (can combine with queries)
