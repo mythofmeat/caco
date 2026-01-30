@@ -1,12 +1,5 @@
 # New Features *(ordered by priority)*
 
-## Cache management
-- [x] `caco cache clear` - remove cached WADs
-- [x] `caco cache list` - show cached files and sizes
-- [x] `caco cache clean` - remove orphaned files
-- [x] Auto-cleanup old cached files
-  - configurable via `cache_max_size_gb`, `cache_max_age_days`, `cache_auto_clean`
-
 ## Data Sources
 - [ ] Doomwiki
   - [ ] Doomwiki scraper - parse infoboxes for metadata
