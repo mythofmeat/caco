@@ -57,7 +57,7 @@ src/caco/
 - `db.py` uses raw sqlite3 with `sqlite3.Row` for dict-like access
 - Source adapters are context managers that handle their own clients
 - `player.py` wraps sourceport execution to track session start/end times
-- Status enum: `wishlist`, `backlog`, `playing`, `finished`, `abandoned`
+- Status enum: `to-play`, `backlog`, `playing`, `finished`, `abandoned`
 - Query syntax: `id:`, `title:`, `author:`, `year:`, `filename:`, `tag:`, `status:`, `source:`
 - Per-WAD config: `custom_iwad`, `custom_sourceport`, `custom_args` columns in wads table
 

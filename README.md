@@ -86,7 +86,7 @@ caco add "doom 2" --multi           # Multi-select mode
 ### Managing Library
 
 ```bash
-# List all WADs (sorted by status: playing → backlog → to-play → abandoned → finished)
+# List all WADs (sorted by ID ascending by default)
 caco list
 
 # Sort by different fields
@@ -98,9 +98,9 @@ caco list --sort last_played           # Recently played first
 # Available sort fields: playtime, rating, created, title, author, last_played, year
 # Prefix with - to reverse (e.g., -title for Z-A)
 
-# Filter by status
+# Filter by status (accepts full names or shortcuts)
 caco list --status playing             # List playing WADs
-caco list --status to-play             # List to-play WADs
+caco list --status to-play             # List to-play WADs (or use -s t)
 caco list --status backlog             # List backlog WADs
 
 # Search with beets-style queries
@@ -204,9 +204,36 @@ caco map complete 1 MAP01 --skill 4 # Record UV completion
 caco map uncomplete 1 MAP30         # Remove completion
 
 # View completions
-caco map list 1                     # Show all completed maps
+caco map list 1                     # Show completed maps (current playthrough)
+caco map list 1 --all-cycles        # Show completions from all playthroughs
 caco map progress 1 --total 32      # Show progress (29/32, 90.6%)
 caco info 1                         # Also shows completion summary
+```
+
+#### Playthrough Cycles
+
+When you mark a WAD as "finished", caco archives the current map progress and starts a new playthrough cycle. This lets you track completions across multiple playthroughs:
+
+```bash
+caco update 1 --status finished     # Archives current map progress, increments cycle
+caco update 1 --status playing      # Start fresh playthrough (cycle 2)
+caco map list 1                     # Shows only current cycle completions
+caco map list 1 --all-cycles        # Shows all completions with cycle numbers
+```
+
+### Completion Count Tracking
+
+Track how many times you've beaten each WAD:
+
+```bash
+# View completion counts
+caco beaten list                    # Show all WADs with completion counts
+caco beaten list --min 2            # WADs beaten 2+ times
+
+# Manual adjustment
+caco beaten add 1                   # Increment completion count
+caco beaten remove 1                # Decrement completion count
+caco beaten set 1 3                 # Set exact count
 ```
 
 Default Stats file location: `~/.local/share/nyan-doom/nyan_doom_data/{iwad}/{wad}/stats.txt`
@@ -243,13 +270,22 @@ download_mirror = 0
 
 # Customize list display
 [list]
+# Available columns: id, title, author, status, maps, beaten, playtime,
+#                    last_played, rating, year, tags
 format = ["id", "title", "author", "status", "playtime", "tags"]
-sort = "title+"  # + for ascending, - for descending
+
+# Sort options: id, title, author, status, playtime, rating, year,
+#               last_played, created, maps, beaten
+# Append + for ascending (default), - for descending
+sort = "id+"
 
 [list.colors]
+# Available colors: black, red, green, yellow, blue, magenta, cyan, white, dim
 to-play = "blue"
+backlog = "yellow"
 playing = "green"
 finished = "dim"
+abandoned = "red"
 ```
 
 ## Command Aliases
