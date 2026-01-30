@@ -243,6 +243,41 @@ Configure custom stats directory:
 caco config stats_dir /path/to/stats
 ```
 
+### Cache Management
+
+WADs from idgames are downloaded on-demand and cached locally. Manage your cache with these commands:
+
+```bash
+# View cache contents
+caco cache list                      # List cached files with sizes
+caco cache list --orphans            # Show orphaned files (not in database)
+
+# Clear cache
+caco cache clear --all               # Clear entire cache
+caco cache clear 1,3,5               # Clear specific WADs
+caco cache clear status:finished     # Clear finished WADs' cache
+caco cache clear --all --dry-run     # Preview what would be deleted
+
+# Clean orphaned files
+caco cache clean                     # Remove files not tracked in database
+caco cache clean --dry-run           # Preview orphan cleanup
+```
+
+**Auto-cleanup**: Configure automatic cache cleanup in config.toml:
+
+```toml
+# Remove cached files not played in 30 days
+cache_max_age_days = 30
+
+# Keep cache under 5 GB (removes least recently played)
+cache_max_size_gb = 5
+
+# Enable auto-cleanup before downloading new WADs
+cache_auto_clean = true
+```
+
+**Note**: Local imports (files from your filesystem) are never deleted by cache commands.
+
 ## Configuration
 
 Config file: `~/.config/caco/config.toml` (see `config.example.toml` for a template)
@@ -257,6 +292,9 @@ Config file: `~/.config/caco/config.toml` (see `config.example.toml` for a templ
 | `cache_dir` | WAD cache directory |
 | `stats_dir` | Stats file directory for map completion tracking |
 | `download_mirror` | Preferred idgames mirror (0-4) |
+| `cache_max_size_gb` | Max cache size in GB (0 = unlimited) |
+| `cache_max_age_days` | Remove files not played in N days (0 = never) |
+| `cache_auto_clean` | Auto-cleanup cache on play (true/false) |
 
 ### Example Config
 

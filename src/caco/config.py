@@ -160,3 +160,27 @@ def get_list_config() -> dict[str, Any]:
             list_config["colors"].update(user_list["colors"])
 
     return list_config
+
+
+# =============================================================================
+# Cache Configuration
+# =============================================================================
+
+
+def get_cache_max_size() -> int:
+    """Get max cache size in bytes. 0 = unlimited."""
+    config = load_config()
+    gb = config.get("cache_max_size_gb", 0)
+    return int(float(gb) * 1024 * 1024 * 1024) if gb > 0 else 0
+
+
+def get_cache_max_age() -> int:
+    """Get max cache age in days. 0 = never expire."""
+    config = load_config()
+    return int(config.get("cache_max_age_days", 0))
+
+
+def get_cache_auto_clean() -> bool:
+    """Whether to auto-clean cache before play."""
+    config = load_config()
+    return bool(config.get("cache_auto_clean", False))

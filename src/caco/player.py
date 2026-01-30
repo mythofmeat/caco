@@ -8,7 +8,16 @@ from pathlib import Path
 from rich.console import Console
 
 from caco import db
-from caco.config import get_cache_dir, get_default_sourceport, get_iwad, get_sourceport_args, get_stats_dir
+from caco.config import (
+    get_cache_dir,
+    get_cache_auto_clean,
+    get_cache_max_age,
+    get_cache_max_size,
+    get_default_sourceport,
+    get_iwad,
+    get_sourceport_args,
+    get_stats_dir,
+)
 
 
 # =============================================================================
@@ -189,6 +198,107 @@ def get_wad_path(wad: dict, console: Console | None = None) -> Path | None:
     return None
 
 
+# =============================================================================
+# Cache Auto-Cleanup
+# =============================================================================
+
+
+def auto_clean_cache(console: Console | None = None) -> int:
+    """Perform automatic cache cleanup based on config rules.
+
+    Returns the number of files deleted.
+    """
+    from datetime import datetime, timedelta
+
+    if not get_cache_auto_clean():
+        return 0
+
+    cache_dir = get_cache_dir()
+    if not cache_dir.exists():
+        return 0
+
+    max_size = get_cache_max_size()
+    max_age_days = get_cache_max_age()
+
+    if not max_size and not max_age_days:
+        return 0  # No limits configured
+
+    cached_wads = db.get_cached_wads()
+    if not cached_wads:
+        return 0
+
+    # Build list of cache entries with metadata
+    cache_entries = []
+    for wad in cached_wads:
+        # Skip local source WADs
+        if wad.get("source_type") == "local":
+            continue
+
+        path = Path(wad["cached_path"])
+        if path.exists():
+            stat = path.stat()
+            last_played = db.get_last_played(wad["id"])
+            cache_entries.append({
+                "wad": wad,
+                "path": path,
+                "size": stat.st_size,
+                "mtime": stat.st_mtime,
+                "last_played": last_played,
+            })
+
+    if not cache_entries:
+        return 0
+
+    to_delete = []
+
+    # Rule 1: Remove files older than max_age_days
+    if max_age_days > 0:
+        cutoff = datetime.now() - timedelta(days=max_age_days)
+        cutoff_ts = cutoff.timestamp()
+
+        for entry in cache_entries:
+            # Use last_played if available, otherwise mtime
+            if entry["last_played"]:
+                try:
+                    played_dt = datetime.fromisoformat(entry["last_played"])
+                    if played_dt < cutoff:
+                        to_delete.append(entry)
+                except ValueError:
+                    pass
+            elif entry["mtime"] < cutoff_ts:
+                to_delete.append(entry)
+
+    # Rule 2: If over max_size, remove LRU files until under limit
+    if max_size > 0:
+        total_size = sum(e["size"] for e in cache_entries)
+        if total_size > max_size:
+            # Sort by last_played (oldest first), then mtime
+            # None values sort first (oldest)
+            remaining = [e for e in cache_entries if e not in to_delete]
+            remaining.sort(key=lambda e: (e["last_played"] or "", e["mtime"]))
+
+            for entry in remaining:
+                if total_size <= max_size:
+                    break
+                to_delete.append(entry)
+                total_size -= entry["size"]
+
+    # Delete files
+    if to_delete and console:
+        console.print(f"[dim]Auto-cleaning {len(to_delete)} cached file(s)...[/dim]")
+
+    deleted = 0
+    for entry in to_delete:
+        try:
+            entry["path"].unlink()
+            db.clear_cached_path(entry["wad"]["id"])
+            deleted += 1
+        except OSError:
+            pass
+
+    return deleted
+
+
 def play(
     wad_id: int,
     sourceport: str | None = None,
@@ -203,6 +313,9 @@ def play(
     wad = db.get_wad(wad_id)
     if not wad:
         raise ValueError(f"WAD {wad_id} not found")
+
+    # Auto-clean cache before potentially downloading new files
+    auto_clean_cache(console=console)
 
     # Get or download WAD file
     wad_path = get_wad_path(wad, console=console)

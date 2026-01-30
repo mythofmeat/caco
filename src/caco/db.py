@@ -1118,3 +1118,66 @@ def get_wad_stats(wad_id: int) -> dict[str, Any]:
             "session_count": session_count,
             "total_playtime": total_playtime,
         }
+
+
+# =============================================================================
+# Cache Management
+# =============================================================================
+
+
+def get_cached_wads() -> list[dict[str, Any]]:
+    """Get all WADs with cached files (non-null cached_path, not deleted)."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM wads
+            WHERE cached_path IS NOT NULL
+            AND deleted_at IS NULL
+            ORDER BY title
+            """
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def clear_cached_path(wad_id: int) -> bool:
+    """Clear the cached_path for a WAD. Returns True if updated."""
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "UPDATE wads SET cached_path = NULL WHERE id = ?",
+            (wad_id,),
+        )
+        return cursor.rowcount > 0
+
+
+def clear_all_cached_paths() -> int:
+    """Clear cached_path for all WADs. Returns count of WADs updated."""
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "UPDATE wads SET cached_path = NULL WHERE cached_path IS NOT NULL"
+        )
+        return cursor.rowcount
+
+
+def get_wad_by_cached_filename(filename: str) -> dict[str, Any] | None:
+    """Find a WAD by the filename portion of its cached_path.
+
+    Used to detect orphaned files (files in cache dir not tracked in DB).
+    """
+    with get_connection() as conn:
+        # Match against the filename part of cached_path (ends with /filename)
+        row = conn.execute(
+            """
+            SELECT * FROM wads
+            WHERE cached_path LIKE ?
+            AND deleted_at IS NULL
+            """,
+            (f"%/{filename}",),
+        ).fetchone()
+        if row:
+            wad = dict(row)
+            tags = conn.execute(
+                "SELECT tag FROM tags WHERE wad_id = ?", (wad["id"],)
+            ).fetchall()
+            wad["tags"] = [t["tag"] for t in tags]
+            return wad
+        return None
