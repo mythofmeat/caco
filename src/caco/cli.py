@@ -1955,8 +1955,9 @@ def _clear_all_cache(cache_dir: Path, dry_run: bool, yes: bool) -> None:
     files_to_delete = []
 
     for wad in cached_wads:
-        # Skip local source WADs - don't delete user's original files
-        if wad.get("source_type") == "local":
+        # Only delete idgames sources - they can always be re-downloaded
+        # Local files are the user's originals, URLs may not be re-downloadable
+        if wad.get("source_type") != "idgames":
             continue
 
         path = Path(wad["cached_path"])
@@ -1966,7 +1967,7 @@ def _clear_all_cache(cache_dir: Path, dry_run: bool, yes: bool) -> None:
             files_to_delete.append((wad, path, size))
 
     if not files_to_delete:
-        console.print("[dim]Cache is empty (no downloadable WADs cached)[/dim]")
+        console.print("[dim]Cache is empty (no idgames WADs cached)[/dim]")
         return
 
     # Preview
@@ -2013,8 +2014,8 @@ def _clear_specific_cache(query: str, cache_dir: Path, dry_run: bool, yes: bool)
     total_size = 0
 
     for wad in wads:
-        # Skip local source WADs
-        if wad.get("source_type") == "local":
+        # Only delete idgames sources - they can always be re-downloaded
+        if wad.get("source_type") != "idgames":
             continue
         if not wad.get("cached_path"):
             continue
@@ -2025,7 +2026,7 @@ def _clear_specific_cache(query: str, cache_dir: Path, dry_run: bool, yes: bool)
             files_to_delete.append((wad, path, size))
 
     if not files_to_delete:
-        console.print("[dim]Selected WAD(s) are not cached or are local files[/dim]")
+        console.print("[dim]Selected WAD(s) are not cached or not from idgames[/dim]")
         return
 
     # Preview

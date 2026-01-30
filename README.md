@@ -276,7 +276,7 @@ cache_max_size_gb = 5
 cache_auto_clean = true
 ```
 
-**Note**: Local imports (files from your filesystem) are never deleted by cache commands.
+**Note**: Only idgames sources are affected by cache commands. Local imports and URL imports are never deleted (they may not be re-downloadable).
 
 ## Configuration
 

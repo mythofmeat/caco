@@ -230,8 +230,9 @@ def auto_clean_cache(console: Console | None = None) -> int:
     # Build list of cache entries with metadata
     cache_entries = []
     for wad in cached_wads:
-        # Skip local source WADs
-        if wad.get("source_type") == "local":
+        # Only consider idgames sources - they can always be re-downloaded
+        # Local files are user's originals, URLs may not be re-downloadable
+        if wad.get("source_type") != "idgames":
             continue
 
         path = Path(wad["cached_path"])
