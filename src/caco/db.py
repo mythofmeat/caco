@@ -125,6 +125,7 @@ def init_db() -> None:
         _migrate_add_wad_completions(conn)
         _migrate_rename_wishlist_to_toplay(conn)
         _migrate_add_deleted_at(conn)
+        _migrate_add_playthrough_cycle(conn)
 
 
 def _migrate_add_custom_play_config(conn: sqlite3.Connection) -> None:
@@ -188,6 +189,21 @@ def _migrate_add_deleted_at(conn: sqlite3.Connection) -> None:
     columns = {row[1] for row in cursor.fetchall()}
     if "deleted_at" not in columns:
         conn.execute("ALTER TABLE wads ADD COLUMN deleted_at TEXT")
+
+
+def _migrate_add_playthrough_cycle(conn: sqlite3.Connection) -> None:
+    """Add playthrough_cycle column to wads and cycle to map_completions."""
+    # Add playthrough_cycle to wads
+    cursor = conn.execute("PRAGMA table_info(wads)")
+    wad_columns = {row[1] for row in cursor.fetchall()}
+    if "playthrough_cycle" not in wad_columns:
+        conn.execute("ALTER TABLE wads ADD COLUMN playthrough_cycle INTEGER DEFAULT 1")
+
+    # Add cycle to map_completions
+    cursor = conn.execute("PRAGMA table_info(map_completions)")
+    mc_columns = {row[1] for row in cursor.fetchall()}
+    if "cycle" not in mc_columns:
+        conn.execute("ALTER TABLE map_completions ADD COLUMN cycle INTEGER DEFAULT 1")
 
 
 def add_wad(
@@ -436,6 +452,7 @@ def search_wads(
 
     # Map sort field to SQL expression
     sort_map = {
+        "id": f"wads.id {reverse_dir}",  # ID default ascending
         "playtime": f"COALESCE(SUM(sessions.duration_seconds), 0) {direction}",
         "rating": f"wads.rating {direction} NULLS LAST",
         "created": f"wads.created_at {direction}",
@@ -449,24 +466,8 @@ def search_wads(
         order_by = sort_map[sort_by]
         use_group_by = sort_by in ("playtime", "last_played")
     else:
-        # Default sort: status priority, then last played/created
-        order_by = """
-            CASE wads.status
-                WHEN 'playing' THEN 1
-                WHEN 'backlog' THEN 2
-                WHEN 'to-play' THEN 3
-                WHEN 'abandoned' THEN 4
-                WHEN 'finished' THEN 5
-                ELSE 6
-            END,
-            CASE wads.status
-                WHEN 'playing' THEN (SELECT MAX(started_at) FROM sessions WHERE sessions.wad_id = wads.id)
-                WHEN 'abandoned' THEN (SELECT MAX(started_at) FROM sessions WHERE sessions.wad_id = wads.id)
-                WHEN 'finished' THEN (SELECT MAX(started_at) FROM sessions WHERE sessions.wad_id = wads.id)
-                ELSE NULL
-            END DESC NULLS LAST,
-            wads.created_at DESC
-        """
+        # Default sort: ID ascending (simplest, most predictable)
+        order_by = "wads.id ASC"
         use_group_by = False
 
     with get_connection() as conn:
@@ -531,7 +532,7 @@ def update_wad(wad_id: int, **fields) -> bool:
         )
         updated = cursor.rowcount > 0
 
-    # Record completion if status was set to 'finished'
+    # Record completion and start new playthrough cycle if status was set to 'finished'
     if updated and recording_completion:
         # Get stats snapshot if available (late import to avoid circular dependency)
         from caco.player import get_stats_path
@@ -546,6 +547,13 @@ def update_wad(wad_id: int, **fields) -> bool:
                 except OSError:
                     pass
         add_wad_completion(wad_id, stats_snapshot=stats_content)
+
+        # Increment playthrough cycle for fresh map progress on next playthrough
+        with get_connection() as conn:
+            conn.execute(
+                "UPDATE wads SET playthrough_cycle = COALESCE(playthrough_cycle, 1) + 1 WHERE id = ?",
+                (wad_id,),
+            )
 
     return updated
 
@@ -778,17 +786,25 @@ def add_map_completion(
     skill: int | None = None,
     notes: str | None = None,
 ) -> int:
-    """Add a map completion record. Returns the completion ID."""
+    """Add a map completion record for the current playthrough cycle. Returns the completion ID."""
     with get_connection() as conn:
+        # Get current playthrough cycle for this WAD
+        row = conn.execute(
+            "SELECT COALESCE(playthrough_cycle, 1) as cycle FROM wads WHERE id = ?",
+            (wad_id,),
+        ).fetchone()
+        cycle = row["cycle"] if row else 1
+
         cursor = conn.execute(
             """
-            INSERT INTO map_completions (wad_id, map_name, skill, notes)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO map_completions (wad_id, map_name, skill, notes, cycle)
+            VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(wad_id, map_name, skill) DO UPDATE SET
                 completed_at = CURRENT_TIMESTAMP,
-                notes = COALESCE(excluded.notes, notes)
+                notes = COALESCE(excluded.notes, notes),
+                cycle = excluded.cycle
             """,
-            (wad_id, map_name.upper(), skill, notes),
+            (wad_id, map_name.upper(), skill, notes, cycle),
         )
         return cursor.lastrowid
 
@@ -810,17 +826,40 @@ def remove_map_completion(wad_id: int, map_name: str, skill: int | None = None) 
         return cursor.rowcount > 0
 
 
-def get_map_completions(wad_id: int) -> list[dict[str, Any]]:
-    """Get all map completions for a WAD."""
+def get_map_completions(wad_id: int, current_cycle_only: bool = True) -> list[dict[str, Any]]:
+    """Get map completions for a WAD.
+
+    Args:
+        wad_id: WAD ID
+        current_cycle_only: If True (default), only show completions from current playthrough cycle.
+                           If False, show all completions from all cycles.
+    """
     with get_connection() as conn:
-        rows = conn.execute(
-            """
-            SELECT * FROM map_completions
-            WHERE wad_id = ?
-            ORDER BY map_name, skill
-            """,
-            (wad_id,),
-        ).fetchall()
+        if current_cycle_only:
+            # Get current cycle
+            row = conn.execute(
+                "SELECT COALESCE(playthrough_cycle, 1) as cycle FROM wads WHERE id = ?",
+                (wad_id,),
+            ).fetchone()
+            cycle = row["cycle"] if row else 1
+
+            rows = conn.execute(
+                """
+                SELECT * FROM map_completions
+                WHERE wad_id = ? AND COALESCE(cycle, 1) = ?
+                ORDER BY map_name, skill
+                """,
+                (wad_id, cycle),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT * FROM map_completions
+                WHERE wad_id = ?
+                ORDER BY cycle DESC, map_name, skill
+                """,
+                (wad_id,),
+            ).fetchall()
         return [dict(row) for row in rows]
 
 
@@ -864,26 +903,43 @@ def sync_map_completions(wad_id: int, completions: list[tuple[str, int]]) -> int
     return added
 
 
-def get_map_completion_stats(wad_id: int) -> dict[str, Any]:
-    """Get map completion statistics for a WAD."""
+def get_map_completion_stats(wad_id: int, current_cycle_only: bool = True) -> dict[str, Any]:
+    """Get map completion statistics for a WAD.
+
+    Args:
+        wad_id: WAD ID
+        current_cycle_only: If True (default), only count completions from current playthrough cycle.
+    """
     with get_connection() as conn:
+        # Get current cycle if filtering
+        cycle_filter = ""
+        params = [wad_id]
+        if current_cycle_only:
+            row = conn.execute(
+                "SELECT COALESCE(playthrough_cycle, 1) as cycle FROM wads WHERE id = ?",
+                (wad_id,),
+            ).fetchone()
+            cycle = row["cycle"] if row else 1
+            cycle_filter = "AND COALESCE(cycle, 1) = ?"
+            params.append(cycle)
+
         # Count unique maps completed
         row = conn.execute(
-            "SELECT COUNT(DISTINCT map_name) as count FROM map_completions WHERE wad_id = ?",
-            (wad_id,),
+            f"SELECT COUNT(DISTINCT map_name) as count FROM map_completions WHERE wad_id = ? {cycle_filter}",
+            params,
         ).fetchone()
         unique_maps = row["count"]
 
         # Get highest skill completed for each map
         rows = conn.execute(
-            """
+            f"""
             SELECT map_name, MAX(skill) as max_skill
             FROM map_completions
-            WHERE wad_id = ?
+            WHERE wad_id = ? {cycle_filter}
             GROUP BY map_name
             ORDER BY map_name
             """,
-            (wad_id,),
+            params,
         ).fetchall()
 
         return {
@@ -928,6 +984,53 @@ def get_wad_completions(wad_id: int) -> list[dict[str, Any]]:
         return [dict(row) for row in rows]
 
 
+def delete_wad_completion(completion_id: int) -> bool:
+    """Delete a specific completion record. Returns True if deleted."""
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "DELETE FROM wad_completions WHERE id = ?",
+            (completion_id,),
+        )
+        return cursor.rowcount > 0
+
+
+def set_wad_completion_count(wad_id: int, count: int) -> None:
+    """Set the completion count for a WAD to a specific number.
+
+    If count is less than current, removes oldest completions.
+    If count is more than current, adds placeholder completions.
+    """
+    with get_connection() as conn:
+        current = conn.execute(
+            "SELECT COUNT(*) as cnt FROM wad_completions WHERE wad_id = ?",
+            (wad_id,),
+        ).fetchone()["cnt"]
+
+        if count < current:
+            # Delete oldest completions to reach target count
+            to_delete = current - count
+            conn.execute(
+                """
+                DELETE FROM wad_completions
+                WHERE id IN (
+                    SELECT id FROM wad_completions
+                    WHERE wad_id = ?
+                    ORDER BY completed_at ASC
+                    LIMIT ?
+                )
+                """,
+                (wad_id, to_delete),
+            )
+        elif count > current:
+            # Add placeholder completions
+            to_add = count - current
+            for _ in range(to_add):
+                conn.execute(
+                    "INSERT INTO wad_completions (wad_id, notes) VALUES (?, ?)",
+                    (wad_id, "Manually added"),
+                )
+
+
 def get_times_beaten(wad_id: int) -> int:
     """Get count of completions for a WAD."""
     with get_connection() as conn:
@@ -939,18 +1042,21 @@ def get_times_beaten(wad_id: int) -> int:
 
 
 def get_maps_completed_batch(wad_ids: list[int]) -> dict[int, int]:
-    """Get maps completed count for multiple WADs efficiently."""
+    """Get maps completed count for multiple WADs efficiently (current cycle only)."""
     if not wad_ids:
         return {}
 
     with get_connection() as conn:
         placeholders = ",".join("?" * len(wad_ids))
+        # Join with wads to get each WAD's current cycle
         rows = conn.execute(
             f"""
-            SELECT wad_id, COUNT(DISTINCT map_name) as count
-            FROM map_completions
-            WHERE wad_id IN ({placeholders})
-            GROUP BY wad_id
+            SELECT mc.wad_id, COUNT(DISTINCT mc.map_name) as count
+            FROM map_completions mc
+            JOIN wads w ON mc.wad_id = w.id
+            WHERE mc.wad_id IN ({placeholders})
+              AND COALESCE(mc.cycle, 1) = COALESCE(w.playthrough_cycle, 1)
+            GROUP BY mc.wad_id
             """,
             wad_ids,
         ).fetchall()

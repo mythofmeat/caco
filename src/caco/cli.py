@@ -287,7 +287,7 @@ def resolve_wad_query(
     return results
 
 
-SORT_FIELDS = ["playtime", "rating", "created", "title", "author", "last_played", "year"]
+SORT_FIELDS = ["id", "playtime", "rating", "created", "title", "author", "last_played", "year"]
 
 # Status shortcuts: single letters and common abbreviations
 STATUS_SHORTCUTS = {
@@ -335,6 +335,15 @@ class StatusChoice(click.Choice):
     def get_metavar(self, param, ctx=None):
         # Show both full values and shortcuts in help
         return "[STATUS]"
+
+
+def _complete_tags(ctx, param, incomplete):
+    """Shell completion function for tag names."""
+    try:
+        tags = db.get_all_tags()
+        return [t for t in tags if t.lower().startswith(incomplete.lower())]
+    except Exception:
+        return []
 
 
 def _parse_sort_option(sort: str | None) -> tuple[str | None, bool]:
@@ -524,7 +533,7 @@ def _render_wad_list(wads: list[dict], title: str | None = None, list_config: di
 @cli.command(name="list")
 @click.argument("query", required=False)
 @click.option("--status", "-s", type=StatusChoice(), help="Filter by status")
-@click.option("--tag", "-t", help="Filter by tag")
+@click.option("--tag", "-t", help="Filter by tag", shell_complete=_complete_tags)
 @click.option("--source", type=click.Choice([s.value for s in db.SourceType]))
 @click.option("--sort", "-S", help="Sort by: playtime, rating, created, title, author, last_played, year (prefix - to reverse)")
 @click.option("--deleted", is_flag=True, help="Show deleted WADs (trash)")
@@ -1052,7 +1061,7 @@ def _infer_title_from_url(url: str) -> str:
 @click.option("--title", "-t", help="Override title (inferred from filename if not provided)")
 @click.option("--author", "-a", help="Author name")
 @click.option("--year", "-y", type=int, help="Year released")
-@click.option("--tag", "tags", multiple=True, help="Tags to add")
+@click.option("--tag", "tags", multiple=True, help="Tags to add", shell_complete=_complete_tags)
 @click.option("--force", "-f", is_flag=True, help="Import even if duplicate exists")
 @click.option("--multi", "-m", is_flag=True, help="Allow multi-select for idgames search (requires fzf)")
 def import_auto(source: str, title: str | None, author: str | None, year: int | None,
@@ -1231,7 +1240,7 @@ def import_auto(source: str, title: str | None, author: str | None, year: int | 
 
 @import_cmd.command(name="idgames")
 @click.argument("query_or_id")
-@click.option("--tag", "-t", "tags", multiple=True, help="Tags to add")
+@click.option("--tag", "-t", "tags", multiple=True, help="Tags to add", shell_complete=_complete_tags)
 @click.option("--force", "-f", is_flag=True, help="Import even if duplicate exists")
 @click.option("--multi", "-m", is_flag=True, help="Allow selecting multiple WADs (requires fzf)")
 def import_idgames(query_or_id: str, tags: tuple[str, ...], force: bool, multi: bool):
@@ -1340,7 +1349,7 @@ def import_idgames(query_or_id: str, tags: tuple[str, ...], force: bool, multi: 
 @click.argument("url")
 @click.option("--author", "-a")
 @click.option("--year", "-y", type=int)
-@click.option("--tag", "-t", "tags", multiple=True)
+@click.option("--tag", "-t", "tags", multiple=True, shell_complete=_complete_tags)
 @click.option("--description", "-d")
 @click.option("--force", "-f", is_flag=True, help="Import even if duplicate exists")
 def import_url(title: str, url: str, author: str | None, year: int | None,
@@ -1375,7 +1384,7 @@ def import_url(title: str, url: str, author: str | None, year: int | None,
 @click.option("--title", "-t", help="Override title (only for single file imports)")
 @click.option("--author", "-a")
 @click.option("--year", "-y", type=int)
-@click.option("--tag", "tags", multiple=True, help="Tags to add")
+@click.option("--tag", "tags", multiple=True, help="Tags to add", shell_complete=_complete_tags)
 @click.option("--force", "-f", is_flag=True, help="Import even if duplicate exists")
 def import_local(paths: tuple[str, ...], title: str | None, author: str | None, year: int | None,
                  tags: tuple[str, ...], force: bool):
@@ -1652,6 +1661,136 @@ def _parse_map_range(maps_str: str) -> list[str]:
     return maps
 
 
+# =============================================================================
+# Beaten (WAD Completions)
+# =============================================================================
+
+
+@cli.group(name="beaten")
+def beaten_cmd():
+    """Manage WAD completion records (times beaten)."""
+    pass
+
+
+@beaten_cmd.command(name="list")
+@click.argument("query")
+@click.option("--yes", "-y", is_flag=True, help="Auto-select first match if multiple")
+def beaten_list(query: str, yes: bool):
+    """List completion records for a WAD (when it was beaten)."""
+    wads = resolve_wad_query(query, mode="pick", yes=yes)
+    if not wads:
+        return
+    wad = wads[0]
+
+    completions = db.get_wad_completions(wad["id"])
+
+    if not completions:
+        console.print(f"[dim]{wad['title']} has not been marked as beaten[/dim]")
+        return
+
+    console.print(f"\n[bold]{wad['title']}[/bold] - Completion History ({len(completions)} time(s))\n")
+
+    table = Table()
+    table.add_column("ID", style="dim")
+    table.add_column("Date")
+    table.add_column("Notes")
+
+    for c in completions:
+        date = c["completed_at"][:16].replace("T", " ") if c["completed_at"] else "-"
+        table.add_row(str(c["id"]), date, c["notes"] or "-")
+
+    console.print(table)
+
+
+@beaten_cmd.command(name="add")
+@click.argument("query")
+@click.option("--notes", "-n", help="Notes for this completion")
+@click.option("--yes", "-y", is_flag=True, help="Auto-select first match if multiple")
+def beaten_add(query: str, notes: str | None, yes: bool):
+    """Manually add a completion record (mark as beaten)."""
+    wads = resolve_wad_query(query, mode="pick", yes=yes)
+    if not wads:
+        return
+    wad = wads[0]
+
+    completion_id = db.add_wad_completion(wad["id"], notes=notes)
+    count = db.get_times_beaten(wad["id"])
+    console.print(f"[green]Added completion for {wad['title']}[/green] (now beaten {count} time(s))")
+
+
+@beaten_cmd.command(name="remove")
+@click.argument("query")
+@click.argument("completion_id", type=int, required=False)
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation / auto-select")
+def beaten_remove(query: str, completion_id: int | None, yes: bool):
+    """Remove a completion record.
+
+    If COMPLETION_ID is provided, removes that specific record.
+    Otherwise, removes the most recent completion.
+    """
+    wads = resolve_wad_query(query, mode="pick", yes=yes)
+    if not wads:
+        return
+    wad = wads[0]
+
+    completions = db.get_wad_completions(wad["id"])
+    if not completions:
+        console.print(f"[dim]{wad['title']} has no completion records[/dim]")
+        return
+
+    if completion_id:
+        # Remove specific completion
+        if db.delete_wad_completion(completion_id):
+            count = db.get_times_beaten(wad["id"])
+            console.print(f"[green]Removed completion #{completion_id}[/green] (now beaten {count} time(s))")
+        else:
+            err_console.print(f"[red]Completion #{completion_id} not found[/red]")
+    else:
+        # Remove most recent (first in list, since sorted DESC)
+        latest = completions[0]
+        if not yes:
+            date = latest["completed_at"][:16].replace("T", " ") if latest["completed_at"] else "unknown date"
+            console.print(f"Remove most recent completion from {date}?")
+            if not click.confirm("Proceed?"):
+                return
+
+        db.delete_wad_completion(latest["id"])
+        count = db.get_times_beaten(wad["id"])
+        console.print(f"[green]Removed most recent completion[/green] (now beaten {count} time(s))")
+
+
+@beaten_cmd.command(name="set")
+@click.argument("query")
+@click.argument("count", type=int)
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation / auto-select")
+def beaten_set(query: str, count: int, yes: bool):
+    """Set completion count to a specific number."""
+    if count < 0:
+        err_console.print("[red]Count cannot be negative[/red]")
+        return
+
+    wads = resolve_wad_query(query, mode="pick", yes=yes)
+    if not wads:
+        return
+    wad = wads[0]
+
+    current = db.get_times_beaten(wad["id"])
+    if current == count:
+        console.print(f"[dim]{wad['title']} is already set to {count} completion(s)[/dim]")
+        return
+
+    if not yes:
+        if count > current:
+            console.print(f"This will add {count - current} completion record(s)")
+        else:
+            console.print(f"This will remove {current - count} completion record(s)")
+        if not click.confirm("Proceed?"):
+            return
+
+    db.set_wad_completion_count(wad["id"], count)
+    console.print(f"[green]Set {wad['title']} to {count} completion(s)[/green]")
+
+
 @cli.group(name="map")
 def map_cmd():
     """Manage map completions."""
@@ -1750,15 +1889,16 @@ def map_uncomplete(query: str, maps: tuple[str, ...], skill: int | None, yes: bo
 @map_cmd.command(name="list")
 @click.argument("query")
 @click.option("--yes", "-y", is_flag=True, help="Auto-select first match if multiple")
+@click.option("--all-cycles", "-a", is_flag=True, help="Show completions from all playthroughs")
 @click.option("--plain", is_flag=True, help="Output as TSV (for scripting)")
-def map_list(query: str, yes: bool, plain: bool):
-    """List completed maps for a WAD."""
+def map_list(query: str, yes: bool, all_cycles: bool, plain: bool):
+    """List completed maps for a WAD (current playthrough by default)."""
     wads = resolve_wad_query(query, mode="pick", yes=yes)
     if not wads:
         return  # User cancelled
     wad = wads[0]
 
-    completions = db.get_map_completions(wad["id"])
+    completions = db.get_map_completions(wad["id"], current_cycle_only=not all_cycles)
 
     if not completions:
         if plain:

@@ -1,15 +1,18 @@
 # Quality-of-life improvements
 
-- [ ] there should be a way to manually adjust the amount of times completed
+- [x] there should be a way to manually adjust the amount of times completed
   - id:49 and id:63 should only have `1` completion count
+  - Added `caco beaten` command group: `caco beaten list`, `caco beaten add`, `caco beaten remove`, `caco beaten set`
 
-- [ ] change default sorting on list to id ascending
+- [x] change default sorting on list to id ascending
+  - Default sort is now `id+` (ascending) when no sort specified
 
 - [x] tag searches should support globs
   - e.g., `caco list --tag cacowards_2025*` should return items that contain `cacowards_2025_winner` and `cacowards_2025_runnerup`
 - [x] tags should be shown when listing WADs
   - Configurable via `[list]` section in config.toml
-- [ ] tags should have completions
+- [x] tags should have completions
+  - All `--tag` options now have shell completions that suggest existing tags
 
 - [x] ALL search and list fields should be supported in ALL commands, always
   - Universal query support now works across all commands with `resolve_wad_query()`
@@ -17,9 +20,15 @@
 - [x] when giving an error that multiple WADs match the search, default behavior should be to do an interactive picker to select which one the user wanted
   - Interactive picker uses fzf if available, falls back to numbered selection
 
-- [ ] the map progress feature should only apply to WADs that are currently playing. when a WAD is marked as finished, its map progress should be archived and reset to 0
+- [x] the map progress feature should only apply to WADs that are currently playing. when a WAD is marked as finished, its map progress should be archived and reset to 0
+  - Implemented playthrough cycles: when status changes to `finished`, the cycle increments
+  - Map completions are tracked per cycle; `caco map list` shows current cycle by default
+  - Use `caco map list --all-cycles` to see completions from all playthroughs
 
-- [ ] there should be a way to view completion details and history
+- [x] there should be a way to view completion details and history
+  - `caco beaten list` shows completion count for WADs
+  - `caco info` displays times completed
+  - Map completion history preserved across playthrough cycles
 
 ## I don't like the syntax for a lot of the commands
 - [x] config
@@ -53,7 +62,45 @@
 - [x] there should be a way to use the configuration file to specify the default formatting when listing WADs
   - Implemented as `[list]` section with `format`, `sort`, `colors` options
 
-# New Features
+# New Features *(ordered by priority)*
+
+## Cache management
+- [ ] `caco cache clear` - remove cached WADs
+- [ ] `caco cache list` - show cached files and sizes
+- [ ] Auto-cleanup old cached files
+  - configurable in caco.conf
+
+## Data Sources
+
+- [ ] Doomwiki
+  - [ ] Doomwiki scraper - parse infoboxes for metadata
+  - [ ] Fetch metadata from wiki pages
+  - [ ] Parse infobox (author, year, IWAD, etc.)
+  - [ ] Link to wiki page in WAD info
+
+- [ ] Doomworld Forums
+  - [ ] Store thread URL for reference
+    - Consider: parse thread title for basic metadata?
+    - Could even implement a call to an AI LLM to scrape the first post of the thread and fill in the relevant info?
+      - what *is* the relevant info? what data are we actually trying to scrape?
+        - title
+        - author
+        - date
+        - description
+        - other info...
+          - complevel?
+
+## Statistics
+- [ ] Total playtime across all WADs
+- [ ] WADs played per month/year
+- [ ] Most played WADs
+- [ ] Completion rate
+
+## TUI
+- [ ] Textual-based TUI
+- [ ] Browse library with vim keybindings
+- [ ] Quick-play from list
+- [ ] Session history view
 
 ## Command Aliases
 - [x] Added Unix-like aliases:
@@ -81,41 +128,3 @@
 - [x] `caco restore <query>` recovers deleted WADs
 - [x] `caco delete --purge` for permanent deletion
 - [x] `caco delete --purge-all` empties trash
-
-## Cache management
-- [ ] `caco cache clear` - remove cached WADs
-- [ ] `caco cache list` - show cached files and sizes
-- [ ] Auto-cleanup old cached files
-  - configurable in caco.conf
-
-## TUI
-- [ ] Textual-based TUI
-- [ ] Browse library with vim keybindings
-- [ ] Quick-play from list
-- [ ] Session history view
-
-## Data Sources
-
-- [ ] Doomwiki
-  - [ ] Doomwiki scraper - parse infoboxes for metadata
-  - [ ] Fetch metadata from wiki pages
-  - [ ] Parse infobox (author, year, IWAD, etc.)
-  - [ ] Link to wiki page in WAD info
-
-- [ ] Doomworld Forums
-  - [ ] Store thread URL for reference
-    - Consider: parse thread title for basic metadata?
-    - Could even implement a call to an AI LLM to scrape the first post of the thread and fill in the relevant info?
-      - what *is* the relevant info? what data are we actually trying to scrape?
-        - title
-        - author
-        - date
-        - description
-        - other info...
-          - complevel?
-
-## Statistics
-- [ ] Total playtime across all WADs
-- [ ] WADs played per month/year
-- [ ] Most played WADs
-- [ ] Completion rate
