@@ -7,6 +7,7 @@ A personal Doom WAD library manager taking inspiration from beets. Track what yo
 - **Import WADs from multiple sources**
   - idgames archive
   - Doom Wiki (doomwiki.org)
+  - Doomworld forums (with optional LLM-powered metadata extraction)
   - URLs / local files
 
 - **Lazy downloads**
@@ -43,6 +44,7 @@ caco config --edit
 caco add "scythe 2"                              # Search idgames
 caco add 19509                                   # idgames ID
 caco add https://doomwiki.org/wiki/Eviternity   # Doomwiki URL
+caco add https://www.doomworld.com/forum/topic/134292-myhousewad/  # Doomworld forum
 caco add ~/Downloads/map.wad                     # Local file
 
 # List your library
@@ -74,6 +76,8 @@ caco import local *.wad --tag new   # Import all WADs, add tag
 # Explicit subcommands (if you prefer)
 caco import idgames "sunlust"
 caco import doomwiki "Scythe"       # Search Doom Wiki
+caco import doomworld https://www.doomworld.com/forum/topic/134292-myhousewad/
+caco import doomworld URL --smart   # Use LLM for metadata extraction
 caco import url "Title" "https://..." --author "Author"
 caco import local "Title" ~/path/to/wad.wad
 

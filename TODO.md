@@ -1,17 +1,24 @@
 # New Features *(ordered by priority)*
 
 ## Data Sources
-- [ ] Doomworld Forums
-  - [ ] Store thread URL for reference
-    - Consider: parse thread title for basic metadata?
-    - Could even implement a call to an AI LLM to scrape the first post of the thread and fill in the relevant info?
-      - what *is* the relevant info? what data are we actually trying to scrape?
-        - title
-        - author
-        - date
-        - description
-        - other info...
-          - complevel?
+- [x] Doomworld Forums (Phase 1 - MVP)
+  - [x] Import from forum thread URL
+  - [x] Parse JSON-LD structured data for title, author, date
+  - [x] Extract first post content as description
+  - [x] Auto-detect Doomworld URLs in `caco import auto`
+  - [x] `caco import doomworld <URL>` command
+  - [x] Duplicate detection by thread ID
+- [x] Doomworld Forums (Phase 2 - Enhanced Parsing)
+  - [x] Extract download links from post content (Dropbox, Google Drive, Mega, etc.)
+  - [x] Parse complevel from post text ("complevel 9", "cl21", "boom compatible", etc.)
+  - [x] Parse IWAD requirements ("requires Doom 2", "doom2.wad", "Plutonia", etc.)
+  - [x] Parse port requirements ("GZDoom required", "DSDA-Doom", "Crispy Doom", etc.)
+  - [x] Display extracted metadata in CLI output
+- [x] Doomworld Forums (Phase 3 - LLM Integration)
+  - [x] `--smart` flag for LLM-based metadata extraction
+  - [x] Multiple LLM backends (claude-code, openrouter, anthropic, openai)
+  - [x] Auto-detection of available backends
+  - [x] Extracts: description, map count, difficulty, themes, version
 
 ## Version Tracking
 - [ ] Track version info for non idgames releases (as idgames releases are final by design)

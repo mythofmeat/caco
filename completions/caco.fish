@@ -77,16 +77,30 @@ complete -c caco -n "__fish_seen_subcommand_from delete" -s y -l yes -d "Skip co
 complete -c caco -n "__fish_seen_subcommand_from play" -s p -l sourceport -d "Sourceport to use" -rF
 
 # import subcommands
-complete -c caco -n "__fish_seen_subcommand_from import; and not __fish_seen_subcommand_from idgames url local" -a idgames -d "Import from idgames archive"
-complete -c caco -n "__fish_seen_subcommand_from import; and not __fish_seen_subcommand_from idgames url local" -a url -d "Import from a URL"
-complete -c caco -n "__fish_seen_subcommand_from import; and not __fish_seen_subcommand_from idgames url local" -a local -d "Import a local file"
+complete -c caco -n "__fish_seen_subcommand_from import; and not __fish_seen_subcommand_from idgames doomwiki doomworld url local auto" -a idgames -d "Import from idgames archive"
+complete -c caco -n "__fish_seen_subcommand_from import; and not __fish_seen_subcommand_from idgames doomwiki doomworld url local auto" -a doomwiki -d "Import from Doom Wiki"
+complete -c caco -n "__fish_seen_subcommand_from import; and not __fish_seen_subcommand_from idgames doomwiki doomworld url local auto" -a doomworld -d "Import from Doomworld forum"
+complete -c caco -n "__fish_seen_subcommand_from import; and not __fish_seen_subcommand_from idgames doomwiki doomworld url local auto" -a url -d "Import from a URL"
+complete -c caco -n "__fish_seen_subcommand_from import; and not __fish_seen_subcommand_from idgames doomwiki doomworld url local auto" -a local -d "Import a local file"
+complete -c caco -n "__fish_seen_subcommand_from import; and not __fish_seen_subcommand_from idgames doomwiki doomworld url local auto" -a auto -d "Auto-detect source type"
 
-# import idgames/url/local options
-complete -c caco -n "__fish_seen_subcommand_from idgames url local" -s t -l tag -d "Add tag"
-complete -c caco -n "__fish_seen_subcommand_from idgames url local" -s f -l force -d "Import even if duplicate exists"
+# import common options
+complete -c caco -n "__fish_seen_subcommand_from idgames doomwiki doomworld url local" -s t -l tag -d "Add tag"
+complete -c caco -n "__fish_seen_subcommand_from idgames doomwiki doomworld url local" -s f -l force -d "Import even if duplicate exists"
 
 # import idgames options
 complete -c caco -n "__fish_seen_subcommand_from idgames" -s m -l multi -d "Allow multi-select (requires fzf)"
+
+# import doomwiki options
+complete -c caco -n "__fish_seen_subcommand_from doomwiki" -s m -l multi -d "Allow multi-select (requires fzf)"
+
+# import doomworld options
+complete -c caco -n "__fish_seen_subcommand_from doomworld" -l title -d "Override parsed title"
+complete -c caco -n "__fish_seen_subcommand_from doomworld" -s a -l author -d "Override parsed author"
+complete -c caco -n "__fish_seen_subcommand_from doomworld" -s y -l year -d "Override parsed year"
+complete -c caco -n "__fish_seen_subcommand_from doomworld" -s s -l smart -d "Use LLM for metadata extraction"
+complete -c caco -n "__fish_seen_subcommand_from doomworld" -l llm-backend -d "LLM backend" -xa "claude-code openrouter anthropic openai"
+complete -c caco -n "__fish_seen_subcommand_from doomworld" -l llm-model -d "Model override for API backends"
 
 # import url options
 complete -c caco -n "__fish_seen_subcommand_from url" -s a -l author -d "Author name"

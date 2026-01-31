@@ -1181,14 +1181,16 @@ def import_cmd(ctx):
 def _detect_source_type(source: str) -> str:
     """Detect the type of import source.
 
-    Returns: 'doomwiki_url', 'url', 'local', 'idgames_id', or 'idgames_search'
+    Returns: 'doomwiki_url', 'doomworld_url', 'url', 'local', 'idgames_id', or 'idgames_search'
     """
     from pathlib import Path
 
-    # URL detection - check for Doomwiki first
+    # URL detection - check for specific sites first
     if source.startswith(("http://", "https://")):
         if "doomwiki.org/wiki/" in source:
             return "doomwiki_url"
+        if "doomworld.com/forum/topic/" in source:
+            return "doomworld_url"
         return "url"
 
     # Local file detection (check if path exists)
@@ -1247,6 +1249,7 @@ def import_auto(source: str, title: str | None, author: str | None, year: int | 
 
     SOURCE can be:
     - A Doomwiki URL (doomwiki.org/wiki/...) - imports from Doom Wiki
+    - A Doomworld forum URL (doomworld.com/forum/topic/...) - imports from forum
     - A URL (http/https) - imports from URL
     - A local file path - imports from local filesystem
     - A number - looks up idgames file ID
@@ -1256,6 +1259,7 @@ def import_auto(source: str, title: str | None, author: str | None, year: int | 
     Examples:
         caco import auto ~/Downloads/mymap.wad
         caco import auto https://doomwiki.org/wiki/Scythe
+        caco import auto https://www.doomworld.com/forum/topic/134292-myhousewad/
         caco import auto https://example.com/map.zip
         caco import auto 12345
         caco import auto "scythe 2"
@@ -1347,6 +1351,57 @@ def import_auto(source: str, title: str | None, author: str | None, year: int | 
             tags=list(tags) if tags else None,
         )
         console.print(f"[green]Added:[/green] {inferred_title} (ID: {wad_id})")
+
+    elif source_type == "doomworld_url":
+        # Doomworld forum URL import
+        from caco.sources.doomworld import DoomworldSource
+        from caco.doomworld import (
+            DoomworldError,
+            complevel_name,
+            iwad_display_name,
+            sourceport_display_name,
+        )
+
+        with DoomworldSource() as doomworld:
+            try:
+                thread = doomworld.get(source)
+            except DoomworldError as e:
+                err_console.print(f"[red]Error: {e}[/red]")
+                return
+
+            if not thread:
+                err_console.print(f"[red]Thread not found:[/red] {source}")
+                return
+
+            existing = db.find_duplicate(
+                db.SourceType.DOOMWORLD,
+                source_id=str(thread.thread_id),
+                source_url=thread.thread_url,
+            )
+            if existing and not force:
+                console.print(f"[yellow]Already in library:[/yellow] {existing['title']} (ID: {existing['id']})")
+                console.print("[dim]Use --force to import anyway[/dim]")
+                return
+
+            wad_id = doomworld.import_wad(
+                thread,
+                tags=list(tags) if tags else None,
+                title=title,
+                author=author,
+                year=year,
+            )
+            console.print(f"[green]Imported:[/green] {thread.title} (ID: {wad_id})")
+
+            # Show technical metadata (Phase 2)
+            if thread.has_technical_info:
+                if thread.iwad:
+                    console.print(f"  [dim]IWAD:[/dim] {iwad_display_name(thread.iwad)}")
+                if thread.sourceport:
+                    console.print(f"  [dim]Port:[/dim] {sourceport_display_name(thread.sourceport)}")
+                if thread.complevel is not None:
+                    console.print(f"  [dim]Complevel:[/dim] {complevel_name(thread.complevel)}")
+                if thread.download_links:
+                    console.print(f"  [dim]Downloads:[/dim] {len(thread.download_links)} link(s)")
 
     elif source_type == "idgames_id":
         # idgames ID lookup
@@ -1661,6 +1716,161 @@ def import_doomwiki(query_or_title: str, tags: tuple[str, ...], force: bool, mul
             wad_id = _check_and_import(entry, list(tags) if tags else None)
             if wad_id:
                 console.print(f"[green]Imported:[/green] {entry.display_name} (ID: {wad_id})")
+
+
+def _complete_llm_backends(ctx, param, incomplete):
+    """Shell completion for LLM backends."""
+    backends = ["claude-code", "openrouter", "anthropic", "openai"]
+    return [b for b in backends if b.startswith(incomplete.lower())]
+
+
+@import_cmd.command(name="doomworld")
+@click.argument("url")
+@click.option("--tag", "-t", "tags", multiple=True, help="Tags to add", shell_complete=_complete_tags)
+@click.option("--title", help="Override parsed title")
+@click.option("--author", "-a", help="Override parsed author")
+@click.option("--year", "-y", type=int, help="Override parsed year")
+@click.option("--force", "-f", is_flag=True, help="Import even if duplicate exists")
+@click.option("--smart", "-s", is_flag=True, help="Use LLM for intelligent metadata extraction")
+@click.option("--llm-backend", type=click.Choice(["claude-code", "openrouter", "anthropic", "openai"]),
+              help="LLM backend (auto-detects if not specified)", shell_complete=_complete_llm_backends)
+@click.option("--llm-model", help="Model override for API backends (e.g., 'gpt-4' for openai)")
+def import_doomworld(url: str, tags: tuple[str, ...], title: str | None,
+                     author: str | None, year: int | None, force: bool,
+                     smart: bool, llm_backend: str | None, llm_model: str | None):
+    """Import a WAD from a Doomworld forum thread.
+
+    Fetches metadata from the forum thread including title, author,
+    date, and first post content. Use --smart for LLM-based extraction.
+
+    \b
+    Examples:
+        caco import doomworld https://www.doomworld.com/forum/topic/134292-myhousewad/
+        caco import doomworld URL --tag cacoward --tag megawad
+        caco import doomworld URL --smart
+        caco import doomworld URL --smart --llm-backend openrouter
+    """
+    from caco.sources.doomworld import DoomworldSource
+    from caco.doomworld import (
+        DoomworldError,
+        complevel_name,
+        iwad_display_name,
+        sourceport_display_name,
+    )
+
+    # Validate URL
+    if "doomworld.com/forum/topic/" not in url:
+        err_console.print("[red]Invalid Doomworld forum URL[/red]")
+        err_console.print("[dim]Expected: https://www.doomworld.com/forum/topic/{id}-{slug}/[/dim]")
+        sys.exit(1)
+
+    with DoomworldSource() as doomworld:
+        try:
+            thread = doomworld.get(url)
+        except DoomworldError as e:
+            err_console.print(f"[red]Error: {e}[/red]")
+            sys.exit(1)
+
+        if not thread:
+            err_console.print(f"[red]Thread not found:[/red] {url}")
+            sys.exit(1)
+
+        # LLM-based extraction (Phase 3)
+        llm_metadata = None
+        if smart:
+            from caco.doomworld.llm import get_parser, LLMError, LLMNotAvailableError
+
+            try:
+                parser = get_parser(backend=llm_backend, model=llm_model)
+                console.print(f"[dim]Using LLM backend: {parser.name}[/dim]")
+
+                with console.status("[bold blue]Extracting metadata with LLM..."):
+                    llm_metadata = parser.parse(thread.first_post_text)
+
+                console.print("[green]LLM extraction complete[/green]")
+
+            except LLMNotAvailableError as e:
+                err_console.print(f"[yellow]LLM not available:[/yellow] {e}")
+                err_console.print("[dim]Falling back to regex extraction[/dim]")
+            except LLMError as e:
+                err_console.print(f"[yellow]LLM error:[/yellow] {e}")
+                err_console.print("[dim]Falling back to regex extraction[/dim]")
+
+        # Check for duplicates
+        existing = db.find_duplicate(
+            db.SourceType.DOOMWORLD,
+            source_id=str(thread.thread_id),
+            source_url=thread.thread_url,
+        )
+        if existing and not force:
+            console.print(f"[yellow]Already in library:[/yellow] {existing['title']} (ID: {existing['id']})")
+            console.print("[dim]Use --force to import anyway[/dim]")
+            return
+
+        # Merge LLM metadata with regex-extracted data (LLM takes precedence where available)
+        final_title = title
+        final_author = author
+        final_iwad = thread.iwad
+        final_sourceport = thread.sourceport
+        final_complevel = thread.complevel
+
+        if llm_metadata:
+            if not final_title and llm_metadata.title:
+                final_title = llm_metadata.title
+            if not final_author and llm_metadata.author:
+                final_author = llm_metadata.author
+            if not final_iwad and llm_metadata.iwad:
+                final_iwad = llm_metadata.iwad
+            if not final_sourceport and llm_metadata.sourceport:
+                final_sourceport = llm_metadata.sourceport
+            if final_complevel is None and llm_metadata.complevel is not None:
+                final_complevel = llm_metadata.complevel
+
+        # Import with merged metadata
+        wad_id = doomworld.import_wad(
+            thread,
+            tags=list(tags) if tags else None,
+            title=final_title,
+            author=final_author,
+            year=year,
+        )
+        console.print(f"[green]Imported:[/green] {thread.title} (ID: {wad_id})")
+
+        # Show parsed metadata
+        if thread.author:
+            console.print(f"  [dim]Author:[/dim] {thread.author}")
+        if thread.posted_date:
+            console.print(f"  [dim]Posted:[/dim] {thread.posted_date[:10]}")
+
+        # Show technical metadata (Phase 2 regex + Phase 3 LLM)
+        display_iwad = final_iwad or thread.iwad
+        display_port = final_sourceport or thread.sourceport
+        display_complevel = final_complevel if final_complevel is not None else thread.complevel
+
+        if display_iwad or display_port or display_complevel is not None or thread.download_links:
+            if display_iwad:
+                console.print(f"  [dim]IWAD:[/dim] {iwad_display_name(display_iwad)}")
+            if display_port:
+                console.print(f"  [dim]Port:[/dim] {sourceport_display_name(display_port)}")
+            if display_complevel is not None:
+                console.print(f"  [dim]Complevel:[/dim] {complevel_name(display_complevel)}")
+            if thread.download_links:
+                console.print(f"  [dim]Downloads:[/dim] {len(thread.download_links)} link(s) found")
+                for link in thread.download_links[:3]:  # Show first 3
+                    console.print(f"    [blue]{link}[/blue]")
+                if len(thread.download_links) > 3:
+                    console.print(f"    [dim]... and {len(thread.download_links) - 3} more[/dim]")
+
+        # Show LLM-specific metadata
+        if llm_metadata:
+            if llm_metadata.description:
+                console.print(f"  [dim]Description:[/dim] {llm_metadata.description[:100]}...")
+            if llm_metadata.map_count:
+                console.print(f"  [dim]Maps:[/dim] {llm_metadata.map_count}")
+            if llm_metadata.difficulty:
+                console.print(f"  [dim]Difficulty:[/dim] {llm_metadata.difficulty}")
+            if llm_metadata.themes:
+                console.print(f"  [dim]Themes:[/dim] {', '.join(llm_metadata.themes)}")
 
 
 @import_cmd.command(name="url")
