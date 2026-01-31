@@ -1,12 +1,6 @@
 # New Features *(ordered by priority)*
 
 ## Data Sources
-- [ ] Doomwiki
-  - [ ] Doomwiki scraper - parse infoboxes for metadata
-  - [ ] Fetch metadata from wiki pages
-  - [ ] Parse infobox (author, year, IWAD, etc.)
-  - [ ] Link to wiki page in WAD info
-
 - [ ] Doomworld Forums
   - [ ] Store thread URL for reference
     - Consider: parse thread title for basic metadata?
@@ -20,10 +14,10 @@
           - complevel?
 
 ## Statistics
-- [ ] Total playtime across all WADs
-- [ ] WADs played per month/year
-- [ ] Most played WADs
-- [ ] Completion rate
+- [ ] `caco stats` command
+  - [ ] Total playtime across all WADs
+  - [ ] WADs played per month/year
+  - [ ] Completion rate
 
 ## TUI
 - [ ] Textual-based TUI
