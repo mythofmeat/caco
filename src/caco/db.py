@@ -844,6 +844,28 @@ def get_last_played(wad_id: int) -> str | None:
         return row["started_at"] if row else None
 
 
+def get_most_recently_played() -> dict[str, Any] | None:
+    """Get the most recently played WAD across the entire library."""
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT wads.* FROM wads
+            JOIN sessions ON sessions.wad_id = wads.id
+            WHERE wads.deleted_at IS NULL
+            ORDER BY sessions.started_at DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        if row:
+            wad = dict(row)
+            tags = conn.execute(
+                "SELECT tag FROM tags WHERE wad_id = ?", (wad["id"],)
+            ).fetchall()
+            wad["tags"] = [t["tag"] for t in tags]
+            return wad
+        return None
+
+
 def get_all_tags() -> list[str]:
     """Get all unique tags."""
     with get_connection() as conn:

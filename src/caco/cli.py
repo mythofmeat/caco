@@ -1770,16 +1770,26 @@ def import_local(paths: tuple[str, ...], title: str | None, author: str | None, 
 
 
 @cli.command()
-@click.argument("query")
+@click.argument("query", required=False, shell_complete=_complete_query)
 @click.option("--sourceport", "-p", help="Sourceport to use")
 @click.option("--yes", "-y", is_flag=True, help="Auto-select first match if multiple")
 @click.argument("extra_args", nargs=-1)
-def play_cmd(query: str, sourceport: str | None, yes: bool, extra_args: tuple[str, ...]):
-    """Play a WAD by ID or query (e.g., 'caco play 1' or 'caco play filename:tnto')."""
-    wads = resolve_wad_query(query, mode="pick", yes=yes)
-    if not wads:
-        return  # User cancelled
-    wad = wads[0]
+def play_cmd(query: str | None, sourceport: str | None, yes: bool, extra_args: tuple[str, ...]):
+    """Play a WAD by ID or query (e.g., 'caco play 1' or 'caco play filename:tnto').
+
+    With no arguments, plays the most recently played WAD.
+    """
+    if query:
+        wads = resolve_wad_query(query, mode="pick", yes=yes)
+        if not wads:
+            return  # User cancelled
+        wad = wads[0]
+    else:
+        # No query - play most recently played WAD
+        wad = db.get_most_recently_played()
+        if not wad:
+            err_console.print("[yellow]No play history yet. Specify a WAD to play.[/yellow]")
+            return
     wad_id = wad["id"]
 
     port = sourceport or get_default_sourceport()
