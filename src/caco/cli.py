@@ -439,6 +439,32 @@ def _parse_sort_option(sort: str | None) -> tuple[str | None, bool]:
     return sort, True
 
 
+def _complete_sort(ctx, param, incomplete: str) -> list[str]:
+    """Shell completion for sort fields.
+
+    Completes field names and suggests +/- suffix for direction.
+    """
+    completions = []
+
+    # Check for direction suffix
+    if incomplete.endswith("+") or incomplete.endswith("-"):
+        # Already has direction, complete the field part
+        field_part = incomplete[:-1]
+        suffix = incomplete[-1]
+        for field in SORT_FIELDS:
+            if field.startswith(field_part):
+                completions.append(f"{field}{suffix}")
+    else:
+        # Complete field names, offer with +/- variants
+        for field in SORT_FIELDS:
+            if field.startswith(incomplete):
+                completions.append(field)      # Default direction
+                completions.append(f"{field}+")  # Ascending
+                completions.append(f"{field}-")  # Descending
+
+    return completions
+
+
 def _render_wad_list_plain(wads: list[dict]) -> None:
     """TSV output: ID\tTitle\tAuthor\tStatus\tMaps\tBeaten\tPlaytime\tLastPlayed."""
     # Batch fetch stats for all WADs
@@ -610,7 +636,7 @@ def _render_wad_list(wads: list[dict], title: str | None = None, list_config: di
 
 @cli.command(name="list")
 @click.argument("query", nargs=-1, shell_complete=_complete_query)
-@click.option("--sort", "-S", help="Sort by: playtime, rating, created, title, author, last_played, year (suffix + for asc, - for desc)")
+@click.option("--sort", "-S", shell_complete=_complete_sort, help="Sort by: playtime, rating, created, title, author, last_played, year (suffix + for asc, - for desc)")
 @click.option("--deleted", is_flag=True, help="Show deleted WADs (trash)")
 @click.option("--plain", is_flag=True, help="Output as TSV (for scripting)")
 def list_cmd(query: tuple[str, ...], sort: str | None, deleted: bool, plain: bool):

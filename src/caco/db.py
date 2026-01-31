@@ -606,17 +606,20 @@ def search_wads(
     # Determine sort order
     direction = "DESC" if sort_desc else "ASC"
     reverse_dir = "ASC" if sort_desc else "DESC"  # For text fields where default should be opposite
+    # For nullable fields: DESC = NULLS LAST (best first), ASC = NULLS FIRST (worst/empty first)
+    nulls = "NULLS LAST" if sort_desc else "NULLS FIRST"
+    reverse_nulls = "NULLS FIRST" if sort_desc else "NULLS LAST"
 
     # Map sort field to SQL expression
     sort_map = {
         "id": f"wads.id {reverse_dir}",  # ID default ascending
         "playtime": f"COALESCE(SUM(sessions.duration_seconds), 0) {direction}",
-        "rating": f"wads.rating {direction} NULLS LAST",
+        "rating": f"wads.rating {direction} {nulls}",
         "created": f"wads.created_at {direction}",
         "title": f"LOWER(wads.title) {reverse_dir}",  # Title default ascending (A-Z)
-        "author": f"LOWER(wads.author) {reverse_dir} NULLS LAST",  # Author default ascending
-        "last_played": f"MAX(sessions.started_at) {direction} NULLS LAST",
-        "year": f"wads.year {direction} NULLS LAST",
+        "author": f"LOWER(wads.author) {reverse_dir} {reverse_nulls}",  # Author default ascending
+        "last_played": f"MAX(sessions.started_at) {direction} {nulls}",
+        "year": f"wads.year {direction} {nulls}",
     }
 
     if sort_by and sort_by in sort_map:
