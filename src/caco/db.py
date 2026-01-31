@@ -1,6 +1,8 @@
 """SQLite database for WAD library."""
 
+import shlex
 import sqlite3
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -25,6 +27,54 @@ class SourceType(str, Enum):
     DOOMWORLD = "doomworld"
     URL = "url"
     LOCAL = "local"
+
+
+# =============================================================================
+# Query Parser Data Structures
+# =============================================================================
+
+
+@dataclass
+class QueryTerm:
+    """A single query term (field:value or free text)."""
+    field: str | None  # None for free-text search
+    value: str
+    negated: bool = False
+
+    def __repr__(self) -> str:
+        neg = "-" if self.negated else ""
+        if self.field:
+            return f"{neg}{self.field}:{self.value}"
+        return f"{neg}{self.value}"
+
+
+@dataclass
+class AndGroup:
+    """A group of terms joined by AND (implicit)."""
+    terms: list[QueryTerm] = field(default_factory=list)
+
+
+@dataclass
+class ParsedQuery:
+    """Complete parsed query with OR groups.
+
+    Structure: (term1 AND term2) OR (term3 AND term4)
+    Each AndGroup is OR-ed together.
+    """
+    or_groups: list[AndGroup] = field(default_factory=list)
+
+    def is_empty(self) -> bool:
+        return not self.or_groups or all(not g.terms for g in self.or_groups)
+
+
+# Status shortcuts for query parsing (moved from cli.py)
+STATUS_SHORTCUTS = {
+    "t": "to-play", "toplay": "to-play", "tp": "to-play",
+    "b": "backlog", "back": "backlog",
+    "p": "playing", "play": "playing",
+    "f": "finished", "fin": "finished", "done": "finished",
+    "a": "abandoned", "drop": "abandoned", "dropped": "abandoned",
+}
 
 
 SCHEMA = """
@@ -293,73 +343,249 @@ def _is_glob_pattern(pattern: str) -> bool:
     return "*" in pattern or "?" in pattern
 
 
-def parse_query(query: str) -> tuple[dict[str, str], list[str]]:
-    """
-    Parse beets-style query into field filters and free text.
+def _split_or_groups(query: str) -> list[str]:
+    """Split query by ' , ' respecting quoted strings."""
+    parts = []
+    current: list[str] = []
+    i = 0
+    in_quotes = False
+    quote_char = None
 
-    Supports:
-        id:123          - exact ID match
-        title:foo       - title contains 'foo'
-        name:foo        - alias for title
-        author:bar      - author contains 'bar'
-        year:2020       - exact year match
-        tag:megawad     - has tag
-        status:playing  - status match
-        source:idgames  - source type match
-        foo bar         - free text search (title/author/description)
+    while i < len(query):
+        char = query[i]
 
-    Returns:
-        (field_filters, free_text_terms)
-    """
-    import shlex
+        # Handle quote state
+        if char in '"\'':
+            if not in_quotes:
+                in_quotes = True
+                quote_char = char
+            elif char == quote_char:
+                in_quotes = False
+                quote_char = None
+            current.append(char)
+            i += 1
+            continue
 
-    filters: dict[str, str] = {}
-    free_text: list[str] = []
+        # Check for " , " pattern (not inside quotes)
+        if not in_quotes and i + 2 < len(query):
+            if query[i:i+3] == " , ":
+                parts.append("".join(current).strip())
+                current = []
+                i += 3
+                continue
+
+        current.append(char)
+        i += 1
+
+    # Add final part
+    if current:
+        parts.append("".join(current).strip())
+
+    return [p for p in parts if p]
+
+
+def _parse_and_group(group_str: str) -> list[QueryTerm]:
+    """Parse a single AND group into terms."""
+    terms = []
 
     try:
-        tokens = shlex.split(query)
+        tokens = shlex.split(group_str)
     except ValueError:
-        tokens = query.split()
+        tokens = group_str.split()
 
     for token in tokens:
+        negated = False
+
+        # Check for negation prefix (- or ^ like beets)
+        # ^ is useful when - would be interpreted as a CLI option
+        if (token.startswith("-") or token.startswith("^")) and len(token) > 1:
+            negated = True
+            token = token[1:]
+
+        # Check for field:value pattern
         if ":" in token:
             field, _, value = token.partition(":")
             field = field.lower()
-            # Normalize field names
+
+            # Normalize field aliases
             if field == "name":
                 field = "title"
-            filters[field] = value
-        else:
-            free_text.append(token)
 
-    return filters, free_text
+            terms.append(QueryTerm(field=field, value=value, negated=negated))
+        else:
+            # Free text term
+            terms.append(QueryTerm(field=None, value=token, negated=negated))
+
+    return terms
+
+
+def parse_query(query: str) -> ParsedQuery:
+    """
+    Parse beets-style query into structured form.
+
+    Syntax:
+        - Field queries: field:value, field:"quoted value"
+        - Free text: word (searches title/author/description)
+        - Negation: -field:value, -word
+        - OR groups: term1 term2 , term3 term4
+          (comma surrounded by spaces creates OR boundary)
+        - Field aliases: name: -> title:
+
+    Examples:
+        status:playing author:alm          -> AND(status=playing, author=alm)
+        status:playing , status:to-play    -> OR(status=playing, status=to-play)
+        -status:finished -tag:cacoward*    -> AND(NOT status=finished, NOT tag=cacoward*)
+        "ancient aliens" , scythe          -> OR(free_text="ancient aliens", free_text=scythe)
+
+    Returns:
+        ParsedQuery with or_groups containing AndGroups of QueryTerms.
+    """
+    if not query or not query.strip():
+        return ParsedQuery(or_groups=[])
+
+    # Split by " , " (comma with surrounding spaces) for OR groups
+    or_parts = _split_or_groups(query)
+
+    or_groups = []
+    for part in or_parts:
+        terms = _parse_and_group(part)
+        if terms:
+            or_groups.append(AndGroup(terms=terms))
+
+    return ParsedQuery(or_groups=or_groups)
+
+
+def _normalize_status(value: str) -> str:
+    """Normalize status value, expanding shortcuts."""
+    lower = value.lower()
+    return STATUS_SHORTCUTS.get(lower, lower)
+
+
+def _build_term_sql(term: QueryTerm) -> tuple[str, list[Any]]:
+    """Build SQL clause for a single QueryTerm."""
+    clause = ""
+    params: list[Any] = []
+
+    if term.field is None:
+        # Free text search
+        clause = "(wads.title LIKE ? OR wads.author LIKE ? OR wads.description LIKE ?)"
+        like = f"%{term.value}%"
+        params = [like, like, like]
+
+    elif term.field == "id":
+        try:
+            clause = "wads.id = ?"
+            params = [int(term.value)]
+        except ValueError:
+            return "", []
+
+    elif term.field == "title":
+        clause = "wads.title LIKE ?"
+        params = [f"%{term.value}%"]
+
+    elif term.field == "author":
+        clause = "wads.author LIKE ?"
+        params = [f"%{term.value}%"]
+
+    elif term.field == "year":
+        try:
+            clause = "wads.year = ?"
+            params = [int(term.value)]
+        except ValueError:
+            return "", []
+
+    elif term.field == "filename":
+        clause = "wads.filename LIKE ?"
+        params = [f"%{term.value}%"]
+
+    elif term.field == "status":
+        clause = "wads.status = ?"
+        params = [_normalize_status(term.value)]
+
+    elif term.field == "source":
+        clause = "wads.source_type = ?"
+        params = [term.value.lower()]
+
+    elif term.field == "tag":
+        tag_pattern = term.value.lower()
+        if _is_glob_pattern(tag_pattern):
+            like_pattern = _glob_to_like(tag_pattern)
+            clause = "wads.id IN (SELECT wad_id FROM tags WHERE tag LIKE ? ESCAPE '\\')"
+            params = [like_pattern]
+        else:
+            # Substring match for non-glob
+            clause = "wads.id IN (SELECT wad_id FROM tags WHERE tag LIKE ?)"
+            params = [f"%{tag_pattern}%"]
+
+    else:
+        # Unknown field - treat as free text
+        clause = "(wads.title LIKE ? OR wads.author LIKE ? OR wads.description LIKE ?)"
+        like = f"%{term.value}%"
+        params = [like, like, like]
+
+    # Apply negation
+    if term.negated and clause:
+        clause = f"NOT ({clause})"
+
+    return clause, params
+
+
+def _build_query_sql(parsed: ParsedQuery) -> tuple[str, list[Any]]:
+    """Build SQL WHERE clause from ParsedQuery."""
+    if parsed.is_empty():
+        return "", []
+
+    or_clauses = []
+    all_params: list[Any] = []
+
+    for and_group in parsed.or_groups:
+        and_clauses = []
+        group_params: list[Any] = []
+
+        for term in and_group.terms:
+            clause, term_params = _build_term_sql(term)
+            if clause:
+                and_clauses.append(clause)
+                group_params.extend(term_params)
+
+        if and_clauses:
+            or_clauses.append(f"({' AND '.join(and_clauses)})")
+            all_params.extend(group_params)
+
+    if not or_clauses:
+        return "", []
+
+    return " OR ".join(or_clauses), all_params
 
 
 def search_wads(
     query: str | None = None,
-    status: Status | None = None,
-    source_type: SourceType | None = None,
-    tag: str | None = None,
     sort_by: str | None = None,
     sort_desc: bool = True,
     include_deleted: bool = False,
 ) -> list[dict[str, Any]]:
     """
-    Search WADs with optional filters.
+    Search WADs with beets-style query syntax.
 
-    Query supports beets-style field:value syntax:
-        caco list id:1
-        caco list title:scythe author:alm
-        caco list "tnt evilution"
+    Query supports:
+        - Field queries: status:playing, author:romero, tag:megawad
+        - Negation: -status:finished, -tag:cacoward*
+        - OR groups: status:playing , status:to-play
+        - Free text: scythe (searches title/author/description)
+        - Glob patterns: tag:caco* (matches cacoward, etc.)
+        - Status shortcuts: status:p (playing), status:f (finished), etc.
 
     Sort fields: playtime, rating, created, title, author, last_played, year
 
     Args:
+        query: Beets-style query string
+        sort_by: Field to sort by
+        sort_desc: Sort descending (default True)
         include_deleted: If True, only show deleted WADs. If False (default),
                         exclude deleted WADs.
     """
     conditions = []
-    params = []
+    params: list[Any] = []
 
     # Filter by deleted status
     if include_deleted:
@@ -368,81 +594,12 @@ def search_wads(
         conditions.append("wads.deleted_at IS NULL")
 
     if query:
-        filters, free_text = parse_query(query)
-
-        # Handle field-specific filters
-        if "id" in filters:
-            try:
-                conditions.append("wads.id = ?")
-                params.append(int(filters["id"]))
-            except ValueError:
-                pass
-
-        if "title" in filters:
-            conditions.append("wads.title LIKE ?")
-            params.append(f"%{filters['title']}%")
-
-        if "author" in filters:
-            conditions.append("wads.author LIKE ?")
-            params.append(f"%{filters['author']}%")
-
-        if "year" in filters:
-            try:
-                conditions.append("wads.year = ?")
-                params.append(int(filters["year"]))
-            except ValueError:
-                pass
-
-        if "tag" in filters:
-            tag_pattern = filters['tag'].lower()
-            if _is_glob_pattern(tag_pattern):
-                # Glob pattern: convert to LIKE
-                like_pattern = _glob_to_like(tag_pattern)
-                conditions.append("wads.id IN (SELECT wad_id FROM tags WHERE tag LIKE ? ESCAPE '\\')")
-                params.append(like_pattern)
-            else:
-                # No glob: substring match
-                conditions.append("wads.id IN (SELECT wad_id FROM tags WHERE tag LIKE ?)")
-                params.append(f"%{tag_pattern}%")
-
-        if "status" in filters:
-            conditions.append("wads.status = ?")
-            params.append(filters["status"].lower())
-
-        if "source" in filters:
-            conditions.append("wads.source_type = ?")
-            params.append(filters["source"].lower())
-
-        if "filename" in filters:
-            conditions.append("wads.filename LIKE ?")
-            params.append(f"%{filters['filename']}%")
-
-        # Free text searches title, author, description
-        for term in free_text:
-            conditions.append("(wads.title LIKE ? OR wads.author LIKE ? OR wads.description LIKE ?)")
-            like = f"%{term}%"
-            params.extend([like, like, like])
-
-    # CLI option filters (override query filters if both present)
-    if status:
-        conditions.append("wads.status = ?")
-        params.append(status.value)
-
-    if source_type:
-        conditions.append("wads.source_type = ?")
-        params.append(source_type.value)
-
-    if tag:
-        tag_pattern = tag.lower()
-        if _is_glob_pattern(tag_pattern):
-            # Glob pattern: convert to LIKE
-            like_pattern = _glob_to_like(tag_pattern)
-            conditions.append("wads.id IN (SELECT wad_id FROM tags WHERE tag LIKE ? ESCAPE '\\')")
-            params.append(like_pattern)
-        else:
-            # Exact match for non-glob
-            conditions.append("wads.id IN (SELECT wad_id FROM tags WHERE tag = ?)")
-            params.append(tag_pattern)
+        parsed = parse_query(query)
+        if not parsed.is_empty():
+            query_sql, query_params = _build_query_sql(parsed)
+            if query_sql:
+                conditions.append(f"({query_sql})")
+                params.extend(query_params)
 
     where = " AND ".join(conditions) if conditions else "1=1"
 

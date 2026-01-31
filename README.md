@@ -105,11 +105,6 @@ caco list --sort last_played           # Recently played first
 # Available sort fields: playtime, rating, created, title, author, last_played, year
 # Prefix with - to reverse (e.g., -title for Z-A)
 
-# Filter by status (accepts full names or shortcuts)
-caco list --status playing             # List playing WADs
-caco list --status to-play             # List to-play WADs (or use -s t)
-caco list --status backlog             # List backlog WADs
-
 # Search with beets-style queries
 caco list scythe                    # Free text (title/author/description)
 caco list id:1                      # By database ID
@@ -117,15 +112,18 @@ caco list title:"scythe"            # By title (or name:)
 caco list author:"erik alm"         # By author
 caco list year:2020                 # By year
 caco list filename:scythe2          # By filename
-caco list tag:megawad               # By tag
-caco list status:playing            # By status
+caco list tag:megawad               # By tag (supports globs: tag:caco*)
+caco list status:playing            # By status (shortcuts: status:p)
 caco list source:idgames            # By source type (idgames, doomwiki, url, local)
-caco list author:alm title:scythe   # Combine multiple filters
+caco list author:alm title:scythe   # Combine filters (AND logic)
 
-# Filter options (can combine with queries)
-caco list --status backlog
-caco list --tag megawad
-caco list --source idgames
+# OR queries (comma with spaces)
+caco list "status:playing , status:to-play"   # Match either status
+caco list "tag:megawad , tag:cacoward"        # Match either tag
+
+# Negation (use ^ prefix to exclude)
+caco list ^status:finished          # Exclude finished WADs
+caco list status:playing ^tag:slaughter   # Playing but not slaughter-tagged
 
 # View details (by ID or query)
 caco info id:1
@@ -358,7 +356,7 @@ Use single letters or abbreviations for status values:
 
 ```bash
 caco update 1 -s p     # Set status to "playing"
-caco list -s f         # List finished WADs
+caco list status:f     # List finished WADs (query syntax)
 ```
 
 ### CLI Commands

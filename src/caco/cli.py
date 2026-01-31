@@ -347,6 +347,71 @@ def _complete_tags(ctx, param, incomplete):
         return []
 
 
+# Query field prefixes for completion
+QUERY_FIELDS = ["id:", "title:", "name:", "author:", "year:", "filename:", "tag:", "status:", "source:"]
+
+# Valid status values for completion
+QUERY_STATUS_VALUES = ["to-play", "backlog", "playing", "finished", "abandoned"]
+
+# Valid source values for completion
+QUERY_SOURCE_VALUES = ["idgames", "doomwiki", "doomworld", "url", "local"]
+
+
+def _complete_query(ctx, param, incomplete: str) -> list[str]:
+    """Shell completion for query arguments.
+
+    Completes:
+    - Field prefixes: title:, author:, status:, etc.
+    - Status values: status:playing, status:to-play, etc.
+    - Source values: source:idgames, source:doomwiki, etc.
+    - Tag values: tag:megawad, tag:cacoward, etc.
+    - Negated versions: ^status:, ^tag:, etc. (^ avoids CLI option parsing issues)
+    """
+    completions = []
+
+    # Check if we're completing a negation (- or ^ prefix)
+    # ^ is preferred to avoid CLI option parsing issues
+    negated = incomplete.startswith("-") or incomplete.startswith("^")
+    if negated:
+        search_text = incomplete[1:]
+        prefix = incomplete[0]  # Preserve the original prefix
+    else:
+        search_text = incomplete
+        prefix = ""
+
+    # If no colon yet, suggest field prefixes
+    if ":" not in search_text:
+        for field in QUERY_FIELDS:
+            if field.startswith(search_text.lower()):
+                completions.append(f"{prefix}{field}")
+        return completions
+
+    # Field:value completion
+    field, _, partial_value = search_text.partition(":")
+    field = field.lower()
+
+    if field == "status":
+        for status in QUERY_STATUS_VALUES:
+            if status.startswith(partial_value.lower()):
+                completions.append(f"{prefix}status:{status}")
+
+    elif field == "source":
+        for source in QUERY_SOURCE_VALUES:
+            if source.startswith(partial_value.lower()):
+                completions.append(f"{prefix}source:{source}")
+
+    elif field == "tag":
+        try:
+            tags = db.get_all_tags()
+            for tag in tags:
+                if tag.startswith(partial_value.lower()):
+                    completions.append(f"{prefix}tag:{tag}")
+        except Exception:
+            pass
+
+    return completions
+
+
 def _parse_sort_option(sort: str | None) -> tuple[str | None, bool]:
     """Parse sort option. Returns (field, descending).
 
@@ -532,32 +597,43 @@ def _render_wad_list(wads: list[dict], title: str | None = None, list_config: di
 
 
 @cli.command(name="list")
-@click.argument("query", required=False)
-@click.option("--status", "-s", type=StatusChoice(), help="Filter by status")
-@click.option("--tag", "-t", help="Filter by tag", shell_complete=_complete_tags)
-@click.option("--source", type=click.Choice([s.value for s in db.SourceType]))
+@click.argument("query", nargs=-1, shell_complete=_complete_query)
 @click.option("--sort", "-S", help="Sort by: playtime, rating, created, title, author, last_played, year (prefix - to reverse)")
 @click.option("--deleted", is_flag=True, help="Show deleted WADs (trash)")
 @click.option("--plain", is_flag=True, help="Output as TSV (for scripting)")
-def list_cmd(query: str | None, status: str | None, tag: str | None, source: str | None, sort: str | None, deleted: bool, plain: bool):
+def list_cmd(query: tuple[str, ...], sort: str | None, deleted: bool, plain: bool):
     """List WADs in your library.
 
+    Uses beets-style query syntax:
+
+    \b
+      caco list status:playing              # Filter by status
+      caco list author:romero year:1994     # Multiple filters (AND)
+      caco list "status:playing , status:to-play"  # OR queries
+      caco list ^status:finished            # Negation (use ^ to avoid CLI issues)
+      caco list tag:megawad ^tag:slaughter  # Combined filters
+      caco list "ancient aliens"            # Free text search
+
+    Query fields: id:, title:, author:, year:, filename:, tag:, status:, source:
+
+    Negation: Use ^ prefix (e.g., ^status:finished). The - prefix also works but
+    may conflict with CLI options.
+
     Customize display via config file: columns, colors, default sort.
-    CLI flags override config settings.
     """
     # Load list config for defaults
     list_config = get_list_config()
 
-    # Use config default status if not specified via CLI
-    status_enum = None
-    if status:
-        status_enum = db.Status(status)
-    elif list_config.get("default_status"):
-        # Config can have list of default statuses to show
+    # Join query arguments
+    query_str = " ".join(query) if query else None
+
+    # Handle config default_status (convert list to OR query)
+    if not query_str and list_config.get("default_status"):
         default_statuses = list_config["default_status"]
-        if len(default_statuses) == 1:
-            status_enum = db.Status(default_statuses[0])
-        # Multiple statuses handled via query
+        if default_statuses:
+            # Convert ["playing", "to-play"] -> "status:playing , status:to-play"
+            status_queries = [f"status:{s}" for s in default_statuses]
+            query_str = " , ".join(status_queries)
 
     # Use config sort if not specified via CLI
     if sort is None and list_config.get("sort"):
@@ -569,13 +645,8 @@ def list_cmd(query: str | None, status: str | None, tag: str | None, source: str
         err_console.print(f"[dim]Valid fields: {', '.join(SORT_FIELDS)}[/dim]")
         sys.exit(1)
 
-    source_enum = db.SourceType(source) if source else None
-
     wads = db.search_wads(
-        query=query,
-        status=status_enum,
-        source_type=source_enum,
-        tag=tag,
+        query=query_str,
         sort_by=sort_field,
         sort_desc=sort_desc,
         include_deleted=deleted,

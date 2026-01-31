@@ -63,7 +63,12 @@ src/caco/
 - Source adapters are context managers that handle their own clients
 - `player.py` wraps sourceport execution to track session start/end times
 - Status enum: `to-play`, `backlog`, `playing`, `finished`, `abandoned`
-- Query syntax: `id:`, `title:`, `author:`, `year:`, `filename:`, `tag:`, `status:`, `source:`
+- Query syntax (beets-style):
+  - Fields: `id:`, `title:`, `author:`, `year:`, `filename:`, `tag:`, `status:`, `source:`
+  - OR queries: `"status:playing , status:to-play"` (comma with spaces)
+  - Negation: `^status:finished` (use `^` prefix, `-` also works but may conflict with CLI)
+  - Status shortcuts: `status:p` (playing), `status:f` (finished), etc.
+  - Glob patterns: `tag:caco*` (matches cacoward, etc.)
 - Per-WAD config: `custom_iwad`, `custom_sourceport`, `custom_args` columns in wads table
 
 ## Dependencies
