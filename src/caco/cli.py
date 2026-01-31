@@ -911,6 +911,71 @@ def restore(query: str, yes: bool):
     console.print(f"\n[green]Restored {restored} WAD(s)[/green]")
 
 
+@cli.command()
+@click.argument("query")
+@click.argument("file_path", type=click.Path(exists=True))
+@click.option("--move", "-m", is_flag=True, help="Move file instead of copying")
+def link(query: str, file_path: str, move: bool):
+    """Link a local file to an existing library entry.
+
+    Use this to attach a downloaded WAD file to a Doomwiki import
+    or any other metadata-only entry.
+
+    The file is copied (or moved with --move) to the cache directory.
+
+    \b
+    Examples:
+        caco link 73 ~/Downloads/heartland.wad
+        caco link "Heartland" ~/Downloads/heartland.wad --move
+    """
+    # Resolve the WAD
+    wads = resolve_wad_query(query, mode="single")
+    if not wads:
+        return
+    wad = wads[0]
+
+    source_path = Path(file_path).resolve()
+    cache_dir = get_cache_dir()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    # Generate cache filename: wad_id_original_filename
+    dest_filename = f"{wad['id']}_{source_path.name}"
+    dest_path = cache_dir / dest_filename
+
+    # Check if already linked
+    if wad.get("cached_path"):
+        existing = Path(wad["cached_path"])
+        if existing.exists():
+            console.print(f"[yellow]Already linked:[/yellow] {existing.name}")
+            if not click.confirm("Replace with new file?"):
+                console.print("[dim]Cancelled[/dim]")
+                return
+            # Remove old file
+            existing.unlink()
+
+    # Copy or move the file
+    try:
+        if move:
+            shutil.move(str(source_path), str(dest_path))
+            action = "Moved"
+        else:
+            shutil.copy2(str(source_path), str(dest_path))
+            action = "Copied"
+    except OSError as e:
+        err_console.print(f"[red]Failed to {('move' if move else 'copy')} file: {e}[/red]")
+        sys.exit(1)
+
+    # Update database
+    db.update_wad(
+        wad["id"],
+        cached_path=str(dest_path),
+        filename=source_path.name,
+    )
+
+    console.print(f"[green]{action}:[/green] {source_path.name}")
+    console.print(f"[green]Linked to:[/green] {wad['title']} (ID: {wad['id']})")
+
+
 # =============================================================================
 # Tags
 # =============================================================================

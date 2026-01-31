@@ -84,6 +84,10 @@ caco add 19509 --force              # Import anyway
 # Interactive selection with fzf (if installed)
 caco add scythe                     # Opens fzf fuzzy picker
 caco add "doom 2" --multi           # Multi-select mode
+
+# Link a downloaded file to a metadata-only entry (e.g., Doomwiki import)
+caco link 73 ~/Downloads/heartland.wad
+caco link "Heartland" ~/Downloads/heartland.wad --move  # Move instead of copy
 ```
 
 ### Managing Library
