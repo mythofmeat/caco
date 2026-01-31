@@ -99,11 +99,13 @@ caco list
 # Sort by different fields
 caco list --sort playtime              # Most played first
 caco list --sort rating                # Highest rated first
-caco list --sort -title                # Reverse alphabetical (Z-A)
-caco list --sort last_played           # Recently played first
+caco list --sort title+                # Alphabetical (A-Z, ascending)
+caco list --sort title-                # Reverse alphabetical (Z-A, descending)
+caco list --sort last_played           # Recently played first (default)
+caco list --sort last_played+          # Oldest played first
 
 # Available sort fields: playtime, rating, created, title, author, last_played, year
-# Prefix with - to reverse (e.g., -title for Z-A)
+# Suffix + for ascending, - for descending
 
 # Search with beets-style queries
 caco list scythe                    # Free text (title/author/description)

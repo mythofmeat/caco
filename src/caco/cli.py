@@ -415,15 +415,27 @@ def _complete_query(ctx, param, incomplete: str) -> list[str]:
 def _parse_sort_option(sort: str | None) -> tuple[str | None, bool]:
     """Parse sort option. Returns (field, descending).
 
-    Examples:
-        'playtime' -> ('playtime', True)  # Default desc
-        '-title' -> ('title', False)  # Explicit reverse (for title: Z-A)
+    Supports suffix notation (like beets) to avoid CLI flag conflicts:
+        'playtime' -> ('playtime', True)   # Default (desc for numeric/date)
+        'title+' -> ('title', False)       # Explicit ascending
+        'title-' -> ('title', True)        # Explicit descending
+        '-title' -> ('title', False)       # Legacy prefix (still works)
     """
     if not sort:
         return None, True
 
+    # Suffix notation (preferred - avoids CLI flag issues)
+    if sort.endswith("+"):
+        return sort[:-1], False  # Ascending
+    if sort.endswith("-"):
+        return sort[:-1], True   # Descending
+
+    # Legacy prefix notation (still supported)
     if sort.startswith("-"):
         return sort[1:], False
+    if sort.startswith("+"):
+        return sort[1:], True
+
     return sort, True
 
 
@@ -598,7 +610,7 @@ def _render_wad_list(wads: list[dict], title: str | None = None, list_config: di
 
 @cli.command(name="list")
 @click.argument("query", nargs=-1, shell_complete=_complete_query)
-@click.option("--sort", "-S", help="Sort by: playtime, rating, created, title, author, last_played, year (prefix - to reverse)")
+@click.option("--sort", "-S", help="Sort by: playtime, rating, created, title, author, last_played, year (suffix + for asc, - for desc)")
 @click.option("--deleted", is_flag=True, help="Show deleted WADs (trash)")
 @click.option("--plain", is_flag=True, help="Output as TSV (for scripting)")
 def list_cmd(query: tuple[str, ...], sort: str | None, deleted: bool, plain: bool):
