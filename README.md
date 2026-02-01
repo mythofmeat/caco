@@ -142,6 +142,12 @@ caco update 1-5 --rating 4                      # ID range
 caco update tag:megawad --rating 5 --yes        # Query with confirmation skip
 caco update 1 --rating 4 --notes "Great level design"
 
+# Edit core metadata (title, author, year, description)
+caco update 1 --title "My Custom Title"
+caco update 1 --author "John Romero" --year 1994
+caco update 1 --description "A classic megawad"
+caco update 1 --clear-author --clear-year       # Clear optional fields
+
 # Delete WADs (soft delete - can be restored)
 caco rm 1                                       # Move to trash (alias for delete)
 caco delete status:abandoned                    # Shows preview, prompts

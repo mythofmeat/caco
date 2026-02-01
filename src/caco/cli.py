@@ -791,6 +791,13 @@ def info(query: str, yes: bool, plain: bool):
 
 @cli.command()
 @click.argument("query")
+@click.option("--title", "-t", help="Set WAD title")
+@click.option("--author", "-a", help="Set WAD author")
+@click.option("--clear-author", is_flag=True, help="Clear author")
+@click.option("--year", type=int, help="Set release year")
+@click.option("--clear-year", is_flag=True, help="Clear release year")
+@click.option("--description", "-d", help="Set WAD description")
+@click.option("--clear-description", is_flag=True, help="Clear description")
 @click.option("--status", "-s", type=StatusChoice())
 @click.option("--rating", "-r", type=click.IntRange(1, 5))
 @click.option("--notes", "-n")
@@ -804,6 +811,13 @@ def info(query: str, yes: bool, plain: bool):
 @click.option("--dry-run", is_flag=True, help="Show what would change without making changes")
 def update(
     query: str,
+    title: str | None,
+    author: str | None,
+    clear_author: bool,
+    year: int | None,
+    clear_year: bool,
+    description: str | None,
+    clear_description: bool,
     status: str | None,
     rating: int | None,
     notes: str | None,
@@ -822,6 +836,31 @@ def update(
     updates = {}
     update_descriptions = []
 
+    # Core metadata fields
+    if title:
+        updates["title"] = title
+        update_descriptions.append(f"title → \"{title}\"")
+    if author:
+        updates["author"] = author
+        update_descriptions.append(f"author → \"{author}\"")
+    elif clear_author:
+        updates["author"] = None
+        update_descriptions.append("author → (cleared)")
+    if year:
+        updates["year"] = year
+        update_descriptions.append(f"year → {year}")
+    elif clear_year:
+        updates["year"] = None
+        update_descriptions.append("year → (cleared)")
+    if description:
+        updates["description"] = description
+        desc_preview = description[:30] + "..." if len(description) > 30 else description
+        update_descriptions.append(f"description → \"{desc_preview}\"")
+    elif clear_description:
+        updates["description"] = None
+        update_descriptions.append("description → (cleared)")
+
+    # Status and user fields
     if status:
         updates["status"] = db.Status(status)
         update_descriptions.append(f"status → {status}")
