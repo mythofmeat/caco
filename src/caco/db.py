@@ -278,6 +278,7 @@ def add_wad(
     source_id: str | None = None,
     source_url: str | None = None,
     filename: str | None = None,
+    cached_path: str | None = None,
     status: Status = Status.BACKLOG,
     tags: list[str] | None = None,
     version: str | None = None,
@@ -287,11 +288,11 @@ def add_wad(
         cursor = conn.execute(
             """
             INSERT INTO wads (title, author, year, description, source_type,
-                              source_id, source_url, filename, status, version)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                              source_id, source_url, filename, cached_path, status, version)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (title, author, year, description, source_type.value,
-             source_id, source_url, filename, status.value, version),
+             source_id, source_url, filename, cached_path, status.value, version),
         )
         wad_id = cursor.lastrowid
 
