@@ -321,7 +321,24 @@ def play(
     # Get or download WAD file
     wad_path = get_wad_path(wad, console=console)
     if not wad_path:
-        raise ValueError(f"Could not get WAD file for {wad['title']}")
+        # Build a helpful error message with source URL if available
+        error_parts = [f"No WAD file linked for '{wad['title']}'"]
+
+        source_url = wad.get("source_url")
+        source_type = wad.get("source_type")
+
+        if source_url:
+            if source_type == "doomwiki":
+                error_parts.append(f"\nDoom Wiki page: {source_url}")
+            elif source_type == "doomworld":
+                error_parts.append(f"\nDoomworld thread: {source_url}")
+            else:
+                error_parts.append(f"\nSource: {source_url}")
+
+        error_parts.append(f"\n\nDownload the WAD file, then link it with:")
+        error_parts.append(f"  caco link {wad_id} /path/to/downloaded.wad")
+
+        raise ValueError("".join(error_parts))
 
     # Determine sourceport (CLI > WAD-specific > global config)
     port = sourceport or wad.get("custom_sourceport") or get_default_sourceport()
