@@ -297,6 +297,8 @@ STATUS_SHORTCUTS = {
     "p": "playing", "play": "playing",
     "f": "finished", "fin": "finished", "done": "finished",
     "a": "abandoned", "drop": "abandoned", "dropped": "abandoned",
+    "w": "awaiting-update", "waiting": "awaiting-update", "wip": "awaiting-update",
+    "au": "awaiting-update", "await": "awaiting-update",
 }
 
 
@@ -724,6 +726,8 @@ def info(query: str, yes: bool, plain: bool):
     if wad["year"]:
         console.print(f"[bold]Year:[/bold] {wad['year']}")
     console.print(f"[bold]Status:[/bold] {wad['status']}")
+    if wad.get("version"):
+        console.print(f"[bold]Version:[/bold] {wad['version']}")
 
     if wad["rating"]:
         console.print(f"[bold]Rating:[/bold] {'★' * wad['rating']}{'☆' * (5 - wad['rating'])}")
@@ -798,6 +802,8 @@ def info(query: str, yes: bool, plain: bool):
 @click.option("--clear-year", is_flag=True, help="Clear release year")
 @click.option("--description", "-d", help="Set WAD description")
 @click.option("--clear-description", is_flag=True, help="Clear description")
+@click.option("--version", "-V", "version_str", help="Set version string (e.g., 'v1.0', 'RC2')")
+@click.option("--clear-version", is_flag=True, help="Clear version")
 @click.option("--status", "-s", type=StatusChoice())
 @click.option("--rating", "-r", type=click.IntRange(1, 5))
 @click.option("--notes", "-n")
@@ -818,6 +824,8 @@ def update(
     clear_year: bool,
     description: str | None,
     clear_description: bool,
+    version_str: str | None,
+    clear_version: bool,
     status: str | None,
     rating: int | None,
     notes: str | None,
@@ -859,6 +867,12 @@ def update(
     elif clear_description:
         updates["description"] = None
         update_descriptions.append("description → (cleared)")
+    if version_str:
+        updates["version"] = version_str
+        update_descriptions.append(f"version → \"{version_str}\"")
+    elif clear_version:
+        updates["version"] = None
+        update_descriptions.append("version → (cleared)")
 
     # Status and user fields
     if status:
@@ -1854,6 +1868,7 @@ def import_doomworld(url: str, tags: tuple[str, ...], title: str | None,
         final_iwad = thread.iwad
         final_sourceport = thread.sourceport
         final_complevel = thread.complevel
+        final_version = None
 
         if llm_metadata:
             if not final_title and llm_metadata.title:
@@ -1866,6 +1881,8 @@ def import_doomworld(url: str, tags: tuple[str, ...], title: str | None,
                 final_sourceport = llm_metadata.sourceport
             if final_complevel is None and llm_metadata.complevel is not None:
                 final_complevel = llm_metadata.complevel
+            if llm_metadata.version:
+                final_version = llm_metadata.version
 
         # Import with merged metadata
         wad_id = doomworld.import_wad(
@@ -1874,6 +1891,7 @@ def import_doomworld(url: str, tags: tuple[str, ...], title: str | None,
             title=final_title,
             author=final_author,
             year=year,
+            version=final_version,
         )
         console.print(f"[green]Imported:[/green] {thread.title} (ID: {wad_id})")
 
@@ -1904,6 +1922,8 @@ def import_doomworld(url: str, tags: tuple[str, ...], title: str | None,
 
         # Show LLM-specific metadata
         if llm_metadata:
+            if llm_metadata.version:
+                console.print(f"  [dim]Version:[/dim] {llm_metadata.version}")
             if llm_metadata.description:
                 console.print(f"  [dim]Description:[/dim] {llm_metadata.description[:100]}...")
             if llm_metadata.map_count:

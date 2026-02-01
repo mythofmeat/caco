@@ -18,6 +18,7 @@ class Status(str, Enum):
     PLAYING = "playing"
     FINISHED = "finished"
     ABANDONED = "abandoned"
+    AWAITING_UPDATE = "awaiting-update"
 
 
 class SourceType(str, Enum):
@@ -74,6 +75,8 @@ STATUS_SHORTCUTS = {
     "p": "playing", "play": "playing",
     "f": "finished", "fin": "finished", "done": "finished",
     "a": "abandoned", "drop": "abandoned", "dropped": "abandoned",
+    "w": "awaiting-update", "waiting": "awaiting-update", "wip": "awaiting-update",
+    "au": "awaiting-update", "await": "awaiting-update",
 }
 
 
@@ -176,6 +179,7 @@ def init_db() -> None:
         _migrate_rename_wishlist_to_toplay(conn)
         _migrate_add_deleted_at(conn)
         _migrate_add_playthrough_cycle(conn)
+        _migrate_add_version(conn)
 
 
 def _migrate_add_custom_play_config(conn: sqlite3.Connection) -> None:
@@ -256,6 +260,14 @@ def _migrate_add_playthrough_cycle(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE map_completions ADD COLUMN cycle INTEGER DEFAULT 1")
 
 
+def _migrate_add_version(conn: sqlite3.Connection) -> None:
+    """Add version column for non-idgames releases."""
+    cursor = conn.execute("PRAGMA table_info(wads)")
+    columns = {row[1] for row in cursor.fetchall()}
+    if "version" not in columns:
+        conn.execute("ALTER TABLE wads ADD COLUMN version TEXT")
+
+
 def add_wad(
     title: str,
     source_type: SourceType,
@@ -268,17 +280,18 @@ def add_wad(
     filename: str | None = None,
     status: Status = Status.BACKLOG,
     tags: list[str] | None = None,
+    version: str | None = None,
 ) -> int:
     """Add a WAD to the library. Returns the new WAD ID."""
     with get_connection() as conn:
         cursor = conn.execute(
             """
             INSERT INTO wads (title, author, year, description, source_type,
-                              source_id, source_url, filename, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                              source_id, source_url, filename, status, version)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (title, author, year, description, source_type.value,
-             source_id, source_url, filename, status.value),
+             source_id, source_url, filename, status.value, version),
         )
         wad_id = cursor.lastrowid
 

@@ -33,9 +33,15 @@ TypeError: add_wad() got an unexpected keyword argument 'cached_path'
 # New Features *(ordered by priority)*
 
 ## Version Tracking
-- [ ] Track version info for non idgames releases (as idgames releases are final by design)
-- [ ] Create a new category for WADs awaiting updates/a full release.
-  - idk what to call this category, but i'm open to suggestions
+- [x] Track version info for non idgames releases (as idgames releases are final by design)
+  - Added `version` column to database
+  - `caco update <id> --version "v1.0"` to set version
+  - `caco info <id>` displays version
+  - LLM extraction (`--smart`) auto-extracts version from Doomworld forum posts
+- [x] Create a new category for WADs awaiting updates/a full release.
+  - Added `awaiting-update` status
+  - Shortcuts: `w`, `wip`, `au`, `await`, `waiting`
+  - Displayed in magenta in list output
 
 ## Statistics
 - [ ] `caco stats` command

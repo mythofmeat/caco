@@ -60,6 +60,7 @@ class DoomworldSource:
         title: str | None = None,
         author: str | None = None,
         year: int | None = None,
+        version: str | None = None,
     ) -> int:
         """Import a WAD from a Doomworld forum thread into the local database.
 
@@ -69,6 +70,7 @@ class DoomworldSource:
             title: Override title (defaults to thread title)
             author: Override author (defaults to thread author/OP)
             year: Override year (extracted from posted_date if not provided)
+            version: Version string (e.g., 'v1.0', 'RC2') if known
 
         Returns:
             The new WAD's database ID
@@ -100,4 +102,5 @@ class DoomworldSource:
             source_id=str(thread.thread_id),
             source_url=thread.thread_url,
             tags=tags,
+            version=version,
         )

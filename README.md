@@ -14,7 +14,8 @@ A personal Doom WAD library manager taking inspiration from beets. Track what yo
   - WADs from idgames are downloaded and cached when you play
 
 - **Library tracking**
-  - Status (to-play, backlog, playing, finished)
+  - Status (to-play, backlog, playing, finished, awaiting-update)
+  - Version tracking for WIP/beta releases
   - Ratings
   - Custom Tags
   - Arbitrary Notes
@@ -142,10 +143,11 @@ caco update 1-5 --rating 4                      # ID range
 caco update tag:megawad --rating 5 --yes        # Query with confirmation skip
 caco update 1 --rating 4 --notes "Great level design"
 
-# Edit core metadata (title, author, year, description)
+# Edit core metadata (title, author, year, description, version)
 caco update 1 --title "My Custom Title"
 caco update 1 --author "John Romero" --year 1994
 caco update 1 --description "A classic megawad"
+caco update 1 --version "v1.0"                  # Track version for non-idgames releases
 caco update 1 --clear-author --clear-year       # Clear optional fields
 
 # Delete WADs (soft delete - can be restored)
@@ -341,6 +343,7 @@ backlog = "yellow"
 playing = "green"
 finished = "dim"
 abandoned = "red"
+awaiting-update = "magenta"
 ```
 
 ## Command Aliases
@@ -365,6 +368,7 @@ Use single letters or abbreviations for status values:
 | `p`, `play` | playing |
 | `f`, `fin`, `done` | finished |
 | `a`, `drop` | abandoned |
+| `w`, `wip`, `au` | awaiting-update |
 
 ```bash
 caco update 1 -s p     # Set status to "playing"

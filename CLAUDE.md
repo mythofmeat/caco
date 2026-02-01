@@ -69,7 +69,7 @@ src/caco/
 - `db.py` uses raw sqlite3 with `sqlite3.Row` for dict-like access
 - Source adapters are context managers that handle their own clients
 - `player.py` wraps sourceport execution to track session start/end times
-- Status enum: `to-play`, `backlog`, `playing`, `finished`, `abandoned`
+- Status enum: `to-play`, `backlog`, `playing`, `finished`, `abandoned`, `awaiting-update`
 - Query syntax (beets-style):
   - Fields: `id:`, `title:`, `author:`, `year:`, `filename:`, `tag:`, `status:`, `source:`
   - OR queries: `"status:playing , status:to-play"` (comma with spaces)

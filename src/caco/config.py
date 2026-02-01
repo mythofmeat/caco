@@ -30,6 +30,7 @@ DEFAULT_LIST_CONFIG = {
         "playing": "green",
         "finished": "dim",
         "abandoned": "red",
+        "awaiting-update": "magenta",
     },
 }
 
