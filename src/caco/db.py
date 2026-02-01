@@ -1407,3 +1407,139 @@ def get_wad_by_cached_filename(filename: str) -> dict[str, Any] | None:
             wad["tags"] = [t["tag"] for t in tags]
             return wad
         return None
+
+
+# =============================================================================
+# Library Statistics
+# =============================================================================
+
+
+def get_library_stats() -> dict[str, Any]:
+    """Get library-wide overview statistics.
+
+    Returns:
+        Dict with keys:
+        - total_wads: COUNT of non-deleted WADs
+        - total_sessions: COUNT of all play sessions
+        - total_playtime: SUM of duration_seconds from sessions
+        - wads_with_sessions: COUNT of distinct WADs with at least one session
+        - wads_by_status: dict mapping status -> count
+    """
+    with get_connection() as conn:
+        # Total WADs (non-deleted)
+        row = conn.execute(
+            "SELECT COUNT(*) as count FROM wads WHERE deleted_at IS NULL"
+        ).fetchone()
+        total_wads = row["count"]
+
+        # Total sessions
+        row = conn.execute("SELECT COUNT(*) as count FROM sessions").fetchone()
+        total_sessions = row["count"]
+
+        # Total playtime
+        row = conn.execute(
+            "SELECT COALESCE(SUM(duration_seconds), 0) as total FROM sessions"
+        ).fetchone()
+        total_playtime = row["total"]
+
+        # WADs with at least one session
+        row = conn.execute(
+            "SELECT COUNT(DISTINCT wad_id) as count FROM sessions"
+        ).fetchone()
+        wads_with_sessions = row["count"]
+
+        # WADs by status
+        rows = conn.execute(
+            """
+            SELECT status, COUNT(*) as count
+            FROM wads
+            WHERE deleted_at IS NULL
+            GROUP BY status
+            """
+        ).fetchall()
+        wads_by_status = {row["status"]: row["count"] for row in rows}
+
+        return {
+            "total_wads": total_wads,
+            "total_sessions": total_sessions,
+            "total_playtime": total_playtime,
+            "wads_with_sessions": wads_with_sessions,
+            "wads_by_status": wads_by_status,
+        }
+
+
+def get_wads_played_by_period(period: str = "month") -> list[dict[str, Any]]:
+    """Get activity grouped by time period.
+
+    Args:
+        period: "month" for YYYY-MM grouping, "year" for YYYY grouping
+
+    Returns:
+        List of dicts with keys: period, wad_count, session_count, total_playtime
+        Ordered by period descending (most recent first).
+    """
+    # Map period to strftime format
+    if period == "year":
+        fmt = "%Y"
+    else:
+        fmt = "%Y-%m"
+
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT
+                strftime('{fmt}', started_at) as period,
+                COUNT(DISTINCT wad_id) as wad_count,
+                COUNT(*) as session_count,
+                COALESCE(SUM(duration_seconds), 0) as total_playtime
+            FROM sessions
+            GROUP BY strftime('{fmt}', started_at)
+            ORDER BY period DESC
+            """
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def get_completion_rate() -> dict[str, Any]:
+    """Get completion statistics.
+
+    Returns:
+        Dict with keys:
+        - played_wads: WADs with at least one session
+        - finished_wads: WADs with status='finished' that have been played (have sessions)
+        - completion_rate: finished/played as float (0.0 if no played WADs)
+        - total_completions: COUNT from wad_completions (includes replays)
+    """
+    with get_connection() as conn:
+        # WADs with at least one session
+        row = conn.execute(
+            "SELECT COUNT(DISTINCT wad_id) as count FROM sessions"
+        ).fetchone()
+        played_wads = row["count"]
+
+        # WADs with status='finished' that also have at least one session (played AND finished)
+        row = conn.execute(
+            """
+            SELECT COUNT(DISTINCT wads.id) as count
+            FROM wads
+            JOIN sessions ON sessions.wad_id = wads.id
+            WHERE wads.status = 'finished' AND wads.deleted_at IS NULL
+            """
+        ).fetchone()
+        finished_wads = row["count"]
+
+        # Total completions (including replays)
+        row = conn.execute(
+            "SELECT COUNT(*) as count FROM wad_completions"
+        ).fetchone()
+        total_completions = row["count"]
+
+        # Calculate completion rate (avoid division by zero)
+        completion_rate = finished_wads / played_wads if played_wads > 0 else 0.0
+
+        return {
+            "played_wads": played_wads,
+            "finished_wads": finished_wads,
+            "completion_rate": completion_rate,
+            "total_completions": total_completions,
+        }

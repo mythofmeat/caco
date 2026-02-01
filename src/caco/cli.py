@@ -2908,6 +2908,141 @@ def map_progress(query: str, total: int | None, yes: bool, plain: bool):
 
 
 # =============================================================================
+# Library Statistics
+# =============================================================================
+
+
+@cli.command()
+@click.option("--period", "-p", type=click.Choice(["month", "year"]),
+              default="month", help="Group activity by month or year")
+@click.option("--limit", "-n", type=int, default=12,
+              help="Number of periods to show in activity table")
+@click.option("--plain", is_flag=True,
+              help="Output as key=value pairs (for scripting)")
+def stats(period: str, limit: int, plain: bool):
+    """Show library statistics.
+
+    Displays library-wide statistics including total playtime,
+    completion rates, WAD counts by status, and activity over time.
+
+    \b
+    Examples:
+        caco stats                # Default: group by month, show 12 periods
+        caco stats --period year  # Group activity by year
+        caco stats --limit 6      # Show only last 6 periods
+        caco stats --plain        # Output for scripting
+    """
+    library_stats = db.get_library_stats()
+    completion_stats = db.get_completion_rate()
+    activity = db.get_wads_played_by_period(period)
+
+    if plain:
+        # Key=value output for scripting
+        print(f"total_wads={library_stats['total_wads']}")
+        print(f"total_sessions={library_stats['total_sessions']}")
+        print(f"total_playtime={library_stats['total_playtime']}")
+        print(f"wads_with_sessions={library_stats['wads_with_sessions']}")
+        print(f"played_wads={completion_stats['played_wads']}")
+        print(f"finished_wads={completion_stats['finished_wads']}")
+        print(f"completion_rate={completion_stats['completion_rate']:.3f}")
+        print(f"total_completions={completion_stats['total_completions']}")
+
+        # Status breakdown
+        for status, count in sorted(library_stats['wads_by_status'].items()):
+            print(f"status_{status.replace('-', '_')}={count}")
+
+        # Activity periods
+        for i, row in enumerate(activity[:limit]):
+            print(f"activity_{i}_period={row['period']}")
+            print(f"activity_{i}_wads={row['wad_count']}")
+            print(f"activity_{i}_sessions={row['session_count']}")
+            print(f"activity_{i}_playtime={row['total_playtime']}")
+        return
+
+    # Check for empty library
+    if library_stats['total_wads'] == 0:
+        console.print("[dim]No WADs in library[/dim]")
+        return
+
+    # Rich formatted output
+    console.print("\n[bold]Library Statistics[/bold]\n")
+
+    # Overview section
+    console.print("[bold cyan]Overview[/bold cyan]")
+    console.print(f"  Total WADs:      {library_stats['total_wads']}")
+    total_playtime_str = format_duration(library_stats['total_playtime']) if library_stats['total_playtime'] else "0s"
+    console.print(f"  Total playtime:  {total_playtime_str}")
+    console.print(f"  Sessions:        {library_stats['total_sessions']}")
+    console.print(f"  WADs played:     {library_stats['wads_with_sessions']}")
+
+    # Completion section
+    console.print("\n[bold cyan]Completion[/bold cyan]")
+    played = completion_stats['played_wads']
+    finished = completion_stats['finished_wads']
+    if played > 0:
+        pct = completion_stats['completion_rate'] * 100
+        console.print(f"  Finished:          {finished} / {played} played ({pct:.1f}%)")
+    else:
+        console.print(f"  Finished:          {finished} / 0 played")
+    if completion_stats['total_completions'] > 0:
+        console.print(f"  Total completions: {completion_stats['total_completions']} (including replays)")
+
+    # Status breakdown
+    status_counts = library_stats['wads_by_status']
+    if status_counts:
+        console.print("\n[bold cyan]Status Breakdown[/bold cyan]")
+        # Order statuses for consistent display
+        status_order = ['to-play', 'playing', 'backlog', 'finished', 'abandoned', 'awaiting-update']
+        # Format as two columns
+        items = []
+        for status in status_order:
+            if status in status_counts:
+                items.append((status, status_counts[status]))
+        # Add any statuses not in our order
+        for status, count in sorted(status_counts.items()):
+            if status not in status_order:
+                items.append((status, count))
+
+        # Display in two columns
+        for i in range(0, len(items), 2):
+            left = f"  {items[i][0]}:".ljust(18) + str(items[i][1]).rjust(4)
+            if i + 1 < len(items):
+                right = f"  {items[i+1][0]}:".ljust(18) + str(items[i+1][1]).rjust(4)
+                console.print(f"{left}{right}")
+            else:
+                console.print(left)
+
+    # Activity table
+    if not activity:
+        console.print("\n[dim]No play history yet[/dim]")
+    else:
+        period_label = "Month" if period == "month" else "Year"
+        console.print(f"\n[bold cyan]Activity by {period_label}[/bold cyan]")
+
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("Period", style="dim")
+        table.add_column("WADs", justify="right")
+        table.add_column("Sessions", justify="right")
+        table.add_column("Playtime", justify="right")
+
+        for row in activity[:limit]:
+            playtime_str = format_duration(row['total_playtime']) if row['total_playtime'] else "-"
+            table.add_row(
+                row['period'],
+                str(row['wad_count']),
+                str(row['session_count']),
+                playtime_str,
+            )
+
+        console.print(table)
+
+        if len(activity) > limit:
+            console.print(f"[dim]... and {len(activity) - limit} more period(s)[/dim]")
+
+    console.print()
+
+
+# =============================================================================
 # Command Aliases
 # =============================================================================
 
