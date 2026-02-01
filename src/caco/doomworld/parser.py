@@ -435,9 +435,10 @@ class DoomworldParser:
         - https://www.doomworld.com/forum/topic/134292-myhousewad/
         - https://www.doomworld.com/forum/topic/134292-myhousewad/?page=5
         - https://www.doomworld.com/forum/topic/134292-some-title-here
+        - https://www.doomworld.com/vb/thread/153124 (old vBulletin format)
         """
-        # Match /topic/{id}-{slug} pattern
-        match = re.search(r'/forum/topic/(\d+)', url)
+        # Match /forum/topic/{id} or /vb/thread/{id} pattern
+        match = re.search(r'/(?:forum/topic|vb/thread)/(\d+)', url)
         if match:
             return int(match.group(1))
         return 0

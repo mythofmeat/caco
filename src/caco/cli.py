@@ -1189,7 +1189,8 @@ def _detect_source_type(source: str) -> str:
     if source.startswith(("http://", "https://")):
         if "doomwiki.org/wiki/" in source:
             return "doomwiki_url"
-        if "doomworld.com/forum/topic/" in source:
+        # Doomworld forum URLs (both new /forum/topic/ and old /vb/thread/ formats)
+        if "doomworld.com/forum/topic/" in source or "doomworld.com/vb/thread/" in source:
             return "doomworld_url"
         return "url"
 
@@ -1758,10 +1759,11 @@ def import_doomworld(url: str, tags: tuple[str, ...], title: str | None,
         sourceport_display_name,
     )
 
-    # Validate URL
-    if "doomworld.com/forum/topic/" not in url:
+    # Validate URL - accept both new (/forum/topic/) and old (/vb/thread/) formats
+    if "doomworld.com/forum/topic/" not in url and "doomworld.com/vb/thread/" not in url:
         err_console.print("[red]Invalid Doomworld forum URL[/red]")
         err_console.print("[dim]Expected: https://www.doomworld.com/forum/topic/{id}-{slug}/[/dim]")
+        err_console.print("[dim]      or: https://www.doomworld.com/vb/thread/{id}[/dim]")
         sys.exit(1)
 
     with DoomworldSource() as doomworld:

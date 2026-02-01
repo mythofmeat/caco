@@ -51,8 +51,8 @@ class DoomworldClient:
         Raises:
             DoomworldError: If the thread cannot be fetched or parsed
         """
-        # Validate URL
-        if "doomworld.com/forum/topic/" not in url:
+        # Validate URL - accept both new (/forum/topic/) and old (/vb/thread/) formats
+        if "doomworld.com/forum/topic/" not in url and "doomworld.com/vb/thread/" not in url:
             raise DoomworldError(f"Invalid Doomworld forum URL: {url}")
 
         try:
