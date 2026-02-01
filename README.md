@@ -59,6 +59,38 @@ caco update scythe --status finished --rating 5
 caco update scythe -s f -r 5  # Short form (f=finished)
 ```
 
+## TUI (Terminal User Interface)
+
+Launch an interactive terminal interface with vim-style navigation:
+
+```bash
+caco --tui
+```
+
+### Key Bindings
+
+| Key | Action |
+|-----|--------|
+| `j/k` | Navigate up/down |
+| `gg/G` | Jump to top/bottom |
+| `Ctrl+d/u` | Page down/up |
+| `/` | Open search filter |
+| `Enter` | Play selected WAD |
+| `i` | View WAD details |
+| `h` | View session history |
+| `s` | Enter status mode |
+| `q` | Quit/go back |
+
+**Status Mode:** Press `s` then one of:
+- `p` - playing
+- `f` - finished
+- `t` - to-play
+- `b` - backlog
+- `a` - abandoned
+- `w` - awaiting-update
+
+The search filter supports the same beets-style query syntax as `caco list`.
+
 ## Usage
 
 ### Importing WADs

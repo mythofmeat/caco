@@ -1,0 +1,195 @@
+/* Caco TUI Styles */
+
+Screen {
+    background: $surface;
+}
+
+/* Library Screen Layout */
+LibraryScreen {
+    layout: horizontal;
+}
+
+#wad-list-container {
+    width: 2fr;
+    height: 100%;
+}
+
+#info-panel-container {
+    width: 1fr;
+    height: 100%;
+    border-left: solid $primary;
+}
+
+/* WAD Table */
+WadTable {
+    height: 100%;
+}
+
+WadTable > .datatable--header {
+    background: $primary-darken-2;
+    color: $text;
+    text-style: bold;
+}
+
+WadTable > .datatable--cursor {
+    background: $primary;
+    color: $text;
+}
+
+/* WAD Info Panel */
+WadInfoPanel {
+    padding: 1 2;
+}
+
+#info-title {
+    text-style: bold;
+    color: $text;
+    margin-bottom: 1;
+}
+
+#info-author {
+    color: $text-muted;
+    margin-bottom: 1;
+}
+
+#info-status {
+    margin-bottom: 1;
+}
+
+#info-details {
+    color: $text-muted;
+}
+
+/* Status Colors */
+.status-to-play {
+    color: dodgerblue;
+}
+
+.status-backlog {
+    color: yellow;
+}
+
+.status-playing {
+    color: lime;
+}
+
+.status-finished {
+    color: $text-muted;
+}
+
+.status-abandoned {
+    color: red;
+}
+
+.status-awaiting-update {
+    color: magenta;
+}
+
+/* Filter Input */
+FilterInput {
+    dock: top;
+    height: 3;
+    padding: 0 1;
+    background: $surface-darken-1;
+}
+
+FilterInput:focus-within {
+    border: tall $primary;
+}
+
+#filter-prompt {
+    width: 2;
+    color: $primary;
+}
+
+#filter-input {
+    width: 1fr;
+    background: $surface;
+    color: $text;
+    border: none;
+}
+
+#filter-input:focus {
+    border: none;
+}
+
+#filter-input > .input--cursor {
+    color: $text;
+    background: $primary;
+}
+
+#filter-input > .input--placeholder {
+    color: $text-muted;
+}
+
+/* Header Bar */
+#header {
+    dock: top;
+    height: 1;
+    background: $primary-darken-2;
+    padding: 0 1;
+}
+
+/* Footer / Key Hints */
+#footer {
+    dock: bottom;
+    height: 1;
+    background: $primary-darken-2;
+    color: $text-muted;
+    padding: 0 1;
+}
+
+/* WAD Detail Screen */
+WadDetailScreen {
+    padding: 1 2;
+}
+
+#detail-header {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#detail-content {
+    height: 100%;
+}
+
+.detail-section {
+    margin-bottom: 1;
+}
+
+.detail-label {
+    color: $text-muted;
+    width: 15;
+}
+
+.detail-value {
+    color: $text;
+}
+
+/* Sessions Screen */
+SessionsScreen {
+    padding: 1 2;
+}
+
+#sessions-header {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#sessions-table {
+    height: 1fr;
+}
+
+/* Status mode indicator */
+#status-mode {
+    dock: bottom;
+    height: 1;
+    background: $warning;
+    color: $text;
+    padding: 0 1;
+    display: none;
+}
+
+#status-mode.visible {
+    display: block;
+}

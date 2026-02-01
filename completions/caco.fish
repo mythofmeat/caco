@@ -13,6 +13,9 @@ function __caco_tags
     caco tag list 2>/dev/null
 end
 
+# Global options
+complete -c caco -n __fish_use_subcommand -l tui -d "Launch TUI interface"
+
 # Main commands
 complete -c caco -n __fish_use_subcommand -a list -d "List WADs in your library"
 complete -c caco -n __fish_use_subcommand -a info -d "Show details about a WAD"

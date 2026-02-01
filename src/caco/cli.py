@@ -517,10 +517,21 @@ def _render_wad_info_plain(wad: dict) -> None:
         print(f"custom_args={wad['custom_args']}")
 
 
-@click.group()
-def cli():
+@click.group(invoke_without_command=True)
+@click.option("--tui", is_flag=True, help="Launch TUI interface")
+@click.pass_context
+def cli(ctx, tui: bool):
     """Caco - Personal Doom WAD library manager."""
     db.init_db()
+
+    if tui:
+        from caco.tui import CacoApp
+        CacoApp().run()
+        ctx.exit(0)
+
+    # If no command given and not TUI, show help
+    if ctx.invoked_subcommand is None and not tui:
+        click.echo(ctx.get_help())
 
 
 # =============================================================================

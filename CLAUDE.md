@@ -54,6 +54,17 @@ src/caco/
 │   ├── models.py   # Pydantic models (ForumThread)
 │   ├── parser.py   # HTML/JSON-LD parser + regex extraction
 │   └── llm.py      # LLM backends for smart metadata extraction
+├── tui/            # Textual-based TUI (caco --tui)
+│   ├── app.py      # Main Textual App class
+│   ├── styles.tcss # Textual CSS styles
+│   ├── screens/    # Screen classes
+│   │   ├── library.py     # Main library browser
+│   │   ├── wad_detail.py  # WAD detail view
+│   │   └── sessions.py    # Session history
+│   └── widgets/    # Widget classes
+│       ├── wad_table.py   # DataTable for WAD list
+│       ├── wad_info.py    # Info panel widget
+│       └── filter_input.py # Search input
 └── sources/
     ├── idgames.py  # idgames archive adapter
     ├── doomwiki.py # Doom Wiki adapter
@@ -84,6 +95,7 @@ src/caco/
 - `rich` - Terminal output formatting
 - `httpx` - HTTP client for idgames and Doomwiki APIs
 - `pydantic` - Data validation for API responses
+- `textual` - TUI framework (for `caco --tui`)
 
 ## Completions
 - Always ensure that completions and `--help` flags are synced with any and all changes to functionality
