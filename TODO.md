@@ -1,7 +1,3 @@
-# BUGS
-
-*(none currently)*
-
 # New Features *(ordered by priority)*
 
 ## Statistics
