@@ -1,5 +1,9 @@
 """WAD list table widget."""
 
+import asyncio
+
+from rich.text import Text
+from textual.binding import Binding
 from textual.widgets import DataTable
 from textual.message import Message
 
@@ -7,8 +11,28 @@ from caco import db
 from caco.player import format_duration
 
 
+# Status colors for table display
+STATUS_COLORS = {
+    "to-play": "dodger_blue1",
+    "backlog": "yellow",
+    "playing": "green1",
+    "finished": "grey50",
+    "abandoned": "red",
+    "awaiting-update": "magenta",
+}
+
+
 class WadTable(DataTable):
     """DataTable for displaying WAD list with vim-style navigation."""
+
+    BINDINGS = [
+        Binding("j", "cursor_down", "Down", show=False),
+        Binding("k", "cursor_up", "Up", show=False),
+        Binding("g", "handle_g", "Top (gg)", show=False),
+        Binding("G", "go_bottom", "Bottom", show=False),
+        Binding("ctrl+d", "page_down", "Page Down", show=False),
+        Binding("ctrl+u", "page_up", "Page Up", show=False),
+    ]
 
     class WadSelected(Message):
         """Fired when cursor moves to a new WAD."""
@@ -17,11 +41,19 @@ class WadTable(DataTable):
             super().__init__()
             self.wad_id = wad_id
 
+    class WadActivated(Message):
+        """Fired when Enter is pressed on a WAD (to play it)."""
+
+        def __init__(self, wad_id: int) -> None:
+            super().__init__()
+            self.wad_id = wad_id
+
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self._wads: list[dict] = []
         self._wad_id_to_row: dict[int, int] = {}
         self._g_pressed = False
+        self._g_timeout_task: asyncio.Task | None = None
 
     def on_mount(self) -> None:
         """Set up the table columns."""
@@ -36,14 +68,22 @@ class WadTable(DataTable):
         self.add_column("Maps", key="maps", width=6)
         self.add_column("Playtime", key="playtime", width=10)
 
-    def load_wads(self, query: str | None = None) -> None:
-        """Load WADs from database and populate table."""
-        self._wads = db.search_wads(query)
+    def load_wads(
+        self,
+        query: str | None = None,
+        sort_by: str = "id",
+        sort_desc: bool = False,
+    ) -> int:
+        """Load WADs from database and populate table.
+
+        Returns the number of WADs loaded.
+        """
+        self._wads = db.search_wads(query, sort_by=sort_by, sort_desc=sort_desc)
         self._wad_id_to_row.clear()
         self.clear()
 
         if not self._wads:
-            return
+            return 0
 
         # Batch fetch stats
         wad_ids = [w["id"] for w in self._wads]
@@ -61,14 +101,16 @@ class WadTable(DataTable):
             maps_count = maps_completed.get(wad_id, 0)
             maps_str = str(maps_count) if maps_count else "-"
 
-            # Status with color styling
+            # Status with color styling using Rich Text
             status = wad["status"]
+            color = STATUS_COLORS.get(status, "")
+            status_text = Text(status, style=color) if color else status
 
             self.add_row(
                 str(wad_id),
                 wad["title"],
                 wad["author"] or "-",
-                status,
+                status_text,
                 maps_str,
                 playtime_str,
                 key=str(wad_id),
@@ -77,6 +119,8 @@ class WadTable(DataTable):
         # Notify about initial selection
         if self._wads:
             self.post_message(self.WadSelected(self._wads[0]["id"]))
+
+        return len(self._wads)
 
     def get_selected_wad_id(self) -> int | None:
         """Get the currently selected WAD ID."""
@@ -91,6 +135,12 @@ class WadTable(DataTable):
             self.post_message(self.WadSelected(wad_id))
         else:
             self.post_message(self.WadSelected(None))
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Handle Enter key on a row."""
+        wad_id = self.get_selected_wad_id()
+        if wad_id is not None:
+            self.post_message(self.WadActivated(wad_id))
 
     async def action_cursor_down(self) -> None:
         """Move cursor down (j key)."""
@@ -132,18 +182,31 @@ class WadTable(DataTable):
         if self._wads:
             self.move_cursor(row=len(self._wads) - 1)
 
-    def handle_g_key(self) -> bool:
-        """Handle 'g' key press for gg motion. Returns True if handled."""
+    def action_handle_g(self) -> None:
+        """Handle 'g' key press for gg motion."""
         if self._g_pressed:
             # Second g - go to top
             self._g_pressed = False
+            if self._g_timeout_task:
+                self._g_timeout_task.cancel()
             self.run_worker(self.action_go_top())
-            return True
         else:
             # First g - wait for second
             self._g_pressed = True
-            # Reset after timeout (handled by screen)
-            return True
+            self._g_timeout_task = asyncio.create_task(self._g_timeout())
+
+    async def _g_timeout(self) -> None:
+        """Reset g state after timeout."""
+        await asyncio.sleep(0.5)
+        self._g_pressed = False
+
+    def handle_g_key(self) -> bool:
+        """Handle 'g' key press for gg motion. Returns True if handled.
+
+        Deprecated: Use action_handle_g instead. Kept for compatibility.
+        """
+        self.action_handle_g()
+        return True
 
     def reset_g_state(self) -> None:
         """Reset g key state."""

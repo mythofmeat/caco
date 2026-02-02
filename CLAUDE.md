@@ -58,13 +58,18 @@ src/caco/
 │   ├── app.py      # Main Textual App class
 │   ├── styles.tcss # Textual CSS styles
 │   ├── screens/    # Screen classes
-│   │   ├── library.py     # Main library browser
+│   │   ├── tabbed_library.py  # Main tabbed interface (entry point)
+│   │   ├── library.py     # Legacy library browser (not used)
 │   │   ├── wad_detail.py  # WAD detail view
+│   │   ├── wad_edit.py    # WAD metadata edit form
 │   │   └── sessions.py    # Session history
 │   └── widgets/    # Widget classes
-│       ├── wad_table.py   # DataTable for WAD list
+│       ├── wad_table.py   # DataTable for WAD list (with vim bindings)
 │       ├── wad_info.py    # Info panel widget
-│       └── filter_input.py # Search input
+│       ├── filter_input.py # Search/filter input
+│       ├── sort_select.py  # Sort dropdown widget
+│       ├── library_pane.py # Reusable library view (table + panel + filter)
+│       └── idgames_pane.py # idgames search and import
 └── sources/
     ├── idgames.py  # idgames archive adapter
     ├── doomwiki.py # Doom Wiki adapter

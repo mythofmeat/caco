@@ -5,7 +5,7 @@ from pathlib import Path
 from textual.app import App
 from textual.binding import Binding
 
-from caco.tui.screens.library import LibraryScreen
+from caco.tui.screens.tabbed_library import TabbedLibraryScreen
 
 
 class CacoApp(App):
@@ -20,4 +20,4 @@ class CacoApp(App):
 
     def on_mount(self) -> None:
         """Set up the app on mount."""
-        self.push_screen(LibraryScreen())
+        self.push_screen(TabbedLibraryScreen())

@@ -4,7 +4,93 @@ Screen {
     background: $surface;
 }
 
-/* Library Screen Layout */
+/* =============================================================================
+   Tabbed Library Screen
+   ============================================================================= */
+
+TabbedLibraryScreen {
+    layout: vertical;
+}
+
+TabbedLibraryScreen TabbedContent {
+    height: 1fr;
+}
+
+TabbedLibraryScreen ContentSwitcher {
+    height: 1fr;
+}
+
+TabbedLibraryScreen TabPane {
+    height: 100%;
+    padding: 0;
+}
+
+/* Tab styling */
+Tabs {
+    background: $surface-darken-1;
+}
+
+Tab {
+    padding: 0 2;
+}
+
+Tab.-active {
+    background: $primary;
+    color: $text;
+}
+
+Tab:hover {
+    background: $primary-darken-1;
+}
+
+/* =============================================================================
+   Library Pane (used in tabs)
+   ============================================================================= */
+
+LibraryPane {
+    height: 100%;
+    width: 100%;
+}
+
+LibraryPane #pane-header {
+    height: 3;
+    width: 100%;
+    padding: 0 1;
+    align: left middle;
+}
+
+LibraryPane #pane-content {
+    height: 1fr;
+}
+
+LibraryPane #wad-list-container {
+    width: 2fr;
+    height: 100%;
+}
+
+LibraryPane #info-panel-container {
+    width: 1fr;
+    height: 100%;
+    border-left: solid $primary;
+}
+
+LibraryPane #status-mode {
+    dock: bottom;
+    height: 1;
+    background: $warning;
+    color: $text;
+    padding: 0 1;
+    display: none;
+}
+
+LibraryPane #status-mode.visible {
+    display: block;
+}
+
+/* =============================================================================
+   Legacy Library Screen Layout (kept for compatibility)
+   ============================================================================= */
+
 LibraryScreen {
     layout: horizontal;
 }
@@ -20,7 +106,10 @@ LibraryScreen {
     border-left: solid $primary;
 }
 
-/* WAD Table */
+/* =============================================================================
+   WAD Table
+   ============================================================================= */
+
 WadTable {
     height: 100%;
 }
@@ -36,7 +125,10 @@ WadTable > .datatable--cursor {
     color: $text;
 }
 
-/* WAD Info Panel */
+/* =============================================================================
+   WAD Info Panel
+   ============================================================================= */
+
 WadInfoPanel {
     padding: 1 2;
 }
@@ -85,12 +177,15 @@ WadInfoPanel {
     color: magenta;
 }
 
-/* Filter Input */
+/* =============================================================================
+   Filter Input
+   ============================================================================= */
+
 FilterInput {
-    dock: top;
     height: 3;
-    padding: 0 1;
-    background: $surface-darken-1;
+    width: 1fr;
+    padding: 0;
+    background: transparent;
 }
 
 FilterInput:focus-within {
@@ -122,7 +217,169 @@ FilterInput:focus-within {
     color: $text-muted;
 }
 
-/* Header Bar */
+#filter-count {
+    width: auto;
+    color: $text-muted;
+    padding: 0 1;
+}
+
+/* =============================================================================
+   Sort Select
+   ============================================================================= */
+
+SortSelect {
+    height: 3;
+    width: auto;
+    align: right middle;
+}
+
+SortSelect Select {
+    width: 16;
+}
+
+SortSelect #sort-dir-btn {
+    width: 3;
+    min-width: 3;
+    margin-left: 1;
+}
+
+/* =============================================================================
+   idgames Search Pane
+   ============================================================================= */
+
+IdgamesSearchPane {
+    height: 100%;
+    width: 100%;
+}
+
+IdgamesSearchPane #search-header {
+    height: 3;
+    width: 100%;
+    padding: 0 1;
+    align: left middle;
+}
+
+IdgamesSearchPane #search-input {
+    width: 1fr;
+}
+
+IdgamesSearchPane #search-btn {
+    margin-left: 1;
+}
+
+IdgamesSearchPane #search-content {
+    height: 1fr;
+}
+
+IdgamesSearchPane #results-container {
+    width: 2fr;
+    height: 100%;
+}
+
+IdgamesSearchPane #preview-container {
+    width: 1fr;
+    height: 100%;
+    border-left: solid $primary;
+    padding: 1 2;
+}
+
+IdgamesSearchPane #preview-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+IdgamesSearchPane #preview-author {
+    color: $text-muted;
+    margin-bottom: 1;
+}
+
+IdgamesSearchPane #preview-rating {
+    margin-bottom: 1;
+}
+
+IdgamesSearchPane #preview-desc {
+    color: $text;
+}
+
+IdgamesSearchPane #search-status {
+    dock: bottom;
+    height: 1;
+    padding: 0 1;
+    color: $text-muted;
+}
+
+IdgamesSearchPane DataTable {
+    height: 100%;
+}
+
+/* =============================================================================
+   WAD Edit Screen
+   ============================================================================= */
+
+WadEditScreen {
+    align: center middle;
+}
+
+WadEditScreen #edit-container {
+    width: 80%;
+    max-width: 100;
+    height: auto;
+    max-height: 90%;
+    background: $surface;
+    border: thick $primary;
+    padding: 1 2;
+}
+
+WadEditScreen #edit-header {
+    text-style: bold;
+    margin-bottom: 1;
+    text-align: center;
+}
+
+WadEditScreen #edit-form {
+    height: auto;
+    max-height: 100%;
+}
+
+WadEditScreen .form-row {
+    height: auto;
+    margin-bottom: 1;
+}
+
+WadEditScreen .form-label {
+    width: 16;
+    color: $text-muted;
+}
+
+WadEditScreen .form-input {
+    width: 1fr;
+}
+
+WadEditScreen .form-section {
+    text-style: bold;
+    margin-top: 1;
+    margin-bottom: 1;
+    border-bottom: solid $primary-darken-2;
+}
+
+WadEditScreen TextArea {
+    height: 6;
+}
+
+WadEditScreen #button-row {
+    height: 3;
+    margin-top: 1;
+    align: center middle;
+}
+
+WadEditScreen #save-btn {
+    margin-right: 2;
+}
+
+/* =============================================================================
+   Header Bar
+   ============================================================================= */
+
 #header {
     dock: top;
     height: 1;
@@ -130,7 +387,10 @@ FilterInput:focus-within {
     padding: 0 1;
 }
 
-/* Footer / Key Hints */
+/* =============================================================================
+   Footer / Key Hints
+   ============================================================================= */
+
 #footer {
     dock: bottom;
     height: 1;
@@ -139,7 +399,10 @@ FilterInput:focus-within {
     padding: 0 1;
 }
 
-/* WAD Detail Screen */
+/* =============================================================================
+   WAD Detail Screen
+   ============================================================================= */
+
 WadDetailScreen {
     padding: 1 2;
 }
@@ -166,7 +429,10 @@ WadDetailScreen {
     color: $text;
 }
 
-/* Sessions Screen */
+/* =============================================================================
+   Sessions Screen
+   ============================================================================= */
+
 SessionsScreen {
     padding: 1 2;
 }
@@ -180,7 +446,10 @@ SessionsScreen {
     height: 1fr;
 }
 
-/* Status mode indicator */
+/* =============================================================================
+   Status Mode Indicator (legacy, also in LibraryPane)
+   ============================================================================= */
+
 #status-mode {
     dock: bottom;
     height: 1;

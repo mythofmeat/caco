@@ -81,6 +81,12 @@ class WadInfoPanel(Vertical):
 
         details_lines = []
 
+        # Rating (stars)
+        if wad.get("rating"):
+            rating = wad["rating"]
+            stars = "★" * rating + "☆" * (5 - rating)
+            details_lines.append(f"Rating: {stars}")
+
         # Playtime
         if playtime:
             details_lines.append(f"Playtime: {format_duration(playtime)}")

@@ -29,6 +29,7 @@ class WadDetailScreen(Screen):
         Binding("escape", "back", "Back", show=False),
         Binding("enter", "play_wad", "Play", show=True),
         Binding("h", "show_history", "History", show=True),
+        Binding("e", "edit_wad", "Edit", show=True),
     ]
 
     def __init__(self, wad_id: int) -> None:
@@ -184,3 +185,13 @@ class WadDetailScreen(Screen):
         """Show session history."""
         from caco.tui.screens.sessions import SessionsScreen
         self.app.push_screen(SessionsScreen(self.wad_id))
+
+    def action_edit_wad(self) -> None:
+        """Open WAD edit screen."""
+        from caco.tui.screens.wad_edit import WadEditScreen
+
+        def on_dismiss(result: bool | None) -> None:
+            if result:
+                self._load_details()
+
+        self.app.push_screen(WadEditScreen(self.wad_id), on_dismiss)

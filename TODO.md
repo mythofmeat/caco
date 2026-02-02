@@ -1,18 +1,27 @@
 # TUI Improvements
-- [ ] i don't love the current interface. here's how i would change it:
-  - [ ] there should be tabs that can be switched between by using the tab key
-    - [ ] tab 1: all wads
-    - [ ] tab 2: status:playing
-    - [ ] tab 3: status:to-play
-    - [ ] tab 4: status:finished
-    - [ ] tab 5: idgames search
-  - [ ] the current method of sorting is bad and unwieldy. there should just be a dropdown menu
-  - [ ] please implement the ability to play a WAD by pressing enter from the main page
-- [ ] There should be a way to edit and update all the info, including updating the sourceport and args for launching wads
-- [ ] Basically I want all the CLI features to be usable from the TUI, including adding WADs
+
+## Completed
+- [x] Tab should only be for swapping between tabs
+- [x] Pressing j/k should go up and down the list
+- [x] Pressing `/` or `f` should activate the filter
+- [x] Pressing `enter` on the filter should move the focus back to the main wad list view
+- [x] Pressing `escape` when filtering should empty the filter and move the focus back to the main wad list view
+- [x] Pressing `o` on the main list should open the sort dropdown
+- [x] Launch a WAD by pressing enter from the main list
+- [x] Tabs that can be switched between by using the tab key:
+  - [x] Tab 1: All WADs
+  - [x] Tab 2: status:playing
+  - [x] Tab 3: status:to-play
+  - [x] Tab 4: status:finished
+  - [x] Tab 5: idgames search
+- [x] Sort dropdown instead of keyboard cycling
+- [x] Edit and update all WAD info, including sourceport and args for launching
+
+## Remaining
+- [ ] All CLI features usable from TUI (some import sources not yet integrated)
 
 # GUI
-- [ ] gui for launching and managing WADs
+- [ ] GUI for launching and managing WADs
 - [ ] The GUI should be able to be called with `caco --gui`
-- [ ] downloaded WADs should have a thumbnail which is extracted directly from the TITLEPIC in the WAD
-  - there are various utilities that can do this. deutex is one, but there may be some python libraries that can extract WAD info
+- [ ] Downloaded WADs should have a thumbnail extracted from TITLEPIC in the WAD
+  - There are various utilities that can do this. deutex is one, but there may be some python libraries that can extract WAD info

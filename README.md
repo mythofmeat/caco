@@ -67,21 +67,65 @@ Launch an interactive terminal interface with vim-style navigation:
 caco --tui
 ```
 
+### Tabbed Interface
+
+The TUI features a tabbed interface for quick filtering:
+
+| Tab | Description |
+|-----|-------------|
+| **All** | Complete library view |
+| **Playing** | WADs with status "playing" |
+| **To-Play** | WADs with status "to-play" |
+| **Finished** | WADs with status "finished" |
+| **Search** | Search and import from idgames archive |
+
+Use `Tab` key to switch between tabs.
+
 ### Key Bindings
 
 | Key | Action |
 |-----|--------|
-| `j/k` | Navigate up/down |
+| `Tab` / `Shift+Tab` | Switch between tabs |
+| `j/k` | Navigate up/down in list |
 | `gg/G` | Jump to top/bottom |
 | `Ctrl+d/u` | Page down/up |
-| `/` | Open search filter |
-| `Enter` | Play selected WAD |
+| `/` or `f` | Focus filter input (live filtering as you type) |
+| `Enter` | Play selected WAD / Import (in Search tab) |
+| `Escape` | Clear filter and return to list |
 | `i` | View WAD details |
+| `e` | Edit WAD metadata |
 | `h` | View session history |
 | `s` | Enter status mode |
+| `o` | Open sort dropdown |
+| `O` | Toggle sort direction (↑/↓) |
+| `r` | Cycle rating (1-5 stars) |
+| `R` | Clear rating |
 | `q` | Quit/go back |
 
-**Status Mode:** Press `s` then one of:
+### Sort Dropdown
+
+Each library tab includes a sort dropdown in the header. Press `o` to focus it, or click to select a sort field. Use `O` to toggle ascending/descending order.
+
+### Edit Screen
+
+Press `e` on any WAD to open the edit form with fields for:
+- **Basic Info**: Title, Author, Year, Status, Rating, Tags
+- **Text Fields**: Notes, Description
+- **Launch Config**: Custom IWAD, Sourceport, Extra Args
+
+Save with `Ctrl+S`, cancel with `Escape`.
+
+### idgames Search Tab
+
+The Search tab allows importing WADs directly from the idgames archive:
+1. Enter a search query and press Enter or click Search
+2. Browse results in the table, preview details on the right
+3. Press `Enter` to import the selected WAD
+4. Library tabs automatically refresh with new imports
+
+### Status Mode
+
+Press `s` then one of:
 - `p` - playing
 - `f` - finished
 - `t` - to-play
@@ -89,7 +133,11 @@ caco --tui
 - `a` - abandoned
 - `w` - awaiting-update
 
-The search filter supports the same beets-style query syntax as `caco list`.
+### Filter Bar
+
+The search filter supports live filtering as you type (debounced). The status column is color-coded by status type.
+
+The filter supports the same beets-style query syntax as `caco list`.
 
 ## Usage
 
