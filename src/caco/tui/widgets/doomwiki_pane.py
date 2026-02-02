@@ -1,6 +1,5 @@
-"""idgames search pane widget for the TUI."""
+"""Doomwiki search pane widget for the TUI."""
 
-from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -9,12 +8,12 @@ from textual.widget import Widget
 from textual.widgets import Button, DataTable, Input, Static
 from textual.worker import Worker, get_current_worker
 
-from caco.idgames.models import FileEntry
-from caco.sources.idgames import IdgamesSource
+from caco.doomwiki.models import WikiEntry
+from caco.sources.doomwiki import DoomwikiSource
 
 
-class IdgamesSearchPane(Widget):
-    """Search pane for finding and importing WADs from idgames archive."""
+class DoomwikiSearchPane(Widget):
+    """Search pane for finding and importing WADs from Doom Wiki."""
 
     BINDINGS = [
         Binding("j", "cursor_down", "Down", show=False),
@@ -31,82 +30,81 @@ class IdgamesSearchPane(Widget):
             self.wad_id = wad_id
 
     DEFAULT_CSS = """
-    IdgamesSearchPane {
+    DoomwikiSearchPane {
         height: 100%;
         width: 100%;
     }
 
-    IdgamesSearchPane #search-header {
+    DoomwikiSearchPane #search-header {
         height: 3;
         width: 100%;
         padding: 0 1;
         align: left middle;
     }
 
-    IdgamesSearchPane #search-input {
+    DoomwikiSearchPane #search-input {
         width: 1fr;
     }
 
-    IdgamesSearchPane #search-btn {
+    DoomwikiSearchPane #search-btn {
         margin-left: 1;
     }
 
-    IdgamesSearchPane #search-content {
+    DoomwikiSearchPane #search-content {
         height: 1fr;
     }
 
-    IdgamesSearchPane #results-container {
+    DoomwikiSearchPane #results-container {
         width: 2fr;
         height: 100%;
     }
 
-    IdgamesSearchPane #preview-container {
+    DoomwikiSearchPane #preview-container {
         width: 1fr;
         height: 100%;
         border-left: solid $primary;
         padding: 1 2;
     }
 
-    IdgamesSearchPane #preview-title {
+    DoomwikiSearchPane #preview-title {
         text-style: bold;
         margin-bottom: 1;
     }
 
-    IdgamesSearchPane #preview-author {
+    DoomwikiSearchPane #preview-author {
         color: $text-muted;
         margin-bottom: 1;
     }
 
-    IdgamesSearchPane #preview-rating {
+    DoomwikiSearchPane #preview-tech {
         margin-bottom: 1;
     }
 
-    IdgamesSearchPane #preview-desc {
+    DoomwikiSearchPane #preview-desc {
         color: $text;
     }
 
-    IdgamesSearchPane #search-status {
+    DoomwikiSearchPane #search-status {
         dock: bottom;
         height: 1;
         padding: 0 1;
         color: $text-muted;
     }
 
-    IdgamesSearchPane DataTable {
+    DoomwikiSearchPane DataTable {
         height: 100%;
     }
     """
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
-        self._results: list[FileEntry] = []
-        self._result_id_to_row: dict[int, int] = {}
+        self._results: list[WikiEntry] = []
         self._current_worker: Worker | None = None
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="search-header"):
             yield Input(
-                placeholder="Search idgames archive...",
+                placeholder="Search Doom Wiki...",
                 id="search-input",
             )
             yield Button("Search", id="search-btn", variant="primary")
@@ -116,7 +114,7 @@ class IdgamesSearchPane(Widget):
             with Vertical(id="preview-container"):
                 yield Static("", id="preview-title")
                 yield Static("", id="preview-author")
-                yield Static("", id="preview-rating")
+                yield Static("", id="preview-tech")
                 yield Static("", id="preview-desc")
         yield Static("/ Search  Enter Import  j/k Navigate  1-5 Source", id="search-status")
 
@@ -126,11 +124,11 @@ class IdgamesSearchPane(Widget):
         table.cursor_type = "row"
         table.zebra_stripes = True
 
-        table.add_column("ID", key="id", width=8)
         table.add_column("Title", key="title", width=30)
         table.add_column("Author", key="author", width=20)
-        table.add_column("Rating", key="rating", width=8)
-        table.add_column("Date", key="date", width=12)
+        table.add_column("Year", key="year", width=6)
+        table.add_column("IWAD", key="iwad", width=12)
+        table.add_column("Port", key="port", width=15)
 
     def action_focus_search(self) -> None:
         """Focus the search input."""
@@ -158,19 +156,19 @@ class IdgamesSearchPane(Widget):
             self._current_worker.cancel()
 
         status = self.query_one("#search-status", Static)
-        status.update(f"Searching for '{query}'...")
+        status.update(f"Searching Doom Wiki for '{query}'...")
 
         self._current_worker = self.run_worker(
-            self._search_idgames(query),
+            self._search_doomwiki(query),
             exclusive=True,
         )
 
-    async def _search_idgames(self, query: str) -> list[FileEntry]:
-        """Search idgames in a worker thread."""
+    async def _search_doomwiki(self, query: str) -> list[WikiEntry]:
+        """Search Doom Wiki in a worker thread."""
         worker = get_current_worker()
 
         try:
-            with IdgamesSource() as source:
+            with DoomwikiSource() as source:
                 if worker.is_cancelled:
                     return []
                 results = source.search(query)
@@ -185,10 +183,9 @@ class IdgamesSearchPane(Widget):
             results = event.worker.result
             self._display_results(results)
 
-    def _display_results(self, results: list[FileEntry]) -> None:
+    def _display_results(self, results: list[WikiEntry]) -> None:
         """Display search results in the table."""
         self._results = results
-        self._result_id_to_row.clear()
 
         table = self.query_one("#results-table", DataTable)
         table.clear()
@@ -200,25 +197,21 @@ class IdgamesSearchPane(Widget):
             self._clear_preview()
             return
 
-        for i, entry in enumerate(results):
-            self._result_id_to_row[entry.id] = i
+        for entry in results:
+            # Format year
+            year_text = str(entry.year) if entry.year else "-"
 
-            # Format rating
-            if entry.rating > 0:
-                rating_text = f"{entry.rating:.1f}"
-            else:
-                rating_text = "-"
-
-            # Format date (YYYY-MM-DD)
-            date_text = entry.date[:10] if entry.date else "-"
+            # Truncate long values
+            iwad = entry.iwad[:12] if entry.iwad else "-"
+            port = entry.port[:15] if entry.port else "-"
 
             table.add_row(
-                str(entry.id),
-                entry.title or entry.filename,
-                entry.author or "-",
-                rating_text,
-                date_text,
-                key=str(entry.id),
+                entry.display_name[:30] if len(entry.display_name) > 30 else entry.display_name,
+                entry.author[:20] if entry.author and len(entry.author) > 20 else (entry.author or "-"),
+                year_text,
+                iwad,
+                port,
+                key=str(entry.page_id),
             )
 
         status.update(f"Found {len(results)} results  |  Enter Import  j/k Navigate  1-5 Source")
@@ -232,30 +225,30 @@ class IdgamesSearchPane(Widget):
         """Clear the preview panel."""
         self.query_one("#preview-title", Static).update("")
         self.query_one("#preview-author", Static).update("")
-        self.query_one("#preview-rating", Static).update("")
+        self.query_one("#preview-tech", Static).update("")
         self.query_one("#preview-desc", Static).update("")
 
-    def _update_preview(self, entry: FileEntry) -> None:
+    def _update_preview(self, entry: WikiEntry) -> None:
         """Update the preview panel with entry details."""
         title = self.query_one("#preview-title", Static)
-        title.update(entry.title or entry.filename)
+        title.update(entry.display_name)
 
         author = self.query_one("#preview-author", Static)
         author_parts = []
         if entry.author:
             author_parts.append(entry.author)
-        if entry.date:
-            year = entry.date.split("-")[0] if "-" in entry.date else entry.date[:4]
-            author_parts.append(f"({year})")
+        if entry.year:
+            author_parts.append(f"({entry.year})")
         author.update(" ".join(author_parts) if author_parts else "Unknown author")
 
-        rating = self.query_one("#preview-rating", Static)
-        if entry.rating > 0:
-            stars_full = int(entry.rating)
-            stars = "★" * stars_full + "☆" * (5 - stars_full)
-            rating.update(f"Rating: {stars} ({entry.rating:.1f}, {entry.votes} votes)")
-        else:
-            rating.update("Rating: Not rated")
+        # Technical info (IWAD + Port)
+        tech = self.query_one("#preview-tech", Static)
+        tech_parts = []
+        if entry.iwad:
+            tech_parts.append(f"IWAD: {entry.iwad}")
+        if entry.port:
+            tech_parts.append(f"Port: {entry.port}")
+        tech.update(" | ".join(tech_parts) if tech_parts else "")
 
         desc = self.query_one("#preview-desc", Static)
         description = entry.description or "No description available"
@@ -292,23 +285,21 @@ class IdgamesSearchPane(Widget):
         entry = self._results[table.cursor_row]
         self._import_entry(entry)
 
-    def _import_entry(self, entry: FileEntry) -> None:
+    def _import_entry(self, entry: WikiEntry) -> None:
         """Import a WAD entry into the library."""
         status = self.query_one("#search-status", Static)
-        status.update(f"Importing {entry.title or entry.filename}...")
+        status.update(f"Importing {entry.display_name}...")
 
         self.run_worker(self._do_import(entry), exclusive=False)
 
-    async def _do_import(self, entry: FileEntry) -> None:
+    async def _do_import(self, entry: WikiEntry) -> None:
         """Perform the import in a worker."""
         from caco import db
 
         # Check for duplicates
         existing = db.find_duplicate(
-            source_type=db.SourceType.IDGAMES,
-            source_id=str(entry.id),
-            filename=entry.filename,
-            author=entry.author,
+            source_type=db.SourceType.DOOMWIKI,
+            source_id=str(entry.page_id),
         )
 
         if existing:
@@ -321,10 +312,10 @@ class IdgamesSearchPane(Widget):
             return
 
         try:
-            with IdgamesSource() as source:
+            with DoomwikiSource() as source:
                 wad_id = source.import_wad(entry)
 
-            self.notify(f"Imported: {entry.title or entry.filename} (ID: {wad_id})")
+            self.notify(f"Imported: {entry.display_name} (ID: {wad_id})")
             status = self.query_one("#search-status", Static)
             status.update(f"Successfully imported as ID {wad_id}")
 

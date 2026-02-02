@@ -1,5 +1,8 @@
+# General
+- [ ] The description from idgames should also include the `textfile` element from the idgames api (https://www.doomworld.com/idgames/api/)
+
 # TUI Improvements
-- [ ] All CLI features usable from TUI (some import sources not yet integrated)
+- [ ] able to choose a default start page and sort via the config file
 
 # GUI
 - [ ] GUI for launching and managing WADs

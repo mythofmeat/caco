@@ -69,7 +69,12 @@ src/caco/
 │       ├── filter_input.py # Search/filter input
 │       ├── sort_select.py  # Sort dropdown widget
 │       ├── library_pane.py # Reusable library view (table + panel + filter)
-│       └── idgames_pane.py # idgames search and import
+│       ├── import_pane.py  # Import container with source selector
+│       ├── idgames_pane.py # idgames search and import
+│       ├── doomwiki_pane.py # Doom Wiki search and import
+│       ├── doomworld_pane.py # Doomworld forum URL import
+│       ├── url_pane.py     # Manual URL import form
+│       └── local_pane.py   # Local file import form
 └── sources/
     ├── idgames.py  # idgames archive adapter
     ├── doomwiki.py # Doom Wiki adapter

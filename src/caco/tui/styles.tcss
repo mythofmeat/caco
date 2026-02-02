@@ -313,6 +313,324 @@ IdgamesSearchPane DataTable {
 }
 
 /* =============================================================================
+   Import Pane (container)
+   ============================================================================= */
+
+ImportPane {
+    height: 100%;
+    width: 100%;
+}
+
+ImportPane #source-selector {
+    height: 3;
+    width: 100%;
+    padding: 0 1;
+    align: left middle;
+    background: $surface-darken-1;
+}
+
+ImportPane #source-selector RadioSet {
+    width: auto;
+    layout: horizontal;
+}
+
+ImportPane #source-selector RadioButton {
+    padding: 0 1;
+    margin: 0 1;
+    background: $surface;
+    border: none;
+}
+
+ImportPane #source-selector RadioButton.-on {
+    background: $primary;
+    color: $text;
+    text-style: bold;
+}
+
+ImportPane #import-content {
+    height: 1fr;
+}
+
+/* =============================================================================
+   Doomwiki Search Pane
+   ============================================================================= */
+
+DoomwikiSearchPane {
+    height: 100%;
+    width: 100%;
+}
+
+DoomwikiSearchPane #search-header {
+    height: 3;
+    width: 100%;
+    padding: 0 1;
+    align: left middle;
+}
+
+DoomwikiSearchPane #search-input {
+    width: 1fr;
+}
+
+DoomwikiSearchPane #search-btn {
+    margin-left: 1;
+}
+
+DoomwikiSearchPane #search-content {
+    height: 1fr;
+}
+
+DoomwikiSearchPane #results-container {
+    width: 2fr;
+    height: 100%;
+}
+
+DoomwikiSearchPane #preview-container {
+    width: 1fr;
+    height: 100%;
+    border-left: solid $primary;
+    padding: 1 2;
+}
+
+DoomwikiSearchPane #preview-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+DoomwikiSearchPane #preview-author {
+    color: $text-muted;
+    margin-bottom: 1;
+}
+
+DoomwikiSearchPane #preview-tech {
+    color: $primary-lighten-2;
+    margin-bottom: 1;
+}
+
+DoomwikiSearchPane #preview-desc {
+    color: $text;
+}
+
+DoomwikiSearchPane #search-status {
+    dock: bottom;
+    height: 1;
+    padding: 0 1;
+    color: $text-muted;
+}
+
+DoomwikiSearchPane DataTable {
+    height: 100%;
+}
+
+/* =============================================================================
+   Doomworld URL Pane
+   ============================================================================= */
+
+DoomworldUrlPane {
+    height: 100%;
+    width: 100%;
+}
+
+DoomworldUrlPane #url-header {
+    height: 3;
+    width: 100%;
+    padding: 0 1;
+    align: left middle;
+}
+
+DoomworldUrlPane #url-input {
+    width: 1fr;
+}
+
+DoomworldUrlPane #fetch-btn {
+    margin-left: 1;
+}
+
+DoomworldUrlPane #content-area {
+    height: 1fr;
+}
+
+DoomworldUrlPane #form-container {
+    width: 1fr;
+    height: 100%;
+    padding: 1 2;
+}
+
+DoomworldUrlPane #preview-container {
+    width: 1fr;
+    height: 100%;
+    border-left: solid $primary;
+    padding: 1 2;
+}
+
+DoomworldUrlPane .form-row {
+    height: auto;
+    margin-bottom: 1;
+    align: left middle;
+}
+
+DoomworldUrlPane .form-label {
+    width: 10;
+    color: $text-muted;
+}
+
+DoomworldUrlPane .form-input {
+    width: 1fr;
+}
+
+DoomworldUrlPane #preview-header {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+DoomworldUrlPane #preview-meta {
+    color: $text-muted;
+    margin-bottom: 1;
+}
+
+DoomworldUrlPane #preview-excerpt {
+    color: $text;
+    height: 1fr;
+    overflow: auto;
+}
+
+DoomworldUrlPane #placeholder {
+    width: 100%;
+    height: 100%;
+    content-align: center middle;
+    color: $text-muted;
+}
+
+DoomworldUrlPane #status {
+    dock: bottom;
+    height: 1;
+    padding: 0 1;
+    color: $text-muted;
+}
+
+/* =============================================================================
+   URL Import Pane
+   ============================================================================= */
+
+UrlImportPane {
+    height: 100%;
+    width: 100%;
+}
+
+UrlImportPane #form-area {
+    width: 100%;
+    height: 100%;
+    padding: 1 2;
+    align: center top;
+}
+
+UrlImportPane #form-box {
+    width: 80;
+    max-width: 100%;
+    height: auto;
+}
+
+UrlImportPane #form-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+UrlImportPane .form-row {
+    height: auto;
+    margin-bottom: 1;
+    align: left middle;
+}
+
+UrlImportPane .form-label {
+    width: 12;
+    color: $text-muted;
+}
+
+UrlImportPane .form-input {
+    width: 1fr;
+}
+
+UrlImportPane #desc-area {
+    height: 6;
+    width: 1fr;
+}
+
+UrlImportPane #import-btn {
+    margin-top: 1;
+    width: 100%;
+}
+
+UrlImportPane #status {
+    dock: bottom;
+    height: 1;
+    padding: 0 1;
+    color: $text-muted;
+}
+
+/* =============================================================================
+   Local Import Pane
+   ============================================================================= */
+
+LocalImportPane {
+    height: 100%;
+    width: 100%;
+}
+
+LocalImportPane #form-area {
+    width: 100%;
+    height: 100%;
+    padding: 1 2;
+    align: center top;
+}
+
+LocalImportPane #form-box {
+    width: 80;
+    max-width: 100%;
+    height: auto;
+}
+
+LocalImportPane #form-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+LocalImportPane .form-row {
+    height: auto;
+    margin-bottom: 1;
+    align: left middle;
+}
+
+LocalImportPane .form-label {
+    width: 12;
+    color: $text-muted;
+}
+
+LocalImportPane .form-input {
+    width: 1fr;
+}
+
+LocalImportPane #file-info {
+    color: $success;
+    margin-bottom: 1;
+}
+
+LocalImportPane #desc-area {
+    height: 6;
+    width: 1fr;
+}
+
+LocalImportPane #import-btn {
+    margin-top: 1;
+    width: 100%;
+}
+
+LocalImportPane #status {
+    dock: bottom;
+    height: 1;
+    padding: 0 1;
+    color: $text-muted;
+}
+
+/* =============================================================================
    WAD Edit Screen
    ============================================================================= */
 

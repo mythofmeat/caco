@@ -77,7 +77,8 @@ The TUI features a tabbed interface for quick filtering:
 | **Playing** | WADs with status "playing" |
 | **To-Play** | WADs with status "to-play" |
 | **Finished** | WADs with status "finished" |
-| **Search** | Search and import from idgames archive |
+| **Backlog** | WADs with status "backlog" |
+| **Import** | Import from multiple sources |
 
 Use `Tab` key to switch between tabs.
 
@@ -115,13 +116,33 @@ Press `e` on any WAD to open the edit form with fields for:
 
 Save with `Ctrl+S`, cancel with `Escape`.
 
-### idgames Search Tab
+### Import Tab
 
-The Search tab allows importing WADs directly from the idgames archive:
+The Import tab provides access to all import sources in one place. Use the source selector at the top or press `1-5` to switch between sources:
+
+| Source | Description |
+|--------|-------------|
+| **idgames** | Search the idgames archive |
+| **Doomwiki** | Search Doom Wiki for WAD pages |
+| **Doomworld** | Import from Doomworld forum threads (paste URL) |
+| **URL** | Manual entry with title and download URL |
+| **Local** | Import local WAD files |
+
+**Search-based sources (idgames, Doomwiki):**
 1. Enter a search query and press Enter or click Search
 2. Browse results in the table, preview details on the right
 3. Press `Enter` to import the selected WAD
-4. Library tabs automatically refresh with new imports
+
+**URL-based source (Doomworld):**
+1. Paste a forum thread URL and click Fetch
+2. Edit pre-filled metadata if needed
+3. Press `Ctrl+Enter` or click Import
+
+**Form-based sources (URL, Local):**
+1. Fill in the form fields (title is required)
+2. Press `Ctrl+Enter` or click Import
+
+Library tabs automatically refresh with new imports.
 
 ### Status Mode
 
