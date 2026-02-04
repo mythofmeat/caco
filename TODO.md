@@ -1,5 +1,6 @@
 # General
 - [ ] The description from idgames should also include the `textfile` element from the idgames api (https://www.doomworld.com/idgames/api/)
+- [ ] i think we should just remove the `completed maps` feature entirely. not enough sourceports provide ways to access this data and it's not particularly useful.
 
 # TUI Improvements
 - [ ] able to choose a default start page and sort via the config file
