@@ -503,6 +503,7 @@ def _render_wad_info_plain(wad: dict) -> None:
     print(f"tags={','.join(wad.get('tags') or [])}")
     print(f"source_type={wad['source_type']}")
     print(f"source_url={wad['source_url'] or ''}")
+    print(f"idgames_id={wad.get('idgames_id') or ''}")
     print(f"filename={wad.get('filename') or ''}")
     print(f"playtime={format_duration(playtime) if playtime else ''}")
     print(f"sessions={len(sessions)}")
@@ -750,6 +751,8 @@ def info(query: str, yes: bool, plain: bool):
     console.print(f"[bold]Source:[/bold] {wad['source_type']}")
     if wad["source_url"]:
         console.print(f"[bold]URL:[/bold] {wad['source_url']}")
+    if wad.get("idgames_id"):
+        console.print(f"[bold]idgames ID:[/bold] {wad['idgames_id']}")
 
     if wad["description"]:
         console.print()
@@ -824,6 +827,8 @@ def info(query: str, yes: bool, plain: bool):
 @click.option("--clear-sourceport", is_flag=True, help="Clear custom sourceport")
 @click.option("--args", "custom_args", help="Custom arguments (JSON array or space-separated)")
 @click.option("--clear-args", is_flag=True, help="Clear custom arguments")
+@click.option("--idgames-id", help="Set idgames file ID for downloading")
+@click.option("--clear-idgames-id", is_flag=True, help="Clear idgames file ID")
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation for multi-WAD updates")
 @click.option("--dry-run", is_flag=True, help="Show what would change without making changes")
 def update(
@@ -846,6 +851,8 @@ def update(
     clear_sourceport: bool,
     custom_args: str | None,
     clear_args: bool,
+    idgames_id: str | None,
+    clear_idgames_id: bool,
     yes: bool,
     dry_run: bool,
 ):
@@ -920,6 +927,14 @@ def update(
     elif clear_args:
         updates["custom_args"] = None
         update_descriptions.append("custom_args → (cleared)")
+
+    # Cross-source idgames download ID
+    if idgames_id:
+        updates["idgames_id"] = idgames_id
+        update_descriptions.append(f"idgames_id → {idgames_id}")
+    elif clear_idgames_id:
+        updates["idgames_id"] = None
+        update_descriptions.append("idgames_id → (cleared)")
 
     if not updates:
         err_console.print("[yellow]No updates specified[/yellow]")

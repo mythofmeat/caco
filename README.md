@@ -305,6 +305,21 @@ caco update 1 --clear-iwad --clear-sourceport --clear-args
 
 Priority: CLI arguments > Per-WAD config > Global config
 
+### Cross-Source Downloading
+
+WADs imported from non-idgames sources (Doomwiki, Doomworld, etc.) can be linked to an idgames file ID for auto-downloading:
+
+```bash
+# Set idgames file ID for a WAD imported from another source
+caco update "Eviternity" --idgames-id 19509
+
+# Now `caco play` will auto-download from idgames
+caco play "Eviternity"
+
+# Clear the idgames ID
+caco update "Eviternity" --clear-idgames-id
+```
+
 ### Map Completion Tracking
 
 Track which maps you've completed in each WAD. Automatically syncs with nyan-doom/dsda-doom stats files.

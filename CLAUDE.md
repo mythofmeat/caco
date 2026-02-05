@@ -98,6 +98,7 @@ src/caco/
   - Status shortcuts: `status:p` (playing), `status:f` (finished), etc.
   - Glob patterns: `tag:caco*` (matches cacoward, etc.)
 - Per-WAD config: `custom_iwad`, `custom_sourceport`, `custom_args` columns in wads table
+- Cross-source downloading: `idgames_id` column allows any WAD to download via idgames API (set with `caco update --idgames-id`)
 
 ## Dependencies
 

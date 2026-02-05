@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS wads (
     source_type TEXT NOT NULL,
     source_id TEXT,      -- e.g., idgames file ID
     source_url TEXT,     -- download URL or forum thread
+    idgames_id TEXT,     -- idgames file ID for downloading (any source)
 
     -- File info (when downloaded/cached)
     filename TEXT,
@@ -180,6 +181,7 @@ def init_db() -> None:
         _migrate_add_deleted_at(conn)
         _migrate_add_playthrough_cycle(conn)
         _migrate_add_version(conn)
+        _migrate_add_idgames_id(conn)
 
 
 def _migrate_add_custom_play_config(conn: sqlite3.Connection) -> None:
@@ -266,6 +268,14 @@ def _migrate_add_version(conn: sqlite3.Connection) -> None:
     columns = {row[1] for row in cursor.fetchall()}
     if "version" not in columns:
         conn.execute("ALTER TABLE wads ADD COLUMN version TEXT")
+
+
+def _migrate_add_idgames_id(conn: sqlite3.Connection) -> None:
+    """Add idgames_id column for cross-source downloading."""
+    cursor = conn.execute("PRAGMA table_info(wads)")
+    columns = {row[1] for row in cursor.fetchall()}
+    if "idgames_id" not in columns:
+        conn.execute("ALTER TABLE wads ADD COLUMN idgames_id TEXT")
 
 
 def add_wad(

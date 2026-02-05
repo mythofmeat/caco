@@ -174,14 +174,17 @@ def get_wad_path(wad: dict, console: Console | None = None) -> Path | None:
     # Download based on source type
     source_type = wad["source_type"]
 
-    if source_type == "idgames":
+    # Resolve idgames ID: explicit idgames_id takes priority, then source_id for idgames sources
+    idgames_id = wad.get("idgames_id") or (wad["source_id"] if source_type == "idgames" else None)
+
+    if idgames_id:
         from caco.sources.idgames import IdgamesSource
 
         cache_dir = get_cache_dir()
         cache_dir.mkdir(parents=True, exist_ok=True)
 
         with IdgamesSource() as source:
-            entry = source.get(int(wad["source_id"]))
+            entry = source.get(int(idgames_id))
             dest = source.download(entry, cache_dir, console=console)
 
             # Update cached path in database

@@ -71,6 +71,8 @@ complete -c caco -n "__fish_seen_subcommand_from update" -l sourceport -d "Custo
 complete -c caco -n "__fish_seen_subcommand_from update" -l clear-sourceport -d "Clear custom sourceport"
 complete -c caco -n "__fish_seen_subcommand_from update" -l args -d "Custom arguments"
 complete -c caco -n "__fish_seen_subcommand_from update" -l clear-args -d "Clear custom arguments"
+complete -c caco -n "__fish_seen_subcommand_from update" -l idgames-id -d "Set idgames file ID for downloading"
+complete -c caco -n "__fish_seen_subcommand_from update" -l clear-idgames-id -d "Clear idgames file ID"
 complete -c caco -n "__fish_seen_subcommand_from update" -s y -l yes -d "Skip confirmation for multi-WAD updates"
 
 # delete options
