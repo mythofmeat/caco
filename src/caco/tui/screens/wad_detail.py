@@ -100,9 +100,6 @@ class WadDetailScreen(Screen):
         if last_played:
             content.mount(self._make_row("Last Played", last_played[:10]))
 
-        map_stats = db.get_map_completion_stats(self.wad_id)
-        content.mount(self._make_row("Maps Completed", str(map_stats["unique_maps"])))
-
         times_beaten = db.get_times_beaten(self.wad_id)
         content.mount(self._make_row("Times Beaten", str(times_beaten)))
 

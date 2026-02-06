@@ -8,6 +8,7 @@ from textual.widget import Widget
 from textual.widgets import Static
 
 from caco import db
+from caco.config import get_tui_config
 from caco.player import play
 from caco.tui.widgets.filter_input import FilterInput
 from caco.tui.widgets.sort_select import SortSelect
@@ -133,13 +134,14 @@ class LibraryPane(Widget):
         self._status_filter = status_filter
         self._current_query: str = ""
         self._status_mode = False
-        self._sort_by: str = "id"
-        self._sort_desc: bool = False
+        tui_config = get_tui_config()
+        self._sort_by: str = tui_config.get("default_sort", "id")
+        self._sort_desc: bool = tui_config.get("default_sort_desc", False)
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="pane-header"):
             yield FilterInput(id="filter")
-            yield SortSelect(id="sort-select")
+            yield SortSelect(sort_by=self._sort_by, sort_desc=self._sort_desc, id="sort-select")
         with Horizontal(id="pane-content"):
             with Vertical(id="wad-list-container"):
                 yield WadTable(id="wad-table")

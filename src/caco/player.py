@@ -1,7 +1,6 @@
 """Sourceport launcher and playtime tracking."""
 
 import json
-import re
 import subprocess
 from pathlib import Path
 
@@ -16,151 +15,7 @@ from caco.config import (
     get_default_sourceport,
     get_iwad,
     get_sourceport_args,
-    get_stats_dir,
 )
-
-
-# =============================================================================
-# Stats File Parsing (nyan-doom/dsda-doom)
-# =============================================================================
-
-# Common IWAD name mappings
-IWAD_NAMES = {
-    "doom.wad": "doom",
-    "doom2.wad": "doom2",
-    "tnt.wad": "tnt",
-    "plutonia.wad": "plutonia",
-    "heretic.wad": "heretic",
-    "hexen.wad": "hexen",
-    "strife.wad": "strife",
-    "freedoom1.wad": "freedoom1",
-    "freedoom2.wad": "freedoom2",
-    "freedm.wad": "freedm",
-}
-
-
-def _detect_iwad_name(wad: dict) -> str | None:
-    """Detect the IWAD name from WAD metadata."""
-    # Check custom_iwad first
-    if wad.get("custom_iwad"):
-        iwad_path = Path(wad["custom_iwad"])
-        iwad_lower = iwad_path.name.lower()
-        return IWAD_NAMES.get(iwad_lower, iwad_path.stem.lower())
-
-    # Try to detect from custom_args "-iwad tnt"
-    if wad.get("custom_args"):
-        try:
-            args = json.loads(wad["custom_args"])
-            for i, arg in enumerate(args):
-                if arg.lower() == "-iwad" and i + 1 < len(args):
-                    iwad_arg = Path(args[i + 1])
-                    iwad_lower = iwad_arg.name.lower()
-                    return IWAD_NAMES.get(iwad_lower, iwad_arg.stem.lower())
-        except (json.JSONDecodeError, TypeError):
-            pass
-
-    # Default to doom2 (most common)
-    return "doom2"
-
-
-def _get_wad_basename(wad: dict) -> str | None:
-    """Get the WAD basename for stats directory."""
-    filename = wad.get("filename")
-    if not filename:
-        return None
-
-    # Strip extension
-    p = Path(filename)
-    return p.stem.lower()
-
-
-def get_stats_path(wad: dict, stats_dir: Path | None = None) -> Path | None:
-    """
-    Build stats.txt path from WAD metadata.
-
-    Path format: {stats_dir}/{iwad}/{wad_basename}/stats.txt
-
-    Returns None if can't determine path.
-    """
-    if stats_dir is None:
-        stats_dir = get_stats_dir()
-
-    iwad_name = _detect_iwad_name(wad)
-    wad_basename = _get_wad_basename(wad)
-
-    if not iwad_name or not wad_basename:
-        return None
-
-    return stats_dir / iwad_name / wad_basename / "stats.txt"
-
-
-def parse_stats_file(path: Path) -> list[tuple[str, int]]:
-    """
-    Parse nyan-doom/dsda-doom stats.txt file.
-
-    Stats.txt format (space-delimited):
-    MAP01 1 1 4 9920 -1 -1 1 214 99 14 1 101 16 3
-          ^     ^              ^
-          |     |              +-- exits (index 7, 0 = never completed)
-          |     +-- skill (index 3, 0=unplayed, 1-5 = ITYTD→NM)
-          +-- map number (index 1)
-
-    A map is completed if: skill > 0 AND exits > 0
-
-    Returns: list of (map_name, skill) tuples for completed maps.
-    """
-    if not path.exists():
-        return []
-
-    completions = []
-    try:
-        with open(path) as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-
-                parts = line.split()
-                if len(parts) < 8:
-                    continue
-
-                map_name = parts[0]
-                try:
-                    skill = int(parts[3])
-                    exits = int(parts[7])
-                except (ValueError, IndexError):
-                    continue
-
-                # Completed if skill > 0 and exits > 0
-                if skill > 0 and exits > 0:
-                    completions.append((map_name, skill))
-
-    except (OSError, IOError):
-        pass
-
-    return completions
-
-
-def sync_completions_from_stats(wad: dict, console: Console | None = None) -> int:
-    """
-    Sync map completions from stats file for a WAD.
-
-    Returns number of new completions added.
-    """
-    stats_path = get_stats_path(wad)
-    if not stats_path or not stats_path.exists():
-        return 0
-
-    completions = parse_stats_file(stats_path)
-    if not completions:
-        return 0
-
-    added = db.sync_map_completions(wad["id"], completions)
-
-    if added > 0 and console:
-        console.print(f"[dim]Synced {added} new map completion(s)[/dim]")
-
-    return added
 
 
 def get_wad_path(wad: dict, console: Console | None = None) -> Path | None:
@@ -386,9 +241,6 @@ def play(
     finally:
         # End session and calculate duration
         db.end_session(session_id)
-
-    # Auto-sync map completions from stats file
-    sync_completions_from_stats(wad, console=console)
 
     # Return duration
     sessions = db.get_sessions(wad_id)

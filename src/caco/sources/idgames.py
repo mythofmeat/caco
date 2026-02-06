@@ -48,11 +48,16 @@ class IdgamesSource:
             except (ValueError, IndexError):
                 pass
 
+        # Build description, appending textfile content if available
+        description = entry.description
+        if entry.textfile:
+            description = f"{description}\n\n---\n\n{entry.textfile}" if description else entry.textfile
+
         return add_wad(
             title=entry.title,
             author=entry.author,
             year=year,
-            description=entry.description,
+            description=description,
             source_type=SourceType.IDGAMES,
             source_id=str(entry.id),
             source_url=entry.url,

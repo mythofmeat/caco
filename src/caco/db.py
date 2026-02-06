@@ -132,16 +132,6 @@ CREATE TABLE IF NOT EXISTS sessions (
     FOREIGN KEY (wad_id) REFERENCES wads(id) ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS map_completions (
-    id INTEGER PRIMARY KEY,
-    wad_id INTEGER NOT NULL REFERENCES wads(id) ON DELETE CASCADE,
-    map_name TEXT NOT NULL,
-    skill INTEGER,
-    completed_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    notes TEXT,
-    UNIQUE(wad_id, map_name, skill)
-);
-
 CREATE TABLE IF NOT EXISTS wad_completions (
     id INTEGER PRIMARY KEY,
     wad_id INTEGER NOT NULL REFERENCES wads(id) ON DELETE CASCADE,
@@ -155,7 +145,6 @@ CREATE INDEX IF NOT EXISTS idx_wads_source_type ON wads(source_type);
 CREATE INDEX IF NOT EXISTS idx_tags_wad_id ON tags(wad_id);
 CREATE INDEX IF NOT EXISTS idx_tags_tag ON tags(tag);
 CREATE INDEX IF NOT EXISTS idx_sessions_wad_id ON sessions(wad_id);
-CREATE INDEX IF NOT EXISTS idx_map_completions_wad_id ON map_completions(wad_id);
 CREATE INDEX IF NOT EXISTS idx_wad_completions_wad_id ON wad_completions(wad_id);
 """
 
@@ -175,13 +164,12 @@ def init_db() -> None:
         conn.executescript(SCHEMA)
         # Migrations for existing databases
         _migrate_add_custom_play_config(conn)
-        _migrate_add_map_completions(conn)
         _migrate_add_wad_completions(conn)
         _migrate_rename_wishlist_to_toplay(conn)
         _migrate_add_deleted_at(conn)
-        _migrate_add_playthrough_cycle(conn)
         _migrate_add_version(conn)
         _migrate_add_idgames_id(conn)
+        _migrate_drop_map_completions(conn)
 
 
 def _migrate_add_custom_play_config(conn: sqlite3.Connection) -> None:
@@ -194,26 +182,6 @@ def _migrate_add_custom_play_config(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE wads ADD COLUMN custom_sourceport TEXT")
     if "custom_args" not in columns:
         conn.execute("ALTER TABLE wads ADD COLUMN custom_args TEXT")
-
-
-def _migrate_add_map_completions(conn: sqlite3.Connection) -> None:
-    """Create map_completions table if missing."""
-    cursor = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='map_completions'"
-    )
-    if not cursor.fetchone():
-        conn.execute("""
-            CREATE TABLE map_completions (
-                id INTEGER PRIMARY KEY,
-                wad_id INTEGER NOT NULL REFERENCES wads(id) ON DELETE CASCADE,
-                map_name TEXT NOT NULL,
-                skill INTEGER,
-                completed_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                notes TEXT,
-                UNIQUE(wad_id, map_name, skill)
-            )
-        """)
-        conn.execute("CREATE INDEX idx_map_completions_wad_id ON map_completions(wad_id)")
 
 
 def _migrate_add_wad_completions(conn: sqlite3.Connection) -> None:
@@ -247,21 +215,6 @@ def _migrate_add_deleted_at(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE wads ADD COLUMN deleted_at TEXT")
 
 
-def _migrate_add_playthrough_cycle(conn: sqlite3.Connection) -> None:
-    """Add playthrough_cycle column to wads and cycle to map_completions."""
-    # Add playthrough_cycle to wads
-    cursor = conn.execute("PRAGMA table_info(wads)")
-    wad_columns = {row[1] for row in cursor.fetchall()}
-    if "playthrough_cycle" not in wad_columns:
-        conn.execute("ALTER TABLE wads ADD COLUMN playthrough_cycle INTEGER DEFAULT 1")
-
-    # Add cycle to map_completions
-    cursor = conn.execute("PRAGMA table_info(map_completions)")
-    mc_columns = {row[1] for row in cursor.fetchall()}
-    if "cycle" not in mc_columns:
-        conn.execute("ALTER TABLE map_completions ADD COLUMN cycle INTEGER DEFAULT 1")
-
-
 def _migrate_add_version(conn: sqlite3.Connection) -> None:
     """Add version column for non-idgames releases."""
     cursor = conn.execute("PRAGMA table_info(wads)")
@@ -276,6 +229,11 @@ def _migrate_add_idgames_id(conn: sqlite3.Connection) -> None:
     columns = {row[1] for row in cursor.fetchall()}
     if "idgames_id" not in columns:
         conn.execute("ALTER TABLE wads ADD COLUMN idgames_id TEXT")
+
+
+def _migrate_drop_map_completions(conn: sqlite3.Connection) -> None:
+    """Drop the map_completions table (feature removed)."""
+    conn.execute("DROP TABLE IF EXISTS map_completions")
 
 
 def add_wad(
@@ -685,8 +643,7 @@ def search_wads(
 def update_wad(wad_id: int, **fields) -> bool:
     """Update a WAD's fields. Returns True if updated.
 
-    If status is set to 'finished', automatically records a completion
-    with a snapshot of the stats.txt file (if available).
+    If status is set to 'finished', automatically records a completion.
     """
     if not fields:
         return False
@@ -716,28 +673,9 @@ def update_wad(wad_id: int, **fields) -> bool:
         )
         updated = cursor.rowcount > 0
 
-    # Record completion and start new playthrough cycle if status was set to 'finished'
+    # Record completion if status was set to 'finished'
     if updated and recording_completion:
-        # Get stats snapshot if available (late import to avoid circular dependency)
-        from caco.player import get_stats_path
-
-        wad = get_wad(wad_id)
-        stats_content = None
-        if wad:
-            stats_path = get_stats_path(wad)
-            if stats_path and stats_path.exists():
-                try:
-                    stats_content = stats_path.read_text()
-                except OSError:
-                    pass
-        add_wad_completion(wad_id, stats_snapshot=stats_content)
-
-        # Increment playthrough cycle for fresh map progress on next playthrough
-        with get_connection() as conn:
-            conn.execute(
-                "UPDATE wads SET playthrough_cycle = COALESCE(playthrough_cycle, 1) + 1 WHERE id = ?",
-                (wad_id,),
-            )
+        add_wad_completion(wad_id)
 
     return updated
 
@@ -1012,179 +950,6 @@ def find_duplicate(
 
 
 # =============================================================================
-# Map Completions
-# =============================================================================
-
-
-def add_map_completion(
-    wad_id: int,
-    map_name: str,
-    skill: int | None = None,
-    notes: str | None = None,
-) -> int:
-    """Add a map completion record for the current playthrough cycle. Returns the completion ID."""
-    with get_connection() as conn:
-        # Get current playthrough cycle for this WAD
-        row = conn.execute(
-            "SELECT COALESCE(playthrough_cycle, 1) as cycle FROM wads WHERE id = ?",
-            (wad_id,),
-        ).fetchone()
-        cycle = row["cycle"] if row else 1
-
-        cursor = conn.execute(
-            """
-            INSERT INTO map_completions (wad_id, map_name, skill, notes, cycle)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(wad_id, map_name, skill) DO UPDATE SET
-                completed_at = CURRENT_TIMESTAMP,
-                notes = COALESCE(excluded.notes, notes),
-                cycle = excluded.cycle
-            """,
-            (wad_id, map_name.upper(), skill, notes, cycle),
-        )
-        return cursor.lastrowid
-
-
-def remove_map_completion(wad_id: int, map_name: str, skill: int | None = None) -> bool:
-    """Remove a map completion. Returns True if removed."""
-    with get_connection() as conn:
-        if skill is not None:
-            cursor = conn.execute(
-                "DELETE FROM map_completions WHERE wad_id = ? AND map_name = ? AND skill = ?",
-                (wad_id, map_name.upper(), skill),
-            )
-        else:
-            # Remove all skill levels for this map
-            cursor = conn.execute(
-                "DELETE FROM map_completions WHERE wad_id = ? AND map_name = ?",
-                (wad_id, map_name.upper()),
-            )
-        return cursor.rowcount > 0
-
-
-def get_map_completions(wad_id: int, current_cycle_only: bool = True) -> list[dict[str, Any]]:
-    """Get map completions for a WAD.
-
-    Args:
-        wad_id: WAD ID
-        current_cycle_only: If True (default), only show completions from current playthrough cycle.
-                           If False, show all completions from all cycles.
-    """
-    with get_connection() as conn:
-        if current_cycle_only:
-            # Get current cycle
-            row = conn.execute(
-                "SELECT COALESCE(playthrough_cycle, 1) as cycle FROM wads WHERE id = ?",
-                (wad_id,),
-            ).fetchone()
-            cycle = row["cycle"] if row else 1
-
-            rows = conn.execute(
-                """
-                SELECT * FROM map_completions
-                WHERE wad_id = ? AND COALESCE(cycle, 1) = ?
-                ORDER BY map_name, skill
-                """,
-                (wad_id, cycle),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                """
-                SELECT * FROM map_completions
-                WHERE wad_id = ?
-                ORDER BY cycle DESC, map_name, skill
-                """,
-                (wad_id,),
-            ).fetchall()
-        return [dict(row) for row in rows]
-
-
-def get_completed_maps(wad_id: int) -> list[str]:
-    """Get list of unique completed map names for a WAD."""
-    with get_connection() as conn:
-        rows = conn.execute(
-            "SELECT DISTINCT map_name FROM map_completions WHERE wad_id = ? ORDER BY map_name",
-            (wad_id,),
-        ).fetchall()
-        return [row["map_name"] for row in rows]
-
-
-def sync_map_completions(wad_id: int, completions: list[tuple[str, int]]) -> int:
-    """
-    Sync map completions from stats file.
-
-    Args:
-        wad_id: WAD database ID
-        completions: List of (map_name, skill) tuples
-
-    Returns:
-        Number of new completions added
-    """
-    added = 0
-    with get_connection() as conn:
-        for map_name, skill in completions:
-            # Check if already exists
-            existing = conn.execute(
-                "SELECT id FROM map_completions WHERE wad_id = ? AND map_name = ? AND skill = ?",
-                (wad_id, map_name.upper(), skill),
-            ).fetchone()
-
-            if not existing:
-                conn.execute(
-                    "INSERT INTO map_completions (wad_id, map_name, skill) VALUES (?, ?, ?)",
-                    (wad_id, map_name.upper(), skill),
-                )
-                added += 1
-
-    return added
-
-
-def get_map_completion_stats(wad_id: int, current_cycle_only: bool = True) -> dict[str, Any]:
-    """Get map completion statistics for a WAD.
-
-    Args:
-        wad_id: WAD ID
-        current_cycle_only: If True (default), only count completions from current playthrough cycle.
-    """
-    with get_connection() as conn:
-        # Get current cycle if filtering
-        cycle_filter = ""
-        params = [wad_id]
-        if current_cycle_only:
-            row = conn.execute(
-                "SELECT COALESCE(playthrough_cycle, 1) as cycle FROM wads WHERE id = ?",
-                (wad_id,),
-            ).fetchone()
-            cycle = row["cycle"] if row else 1
-            cycle_filter = "AND COALESCE(cycle, 1) = ?"
-            params.append(cycle)
-
-        # Count unique maps completed
-        row = conn.execute(
-            f"SELECT COUNT(DISTINCT map_name) as count FROM map_completions WHERE wad_id = ? {cycle_filter}",
-            params,
-        ).fetchone()
-        unique_maps = row["count"]
-
-        # Get highest skill completed for each map
-        rows = conn.execute(
-            f"""
-            SELECT map_name, MAX(skill) as max_skill
-            FROM map_completions
-            WHERE wad_id = ? {cycle_filter}
-            GROUP BY map_name
-            ORDER BY map_name
-            """,
-            params,
-        ).fetchall()
-
-        return {
-            "unique_maps": unique_maps,
-            "by_map": {row["map_name"]: row["max_skill"] for row in rows},
-        }
-
-
-# =============================================================================
 # WAD Completions (Times Beaten)
 # =============================================================================
 
@@ -1277,28 +1042,6 @@ def get_times_beaten(wad_id: int) -> int:
         return row["count"]
 
 
-def get_maps_completed_batch(wad_ids: list[int]) -> dict[int, int]:
-    """Get maps completed count for multiple WADs efficiently (current cycle only)."""
-    if not wad_ids:
-        return {}
-
-    with get_connection() as conn:
-        placeholders = ",".join("?" * len(wad_ids))
-        # Join with wads to get each WAD's current cycle
-        rows = conn.execute(
-            f"""
-            SELECT mc.wad_id, COUNT(DISTINCT mc.map_name) as count
-            FROM map_completions mc
-            JOIN wads w ON mc.wad_id = w.id
-            WHERE mc.wad_id IN ({placeholders})
-              AND COALESCE(mc.cycle, 1) = COALESCE(w.playthrough_cycle, 1)
-            GROUP BY mc.wad_id
-            """,
-            wad_ids,
-        ).fetchall()
-        return {row["wad_id"]: row["count"] for row in rows}
-
-
 def get_times_beaten_batch(wad_ids: list[int]) -> dict[int, int]:
     """Get times beaten for multiple WADs efficiently."""
     if not wad_ids:
@@ -1323,18 +1066,10 @@ def get_wad_stats(wad_id: int) -> dict[str, Any]:
 
     Returns:
         Dict with keys:
-        - map_completions: number of map completion records
         - session_count: number of play sessions
         - total_playtime: total playtime in seconds
     """
     with get_connection() as conn:
-        # Map completions count
-        row = conn.execute(
-            "SELECT COUNT(*) as count FROM map_completions WHERE wad_id = ?",
-            (wad_id,),
-        ).fetchone()
-        map_completions = row["count"]
-
         # Session count
         row = conn.execute(
             "SELECT COUNT(*) as count FROM sessions WHERE wad_id = ?",
@@ -1350,7 +1085,6 @@ def get_wad_stats(wad_id: int) -> dict[str, Any]:
         total_playtime = row["total"]
 
         return {
-            "map_completions": map_completions,
             "session_count": session_count,
             "total_playtime": total_playtime,
         }

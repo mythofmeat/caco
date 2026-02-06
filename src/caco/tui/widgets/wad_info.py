@@ -75,7 +75,6 @@ class WadInfoPanel(Vertical):
         # Details
         playtime = db.get_total_playtime(wad_id)
         last_played = db.get_last_played(wad_id)
-        map_stats = db.get_map_completion_stats(wad_id)
         times_beaten = db.get_times_beaten(wad_id)
         sessions = db.get_sessions(wad_id)
 
@@ -93,10 +92,6 @@ class WadInfoPanel(Vertical):
 
         # Sessions
         details_lines.append(f"Sessions: {len(sessions)}")
-
-        # Maps completed
-        if map_stats["unique_maps"]:
-            details_lines.append(f"Maps: {map_stats['unique_maps']} completed")
 
         # Times beaten
         if times_beaten:

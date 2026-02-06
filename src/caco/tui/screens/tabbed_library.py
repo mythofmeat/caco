@@ -5,6 +5,7 @@ from textual.binding import Binding
 from textual.screen import Screen
 from textual.widgets import Footer, TabbedContent, TabPane, Tabs
 
+from caco.config import get_tui_config
 from caco.tui.widgets.import_pane import ImportPane
 from caco.tui.widgets.library_pane import LibraryPane
 
@@ -57,9 +58,13 @@ class TabbedLibraryScreen(Screen):
         yield Footer()
 
     def on_mount(self) -> None:
-        """Focus the first tab's table on mount."""
-        # The LibraryPane handles its own focus on mount
-        pass
+        """Set the default tab from config and focus."""
+        tui_config = get_tui_config()
+        default_tab = tui_config.get("default_tab", "all")
+        tab_id = f"tab-{default_tab}"
+        if tab_id in TAB_ORDER:
+            tabbed = self.query_one("#library-tabs", TabbedContent)
+            tabbed.active = tab_id
 
     def on_library_pane_wad_imported(self, event: LibraryPane.WadImported) -> None:
         """Refresh all library panes when a WAD status changes or is imported."""

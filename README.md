@@ -21,9 +21,9 @@ A personal Doom WAD library manager taking inspiration from beets. Track what yo
   - Arbitrary Notes
 
 - **Completion tracking**
-  - Automatically track map and WAD completions (if using a sourceport that provides `stats.txt` files such as *dsda-doom* and its forks)
+  - Track how many times you've beaten each WAD
 
-- **Playtime tracking** 
+- **Playtime tracking**
   - Automatically tracks how long you play each WAD
 
 ## Installation
@@ -320,42 +320,6 @@ caco play "Eviternity"
 caco update "Eviternity" --clear-idgames-id
 ```
 
-### Map Completion Tracking
-
-Track which maps you've completed in each WAD. Automatically syncs with nyan-doom/dsda-doom stats files.
-
-```bash
-# Auto-sync happens after every play session (if stats file exists)
-caco play 1                         # Syncs completions on exit
-
-# Manual sync from stats.txt files
-caco map sync 1                     # Sync specific WAD
-caco map sync --all                 # Sync all WADs
-
-# Manual completion tracking (for other sourceports)
-caco map complete 1 MAP01 MAP02 MAP03
-caco map complete 1 MAP01-MAP05     # Range support
-caco map complete 1 MAP01 --skill 4 # Record UV completion
-caco map uncomplete 1 MAP30         # Remove completion
-
-# View completions
-caco map list 1                     # Show completed maps (current playthrough)
-caco map list 1 --all-cycles        # Show completions from all playthroughs
-caco map progress 1 --total 32      # Show progress (29/32, 90.6%)
-caco info 1                         # Also shows completion summary
-```
-
-#### Playthrough Cycles
-
-When you mark a WAD as "finished", caco archives the current map progress and starts a new playthrough cycle. This lets you track completions across multiple playthroughs:
-
-```bash
-caco update 1 --status finished     # Archives current map progress, increments cycle
-caco update 1 --status playing      # Start fresh playthrough (cycle 2)
-caco map list 1                     # Shows only current cycle completions
-caco map list 1 --all-cycles        # Shows all completions with cycle numbers
-```
-
 ### Completion Count Tracking
 
 Track how many times you've beaten each WAD:
@@ -371,11 +335,15 @@ caco beaten remove 1                # Decrement completion count
 caco beaten set 1 3                 # Set exact count
 ```
 
-Default Stats file location: `~/.local/share/nyan-doom/nyan_doom_data/{iwad}/{wad}/stats.txt`
+### Random WAD
 
-Configure custom stats directory:
+Pick a random WAD for scripting:
+
 ```bash
-caco config stats_dir /path/to/stats
+caco random                        # Random WAD from entire library (prints ID)
+caco random status:to-play         # Random to-play WAD
+caco play $(caco random)           # Play a random WAD
+caco play $(caco random tag:megawad)  # Play a random megawad
 ```
 
 ### Cache Management
@@ -425,7 +393,6 @@ Config file: `~/.config/caco/config.toml` (see `config.example.toml` for a templ
 | `iwad` | Path to default IWAD (doom2.wad, etc.) |
 | `sourceport_args` | Default args passed to sourceport |
 | `cache_dir` | WAD cache directory |
-| `stats_dir` | Stats file directory for map completion tracking |
 | `download_mirror` | Preferred idgames mirror (0-4) |
 | `cache_max_size_gb` | Max cache size in GB (0 = unlimited) |
 | `cache_max_age_days` | Remove files not played in N days (0 = never) |
@@ -438,17 +405,16 @@ sourceport = "/usr/bin/nyan-doom"
 iwad = "/usr/share/games/doom/doom2.wad"
 sourceport_args = ["-nomusic"]
 cache_dir = "~/.cache/caco/wads"
-stats_dir = "~/.local/share/nyan-doom/nyan_doom_data"
 download_mirror = 0
 
 # Customize list display
 [list]
-# Available columns: id, title, author, status, maps, beaten, playtime,
+# Available columns: id, title, author, status, beaten, playtime,
 #                    last_played, rating, year, tags
 format = ["id", "title", "author", "status", "playtime", "tags"]
 
 # Sort options: id, title, author, status, playtime, rating, year,
-#               last_played, created, maps, beaten
+#               last_played, created, beaten
 # Append + for ascending (default), - for descending
 sort = "id+"
 
@@ -460,6 +426,13 @@ playing = "green"
 finished = "dim"
 abandoned = "red"
 awaiting-update = "magenta"
+
+[tui]
+# Default tab: all, playing, to-play, finished, backlog
+default_tab = "all"
+# Default sort: id, title, author, playtime, last_played
+default_sort = "id"
+default_sort_desc = false
 ```
 
 ## Command Aliases
@@ -535,7 +508,7 @@ Use `--plain` to output machine-readable text suitable for scripting:
 ```bash
 # List WADs as TSV (tab-separated)
 caco list --plain
-# Output: ID	Title	Author	Status	Maps	Beaten	Playtime	LastPlayed
+# Output: ID	Title	Author	Status	Beaten	Playtime	LastPlayed
 
 # Get WAD info as key=value pairs
 caco info 1 --plain

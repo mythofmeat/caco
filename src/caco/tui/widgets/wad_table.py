@@ -65,7 +65,6 @@ class WadTable(DataTable):
         self.add_column("Title", key="title", width=30)
         self.add_column("Author", key="author", width=20)
         self.add_column("Status", key="status", width=12)
-        self.add_column("Maps", key="maps", width=6)
         self.add_column("Playtime", key="playtime", width=10)
 
     def load_wads(
@@ -85,10 +84,6 @@ class WadTable(DataTable):
         if not self._wads:
             return 0
 
-        # Batch fetch stats
-        wad_ids = [w["id"] for w in self._wads]
-        maps_completed = db.get_maps_completed_batch(wad_ids)
-
         for i, wad in enumerate(self._wads):
             wad_id = wad["id"]
             self._wad_id_to_row[wad_id] = i
@@ -96,10 +91,6 @@ class WadTable(DataTable):
             # Format playtime
             playtime = db.get_total_playtime(wad_id)
             playtime_str = format_duration(playtime) if playtime else "-"
-
-            # Format maps
-            maps_count = maps_completed.get(wad_id, 0)
-            maps_str = str(maps_count) if maps_count else "-"
 
             # Status with color styling using Rich Text
             status = wad["status"]
@@ -111,7 +102,6 @@ class WadTable(DataTable):
                 wad["title"],
                 wad["author"] or "-",
                 status_text,
-                maps_str,
                 playtime_str,
                 key=str(wad_id),
             )

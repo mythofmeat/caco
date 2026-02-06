@@ -24,8 +24,8 @@ complete -c caco -n __fish_use_subcommand -a delete -d "Delete a WAD from the li
 complete -c caco -n __fish_use_subcommand -a play -d "Play a WAD"
 complete -c caco -n __fish_use_subcommand -a import -d "Import WADs from various sources"
 complete -c caco -n __fish_use_subcommand -a tag -d "Manage tags"
-complete -c caco -n __fish_use_subcommand -a map -d "Manage map completions"
 complete -c caco -n __fish_use_subcommand -a config -d "View or set configuration"
+complete -c caco -n __fish_use_subcommand -a random -d "Pick a random WAD (prints ID)"
 complete -c caco -n __fish_use_subcommand -a completions -d "Generate shell completions"
 
 # list options
@@ -131,37 +131,16 @@ complete -c caco -n "__fish_seen_subcommand_from tag; and __fish_seen_subcommand
 complete -c caco -n "__fish_seen_subcommand_from tag; and __fish_seen_subcommand_from add remove" -a "status:" -d "Filter by status"
 complete -c caco -n "__fish_seen_subcommand_from tag; and __fish_seen_subcommand_from add remove" -s y -l yes -d "Skip confirmation for multi-WAD updates"
 
-# map subcommands
-complete -c caco -n "__fish_seen_subcommand_from map; and not __fish_seen_subcommand_from sync complete uncomplete list progress" -a sync -d "Sync map completions from stats.txt"
-complete -c caco -n "__fish_seen_subcommand_from map; and not __fish_seen_subcommand_from sync complete uncomplete list progress" -a complete -d "Mark maps as completed"
-complete -c caco -n "__fish_seen_subcommand_from map; and not __fish_seen_subcommand_from sync complete uncomplete list progress" -a uncomplete -d "Remove map completion records"
-complete -c caco -n "__fish_seen_subcommand_from map; and not __fish_seen_subcommand_from sync complete uncomplete list progress" -a list -d "List completed maps"
-complete -c caco -n "__fish_seen_subcommand_from map; and not __fish_seen_subcommand_from sync complete uncomplete list progress" -a progress -d "Show completion progress"
-
-# map sync options
-complete -c caco -n "__fish_seen_subcommand_from map; and __fish_seen_subcommand_from sync" -l all -d "Sync all WADs"
-complete -c caco -n "__fish_seen_subcommand_from map; and __fish_seen_subcommand_from sync" -xa "(__caco_wads)"
-
-# map complete options
-complete -c caco -n "__fish_seen_subcommand_from map; and __fish_seen_subcommand_from complete" -s s -l skill -d "Skill level (1-5)" -xa "1 2 3 4 5"
-complete -c caco -n "__fish_seen_subcommand_from map; and __fish_seen_subcommand_from complete" -s n -l notes -d "Notes"
-complete -c caco -n "__fish_seen_subcommand_from map; and __fish_seen_subcommand_from complete" -xa "(__caco_wads)"
-
-# map uncomplete options
-complete -c caco -n "__fish_seen_subcommand_from map; and __fish_seen_subcommand_from uncomplete" -s s -l skill -d "Only remove specific skill" -xa "1 2 3 4 5"
-complete -c caco -n "__fish_seen_subcommand_from map; and __fish_seen_subcommand_from uncomplete" -xa "(__caco_wads)"
-
-# map list options
-complete -c caco -n "__fish_seen_subcommand_from map; and __fish_seen_subcommand_from list" -l plain -d "Output as TSV for scripting"
-complete -c caco -n "__fish_seen_subcommand_from map; and __fish_seen_subcommand_from list" -xa "(__caco_wads)"
-
-# map progress options
-complete -c caco -n "__fish_seen_subcommand_from map; and __fish_seen_subcommand_from progress" -s t -l total -d "Total number of maps"
-complete -c caco -n "__fish_seen_subcommand_from map; and __fish_seen_subcommand_from progress" -l plain -d "Output as key=value for scripting"
-complete -c caco -n "__fish_seen_subcommand_from map; and __fish_seen_subcommand_from progress" -xa "(__caco_wads)"
+# random command - query field completions
+complete -c caco -n "__fish_seen_subcommand_from random" -a "id:" -d "Filter by ID"
+complete -c caco -n "__fish_seen_subcommand_from random" -a "title:" -d "Filter by title"
+complete -c caco -n "__fish_seen_subcommand_from random" -a "author:" -d "Filter by author"
+complete -c caco -n "__fish_seen_subcommand_from random" -a "status:" -d "Filter by status"
+complete -c caco -n "__fish_seen_subcommand_from random" -a "tag:" -d "Filter by tag"
+complete -c caco -n "__fish_seen_subcommand_from random" -a "source:" -d "Filter by source"
 
 # config keys
-complete -c caco -n "__fish_seen_subcommand_from config" -xa "sourceport iwad cache_dir stats_dir download_mirror sourceport_args"
+complete -c caco -n "__fish_seen_subcommand_from config" -xa "sourceport iwad cache_dir download_mirror sourceport_args"
 
 # completions command
 complete -c caco -n "__fish_seen_subcommand_from completions" -a "bash fish zsh" -d "Shell type"

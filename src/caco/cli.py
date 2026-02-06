@@ -16,7 +16,6 @@ from caco.config import (
     get_cache_dir,
     set_cache_dir,
     set_iwad,
-    set_stats_dir,
     load_config,
     save_config,
     CONFIG_FILE,
@@ -468,22 +467,20 @@ def _complete_sort(ctx, param, incomplete: str) -> list[str]:
 
 
 def _render_wad_list_plain(wads: list[dict]) -> None:
-    """TSV output: ID\tTitle\tAuthor\tStatus\tMaps\tBeaten\tPlaytime\tLastPlayed."""
+    """TSV output: ID\tTitle\tAuthor\tStatus\tBeaten\tPlaytime\tLastPlayed."""
     # Batch fetch stats for all WADs
     wad_ids = [w["id"] for w in wads]
-    maps_completed = db.get_maps_completed_batch(wad_ids)
     times_beaten = db.get_times_beaten_batch(wad_ids)
 
     # Header
-    print("ID\tTitle\tAuthor\tStatus\tMaps\tBeaten\tPlaytime\tLastPlayed")
+    print("ID\tTitle\tAuthor\tStatus\tBeaten\tPlaytime\tLastPlayed")
     for wad in wads:
         playtime = db.get_total_playtime(wad["id"])
         playtime_str = format_duration(playtime) if playtime else ""
         last_played = db.get_last_played(wad["id"])
         last_played_str = last_played[:10] if last_played else ""
-        maps_str = str(maps_completed.get(wad["id"], 0))
         beaten_str = str(times_beaten.get(wad["id"], 0))
-        print(f"{wad['id']}\t{wad['title']}\t{wad['author'] or ''}\t{wad['status']}\t{maps_str}\t{beaten_str}\t{playtime_str}\t{last_played_str}")
+        print(f"{wad['id']}\t{wad['title']}\t{wad['author'] or ''}\t{wad['status']}\t{beaten_str}\t{playtime_str}\t{last_played_str}")
 
 
 def _render_wad_info_plain(wad: dict) -> None:
@@ -491,7 +488,6 @@ def _render_wad_info_plain(wad: dict) -> None:
     playtime = db.get_total_playtime(wad["id"])
     sessions = db.get_sessions(wad["id"])
     last_played = db.get_last_played(wad["id"])
-    map_stats = db.get_map_completion_stats(wad["id"])
     times_beaten = db.get_times_beaten(wad["id"])
 
     print(f"id={wad['id']}")
@@ -508,7 +504,6 @@ def _render_wad_info_plain(wad: dict) -> None:
     print(f"playtime={format_duration(playtime) if playtime else ''}")
     print(f"sessions={len(sessions)}")
     print(f"last_played={last_played[:10] if last_played else ''}")
-    print(f"maps_completed={map_stats['unique_maps']}")
     print(f"times_beaten={times_beaten}")
     if wad.get("custom_iwad"):
         print(f"custom_iwad={wad['custom_iwad']}")
@@ -556,12 +551,11 @@ def _render_wad_list(wads: list[dict], title: str | None = None, list_config: di
     if list_config is None:
         list_config = get_list_config()
 
-    columns = list_config.get("format", ["id", "title", "author", "status", "maps", "beaten", "playtime", "last_played"])
+    columns = list_config.get("format", ["id", "title", "author", "status", "beaten", "playtime", "last_played"])
     colors = list_config.get("colors", {})
 
     # Batch fetch stats for all WADs
     wad_ids = [w["id"] for w in wads]
-    maps_completed = db.get_maps_completed_batch(wad_ids)
     times_beaten = db.get_times_beaten_batch(wad_ids)
 
     # Column definitions: name -> (header, style, justify)
@@ -572,7 +566,6 @@ def _render_wad_list(wads: list[dict], title: str | None = None, list_config: di
         "year": ("Year", "dim", "right"),
         "status": ("Status", None, None),
         "rating": ("Rating", None, "center"),
-        "maps": ("Maps", None, "right"),
         "beaten": ("Beaten", None, "right"),
         "playtime": ("Playtime", None, "right"),
         "last_played": ("Last Played", "dim", None),
@@ -617,9 +610,6 @@ def _render_wad_list(wads: list[dict], title: str | None = None, list_config: di
                     row_values.append("★" * wad["rating"] + "☆" * (5 - wad["rating"]))
                 else:
                     row_values.append("-")
-            elif col == "maps":
-                count = maps_completed.get(wad["id"], 0)
-                row_values.append(str(count) if count else "-")
             elif col == "beaten":
                 count = times_beaten.get(wad["id"], 0)
                 row_values.append(str(count) if count else "-")
@@ -774,21 +764,11 @@ def info(query: str, yes: bool, plain: bool):
         console.print("[bold]Notes:[/bold]")
         console.print(wad["notes"])
 
-    # Map completion stats
-    map_stats = db.get_map_completion_stats(wad_id)
+    # Completion stats
     times_beaten = db.get_times_beaten(wad_id)
-    if map_stats["unique_maps"] > 0 or times_beaten > 0:
+    if times_beaten > 0:
         console.print()
-        if map_stats["unique_maps"] > 0:
-            console.print(f"[bold]Maps completed:[/bold] {map_stats['unique_maps']}")
-            # Show sample of completed maps
-            completed_maps = list(map_stats["by_map"].keys())[:5]
-            if len(completed_maps) < len(map_stats["by_map"]):
-                console.print(f"  [dim]{', '.join(completed_maps)}, ...[/dim]")
-            else:
-                console.print(f"  [dim]{', '.join(completed_maps)}[/dim]")
-        if times_beaten > 0:
-            console.print(f"[bold]Times beaten:[/bold] {times_beaten}")
+        console.print(f"[bold]Times beaten:[/bold] {times_beaten}")
 
     # Per-WAD play config
     if wad.get("custom_iwad") or wad.get("custom_sourceport") or wad.get("custom_args"):
@@ -1009,7 +989,6 @@ def delete(query: str | None, yes: bool, dry_run: bool, purge: bool, purge_all: 
         return
 
     # Gather stats for all WADs to be deleted
-    total_completions = 0
     total_sessions = 0
     total_playtime = 0
 
@@ -1017,7 +996,6 @@ def delete(query: str | None, yes: bool, dry_run: bool, purge: bool, purge_all: 
     console.print(f"\n[bold]The following WADs will be {action}:[/bold]\n")
     for wad in wads:
         stats = db.get_wad_stats(wad["id"])
-        total_completions += stats["map_completions"]
         total_sessions += stats["session_count"]
         total_playtime += stats["total_playtime"]
 
@@ -1032,13 +1010,10 @@ def delete(query: str | None, yes: bool, dry_run: bool, purge: bool, purge_all: 
         console.print(f"  [dim][{wad['id']}][/dim] {wad['title']}{info}")
 
     # Show associated data that will be deleted (only for purge)
-    if purge and (total_completions or total_sessions):
+    if purge and total_sessions:
         console.print(f"\n[dim]This will also delete:[/dim]")
-        if total_completions:
-            console.print(f"  • {total_completions} map completion record(s)")
-        if total_sessions:
-            playtime_str = format_duration(total_playtime) if total_playtime else "0s"
-            console.print(f"  • {total_sessions} play session(s) ({playtime_str})")
+        playtime_str = format_duration(total_playtime) if total_playtime else "0s"
+        console.print(f"  • {total_sessions} play session(s) ({playtime_str})")
 
     if not purge:
         console.print(f"\n[dim]Use 'caco restore' to recover, or 'caco delete --purge' to permanently delete[/dim]")
@@ -2148,9 +2123,6 @@ iwad = ""
 # Directory for caching downloaded WADs
 cache_dir = "~/.cache/caco/wads"
 
-# Directory for sourceport stats files (dsda-doom stats.txt location)
-stats_dir = "~/.local/share/nyan-doom/nyan_doom_data"
-
 # idgames download mirror (0-4, see https://www.doomworld.com/idgames/api/)
 download_mirror = 0
 
@@ -2244,47 +2216,6 @@ def completions(shell: str | None, install: bool):
         console.print("[dim]Add 'fpath=(~/.zfunc $fpath)' to ~/.zshrc and run 'compinit'[/dim]")
     elif shell == "bash":
         console.print("[dim]Add 'source ~/.local/share/bash-completion/completions/caco' to ~/.bashrc[/dim]")
-
-
-# =============================================================================
-# Map Completions
-# =============================================================================
-
-
-SKILL_NAMES = {1: "ITYTD", 2: "HNTR", 3: "HMP", 4: "UV", 5: "NM"}
-
-
-def _parse_map_range(maps_str: str) -> list[str]:
-    """Parse map range like 'MAP01-MAP05' or 'E1M1-E1M9' into list of maps."""
-    maps = []
-    for part in maps_str.split(","):
-        part = part.strip().upper()
-        if "-" in part and not part.startswith("E"):
-            # Handle MAP01-MAP05 range
-            start, end = part.split("-", 1)
-            if start.startswith("MAP") and end.startswith("MAP"):
-                try:
-                    start_num = int(start[3:])
-                    end_num = int(end[3:])
-                    for i in range(start_num, end_num + 1):
-                        maps.append(f"MAP{i:02d}")
-                except ValueError:
-                    maps.append(part)
-            elif start.startswith("E") and "M" in start:
-                # Handle E1M1-E1M9 range
-                try:
-                    ep = start[1]
-                    start_map = int(start.split("M")[1])
-                    end_map = int(end.split("M")[1])
-                    for i in range(start_map, end_map + 1):
-                        maps.append(f"E{ep}M{i}")
-                except (ValueError, IndexError):
-                    maps.append(part)
-            else:
-                maps.append(part)
-        else:
-            maps.append(part)
-    return maps
 
 
 # =============================================================================
@@ -2746,193 +2677,6 @@ def cache_clean(dry_run: bool, yes: bool):
     console.print(f"\n[green]Deleted {deleted} orphaned file(s), freed {_format_size(freed)}[/green]")
 
 
-@cli.group(name="map")
-def map_cmd():
-    """Manage map completions."""
-    pass
-
-
-@map_cmd.command(name="sync")
-@click.argument("query", required=False)
-@click.option("--all", "sync_all", is_flag=True, help="Sync all WADs with stats files")
-def map_sync(query: str | None, sync_all: bool):
-    """Sync map completions from stats.txt files."""
-    from caco.player import get_stats_path, parse_stats_file
-
-    if sync_all:
-        wads = db.search_wads()
-    elif query:
-        wads = resolve_wad_query(query, mode="multiple", yes=True)
-        if not wads:
-            return
-    else:
-        err_console.print("[red]Specify a WAD query or use --all[/red]")
-        sys.exit(1)
-
-    total_synced = 0
-    wads_synced = 0
-
-    for wad in wads:
-        stats_path = get_stats_path(wad)
-        if not stats_path or not stats_path.exists():
-            continue
-
-        completions = parse_stats_file(stats_path)
-        if completions:
-            added = db.sync_map_completions(wad["id"], completions)
-            if added > 0:
-                total_synced += added
-                wads_synced += 1
-                console.print(f"[dim]{wad['title']}: +{added} completion(s)[/dim]")
-
-    if total_synced > 0:
-        console.print(f"[green]Synced {total_synced} completion(s) across {wads_synced} WAD(s)[/green]")
-    else:
-        console.print("[dim]No new completions found[/dim]")
-
-
-@map_cmd.command(name="complete")
-@click.argument("query")
-@click.argument("maps", nargs=-1, required=True)
-@click.option("--skill", "-s", type=click.IntRange(1, 5), help="Skill level (1-5: ITYTD to NM)")
-@click.option("--notes", "-n", help="Notes for this completion")
-@click.option("--yes", "-y", is_flag=True, help="Auto-select first match if multiple")
-def map_complete(query: str, maps: tuple[str, ...], skill: int | None, notes: str | None, yes: bool):
-    """Manually mark maps as completed."""
-    wads = resolve_wad_query(query, mode="pick", yes=yes)
-    if not wads:
-        return  # User cancelled
-    wad = wads[0]
-
-    # Parse all map arguments (support ranges)
-    all_maps = []
-    for m in maps:
-        all_maps.extend(_parse_map_range(m))
-
-    for map_name in all_maps:
-        db.add_map_completion(wad["id"], map_name, skill=skill, notes=notes)
-
-    skill_str = f" (skill {SKILL_NAMES.get(skill, skill)})" if skill else ""
-    console.print(f"[green]Marked {len(all_maps)} map(s) as completed{skill_str}[/green]")
-
-
-@map_cmd.command(name="uncomplete")
-@click.argument("query")
-@click.argument("maps", nargs=-1, required=True)
-@click.option("--skill", "-s", type=click.IntRange(1, 5), help="Only remove specific skill (default: all)")
-@click.option("--yes", "-y", is_flag=True, help="Auto-select first match if multiple")
-def map_uncomplete(query: str, maps: tuple[str, ...], skill: int | None, yes: bool):
-    """Remove map completion records."""
-    wads = resolve_wad_query(query, mode="pick", yes=yes)
-    if not wads:
-        return  # User cancelled
-    wad = wads[0]
-
-    # Parse all map arguments
-    all_maps = []
-    for m in maps:
-        all_maps.extend(_parse_map_range(m))
-
-    removed = 0
-    for map_name in all_maps:
-        if db.remove_map_completion(wad["id"], map_name, skill=skill):
-            removed += 1
-
-    console.print(f"[green]Removed {removed} completion record(s)[/green]")
-
-
-@map_cmd.command(name="list")
-@click.argument("query")
-@click.option("--yes", "-y", is_flag=True, help="Auto-select first match if multiple")
-@click.option("--all-cycles", "-a", is_flag=True, help="Show completions from all playthroughs")
-@click.option("--plain", is_flag=True, help="Output as TSV (for scripting)")
-def map_list(query: str, yes: bool, all_cycles: bool, plain: bool):
-    """List completed maps for a WAD (current playthrough by default)."""
-    wads = resolve_wad_query(query, mode="pick", yes=yes)
-    if not wads:
-        return  # User cancelled
-    wad = wads[0]
-
-    completions = db.get_map_completions(wad["id"], current_cycle_only=not all_cycles)
-
-    if not completions:
-        if plain:
-            pass  # No output for scripting
-        else:
-            console.print("[dim]No completed maps[/dim]")
-        return
-
-    if plain:
-        print("Map\tSkill\tDate")
-        for c in completions:
-            skill_name = SKILL_NAMES.get(c["skill"], str(c["skill"]) if c["skill"] else "")
-            date = c["completed_at"][:10] if c["completed_at"] else ""
-            print(f"{c['map_name']}\t{skill_name}\t{date}")
-    else:
-        table = Table(title=f"Completed Maps - {wad['title']}")
-        table.add_column("Map", style="cyan")
-        table.add_column("Skill")
-        table.add_column("Date", style="dim")
-        table.add_column("Notes")
-
-        for c in completions:
-            skill_name = SKILL_NAMES.get(c["skill"], str(c["skill"]) if c["skill"] else "-")
-            date = c["completed_at"][:10] if c["completed_at"] else "-"
-            table.add_row(c["map_name"], skill_name, date, c["notes"] or "-")
-
-        console.print(table)
-
-
-@map_cmd.command(name="progress")
-@click.argument("query")
-@click.option("--total", "-t", type=int, help="Total number of maps (for percentage)")
-@click.option("--yes", "-y", is_flag=True, help="Auto-select first match if multiple")
-@click.option("--plain", is_flag=True, help="Output as key=value pairs (for scripting)")
-def map_progress(query: str, total: int | None, yes: bool, plain: bool):
-    """Show map completion progress for a WAD."""
-    wads = resolve_wad_query(query, mode="pick", yes=yes)
-    if not wads:
-        return  # User cancelled
-    wad = wads[0]
-
-    stats = db.get_map_completion_stats(wad["id"])
-    completed = stats["unique_maps"]
-
-    if plain:
-        print(f"completed={completed}")
-        if total:
-            print(f"total={total}")
-            pct = (completed / total * 100) if total > 0 else 0
-            print(f"percentage={pct:.1f}")
-    else:
-        if total:
-            pct = (completed / total * 100) if total > 0 else 0
-            console.print(f"[bold]Progress:[/bold] {completed}/{total} ({pct:.1f}%)")
-
-            # Progress bar
-            bar_width = 30
-            filled = int(bar_width * completed / total) if total > 0 else 0
-            bar = "█" * filled + "░" * (bar_width - filled)
-            console.print(f"[cyan]{bar}[/cyan]")
-        else:
-            console.print(f"[bold]Completed maps:[/bold] {completed}")
-            console.print("[dim]Use --total N to show percentage[/dim]")
-
-        # Show by skill level
-        if stats["by_map"]:
-            by_skill = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
-            for map_name, max_skill in stats["by_map"].items():
-                if max_skill and max_skill in by_skill:
-                    by_skill[max_skill] += 1
-
-            skill_summary = []
-            for s in [5, 4, 3, 2, 1]:  # NM down to ITYTD
-                if by_skill[s] > 0:
-                    skill_summary.append(f"{SKILL_NAMES[s]}: {by_skill[s]}")
-            if skill_summary:
-                console.print(f"[dim]By highest skill: {', '.join(skill_summary)}[/dim]")
-
-
 # =============================================================================
 # Library Statistics
 # =============================================================================
@@ -3066,6 +2810,36 @@ def stats(period: str, limit: int, plain: bool):
             console.print(f"[dim]... and {len(activity) - limit} more period(s)[/dim]")
 
     console.print()
+
+
+# =============================================================================
+# Random WAD
+# =============================================================================
+
+
+@cli.command(name="random")
+@click.argument("query", nargs=-1)
+def random_cmd(query: tuple[str, ...]):
+    """Pick a random WAD. Prints the WAD ID (for scripting).
+
+    Supports the same query syntax as 'caco list' for filtering.
+
+    \b
+    Examples:
+        caco random                        # Random WAD from entire library
+        caco random status:to-play         # Random to-play WAD
+        caco play $(caco random)           # Play a random WAD
+        caco play $(caco random tag:megawad)  # Play a random megawad
+    """
+    import random as rand
+
+    query_str = " ".join(query) if query else None
+    wads = db.search_wads(query=query_str)
+    if not wads:
+        err_console.print("[red]No matching WADs[/red]")
+        sys.exit(1)
+    wad = rand.choice(wads)
+    print(wad["id"])
 
 
 # =============================================================================

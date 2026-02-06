@@ -8,20 +8,17 @@ CONFIG_DIR = Path.home() / ".config" / "caco"
 CONFIG_FILE = CONFIG_DIR / "config.toml"
 CACHE_DIR = Path.home() / ".cache" / "caco" / "wads"
 
-STATS_DIR = Path.home() / ".local" / "share" / "nyan-doom" / "nyan_doom_data"
-
 DEFAULT_CONFIG = {
     "sourceport": "",
     "cache_dir": str(CACHE_DIR),
     "iwad": "",
     "sourceport_args": [],
     "download_mirror": 0,
-    "stats_dir": str(STATS_DIR),
 }
 
 # Default list configuration
 DEFAULT_LIST_CONFIG = {
-    "format": ["id", "title", "author", "status", "maps", "beaten", "playtime", "last_played"],
+    "format": ["id", "title", "author", "status", "beaten", "playtime", "last_played"],
     "sort": None,  # None means use default (status priority)
     "default_status": [],  # Empty means all statuses
     "colors": {
@@ -130,19 +127,6 @@ def get_download_mirror() -> int:
     return int(config.get("download_mirror", 0))
 
 
-def get_stats_dir() -> Path:
-    """Get the stats directory (nyan-doom/dsda-doom stats.txt location)."""
-    config = load_config()
-    return Path(config.get("stats_dir", str(STATS_DIR))).expanduser()
-
-
-def set_stats_dir(path: str) -> None:
-    """Set the stats directory."""
-    config = load_config()
-    config["stats_dir"] = path
-    save_config(config)
-
-
 def get_list_config() -> dict[str, Any]:
     """Get list display configuration, merging defaults with user config."""
     config = load_config()
@@ -185,3 +169,31 @@ def get_cache_auto_clean() -> bool:
     """Whether to auto-clean cache before play."""
     config = load_config()
     return bool(config.get("cache_auto_clean", False))
+
+
+# =============================================================================
+# TUI Configuration
+# =============================================================================
+
+DEFAULT_TUI_CONFIG = {
+    "default_tab": "all",
+    "default_sort": "id",
+    "default_sort_desc": False,
+}
+
+
+def get_tui_config() -> dict[str, Any]:
+    """Get TUI configuration, merging defaults with user config."""
+    config = load_config()
+    tui_config = DEFAULT_TUI_CONFIG.copy()
+
+    if "tui" in config and isinstance(config["tui"], dict):
+        user_tui = config["tui"]
+        if "default_tab" in user_tui:
+            tui_config["default_tab"] = user_tui["default_tab"]
+        if "default_sort" in user_tui:
+            tui_config["default_sort"] = user_tui["default_sort"]
+        if "default_sort_desc" in user_tui:
+            tui_config["default_sort_desc"] = user_tui["default_sort_desc"]
+
+    return tui_config
