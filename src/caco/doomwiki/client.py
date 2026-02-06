@@ -1,18 +1,17 @@
 """Doom Wiki API client using MediaWiki API."""
 
-import httpx
-
 from caco.doomwiki.models import SearchResult, WikiEntry
 from caco.doomwiki.parser import WikitextParser
+from caco.utils import BaseHttpClient, CacoSourceError
 
 
-class DoomwikiError(Exception):
+class DoomwikiError(CacoSourceError):
     """Error from the Doom Wiki API."""
 
     pass
 
 
-class DoomwikiClient:
+class DoomwikiClient(BaseHttpClient):
     """Client for the Doom Wiki MediaWiki API.
 
     Uses the MediaWiki API at https://doomwiki.org/w/api.php to search
@@ -23,21 +22,11 @@ class DoomwikiClient:
     USER_AGENT = "Caco/1.0 (Doom WAD library manager; https://github.com/eshen/caco)"
 
     def __init__(self, timeout: float = 30.0):
-        self._client = httpx.Client(
+        super().__init__(
             timeout=timeout,
             headers={"User-Agent": self.USER_AGENT},
         )
         self._parser = WikitextParser()
-
-    def close(self) -> None:
-        """Close the HTTP client."""
-        self._client.close()
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        self.close()
 
     def _request(self, **params) -> dict:
         """Make a request to the MediaWiki API."""

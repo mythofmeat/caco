@@ -2,6 +2,7 @@
 
 from caco.doomworld import DoomworldClient, ForumThread
 from caco.db import SourceType, add_wad
+from caco.utils import extract_year
 
 
 class DoomworldSource:
@@ -79,14 +80,7 @@ class DoomworldSource:
         final_title = title or thread.title
         final_author = author or thread.author or None
 
-        # Try to extract year from posted_date if not provided
-        final_year = year
-        if final_year is None and thread.posted_date:
-            # posted_date is ISO format like "2023-03-01T..."
-            try:
-                final_year = int(thread.posted_date[:4])
-            except (ValueError, IndexError):
-                pass
+        final_year = year if year is not None else extract_year(thread.posted_date)
 
         # Use first post text as description, truncated if too long
         description = thread.first_post_text

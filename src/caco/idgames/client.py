@@ -3,9 +3,8 @@
 from pathlib import Path
 from typing import Iterator
 
-import httpx
-
 from caco.idgames.models import ApiInfo, Directory, FileEntry, Review, Vote
+from caco.utils import BaseHttpClient, CacoSourceError
 
 
 MIRRORS = [
@@ -17,28 +16,16 @@ MIRRORS = [
 ]
 
 
-class IdgamesError(Exception):
+class IdgamesError(CacoSourceError):
     """Error from the idgames API."""
 
     pass
 
 
-class IdgamesClient:
+class IdgamesClient(BaseHttpClient):
     """Client for the idgames archive API."""
 
     BASE_URL = "https://www.doomworld.com/idgames/api/api.php"
-
-    def __init__(self, timeout: float = 30.0):
-        self._client = httpx.Client(timeout=timeout)
-
-    def close(self) -> None:
-        self._client.close()
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        self.close()
 
     def _request(self, action: str, **params) -> dict:
         """Make a request to the API."""

@@ -7,6 +7,7 @@ from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import ContentSwitcher, RadioButton, RadioSet
 
+from caco.tui.widgets.base_search_pane import BaseSearchPane
 from caco.tui.widgets.idgames_pane import IdgamesSearchPane
 from caco.tui.widgets.doomwiki_pane import DoomwikiSearchPane
 from caco.tui.widgets.doomworld_pane import DoomworldUrlPane
@@ -139,16 +140,10 @@ class ImportPane(Widget):
                 pass
 
     # Bubble up WadImported messages from child panes
-    def on_idgames_search_pane_wad_imported(
-        self, event: IdgamesSearchPane.WadImported
+    def on_base_search_pane_wad_imported(
+        self, event: BaseSearchPane.WadImported
     ) -> None:
-        """Relay import event from idgames pane."""
-        self.post_message(self.WadImported(event.wad_id))
-
-    def on_doomwiki_search_pane_wad_imported(
-        self, event: DoomwikiSearchPane.WadImported
-    ) -> None:
-        """Relay import event from doomwiki pane."""
+        """Relay import event from idgames or doomwiki search panes."""
         self.post_message(self.WadImported(event.wad_id))
 
     def on_doomworld_url_pane_wad_imported(

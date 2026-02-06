@@ -2,10 +2,7 @@
 
 from pydantic import BaseModel, Field, field_validator
 
-
-def _coerce_str(v):
-    """Coerce None to empty string."""
-    return "" if v is None else v
+from caco.utils import coerce_str as _coerce_str
 
 
 class SearchResult(BaseModel):

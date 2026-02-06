@@ -8,6 +8,7 @@ from rich.progress import Progress, BarColumn, DownloadColumn, TransferSpeedColu
 
 from caco.config import get_download_mirror
 from caco.db import SourceType, add_wad
+from caco.utils import extract_year
 
 
 class IdgamesSource:
@@ -40,13 +41,7 @@ class IdgamesSource:
         tags: list[str] | None = None,
     ) -> int:
         """Import a WAD from idgames into the local database."""
-        # Extract year from date if available
-        year = None
-        if entry.date:
-            try:
-                year = int(entry.date.split("-")[0])
-            except (ValueError, IndexError):
-                pass
+        year = extract_year(entry.date)
 
         # Build description, appending textfile content if available
         description = entry.description

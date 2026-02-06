@@ -88,25 +88,6 @@ LibraryPane #status-mode.visible {
 }
 
 /* =============================================================================
-   Legacy Library Screen Layout (kept for compatibility)
-   ============================================================================= */
-
-LibraryScreen {
-    layout: horizontal;
-}
-
-#wad-list-container {
-    width: 2fr;
-    height: 100%;
-}
-
-#info-panel-container {
-    width: 1fr;
-    height: 100%;
-    border-left: solid $primary;
-}
-
-/* =============================================================================
    WAD Table
    ============================================================================= */
 
@@ -244,73 +225,8 @@ SortSelect #sort-dir-btn {
 }
 
 /* =============================================================================
-   idgames Search Pane
+   Search Panes (idgames + doomwiki share BaseSearchPane styles via DEFAULT_CSS)
    ============================================================================= */
-
-IdgamesSearchPane {
-    height: 100%;
-    width: 100%;
-}
-
-IdgamesSearchPane #search-header {
-    height: 3;
-    width: 100%;
-    padding: 0 1;
-    align: left middle;
-}
-
-IdgamesSearchPane #search-input {
-    width: 1fr;
-}
-
-IdgamesSearchPane #search-btn {
-    margin-left: 1;
-}
-
-IdgamesSearchPane #search-content {
-    height: 1fr;
-}
-
-IdgamesSearchPane #results-container {
-    width: 2fr;
-    height: 100%;
-}
-
-IdgamesSearchPane #preview-container {
-    width: 1fr;
-    height: 100%;
-    border-left: solid $primary;
-    padding: 1 2;
-}
-
-IdgamesSearchPane #preview-title {
-    text-style: bold;
-    margin-bottom: 1;
-}
-
-IdgamesSearchPane #preview-author {
-    color: $text-muted;
-    margin-bottom: 1;
-}
-
-IdgamesSearchPane #preview-rating {
-    margin-bottom: 1;
-}
-
-IdgamesSearchPane #preview-desc {
-    color: $text;
-}
-
-IdgamesSearchPane #search-status {
-    dock: bottom;
-    height: 1;
-    padding: 0 1;
-    color: $text-muted;
-}
-
-IdgamesSearchPane DataTable {
-    height: 100%;
-}
 
 /* =============================================================================
    Import Pane (container)
@@ -349,76 +265,6 @@ ImportPane #source-selector RadioButton.-on {
 
 ImportPane #import-content {
     height: 1fr;
-}
-
-/* =============================================================================
-   Doomwiki Search Pane
-   ============================================================================= */
-
-DoomwikiSearchPane {
-    height: 100%;
-    width: 100%;
-}
-
-DoomwikiSearchPane #search-header {
-    height: 3;
-    width: 100%;
-    padding: 0 1;
-    align: left middle;
-}
-
-DoomwikiSearchPane #search-input {
-    width: 1fr;
-}
-
-DoomwikiSearchPane #search-btn {
-    margin-left: 1;
-}
-
-DoomwikiSearchPane #search-content {
-    height: 1fr;
-}
-
-DoomwikiSearchPane #results-container {
-    width: 2fr;
-    height: 100%;
-}
-
-DoomwikiSearchPane #preview-container {
-    width: 1fr;
-    height: 100%;
-    border-left: solid $primary;
-    padding: 1 2;
-}
-
-DoomwikiSearchPane #preview-title {
-    text-style: bold;
-    margin-bottom: 1;
-}
-
-DoomwikiSearchPane #preview-author {
-    color: $text-muted;
-    margin-bottom: 1;
-}
-
-DoomwikiSearchPane #preview-tech {
-    color: $primary-lighten-2;
-    margin-bottom: 1;
-}
-
-DoomwikiSearchPane #preview-desc {
-    color: $text;
-}
-
-DoomwikiSearchPane #search-status {
-    dock: bottom;
-    height: 1;
-    padding: 0 1;
-    color: $text-muted;
-}
-
-DoomwikiSearchPane DataTable {
-    height: 100%;
 }
 
 /* =============================================================================
@@ -764,19 +610,3 @@ SessionsScreen {
     height: 1fr;
 }
 
-/* =============================================================================
-   Status Mode Indicator (legacy, also in LibraryPane)
-   ============================================================================= */
-
-#status-mode {
-    dock: bottom;
-    height: 1;
-    background: $warning;
-    color: $text;
-    padding: 0 1;
-    display: none;
-}
-
-#status-mode.visible {
-    display: block;
-}

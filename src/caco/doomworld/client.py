@@ -4,15 +4,16 @@ import httpx
 
 from caco.doomworld.models import ForumThread
 from caco.doomworld.parser import DoomworldParser
+from caco.utils import BaseHttpClient, CacoSourceError
 
 
-class DoomworldError(Exception):
+class DoomworldError(CacoSourceError):
     """Error from the Doomworld forum."""
 
     pass
 
 
-class DoomworldClient:
+class DoomworldClient(BaseHttpClient):
     """Client for fetching Doomworld forum threads.
 
     Fetches forum thread pages and parses metadata using the DoomworldParser.
@@ -22,22 +23,12 @@ class DoomworldClient:
     USER_AGENT = "Caco/1.0 (Doom WAD library manager; https://github.com/eshen/caco)"
 
     def __init__(self, timeout: float = 30.0):
-        self._client = httpx.Client(
+        super().__init__(
             timeout=timeout,
             headers={"User-Agent": self.USER_AGENT},
             follow_redirects=True,
         )
         self._parser = DoomworldParser()
-
-    def close(self) -> None:
-        """Close the HTTP client."""
-        self._client.close()
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        self.close()
 
     def get_thread(self, url: str) -> ForumThread:
         """Fetch and parse a forum thread by URL.

@@ -4,6 +4,19 @@
 - [x] there should be a `caco random` command to print the info of a random WAD for use in scripting.
   - [x] it should support filtering arguments, and a command like `caco play $(caco random status:to-play)` should work
 
+# Refactoring (completed)
+- [x] Consolidated STATUS_SHORTCUTS to single definition in db.py
+- [x] Extracted _coerce_str to shared utils.py
+- [x] Removed dead LibraryScreen code (397 lines) and legacy CSS
+- [x] Added tag-fetching helpers (_fetch_tags, _attach_tags, _fetch_tags_batch) to eliminate N+1 queries
+- [x] Collapsed find_duplicate strategies 1-3 into single block
+- [x] Added batch query functions (get_total_playtime_batch, get_last_played_batch)
+- [x] Extracted shared _check_and_import_entry helper in CLI
+- [x] Created BaseHttpClient and CacoSourceError hierarchy in utils.py
+- [x] Extracted extract_year helper to utils.py
+- [x] Created BaseSearchPane for TUI search panes (idgames + doomwiki)
+- [x] Split cli.py (2857 lines) into cli/ package with 8 submodules
+
 # TUI Improvements
 - [x] able to choose a default start page and sort via the config file
 

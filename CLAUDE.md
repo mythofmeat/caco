@@ -38,19 +38,28 @@ No test suite exists yet.
 
 ```
 src/caco/
-├── cli.py          # Click-based CLI
-├── db.py           # SQLite database (models, queries)
+├── cli/            # Click-based CLI (split into submodules)
+│   ├── __init__.py     # cli group, shared helpers, command aliases
+│   ├── library.py      # list, info, update, delete, restore, link, random
+│   ├── import_cmds.py  # import group + auto/idgames/doomwiki/doomworld/url/local
+│   ├── tags.py         # tag add/remove/list
+│   ├── play_cmd.py     # play command
+│   ├── cache.py        # cache list/clear/clean
+│   ├── config_cmd.py   # config, completions commands
+│   └── stats.py        # stats, beaten commands
+├── utils.py        # Shared utilities (coerce_str, BaseHttpClient, CacoSourceError, extract_year)
+├── db.py           # SQLite database (models, queries, STATUS_SHORTCUTS)
 ├── config.py       # TOML config in ~/.config/caco/
 ├── player.py       # Sourceport launcher + playtime tracking
 ├── idgames/        # idgames API client
-│   ├── client.py   # HTTP client for doomworld.com/idgames/api
+│   ├── client.py   # HTTP client (inherits BaseHttpClient)
 │   └── models.py   # Pydantic models (FileEntry, etc.)
 ├── doomwiki/       # Doom Wiki API client
-│   ├── client.py   # HTTP client for doomwiki.org MediaWiki API
+│   ├── client.py   # HTTP client (inherits BaseHttpClient)
 │   ├── models.py   # Pydantic models (WikiEntry, SearchResult)
 │   └── parser.py   # Wikitext parser for {{Wad}} infobox template
 ├── doomworld/      # Doomworld forum client
-│   ├── client.py   # HTTP client for doomworld.com/forum
+│   ├── client.py   # HTTP client (inherits BaseHttpClient)
 │   ├── models.py   # Pydantic models (ForumThread)
 │   ├── parser.py   # HTML/JSON-LD parser + regex extraction
 │   └── llm.py      # LLM backends for smart metadata extraction
@@ -59,19 +68,19 @@ src/caco/
 │   ├── styles.tcss # Textual CSS styles
 │   ├── screens/    # Screen classes
 │   │   ├── tabbed_library.py  # Main tabbed interface (entry point)
-│   │   ├── library.py     # Legacy library browser (not used)
 │   │   ├── wad_detail.py  # WAD detail view
 │   │   ├── wad_edit.py    # WAD metadata edit form
 │   │   └── sessions.py    # Session history
 │   └── widgets/    # Widget classes
+│       ├── base_search_pane.py # Abstract base for search panes
 │       ├── wad_table.py   # DataTable for WAD list (with vim bindings)
 │       ├── wad_info.py    # Info panel widget
 │       ├── filter_input.py # Search/filter input
 │       ├── sort_select.py  # Sort dropdown widget
 │       ├── library_pane.py # Reusable library view (table + panel + filter)
 │       ├── import_pane.py  # Import container with source selector
-│       ├── idgames_pane.py # idgames search and import
-│       ├── doomwiki_pane.py # Doom Wiki search and import
+│       ├── idgames_pane.py # idgames search (extends BaseSearchPane)
+│       ├── doomwiki_pane.py # Doom Wiki search (extends BaseSearchPane)
 │       ├── doomworld_pane.py # Doomworld forum URL import
 │       ├── url_pane.py     # Manual URL import form
 │       └── local_pane.py   # Local file import form
@@ -87,8 +96,9 @@ src/caco/
 - WAD cache: `~/.cache/caco/wads/`
 
 **Key patterns:**
-- `db.py` uses raw sqlite3 with `sqlite3.Row` for dict-like access
-- Source adapters are context managers that handle their own clients
+- `db.py` uses raw sqlite3 with `sqlite3.Row` for dict-like access; tag helpers (`_fetch_tags`, `_attach_tags`, `_fetch_tags_batch`) and batch query functions (`get_total_playtime_batch`, `get_last_played_batch`) reduce N+1 queries
+- Source adapters are context managers; clients inherit `BaseHttpClient` from `utils.py`; errors inherit `CacoSourceError`
+- CLI uses Click's decorator registration pattern: each `cli/*.py` submodule imports `cli` from `caco.cli` and registers commands; `__init__.py` imports all submodules at bottom to trigger registration
 - `player.py` wraps sourceport execution to track session start/end times
 - Status enum: `to-play`, `backlog`, `playing`, `finished`, `abandoned`, `awaiting-update`
 - Query syntax (beets-style):

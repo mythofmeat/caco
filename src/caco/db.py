@@ -158,6 +158,35 @@ def get_connection() -> sqlite3.Connection:
     return conn
 
 
+def _fetch_tags(conn: sqlite3.Connection, wad_id: int) -> list[str]:
+    """Fetch tags for a single WAD."""
+    rows = conn.execute(
+        "SELECT tag FROM tags WHERE wad_id = ?", (wad_id,)
+    ).fetchall()
+    return [r["tag"] for r in rows]
+
+
+def _attach_tags(conn: sqlite3.Connection, wad: dict) -> dict:
+    """Attach tags to a WAD dict in-place and return it."""
+    wad["tags"] = _fetch_tags(conn, wad["id"])
+    return wad
+
+
+def _fetch_tags_batch(conn: sqlite3.Connection, wad_ids: list[int]) -> dict[int, list[str]]:
+    """Fetch tags for multiple WADs efficiently. Returns {wad_id: [tags]}."""
+    if not wad_ids:
+        return {}
+    placeholders = ",".join("?" * len(wad_ids))
+    rows = conn.execute(
+        f"SELECT wad_id, tag FROM tags WHERE wad_id IN ({placeholders}) ORDER BY tag",
+        wad_ids,
+    ).fetchall()
+    result: dict[int, list[str]] = {}
+    for r in rows:
+        result.setdefault(r["wad_id"], []).append(r["tag"])
+    return result
+
+
 def init_db() -> None:
     """Initialize the database schema."""
     with get_connection() as conn:
@@ -290,13 +319,7 @@ def get_wad(wad_id: int, include_deleted: bool = False) -> dict[str, Any] | None
                 (wad_id,)
             ).fetchone()
         if row:
-            wad = dict(row)
-            # Fetch tags
-            tags = conn.execute(
-                "SELECT tag FROM tags WHERE wad_id = ?", (wad_id,)
-            ).fetchall()
-            wad["tags"] = [t["tag"] for t in tags]
-            return wad
+            return _attach_tags(conn, dict(row))
         return None
 
 
@@ -628,14 +651,14 @@ def search_wads(
 
         rows = conn.execute(sql, params).fetchall()
 
-        results = []
-        for row in rows:
-            wad = dict(row)
-            tags = conn.execute(
-                "SELECT tag FROM tags WHERE wad_id = ?", (wad["id"],)
-            ).fetchall()
-            wad["tags"] = [t["tag"] for t in tags]
-            results.append(wad)
+        results = [dict(row) for row in rows]
+
+        # Batch-fetch tags for all results
+        if results:
+            wad_ids = [w["id"] for w in results]
+            tags_by_wad = _fetch_tags_batch(conn, wad_ids)
+            for wad in results:
+                wad["tags"] = tags_by_wad.get(wad["id"], [])
 
         return results
 
@@ -796,6 +819,24 @@ def get_total_playtime(wad_id: int) -> int:
         return row["total"]
 
 
+def get_total_playtime_batch(wad_ids: list[int]) -> dict[int, int]:
+    """Get total playtime for multiple WADs efficiently. Returns {wad_id: seconds}."""
+    if not wad_ids:
+        return {}
+    with get_connection() as conn:
+        placeholders = ",".join("?" * len(wad_ids))
+        rows = conn.execute(
+            f"""
+            SELECT wad_id, COALESCE(SUM(duration_seconds), 0) as total
+            FROM sessions
+            WHERE wad_id IN ({placeholders})
+            GROUP BY wad_id
+            """,
+            wad_ids,
+        ).fetchall()
+        return {row["wad_id"]: row["total"] for row in rows}
+
+
 def get_last_played(wad_id: int) -> str | None:
     """Get the last played timestamp for a WAD."""
     with get_connection() as conn:
@@ -804,6 +845,24 @@ def get_last_played(wad_id: int) -> str | None:
             (wad_id,),
         ).fetchone()
         return row["started_at"] if row else None
+
+
+def get_last_played_batch(wad_ids: list[int]) -> dict[int, str]:
+    """Get last played timestamp for multiple WADs efficiently. Returns {wad_id: timestamp}."""
+    if not wad_ids:
+        return {}
+    with get_connection() as conn:
+        placeholders = ",".join("?" * len(wad_ids))
+        rows = conn.execute(
+            f"""
+            SELECT wad_id, MAX(started_at) as last_played
+            FROM sessions
+            WHERE wad_id IN ({placeholders})
+            GROUP BY wad_id
+            """,
+            wad_ids,
+        ).fetchall()
+        return {row["wad_id"]: row["last_played"] for row in rows}
 
 
 def get_most_recently_played() -> dict[str, Any] | None:
@@ -819,12 +878,7 @@ def get_most_recently_played() -> dict[str, Any] | None:
             """
         ).fetchone()
         if row:
-            wad = dict(row)
-            tags = conn.execute(
-                "SELECT tag FROM tags WHERE wad_id = ?", (wad["id"],)
-            ).fetchall()
-            wad["tags"] = [t["tag"] for t in tags]
-            return wad
+            return _attach_tags(conn, dict(row))
         return None
 
 
@@ -857,47 +911,14 @@ def find_duplicate(
     Returns the existing WAD dict if found, or None.
     """
     with get_connection() as conn:
-        # Strategy 1: Match by source_id (for idgames)
-        if source_type == SourceType.IDGAMES and source_id:
+        # Strategy 1-3: Match by source_type + source_id (idgames, doomwiki, doomworld)
+        if source_id and source_type in (SourceType.IDGAMES, SourceType.DOOMWIKI, SourceType.DOOMWORLD):
             row = conn.execute(
                 "SELECT * FROM wads WHERE source_type = ? AND source_id = ?",
                 (source_type.value, source_id),
             ).fetchone()
             if row:
-                wad = dict(row)
-                tags = conn.execute(
-                    "SELECT tag FROM tags WHERE wad_id = ?", (wad["id"],)
-                ).fetchall()
-                wad["tags"] = [t["tag"] for t in tags]
-                return wad
-
-        # Strategy 2: Match by source_id (for doomwiki - page ID)
-        if source_type == SourceType.DOOMWIKI and source_id:
-            row = conn.execute(
-                "SELECT * FROM wads WHERE source_type = ? AND source_id = ?",
-                (source_type.value, source_id),
-            ).fetchone()
-            if row:
-                wad = dict(row)
-                tags = conn.execute(
-                    "SELECT tag FROM tags WHERE wad_id = ?", (wad["id"],)
-                ).fetchall()
-                wad["tags"] = [t["tag"] for t in tags]
-                return wad
-
-        # Strategy 3: Match by source_id (for doomworld - thread ID)
-        if source_type == SourceType.DOOMWORLD and source_id:
-            row = conn.execute(
-                "SELECT * FROM wads WHERE source_type = ? AND source_id = ?",
-                (source_type.value, source_id),
-            ).fetchone()
-            if row:
-                wad = dict(row)
-                tags = conn.execute(
-                    "SELECT tag FROM tags WHERE wad_id = ?", (wad["id"],)
-                ).fetchall()
-                wad["tags"] = [t["tag"] for t in tags]
-                return wad
+                return _attach_tags(conn, dict(row))
 
         # Strategy 4: Match by source_url (for URL and local)
         if source_url and source_type in (SourceType.URL, SourceType.LOCAL):
@@ -906,12 +927,7 @@ def find_duplicate(
                 (source_type.value, source_url),
             ).fetchone()
             if row:
-                wad = dict(row)
-                tags = conn.execute(
-                    "SELECT tag FROM tags WHERE wad_id = ?", (wad["id"],)
-                ).fetchall()
-                wad["tags"] = [t["tag"] for t in tags]
-                return wad
+                return _attach_tags(conn, dict(row))
 
         # Strategy 5: Fuzzy match on normalized filename + author
         if filename:
@@ -939,12 +955,7 @@ def find_duplicate(
                 ).fetchone()
 
             if row:
-                wad = dict(row)
-                tags = conn.execute(
-                    "SELECT tag FROM tags WHERE wad_id = ?", (wad["id"],)
-                ).fetchall()
-                wad["tags"] = [t["tag"] for t in tags]
-                return wad
+                return _attach_tags(conn, dict(row))
 
         return None
 
@@ -1144,12 +1155,7 @@ def get_wad_by_cached_filename(filename: str) -> dict[str, Any] | None:
             (f"%/{filename}",),
         ).fetchone()
         if row:
-            wad = dict(row)
-            tags = conn.execute(
-                "SELECT tag FROM tags WHERE wad_id = ?", (wad["id"],)
-            ).fetchall()
-            wad["tags"] = [t["tag"] for t in tags]
-            return wad
+            return _attach_tags(conn, dict(row))
         return None
 
 

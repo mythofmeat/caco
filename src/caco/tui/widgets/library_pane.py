@@ -9,22 +9,12 @@ from textual.widgets import Static
 
 from caco import db
 from caco.config import get_tui_config
+from caco.db import STATUS_SHORTCUTS
 from caco.player import play
 from caco.tui.widgets.filter_input import FilterInput
 from caco.tui.widgets.sort_select import SortSelect
 from caco.tui.widgets.wad_info import WadInfoPanel
 from caco.tui.widgets.wad_table import WadTable
-
-
-# Status shortcuts for quick status change
-STATUS_SHORTCUTS = {
-    "p": "playing",
-    "f": "finished",
-    "t": "to-play",
-    "b": "backlog",
-    "a": "abandoned",
-    "w": "awaiting-update",
-}
 
 # Sort field display names (for notifications)
 SORT_DISPLAY = {
