@@ -9,17 +9,7 @@ from textual.message import Message
 
 from caco import db
 from caco.player import format_duration
-
-
-# Status colors for table display
-STATUS_COLORS = {
-    "to-play": "dodger_blue1",
-    "backlog": "yellow",
-    "playing": "green1",
-    "finished": "grey50",
-    "abandoned": "red",
-    "awaiting-update": "magenta",
-}
+from caco.tui.theme import get_status_color
 
 
 class WadTable(DataTable):
@@ -32,6 +22,7 @@ class WadTable(DataTable):
         Binding("G", "go_bottom", "Bottom", show=False),
         Binding("ctrl+d", "page_down", "Page Down", show=False),
         Binding("ctrl+u", "page_up", "Page Up", show=False),
+        Binding("enter", "select_cursor", "Play", show=True),
     ]
 
     class WadSelected(Message):
@@ -54,6 +45,11 @@ class WadTable(DataTable):
         self._wad_id_to_row: dict[int, int] = {}
         self._g_pressed = False
         self._g_timeout_task: asyncio.Task | None = None
+        # Batch-fetched stats maps
+        self._playtime_map: dict[int, int] = {}
+        self._last_played_map: dict[int, str] = {}
+        self._times_beaten_map: dict[int, int] = {}
+        self._session_count_map: dict[int, int] = {}
 
     def on_mount(self) -> None:
         """Set up the table columns."""
@@ -72,29 +68,44 @@ class WadTable(DataTable):
         query: str | None = None,
         sort_by: str = "id",
         sort_desc: bool = False,
+        include_deleted: bool = False,
     ) -> int:
         """Load WADs from database and populate table.
 
         Returns the number of WADs loaded.
         """
-        self._wads = db.search_wads(query, sort_by=sort_by, sort_desc=sort_desc)
+        self._wads = db.search_wads(
+            query, sort_by=sort_by, sort_desc=sort_desc,
+            include_deleted=include_deleted,
+        )
         self._wad_id_to_row.clear()
         self.clear()
 
         if not self._wads:
+            self._playtime_map = {}
+            self._last_played_map = {}
+            self._times_beaten_map = {}
+            self._session_count_map = {}
             return 0
+
+        # Batch-fetch all stats in a few queries instead of N+1
+        wad_ids = [wad["id"] for wad in self._wads]
+        self._playtime_map = db.get_total_playtime_batch(wad_ids)
+        self._last_played_map = db.get_last_played_batch(wad_ids)
+        self._times_beaten_map = db.get_times_beaten_batch(wad_ids)
+        self._session_count_map = db.get_session_count_batch(wad_ids)
 
         for i, wad in enumerate(self._wads):
             wad_id = wad["id"]
             self._wad_id_to_row[wad_id] = i
 
-            # Format playtime
-            playtime = db.get_total_playtime(wad_id)
+            # Format playtime from batch map
+            playtime = self._playtime_map.get(wad_id, 0)
             playtime_str = format_duration(playtime) if playtime else "-"
 
             # Status with color styling using Rich Text
             status = wad["status"]
-            color = STATUS_COLORS.get(status, "")
+            color = get_status_color(status)
             status_text = Text(status, style=color) if color else status
 
             self.add_row(
@@ -111,6 +122,60 @@ class WadTable(DataTable):
             self.post_message(self.WadSelected(self._wads[0]["id"]))
 
         return len(self._wads)
+
+    def get_wad_stats(self, wad_id: int) -> dict:
+        """Get pre-fetched stats for a WAD (avoids extra DB queries).
+
+        Returns dict with: playtime, last_played, times_beaten, session_count.
+        """
+        return {
+            "playtime": self._playtime_map.get(wad_id, 0),
+            "last_played": self._last_played_map.get(wad_id),
+            "times_beaten": self._times_beaten_map.get(wad_id, 0),
+            "session_count": self._session_count_map.get(wad_id, 0),
+        }
+
+    def update_row(self, wad_id: int) -> bool:
+        """Update a single row in-place without full table reload.
+
+        Returns True if the row was updated, False if wad_id not found in table.
+        """
+        if wad_id not in self._wad_id_to_row:
+            return False
+
+        row_idx = self._wad_id_to_row[wad_id]
+        wad = db.get_wad(wad_id)
+        if not wad:
+            return False
+
+        # Update the cached wad data
+        self._wads[row_idx] = wad
+
+        # Refresh stats for this single WAD
+        single_playtime = db.get_total_playtime_batch([wad_id])
+        single_last_played = db.get_last_played_batch([wad_id])
+        single_beaten = db.get_times_beaten_batch([wad_id])
+        single_sessions = db.get_session_count_batch([wad_id])
+        self._playtime_map.update(single_playtime)
+        self._last_played_map.update(single_last_played)
+        self._times_beaten_map.update(single_beaten)
+        self._session_count_map.update(single_sessions)
+
+        # Update cells in the DataTable
+        row_key = str(wad_id)
+        playtime = self._playtime_map.get(wad_id, 0)
+        playtime_str = format_duration(playtime) if playtime else "-"
+
+        status = wad["status"]
+        color = get_status_color(status)
+        status_text = Text(status, style=color) if color else status
+
+        self.update_cell(row_key, "title", wad["title"])
+        self.update_cell(row_key, "author", wad["author"] or "-")
+        self.update_cell(row_key, "status", status_text)
+        self.update_cell(row_key, "playtime", playtime_str)
+
+        return True
 
     def get_selected_wad_id(self) -> int | None:
         """Get the currently selected WAD ID."""
@@ -189,14 +254,6 @@ class WadTable(DataTable):
         """Reset g state after timeout."""
         await asyncio.sleep(0.5)
         self._g_pressed = False
-
-    def handle_g_key(self) -> bool:
-        """Handle 'g' key press for gg motion. Returns True if handled.
-
-        Deprecated: Use action_handle_g instead. Kept for compatibility.
-        """
-        self.action_handle_g()
-        return True
 
     def reset_g_state(self) -> None:
         """Reset g key state."""

@@ -168,6 +168,11 @@ class BaseSearchPane(Widget):
             return
         if self._current_worker and self._current_worker.is_running:
             self._current_worker.cancel()
+        # Clear results and show loading state
+        table = self.query_one("#results-table", DataTable)
+        table.clear()
+        self._results = []
+        self._clear_preview()
         status = self.query_one("#search-status", Static)
         status.update(f"Searching for '{query}'...")
         self._current_worker = self.run_worker(

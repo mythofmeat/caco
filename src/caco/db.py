@@ -1088,6 +1088,24 @@ def get_times_beaten_batch(wad_ids: list[int]) -> dict[int, int]:
         return {row["wad_id"]: row["count"] for row in rows}
 
 
+def get_session_count_batch(wad_ids: list[int]) -> dict[int, int]:
+    """Get session count for multiple WADs efficiently. Returns {wad_id: count}."""
+    if not wad_ids:
+        return {}
+    with get_connection() as conn:
+        placeholders = ",".join("?" * len(wad_ids))
+        rows = conn.execute(
+            f"""
+            SELECT wad_id, COUNT(*) as count
+            FROM sessions
+            WHERE wad_id IN ({placeholders})
+            GROUP BY wad_id
+            """,
+            wad_ids,
+        ).fetchall()
+        return {row["wad_id"]: row["count"] for row in rows}
+
+
 def get_wad_stats(wad_id: int) -> dict[str, Any]:
     """Get deletion-relevant stats for a WAD.
 

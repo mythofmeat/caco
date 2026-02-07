@@ -33,6 +33,25 @@
 
 # TUI Improvements
 - [x] able to choose a default start page and sort via the config file
+- [x] Batch queries: replaced N+1 DB calls with batch-fetched stats (playtime, last_played, times_beaten, session_count)
+- [x] Incremental table updates: `update_row()` method for in-place cell updates (rating, status) without full reload
+- [x] Enter=Play binding now visible in footer
+- [x] Fixed rating cycle bug: 0→1→2→3→4→5→0 (was skipping 0/unrated)
+- [x] Delete WAD binding (d) with confirmation modal showing session stats
+- [x] Beaten tracking keybindings: + to increment, - to decrement
+- [x] Loading indicators in search panes (clears results + "Searching..." status)
+- [x] Richer info panel: yellow stars, tag chips, description snippet, source type
+- [x] "Other" tab for abandoned + awaiting-update WADs (list status filter)
+- [x] Year and Rating sort options added to dropdown
+- [x] Filter placeholder shows available query fields
+- [x] Centralized status colors in tui/theme.py (replaces duplicated dicts)
+- [x] Fixed silent exception swallowing: except Exception → except NoMatches
+- [x] Removed deprecated handle_g_key() dead code
+- [x] Stats screen (S) showing library overview, completion rate, monthly activity
+- [x] Trash view (T) with restore (u) in All tab
+- [x] Cache management screen (C) with clear selected/all
+- [x] Responsive layout: auto-hide info panel < 100 cols, P to toggle manually
+- [x] Cleaned up styles.tcss: removed duplicates already in widget DEFAULT_CSS
 
 # GUI
 - [ ] GUI for launching and managing WADs

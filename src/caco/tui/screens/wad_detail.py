@@ -8,17 +8,7 @@ from textual.widgets import Static, Footer
 
 from caco import db
 from caco.player import format_duration
-
-
-# Status display names
-STATUS_DISPLAY = {
-    "to-play": "To Play",
-    "backlog": "Backlog",
-    "playing": "Playing",
-    "finished": "Finished",
-    "abandoned": "Abandoned",
-    "awaiting-update": "Awaiting Update",
-}
+from caco.tui.theme import get_status_display
 
 
 class WadDetailScreen(Screen):
@@ -70,7 +60,7 @@ class WadDetailScreen(Screen):
             content.mount(self._make_row("Year", str(wad["year"])))
 
         status = wad["status"]
-        status_name = STATUS_DISPLAY.get(status, status)
+        status_name = get_status_display(status)
         content.mount(self._make_row("Status", status_name))
 
         if wad.get("rating"):

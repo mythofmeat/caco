@@ -73,19 +73,23 @@ src/caco/
 │   └── llm.py      # LLM backends for smart metadata extraction
 ├── tui/            # Textual-based TUI (caco --tui)
 │   ├── app.py      # Main Textual App class
+│   ├── theme.py    # Centralized status colors/display config
 │   ├── styles.tcss # Textual CSS styles
 │   ├── screens/    # Screen classes
 │   │   ├── tabbed_library.py  # Main tabbed interface (entry point)
 │   │   ├── wad_detail.py  # WAD detail view
 │   │   ├── wad_edit.py    # WAD metadata edit form
-│   │   └── sessions.py    # Session history
+│   │   ├── sessions.py    # Session history
+│   │   ├── confirm_delete.py # Delete confirmation modal
+│   │   ├── stats.py       # Library statistics screen
+│   │   └── cache.py       # Cache management screen
 │   └── widgets/    # Widget classes
 │       ├── base_search_pane.py # Abstract base for search panes
-│       ├── wad_table.py   # DataTable for WAD list (with vim bindings)
-│       ├── wad_info.py    # Info panel widget
+│       ├── wad_table.py   # DataTable for WAD list (with vim bindings, batch stats)
+│       ├── wad_info.py    # Info panel widget (accepts pre-fetched stats)
 │       ├── filter_input.py # Search/filter input
-│       ├── sort_select.py  # Sort dropdown widget
-│       ├── library_pane.py # Reusable library view (table + panel + filter)
+│       ├── sort_select.py  # Sort dropdown widget (ID, Title, Author, Playtime, Last Played, Year, Rating)
+│       ├── library_pane.py # Reusable library view (table + panel + filter + delete/beaten/trash/stats/cache)
 │       ├── import_pane.py  # Import container with source selector
 │       ├── idgames_pane.py # idgames search (extends BaseSearchPane)
 │       ├── doomwiki_pane.py # Doom Wiki search (extends BaseSearchPane)
@@ -107,7 +111,9 @@ src/caco/
 - WAD cache: `~/.cache/caco/wads/`
 
 **Key patterns:**
-- `db.py` uses raw sqlite3 with `sqlite3.Row` for dict-like access; tag helpers (`_fetch_tags`, `_attach_tags`, `_fetch_tags_batch`) and batch query functions (`get_total_playtime_batch`, `get_last_played_batch`) reduce N+1 queries
+- `db.py` uses raw sqlite3 with `sqlite3.Row` for dict-like access; tag helpers (`_fetch_tags`, `_attach_tags`, `_fetch_tags_batch`) and batch query functions (`get_total_playtime_batch`, `get_last_played_batch`, `get_times_beaten_batch`, `get_session_count_batch`) reduce N+1 queries
+- TUI widgets use batch stats: `WadTable.load_wads()` batch-fetches all stats, `get_wad_stats()` exposes them to `WadInfoPanel`; `update_row()` handles incremental cell updates
+- Status colors/display centralized in `tui/theme.py` (`STATUS_CONFIG` dict with `get_status_display/color/css_class` helpers)
 - Source adapters are context managers; clients inherit `BaseHttpClient` from `utils.py`; errors inherit `CacoSourceError`
 - CLI uses Click's decorator registration pattern: each `cli/*.py` submodule imports `cli` from `caco.cli` and registers commands; `__init__.py` imports all submodules at bottom to trigger registration
 - `player.py` wraps sourceport execution to track session start/end times
@@ -156,8 +162,8 @@ src/caco/
 - `cache_auto_clean` — auto-cleanup on play (true/false)
 
 **TUI config (`[tui]` section):**
-- `default_tab` — starting tab (all, playing, to-play, finished, backlog)
-- `default_sort` — default sort field
+- `default_tab` — starting tab (all, playing, to-play, finished, backlog, other)
+- `default_sort` — default sort field (id, title, author, playtime, last_played, year, rating)
 - `default_sort_desc` — default sort direction (boolean)
 
 ## Dependencies

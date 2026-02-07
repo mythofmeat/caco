@@ -5,27 +5,9 @@ Screen {
 }
 
 /* =============================================================================
-   Tabbed Library Screen
+   Tab styling (global — not owned by any widget DEFAULT_CSS)
    ============================================================================= */
 
-TabbedLibraryScreen {
-    layout: vertical;
-}
-
-TabbedLibraryScreen TabbedContent {
-    height: 1fr;
-}
-
-TabbedLibraryScreen ContentSwitcher {
-    height: 1fr;
-}
-
-TabbedLibraryScreen TabPane {
-    height: 100%;
-    padding: 0;
-}
-
-/* Tab styling */
 Tabs {
     background: $surface-darken-1;
 }
@@ -44,51 +26,7 @@ Tab:hover {
 }
 
 /* =============================================================================
-   Library Pane (used in tabs)
-   ============================================================================= */
-
-LibraryPane {
-    height: 100%;
-    width: 100%;
-}
-
-LibraryPane #pane-header {
-    height: 3;
-    width: 100%;
-    padding: 0 1;
-    align: left middle;
-}
-
-LibraryPane #pane-content {
-    height: 1fr;
-}
-
-LibraryPane #wad-list-container {
-    width: 2fr;
-    height: 100%;
-}
-
-LibraryPane #info-panel-container {
-    width: 1fr;
-    height: 100%;
-    border-left: solid $primary;
-}
-
-LibraryPane #status-mode {
-    dock: bottom;
-    height: 1;
-    background: $warning;
-    color: $text;
-    padding: 0 1;
-    display: none;
-}
-
-LibraryPane #status-mode.visible {
-    display: block;
-}
-
-/* =============================================================================
-   WAD Table
+   WAD Table (DataTable sub-elements not settable from DEFAULT_CSS)
    ============================================================================= */
 
 WadTable {
@@ -133,7 +71,7 @@ WadInfoPanel {
     color: $text-muted;
 }
 
-/* Status Colors */
+/* Status Colors (used by Rich markup classes) */
 .status-to-play {
     color: dodgerblue;
 }
@@ -159,7 +97,7 @@ WadInfoPanel {
 }
 
 /* =============================================================================
-   Filter Input
+   Filter Input (sub-element styling)
    ============================================================================= */
 
 FilterInput {
@@ -205,45 +143,8 @@ FilterInput:focus-within {
 }
 
 /* =============================================================================
-   Sort Select
+   Import Pane Radio Styling (global overrides)
    ============================================================================= */
-
-SortSelect {
-    height: 3;
-    width: auto;
-    align: right middle;
-}
-
-SortSelect Select {
-    width: 16;
-}
-
-SortSelect #sort-dir-btn {
-    width: 3;
-    min-width: 3;
-    margin-left: 1;
-}
-
-/* =============================================================================
-   Search Panes (idgames + doomwiki share BaseSearchPane styles via DEFAULT_CSS)
-   ============================================================================= */
-
-/* =============================================================================
-   Import Pane (container)
-   ============================================================================= */
-
-ImportPane {
-    height: 100%;
-    width: 100%;
-}
-
-ImportPane #source-selector {
-    height: 3;
-    width: 100%;
-    padding: 0 1;
-    align: left middle;
-    background: $surface-darken-1;
-}
 
 ImportPane #source-selector RadioSet {
     width: auto;
@@ -261,219 +162,6 @@ ImportPane #source-selector RadioButton.-on {
     background: $primary;
     color: $text;
     text-style: bold;
-}
-
-ImportPane #import-content {
-    height: 1fr;
-}
-
-/* =============================================================================
-   Doomworld URL Pane
-   ============================================================================= */
-
-DoomworldUrlPane {
-    height: 100%;
-    width: 100%;
-}
-
-DoomworldUrlPane #url-header {
-    height: 3;
-    width: 100%;
-    padding: 0 1;
-    align: left middle;
-}
-
-DoomworldUrlPane #url-input {
-    width: 1fr;
-}
-
-DoomworldUrlPane #fetch-btn {
-    margin-left: 1;
-}
-
-DoomworldUrlPane #content-area {
-    height: 1fr;
-}
-
-DoomworldUrlPane #form-container {
-    width: 1fr;
-    height: 100%;
-    padding: 1 2;
-}
-
-DoomworldUrlPane #preview-container {
-    width: 1fr;
-    height: 100%;
-    border-left: solid $primary;
-    padding: 1 2;
-}
-
-DoomworldUrlPane .form-row {
-    height: auto;
-    margin-bottom: 1;
-    align: left middle;
-}
-
-DoomworldUrlPane .form-label {
-    width: 10;
-    color: $text-muted;
-}
-
-DoomworldUrlPane .form-input {
-    width: 1fr;
-}
-
-DoomworldUrlPane #preview-header {
-    text-style: bold;
-    margin-bottom: 1;
-}
-
-DoomworldUrlPane #preview-meta {
-    color: $text-muted;
-    margin-bottom: 1;
-}
-
-DoomworldUrlPane #preview-excerpt {
-    color: $text;
-    height: 1fr;
-    overflow: auto;
-}
-
-DoomworldUrlPane #placeholder {
-    width: 100%;
-    height: 100%;
-    content-align: center middle;
-    color: $text-muted;
-}
-
-DoomworldUrlPane #status {
-    dock: bottom;
-    height: 1;
-    padding: 0 1;
-    color: $text-muted;
-}
-
-/* =============================================================================
-   URL Import Pane
-   ============================================================================= */
-
-UrlImportPane {
-    height: 100%;
-    width: 100%;
-}
-
-UrlImportPane #form-area {
-    width: 100%;
-    height: 100%;
-    padding: 1 2;
-    align: center top;
-}
-
-UrlImportPane #form-box {
-    width: 80;
-    max-width: 100%;
-    height: auto;
-}
-
-UrlImportPane #form-title {
-    text-style: bold;
-    margin-bottom: 1;
-}
-
-UrlImportPane .form-row {
-    height: auto;
-    margin-bottom: 1;
-    align: left middle;
-}
-
-UrlImportPane .form-label {
-    width: 12;
-    color: $text-muted;
-}
-
-UrlImportPane .form-input {
-    width: 1fr;
-}
-
-UrlImportPane #desc-area {
-    height: 6;
-    width: 1fr;
-}
-
-UrlImportPane #import-btn {
-    margin-top: 1;
-    width: 100%;
-}
-
-UrlImportPane #status {
-    dock: bottom;
-    height: 1;
-    padding: 0 1;
-    color: $text-muted;
-}
-
-/* =============================================================================
-   Local Import Pane
-   ============================================================================= */
-
-LocalImportPane {
-    height: 100%;
-    width: 100%;
-}
-
-LocalImportPane #form-area {
-    width: 100%;
-    height: 100%;
-    padding: 1 2;
-    align: center top;
-}
-
-LocalImportPane #form-box {
-    width: 80;
-    max-width: 100%;
-    height: auto;
-}
-
-LocalImportPane #form-title {
-    text-style: bold;
-    margin-bottom: 1;
-}
-
-LocalImportPane .form-row {
-    height: auto;
-    margin-bottom: 1;
-    align: left middle;
-}
-
-LocalImportPane .form-label {
-    width: 12;
-    color: $text-muted;
-}
-
-LocalImportPane .form-input {
-    width: 1fr;
-}
-
-LocalImportPane #file-info {
-    color: $success;
-    margin-bottom: 1;
-}
-
-LocalImportPane #desc-area {
-    height: 6;
-    width: 1fr;
-}
-
-LocalImportPane #import-btn {
-    margin-top: 1;
-    width: 100%;
-}
-
-LocalImportPane #status {
-    dock: bottom;
-    height: 1;
-    padding: 0 1;
-    color: $text-muted;
 }
 
 /* =============================================================================
@@ -541,7 +229,7 @@ WadEditScreen #save-btn {
 }
 
 /* =============================================================================
-   Header Bar
+   Header / Footer
    ============================================================================= */
 
 #header {
@@ -550,10 +238,6 @@ WadEditScreen #save-btn {
     background: $primary-darken-2;
     padding: 0 1;
 }
-
-/* =============================================================================
-   Footer / Key Hints
-   ============================================================================= */
 
 #footer {
     dock: bottom;
@@ -609,4 +293,3 @@ SessionsScreen {
 #sessions-table {
     height: 1fr;
 }
-

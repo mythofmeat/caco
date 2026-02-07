@@ -13,6 +13,8 @@ SORT_OPTIONS = [
     ("Author", "author"),
     ("Playtime", "playtime"),
     ("Last Played", "last_played"),
+    ("Year", "year"),
+    ("Rating", "rating"),
 ]
 
 

@@ -78,6 +78,7 @@ The TUI features a tabbed interface for quick filtering:
 | **To-Play** | WADs with status "to-play" |
 | **Finished** | WADs with status "finished" |
 | **Backlog** | WADs with status "backlog" |
+| **Other** | Abandoned + awaiting-update WADs |
 | **Import** | Import from multiple sources |
 
 Use `Tab` key to switch between tabs.
@@ -90,22 +91,31 @@ Use `Tab` key to switch between tabs.
 | `j/k` | Navigate up/down in list |
 | `gg/G` | Jump to top/bottom |
 | `Ctrl+d/u` | Page down/up |
-| `/` or `f` | Focus filter input (live filtering as you type) |
 | `Enter` | Play selected WAD / Import (in Search tab) |
+| `/` or `f` | Focus filter input (live filtering as you type) |
 | `Escape` | Clear filter and return to list |
 | `i` | View WAD details |
 | `e` | Edit WAD metadata |
 | `h` | View session history |
+| `d` | Delete WAD (moves to trash with confirmation) |
 | `s` | Enter status mode |
 | `o` | Open sort dropdown |
 | `O` | Toggle sort direction (↑/↓) |
-| `r` | Cycle rating (1-5 stars) |
+| `r` | Cycle rating (0→1→2→3→4→5→0) |
 | `R` | Clear rating |
+| `+` / `-` | Increment/decrement beaten count |
+| `T` | Toggle trash view (All tab only) |
+| `u` | Restore WAD from trash (in trash view) |
+| `S` | Open library stats screen |
+| `C` | Open cache management screen |
+| `P` | Toggle info panel visibility |
 | `q` | Quit/go back |
 
 ### Sort Dropdown
 
 Each library tab includes a sort dropdown in the header. Press `o` to focus it, or click to select a sort field. Use `O` to toggle ascending/descending order.
+
+Sort fields: ID, Title, Author, Playtime, Last Played, Year, Rating.
 
 ### Edit Screen
 
@@ -426,9 +436,9 @@ abandoned = "red"
 awaiting-update = "magenta"
 
 [tui]
-# Default tab: all, playing, to-play, finished, backlog
+# Default tab: all, playing, to-play, finished, backlog, other
 default_tab = "all"
-# Default sort: id, title, author, playtime, last_played
+# Default sort: id, title, author, playtime, last_played, year, rating
 default_sort = "id"
 default_sort_desc = false
 ```

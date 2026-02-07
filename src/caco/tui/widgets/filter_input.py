@@ -43,7 +43,7 @@ class FilterInput(Horizontal):
 
     def compose(self) -> ComposeResult:
         yield Static("/", id="filter-prompt")
-        yield Input(placeholder="Filter (beets-style query)", id="filter-input")
+        yield Input(placeholder="Filter (tag:, status:, author:, year:, ^negate)", id="filter-input")
         yield Static("", id="filter-count")
 
     def on_mount(self) -> None:
@@ -78,11 +78,14 @@ class FilterInput(Horizontal):
         input_widget = self.query_one("#filter-input", Input)
         return input_widget.value
 
-    def set_wad_count(self, count: int) -> None:
+    def set_wad_count(self, count: int, label: str | None = None) -> None:
         """Update the displayed WAD count."""
         self._wad_count = count
         count_widget = self.query_one("#filter-count", Static)
-        count_widget.update(f" ({count})")
+        if label:
+            count_widget.update(f" ({count} {label})")
+        else:
+            count_widget.update(f" ({count})")
 
     def on_input_changed(self, event: Input.Changed) -> None:
         """Handle input changes for live filtering with debounce."""
