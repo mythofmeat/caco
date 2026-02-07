@@ -491,6 +491,83 @@ def _complete_sort(ctx, param, incomplete: str) -> list[str]:
     return completions
 
 
+def _render_wad_list_json(wads: list[dict]) -> None:
+    """JSON output for list command."""
+    import json as _json
+
+    wad_ids = [w["id"] for w in wads]
+    times_beaten = db.get_times_beaten_batch(wad_ids)
+    playtimes = db.get_total_playtime_batch(wad_ids)
+    last_played_map = db.get_last_played_batch(wad_ids)
+
+    result = []
+    for wad in wads:
+        playtime = playtimes.get(wad["id"], 0)
+        last_played = last_played_map.get(wad["id"])
+        beaten = times_beaten.get(wad["id"], 0)
+        result.append({
+            "id": wad["id"],
+            "title": wad["title"],
+            "author": wad.get("author"),
+            "year": wad.get("year"),
+            "status": wad["status"],
+            "rating": wad.get("rating"),
+            "tags": wad.get("tags", []),
+            "source_type": wad["source_type"],
+            "source_url": wad.get("source_url"),
+            "idgames_id": wad.get("idgames_id"),
+            "filename": wad.get("filename"),
+            "version": wad.get("version"),
+            "playtime_seconds": playtime,
+            "playtime": format_duration(playtime) if playtime else None,
+            "times_beaten": beaten,
+            "last_played": last_played,
+            "created_at": wad.get("created_at"),
+        })
+
+    print(_json.dumps(result, indent=2))
+
+
+def _render_wad_info_json(wad: dict) -> None:
+    """JSON output for info command."""
+    import json as _json
+
+    playtime = db.get_total_playtime(wad["id"])
+    sessions = db.get_sessions(wad["id"])
+    last_played = db.get_last_played(wad["id"])
+    times_beaten = db.get_times_beaten(wad["id"])
+
+    result = {
+        "id": wad["id"],
+        "title": wad["title"],
+        "author": wad.get("author"),
+        "year": wad.get("year"),
+        "description": wad.get("description"),
+        "status": wad["status"],
+        "rating": wad.get("rating"),
+        "notes": wad.get("notes"),
+        "tags": wad.get("tags", []),
+        "source_type": wad["source_type"],
+        "source_id": wad.get("source_id"),
+        "source_url": wad.get("source_url"),
+        "idgames_id": wad.get("idgames_id"),
+        "filename": wad.get("filename"),
+        "version": wad.get("version"),
+        "custom_iwad": wad.get("custom_iwad"),
+        "custom_sourceport": wad.get("custom_sourceport"),
+        "custom_args": wad.get("custom_args"),
+        "playtime_seconds": playtime,
+        "playtime": format_duration(playtime) if playtime else None,
+        "session_count": len(sessions),
+        "times_beaten": times_beaten,
+        "last_played": last_played,
+        "created_at": wad.get("created_at"),
+        "updated_at": wad.get("updated_at"),
+    }
+
+    print(_json.dumps(result, indent=2))
+
+
 def _render_wad_list_plain(wads: list[dict]) -> None:
     """TSV output: ID\tTitle\tAuthor\tStatus\tBeaten\tPlaytime\tLastPlayed."""
     # Batch fetch stats for all WADs
@@ -680,7 +757,6 @@ from caco.cli import stats  # noqa: E402, F401
 # =============================================================================
 
 # Unix-like aliases for common commands
-cli.add_command(import_cmds.import_auto, name="add")  # caco add -> caco import auto
 cli.add_command(library.delete, name="rm")             # caco rm -> caco delete
 cli.add_command(library.list_cmd, name="ls")           # caco ls -> caco list
 cli.add_command(library.info, name="i")                # caco i -> caco info

@@ -17,6 +17,20 @@
 - [x] Created BaseSearchPane for TUI search panes (idgames + doomwiki)
 - [x] Split cli.py (2857 lines) into cli/ package with 8 submodules
 
+# CLI Improvements (completed)
+- [x] Fixed `-y` flag collision: removed `-y` short form from `--year` so `-y` exclusively means `--yes`
+- [x] Renamed `cache clean` → `cache prune`
+- [x] Enriched `tag list` with WAD counts (Rich table + `--plain` flag)
+- [x] Added `--info` flag to `random` command (prints ID, title, author as TSV)
+- [x] Added `--json` output to `list` and `info` commands
+- [x] Flattened `caco import` from group with subcommands to single command with source flags (`--idgames`, `--doomwiki`, `--doomworld`, `--local`, `--url`)
+- [x] Removed `caco add` alias (use `caco import` directly)
+- [x] Improved query syntax help text in `list` command docstring
+- [x] Updated fish shell completions
+
+# Testing (completed)
+- [x] Set up pytest with 94 unit tests covering models, db CRUD, query parser, player, and utils
+
 # TUI Improvements
 - [x] able to choose a default start page and sort via the config file
 

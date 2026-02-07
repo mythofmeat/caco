@@ -42,11 +42,11 @@ pip install -e .
 caco config --edit
 
 # Import a WAD (auto-detects source type)
-caco add "scythe 2"                              # Search idgames
-caco add 19509                                   # idgames ID
-caco add https://doomwiki.org/wiki/Eviternity   # Doomwiki URL
-caco add https://www.doomworld.com/forum/topic/134292-myhousewad/  # Doomworld forum
-caco add ~/Downloads/map.wad                     # Local file
+caco import "scythe 2"                              # Search idgames
+caco import 19509                                   # idgames ID
+caco import https://doomwiki.org/wiki/Eviternity   # Doomwiki URL
+caco import https://www.doomworld.com/forum/topic/134292-myhousewad/  # Doomworld forum
+caco import ~/Downloads/map.wad                     # Local file
 
 # List your library
 caco ls                       # Alias for 'list'
@@ -165,31 +165,28 @@ The filter supports the same beets-style query syntax as `caco list`.
 ### Importing WADs
 
 ```bash
-# Smart import (auto-detects source type)
-caco add "sunlust"                              # Search idgames
-caco add 19509                                  # idgames ID
-caco add https://doomwiki.org/wiki/Eviternity  # Doomwiki URL
-caco add ~/Downloads/mymap.wad                 # Local file (title inferred)
-caco add https://example.com/wad.zip -t "My WAD"  # URL
+# Auto-detect source type (default behavior)
+caco import "sunlust"                              # Search idgames
+caco import 19509                                  # idgames ID
+caco import https://doomwiki.org/wiki/Eviternity  # Doomwiki URL
+caco import ~/Downloads/mymap.wad                 # Local file (title inferred)
+caco import https://example.com/wad.zip -t "My WAD"  # URL
 
-# Batch local import
-caco import local *.wad --tag new   # Import all WADs, add tag
-
-# Explicit subcommands (if you prefer)
-caco import idgames "sunlust"
-caco import doomwiki "Scythe"       # Search Doom Wiki
-caco import doomworld https://www.doomworld.com/forum/topic/134292-myhousewad/
-caco import doomworld URL --smart   # Use LLM for metadata extraction
-caco import url "Title" "https://..." --author "Author"
-caco import local "Title" ~/path/to/wad.wad
+# Force a specific source with flags
+caco import "sunlust" --idgames             # Force idgames search
+caco import "Scythe" --doomwiki             # Force Doom Wiki search
+caco import https://www.doomworld.com/forum/topic/134292-myhousewad/ --doomworld
+caco import URL --doomworld --smart         # Use LLM for metadata extraction
+caco import --url https://example.com/wad.zip -t "My WAD" -a "Author"
+caco import *.wad --local --tag new         # Batch local import
 
 # Duplicate detection - caco warns if WAD already exists
-caco add 19509                      # "Already in library" warning
-caco add 19509 --force              # Import anyway
+caco import 19509                   # "Already in library" warning
+caco import 19509 --force           # Import anyway
 
 # Interactive selection with fzf (if installed)
-caco add scythe                     # Opens fzf fuzzy picker
-caco add "doom 2" --multi           # Multi-select mode
+caco import scythe                  # Opens fzf fuzzy picker
+caco import "doom 2" --multi        # Multi-select mode
 
 # Link a downloaded file to a metadata-only entry (e.g., Doomwiki import)
 caco link 73 ~/Downloads/heartland.wad
@@ -342,6 +339,7 @@ Pick a random WAD for scripting:
 ```bash
 caco random                        # Random WAD from entire library (prints ID)
 caco random status:to-play         # Random to-play WAD
+caco random --info                 # Print ID, title, and author (TSV)
 caco play $(caco random)           # Play a random WAD
 caco play $(caco random tag:megawad)  # Play a random megawad
 ```
@@ -361,9 +359,9 @@ caco cache clear 1,3,5               # Clear specific WADs
 caco cache clear status:finished     # Clear finished WADs' cache
 caco cache clear --all --dry-run     # Preview what would be deleted
 
-# Clean orphaned files
-caco cache clean                     # Remove files not tracked in database
-caco cache clean --dry-run           # Preview orphan cleanup
+# Prune orphaned files
+caco cache prune                     # Remove files not tracked in database
+caco cache prune --dry-run           # Preview orphan cleanup
 ```
 
 **Auto-cleanup**: Configure automatic cache cleanup in config.toml:
@@ -441,7 +439,6 @@ Unix-like shortcuts for common commands:
 
 | Alias | Full Command |
 |-------|--------------|
-| `caco add` | `caco import auto` |
 | `caco rm` | `caco delete` |
 | `caco ls` | `caco list` |
 | `caco i` | `caco info` |
@@ -503,7 +500,7 @@ cp completions/caco.fish ~/.config/fish/completions/
 
 ## Scripting
 
-Use `--plain` to output machine-readable text suitable for scripting:
+Use `--plain` for TSV output or `--json` for structured data:
 
 ```bash
 # List WADs as TSV (tab-separated)
@@ -516,6 +513,18 @@ caco info 1 --plain
 #         title=Scythe 2
 #         author=Erik Alm
 #         ...
+
+# JSON output (includes all fields, computed stats, tags)
+caco list --json
+caco list status:playing --json
+caco info 1 --json
+
+# Tag list shows WAD counts
+caco tag list                       # Rich table with Tag + Count columns
+caco tag list --plain               # TSV output for scripting
+
+# Random WAD with metadata
+caco random --info                  # Prints ID, title, author (TSV)
 ```
 
 ## Data Storage

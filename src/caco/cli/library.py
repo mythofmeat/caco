@@ -22,7 +22,9 @@ from caco.cli import (
     _parse_sort_option,
     _render_wad_list,
     _render_wad_list_plain,
+    _render_wad_list_json,
     _render_wad_info_plain,
+    _render_wad_info_json,
 )
 
 
@@ -30,24 +32,34 @@ from caco.cli import (
 @click.argument("query", nargs=-1, shell_complete=_complete_query)
 @click.option("--sort", "-S", shell_complete=_complete_sort, help="Sort by: playtime, rating, created, title, author, last_played, year (suffix + for asc, - for desc)")
 @click.option("--deleted", is_flag=True, help="Show deleted WADs (trash)")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.option("--plain", is_flag=True, help="Output as TSV (for scripting)")
-def list_cmd(query: tuple[str, ...], sort: str | None, deleted: bool, plain: bool):
+def list_cmd(query: tuple[str, ...], sort: str | None, deleted: bool, as_json: bool, plain: bool):
     """List WADs in your library.
 
     Uses beets-style query syntax:
 
     \b
       caco list status:playing              # Filter by status
-      caco list author:romero year:1994     # Multiple filters (AND)
-      caco list "status:playing , status:to-play"  # OR queries
-      caco list ^status:finished            # Negation (use ^ to avoid CLI issues)
+      caco list author:romero year:1994     # Multiple filters (implicit AND)
+      caco list "status:playing , status:to-play"  # OR queries (spaces around comma!)
+      caco list ^status:finished            # Negation (prefer ^ over -)
       caco list tag:megawad ^tag:slaughter  # Combined filters
-      caco list "ancient aliens"            # Free text search
+      caco list "ancient aliens"            # Free text (title/author/description)
+      caco list tag:caco*                   # Glob patterns (* and ? supported)
 
+    \b
     Query fields: id:, title:, author:, year:, filename:, tag:, status:, source:
+    Status shortcuts: t/tp (to-play), b (backlog), p (playing), f (finished),
+                      a (abandoned), w (awaiting-update)
 
-    Negation: Use ^ prefix (e.g., ^status:finished). The - prefix also works but
-    may conflict with CLI options.
+    \b
+    Notes:
+      - OR syntax requires spaces around comma: " , " (not just ",")
+      - Prefer ^ for negation over - (which can conflict with CLI flags)
+      - Free text searches title, author, and description fields
+      - Glob patterns work in field queries: tag:caco*, filename:scythe?
+      - Multiple terms without commas are joined with implicit AND
 
     Customize display via config file: columns, colors, default sort.
     """
@@ -85,7 +97,9 @@ def list_cmd(query: tuple[str, ...], sort: str | None, deleted: bool, plain: boo
     # Adjust title for deleted view
     title = "Trash" if deleted else None
 
-    if plain:
+    if as_json:
+        _render_wad_list_json(wads)
+    elif plain:
         _render_wad_list_plain(wads)
     else:
         _render_wad_list(wads, title=title, list_config=list_config)
@@ -94,14 +108,19 @@ def list_cmd(query: tuple[str, ...], sort: str | None, deleted: bool, plain: boo
 @cli.command()
 @click.argument("query")
 @click.option("--yes", "-y", is_flag=True, help="Auto-select first match if multiple")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.option("--plain", is_flag=True, help="Output as key=value pairs (for scripting)")
-def info(query: str, yes: bool, plain: bool):
+def info(query: str, yes: bool, as_json: bool, plain: bool):
     """Show details about a WAD. QUERY: WAD ID or query (e.g., filename:tnto)."""
     wads = resolve_wad_query(query, mode="pick", yes=yes)
     if not wads:
         return  # User cancelled
     wad = wads[0]
     wad_id = wad["id"]
+
+    if as_json:
+        _render_wad_info_json(wad)
+        return
 
     if plain:
         _render_wad_info_plain(wad)
@@ -529,7 +548,8 @@ def link(query: str, file_path: str, move: bool):
 
 @cli.command(name="random")
 @click.argument("query", nargs=-1)
-def random_cmd(query: tuple[str, ...]):
+@click.option("--info", is_flag=True, help="Print ID, title, and author (TSV)")
+def random_cmd(query: tuple[str, ...], info: bool):
     """Pick a random WAD. Prints the WAD ID (for scripting).
 
     Supports the same query syntax as 'caco list' for filtering.
@@ -538,6 +558,7 @@ def random_cmd(query: tuple[str, ...]):
     Examples:
         caco random                        # Random WAD from entire library
         caco random status:to-play         # Random to-play WAD
+        caco random --info                 # Print ID, title, and author
         caco play $(caco random)           # Play a random WAD
         caco play $(caco random tag:megawad)  # Play a random megawad
     """
@@ -549,4 +570,7 @@ def random_cmd(query: tuple[str, ...]):
         err_console.print("[red]No matching WADs[/red]")
         sys.exit(1)
     wad = rand.choice(wads)
-    print(wad["id"])
+    if info:
+        print(f"{wad['id']}\t{wad['title']}\t{wad['author'] or ''}")
+    else:
+        print(wad["id"])

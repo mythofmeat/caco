@@ -12,6 +12,9 @@ dependencies = [
     "textual>=0.40",
 ]
 
+[project.optional-dependencies]
+test = ["pytest>=7.0", "pytest-cov>=4.0"]
+
 [project.scripts]
 caco = "caco.cli:cli"
 

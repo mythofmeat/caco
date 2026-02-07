@@ -1,4 +1,4 @@
-"""Import commands: import group and all subcommands."""
+"""Import command: unified import with source flags."""
 
 import sys
 
@@ -87,64 +87,26 @@ def _complete_llm_backends(ctx, param, incomplete):
 
 
 # =============================================================================
-# Import group
+# Source-specific import helpers
 # =============================================================================
 
 
-@cli.group(name="import", invoke_without_command=True)
-@click.pass_context
-def import_cmd(ctx):
-    """Import WADs from various sources.
-
-    Without a subcommand, shows help. Use 'caco add <source>' for auto-detection.
-    """
-    if ctx.invoked_subcommand is None:
-        click.echo(ctx.get_help())
-
-
-@import_cmd.command(name="auto")
-@click.argument("source")
-@click.option("--title", "-t", help="Override title (inferred from filename if not provided)")
-@click.option("--author", "-a", help="Author name")
-@click.option("--year", "-y", type=int, help="Year released")
-@click.option("--tag", "tags", multiple=True, help="Tags to add", shell_complete=_complete_tags)
-@click.option("--force", "-f", is_flag=True, help="Import even if duplicate exists")
-@click.option("--multi", "-m", is_flag=True, help="Allow multi-select for idgames search (requires fzf)")
-def import_auto(source: str, title: str | None, author: str | None, year: int | None,
-                tags: tuple[str, ...], force: bool, multi: bool):
-    """Smart import that auto-detects source type.
-
-    SOURCE can be:
-    - A Doomwiki URL (doomwiki.org/wiki/...) - imports from Doom Wiki
-    - A Doomworld forum URL (doomworld.com/forum/topic/...) - imports from forum
-    - A URL (http/https) - imports from URL
-    - A local file path - imports from local filesystem
-    - A number - looks up idgames file ID
-    - Text - searches idgames archive
-
-    \b
-    Examples:
-        caco import auto ~/Downloads/mymap.wad
-        caco import auto https://doomwiki.org/wiki/Scythe
-        caco import auto https://www.doomworld.com/forum/topic/134292-myhousewad/
-        caco import auto https://example.com/map.zip
-        caco import auto 12345
-        caco import auto "scythe 2"
-    """
+def _do_auto_import(source: str, title: str | None, author: str | None,
+                    year: int | None, tags: tuple[str, ...], force: bool,
+                    multi: bool):
+    """Auto-detect source type and dispatch to appropriate import."""
     from pathlib import Path
 
     source_type = _detect_source_type(source)
 
     if source_type == "doomwiki_url":
-        # Doomwiki URL import
         from caco.sources.doomwiki import DoomwikiSource
         from urllib.parse import urlparse, unquote
 
-        # Extract page title from URL: https://doomwiki.org/wiki/Page_Title
         parsed = urlparse(source)
-        path = unquote(parsed.path)  # Handle URL-encoded chars like %3A for :
+        path = unquote(parsed.path)
         if path.startswith("/wiki/"):
-            page_title = path[6:].replace("_", " ")  # Remove /wiki/ prefix
+            page_title = path[6:].replace("_", " ")
         else:
             page_title = path.split("/")[-1].replace("_", " ")
 
@@ -167,7 +129,6 @@ def import_auto(source: str, title: str | None, author: str | None, year: int | 
             console.print(f"[green]Imported:[/green] {entry.display_name} (ID: {wad_id})")
 
     elif source_type == "url":
-        # URL import - infer title if not provided
         inferred_title = title or _infer_title_from_url(source)
 
         existing = db.find_duplicate(
@@ -192,7 +153,6 @@ def import_auto(source: str, title: str | None, author: str | None, year: int | 
         console.print(f"[green]Added:[/green] {inferred_title} (ID: {wad_id})")
 
     elif source_type == "local":
-        # Local file import
         p = Path(source).resolve()
         inferred_title = title or _infer_title_from_filename(p.name)
 
@@ -220,7 +180,6 @@ def import_auto(source: str, title: str | None, author: str | None, year: int | 
         console.print(f"[green]Added:[/green] {inferred_title} (ID: {wad_id})")
 
     elif source_type == "doomworld_url":
-        # Doomworld forum URL import
         from caco.sources.doomworld import DoomworldSource
         from caco.doomworld import (
             DoomworldError,
@@ -259,7 +218,6 @@ def import_auto(source: str, title: str | None, author: str | None, year: int | 
             )
             console.print(f"[green]Imported:[/green] {thread.title} (ID: {wad_id})")
 
-            # Show technical metadata (Phase 2)
             if thread.has_technical_info:
                 if thread.iwad:
                     console.print(f"  [dim]IWAD:[/dim] {iwad_display_name(thread.iwad)}")
@@ -271,7 +229,6 @@ def import_auto(source: str, title: str | None, author: str | None, year: int | 
                     console.print(f"  [dim]Downloads:[/dim] {len(thread.download_links)} link(s)")
 
     elif source_type == "idgames_id":
-        # idgames ID lookup
         from caco.sources.idgames import IdgamesSource
 
         with IdgamesSource() as idgames:
@@ -292,85 +249,12 @@ def import_auto(source: str, title: str | None, author: str | None, year: int | 
                 return
 
     else:
-        # idgames search - delegate to existing command's logic
-        from caco.sources.idgames import IdgamesSource
-
-        with IdgamesSource() as idgames:
-            results = idgames.search(source)
-            if not results:
-                console.print("[dim]No results found[/dim]")
-                return
-
-            if multi and not _fzf_available():
-                err_console.print("[red]--multi requires fzf to be installed[/red]")
-                sys.exit(1)
-
-            if _fzf_available():
-                fzf_items = []
-                for entry in results[:50]:
-                    entry_year = entry.date[:4] if entry.date else "????"
-                    fzf_items.append(f"{entry.title} by {entry.author or 'Unknown'} ({entry_year})")
-
-                selected_indices = _fzf_select(
-                    fzf_items,
-                    prompt="Select WAD(s)" if multi else "Select WAD",
-                    multi=multi,
-                )
-
-                if selected_indices is None:
-                    return
-
-                imported = 0
-                tags_list = list(tags) if tags else None
-                for idx in selected_indices:
-                    entry = results[idx]
-                    wad_id = _check_and_import_entry(
-                        idgames, entry, db.SourceType.IDGAMES, tags_list, force,
-                        source_id=str(entry.id), filename=entry.filename, author=entry.author,
-                    )
-                    if wad_id:
-                        console.print(f"[green]Imported:[/green] {entry.title} (ID: {wad_id})")
-                        imported += 1
-
-                if multi and imported > 1:
-                    console.print(f"[green]Imported {imported} WAD(s)[/green]")
-            else:
-                table = Table(title="Search Results")
-                table.add_column("#", style="dim")
-                table.add_column("ID", style="dim")
-                table.add_column("Title", style="cyan")
-                table.add_column("Author")
-                table.add_column("Date")
-
-                for i, entry in enumerate(results[:20], 1):
-                    table.add_row(str(i), str(entry.id), entry.title, entry.author, entry.date or "-")
-
-                console.print(table)
-
-                choice = click.prompt("Enter number to import (or 0 to cancel)", type=int, default=0)
-                if choice == 0 or choice > len(results):
-                    return
-
-                entry = results[choice - 1]
-                wad_id = _check_and_import_entry(
-                    idgames, entry, db.SourceType.IDGAMES,
-                    list(tags) if tags else None, force,
-                    source_id=str(entry.id), filename=entry.filename, author=entry.author,
-                )
-                if wad_id:
-                    console.print(f"[green]Imported:[/green] {entry.title} (ID: {wad_id})")
+        # idgames search
+        _do_idgames_search(source, tags, force, multi)
 
 
-@import_cmd.command(name="idgames")
-@click.argument("query_or_id")
-@click.option("--tag", "-t", "tags", multiple=True, help="Tags to add", shell_complete=_complete_tags)
-@click.option("--force", "-f", is_flag=True, help="Import even if duplicate exists")
-@click.option("--multi", "-m", is_flag=True, help="Allow selecting multiple WADs (requires fzf)")
-def import_idgames(query_or_id: str, tags: tuple[str, ...], force: bool, multi: bool):
-    """Import a WAD from idgames archive.
-
-    Use fzf for interactive selection (if installed). Use --multi for batch import.
-    """
+def _do_idgames_import(query_or_id: str, tags: tuple[str, ...], force: bool, multi: bool):
+    """Import from idgames archive (forced source)."""
     from caco.sources.idgames import IdgamesSource
 
     def _idgames_check_import(src, entry, tags_list):
@@ -392,24 +276,29 @@ def import_idgames(query_or_id: str, tags: tuple[str, ...], force: bool, multi: 
             pass
 
         # Search
-        results = source.search(query_or_id)
+        _do_idgames_search(query_or_id, tags, force, multi, source_override=source)
+
+
+def _do_idgames_search(query: str, tags: tuple[str, ...], force: bool, multi: bool,
+                        source_override=None):
+    """Search idgames and import selected result(s)."""
+    from caco.sources.idgames import IdgamesSource
+
+    def _run_search(source):
+        results = source.search(query)
         if not results:
             console.print("[dim]No results found[/dim]")
             return
 
-        # Multi-select requires fzf
         if multi and not _fzf_available():
             err_console.print("[red]--multi requires fzf to be installed[/red]")
-            err_console.print("[dim]Install fzf: https://github.com/junegunn/fzf[/dim]")
             sys.exit(1)
 
-        # Try fzf for selection
         if _fzf_available():
-            # Format items for fzf: "Title by Author (Year)"
             fzf_items = []
-            for entry in results[:50]:  # Allow more results with fzf
-                year = entry.date[:4] if entry.date else "????"
-                fzf_items.append(f"{entry.title} by {entry.author or 'Unknown'} ({year})")
+            for entry in results[:50]:
+                entry_year = entry.date[:4] if entry.date else "????"
+                fzf_items.append(f"{entry.title} by {entry.author or 'Unknown'} ({entry_year})")
 
             selected_indices = _fzf_select(
                 fzf_items,
@@ -418,23 +307,23 @@ def import_idgames(query_or_id: str, tags: tuple[str, ...], force: bool, multi: 
             )
 
             if selected_indices is None:
-                return  # User cancelled
+                return
 
-            # Import selected WADs
             imported = 0
             tags_list = list(tags) if tags else None
             for idx in selected_indices:
                 entry = results[idx]
-                wad_id = _idgames_check_import(source, entry, tags_list)
+                wad_id = _check_and_import_entry(
+                    source, entry, db.SourceType.IDGAMES, tags_list, force,
+                    source_id=str(entry.id), filename=entry.filename, author=entry.author,
+                )
                 if wad_id:
                     console.print(f"[green]Imported:[/green] {entry.title} (ID: {wad_id})")
                     imported += 1
 
             if multi and imported > 1:
                 console.print(f"[green]Imported {imported} WAD(s)[/green]")
-
         else:
-            # Fallback to numbered prompt
             table = Table(title="Search Results")
             table.add_column("#", style="dim")
             table.add_column("ID", style="dim")
@@ -452,30 +341,23 @@ def import_idgames(query_or_id: str, tags: tuple[str, ...], force: bool, multi: 
                 return
 
             entry = results[choice - 1]
-            wad_id = _idgames_check_import(source, entry, list(tags) if tags else None)
+            wad_id = _check_and_import_entry(
+                source, entry, db.SourceType.IDGAMES,
+                list(tags) if tags else None, force,
+                source_id=str(entry.id), filename=entry.filename, author=entry.author,
+            )
             if wad_id:
                 console.print(f"[green]Imported:[/green] {entry.title} (ID: {wad_id})")
 
+    if source_override:
+        _run_search(source_override)
+    else:
+        with IdgamesSource() as source:
+            _run_search(source)
 
-@import_cmd.command(name="doomwiki")
-@click.argument("query_or_title")
-@click.option("--tag", "-t", "tags", multiple=True, help="Tags to add", shell_complete=_complete_tags)
-@click.option("--force", "-f", is_flag=True, help="Import even if duplicate exists")
-@click.option("--multi", "-m", is_flag=True, help="Allow selecting multiple WADs (requires fzf)")
-def import_doomwiki(query_or_title: str, tags: tuple[str, ...], force: bool, multi: bool):
-    """Import a WAD from Doom Wiki.
 
-    Searches the Doom Wiki (doomwiki.org) for WADs matching the query.
-    Only pages with a {{Wad}} infobox template are shown.
-
-    Use fzf for interactive selection (if installed). Use --multi for batch import.
-
-    \b
-    Examples:
-        caco import doomwiki "Scythe"
-        caco import doomwiki "Eviternity" --tag megawad
-        caco import doomwiki --multi "cacoward"
-    """
+def _do_doomwiki_import(query_or_title: str, tags: tuple[str, ...], force: bool, multi: bool):
+    """Import from Doom Wiki (forced source)."""
     from caco.sources.doomwiki import DoomwikiSource
 
     def _wiki_check_import(src, entry, tags_list):
@@ -499,17 +381,14 @@ def import_doomwiki(query_or_title: str, tags: tuple[str, ...], force: bool, mul
             console.print("[dim]No WAD pages found (only pages with {{Wad}} infobox are shown)[/dim]")
             return
 
-        # Multi-select requires fzf
         if multi and not _fzf_available():
             err_console.print("[red]--multi requires fzf to be installed[/red]")
             err_console.print("[dim]Install fzf: https://github.com/junegunn/fzf[/dim]")
             sys.exit(1)
 
-        # Try fzf for selection
         if _fzf_available():
-            # Format items for fzf: "Title by Author (Year)"
             fzf_items = []
-            for entry in results[:50]:  # Allow more results with fzf
+            for entry in results[:50]:
                 year = str(entry.year) if entry.year else "????"
                 fzf_items.append(f"{entry.display_name} by {entry.author or 'Unknown'} ({year})")
 
@@ -520,9 +399,8 @@ def import_doomwiki(query_or_title: str, tags: tuple[str, ...], force: bool, mul
             )
 
             if selected_indices is None:
-                return  # User cancelled
+                return
 
-            # Import selected WADs
             imported = 0
             tags_list = list(tags) if tags else None
             for idx in selected_indices:
@@ -536,7 +414,6 @@ def import_doomwiki(query_or_title: str, tags: tuple[str, ...], force: bool, mul
                 console.print(f"[green]Imported {imported} WAD(s)[/green]")
 
         else:
-            # Fallback to numbered prompt
             table = Table(title="Search Results")
             table.add_column("#", style="dim")
             table.add_column("Title", style="cyan")
@@ -559,32 +436,10 @@ def import_doomwiki(query_or_title: str, tags: tuple[str, ...], force: bool, mul
                 console.print(f"[green]Imported:[/green] {entry.display_name} (ID: {wad_id})")
 
 
-@import_cmd.command(name="doomworld")
-@click.argument("url")
-@click.option("--tag", "-t", "tags", multiple=True, help="Tags to add", shell_complete=_complete_tags)
-@click.option("--title", help="Override parsed title")
-@click.option("--author", "-a", help="Override parsed author")
-@click.option("--year", "-y", type=int, help="Override parsed year")
-@click.option("--force", "-f", is_flag=True, help="Import even if duplicate exists")
-@click.option("--smart", "-s", is_flag=True, help="Use LLM for intelligent metadata extraction")
-@click.option("--llm-backend", type=click.Choice(["claude-code", "openrouter", "anthropic", "openai"]),
-              help="LLM backend (auto-detects if not specified)", shell_complete=_complete_llm_backends)
-@click.option("--llm-model", help="Model override for API backends (e.g., 'gpt-4' for openai)")
-def import_doomworld(url: str, tags: tuple[str, ...], title: str | None,
-                     author: str | None, year: int | None, force: bool,
-                     smart: bool, llm_backend: str | None, llm_model: str | None):
-    """Import a WAD from a Doomworld forum thread.
-
-    Fetches metadata from the forum thread including title, author,
-    date, and first post content. Use --smart for LLM-based extraction.
-
-    \b
-    Examples:
-        caco import doomworld https://www.doomworld.com/forum/topic/134292-myhousewad/
-        caco import doomworld URL --tag cacoward --tag megawad
-        caco import doomworld URL --smart
-        caco import doomworld URL --smart --llm-backend openrouter
-    """
+def _do_doomworld_import(url: str, tags: tuple[str, ...], title: str | None,
+                         author: str | None, year: int | None, force: bool,
+                         smart: bool, llm_backend: str | None, llm_model: str | None):
+    """Import from Doomworld forum thread (forced source)."""
     from caco.sources.doomworld import DoomworldSource
     from caco.doomworld import (
         DoomworldError,
@@ -593,7 +448,7 @@ def import_doomworld(url: str, tags: tuple[str, ...], title: str | None,
         sourceport_display_name,
     )
 
-    # Validate URL - accept both new (/forum/topic/) and old (/vb/thread/) formats
+    # Validate URL
     if "doomworld.com/forum/topic/" not in url and "doomworld.com/vb/thread/" not in url:
         err_console.print("[red]Invalid Doomworld forum URL[/red]")
         err_console.print("[dim]Expected: https://www.doomworld.com/forum/topic/{id}-{slug}/[/dim]")
@@ -611,7 +466,7 @@ def import_doomworld(url: str, tags: tuple[str, ...], title: str | None,
             err_console.print(f"[red]Thread not found:[/red] {url}")
             sys.exit(1)
 
-        # LLM-based extraction (Phase 3)
+        # LLM-based extraction
         llm_metadata = None
         if smart:
             from caco.doomworld.llm import get_parser, LLMError, LLMNotAvailableError
@@ -643,7 +498,7 @@ def import_doomworld(url: str, tags: tuple[str, ...], title: str | None,
             console.print("[dim]Use --force to import anyway[/dim]")
             return
 
-        # Merge LLM metadata with regex-extracted data (LLM takes precedence where available)
+        # Merge LLM metadata with regex-extracted data
         final_title = title
         final_author = author
         final_iwad = thread.iwad
@@ -682,7 +537,7 @@ def import_doomworld(url: str, tags: tuple[str, ...], title: str | None,
         if thread.posted_date:
             console.print(f"  [dim]Posted:[/dim] {thread.posted_date[:10]}")
 
-        # Show technical metadata (Phase 2 regex + Phase 3 LLM)
+        # Show technical metadata
         display_iwad = final_iwad or thread.iwad
         display_port = final_sourceport or thread.sourceport
         display_complevel = final_complevel if final_complevel is not None else thread.complevel
@@ -696,7 +551,7 @@ def import_doomworld(url: str, tags: tuple[str, ...], title: str | None,
                 console.print(f"  [dim]Complevel:[/dim] {complevel_name(display_complevel)}")
             if thread.download_links:
                 console.print(f"  [dim]Downloads:[/dim] {len(thread.download_links)} link(s) found")
-                for link in thread.download_links[:3]:  # Show first 3
+                for link in thread.download_links[:3]:
                     console.print(f"    [blue]{link}[/blue]")
                 if len(thread.download_links) > 3:
                     console.print(f"    [dim]... and {len(thread.download_links) - 3} more[/dim]")
@@ -715,18 +570,9 @@ def import_doomworld(url: str, tags: tuple[str, ...], title: str | None,
                 console.print(f"  [dim]Themes:[/dim] {', '.join(llm_metadata.themes)}")
 
 
-@import_cmd.command(name="url")
-@click.argument("title")
-@click.argument("url")
-@click.option("--author", "-a")
-@click.option("--year", "-y", type=int)
-@click.option("--tag", "-t", "tags", multiple=True, shell_complete=_complete_tags)
-@click.option("--description", "-d")
-@click.option("--force", "-f", is_flag=True, help="Import even if duplicate exists")
-def import_url(title: str, url: str, author: str | None, year: int | None,
-               tags: tuple[str, ...], description: str | None, force: bool):
-    """Import a WAD from a URL (e.g., Doomworld forums)."""
-    # Check for duplicate
+def _do_url_import(title: str, url: str, author: str | None, year: int | None,
+                   tags: tuple[str, ...], description: str | None, force: bool):
+    """Import from a URL (manual entry)."""
     existing = db.find_duplicate(
         db.SourceType.URL,
         source_url=url,
@@ -750,25 +596,9 @@ def import_url(title: str, url: str, author: str | None, year: int | None,
     console.print(f"[green]Added:[/green] {title} (ID: {wad_id})")
 
 
-@import_cmd.command(name="local")
-@click.argument("paths", nargs=-1, required=True, type=click.Path(exists=True))
-@click.option("--title", "-t", help="Override title (only for single file imports)")
-@click.option("--author", "-a")
-@click.option("--year", "-y", type=int)
-@click.option("--tag", "tags", multiple=True, help="Tags to add", shell_complete=_complete_tags)
-@click.option("--force", "-f", is_flag=True, help="Import even if duplicate exists")
-def import_local(paths: tuple[str, ...], title: str | None, author: str | None, year: int | None,
-                 tags: tuple[str, ...], force: bool):
-    """Import local WAD file(s).
-
-    Supports multiple paths for batch import. Titles are inferred from filenames.
-
-    \b
-    Examples:
-        caco import local ~/Downloads/mymap.wad
-        caco import local *.wad --tag new --author "Me"
-        caco import local map1.wad map2.pk3 --tag batch
-    """
+def _do_local_import(paths: tuple[str, ...], title: str | None, author: str | None,
+                     year: int | None, tags: tuple[str, ...], force: bool):
+    """Import local WAD file(s)."""
     from pathlib import Path as P
 
     if title and len(paths) > 1:
@@ -781,10 +611,13 @@ def import_local(paths: tuple[str, ...], title: str | None, author: str | None, 
     for path in paths:
         p = P(path).resolve()
 
-        # Infer title from filename if not provided (or multiple files)
+        # Validate file existence (since we no longer use Click's Path(exists=True))
+        if not p.exists():
+            err_console.print(f"[red]File not found:[/red] {path}")
+            continue
+
         file_title = title if (title and len(paths) == 1) else _infer_title_from_filename(p.name)
 
-        # Check for duplicate
         existing = db.find_duplicate(
             db.SourceType.LOCAL,
             source_url=str(p),
@@ -814,3 +647,136 @@ def import_local(paths: tuple[str, ...], title: str | None, author: str | None, 
         if skipped:
             summary += f" [dim]({skipped} skipped as duplicates)[/dim]"
         console.print(summary)
+
+
+# =============================================================================
+# Import command (unified)
+# =============================================================================
+
+
+class MutuallyExclusiveSource(click.Option):
+    """Custom Click option that enforces mutual exclusivity among source flags."""
+
+    def handle_parse_result(self, ctx, opts, args):
+        source_flags = ["idgames", "doomwiki", "doomworld", "local", "url"]
+        current = self.name
+        current_value = opts.get(current)
+
+        if current_value:
+            for flag in source_flags:
+                if flag != current and opts.get(flag):
+                    raise click.UsageError(
+                        f"--{current.replace('_', '-')} and --{flag.replace('_', '-')} "
+                        f"are mutually exclusive."
+                    )
+
+        return super().handle_parse_result(ctx, opts, args)
+
+
+@cli.command(name="import")
+@click.argument("source", nargs=-1)
+@click.option("--idgames", is_flag=True, cls=MutuallyExclusiveSource, help="Force idgames source")
+@click.option("--doomwiki", is_flag=True, cls=MutuallyExclusiveSource, help="Force Doom Wiki source")
+@click.option("--doomworld", is_flag=True, cls=MutuallyExclusiveSource, help="Force Doomworld forum source")
+@click.option("--local", is_flag=True, cls=MutuallyExclusiveSource, help="Force local file import")
+@click.option("--url", "url_source", default=None, help="Import from URL (value is the download URL)")
+@click.option("--title", "-t", help="Override title")
+@click.option("--author", "-a", help="Author name")
+@click.option("--year", type=int, help="Year released")
+@click.option("--tag", "tags", multiple=True, help="Tags to add", shell_complete=_complete_tags)
+@click.option("--force", "-f", is_flag=True, help="Import even if duplicate exists")
+@click.option("--multi", "-m", is_flag=True, help="Allow multi-select (requires fzf)")
+@click.option("--description", "-d", help="Description (for --url imports)")
+@click.option("--smart", "-s", is_flag=True, help="Use LLM for metadata extraction (--doomworld)")
+@click.option("--llm-backend", type=click.Choice(["claude-code", "openrouter", "anthropic", "openai"]),
+              help="LLM backend (--doomworld --smart)", shell_complete=_complete_llm_backends)
+@click.option("--llm-model", help="Model override for API backends (--doomworld --smart)")
+@click.pass_context
+def import_cmd(ctx, source: tuple[str, ...], idgames: bool, doomwiki: bool,
+               doomworld: bool, local: bool, url_source: str | None,
+               title: str | None, author: str | None, year: int | None,
+               tags: tuple[str, ...], force: bool, multi: bool,
+               description: str | None, smart: bool,
+               llm_backend: str | None, llm_model: str | None):
+    """Import WADs from various sources.
+
+    By default, auto-detects the source type from the input. Use source
+    flags to force a specific source.
+
+    \b
+    Auto-detect (default):
+        caco import "scythe 2"                     # Search idgames
+        caco import 19509                           # idgames file ID
+        caco import https://doomwiki.org/wiki/Scythe
+        caco import ~/Downloads/map.wad             # Local file
+        caco import https://example.com/map.zip     # URL
+
+    \b
+    Forced source:
+        caco import "scythe" --idgames             # Force idgames search
+        caco import "Scythe" --doomwiki            # Force Doom Wiki search
+        caco import URL --doomworld                # Force Doomworld forum
+        caco import *.wad --local                  # Force local file(s)
+        caco import "My WAD" --url https://...     # Manual URL import
+
+    \b
+    Options:
+        --smart/-s        Use LLM for metadata (with --doomworld)
+        --multi/-m        Multi-select from search results (requires fzf)
+        --force/-f        Import even if duplicate exists
+    """
+    # No args at all -> show help
+    if not source and not url_source:
+        click.echo(ctx.get_help())
+        return
+
+    # --url: positional becomes title, url_source is the URL
+    if url_source:
+        if not source:
+            err_console.print("[red]Title required for --url imports[/red]")
+            err_console.print("[dim]Usage: caco import \"Title\" --url https://...[/dim]")
+            sys.exit(1)
+        import_title = " ".join(source)
+        _do_url_import(import_title, url_source, author, year, tags, description, force)
+        return
+
+    # --local: all positional args are file paths
+    if local:
+        if not source:
+            err_console.print("[red]File path(s) required for --local imports[/red]")
+            sys.exit(1)
+        _do_local_import(source, title, author, year, tags, force)
+        return
+
+    # --doomworld: first positional is the URL
+    if doomworld:
+        if not source:
+            err_console.print("[red]Doomworld forum URL required[/red]")
+            sys.exit(1)
+        _do_doomworld_import(
+            source[0], tags, title, author, year, force,
+            smart, llm_backend, llm_model,
+        )
+        return
+
+    # --idgames: positional becomes query/ID
+    if idgames:
+        if not source:
+            err_console.print("[red]Query or ID required for --idgames imports[/red]")
+            sys.exit(1)
+        query = " ".join(source)
+        _do_idgames_import(query, tags, force, multi)
+        return
+
+    # --doomwiki: positional becomes query/title
+    if doomwiki:
+        if not source:
+            err_console.print("[red]Query or title required for --doomwiki imports[/red]")
+            sys.exit(1)
+        query = " ".join(source)
+        _do_doomwiki_import(query, tags, force, multi)
+        return
+
+    # Default: auto-detect from first positional arg
+    source_str = " ".join(source)
+    _do_auto_import(source_str, title, author, year, tags, force, multi)

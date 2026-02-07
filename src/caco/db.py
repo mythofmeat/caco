@@ -891,6 +891,22 @@ def get_all_tags() -> list[str]:
         return [row["tag"] for row in rows]
 
 
+def get_tag_counts() -> list[tuple[str, int]]:
+    """Get all tags with their WAD counts (excluding deleted WADs)."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT t.tag, COUNT(*) as count
+            FROM tags t
+            JOIN wads w ON w.id = t.wad_id
+            WHERE w.deleted_at IS NULL
+            GROUP BY t.tag
+            ORDER BY t.tag
+            """
+        ).fetchall()
+        return [(row["tag"], row["count"]) for row in rows]
+
+
 def find_duplicate(
     source_type: SourceType,
     source_id: str | None = None,

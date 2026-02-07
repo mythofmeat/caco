@@ -1,6 +1,7 @@
 """Tag management commands: tag add/remove/list."""
 
 import click
+from rich.table import Table
 
 from caco import db
 from caco.cli import (
@@ -71,12 +72,27 @@ def tag_remove(query: str, tags: tuple[str, ...], yes: bool, dry_run: bool):
 
 
 @tag.command(name="list")
-def tag_list():
-    """List all tags."""
-    tags = db.get_all_tags()
-    if not tags:
+@click.option("--plain", is_flag=True, help="Output as TSV (for scripting)")
+def tag_list(plain: bool):
+    """List all tags with WAD counts."""
+    tag_counts = db.get_tag_counts()
+    if not tag_counts:
+        if plain:
+            return
         console.print("[dim]No tags[/dim]")
         return
 
-    for t in tags:
-        console.print(t)
+    if plain:
+        print("Tag\tCount")
+        for tag, count in tag_counts:
+            print(f"{tag}\t{count}")
+        return
+
+    table = Table(title=f"Tags ({len(tag_counts)})")
+    table.add_column("Tag", style="cyan")
+    table.add_column("WADs", justify="right")
+
+    for tag, count in tag_counts:
+        table.add_row(tag, str(count))
+
+    console.print(table)

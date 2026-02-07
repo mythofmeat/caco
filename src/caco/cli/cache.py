@@ -73,7 +73,7 @@ def _list_orphaned_files(cache_dir: Path, plain: bool) -> None:
 
         console.print(table)
         console.print(f"\n[bold]Total:[/bold] {_format_size(total_size)}")
-        console.print(f"[dim]Use 'caco cache clean' to remove orphaned files[/dim]")
+        console.print(f"[dim]Use 'caco cache prune' to remove orphaned files[/dim]")
 
 
 def _clear_all_cache(cache_dir: Path, dry_run: bool, yes: bool) -> None:
@@ -283,10 +283,10 @@ def cache_clear(query: str | None, clear_all: bool, dry_run: bool, yes: bool):
         _clear_specific_cache(query, cache_dir, dry_run, yes)
 
 
-@cache_cmd.command(name="clean")
+@cache_cmd.command(name="prune")
 @click.option("--dry-run", is_flag=True, help="Show what would be deleted")
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
-def cache_clean(dry_run: bool, yes: bool):
+def cache_prune(dry_run: bool, yes: bool):
     """Remove orphaned files from cache.
 
     Orphaned files are files in the cache directory that are not
