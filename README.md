@@ -59,6 +59,53 @@ caco update scythe --status finished --rating 5
 caco update scythe -s f -r 5  # Short form (f=finished)
 ```
 
+## GUI (Graphical User Interface)
+
+Launch a desktop GUI with a dark Doom-inspired theme, grid/list views, and WAD thumbnails:
+
+```bash
+# Install with GUI dependencies
+pip install -e '.[gui]'
+
+# Launch
+caco --gui
+```
+
+### Features
+
+- **Dark Doom-inspired theme** with reds, greens, and browns
+- **Hybrid views**: Toggle between list (table) and grid (card thumbnails) views
+- **Tab-based filtering**: All, Playing, To-Play, Finished, Backlog, Other, Import
+- **Detail panel**: Thumbnail, metadata, stats, tags, and action buttons
+- **WAD thumbnails**: Extracted from TITLEPIC in WAD files, scraped from Doom Wiki, or generated as colored placeholders
+- **Import from all sources**: idgames, Doom Wiki, Doomworld, URLs, local files
+- **Window state persistence**: Window position, size, and splitter state saved between sessions
+
+### Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+F` | Focus filter input |
+| `F5` | Refresh library |
+| `Ctrl+S` | Library statistics |
+| `Ctrl+K` | Cache management |
+| `Alt+1-9` | Switch tabs |
+| `Escape` | Clear filter |
+
+### Configuration
+
+Add a `[gui]` section to `~/.config/caco/config.toml`:
+
+```toml
+[gui]
+default_tab = "all"
+default_sort = "id"
+default_sort_desc = false
+default_view = "list"      # "list" or "grid"
+window_width = 1200
+window_height = 800
+```
+
 ## TUI (Terminal User Interface)
 
 Launch an interactive terminal interface with vim-style navigation:
@@ -544,6 +591,7 @@ caco random --info                  # Prints ID, title, author (TSV)
 - **Database**: `~/.local/share/caco/library.db`
 - **Config**: `~/.config/caco/config.toml`
 - **WAD cache**: `~/.cache/caco/wads/`
+- **Thumbnail cache**: `~/.cache/caco/thumbnails/`
 
 ## License
 

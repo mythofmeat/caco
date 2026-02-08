@@ -15,6 +15,7 @@ end
 
 # Global options
 complete -c caco -n __fish_use_subcommand -l tui -d "Launch TUI interface"
+complete -c caco -n __fish_use_subcommand -l gui -d "Launch GUI interface (requires PySide6)"
 
 # Main commands
 complete -c caco -n __fish_use_subcommand -a list -d "List WADs in your library"

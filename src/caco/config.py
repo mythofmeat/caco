@@ -197,3 +197,34 @@ def get_tui_config() -> dict[str, Any]:
             tui_config["default_sort_desc"] = user_tui["default_sort_desc"]
 
     return tui_config
+
+
+# =============================================================================
+# GUI Configuration
+# =============================================================================
+
+DEFAULT_GUI_CONFIG = {
+    "default_tab": "all",
+    "default_sort": "id",
+    "default_sort_desc": False,
+    "default_view": "list",
+    "window_width": 1200,
+    "window_height": 800,
+    "detail_panel_width": 300,
+    "show_detail_panel": True,
+    "thumbnail_size": 160,
+}
+
+
+def get_gui_config() -> dict[str, Any]:
+    """Get GUI configuration, merging defaults with user config."""
+    config = load_config()
+    gui_config = DEFAULT_GUI_CONFIG.copy()
+
+    if "gui" in config and isinstance(config["gui"], dict):
+        user_gui = config["gui"]
+        for key in DEFAULT_GUI_CONFIG:
+            if key in user_gui:
+                gui_config[key] = user_gui[key]
+
+    return gui_config

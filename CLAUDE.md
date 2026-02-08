@@ -96,6 +96,45 @@ src/caco/
 │       ├── doomworld_pane.py # Doomworld forum URL import
 │       ├── url_pane.py     # Manual URL import form
 │       └── local_pane.py   # Local file import form
+├── gui/            # PySide6-based GUI (caco --gui)
+│   ├── __init__.py      # CacoGuiApp entry point
+│   ├── app.py           # QApplication setup, dark palette, stylesheet
+│   ├── main_window.py   # QMainWindow: tab bar, toolbar, status bar, geometry save/restore
+│   ├── theme.py         # Doom palette colors, QSS stylesheet, status color mappings
+│   ├── constants.py     # Column definitions, sort fields, status tabs
+│   ├── models/
+│   │   └── wad_model.py     # QAbstractTableModel wrapping db.search_wads() + batch stats
+│   ├── views/
+│   │   ├── list_view.py     # QTableView with context menu, vim keys
+│   │   ├── grid_view.py     # QListView (IconMode) with WadCardDelegate for cards
+│   │   ├── detail_panel.py  # Right sidebar: thumbnail, metadata, stats, action buttons
+│   │   ├── filter_bar.py    # QLineEdit with 300ms debounce
+│   │   └── sort_controls.py # QComboBox + asc/desc toggle
+│   ├── tabs/
+│   │   ├── library_tab.py   # Composite: filter + sort + list/grid + detail panel
+│   │   └── import_tab.py    # QTabWidget with 5 source panes
+│   ├── import_panes/
+│   │   ├── idgames_pane.py  # idgames search + import
+│   │   ├── doomwiki_pane.py # Doom Wiki search + import
+│   │   ├── doomworld_pane.py # Doomworld forum URL import
+│   │   ├── url_pane.py      # Manual URL form
+│   │   └── local_pane.py    # File picker + form
+│   ├── dialogs/
+│   │   ├── edit_dialog.py    # WAD metadata editing form
+│   │   ├── delete_dialog.py  # Confirmation dialog with WAD stats
+│   │   ├── sessions_dialog.py # Session history table
+│   │   ├── stats_dialog.py   # Library statistics overview
+│   │   └── cache_dialog.py   # Cache management
+│   ├── workers/
+│   │   ├── play_worker.py      # QThread for sourceport launch
+│   │   ├── search_worker.py    # QRunnable for API searches
+│   │   ├── import_worker.py    # QRunnable for import operations
+│   │   └── thumbnail_worker.py # Re-export of ThumbnailLoader
+│   └── thumbnails/
+│       ├── extractor.py  # TITLEPIC extraction from WAD files + Doom patch decoder
+│       ├── scraper.py    # Doom Wiki image scraping via MediaWiki API
+│       ├── cache.py      # Thumbnail filesystem cache (~/.cache/caco/thumbnails/)
+│       └── loader.py     # Async QThreadPool-based thumbnail loader
 ├── sources/
 │   ├── idgames.py  # idgames archive adapter
 │   ├── doomwiki.py # Doom Wiki adapter
@@ -166,6 +205,26 @@ src/caco/
 - `default_sort` — default sort field (id, title, author, playtime, last_played, year, rating)
 - `default_sort_desc` — default sort direction (boolean)
 
+**GUI config (`[gui]` section):**
+- `default_tab` — starting tab (all, playing, to-play, finished, backlog, other)
+- `default_sort` — default sort field (id, title, author, playtime, last_played, year, rating)
+- `default_sort_desc` — default sort direction (boolean)
+- `default_view` — "list" or "grid"
+- `window_width` / `window_height` — initial window dimensions (overridden by saved geometry)
+- `detail_panel_width` — initial detail panel width
+- `show_detail_panel` — show detail panel on startup
+- `thumbnail_size` — thumbnail pixel size
+
+**GUI key patterns:**
+- GUI uses `QAbstractTableModel` wrapping `db.search_wads()` with batch stats (same pattern as TUI `WadTable`)
+- Single model, two views: both `QTableView` (list) and `QListView` (grid) share the same `WadTableModel`
+- `QStyledItemDelegate` paints custom WAD cards in grid view (thumbnail + title + author + status badge)
+- `QThreadPool` + `QRunnable` for search/import/thumbnail workers; `QThread` for sourceport launch
+- `ThumbnailLoader` uses two-tier caching: in-memory dict in delegate + filesystem at `~/.cache/caco/thumbnails/`
+- Thumbnail extraction: custom Doom WAD parser + patch format decoder (no external tools needed)
+- Window geometry persisted via `QSettings` ("caco", "caco-gui") — auto-restores on next launch
+- Signal relay: view → tab → MainWindow for action handling
+
 ## Dependencies
 
 - `click` - CLI framework
@@ -173,6 +232,8 @@ src/caco/
 - `httpx` - HTTP client for idgames and Doomwiki APIs
 - `pydantic` - Data validation for API responses
 - `textual` - TUI framework (for `caco --tui`)
+- `PySide6` - Qt6 GUI framework (optional, `[gui]` extra)
+- `Pillow` - Image processing for thumbnail extraction (optional, `[gui]` extra)
 - `pytest` / `pytest-cov` - Test framework (optional, `[test]` extra)
 
 ## Completions

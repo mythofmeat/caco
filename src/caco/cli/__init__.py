@@ -724,8 +724,9 @@ def _render_wad_list(wads: list[dict], title: str | None = None, list_config: di
 
 @click.group(invoke_without_command=True)
 @click.option("--tui", is_flag=True, help="Launch TUI interface")
+@click.option("--gui", is_flag=True, help="Launch GUI interface (requires PySide6)")
 @click.pass_context
-def cli(ctx, tui: bool):
+def cli(ctx, tui: bool, gui: bool):
     """Caco - Personal Doom WAD library manager."""
     db.init_db()
 
@@ -734,8 +735,13 @@ def cli(ctx, tui: bool):
         CacoApp().run()
         ctx.exit(0)
 
-    # If no command given and not TUI, show help
-    if ctx.invoked_subcommand is None and not tui:
+    if gui:
+        from caco.gui import CacoGuiApp
+        code = CacoGuiApp().run()
+        ctx.exit(code)
+
+    # If no command given and not TUI/GUI, show help
+    if ctx.invoked_subcommand is None and not tui and not gui:
         click.echo(ctx.get_help())
 
 
