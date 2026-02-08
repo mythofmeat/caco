@@ -9,6 +9,9 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QStackedWidget,
+    QSlider,
+    QMenu,
+    QInputDialog,
 )
 
 from caco.player import format_duration
@@ -33,12 +36,16 @@ class LibraryTab(QWidget):
     delete_requested = Signal(int)
     sessions_requested = Signal(int)
     status_message = Signal(str)
+    card_size_changed = Signal(int)
+    saved_searches_changed = Signal(list)  # list of (name, query) tuples
+    save_as_tab_requested = Signal(str, str)  # (name, query)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._tab_query: str | None = None
         self._user_query: str = ""
         self._is_grid_view = False
+        self._saved_searches: list[tuple[str, str]] = []  # (name, query)
 
         # Model (shared between list and grid)
         self._model = WadTableModel()
@@ -64,6 +71,20 @@ class LibraryTab(QWidget):
         self._view_toggle.clicked.connect(self._toggle_view)
         toolbar.addWidget(self._view_toggle)
 
+        # Card size slider (grid view only)
+        self._size_label = QLabel("Size:")
+        toolbar.addWidget(self._size_label)
+        self._size_slider = QSlider(Qt.Horizontal)
+        self._size_slider.setRange(120, 360)
+        self._size_slider.setValue(200)
+        self._size_slider.setFixedWidth(100)
+        self._size_slider.setToolTip("Card size")
+        self._size_slider.valueChanged.connect(self._on_card_size_changed)
+        toolbar.addWidget(self._size_slider)
+        # Hide slider in list view (default)
+        self._size_label.hide()
+        self._size_slider.hide()
+
         # Sort controls
         self._sort = SortControls()
         self._sort.sort_changed.connect(self._on_sort_changed)
@@ -78,6 +99,14 @@ class LibraryTab(QWidget):
         self._filter.setMinimumWidth(250)
         self._filter.query_changed.connect(self._on_filter_changed)
         toolbar.addWidget(self._filter)
+
+        # Saved searches button
+        self._saved_btn = QPushButton("Searches")
+        self._saved_btn.setObjectName("saved_searches_btn")
+        self._saved_btn.setToolTip("Saved searches")
+        self._saved_btn.setFixedWidth(90)
+        self._saved_btn.clicked.connect(self._show_saved_searches_menu)
+        toolbar.addWidget(self._saved_btn)
 
         main_layout.addLayout(toolbar)
 
@@ -183,16 +212,98 @@ class LibraryTab(QWidget):
 
     # ── View toggle ────────────────────────────────────────────────
 
+    def set_card_size(self, width: int):
+        """Set grid card size (called from MainWindow to restore saved value)."""
+        self._size_slider.setValue(width)
+
+    def card_size(self) -> int:
+        """Return current grid card width."""
+        return self._size_slider.value()
+
     def _toggle_view(self):
         """Switch between list and grid views."""
         self._is_grid_view = not self._is_grid_view
         if self._is_grid_view:
             self._view_stack.setCurrentWidget(self._grid_view)
             self._view_toggle.setText("List")
+            self._size_label.show()
+            self._size_slider.show()
             self._request_visible_thumbnails()
         else:
             self._view_stack.setCurrentWidget(self._list_view)
             self._view_toggle.setText("Grid")
+            self._size_label.hide()
+            self._size_slider.hide()
+
+    def _on_card_size_changed(self, width: int):
+        """Resize grid cards when slider moves."""
+        self._grid_view.set_card_size(width)
+        self.card_size_changed.emit(width)
+
+    # ── Saved searches ─────────────────────────────────────────────
+
+    def set_saved_searches(self, searches: list[tuple[str, str]]):
+        """Set saved searches (called from MainWindow to restore)."""
+        self._saved_searches = list(searches)
+
+    def _show_saved_searches_menu(self):
+        """Show menu with saved searches and save/delete options."""
+        menu = QMenu(self)
+
+        if self._saved_searches:
+            for name, query in self._saved_searches:
+                action = menu.addAction(name)
+                action.setToolTip(query)
+                action.triggered.connect(lambda checked, q=query: self._filter.set_query(q))
+            menu.addSeparator()
+
+            # Delete submenu
+            delete_menu = menu.addMenu("Delete...")
+            for name, query in self._saved_searches:
+                del_action = delete_menu.addAction(name)
+                del_action.triggered.connect(lambda checked, n=name: self._delete_saved_search(n))
+            menu.addSeparator()
+
+        # Save current filter
+        current_query = self._filter.text().strip()
+        save_action = menu.addAction("Save current filter...")
+        save_action.setEnabled(bool(current_query))
+        save_action.triggered.connect(self._save_current_filter)
+
+        tab_action = menu.addAction("Save as tab...")
+        tab_action.setEnabled(bool(current_query))
+        tab_action.triggered.connect(self._save_as_tab)
+
+        menu.exec(self._saved_btn.mapToGlobal(self._saved_btn.rect().bottomLeft()))
+
+    def _save_current_filter(self):
+        """Prompt for a name and save the current filter query."""
+        query = self._filter.text().strip()
+        if not query:
+            return
+
+        name, ok = QInputDialog.getText(self, "Save Search", "Name:", text=query)
+        if ok and name.strip():
+            name = name.strip()
+            # Replace if name already exists
+            self._saved_searches = [(n, q) for n, q in self._saved_searches if n != name]
+            self._saved_searches.append((name, query))
+            self.saved_searches_changed.emit(self._saved_searches)
+
+    def _save_as_tab(self):
+        """Prompt for a name and emit signal to create a custom tab."""
+        query = self._filter.text().strip()
+        if not query:
+            return
+
+        name, ok = QInputDialog.getText(self, "Save as Tab", "Tab name:", text=query)
+        if ok and name.strip():
+            self.save_as_tab_requested.emit(name.strip(), query)
+
+    def _delete_saved_search(self, name: str):
+        """Remove a saved search by name."""
+        self._saved_searches = [(n, q) for n, q in self._saved_searches if n != name]
+        self.saved_searches_changed.emit(self._saved_searches)
 
     def _request_visible_thumbnails(self):
         """Request thumbnails for all loaded WADs (for grid view)."""

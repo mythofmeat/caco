@@ -1,7 +1,7 @@
 [Desktop Entry]
 Categories=Game
 Comment=
-Exec=caco play
+Exec=caco --gui
 Icon=/home/eshen/.local/repos/caco/src/desktop/icon.png
 Keywords=doom;caco
 MimeType=application/x-doom-wad;

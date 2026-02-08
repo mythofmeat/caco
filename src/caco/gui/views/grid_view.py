@@ -14,12 +14,14 @@ from caco.gui.theme import DOOM_PALETTE, get_status_color, get_status_display
 from caco.gui.constants import Column
 
 
-# Card dimensions
-CARD_WIDTH = 200
-CARD_HEIGHT = 240
-THUMB_HEIGHT = 120
+# Default card dimensions
+DEFAULT_CARD_WIDTH = 200
+DEFAULT_CARD_HEIGHT = 240
+DEFAULT_THUMB_HEIGHT = 120
 PADDING = 8
 TEXT_LINE_HEIGHT = 18
+# Fixed text area height below thumbnail (title + author + status row)
+TEXT_AREA_HEIGHT = TEXT_LINE_HEIGHT * 2 + 16 + 6 + 4  # title + author + badge + gaps
 
 
 class WadCardDelegate(QStyledItemDelegate):
@@ -30,24 +32,42 @@ class WadCardDelegate(QStyledItemDelegate):
     - Title (bold, truncated)
     - Author
     - Status badge (colored)
+
+    Card size is adjustable via set_card_size(). The thumbnail area scales
+    while the text area stays fixed.
     """
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._thumbnails: dict[int, QPixmap] = {}
+        self._card_width = DEFAULT_CARD_WIDTH
+        self._card_height = DEFAULT_CARD_HEIGHT
+        self._thumb_height = DEFAULT_THUMB_HEIGHT
 
     def set_thumbnail(self, wad_id: int, pixmap: QPixmap):
         """Cache a thumbnail for a wad_id."""
         self._thumbnails[wad_id] = pixmap
 
+    def set_card_size(self, width: int):
+        """Set card width; height and thumb area scale proportionally."""
+        self._card_width = width
+        self._thumb_height = int(width * 0.6)
+        self._card_height = self._thumb_height + TEXT_AREA_HEIGHT + PADDING * 2
+
+    def card_size(self) -> QSize:
+        """Return the current card size."""
+        return QSize(self._card_width, self._card_height)
+
     def sizeHint(self, option, index):
-        return QSize(CARD_WIDTH, CARD_HEIGHT)
+        return QSize(self._card_width, self._card_height)
 
     def paint(self, painter: QPainter, option, index: QModelIndex):
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing)
 
         rect = option.rect
+        card_w = self._card_width
+        thumb_h = self._thumb_height
         is_selected = option.state & QStyle.State_Selected
         is_hover = option.state & QStyle.State_MouseOver
 
@@ -71,8 +91,8 @@ class WadCardDelegate(QStyledItemDelegate):
         thumb_rect = QRect(
             rect.x() + PADDING,
             rect.y() + PADDING,
-            CARD_WIDTH - 2 * PADDING,
-            THUMB_HEIGHT,
+            card_w - 2 * PADDING,
+            thumb_h,
         )
 
         if wad_id in self._thumbnails:
@@ -93,7 +113,7 @@ class WadCardDelegate(QStyledItemDelegate):
             painter.drawRoundedRect(thumb_rect, 4, 4)
 
         # Text area starts below thumbnail
-        text_y = rect.y() + PADDING + THUMB_HEIGHT + 6
+        text_y = rect.y() + PADDING + thumb_h + 6
 
         # Title (bold)
         title_font = QFont()
@@ -104,7 +124,7 @@ class WadCardDelegate(QStyledItemDelegate):
 
         # Get title from the model's display data
         title = model.data(model.index(index.row(), _col_index(model, Column.TITLE)), Qt.DisplayRole) or ""
-        title_rect = QRect(rect.x() + PADDING, text_y, CARD_WIDTH - 2 * PADDING, TEXT_LINE_HEIGHT)
+        title_rect = QRect(rect.x() + PADDING, text_y, card_w - 2 * PADDING, TEXT_LINE_HEIGHT)
         painter.drawText(title_rect, Qt.AlignLeft | Qt.TextSingleLine, _elide(painter.fontMetrics(), title, title_rect.width()))
 
         # Author
@@ -115,7 +135,7 @@ class WadCardDelegate(QStyledItemDelegate):
         painter.setPen(QColor(DOOM_PALETTE["text_secondary"]))
 
         author = model.data(model.index(index.row(), _col_index(model, Column.AUTHOR)), Qt.DisplayRole) or ""
-        author_rect = QRect(rect.x() + PADDING, text_y, CARD_WIDTH - 2 * PADDING, TEXT_LINE_HEIGHT)
+        author_rect = QRect(rect.x() + PADDING, text_y, card_w - 2 * PADDING, TEXT_LINE_HEIGHT)
         painter.drawText(author_rect, Qt.AlignLeft | Qt.TextSingleLine, _elide(painter.fontMetrics(), author, author_rect.width()))
 
         # Status badge
@@ -151,7 +171,7 @@ class WadCardDelegate(QStyledItemDelegate):
             pt_font.setPixelSize(10)
             painter.setFont(pt_font)
             painter.setPen(QColor(DOOM_PALETTE["text_secondary"]))
-            pt_rect = QRect(rect.x() + PADDING, text_y, CARD_WIDTH - 2 * PADDING, 16)
+            pt_rect = QRect(rect.x() + PADDING, text_y, card_w - 2 * PADDING, 16)
             painter.drawText(pt_rect, Qt.AlignRight | Qt.AlignVCenter, playtime)
 
         painter.restore()
@@ -197,11 +217,22 @@ class WadGridView(QListView):
         self.setViewMode(QListView.IconMode)
         self.setResizeMode(QListView.Adjust)
         self.setUniformItemSizes(True)
-        self.setGridSize(QSize(CARD_WIDTH + 8, CARD_HEIGHT + 8))
+        self._update_grid_size()
         self.setSpacing(4)
         self.setSelectionMode(QAbstractItemView.SingleSelection)
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
+
+    def set_card_size(self, width: int):
+        """Set the card width — scales thumbnail area proportionally."""
+        self._delegate.set_card_size(width)
+        self._update_grid_size()
+        self.viewport().update()
+
+    def _update_grid_size(self):
+        """Sync QListView grid size with the delegate's card size."""
+        cs = self._delegate.card_size()
+        self.setGridSize(QSize(cs.width() + 8, cs.height() + 8))
 
     def set_thumbnail(self, wad_id: int, pixmap: QPixmap):
         """Set a thumbnail in the delegate and trigger repaint."""

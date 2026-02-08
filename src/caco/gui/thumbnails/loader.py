@@ -1,8 +1,8 @@
 """Async QThreadPool-based thumbnail loader.
 
 Sequence per WAD:
-1. Check cache -> emit immediately if hit
-2. Try extract_titlepic() if WAD has cached_path
+1. Try extract_titlepic() if WAD has cached_path (always preferred — actual WAD art)
+2. Check thumbnail cache (may contain wiki image from earlier)
 3. Try wiki scraping (direct URL for doomwiki, title search for others)
 4. Generate colored placeholder with WAD initials as fallback
 5. Emit thumbnail_ready(wad_id, QPixmap) signal
@@ -53,16 +53,14 @@ class ThumbnailWorker(QRunnable):
         self.signals.ready.emit(self.wad_id, image)
 
     def _load_image(self) -> QImage | None:
-        """Try all image sources in priority order. Returns QImage or None."""
+        """Try all image sources in priority order. Returns QImage or None.
 
-        # 1. Check filesystem cache
-        cached_bytes = thumb_cache.load(self.wad_id)
-        if cached_bytes:
-            img = QImage()
-            if img.loadFromData(cached_bytes):
-                return img
+        Priority: TITLEPIC (from WAD file) > cached thumbnail > wiki scrape.
+        TITLEPIC always wins when available because it's the actual WAD art,
+        and overwrites any previously cached wiki image.
+        """
 
-        # 2. Try TITLEPIC extraction from downloaded WAD
+        # 1. Try TITLEPIC extraction first — always preferred when WAD is downloaded
         if self.cached_path:
             try:
                 from caco.gui.thumbnails.extractor import extract_titlepic
@@ -77,6 +75,13 @@ class ThumbnailWorker(QRunnable):
                         return img
             except Exception:
                 pass
+
+        # 2. Check filesystem cache (wiki image or previous TITLEPIC)
+        cached_bytes = thumb_cache.load(self.wad_id)
+        if cached_bytes:
+            img = QImage()
+            if img.loadFromData(cached_bytes):
+                return img
 
         # 3. Try wiki scraping (direct URL for doomwiki, title search for all)
         try:

@@ -62,6 +62,7 @@ SORT_FIELDS = {
     "Year": "year",
     "Rating": "rating",
     "Created": "created",
+    "Random": "random",
 }
 
 # Tab definitions: (label, query_filter)

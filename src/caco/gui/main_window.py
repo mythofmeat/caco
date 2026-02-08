@@ -1,7 +1,7 @@
 """Main application window with tab bar, toolbar, and status bar."""
 
 from PySide6.QtCore import Qt, QSettings
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtGui import QKeySequence, QShortcut, QAction
 from PySide6.QtWidgets import (
     QMainWindow,
     QTabBar,
@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QWidget,
     QStatusBar,
     QMessageBox,
+    QMenu,
 )
 
 from caco import db
@@ -56,14 +57,18 @@ class MainWindow(QMainWindow):
         self._tab_bar = QTabBar()
         self._tab_bar.setExpanding(False)
         self._tab_bar.setDrawBase(False)
+        self._tab_bar.setContextMenuPolicy(Qt.CustomContextMenu)
+        self._tab_bar.customContextMenuRequested.connect(self._show_tab_context_menu)
 
-        # Add status filter tabs
-        for label, _query in STATUS_TABS:
-            self._tab_bar.addTab(label)
+        # Track which STATUS_TABS indices are visible (all by default)
+        self._visible_status_tabs: list[int] = list(range(len(STATUS_TABS)))
+        # Custom user-defined tabs: list of (name, query) tuples
+        self._custom_tabs: list[tuple[str, str]] = []
+        # Maps tab bar position → ("status", STATUS_TABS index) or ("custom", custom_tabs index)
+        self._tab_mapping: list[tuple[str, int]] = []
+        self._import_tab_index = -1
 
-        # Add Import tab
-        self._import_tab_index = self._tab_bar.addTab("Import")
-
+        self._rebuild_tab_bar()
         self._tab_bar.currentChanged.connect(self._on_tab_changed)
         layout.addWidget(self._tab_bar)
 
@@ -93,23 +98,37 @@ class MainWindow(QMainWindow):
         # -- Keyboard shortcuts --
         self._setup_shortcuts()
 
-        # Apply default tab from config
-        default_tab = self._config.get("default_tab", "all")
-        self._apply_default_tab(default_tab)
+        # QSettings for persistent state (needed before tab restore)
+        self._settings = QSettings("caco", "caco-gui")
+
+        # Restore last active tab (falls back to config default_tab)
+        self._restore_last_tab()
 
         # Apply default sort from config
         default_sort = self._config.get("default_sort", "id")
         default_sort_desc = self._config.get("default_sort_desc", False)
         self._library_tab._sort.set_sort(default_sort, default_sort_desc)
 
-        # QSettings for persistent state
-        self._settings = QSettings("caco", "caco-gui")
-
         # Restore saved column visibility
         self._restore_columns()
 
+        # Restore saved card size for grid view
+        self._restore_card_size()
+
+        # Restore saved searches
+        self._restore_saved_searches()
+
         # Listen for column changes to persist them
         self._library_tab._list_view.columns_changed.connect(self._on_columns_changed)
+
+        # Listen for card size changes to persist them
+        self._library_tab.card_size_changed.connect(self._on_card_size_changed)
+
+        # Listen for saved searches changes to persist them
+        self._library_tab.saved_searches_changed.connect(self._on_saved_searches_changed)
+
+        # Listen for "save as tab" requests
+        self._library_tab.save_as_tab_requested.connect(self._add_custom_tab)
 
         # Restore saved geometry
         self._restore_geometry()
@@ -128,21 +147,172 @@ class MainWindow(QMainWindow):
                 lambda idx=i: self._tab_bar.setCurrentIndex(idx),
             )
 
-    def _apply_default_tab(self, tab_name: str):
-        """Select the default tab by name."""
-        tab_map = {label.lower(): i for i, (label, _) in enumerate(STATUS_TABS)}
-        index = tab_map.get(tab_name.lower(), 0)
-        self._tab_bar.setCurrentIndex(index)
+    def _rebuild_tab_bar(self):
+        """Rebuild the tab bar: status tabs + custom tabs + Import."""
+        self._tab_bar.blockSignals(True)
+        while self._tab_bar.count():
+            self._tab_bar.removeTab(0)
+
+        self._tab_mapping = []
+        for i in self._visible_status_tabs:
+            label, _ = STATUS_TABS[i]
+            self._tab_bar.addTab(label)
+            self._tab_mapping.append(("status", i))
+
+        for i, (name, _query) in enumerate(self._custom_tabs):
+            self._tab_bar.addTab(name)
+            self._tab_mapping.append(("custom", i))
+
+        # Import tab is always last
+        self._import_tab_index = self._tab_bar.addTab("Import")
+        self._tab_bar.blockSignals(False)
+
+    def _tab_bar_index_for_name(self, name: str) -> int:
+        """Find tab bar index for a tab name (case-insensitive)."""
+        name_lower = name.lower()
+        for bar_idx, (kind, idx) in enumerate(self._tab_mapping):
+            if kind == "status" and STATUS_TABS[idx][0].lower() == name_lower:
+                return bar_idx
+            elif kind == "custom" and self._custom_tabs[idx][0].lower() == name_lower:
+                return bar_idx
+        return 0
+
+    def _restore_last_tab(self):
+        """Restore the last active tab from QSettings, falling back to config."""
+        # Restore visible status tabs
+        saved_visible = self._settings.value("visibleTabs")
+        if saved_visible and isinstance(saved_visible, list):
+            name_to_idx = {label.lower(): i for i, (label, _) in enumerate(STATUS_TABS)}
+            restored = [name_to_idx[n.lower()] for n in saved_visible if n.lower() in name_to_idx]
+            if 0 not in restored:
+                restored.insert(0, 0)
+            if restored:
+                self._visible_status_tabs = sorted(restored)
+
+        # Restore custom tabs
+        ct_names = self._settings.value("customTabNames")
+        ct_queries = self._settings.value("customTabQueries")
+        if ct_names and ct_queries and isinstance(ct_names, list) and isinstance(ct_queries, list):
+            self._custom_tabs = list(zip(ct_names, ct_queries))
+
+        self._rebuild_tab_bar()
+
+        # Restore last active tab by name
+        saved_tab = self._settings.value("lastTabName")
+        if saved_tab and isinstance(saved_tab, str):
+            if saved_tab.lower() == "import":
+                self._tab_bar.setCurrentIndex(self._import_tab_index)
+                return
+            idx = self._tab_bar_index_for_name(saved_tab)
+            self._tab_bar.setCurrentIndex(idx)
+            return
+
+        # Fall back to config default
+        default_tab = self._config.get("default_tab", "all")
+        self._tab_bar.setCurrentIndex(self._tab_bar_index_for_name(default_tab))
 
     def _on_tab_changed(self, index: int):
         """Handle tab bar changes."""
         if index == self._import_tab_index:
             self._stack.setCurrentWidget(self._import_tab)
-        else:
+        elif 0 <= index < len(self._tab_mapping):
             self._stack.setCurrentWidget(self._library_tab)
-            if 0 <= index < len(STATUS_TABS):
-                _, query = STATUS_TABS[index]
-                self._library_tab.set_tab_query(query)
+            kind, idx = self._tab_mapping[index]
+            if kind == "status":
+                _, query = STATUS_TABS[idx]
+            else:
+                _, query = self._custom_tabs[idx]
+            self._library_tab.set_tab_query(query)
+
+    def _show_tab_context_menu(self, pos):
+        """Right-click on tab bar: show/hide status tabs, manage custom tabs."""
+        menu = QMenu(self)
+
+        # Status tab visibility
+        for i, (label, _query) in enumerate(STATUS_TABS):
+            action = QAction(label, self)
+            action.setCheckable(True)
+            action.setChecked(i in self._visible_status_tabs)
+            if i == 0:
+                action.setEnabled(False)
+            action.toggled.connect(lambda checked, idx=i: self._toggle_tab(idx, checked))
+            menu.addAction(action)
+
+        # Custom tab removal
+        if self._custom_tabs:
+            menu.addSeparator()
+            remove_menu = menu.addMenu("Remove custom tab...")
+            for name, _query in self._custom_tabs:
+                rm_action = remove_menu.addAction(name)
+                rm_action.triggered.connect(lambda checked, n=name: self._remove_custom_tab(n))
+
+        menu.exec(self._tab_bar.mapToGlobal(pos))
+
+    def _current_tab_name(self) -> str | None:
+        """Get the name of the currently selected tab."""
+        cur = self._tab_bar.currentIndex()
+        if cur == self._import_tab_index:
+            return "Import"
+        if 0 <= cur < len(self._tab_mapping):
+            kind, idx = self._tab_mapping[cur]
+            if kind == "status":
+                return STATUS_TABS[idx][0]
+            return self._custom_tabs[idx][0]
+        return None
+
+    def _select_tab_by_name(self, name: str | None):
+        """Select a tab by name after a rebuild."""
+        if not name:
+            return
+        if name == "Import":
+            self._tab_bar.setCurrentIndex(self._import_tab_index)
+        else:
+            self._tab_bar.setCurrentIndex(self._tab_bar_index_for_name(name))
+
+    def _toggle_tab(self, status_idx: int, visible: bool):
+        """Show or hide a status tab."""
+        if visible and status_idx not in self._visible_status_tabs:
+            self._visible_status_tabs.append(status_idx)
+            self._visible_status_tabs.sort()
+        elif not visible and status_idx in self._visible_status_tabs:
+            if len(self._visible_status_tabs) <= 1:
+                return
+            self._visible_status_tabs.remove(status_idx)
+
+        cur_name = self._current_tab_name()
+        self._rebuild_tab_bar()
+        self._select_tab_by_name(cur_name)
+
+    def _add_custom_tab(self, name: str, query: str):
+        """Add a custom tab with the given name and query."""
+        # Replace if name already exists
+        self._custom_tabs = [(n, q) for n, q in self._custom_tabs if n != name]
+        self._custom_tabs.append((name, query))
+
+        self._rebuild_tab_bar()
+        # Switch to the new tab
+        self._tab_bar.setCurrentIndex(self._tab_bar_index_for_name(name))
+        self._persist_custom_tabs()
+
+    def _remove_custom_tab(self, name: str):
+        """Remove a custom tab by name."""
+        cur_name = self._current_tab_name()
+        self._custom_tabs = [(n, q) for n, q in self._custom_tabs if n != name]
+
+        self._rebuild_tab_bar()
+        # If we removed the active tab, go to "All"
+        if cur_name == name:
+            self._tab_bar.setCurrentIndex(0)
+        else:
+            self._select_tab_by_name(cur_name)
+        self._persist_custom_tabs()
+
+    def _persist_custom_tabs(self):
+        """Save custom tabs to QSettings."""
+        names = [n for n, _ in self._custom_tabs]
+        queries = [q for _, q in self._custom_tabs]
+        self._settings.setValue("customTabNames", names)
+        self._settings.setValue("customTabQueries", queries)
 
     def _update_status(self, msg: str):
         """Update the status bar message."""
@@ -246,6 +416,38 @@ class MainWindow(QMainWindow):
         names = [c.name for c in columns]
         self._settings.setValue("visibleColumns", names)
 
+    # ── Card size persistence ─────────────────────────────────────
+
+    def _restore_card_size(self):
+        """Restore saved grid card size from QSettings."""
+        saved = self._settings.value("cardSize")
+        if saved is not None:
+            try:
+                self._library_tab.set_card_size(int(saved))
+            except (ValueError, TypeError):
+                pass
+
+    def _on_card_size_changed(self, width: int):
+        """Persist card size when user adjusts slider."""
+        self._settings.setValue("cardSize", width)
+
+    # ── Saved searches persistence ────────────────────────────────
+
+    def _restore_saved_searches(self):
+        """Restore saved searches from QSettings."""
+        names = self._settings.value("savedSearchNames")
+        queries = self._settings.value("savedSearchQueries")
+        if names and queries and isinstance(names, list) and isinstance(queries, list):
+            searches = list(zip(names, queries))
+            self._library_tab.set_saved_searches(searches)
+
+    def _on_saved_searches_changed(self, searches: list):
+        """Persist saved searches when user adds/deletes one."""
+        names = [s[0] for s in searches]
+        queries = [s[1] for s in searches]
+        self._settings.setValue("savedSearchNames", names)
+        self._settings.setValue("savedSearchQueries", queries)
+
     # ── Window geometry save/restore ──────────────────────────────
 
     def _restore_geometry(self):
@@ -261,8 +463,19 @@ class MainWindow(QMainWindow):
             self._library_tab._splitter.restoreState(splitter_state)
 
     def closeEvent(self, event):
-        """Save window geometry on close."""
+        """Save window state on close."""
         self._settings.setValue("geometry", self.saveGeometry())
         self._settings.setValue("windowState", self.saveState())
         self._settings.setValue("splitterState", self._library_tab._splitter.saveState())
+
+        # Save current tab by name
+        self._settings.setValue("lastTabName", self._current_tab_name() or "All")
+
+        # Save visible status tabs
+        visible_names = [STATUS_TABS[i][0] for i in self._visible_status_tabs]
+        self._settings.setValue("visibleTabs", visible_names)
+
+        # Save custom tabs
+        self._persist_custom_tabs()
+
         super().closeEvent(event)

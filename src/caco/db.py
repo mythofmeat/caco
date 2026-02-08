@@ -625,6 +625,7 @@ def search_wads(
         "author": f"LOWER(wads.author) {reverse_dir} {reverse_nulls}",  # Author default ascending
         "last_played": f"MAX(sessions.started_at) {direction} {nulls}",
         "year": f"wads.year {direction} {nulls}",
+        "random": "RANDOM()",
     }
 
     if sort_by and sort_by in sort_map:
