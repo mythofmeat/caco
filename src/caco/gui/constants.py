@@ -4,25 +4,38 @@ from enum import Enum
 
 
 class Column(Enum):
-    """Table column definitions: (display_name, width)."""
-    ID = ("ID", 50)
-    TITLE = ("Title", 250)
-    AUTHOR = ("Author", 150)
-    YEAR = ("Year", 60)
-    STATUS = ("Status", 100)
-    RATING = ("Rating", 90)
-    BEATEN = ("Beaten", 60)
-    PLAYTIME = ("Playtime", 80)
-    LAST_PLAYED = ("Last Played", 100)
-    TAGS = ("Tags", 150)
-    SOURCE = ("Source", 80)
+    """Table column definitions: (display_name, min_width, weight).
+
+    Weight determines the proportional width of each column.
+    On resize, each column gets: total_width * (weight / sum_of_weights).
+    """
+    ID = ("ID", 40, 4)
+    TITLE = ("Title", 120, 22)
+    AUTHOR = ("Author", 80, 14)
+    YEAR = ("Year", 45, 5)
+    STATUS = ("Status", 60, 9)
+    RATING = ("Rating", 60, 8)
+    BEATEN = ("Beaten", 45, 5)
+    PLAYTIME = ("Playtime", 55, 7)
+    LAST_PLAYED = ("Last Played", 70, 9)
+    TAGS = ("Tags", 80, 13)
+    SOURCE = ("Source", 50, 7)
 
     @property
     def header(self) -> str:
         return self.value[0]
 
     @property
+    def min_width(self) -> int:
+        return self.value[1]
+
+    @property
+    def weight(self) -> int:
+        return self.value[2]
+
+    @property
     def default_width(self) -> int:
+        """Legacy: returns min_width for compatibility."""
         return self.value[1]
 
 

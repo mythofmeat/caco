@@ -3,9 +3,12 @@
 Sequence per WAD:
 1. Check cache -> emit immediately if hit
 2. Try extract_titlepic() if WAD has cached_path
-3. Try fetch_wiki_image() if source is doomwiki
+3. Try wiki scraping (direct URL for doomwiki, title search for others)
 4. Generate colored placeholder with WAD initials as fallback
 5. Emit thumbnail_ready(wad_id, QPixmap) signal
+
+IMPORTANT: Worker threads use QImage (thread-safe) exclusively.
+Conversion to QPixmap happens only on the main thread in _on_ready().
 """
 
 from io import BytesIO
@@ -19,7 +22,8 @@ from caco.gui.theme import DOOM_PALETTE
 
 class ThumbnailSignals(QObject):
     """Signals emitted by thumbnail workers."""
-    ready = Signal(int, QPixmap)  # (wad_id, thumbnail)
+    # Carries QImage (thread-safe) — converted to QPixmap on main thread
+    ready = Signal(int, QImage)
 
 
 class ThumbnailWorker(QRunnable):
@@ -37,34 +41,44 @@ class ThumbnailWorker(QRunnable):
 
     @Slot()
     def run(self):
-        pixmap = None
+        # Top-level try/except: signal MUST always emit so _pending is cleared
+        try:
+            image = self._load_image()
+        except Exception:
+            image = None
 
-        # 1. Check cache
+        if image is None or image.isNull():
+            image = _generate_placeholder_image(self.title, self.wad_id)
+
+        self.signals.ready.emit(self.wad_id, image)
+
+    def _load_image(self) -> QImage | None:
+        """Try all image sources in priority order. Returns QImage or None."""
+
+        # 1. Check filesystem cache
         cached_bytes = thumb_cache.load(self.wad_id)
         if cached_bytes:
-            pixmap = _bytes_to_pixmap(cached_bytes)
-            if pixmap and not pixmap.isNull():
-                self.signals.ready.emit(self.wad_id, pixmap)
-                return
+            img = QImage()
+            if img.loadFromData(cached_bytes):
+                return img
 
-        # 2. Try TITLEPIC extraction
+        # 2. Try TITLEPIC extraction from downloaded WAD
         if self.cached_path:
             try:
                 from caco.gui.thumbnails.extractor import extract_titlepic
-                img = extract_titlepic(self.cached_path)
-                if img:
+                pil_img = extract_titlepic(self.cached_path)
+                if pil_img:
                     buf = BytesIO()
-                    img.save(buf, format="PNG")
+                    pil_img.save(buf, format="PNG")
                     png_bytes = buf.getvalue()
                     thumb_cache.save(self.wad_id, png_bytes)
-                    pixmap = _bytes_to_pixmap(png_bytes)
-                    if pixmap and not pixmap.isNull():
-                        self.signals.ready.emit(self.wad_id, pixmap)
-                        return
+                    img = QImage()
+                    if img.loadFromData(png_bytes):
+                        return img
             except Exception:
                 pass
 
-        # 3. Try wiki scraping (direct URL for doomwiki, title search for others)
+        # 3. Try wiki scraping (direct URL for doomwiki, title search for all)
         try:
             from caco.gui.thumbnails.scraper import fetch_wiki_image, search_wiki_image
             img_bytes = None
@@ -74,16 +88,13 @@ class ThumbnailWorker(QRunnable):
                 img_bytes = search_wiki_image(self.title)
             if img_bytes:
                 thumb_cache.save(self.wad_id, img_bytes)
-                pixmap = _bytes_to_pixmap(img_bytes)
-                if pixmap and not pixmap.isNull():
-                    self.signals.ready.emit(self.wad_id, pixmap)
-                    return
+                img = QImage()
+                if img.loadFromData(img_bytes):
+                    return img
         except Exception:
             pass
 
-        # 4. Generate placeholder
-        pixmap = _generate_placeholder(self.title, self.wad_id)
-        self.signals.ready.emit(self.wad_id, pixmap)
+        return None
 
 
 class ThumbnailLoader(QObject):
@@ -111,22 +122,15 @@ class ThumbnailLoader(QObject):
         worker.signals.ready.connect(self._on_ready)
         self._pool.start(worker)
 
-    def _on_ready(self, wad_id: int, pixmap: QPixmap):
+    def _on_ready(self, wad_id: int, image: QImage):
+        """Convert QImage to QPixmap on the main thread and emit."""
         self._pending.discard(wad_id)
+        pixmap = QPixmap.fromImage(image)
         self.thumbnail_ready.emit(wad_id, pixmap)
 
 
-def _bytes_to_pixmap(data: bytes) -> QPixmap | None:
-    """Convert image bytes to QPixmap."""
-    img = QImage()
-    if img.loadFromData(data):
-        return QPixmap.fromImage(img)
-    return None
-
-
-def _generate_placeholder(title: str, wad_id: int) -> QPixmap:
-    """Generate a colored placeholder with WAD initials."""
-    # Deterministic color from wad_id
+def _generate_placeholder_image(title: str, wad_id: int) -> QImage:
+    """Generate a colored placeholder with WAD initials using QImage (thread-safe)."""
     colors = [
         DOOM_PALETTE["red"], DOOM_PALETTE["green"], DOOM_PALETTE["blue"],
         DOOM_PALETTE["brown"], DOOM_PALETTE["magenta"], DOOM_PALETTE["yellow"],
@@ -142,16 +146,16 @@ def _generate_placeholder(title: str, wad_id: int) -> QPixmap:
     else:
         initials = "?"
 
-    pixmap = QPixmap(160, 100)
-    pixmap.fill(bg_color)
+    image = QImage(160, 100, QImage.Format_RGB32)
+    image.fill(bg_color)
 
-    painter = QPainter(pixmap)
+    painter = QPainter(image)
     painter.setPen(QColor(DOOM_PALETTE["text_primary"]))
     font = QFont()
     font.setPixelSize(36)
     font.setBold(True)
     painter.setFont(font)
-    painter.drawText(pixmap.rect(), 0x0084, initials)  # AlignCenter
+    painter.drawText(image.rect(), 0x0084, initials)  # AlignCenter
     painter.end()
 
-    return pixmap
+    return image

@@ -1,7 +1,7 @@
 """WAD list view (QTableView) with context menu and keyboard shortcuts."""
 
 from PySide6.QtCore import Qt, Signal, QModelIndex
-from PySide6.QtGui import QKeySequence, QShortcut, QAction
+from PySide6.QtGui import QKeySequence, QShortcut, QAction, QResizeEvent
 from PySide6.QtWidgets import QTableView, QHeaderView, QAbstractItemView, QMenu
 
 from caco.gui.constants import DEFAULT_COLUMNS, ALL_COLUMNS, Column
@@ -34,9 +34,9 @@ class WadListView(QTableView):
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
 
-        # Column sizing
+        # Column sizing — proportional widths, recalculated on resize
         header = self.horizontalHeader()
-        header.setStretchLastSection(True)
+        header.setStretchLastSection(False)
         header.setSectionResizeMode(QHeaderView.Interactive)
         header.setContextMenuPolicy(Qt.CustomContextMenu)
         header.customContextMenuRequested.connect(self._show_header_context_menu)
@@ -51,10 +51,36 @@ class WadListView(QTableView):
             self._apply_column_widths()
 
     def _apply_column_widths(self):
-        """Set initial column widths from constants."""
-        for i, col in enumerate(DEFAULT_COLUMNS):
-            if i < self.model().columnCount():
-                self.setColumnWidth(i, col.default_width)
+        """Set column widths proportionally based on current view width."""
+        model = self.model()
+        if not model or model.columnCount() == 0:
+            return
+
+        # Get columns from model if available, else use defaults
+        if hasattr(model, 'columns'):
+            columns = model.columns
+        else:
+            columns = DEFAULT_COLUMNS[:model.columnCount()]
+
+        # Account for vertical scrollbar width
+        scrollbar_width = self.verticalScrollBar().width() if self.verticalScrollBar().isVisible() else 20
+        available = self.viewport().width() or (self.width() - scrollbar_width)
+        if available <= 0:
+            return
+
+        total_weight = sum(c.weight for c in columns)
+        if total_weight == 0:
+            return
+
+        for i, col in enumerate(columns):
+            if i < model.columnCount():
+                width = max(col.min_width, int(available * col.weight / total_weight))
+                self.setColumnWidth(i, width)
+
+    def resizeEvent(self, event: QResizeEvent):
+        """Recalculate proportional column widths on window resize."""
+        super().resizeEvent(event)
+        self._apply_column_widths()
 
     def _setup_shortcuts(self):
         """Vim-style and standard keyboard shortcuts."""

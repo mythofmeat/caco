@@ -196,6 +196,10 @@ class DetailPanel(QScrollArea):
 
         self._wad_id = wad_id
 
+        # Reset thumbnail to placeholder while loading
+        self._thumbnail.setPixmap(QPixmap())
+        self._thumbnail.setText("Loading...")
+
         # Title
         self._title.setText(wad["title"])
 
