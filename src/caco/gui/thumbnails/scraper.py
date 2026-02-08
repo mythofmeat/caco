@@ -12,6 +12,9 @@ import httpx
 
 API_URL = "https://doomwiki.org/w/api.php"
 _TIMEOUT = 15.0
+# MediaWiki blocks requests without a descriptive User-Agent (returns 403).
+# Must match the pattern used by caco's existing doomwiki client.
+_HEADERS = {"User-Agent": "Caco/1.0 (Doom WAD library manager)"}
 
 
 def fetch_wiki_image(wiki_url: str) -> bytes | None:
@@ -46,7 +49,7 @@ def search_wiki_image(title: str) -> bytes | None:
         return None
 
     try:
-        with httpx.Client(timeout=_TIMEOUT) as client:
+        with httpx.Client(timeout=_TIMEOUT, headers=_HEADERS) as client:
             # Search for the WAD page by title
             resp = client.get(API_URL, params={
                 "action": "opensearch",
@@ -87,7 +90,7 @@ def _fetch_image_for_page(page_title: str, client: httpx.Client | None = None) -
     should_close = client is None
     try:
         if client is None:
-            client = httpx.Client(timeout=_TIMEOUT)
+            client = httpx.Client(timeout=_TIMEOUT, headers=_HEADERS)
 
         # Step 1: Get images on the page
         resp = client.get(API_URL, params={
