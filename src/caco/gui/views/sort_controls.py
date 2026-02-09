@@ -48,10 +48,12 @@ class SortControls(QWidget):
         return self._desc
 
     def set_sort(self, field: str, desc: bool) -> None:
-        """Set sort field and direction programmatically."""
+        """Set sort field and direction programmatically (no signal emitted)."""
+        self._combo.blockSignals(True)
         for i in range(self._combo.count()):
             if self._combo.itemData(i) == field:
                 self._combo.setCurrentIndex(i)
                 break
+        self._combo.blockSignals(False)
         self._desc = desc
         self._dir_btn.setText("\u2193" if desc else "\u2191")

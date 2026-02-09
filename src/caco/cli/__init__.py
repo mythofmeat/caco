@@ -623,7 +623,7 @@ def _render_wad_list(wads: list[dict], title: str | None = None, list_config: di
     Args:
         wads: List of WAD dicts to display
         title: Optional table title
-        list_config: Optional config dict with 'format' and 'colors' keys
+        list_config: Optional config dict with 'format' key
     """
     if not wads:
         console.print("[dim]No WADs found[/dim]")
@@ -634,7 +634,6 @@ def _render_wad_list(wads: list[dict], title: str | None = None, list_config: di
         list_config = get_list_config()
 
     columns = list_config.get("format", ["id", "title", "author", "status", "beaten", "playtime", "last_played"])
-    colors = list_config.get("colors", {})
 
     # Batch fetch stats for all WADs
     wad_ids = [w["id"] for w in wads]
@@ -683,12 +682,7 @@ def _render_wad_list(wads: list[dict], title: str | None = None, list_config: di
             elif col == "year":
                 row_values.append(str(wad["year"]) if wad.get("year") else "-")
             elif col == "status":
-                status = wad["status"]
-                status_color = colors.get(status, "")
-                if status_color:
-                    row_values.append(f"[{status_color}]{status}[/{status_color}]")
-                else:
-                    row_values.append(status)
+                row_values.append(wad["status"])
             elif col == "rating":
                 if wad.get("rating"):
                     row_values.append("\u2605" * wad["rating"] + "\u2606" * (5 - wad["rating"]))

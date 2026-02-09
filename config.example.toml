@@ -21,29 +21,17 @@
 # 4 = xvertigox.com
 # download_mirror = 0
 
-# Stats directory for nyan-doom/dsda-doom stats.txt files
-# Used for tracking map completion statistics
-# stats_dir = "~/.local/share/nyan-doom/nyan_doom_data"
-
 # List display configuration
 # [list]
 
-# Columns to display (available: id, title, author, status, tags, maps, beaten, playtime, last_played)
-# format = ["id", "title", "author", "status", "maps", "beaten", "playtime", "last_played"]
+# Columns to display (available: id, title, author, status, tags, beaten, playtime, last_played)
+# format = ["id", "title", "author", "status", "beaten", "playtime", "last_played"]
 
 # Default sort order (e.g., "title", "author", "playtime", "-last_played" for descending)
 # sort = ""
 
 # Default status filter (empty array shows all statuses)
 # default_status = []
-
-# Colors for each status (valid: blue, yellow, green, red, dim, cyan, magenta, white)
-# [list.colors]
-# to-play = "blue"
-# backlog = "yellow"
-# playing = "green"
-# finished = "dim"
-# abandoned = "red"
 
 # Cache auto-cleanup settings
 # Maximum cache size in GB (0 = unlimited)

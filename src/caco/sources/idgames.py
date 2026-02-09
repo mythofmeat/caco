@@ -66,8 +66,14 @@ class IdgamesSource:
         dest: Path,
         mirror: int | None = None,
         console: Console | None = None,
+        progress_callback: object = None,
     ) -> Path:
-        """Download a WAD file. Returns the path to the downloaded file."""
+        """Download a WAD file. Returns the path to the downloaded file.
+
+        Args:
+            progress_callback: Optional callable(downloaded, total, filename)
+                for non-console progress reporting (e.g. GUI).
+        """
         if mirror is None:
             mirror = get_download_mirror()
         dest_file = dest / entry.filename
@@ -84,7 +90,8 @@ class IdgamesSource:
                 for downloaded, total in self.client.download(entry, dest_file, mirror):
                     progress.update(task, completed=downloaded, total=total)
         else:
-            for _ in self.client.download(entry, dest_file, mirror):
-                pass
+            for downloaded, total in self.client.download(entry, dest_file, mirror):
+                if progress_callback:
+                    progress_callback(downloaded, total, entry.filename)
 
         return dest_file

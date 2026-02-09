@@ -21,14 +21,6 @@ DEFAULT_LIST_CONFIG = {
     "format": ["id", "title", "author", "status", "beaten", "playtime", "last_played"],
     "sort": None,  # None means use default (status priority)
     "default_status": [],  # Empty means all statuses
-    "colors": {
-        "to-play": "blue",
-        "backlog": "yellow",
-        "playing": "green",
-        "finished": "dim",
-        "abandoned": "red",
-        "awaiting-update": "magenta",
-    },
 }
 
 
@@ -141,8 +133,6 @@ def get_list_config() -> dict[str, Any]:
             list_config["sort"] = user_list["sort"]
         if "default_status" in user_list:
             list_config["default_status"] = user_list["default_status"]
-        if "colors" in user_list and isinstance(user_list["colors"], dict):
-            list_config["colors"].update(user_list["colors"])
 
     return list_config
 

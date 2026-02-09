@@ -18,7 +18,11 @@ from caco.config import (
 )
 
 
-def get_wad_path(wad: dict, console: Console | None = None) -> Path | None:
+def get_wad_path(
+    wad: dict,
+    console: Console | None = None,
+    progress_callback: object = None,
+) -> Path | None:
     """Get the local path to a WAD file, downloading if needed."""
     # If already cached, return cached path
     if wad.get("cached_path"):
@@ -40,7 +44,10 @@ def get_wad_path(wad: dict, console: Console | None = None) -> Path | None:
 
         with IdgamesSource() as source:
             entry = source.get(int(idgames_id))
-            dest = source.download(entry, cache_dir, console=console)
+            dest = source.download(
+                entry, cache_dir, console=console,
+                progress_callback=progress_callback,
+            )
 
             # Update cached path in database
             db.update_wad(wad["id"], cached_path=str(dest))
@@ -163,6 +170,7 @@ def play(
     sourceport: str | None = None,
     extra_args: list[str] | None = None,
     console: Console | None = None,
+    progress_callback: object = None,
 ) -> int | None:
     """
     Play a WAD with the specified sourceport.
@@ -177,7 +185,7 @@ def play(
     auto_clean_cache(console=console)
 
     # Get or download WAD file
-    wad_path = get_wad_path(wad, console=console)
+    wad_path = get_wad_path(wad, console=console, progress_callback=progress_callback)
     if not wad_path:
         # Build a helpful error message with source URL if available
         error_parts = [f"No WAD file linked for '{wad['title']}'"]

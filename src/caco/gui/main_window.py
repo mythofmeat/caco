@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QStatusBar,
     QMessageBox,
     QMenu,
+    QProgressBar,
 )
 
 from caco import db
@@ -34,6 +35,21 @@ class MainWindow(QMainWindow):
     - Content area switches between LibraryTab and ImportTab
     - Status bar at the bottom
     """
+
+    @staticmethod
+    def _ensure_list(value) -> list | None:
+        """Normalize QSettings value to a list.
+
+        QSettings deserializes single-element lists as bare strings,
+        so ["myTab"] comes back as "myTab" instead of a list.
+        """
+        if value is None:
+            return None
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str):
+            return [value]
+        return None
 
     def __init__(self, config: dict | None = None):
         super().__init__()
@@ -95,22 +111,37 @@ class MainWindow(QMainWindow):
         self._status_bar = QStatusBar()
         self.setStatusBar(self._status_bar)
 
+        # Download progress bar (hidden until a download starts)
+        self._download_bar = QProgressBar()
+        self._download_bar.setFixedWidth(200)
+        self._download_bar.setTextVisible(True)
+        self._download_bar.hide()
+        self._status_bar.addPermanentWidget(self._download_bar)
+
         # -- Keyboard shortcuts --
         self._setup_shortcuts()
 
         # QSettings for persistent state (needed before tab restore)
         self._settings = QSettings("caco", "caco-gui")
 
-        # Restore last active tab (falls back to config default_tab)
-        self._restore_last_tab()
+        # Restore sort and view BEFORE tab restore, so the first
+        # tab-triggered refresh() reads the correct sort/view state.
+        saved_sort = self._settings.value("sortField")
+        saved_desc = self._settings.value("sortDesc")
+        sort_field = saved_sort if isinstance(saved_sort, str) else self._config.get("default_sort", "id")
+        sort_desc = (saved_desc == "true" or saved_desc is True) if saved_desc is not None else self._config.get("default_sort_desc", False)
+        self._library_tab._sort.set_sort(sort_field, sort_desc)
 
-        # Apply default sort from config
-        default_sort = self._config.get("default_sort", "id")
-        default_sort_desc = self._config.get("default_sort_desc", False)
-        self._library_tab._sort.set_sort(default_sort, default_sort_desc)
+        saved_view = self._settings.value("viewType")
+        view_type = saved_view if isinstance(saved_view, str) else self._config.get("default_view", "list")
+        if view_type == "grid":
+            self._library_tab._toggle_view()
 
         # Restore saved column visibility
         self._restore_columns()
+
+        # Restore last active tab (triggers refresh with correct sort/view)
+        self._restore_last_tab()
 
         # Restore saved card size for grid view
         self._restore_card_size()
@@ -180,8 +211,8 @@ class MainWindow(QMainWindow):
     def _restore_last_tab(self):
         """Restore the last active tab from QSettings, falling back to config."""
         # Restore visible status tabs
-        saved_visible = self._settings.value("visibleTabs")
-        if saved_visible and isinstance(saved_visible, list):
+        saved_visible = self._ensure_list(self._settings.value("visibleTabs"))
+        if saved_visible:
             name_to_idx = {label.lower(): i for i, (label, _) in enumerate(STATUS_TABS)}
             restored = [name_to_idx[n.lower()] for n in saved_visible if n.lower() in name_to_idx]
             if 0 not in restored:
@@ -190,9 +221,9 @@ class MainWindow(QMainWindow):
                 self._visible_status_tabs = sorted(restored)
 
         # Restore custom tabs
-        ct_names = self._settings.value("customTabNames")
-        ct_queries = self._settings.value("customTabQueries")
-        if ct_names and ct_queries and isinstance(ct_names, list) and isinstance(ct_queries, list):
+        ct_names = self._ensure_list(self._settings.value("customTabNames"))
+        ct_queries = self._ensure_list(self._settings.value("customTabQueries"))
+        if ct_names and ct_queries:
             self._custom_tabs = list(zip(ct_names, ct_queries))
 
         self._rebuild_tab_bar()
@@ -330,6 +361,25 @@ class MainWindow(QMainWindow):
 
     # ── Action handlers ────────────────────────────────────────────
 
+    @staticmethod
+    def _can_resolve_wad(wad: dict) -> bool:
+        """Check if a WAD file can be obtained without showing the unavailable dialog.
+
+        Mirrors the preconditions in player.get_wad_path() without side effects
+        (no downloads, no DB writes).
+        """
+        from pathlib import Path
+
+        if wad.get("cached_path") and Path(wad["cached_path"]).exists():
+            return True
+        if wad.get("idgames_id"):
+            return True
+        if wad["source_type"] == "idgames" and wad.get("source_id"):
+            return True
+        if wad["source_type"] == "local" and wad.get("source_url") and Path(wad["source_url"]).exists():
+            return True
+        return False
+
     def _on_play(self, wad_id: int):
         """Launch sourceport in a background thread."""
         if self._play_worker and self._play_worker.isRunning():
@@ -343,14 +393,39 @@ class MainWindow(QMainWindow):
         if not wad:
             return
 
+        # Pre-check: can we resolve the WAD file?
+        if not self._can_resolve_wad(wad):
+            from caco.gui.dialogs.link_dialog import WadUnavailableDialog
+
+            dialog = WadUnavailableDialog(wad_id, parent=self)
+            if dialog.exec() == WadUnavailableDialog.Accepted:
+                self._library_tab.refresh()
+                self._library_tab.select_wad(wad_id)
+                self._on_play(wad_id)
+            return
+
         self._status_bar.showMessage(f"Launching {wad['title']}...")
         self._play_worker = PlayWorker(wad_id, parent=self)
         self._play_worker.finished.connect(self._on_play_finished)
         self._play_worker.error.connect(self._on_play_error)
+        self._play_worker.download_progress.connect(self._on_download_progress)
         self._play_worker.start()
+
+    def _on_download_progress(self, downloaded: int, total: int, filename: str):
+        """Update status bar progress during WAD download."""
+        if not self._download_bar.isVisible():
+            self._download_bar.show()
+            self._status_bar.showMessage(f"Downloading {filename}...")
+        if total > 0:
+            self._download_bar.setMaximum(total)
+            self._download_bar.setValue(downloaded)
+        else:
+            # Unknown total: use indeterminate mode
+            self._download_bar.setMaximum(0)
 
     def _on_play_finished(self, wad_id: int, duration):
         """Called when sourceport exits normally."""
+        self._download_bar.hide()
         from caco.player import format_duration
         if duration:
             self._status_bar.showMessage(
@@ -362,6 +437,7 @@ class MainWindow(QMainWindow):
 
     def _on_play_error(self, wad_id: int, error_msg: str):
         """Called when play fails."""
+        self._download_bar.hide()
         QMessageBox.warning(self, "Cannot Play", error_msg)
         self._status_bar.clearMessage()
 
@@ -403,8 +479,8 @@ class MainWindow(QMainWindow):
 
     def _restore_columns(self):
         """Restore saved column visibility from QSettings."""
-        saved = self._settings.value("visibleColumns")
-        if saved and isinstance(saved, list):
+        saved = self._ensure_list(self._settings.value("visibleColumns"))
+        if saved:
             col_map = {c.name: c for c in ALL_COLUMNS}
             columns = [col_map[name] for name in saved if name in col_map]
             if columns:
@@ -435,9 +511,9 @@ class MainWindow(QMainWindow):
 
     def _restore_saved_searches(self):
         """Restore saved searches from QSettings."""
-        names = self._settings.value("savedSearchNames")
-        queries = self._settings.value("savedSearchQueries")
-        if names and queries and isinstance(names, list) and isinstance(queries, list):
+        names = self._ensure_list(self._settings.value("savedSearchNames"))
+        queries = self._ensure_list(self._settings.value("savedSearchQueries"))
+        if names and queries:
             searches = list(zip(names, queries))
             self._library_tab.set_saved_searches(searches)
 
@@ -477,5 +553,12 @@ class MainWindow(QMainWindow):
 
         # Save custom tabs
         self._persist_custom_tabs()
+
+        # Save sort order
+        self._settings.setValue("sortField", self._library_tab._sort.current_field())
+        self._settings.setValue("sortDesc", self._library_tab._sort.is_descending())
+
+        # Save view type
+        self._settings.setValue("viewType", "grid" if self._library_tab._is_grid_view else "list")
 
         super().closeEvent(event)
