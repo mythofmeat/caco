@@ -444,7 +444,7 @@ Config file: `~/.config/caco/config.toml` (see `config.example.toml` for a templ
 
 | Option | Description |
 |--------|-------------|
-| `sourceport` | Path to default sourceport |
+| `sourceport` | Default sourceport (name on PATH or full path) |
 | `iwad` | Default IWAD (path or short name with `iwad_dirs`) |
 | `iwad_dirs` | Directories to search for IWADs |
 | `sourceport_args` | Default args passed to sourceport |
@@ -458,7 +458,7 @@ Config file: `~/.config/caco/config.toml` (see `config.example.toml` for a templ
 ### Example Config
 
 ```toml
-sourceport = "/usr/bin/nyan-doom"
+sourceport = "nyan-doom"
 iwad = "doom2"
 iwad_dirs = ["/usr/share/games/doom", "~/.steam/steam/steamapps/common/Doom 2/base"]
 sourceport_args = ["-nomusic"]

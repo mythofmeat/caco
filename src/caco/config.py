@@ -1,5 +1,6 @@
 """Configuration management for caco."""
 
+import shutil
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -74,6 +75,18 @@ def set_default_sourceport(sourceport: str) -> None:
     config = load_config()
     config["sourceport"] = sourceport
     save_config(config)
+
+
+def resolve_sourceport(name: str) -> str:
+    """Resolve a sourceport name to a full path.
+
+    If name is already an absolute path, return as-is.
+    Otherwise, use shutil.which() to find it on PATH.
+    Falls back to the original name if not found.
+    """
+    if Path(name).is_absolute():
+        return name
+    return shutil.which(name) or name
 
 
 def get_db_path() -> Path:

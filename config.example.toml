@@ -1,8 +1,8 @@
 # Caco configuration
 # Copy to ~/.config/caco/config.toml
 
-# Default sourceport path
-# sourceport = "/usr/bin/gzdoom"
+# Default sourceport (full path is also acceptable)
+# sourceport = "gzdoom"
 
 # Default IWAD for playing WADs
 # With iwad_dirs set, you can use short names like "doom2" instead of full paths

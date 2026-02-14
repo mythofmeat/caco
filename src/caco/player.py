@@ -16,6 +16,7 @@ from caco.config import (
     get_iwad,
     get_sourceport_args,
     resolve_iwad,
+    resolve_sourceport,
 )
 
 
@@ -213,6 +214,7 @@ def play(
         raise ValueError("No sourceport specified and no default configured")
 
     # Build command
+    port = resolve_sourceport(port)
     cmd = [port]
 
     # Add IWAD (CLI option would be in extra_args, so: WAD-specific > global config)

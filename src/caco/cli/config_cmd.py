@@ -40,7 +40,7 @@ def config(path: bool, edit: bool):
             default_content = '''# Caco configuration file
 # Edit these settings to customize caco behavior
 
-# Path to your sourceport executable (e.g., gzdoom, dsda-doom)
+# Sourceport executable (name on PATH or full path, e.g., gzdoom, dsda-doom)
 sourceport = ""
 
 # Path to your IWAD file (e.g., doom2.wad, or just "doom2" with iwad_dirs)
