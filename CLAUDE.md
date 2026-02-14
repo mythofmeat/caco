@@ -145,7 +145,7 @@ src/caco/
 ```
 
 **Data locations:**
-- Database: `~/.local/share/caco/library.db`
+- Database: `~/.local/share/caco/library.db` (configurable via `db_path`)
 - Config: `~/.config/caco/config.toml`
 - WAD cache: `~/.cache/caco/wads/`
 

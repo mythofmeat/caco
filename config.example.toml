@@ -10,6 +10,9 @@
 # Default arguments passed to sourceport
 # sourceport_args = ["-nomusic", "-nosfx"]
 
+# Library database file path
+# db_path = "~/.local/share/caco/library.db"
+
 # WAD cache directory (downloaded WADs are stored here)
 # cache_dir = "~/.cache/caco/wads"
 

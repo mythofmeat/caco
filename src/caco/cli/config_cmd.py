@@ -46,6 +46,9 @@ sourceport = ""
 # Path to your IWAD file (e.g., doom2.wad)
 iwad = ""
 
+# Path to the library database file
+db_path = "~/.local/share/caco/library.db"
+
 # Directory for caching downloaded WADs
 cache_dir = "~/.cache/caco/wads"
 

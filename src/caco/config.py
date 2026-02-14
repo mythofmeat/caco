@@ -7,10 +7,13 @@ from typing import Any
 CONFIG_DIR = Path.home() / ".config" / "caco"
 CONFIG_FILE = CONFIG_DIR / "config.toml"
 CACHE_DIR = Path.home() / ".cache" / "caco" / "wads"
+DB_DIR = Path.home() / ".local" / "share" / "caco"
+DEFAULT_DB_PATH = DB_DIR / "library.db"
 
 DEFAULT_CONFIG = {
     "sourceport": "",
     "cache_dir": str(CACHE_DIR),
+    "db_path": str(DEFAULT_DB_PATH),
     "iwad": "",
     "sourceport_args": [],
     "download_mirror": 0,
@@ -72,10 +75,16 @@ def set_default_sourceport(sourceport: str) -> None:
     save_config(config)
 
 
+def get_db_path() -> Path:
+    """Get the database file path."""
+    config = load_config()
+    return Path(config.get("db_path", str(DEFAULT_DB_PATH))).expanduser()
+
+
 def get_cache_dir() -> Path:
     """Get the WAD cache directory."""
     config = load_config()
-    return Path(config.get("cache_dir", str(CACHE_DIR)))
+    return Path(config.get("cache_dir", str(CACHE_DIR))).expanduser()
 
 
 def set_cache_dir(path: str) -> None:

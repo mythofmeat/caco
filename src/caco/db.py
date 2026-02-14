@@ -8,7 +8,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-DB_PATH = Path.home() / ".local" / "share" / "caco" / "library.db"
+from caco.config import get_db_path
 
 
 class Status(str, Enum):
@@ -151,8 +151,9 @@ CREATE INDEX IF NOT EXISTS idx_wad_completions_wad_id ON wad_completions(wad_id)
 
 def get_connection() -> sqlite3.Connection:
     """Get a database connection, creating the database if needed."""
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    db_path = get_db_path()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn

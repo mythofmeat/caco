@@ -447,6 +447,7 @@ Config file: `~/.config/caco/config.toml` (see `config.example.toml` for a templ
 | `sourceport` | Path to default sourceport |
 | `iwad` | Path to default IWAD (doom2.wad, etc.) |
 | `sourceport_args` | Default args passed to sourceport |
+| `db_path` | Path to the library database file |
 | `cache_dir` | WAD cache directory |
 | `download_mirror` | Preferred idgames mirror (0-4) |
 | `cache_max_size_gb` | Max cache size in GB (0 = unlimited) |
@@ -459,6 +460,7 @@ Config file: `~/.config/caco/config.toml` (see `config.example.toml` for a templ
 sourceport = "/usr/bin/nyan-doom"
 iwad = "/usr/share/games/doom/doom2.wad"
 sourceport_args = ["-nomusic"]
+db_path = "~/.local/share/caco/library.db"
 cache_dir = "~/.cache/caco/wads"
 download_mirror = 0
 
