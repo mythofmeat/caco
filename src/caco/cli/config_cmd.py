@@ -43,8 +43,11 @@ def config(path: bool, edit: bool):
 # Path to your sourceport executable (e.g., gzdoom, dsda-doom)
 sourceport = ""
 
-# Path to your IWAD file (e.g., doom2.wad)
+# Path to your IWAD file (e.g., doom2.wad, or just "doom2" with iwad_dirs)
 iwad = ""
+
+# Directories to search for IWADs (allows using short names like "doom2")
+iwad_dirs = []
 
 # Path to the library database file
 db_path = "~/.local/share/caco/library.db"

@@ -16,6 +16,7 @@ from caco.config import (
     get_cache_dir,
     set_cache_dir,
     set_iwad,
+    get_iwad_dirs,
     load_config,
     save_config,
     CONFIG_FILE,
@@ -723,6 +724,11 @@ def _render_wad_list(wads: list[dict], title: str | None = None, list_config: di
 def cli(ctx, tui: bool, gui: bool):
     """Caco - Personal Doom WAD library manager."""
     db.init_db()
+
+    # Warn about non-existent iwad_dirs
+    for iwad_dir in get_iwad_dirs():
+        if not iwad_dir.is_dir():
+            err_console.print(f"[yellow]Warning: iwad_dirs entry does not exist: {iwad_dir}[/yellow]")
 
     if tui:
         from caco.tui import CacoApp

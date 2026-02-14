@@ -15,6 +15,7 @@ from caco.config import (
     get_default_sourceport,
     get_iwad,
     get_sourceport_args,
+    resolve_iwad,
 )
 
 
@@ -217,7 +218,7 @@ def play(
     # Add IWAD (CLI option would be in extra_args, so: WAD-specific > global config)
     iwad = wad.get("custom_iwad") or get_iwad()
     if iwad:
-        cmd.extend(["-iwad", iwad])
+        cmd.extend(["-iwad", resolve_iwad(iwad)])
 
     # Add default sourceport args from global config
     default_args = get_sourceport_args()

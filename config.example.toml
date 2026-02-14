@@ -4,8 +4,12 @@
 # Default sourceport path
 # sourceport = "/usr/bin/gzdoom"
 
-# Default IWAD for playing WADs (doom.wad, doom2.wad, plutonia.wad, tnt.wad, etc.)
-# iwad = "/usr/share/games/doom/doom2.wad"
+# Default IWAD for playing WADs
+# With iwad_dirs set, you can use short names like "doom2" instead of full paths
+# iwad = "doom2"
+
+# Directories to search for IWADs (searched in order)
+# iwad_dirs = ["/usr/share/games/doom", "~/.steam/steam/steamapps/common/Doom 2/base"]
 
 # Default arguments passed to sourceport
 # sourceport_args = ["-nomusic", "-nosfx"]

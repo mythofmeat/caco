@@ -445,7 +445,8 @@ Config file: `~/.config/caco/config.toml` (see `config.example.toml` for a templ
 | Option | Description |
 |--------|-------------|
 | `sourceport` | Path to default sourceport |
-| `iwad` | Path to default IWAD (doom2.wad, etc.) |
+| `iwad` | Default IWAD (path or short name with `iwad_dirs`) |
+| `iwad_dirs` | Directories to search for IWADs |
 | `sourceport_args` | Default args passed to sourceport |
 | `db_path` | Path to the library database file |
 | `cache_dir` | WAD cache directory |
@@ -458,7 +459,8 @@ Config file: `~/.config/caco/config.toml` (see `config.example.toml` for a templ
 
 ```toml
 sourceport = "/usr/bin/nyan-doom"
-iwad = "/usr/share/games/doom/doom2.wad"
+iwad = "doom2"
+iwad_dirs = ["/usr/share/games/doom", "~/.steam/steam/steamapps/common/Doom 2/base"]
 sourceport_args = ["-nomusic"]
 db_path = "~/.local/share/caco/library.db"
 cache_dir = "~/.cache/caco/wads"

@@ -15,6 +15,7 @@ DEFAULT_CONFIG = {
     "cache_dir": str(CACHE_DIR),
     "db_path": str(DEFAULT_DB_PATH),
     "iwad": "",
+    "iwad_dirs": [],
     "sourceport_args": [],
     "download_mirror": 0,
 }
@@ -106,6 +107,38 @@ def set_iwad(path: str) -> None:
     config = load_config()
     config["iwad"] = path
     save_config(config)
+
+
+def get_iwad_dirs() -> list[Path]:
+    """Get configured IWAD directories, with tilde expansion."""
+    config = load_config()
+    dirs = config.get("iwad_dirs", [])
+    if not isinstance(dirs, list):
+        return []
+    return [Path(d).expanduser() for d in dirs if d]
+
+
+def resolve_iwad(name: str) -> str:
+    """Resolve an IWAD name to a full path using iwad_dirs.
+
+    Resolution order:
+    1. If name is an existing absolute path, return as-is.
+    2. Search each iwad_dirs entry for name and name.wad.
+    3. If not found, return the original name unchanged.
+    """
+    path = Path(name).expanduser()
+    if path.is_absolute() and path.exists():
+        return str(path)
+
+    for iwad_dir in get_iwad_dirs():
+        if not iwad_dir.is_dir():
+            continue
+        # Try exact name, then with .wad extension
+        for candidate in (iwad_dir / name, iwad_dir / f"{name}.wad"):
+            if candidate.exists():
+                return str(candidate)
+
+    return name
 
 
 def get_sourceport_args() -> list[str]:
