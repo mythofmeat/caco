@@ -77,7 +77,6 @@ def _fzf_select(
     items: list[str],
     prompt: str = "Select",
     multi: bool = False,
-    preview: str | None = None,
 ) -> list[int] | None:
     """
     Use fzf to select from a list of items.
@@ -86,7 +85,6 @@ def _fzf_select(
         items: List of strings to select from
         prompt: Prompt to display
         multi: Allow multiple selections
-        preview: Optional preview command template ({} is replaced with selection)
 
     Returns:
         List of selected indices (0-based), or None if cancelled.
@@ -98,8 +96,6 @@ def _fzf_select(
     cmd = ["fzf", "--prompt", f"{prompt}> "]
     if multi:
         cmd.append("--multi")
-    if preview:
-        cmd.extend(["--preview", preview])
 
     # Add line numbers for tracking
     numbered_items = [f"{i+1}. {item}" for i, item in enumerate(items)]
@@ -262,8 +258,12 @@ def resolve_wad_query(
         yes: If True, skip confirmation prompts (selects first for single mode)
 
     Returns:
-        List of WAD dicts, or None if cancelled/no matches.
-        Exits with error if mode="error" and multiple found.
+        List of WAD dicts, or None if user cancelled interactive selection.
+
+    Raises:
+        SystemExit: In mode="error", if query matches zero WADs or multiple
+            WADs. Also raised for missing IDs in ID range lookups. This is
+            intentional for CLI convenience.
     """
     # Normalize mode aliases
     if mode == "single":

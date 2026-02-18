@@ -159,10 +159,12 @@ def auto_clean_cache(console: Console | None = None) -> int:
     for entry in to_delete:
         try:
             entry["path"].unlink()
-            db.clear_cached_path(entry["wad"]["id"])
-            deleted += 1
+        except FileNotFoundError:
+            pass  # Already deleted by another process or user
         except OSError:
-            pass
+            continue  # Permission error or other issue, skip
+        db.clear_cached_path(entry["wad"]["id"])
+        deleted += 1
 
     return deleted
 

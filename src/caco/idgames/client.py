@@ -214,6 +214,9 @@ class IdgamesClient(BaseHttpClient):
         """
         Download a file, yielding (bytes_downloaded, total_bytes) tuples.
 
+        Uses atomic download: writes to a .partial file first, then renames
+        on success. Cleans up the .partial file on failure.
+
         Args:
             entry: The file entry to download
             dest: Destination path (defaults to current dir with original filename)
@@ -224,14 +227,24 @@ class IdgamesClient(BaseHttpClient):
         """
         url = self.get_download_url(entry, mirror)
         dest = dest or Path(entry.filename)
+        partial = dest.with_suffix(dest.suffix + ".partial")
 
-        with self._client.stream("GET", url) as response:
-            response.raise_for_status()
-            total = int(response.headers.get("content-length", 0))
-            downloaded = 0
+        try:
+            with self._client.stream("GET", url) as response:
+                response.raise_for_status()
+                total = int(response.headers.get("content-length", 0))
+                downloaded = 0
 
-            with open(dest, "wb") as f:
-                for chunk in response.iter_bytes(chunk_size=8192):
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    yield downloaded, total
+                with open(partial, "wb") as f:
+                    for chunk in response.iter_bytes(chunk_size=8192):
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        yield downloaded, total
+
+            # Rename to final destination only on complete success
+            partial.rename(dest)
+        except BaseException:
+            # Clean up partial download on any failure (including GeneratorExit)
+            if partial.exists():
+                partial.unlink()
+            raise

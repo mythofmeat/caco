@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 from caco.config import get_db_path
@@ -69,7 +70,7 @@ class ParsedQuery:
 
 
 # Status shortcuts for query parsing (moved from cli.py)
-STATUS_SHORTCUTS = {
+STATUS_SHORTCUTS: MappingProxyType[str, str] = MappingProxyType({
     "t": "to-play", "toplay": "to-play", "tp": "to-play",
     "b": "backlog", "back": "backlog",
     "p": "playing", "play": "playing",
@@ -77,7 +78,10 @@ STATUS_SHORTCUTS = {
     "a": "abandoned", "drop": "abandoned", "dropped": "abandoned",
     "w": "awaiting-update", "waiting": "awaiting-update", "wip": "awaiting-update",
     "au": "awaiting-update", "await": "awaiting-update",
-}
+})
+
+# OR separator for query syntax (space-comma-space)
+OR_SEPARATOR = " , "
 
 
 SCHEMA = """
@@ -293,6 +297,8 @@ def add_wad(
              source_id, source_url, filename, cached_path, status.value, version),
         )
         wad_id = cursor.lastrowid
+        if not wad_id or wad_id <= 0:
+            raise RuntimeError(f"Failed to get valid WAD ID after insert (got {wad_id})")
 
         if tags:
             for tag in tags:
@@ -350,7 +356,8 @@ def _is_glob_pattern(pattern: str) -> bool:
 
 
 def _split_or_groups(query: str) -> list[str]:
-    """Split query by ' , ' respecting quoted strings."""
+    """Split query by OR_SEPARATOR respecting quoted strings."""
+    sep_len = len(OR_SEPARATOR)
     parts = []
     current: list[str] = []
     i = 0
@@ -372,12 +379,12 @@ def _split_or_groups(query: str) -> list[str]:
             i += 1
             continue
 
-        # Check for " , " pattern (not inside quotes)
-        if not in_quotes and i + 2 < len(query):
-            if query[i:i+3] == " , ":
+        # Check for OR_SEPARATOR pattern (not inside quotes)
+        if not in_quotes and i + sep_len <= len(query):
+            if query[i:i+sep_len] == OR_SEPARATOR:
                 parts.append("".join(current).strip())
                 current = []
-                i += 3
+                i += sep_len
                 continue
 
         current.append(char)
@@ -590,6 +597,11 @@ def search_wads(
         include_deleted: If True, only show deleted WADs. If False (default),
                         exclude deleted WADs.
     """
+    # Validate sort field before use in SQL construction
+    allowed_sort_fields = {"id", "playtime", "rating", "created", "title", "author", "last_played", "year", "random"}
+    if sort_by and sort_by not in allowed_sort_fields:
+        raise ValueError(f"Invalid sort field: {sort_by}")
+
     conditions = []
     params: list[Any] = []
 
@@ -607,6 +619,7 @@ def search_wads(
                 conditions.append(f"({query_sql})")
                 params.extend(query_params)
 
+    # SAFETY: conditions built by _build_query_sql() which uses parameterized queries
     where = " AND ".join(conditions) if conditions else "1=1"
 
     # Determine sort order
@@ -616,7 +629,7 @@ def search_wads(
     nulls = "NULLS LAST" if sort_desc else "NULLS FIRST"
     reverse_nulls = "NULLS FIRST" if sort_desc else "NULLS LAST"
 
-    # Map sort field to SQL expression
+    # Map sort field to SQL expression (all values are hardcoded, not user-controlled)
     sort_map = {
         "id": f"wads.id {reverse_dir}",  # ID default ascending
         "playtime": f"COALESCE(SUM(sessions.duration_seconds), 0) {direction}",
@@ -775,7 +788,10 @@ def start_session(wad_id: int, sourceport: str | None = None) -> int:
             """,
             (wad_id, datetime.now().isoformat(), sourceport),
         )
-        return cursor.lastrowid
+        session_id = cursor.lastrowid
+        if not session_id or session_id <= 0:
+            raise RuntimeError(f"Failed to get valid session ID after insert (got {session_id})")
+        return session_id
 
 
 def end_session(session_id: int, notes: str | None = None) -> None:
@@ -821,22 +837,45 @@ def get_total_playtime(wad_id: int) -> int:
         return row["total"]
 
 
-def get_total_playtime_batch(wad_ids: list[int]) -> dict[int, int]:
-    """Get total playtime for multiple WADs efficiently. Returns {wad_id: seconds}."""
+def _batch_query(
+    wad_ids: list[int],
+    query_template: str,
+    result_column: str = "result",
+) -> dict[int, Any]:
+    """Generic batch query helper for aggregation queries.
+
+    Args:
+        wad_ids: List of WAD IDs to query
+        query_template: SQL with {placeholders} format string for IN clause
+        result_column: Column name to extract from results
+
+    Returns:
+        Dict mapping wad_id to result value
+    """
     if not wad_ids:
         return {}
+
     with get_connection() as conn:
         placeholders = ",".join("?" * len(wad_ids))
-        rows = conn.execute(
-            f"""
-            SELECT wad_id, COALESCE(SUM(duration_seconds), 0) as total
-            FROM sessions
-            WHERE wad_id IN ({placeholders})
-            GROUP BY wad_id
-            """,
-            wad_ids,
-        ).fetchall()
-        return {row["wad_id"]: row["total"] for row in rows}
+        query = query_template.format(placeholders=placeholders)
+        rows = conn.execute(query, wad_ids).fetchall()
+        return {row["wad_id"]: row[result_column] for row in rows}
+
+
+def get_total_playtime_batch(wad_ids: list[int]) -> dict[int, int]:
+    """Get total playtime for multiple WADs efficiently. Returns {wad_id: seconds}."""
+    result = _batch_query(
+        wad_ids,
+        """
+        SELECT wad_id, COALESCE(SUM(duration_seconds), 0) as total
+        FROM sessions
+        WHERE wad_id IN ({placeholders})
+        GROUP BY wad_id
+        """,
+        "total",
+    )
+    # Fill in zeros for WADs with no sessions
+    return {wid: result.get(wid, 0) for wid in wad_ids}
 
 
 def get_last_played(wad_id: int) -> str | None:
@@ -851,20 +890,16 @@ def get_last_played(wad_id: int) -> str | None:
 
 def get_last_played_batch(wad_ids: list[int]) -> dict[int, str]:
     """Get last played timestamp for multiple WADs efficiently. Returns {wad_id: timestamp}."""
-    if not wad_ids:
-        return {}
-    with get_connection() as conn:
-        placeholders = ",".join("?" * len(wad_ids))
-        rows = conn.execute(
-            f"""
-            SELECT wad_id, MAX(started_at) as last_played
-            FROM sessions
-            WHERE wad_id IN ({placeholders})
-            GROUP BY wad_id
-            """,
-            wad_ids,
-        ).fetchall()
-        return {row["wad_id"]: row["last_played"] for row in rows}
+    return _batch_query(
+        wad_ids,
+        """
+        SELECT wad_id, MAX(started_at) as last_played
+        FROM sessions
+        WHERE wad_id IN ({placeholders})
+        GROUP BY wad_id
+        """,
+        "last_played",
+    )
 
 
 def get_most_recently_played() -> dict[str, Any] | None:
@@ -997,7 +1032,10 @@ def add_wad_completion(
             """,
             (wad_id, stats_snapshot, notes),
         )
-        return cursor.lastrowid
+        completion_id = cursor.lastrowid
+        if not completion_id or completion_id <= 0:
+            raise RuntimeError(f"Failed to get valid completion ID after insert (got {completion_id})")
+        return completion_id
 
 
 def get_wad_completions(wad_id: int) -> list[dict[str, Any]]:
@@ -1073,39 +1111,31 @@ def get_times_beaten(wad_id: int) -> int:
 
 def get_times_beaten_batch(wad_ids: list[int]) -> dict[int, int]:
     """Get times beaten for multiple WADs efficiently."""
-    if not wad_ids:
-        return {}
-
-    with get_connection() as conn:
-        placeholders = ",".join("?" * len(wad_ids))
-        rows = conn.execute(
-            f"""
-            SELECT wad_id, COUNT(*) as count
-            FROM wad_completions
-            WHERE wad_id IN ({placeholders})
-            GROUP BY wad_id
-            """,
-            wad_ids,
-        ).fetchall()
-        return {row["wad_id"]: row["count"] for row in rows}
+    result = _batch_query(
+        wad_ids,
+        """
+        SELECT wad_id, COUNT(*) as times_beaten
+        FROM wad_completions
+        WHERE wad_id IN ({placeholders})
+        GROUP BY wad_id
+        """,
+        "times_beaten",
+    )
+    return {wid: result.get(wid, 0) for wid in wad_ids}
 
 
 def get_session_count_batch(wad_ids: list[int]) -> dict[int, int]:
     """Get session count for multiple WADs efficiently. Returns {wad_id: count}."""
-    if not wad_ids:
-        return {}
-    with get_connection() as conn:
-        placeholders = ",".join("?" * len(wad_ids))
-        rows = conn.execute(
-            f"""
-            SELECT wad_id, COUNT(*) as count
-            FROM sessions
-            WHERE wad_id IN ({placeholders})
-            GROUP BY wad_id
-            """,
-            wad_ids,
-        ).fetchall()
-        return {row["wad_id"]: row["count"] for row in rows}
+    return _batch_query(
+        wad_ids,
+        """
+        SELECT wad_id, COUNT(*) as count
+        FROM sessions
+        WHERE wad_id IN ({placeholders})
+        GROUP BY wad_id
+        """,
+        "count",
+    )
 
 
 def get_wad_stats(wad_id: int) -> dict[str, Any]:

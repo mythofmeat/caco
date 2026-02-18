@@ -505,6 +505,10 @@ def link(query: str, file_path: str, move: bool):
     wad = wads[0]
 
     source_path = Path(file_path).resolve()
+    if not source_path.is_file():
+        err_console.print(f"[red]Error: {file_path} is not a regular file[/red]")
+        sys.exit(1)
+
     cache_dir = get_cache_dir()
     cache_dir.mkdir(parents=True, exist_ok=True)
 

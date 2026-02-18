@@ -38,8 +38,18 @@ def load_config() -> dict[str, Any]:
             with open(CONFIG_FILE, "rb") as f:
                 user_config = tomllib.load(f)
                 config.update(user_config)
-        except Exception:
-            pass  # Use defaults on error
+        except tomllib.TOMLDecodeError as e:
+            import sys
+            print(f"Warning: Invalid TOML syntax in {CONFIG_FILE}: {e}", file=sys.stderr)
+            print("Warning: Using default configuration.", file=sys.stderr)
+        except PermissionError:
+            import sys
+            print(f"Warning: Permission denied reading {CONFIG_FILE}", file=sys.stderr)
+            print("Warning: Using default configuration.", file=sys.stderr)
+        except Exception as e:
+            import sys
+            print(f"Warning: Failed to load config: {e}", file=sys.stderr)
+            print("Warning: Using default configuration.", file=sys.stderr)
 
     return config
 
