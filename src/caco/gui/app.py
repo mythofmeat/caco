@@ -1,9 +1,10 @@
 """QApplication setup with dark Doom-inspired palette."""
 
 import sys
+from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
-from PySide6.QtGui import QPalette, QColor
+from PySide6.QtGui import QPalette, QColor, QIcon
 from PySide6.QtCore import Qt
 
 from caco.gui.theme import DOOM_PALETTE, APP_STYLESHEET
@@ -18,6 +19,12 @@ def create_app(config: dict | None = None) -> tuple[QApplication, MainWindow]:
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("Caco")
     app.setApplicationDisplayName("Caco - Doom WAD Library")
+    app.setDesktopFileName("caco")
+
+    # Set window icon (used on X11 and as fallback on Wayland)
+    icon_path = Path(__file__).resolve().parent.parent.parent / "desktop" / "icon.png"
+    if icon_path.exists():
+        app.setWindowIcon(QIcon(str(icon_path)))
 
     # Apply dark palette
     palette = QPalette()
