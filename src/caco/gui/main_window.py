@@ -383,10 +383,15 @@ class MainWindow(QMainWindow):
     def _on_play(self, wad_id: int):
         """Launch sourceport in a background thread."""
         if self._play_worker and self._play_worker.isRunning():
-            QMessageBox.information(
+            reply = QMessageBox.question(
                 self, "Already Playing",
-                "A sourceport is already running. Wait for it to finish."
+                "A sourceport is already running.\n\n"
+                "Do you want to force-stop it?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
             )
+            if reply == QMessageBox.StandardButton.Yes:
+                self._play_worker.stop_sourceport()
             return
 
         wad = db.get_wad(wad_id)

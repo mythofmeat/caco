@@ -175,6 +175,7 @@ def play(
     extra_args: list[str] | None = None,
     console: Console | None = None,
     progress_callback: object = None,
+    process_ref: list | None = None,
 ) -> int | None:
     """
     Play a WAD with the specified sourceport.
@@ -245,12 +246,30 @@ def play(
     if extra_args:
         cmd.extend(extra_args)
 
-    # Start session
+    # Launch sourceport process — use Popen so launch failures are caught
+    # before we create a session record in the database.
+    try:
+        proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL)
+    except FileNotFoundError:
+        raise FileNotFoundError(
+            f"Sourceport '{port}' not found. "
+            "Check that it's installed and available on your PATH."
+        ) from None
+    except PermissionError:
+        raise PermissionError(
+            f"Permission denied running sourceport '{port}'. "
+            "Check file permissions."
+        ) from None
+
+    # Expose process handle for external cancellation (GUI stop button)
+    if process_ref is not None:
+        process_ref.append(proc)
+
+    # Only start tracking the session after a successful launch
     session_id = db.start_session(wad_id, sourceport=port)
 
     try:
-        # Run sourceport (blocking)
-        subprocess.run(cmd)
+        proc.wait()
     finally:
         # End session and calculate duration
         db.end_session(session_id)
