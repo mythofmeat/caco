@@ -129,6 +129,7 @@ src/caco/
 │   ├── dialogs/
 │   │   ├── edit_dialog.py    # WAD metadata editing form
 │   │   ├── delete_dialog.py  # Confirmation dialog with WAD stats
+│   │   ├── link_dialog.py    # WadUnavailableDialog: open source page, link local file
 │   │   ├── sessions_dialog.py # Session history table
 │   │   ├── stats_dialog.py   # Library statistics overview
 │   │   └── cache_dialog.py   # Cache management
@@ -142,6 +143,9 @@ src/caco/
 │       ├── scraper.py    # Doom Wiki image scraping via MediaWiki API
 │       ├── cache.py      # Thumbnail filesystem cache (~/.cache/caco/thumbnails/)
 │       └── loader.py     # Async QThreadPool-based thumbnail loader
+├── services/
+│   ├── __init__.py
+│   └── import_service.py  # Centralized duplicate-check-and-import for all 5 source types
 ├── sources/
 │   ├── base.py     # BaseSource mixin (shared context-manager lifecycle)
 │   ├── idgames.py  # idgames archive adapter (extends BaseSource)
@@ -164,6 +168,7 @@ src/caco/
 - Source adapters inherit `BaseSource` from `sources/base.py` for shared context-manager lifecycle; clients inherit `BaseHttpClient` from `utils.py`; errors inherit `CacoSourceError`
 - CLI uses Click's decorator registration pattern: each `cli/*.py` submodule imports `cli` from `caco.cli` and registers commands; `__init__.py` imports all submodules at bottom to trigger registration
 - `player.py` wraps sourceport execution to track session start/end times; decoupled from Rich — uses `ProgressCallback` for download progress; CLI creates Rich progress wrapper in `play_cmd.py`
+- `ImportService` in `services/import_service.py` centralizes duplicate-check-and-import for all 5 source types; used by CLI, TUI, and GUI
 - `WadInfoPanel` and `DetailPanel` accept optional pre-fetched `wad` dict to avoid DB re-fetch on selection
 - Status enum: `to-play`, `backlog`, `playing`, `finished`, `abandoned`, `awaiting-update`
 - Import command uses flag-based source selection: `caco import <source> [--idgames|--doomwiki|--doomworld|--local|--url URL]`
@@ -194,16 +199,25 @@ src/caco/
 | `w`, `au`, `await`, `waiting`, `wip` | awaiting-update |
 
 **Beaten command group:**
-- `caco beaten list` — show all WADs with completion counts
-- `caco beaten add <query>` — increment completion count
-- `caco beaten remove <query>` — decrement completion count
-- `caco beaten set <query> <count>` — set exact count
+- `caco beaten list <query>` — show completion history (dates + notes) for a specific WAD
+- `caco beaten add <query> [--notes "text"]` — add a completion record
+- `caco beaten remove <query> [COMPLETION_ID]` — remove most recent or specific completion
+- `caco beaten set <query> <count>` — set exact completion count
 - Uses `wad_completions` table (auto-created via migration)
 
 **Output formats:**
-- `--plain` on `list`, `info`, `tag list`, `cache list` — TSV/key=value for scripting
+- `--plain` on `list`, `info`, `tag list`, `cache list`, `stats` — TSV/key=value for scripting
 - `--json` on `list`, `info` — JSON output with computed stats
 - `--info` on `random` — print ID, title, author (TSV)
+
+**Stats command options:**
+- `--period month|year` — group activity by month (default) or year
+- `--limit N` — number of periods to show (default: 12)
+- `--plain` — key=value output for scripting
+
+**Import command LLM options (Doomworld `--smart`):**
+- `--llm-backend` — LLM backend: `claude-code`, `openrouter`, `anthropic`, `openai`
+- `--llm-model` — model override for API backends
 
 **Cache config options:**
 - `cache_max_size_gb` — max cache size in GB (0 = unlimited)
@@ -244,7 +258,7 @@ src/caco/
 - `textual` - TUI framework (for `caco --tui`)
 - `PySide6` - Qt6 GUI framework (optional, `[gui]` extra)
 - `Pillow` - Image processing for thumbnail extraction (optional, `[gui]` extra)
-- `pytest` / `pytest-cov` - Test framework (optional, `[test]` extra)
+- `pytest` / `pytest-cov` / `mypy` - Test framework and type checking (optional, `[test]` extra)
 
 ## Completions
 - Always ensure that completions and `--help` flags are synced with any and all changes to functionality

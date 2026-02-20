@@ -14,7 +14,7 @@ A personal Doom WAD library manager taking inspiration from beets. Track what yo
   - WADs from idgames are downloaded and cached when you play
 
 - **Library tracking**
-  - Status (to-play, backlog, playing, finished, awaiting-update)
+  - Status (to-play, backlog, playing, finished, abandoned, awaiting-update)
   - Version tracking for WIP/beta releases
   - Ratings
   - Custom Tags
@@ -79,6 +79,7 @@ caco --gui
 - **Detail panel**: Thumbnail, metadata, stats, tags, and action buttons
 - **WAD thumbnails**: Extracted from TITLEPIC in WAD files, scraped from Doom Wiki, or generated as colored placeholders
 - **Import from all sources**: idgames, Doom Wiki, Doomworld, URLs, local files
+- **WAD unavailable dialog**: When a WAD has no cached file, offers to open the source page, link a local file, or cancel
 - **Window state persistence**: Window position, size, and splitter state saved between sessions
 
 ### Keyboard Shortcuts
@@ -104,6 +105,9 @@ default_sort_desc = false
 default_view = "list"      # "list" or "grid"
 window_width = 1200
 window_height = 800
+detail_panel_width = 350
+show_detail_panel = true
+thumbnail_size = 128
 ```
 
 ## TUI (Terminal User Interface)
@@ -234,6 +238,8 @@ caco import "sunlust" --idgames             # Force idgames search
 caco import "Scythe" --doomwiki             # Force Doom Wiki search
 caco import https://www.doomworld.com/forum/topic/134292-myhousewad/ --doomworld
 caco import URL --doomworld --smart         # Use LLM for metadata extraction
+caco import URL --doomworld --smart --llm-backend openrouter  # Specific LLM backend
+caco import URL --doomworld --smart --llm-model gpt-4o        # Override LLM model
 caco import --url https://example.com/wad.zip -t "My WAD" -a "Author"
 caco import *.wad --local --tag new         # Batch local import
 
@@ -304,6 +310,8 @@ caco update 1 --author "John Romero" --year 1994
 caco update 1 --description "A classic megawad"
 caco update 1 --version "v1.0"                  # Track version for non-idgames releases
 caco update 1 --clear-author --clear-year       # Clear optional fields
+caco update 1 --clear-description               # Clear description
+caco update 1 --clear-version                   # Clear version string
 
 # Delete WADs (soft delete - can be restored)
 caco rm 1                                       # Move to trash (alias for delete)
@@ -379,14 +387,29 @@ caco update "Eviternity" --clear-idgames-id
 Track how many times you've beaten each WAD:
 
 ```bash
-# View completion counts
-caco beaten list                    # Show all WADs with completion counts
-caco beaten list --min 2            # WADs beaten 2+ times
+# View completion history for a specific WAD
+caco beaten list scythe              # Show dates and notes for each completion
+caco beaten list id:1                # By ID
 
-# Manual adjustment
-caco beaten add 1                   # Increment completion count
-caco beaten remove 1                # Decrement completion count
-caco beaten set 1 3                 # Set exact count
+# Add a completion record
+caco beaten add 1                    # Mark as beaten
+caco beaten add 1 --notes "UV-max"   # With notes
+
+# Remove a completion record
+caco beaten remove 1                 # Remove most recent completion (with confirmation)
+caco beaten remove 1 42              # Remove specific completion by record ID
+
+# Set exact completion count
+caco beaten set 1 3                  # Set to 3 completions
+```
+
+### Library Statistics
+
+```bash
+caco stats                         # Overview: playtime, completion rate, status breakdown
+caco stats --period year           # Group activity by year (default: month)
+caco stats --limit 6               # Show last 6 periods (default: 12)
+caco stats --plain                 # Key=value output for scripting
 ```
 
 ### Random WAD
@@ -454,6 +477,9 @@ Config file: `~/.config/caco/config.toml` (see `config.example.toml` for a templ
 | `cache_max_size_gb` | Max cache size in GB (0 = unlimited) |
 | `cache_max_age_days` | Remove files not played in N days (0 = never) |
 | `cache_auto_clean` | Auto-cleanup cache on play (true/false) |
+| `[list] format` | Columns to display (see config example) |
+| `[list] sort` | Default sort order |
+| `[list] default_status` | Default status filter (empty = all statuses) |
 
 ### Example Config
 
@@ -469,13 +495,16 @@ download_mirror = 0
 # Customize list display
 [list]
 # Available columns: id, title, author, status, beaten, playtime,
-#                    last_played, rating, year, tags
+#                    last_played, rating, year, tags, source, filename
 format = ["id", "title", "author", "status", "playtime", "tags"]
 
 # Sort options: id, title, author, status, playtime, rating, year,
 #               last_played, created, beaten
 # Append + for ascending (default), - for descending
 sort = "id+"
+
+# Default status filter (empty shows all statuses)
+# default_status = ["to-play", "playing"]
 
 [list.colors]
 # Available colors: black, red, green, yellow, blue, magenta, cyan, white, dim
@@ -510,12 +539,12 @@ Use single letters or abbreviations for status values:
 
 | Shortcut | Status |
 |----------|--------|
-| `t`, `tp` | to-play |
+| `t`, `tp`, `toplay` | to-play |
 | `b`, `back` | backlog |
 | `p`, `play` | playing |
 | `f`, `fin`, `done` | finished |
-| `a`, `drop` | abandoned |
-| `w`, `wip`, `au` | awaiting-update |
+| `a`, `drop`, `dropped` | abandoned |
+| `w`, `au`, `await`, `waiting`, `wip` | awaiting-update |
 
 ```bash
 caco update 1 -s p     # Set status to "playing"
@@ -580,6 +609,9 @@ caco list --json
 caco list status:playing --json
 caco info 1 --json
 
+# Stats output for scripting
+caco stats --plain                  # Key=value output
+
 # Tag list shows WAD counts
 caco tag list                       # Rich table with Tag + Count columns
 caco tag list --plain               # TSV output for scripting
@@ -608,7 +640,16 @@ pytest tests/ -v
 
 # Run tests with coverage
 pytest tests/ -v --cov=caco --cov-report=term-missing
+
+# Type checking (mypy)
+mypy src/caco
 ```
+
+### CI
+
+GitHub Actions runs on every push/PR:
+- **Tests**: Python 3.10, 3.11, 3.12 matrix
+- **Type checking**: mypy on Python 3.12 with `[test,gui]` extras
 
 ## License
 

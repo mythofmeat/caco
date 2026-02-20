@@ -31,7 +31,8 @@
 # List display configuration
 # [list]
 
-# Columns to display (available: id, title, author, status, tags, beaten, playtime, last_played)
+# Columns to display (available: id, title, author, status, tags, beaten,
+#   playtime, last_played, rating, year, source, filename)
 # format = ["id", "title", "author", "status", "beaten", "playtime", "last_played"]
 
 # Default sort order (e.g., "title", "author", "playtime", "-last_played" for descending)
