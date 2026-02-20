@@ -12,10 +12,9 @@ from PySide6.QtWidgets import (
     QMessageBox,
 )
 
-from caco import db
 from caco.gui.theme import DOOM_PALETTE
 from caco.gui.workers.search_worker import DoomworldFetchWorker
-from caco.gui.workers.import_worker import DoomworldImportWorker
+from caco.services import ImportService
 
 
 class DoomworldPane(QWidget):
@@ -168,43 +167,28 @@ class DoomworldPane(QWidget):
                 pass
 
         tags = [t.strip().lower() for t in self._tags_input.text().split(",") if t.strip()]
+        svc = ImportService()
 
-        # Duplicate check
-        existing = db.find_duplicate(
-            db.SourceType.DOOMWORLD,
-            source_id=self._thread.thread_id,
+        result = svc.import_doomworld(
+            self._thread, tags=tags or None, title=title, author=author, year=year,
         )
-        if existing:
+        if result.is_duplicate:
             reply = QMessageBox.question(
                 self,
                 "Duplicate Found",
-                f"'{existing['title']}' (ID: {existing['id']}) already in library.\n\nImport anyway?",
+                f"'{result.duplicate_title}' (ID: {result.duplicate_id}) already in library.\n\nImport anyway?",
                 QMessageBox.Yes | QMessageBox.No,
             )
             if reply != QMessageBox.Yes:
                 return
+            result = svc.import_doomworld(
+                self._thread, tags=tags or None, title=title, author=author, year=year, force=True,
+            )
 
-        self._import_btn.setEnabled(False)
-        self._status.setText("Importing...")
-
-        worker = DoomworldImportWorker(
-            self._thread,
-            tags=tags or None,
-            title=title,
-            author=author,
-            year=year,
-        )
-        worker.signals.finished.connect(self._on_import_done)
-        worker.signals.error.connect(self._on_import_error)
-        self._pool.start(worker)
-
-    def _on_import_done(self, wad_id):
-        self._import_btn.setEnabled(True)
-        self._status.setText(f"Imported! (ID: {wad_id})")
-        self._form_widget.setVisible(False)
-        self._thread = None
-        self.wad_imported.emit(wad_id)
-
-    def _on_import_error(self, error_msg):
-        self._import_btn.setEnabled(True)
-        self._status.setText(f"Import error: {error_msg}")
+        if result.error:
+            self._status.setText(f"Import error: {result.error}")
+        elif result.ok:
+            self._status.setText(f"Imported! (ID: {result.wad_id})")
+            self._form_widget.setVisible(False)
+            self._thread = None
+            self.wad_imported.emit(result.wad_id)

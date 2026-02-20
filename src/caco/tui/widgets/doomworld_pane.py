@@ -352,40 +352,29 @@ class DoomworldUrlPane(Widget):
         tags: list[str] | None,
     ) -> None:
         """Perform the import in a worker."""
-        from caco import db
+        from caco.services import ImportService
 
         thread = self._thread
         if not thread:
             return
 
-        # Check for duplicates
-        existing = db.find_duplicate(
-            source_type=db.SourceType.DOOMWORLD,
-            source_id=str(thread.thread_id),
+        result = ImportService().import_doomworld(
+            thread, tags=tags, title=title, author=author, year=year,
         )
 
-        if existing:
+        status = self.query_one("#status", Static)
+        if result.is_duplicate:
             self.notify(
-                f"Already in library: {existing['title']} (ID: {existing['id']})",
+                f"Already in library: {result.duplicate_title} (ID: {result.duplicate_id})",
                 severity="warning",
             )
-            status = self.query_one("#status", Static)
             status.update("WAD already exists in library")
-            return
-
-        try:
-            with DoomworldSource() as source:
-                wad_id = source.import_wad(
-                    thread,
-                    tags=tags,
-                    title=title,
-                    author=author,
-                    year=year,
-                )
-
-            self.notify(f"Imported: {title} (ID: {wad_id})")
-            status = self.query_one("#status", Static)
-            status.update(f"Successfully imported as ID {wad_id}")
+        elif result.error:
+            self.notify(f"Import failed: {result.error}", severity="error")
+            status.update(f"Import failed: {result.error}")
+        else:
+            self.notify(f"Imported: {title} (ID: {result.wad_id})")
+            status.update(f"Successfully imported as ID {result.wad_id}")
 
             # Clear form for next import
             self._thread = None
@@ -395,10 +384,4 @@ class DoomworldUrlPane(Widget):
             self.query_one("#preview-meta", Static).update("")
             self.query_one("#preview-excerpt", Static).update("")
 
-            # Notify parent to refresh library panes
-            self.post_message(self.WadImported(wad_id))
-
-        except Exception as e:
-            self.notify(f"Import failed: {e}", severity="error")
-            status = self.query_one("#status", Static)
-            status.update(f"Import failed: {e}")
+            self.post_message(self.WadImported(result.wad_id))

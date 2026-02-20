@@ -80,6 +80,17 @@ STATUS_SHORTCUTS: MappingProxyType[str, str] = MappingProxyType({
     "au": "awaiting-update", "await": "awaiting-update",
 })
 
+# Canonical status metadata — single source of truth for display names and colors.
+# Keys: (display_name, hex_color, rich_color, css_class)
+STATUS_METADATA: MappingProxyType[str, tuple[str, str, str, str]] = MappingProxyType({
+    "to-play":         ("To Play",         "#3366cc", "dodger_blue1", "status-to-play"),
+    "backlog":         ("Backlog",          "#cccc33", "yellow",       "status-backlog"),
+    "playing":         ("Playing",          "#33cc33", "green1",       "status-playing"),
+    "finished":        ("Finished",         "#808080", "grey50",       "status-finished"),
+    "abandoned":       ("Abandoned",        "#cc3333", "red",          "status-abandoned"),
+    "awaiting-update": ("Awaiting Update",  "#cc33cc", "magenta",      "status-awaiting-update"),
+})
+
 # OR separator for query syntax (space-comma-space)
 OR_SEPARATOR = " , "
 
@@ -158,6 +169,12 @@ CREATE INDEX IF NOT EXISTS idx_tags_wad_id ON tags(wad_id);
 CREATE INDEX IF NOT EXISTS idx_tags_tag ON tags(tag);
 CREATE INDEX IF NOT EXISTS idx_sessions_wad_id ON sessions(wad_id);
 CREATE INDEX IF NOT EXISTS idx_wad_completions_wad_id ON wad_completions(wad_id);
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    applied_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 # Indexes that depend on migration-added columns — run after init_db() migrations
@@ -212,17 +229,29 @@ def _fetch_tags_batch(conn: sqlite3.Connection, wad_ids: list[int]) -> dict[int,
 
 
 def init_db() -> None:
-    """Initialize the database schema."""
+    """Initialize the database schema and run pending migrations."""
     with get_connection() as conn:
         conn.executescript(SCHEMA)
-        # Migrations for existing databases
-        _migrate_add_custom_play_config(conn)
-        _migrate_add_wad_completions(conn)
-        _migrate_rename_wishlist_to_toplay(conn)
-        _migrate_add_deleted_at(conn)
-        _migrate_add_version(conn)
-        _migrate_add_idgames_id(conn)
-        _migrate_drop_map_completions(conn)
+
+        # Determine which migrations have already been applied
+        current_version = 0
+        try:
+            row = conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()
+            if row and row[0] is not None:
+                current_version = row[0]
+        except sqlite3.OperationalError:
+            # Table doesn't exist yet (shouldn't happen since SCHEMA creates it)
+            pass
+
+        # Run only pending migrations (they're idempotent, safe for first run)
+        for version, name, fn in _MIGRATIONS:
+            if version > current_version:
+                fn(conn)
+                conn.execute(
+                    "INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (?, ?)",
+                    (version, name),
+                )
+
         # Indexes on migration-added columns (must run after migrations)
         conn.executescript(_POST_MIGRATION_INDEXES)
 
@@ -289,6 +318,18 @@ def _migrate_add_idgames_id(conn: sqlite3.Connection) -> None:
 def _migrate_drop_map_completions(conn: sqlite3.Connection) -> None:
     """Drop the map_completions table (feature removed)."""
     conn.execute("DROP TABLE IF EXISTS map_completions")
+
+
+# Ordered migration registry — append new migrations here with incrementing version
+_MIGRATIONS: list[tuple[int, str, Any]] = [
+    (1, "add_custom_play_config", _migrate_add_custom_play_config),
+    (2, "add_wad_completions", _migrate_add_wad_completions),
+    (3, "rename_wishlist_to_toplay", _migrate_rename_wishlist_to_toplay),
+    (4, "add_deleted_at", _migrate_add_deleted_at),
+    (5, "add_version", _migrate_add_version),
+    (6, "add_idgames_id", _migrate_add_idgames_id),
+    (7, "drop_map_completions", _migrate_drop_map_completions),
+]
 
 
 def add_wad(
@@ -489,8 +530,11 @@ def parse_query(query: str) -> ParsedQuery:
     return ParsedQuery(or_groups=or_groups)
 
 
-def _normalize_status(value: str) -> str:
-    """Normalize status value, expanding shortcuts."""
+def normalize_status(value: str) -> str:
+    """Normalize status value, expanding shortcuts.
+
+    Public API — also used by CLI's StatusChoice.
+    """
     lower = value.lower()
     return STATUS_SHORTCUTS.get(lower, lower)
 
@@ -534,7 +578,7 @@ def _build_term_sql(term: QueryTerm) -> tuple[str, list[Any]]:
 
     elif term.field == "status":
         clause = "wads.status = ?"
-        params = [_normalize_status(term.value)]
+        params = [normalize_status(term.value)]
 
     elif term.field == "source":
         clause = "wads.source_type = ?"
@@ -867,6 +911,10 @@ def get_total_playtime(wad_id: int) -> int:
         return row["total"]
 
 
+# Conservative limit for SQLite's SQLITE_MAX_VARIABLE_NUMBER (default 999)
+_SQLITE_MAX_VARS = 900
+
+
 def _batch_query(
     wad_ids: list[int],
     query_template: str,
@@ -885,11 +933,16 @@ def _batch_query(
     if not wad_ids:
         return {}
 
+    result = {}
     with get_connection() as conn:
-        placeholders = ",".join("?" * len(wad_ids))
-        query = query_template.format(placeholders=placeholders)
-        rows = conn.execute(query, wad_ids).fetchall()
-        return {row["wad_id"]: row[result_column] for row in rows}
+        for i in range(0, len(wad_ids), _SQLITE_MAX_VARS):
+            chunk = wad_ids[i:i + _SQLITE_MAX_VARS]
+            placeholders = ",".join("?" * len(chunk))
+            query = query_template.format(placeholders=placeholders)
+            rows = conn.execute(query, chunk).fetchall()
+            for row in rows:
+                result[row["wad_id"]] = row[result_column]
+    return result
 
 
 def get_total_playtime_batch(wad_ids: list[int]) -> dict[int, int]:
@@ -1167,6 +1220,69 @@ def get_session_count_batch(wad_ids: list[int]) -> dict[int, int]:
     )
 
 
+def get_wad_stats_batch(wad_ids: list[int]) -> dict[int, dict[str, Any]]:
+    """Get all stats for multiple WADs in 2 queries on 1 connection.
+
+    Returns {wad_id: {playtime, last_played, session_count, times_beaten}}.
+    Replaces 4 separate batch functions for list view loading.
+    """
+    if not wad_ids:
+        return {}
+
+    session_stats: dict[int, dict[str, Any]] = {}
+    beaten_map: dict[int, int] = {}
+
+    with get_connection() as conn:
+        for i in range(0, len(wad_ids), _SQLITE_MAX_VARS):
+            chunk = wad_ids[i:i + _SQLITE_MAX_VARS]
+            placeholders = ",".join("?" * len(chunk))
+
+            # Query 1: session aggregates (playtime + last_played + count)
+            rows = conn.execute(
+                f"""
+                SELECT wad_id,
+                    COALESCE(SUM(duration_seconds), 0) as playtime,
+                    MAX(started_at) as last_played,
+                    COUNT(*) as session_count
+                FROM sessions
+                WHERE wad_id IN ({placeholders})
+                GROUP BY wad_id
+                """,
+                chunk,
+            ).fetchall()
+            for r in rows:
+                session_stats[r["wad_id"]] = {
+                    "playtime": r["playtime"],
+                    "last_played": r["last_played"],
+                    "session_count": r["session_count"],
+                }
+
+            # Query 2: completions (times_beaten)
+            rows = conn.execute(
+                f"""
+                SELECT wad_id, COUNT(*) as times_beaten
+                FROM wad_completions
+                WHERE wad_id IN ({placeholders})
+                GROUP BY wad_id
+                """,
+                chunk,
+            ).fetchall()
+            for r in rows:
+                beaten_map[r["wad_id"]] = r["times_beaten"]
+
+    # Build result with defaults for WADs with no data
+    result = {}
+    for wid in wad_ids:
+        ss = session_stats.get(wid, {})
+        result[wid] = {
+            "playtime": ss.get("playtime", 0),
+            "last_played": ss.get("last_played"),
+            "session_count": ss.get("session_count", 0),
+            "times_beaten": beaten_map.get(wid, 0),
+        }
+    return result
+
+
 def get_wad_stats(wad_id: int) -> dict[str, Any]:
     """Get deletion-relevant stats for a WAD.
 
@@ -1257,6 +1373,51 @@ def get_wad_by_cached_filename(filename: str) -> dict[str, Any] | None:
 # =============================================================================
 # Library Statistics
 # =============================================================================
+
+
+@dataclass
+class StatsSnapshot:
+    """Library-wide statistics bundled into a single object.
+
+    Replaces 3 separate DB calls (get_library_stats, get_completion_rate,
+    get_wads_played_by_period) with one `get_stats_snapshot()` call.
+    """
+    # Overview
+    total_wads: int = 0
+    total_sessions: int = 0
+    total_playtime: int = 0
+    wads_with_sessions: int = 0
+    wads_by_status: dict[str, int] = field(default_factory=dict)
+    # Completion
+    played_wads: int = 0
+    finished_wads: int = 0
+    completion_rate: float = 0.0
+    total_completions: int = 0
+    # Activity
+    activity: list[dict[str, Any]] = field(default_factory=list)
+
+
+def get_stats_snapshot(period: str = "month") -> StatsSnapshot:
+    """Get a complete library statistics snapshot in a single call.
+
+    Combines get_library_stats(), get_completion_rate(), and
+    get_wads_played_by_period() into one snapshot object.
+    """
+    stats = get_library_stats()
+    completion = get_completion_rate()
+    activity = get_wads_played_by_period(period)
+    return StatsSnapshot(
+        total_wads=stats["total_wads"],
+        total_sessions=stats["total_sessions"],
+        total_playtime=stats["total_playtime"],
+        wads_with_sessions=stats["wads_with_sessions"],
+        wads_by_status=stats["wads_by_status"],
+        played_wads=completion["played_wads"],
+        finished_wads=completion["finished_wads"],
+        completion_rate=completion["completion_rate"],
+        total_completions=completion["total_completions"],
+        activity=activity,
+    )
 
 
 def get_library_stats() -> dict[str, Any]:

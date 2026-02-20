@@ -173,48 +173,28 @@ class UrlImportPane(Widget):
         tags: list[str] | None,
     ) -> None:
         """Perform the import in a worker."""
-        from caco import db
+        from caco.services import ImportService
 
-        # Check for duplicates (by URL for manual imports)
-        existing = db.find_duplicate(
-            source_type=db.SourceType.URL,
-            source_url=url,
+        result = ImportService().import_url(
+            title, url, author=author, year=year,
+            description=description, tags=tags,
         )
 
-        if existing:
+        status = self.query_one("#status", Static)
+        if result.is_duplicate:
             self.notify(
-                f"Already in library: {existing['title']} (ID: {existing['id']})",
+                f"Already in library: {result.duplicate_title} (ID: {result.duplicate_id})",
                 severity="warning",
             )
-            status = self.query_one("#status", Static)
             status.update("URL already exists in library")
-            return
-
-        try:
-            wad_id = db.add_wad(
-                title=title,
-                source_type=db.SourceType.URL,
-                source_url=url,
-                author=author,
-                year=year,
-                description=description,
-                tags=tags,
-            )
-
-            self.notify(f"Imported: {title} (ID: {wad_id})")
-            status = self.query_one("#status", Static)
-            status.update(f"Successfully imported as ID {wad_id}")
-
-            # Clear form for next import
+        elif result.error:
+            self.notify(f"Import failed: {result.error}", severity="error")
+            status.update(f"Import failed: {result.error}")
+        else:
+            self.notify(f"Imported: {title} (ID: {result.wad_id})")
+            status.update(f"Successfully imported as ID {result.wad_id}")
             self._clear_form()
-
-            # Notify parent to refresh library panes
-            self.post_message(self.WadImported(wad_id))
-
-        except Exception as e:
-            self.notify(f"Import failed: {e}", severity="error")
-            status = self.query_one("#status", Static)
-            status.update(f"Import failed: {e}")
+            self.post_message(self.WadImported(result.wad_id))
 
     def _clear_form(self) -> None:
         """Clear all form fields."""

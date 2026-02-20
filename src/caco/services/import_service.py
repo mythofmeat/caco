@@ -1,0 +1,249 @@
+"""Centralized import service — single source of truth for duplicate checking and WAD import.
+
+Replaces ~15 duplicate-check-and-import blocks across CLI, TUI, and GUI with one call site.
+Each UI layer calls ImportService methods and interprets the ImportResult.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+from caco import db
+from caco.db import SourceType
+
+
+@dataclass
+class ImportResult:
+    """Result of an import attempt.
+
+    Callers check `is_duplicate` first. If True and `force` was not set,
+    the import was skipped — `duplicate_id` and `duplicate_title` describe the existing entry.
+    Otherwise `wad_id` contains the newly created WAD ID.
+    """
+    wad_id: int | None = None
+    is_duplicate: bool = False
+    duplicate_id: int | None = None
+    duplicate_title: str | None = None
+    error: str | None = None
+
+    @property
+    def ok(self) -> bool:
+        return self.wad_id is not None and self.error is None
+
+
+def normalize_tags(tags: str | list | tuple | None) -> list[str] | None:
+    """Normalize tags from any input format to a clean list.
+
+    Accepts comma-separated string, list, tuple, or None.
+    Strips whitespace, lowercases, and removes empty entries.
+    """
+    if tags is None:
+        return None
+    if isinstance(tags, str):
+        parts = [t.strip().lower() for t in tags.split(",") if t.strip()]
+        return parts if parts else None
+    items = [str(t).strip().lower() for t in tags if str(t).strip()]
+    return items if items else None
+
+
+class ImportService:
+    """Handles duplicate checking and WAD import for all source types.
+
+    Usage:
+        svc = ImportService()
+        result = svc.import_idgames(entry, tags=["cacoward"])
+        if result.is_duplicate:
+            # Show duplicate warning using result.duplicate_title/duplicate_id
+        elif result.ok:
+            # Success — result.wad_id is the new WAD ID
+        else:
+            # Error — result.error has the message
+    """
+
+    def import_idgames(
+        self,
+        entry,  # idgames.FileEntry
+        *,
+        tags: list[str] | None = None,
+        force: bool = False,
+    ) -> ImportResult:
+        """Import from idgames archive.
+
+        Duplicate detection: source_id + filename + author.
+        """
+        existing = db.find_duplicate(
+            source_type=SourceType.IDGAMES,
+            source_id=str(entry.id),
+            filename=entry.filename,
+            author=entry.author,
+        )
+        if existing and not force:
+            return ImportResult(
+                is_duplicate=True,
+                duplicate_id=existing["id"],
+                duplicate_title=existing["title"],
+            )
+
+        try:
+            from caco.sources.idgames import IdgamesSource
+            with IdgamesSource() as source:
+                wad_id = source.import_wad(entry, tags=tags)
+            return ImportResult(wad_id=wad_id)
+        except Exception as e:
+            return ImportResult(error=str(e))
+
+    def import_doomwiki(
+        self,
+        entry,  # doomwiki.WikiEntry
+        *,
+        tags: list[str] | None = None,
+        force: bool = False,
+    ) -> ImportResult:
+        """Import from Doom Wiki.
+
+        Duplicate detection: source_id (page_id).
+        """
+        existing = db.find_duplicate(
+            source_type=SourceType.DOOMWIKI,
+            source_id=str(entry.page_id),
+        )
+        if existing and not force:
+            return ImportResult(
+                is_duplicate=True,
+                duplicate_id=existing["id"],
+                duplicate_title=existing["title"],
+            )
+
+        try:
+            from caco.sources.doomwiki import DoomwikiSource
+            with DoomwikiSource() as source:
+                wad_id = source.import_wad(entry, tags=tags)
+            return ImportResult(wad_id=wad_id)
+        except Exception as e:
+            return ImportResult(error=str(e))
+
+    def import_doomworld(
+        self,
+        thread,  # doomworld.ForumThread
+        *,
+        tags: list[str] | None = None,
+        title: str | None = None,
+        author: str | None = None,
+        year: int | None = None,
+        version: str | None = None,
+        force: bool = False,
+    ) -> ImportResult:
+        """Import from Doomworld forum thread.
+
+        Duplicate detection: source_id (thread_id).
+        """
+        existing = db.find_duplicate(
+            source_type=SourceType.DOOMWORLD,
+            source_id=str(thread.thread_id),
+        )
+        if existing and not force:
+            return ImportResult(
+                is_duplicate=True,
+                duplicate_id=existing["id"],
+                duplicate_title=existing["title"],
+            )
+
+        try:
+            from caco.sources.doomworld import DoomworldSource
+            with DoomworldSource() as source:
+                wad_id = source.import_wad(
+                    thread, tags=tags, title=title, author=author,
+                    year=year, version=version,
+                )
+            return ImportResult(wad_id=wad_id)
+        except Exception as e:
+            return ImportResult(error=str(e))
+
+    def import_url(
+        self,
+        title: str,
+        url: str,
+        *,
+        author: str | None = None,
+        year: int | None = None,
+        description: str | None = None,
+        tags: list[str] | None = None,
+        force: bool = False,
+    ) -> ImportResult:
+        """Import from a direct URL.
+
+        Duplicate detection: source_url.
+        """
+        existing = db.find_duplicate(
+            source_type=SourceType.URL,
+            source_url=url,
+        )
+        if existing and not force:
+            return ImportResult(
+                is_duplicate=True,
+                duplicate_id=existing["id"],
+                duplicate_title=existing["title"],
+            )
+
+        try:
+            wad_id = db.add_wad(
+                title=title,
+                source_type=SourceType.URL,
+                source_url=url,
+                author=author,
+                year=year,
+                description=description,
+                tags=tags,
+            )
+            return ImportResult(wad_id=wad_id)
+        except Exception as e:
+            return ImportResult(error=str(e))
+
+    def import_local(
+        self,
+        title: str,
+        path: str | Path,
+        *,
+        author: str | None = None,
+        year: int | None = None,
+        description: str | None = None,
+        tags: list[str] | None = None,
+        force: bool = False,
+    ) -> ImportResult:
+        """Import a local file.
+
+        Duplicate detection: source_url (the resolved file path).
+        """
+        resolved = Path(path).expanduser().resolve()
+        source_url = str(resolved)
+
+        existing = db.find_duplicate(
+            source_type=SourceType.LOCAL,
+            source_url=source_url,
+        )
+        if existing and not force:
+            return ImportResult(
+                is_duplicate=True,
+                duplicate_id=existing["id"],
+                duplicate_title=existing["title"],
+            )
+
+        filename = resolved.name if resolved.suffix else None
+        cached_path = str(resolved) if resolved.exists() else None
+
+        try:
+            wad_id = db.add_wad(
+                title=title,
+                source_type=SourceType.LOCAL,
+                source_url=source_url,
+                filename=filename,
+                cached_path=cached_path,
+                author=author,
+                year=year,
+                description=description,
+                tags=tags,
+            )
+            return ImportResult(wad_id=wad_id)
+        except Exception as e:
+            return ImportResult(error=str(e))

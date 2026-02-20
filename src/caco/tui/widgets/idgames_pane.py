@@ -2,8 +2,8 @@
 
 from textual.widgets import DataTable, Static
 
-from caco import db
 from caco.idgames.models import FileEntry
+from caco.services import ImportService
 from caco.sources.idgames import IdgamesSource
 from caco.tui.widgets.base_search_pane import BaseSearchPane
 from caco.utils import format_author_year, format_rating, truncate
@@ -61,20 +61,15 @@ class IdgamesSearchPane(BaseSearchPane):
         )
 
     def _do_import(self, entry: FileEntry) -> int | None:
-        existing = db.find_duplicate(
-            source_type=db.SourceType.IDGAMES,
-            source_id=str(entry.id),
-            filename=entry.filename,
-            author=entry.author,
-        )
-        if existing:
+        result = ImportService().import_idgames(entry)
+        if result.is_duplicate:
             self.notify(
-                f"Already in library: {existing['title']} (ID: {existing['id']})",
+                f"Already in library: {result.duplicate_title} (ID: {result.duplicate_id})",
                 severity="warning",
             )
-            status = self.query_one("#search-status", Static)
-            status.update("WAD already exists in library")
+            self.query_one("#search-status", Static).update("WAD already exists in library")
             return None
-
-        with IdgamesSource() as source:
-            return source.import_wad(entry)
+        if result.error:
+            self.notify(f"Import failed: {result.error}", severity="error")
+            return None
+        return result.wad_id

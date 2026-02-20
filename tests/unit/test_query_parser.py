@@ -8,7 +8,7 @@ from caco.db import (
     _split_or_groups,
     _parse_and_group,
     parse_query,
-    _normalize_status,
+    normalize_status,
     _build_term_sql,
     QueryTerm,
 )
@@ -128,16 +128,16 @@ class TestParseQuery:
 
 class TestNormalizeStatus:
     def test_shortcut_p(self):
-        assert _normalize_status("p") == "playing"
+        assert normalize_status("p") == "playing"
 
     def test_shortcut_f(self):
-        assert _normalize_status("f") == "finished"
+        assert normalize_status("f") == "finished"
 
     def test_full_value(self):
-        assert _normalize_status("playing") == "playing"
+        assert normalize_status("playing") == "playing"
 
     def test_unknown(self):
-        assert _normalize_status("xyz") == "xyz"
+        assert normalize_status("xyz") == "xyz"
 
 
 class TestBuildTermSql:

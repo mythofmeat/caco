@@ -45,11 +45,8 @@ class WadTable(DataTable):
         self._wad_id_to_row: dict[int, int] = {}
         self._g_pressed = False
         self._g_timeout_task: asyncio.Task | None = None
-        # Batch-fetched stats maps
-        self._playtime_map: dict[int, int] = {}
-        self._last_played_map: dict[int, str] = {}
-        self._times_beaten_map: dict[int, int] = {}
-        self._session_count_map: dict[int, int] = {}
+        # Unified stats map: {wad_id: {playtime, last_played, session_count, times_beaten}}
+        self._stats_map: dict[int, dict] = {}
 
     def on_mount(self) -> None:
         """Set up the table columns."""
@@ -82,25 +79,19 @@ class WadTable(DataTable):
         self.clear()
 
         if not self._wads:
-            self._playtime_map = {}
-            self._last_played_map = {}
-            self._times_beaten_map = {}
-            self._session_count_map = {}
+            self._stats_map = {}
             return 0
 
-        # Batch-fetch all stats in a few queries instead of N+1
+        # Batch-fetch all stats in 2 queries on 1 connection
         wad_ids = [wad["id"] for wad in self._wads]
-        self._playtime_map = db.get_total_playtime_batch(wad_ids)
-        self._last_played_map = db.get_last_played_batch(wad_ids)
-        self._times_beaten_map = db.get_times_beaten_batch(wad_ids)
-        self._session_count_map = db.get_session_count_batch(wad_ids)
+        self._stats_map = db.get_wad_stats_batch(wad_ids)
 
         for i, wad in enumerate(self._wads):
             wad_id = wad["id"]
             self._wad_id_to_row[wad_id] = i
 
-            # Format playtime from batch map
-            playtime = self._playtime_map.get(wad_id, 0)
+            # Format playtime from unified stats map
+            playtime = self._stats_map.get(wad_id, {}).get("playtime", 0)
             playtime_str = format_duration(playtime) if playtime else "-"
 
             # Status with color styling using Rich Text
@@ -128,12 +119,8 @@ class WadTable(DataTable):
 
         Returns dict with: playtime, last_played, times_beaten, session_count.
         """
-        return {
-            "playtime": self._playtime_map.get(wad_id, 0),
-            "last_played": self._last_played_map.get(wad_id),
-            "times_beaten": self._times_beaten_map.get(wad_id, 0),
-            "session_count": self._session_count_map.get(wad_id, 0),
-        }
+        defaults = {"playtime": 0, "last_played": None, "times_beaten": 0, "session_count": 0}
+        return self._stats_map.get(wad_id, defaults)
 
     def update_row(self, wad_id: int) -> bool:
         """Update a single row in-place without full table reload.
@@ -151,19 +138,12 @@ class WadTable(DataTable):
         # Update the cached wad data
         self._wads[row_idx] = wad
 
-        # Refresh stats for this single WAD
-        single_playtime = db.get_total_playtime_batch([wad_id])
-        single_last_played = db.get_last_played_batch([wad_id])
-        single_beaten = db.get_times_beaten_batch([wad_id])
-        single_sessions = db.get_session_count_batch([wad_id])
-        self._playtime_map.update(single_playtime)
-        self._last_played_map.update(single_last_played)
-        self._times_beaten_map.update(single_beaten)
-        self._session_count_map.update(single_sessions)
+        # Refresh stats for this single WAD (1 call, 2 queries)
+        self._stats_map.update(db.get_wad_stats_batch([wad_id]))
 
         # Update cells in the DataTable
         row_key = str(wad_id)
-        playtime = self._playtime_map.get(wad_id, 0)
+        playtime = self._stats_map.get(wad_id, {}).get("playtime", 0)
         playtime_str = format_duration(playtime) if playtime else "-"
 
         status = wad["status"]

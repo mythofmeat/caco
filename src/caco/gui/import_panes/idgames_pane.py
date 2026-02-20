@@ -14,10 +14,9 @@ from PySide6.QtWidgets import (
     QMessageBox,
 )
 
-from caco import db
 from caco.gui.theme import DOOM_PALETTE
 from caco.gui.workers.search_worker import IdgamesSearchWorker
-from caco.gui.workers.import_worker import IdgamesImportWorker
+from caco.services import ImportService
 from caco.utils import format_rating
 
 
@@ -161,37 +160,22 @@ class IdgamesPane(QWidget):
             return
 
         entry = self._results[row]
+        svc = ImportService()
 
-        # Duplicate check
-        existing = db.find_duplicate(
-            db.SourceType.IDGAMES,
-            source_id=str(entry.id),
-            filename=entry.filename,
-            author=entry.author,
-        )
-        if existing:
+        result = svc.import_idgames(entry)
+        if result.is_duplicate:
             reply = QMessageBox.question(
                 self,
                 "Duplicate Found",
-                f"'{existing['title']}' (ID: {existing['id']}) already in library.\n\nImport anyway?",
+                f"'{result.duplicate_title}' (ID: {result.duplicate_id}) already in library.\n\nImport anyway?",
                 QMessageBox.Yes | QMessageBox.No,
             )
             if reply != QMessageBox.Yes:
                 return
+            result = svc.import_idgames(entry, force=True)
 
-        self._import_btn.setEnabled(False)
-        self._status.setText(f"Importing {entry.title}...")
-
-        worker = IdgamesImportWorker(entry)
-        worker.signals.finished.connect(self._on_import_done)
-        worker.signals.error.connect(self._on_import_error)
-        self._pool.start(worker)
-
-    def _on_import_done(self, wad_id):
-        self._import_btn.setEnabled(True)
-        self._status.setText(f"Imported! (ID: {wad_id})")
-        self.wad_imported.emit(wad_id)
-
-    def _on_import_error(self, error_msg):
-        self._import_btn.setEnabled(True)
-        self._status.setText(f"Import error: {error_msg}")
+        if result.error:
+            self._status.setText(f"Import error: {result.error}")
+        elif result.ok:
+            self._status.setText(f"Imported! (ID: {result.wad_id})")
+            self.wad_imported.emit(result.wad_id)

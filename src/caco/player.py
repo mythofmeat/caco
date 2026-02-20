@@ -96,23 +96,23 @@ def auto_clean_cache(console: Console | None = None) -> int:
         return 0
 
     # Build list of cache entries with metadata
-    cache_entries = []
-    for wad in cached_wads:
-        # Only consider idgames sources - they can always be re-downloaded
-        # Local files are user's originals, URLs may not be re-downloadable
-        if wad.get("source_type") != "idgames":
-            continue
+    # Filter to re-downloadable sources first
+    eligible = [w for w in cached_wads if w.get("source_type") == "idgames"]
+    # Batch-fetch all last_played dates in one query
+    wad_ids = [w["id"] for w in eligible]
+    last_played_map = db.get_last_played_batch(wad_ids) if wad_ids else {}
 
+    cache_entries = []
+    for wad in eligible:
         path = Path(wad["cached_path"])
         if path.exists():
             stat = path.stat()
-            last_played = db.get_last_played(wad["id"])
             cache_entries.append({
                 "wad": wad,
                 "path": path,
                 "size": stat.st_size,
                 "mtime": stat.st_mtime,
-                "last_played": last_played,
+                "last_played": last_played_map.get(wad["id"]),
             })
 
     if not cache_entries:

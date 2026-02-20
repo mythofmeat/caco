@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 
 from caco import db
 from caco.gui.theme import DOOM_PALETTE
+from caco.services import ImportService
 
 
 class LocalPane(QWidget):
@@ -156,40 +157,28 @@ class LocalPane(QWidget):
         notes = self._notes_input.toPlainText().strip() or None
         author = self._author_input.text().strip() or None
 
-        # Duplicate check
-        existing = db.find_duplicate(
-            db.SourceType.LOCAL,
-            source_url=str(path),
-        )
-        if existing:
+        svc = ImportService()
+        result = svc.import_local(title, path, author=author, year=year, tags=tags or None)
+        if result.is_duplicate:
             reply = QMessageBox.question(
                 self,
                 "Duplicate Found",
-                f"'{existing['title']}' (ID: {existing['id']}) already in library.\n\nImport anyway?",
+                f"'{result.duplicate_title}' (ID: {result.duplicate_id}) already in library.\n\nImport anyway?",
                 QMessageBox.Yes | QMessageBox.No,
             )
             if reply != QMessageBox.Yes:
                 return
+            result = svc.import_local(title, path, author=author, year=year, tags=tags or None, force=True)
 
-        # Set cached_path only if file actually exists
-        cached_path = str(path) if path.exists() else None
+        if result.error:
+            self._status.setText(f"Import error: {result.error}")
+            return
 
-        wad_id = db.add_wad(
-            title=title,
-            source_type=db.SourceType.LOCAL,
-            author=author,
-            year=year,
-            source_url=str(path),
-            filename=path.name,
-            cached_path=cached_path,
-            tags=tags or None,
-        )
+        if notes and result.wad_id:
+            db.update_wad(result.wad_id, notes=notes)
 
-        if notes:
-            db.update_wad(wad_id, notes=notes)
-
-        self._status.setText(f"Imported! (ID: {wad_id})")
-        self.wad_imported.emit(wad_id)
+        self._status.setText(f"Imported! (ID: {result.wad_id})")
+        self.wad_imported.emit(result.wad_id)
 
         # Clear form
         self._path_input.clear()

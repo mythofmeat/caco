@@ -39,27 +39,25 @@ def stats(period: str, limit: int, plain: bool):
         caco stats --limit 6      # Show only last 6 periods
         caco stats --plain        # Output for scripting
     """
-    library_stats = db.get_library_stats()
-    completion_stats = db.get_completion_rate()
-    activity = db.get_wads_played_by_period(period)
+    snap = db.get_stats_snapshot(period)
 
     if plain:
         # Key=value output for scripting
-        print(f"total_wads={library_stats['total_wads']}")
-        print(f"total_sessions={library_stats['total_sessions']}")
-        print(f"total_playtime={library_stats['total_playtime']}")
-        print(f"wads_with_sessions={library_stats['wads_with_sessions']}")
-        print(f"played_wads={completion_stats['played_wads']}")
-        print(f"finished_wads={completion_stats['finished_wads']}")
-        print(f"completion_rate={completion_stats['completion_rate']:.3f}")
-        print(f"total_completions={completion_stats['total_completions']}")
+        print(f"total_wads={snap.total_wads}")
+        print(f"total_sessions={snap.total_sessions}")
+        print(f"total_playtime={snap.total_playtime}")
+        print(f"wads_with_sessions={snap.wads_with_sessions}")
+        print(f"played_wads={snap.played_wads}")
+        print(f"finished_wads={snap.finished_wads}")
+        print(f"completion_rate={snap.completion_rate:.3f}")
+        print(f"total_completions={snap.total_completions}")
 
         # Status breakdown
-        for status, count in sorted(library_stats['wads_by_status'].items()):
+        for status, count in sorted(snap.wads_by_status.items()):
             print(f"status_{status.replace('-', '_')}={count}")
 
         # Activity periods
-        for i, row in enumerate(activity[:limit]):
+        for i, row in enumerate(snap.activity[:limit]):
             print(f"activity_{i}_period={row['period']}")
             print(f"activity_{i}_wads={row['wad_count']}")
             print(f"activity_{i}_sessions={row['session_count']}")
@@ -67,7 +65,7 @@ def stats(period: str, limit: int, plain: bool):
         return
 
     # Check for empty library
-    if library_stats['total_wads'] == 0:
+    if snap.total_wads == 0:
         console.print("[dim]No WADs in library[/dim]")
         return
 
@@ -76,26 +74,24 @@ def stats(period: str, limit: int, plain: bool):
 
     # Overview section
     console.print("[bold cyan]Overview[/bold cyan]")
-    console.print(f"  Total WADs:      {library_stats['total_wads']}")
-    total_playtime_str = format_duration(library_stats['total_playtime']) if library_stats['total_playtime'] else "0s"
+    console.print(f"  Total WADs:      {snap.total_wads}")
+    total_playtime_str = format_duration(snap.total_playtime) if snap.total_playtime else "0s"
     console.print(f"  Total playtime:  {total_playtime_str}")
-    console.print(f"  Sessions:        {library_stats['total_sessions']}")
-    console.print(f"  WADs played:     {library_stats['wads_with_sessions']}")
+    console.print(f"  Sessions:        {snap.total_sessions}")
+    console.print(f"  WADs played:     {snap.wads_with_sessions}")
 
     # Completion section
     console.print("\n[bold cyan]Completion[/bold cyan]")
-    played = completion_stats['played_wads']
-    finished = completion_stats['finished_wads']
-    if played > 0:
-        pct = completion_stats['completion_rate'] * 100
-        console.print(f"  Finished:          {finished} / {played} played ({pct:.1f}%)")
+    if snap.played_wads > 0:
+        pct = snap.completion_rate * 100
+        console.print(f"  Finished:          {snap.finished_wads} / {snap.played_wads} played ({pct:.1f}%)")
     else:
-        console.print(f"  Finished:          {finished} / 0 played")
-    if completion_stats['total_completions'] > 0:
-        console.print(f"  Total completions: {completion_stats['total_completions']} (including replays)")
+        console.print(f"  Finished:          {snap.finished_wads} / 0 played")
+    if snap.total_completions > 0:
+        console.print(f"  Total completions: {snap.total_completions} (including replays)")
 
     # Status breakdown
-    status_counts = library_stats['wads_by_status']
+    status_counts = snap.wads_by_status
     if status_counts:
         console.print("\n[bold cyan]Status Breakdown[/bold cyan]")
         # Order statuses for consistent display
@@ -120,6 +116,7 @@ def stats(period: str, limit: int, plain: bool):
                 console.print(left)
 
     # Activity table
+    activity = snap.activity
     if not activity:
         console.print("\n[dim]No play history yet[/dim]")
     else:

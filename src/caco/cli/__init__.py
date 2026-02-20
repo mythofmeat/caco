@@ -329,20 +329,13 @@ SORT_FIELDS = ["id", "playtime", "rating", "created", "title", "author", "last_p
 
 
 def _normalize_status(value: str | None) -> str | None:
-    """Normalize status value, expanding shortcuts."""
+    """Normalize status value, expanding shortcuts.
+
+    Delegates to db.normalize_status() for the actual lookup.
+    """
     if value is None:
         return None
-    lower = value.lower()
-    # Check if it's a shortcut
-    if lower in STATUS_SHORTCUTS:
-        return STATUS_SHORTCUTS[lower]
-    # Check if it's already a valid status
-    try:
-        db.Status(lower)
-        return lower
-    except ValueError:
-        # Return as-is, let Click's Choice handle the error
-        return value
+    return db.normalize_status(value)
 
 
 class StatusChoice(click.Choice):

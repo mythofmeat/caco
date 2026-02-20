@@ -21,11 +21,8 @@ class WadTableModel(QAbstractTableModel):
         self._columns = columns or DEFAULT_COLUMNS
         self._wads: list[dict] = []
         self._wad_index: dict[int, int] = {}  # wad_id -> row index (O(1) lookup)
-        # Batch-fetched stat maps
-        self._playtime_map: dict[int, int] = {}
-        self._last_played_map: dict[int, str] = {}
-        self._times_beaten_map: dict[int, int] = {}
-        self._session_count_map: dict[int, int] = {}
+        # Unified stats map: {wad_id: {playtime, last_played, session_count, times_beaten}}
+        self._stats_map: dict[int, dict] = {}
 
     def load(
         self,
@@ -47,18 +44,9 @@ class WadTableModel(QAbstractTableModel):
         # Build O(1) wad_id → row index (mirrors TUI's _wad_id_to_row)
         self._wad_index = {w["id"]: i for i, w in enumerate(self._wads)}
 
-        # Batch-fetch all stats in bulk
+        # Batch-fetch all stats in 2 queries on 1 connection
         wad_ids = [w["id"] for w in self._wads]
-        if wad_ids:
-            self._playtime_map = db.get_total_playtime_batch(wad_ids)
-            self._last_played_map = db.get_last_played_batch(wad_ids)
-            self._times_beaten_map = db.get_times_beaten_batch(wad_ids)
-            self._session_count_map = db.get_session_count_batch(wad_ids)
-        else:
-            self._playtime_map = {}
-            self._last_played_map = {}
-            self._times_beaten_map = {}
-            self._session_count_map = {}
+        self._stats_map = db.get_wad_stats_batch(wad_ids) if wad_ids else {}
 
         self.endResetModel()
         return len(self._wads)
@@ -123,13 +111,13 @@ class WadTableModel(QAbstractTableModel):
             stars = format_rating(wad.get("rating"))
             return stars if stars else "-"
         elif col == Column.BEATEN:
-            count = self._times_beaten_map.get(wad_id, 0)
+            count = self._stats_map.get(wad_id, {}).get("times_beaten", 0)
             return str(count) if count else "-"
         elif col == Column.PLAYTIME:
-            seconds = self._playtime_map.get(wad_id, 0)
+            seconds = self._stats_map.get(wad_id, {}).get("playtime", 0)
             return format_duration(seconds) if seconds else "-"
         elif col == Column.LAST_PLAYED:
-            ts = self._last_played_map.get(wad_id)
+            ts = self._stats_map.get(wad_id, {}).get("last_played")
             return ts[:10] if ts else "-"
         elif col == Column.TAGS:
             tags = wad.get("tags", [])
@@ -171,12 +159,8 @@ class WadTableModel(QAbstractTableModel):
 
     def get_wad_stats(self, wad_id: int) -> dict:
         """Get pre-fetched stats for a WAD (mirrors TUI's get_wad_stats)."""
-        return {
-            "playtime": self._playtime_map.get(wad_id, 0),
-            "last_played": self._last_played_map.get(wad_id),
-            "times_beaten": self._times_beaten_map.get(wad_id, 0),
-            "session_count": self._session_count_map.get(wad_id, 0),
-        }
+        defaults = {"playtime": 0, "last_played": None, "times_beaten": 0, "session_count": 0}
+        return self._stats_map.get(wad_id, defaults)
 
     def wad_count(self) -> int:
         """Return the current number of WADs."""
@@ -184,4 +168,4 @@ class WadTableModel(QAbstractTableModel):
 
     def total_playtime(self) -> int:
         """Return total playtime across all loaded WADs."""
-        return sum(self._playtime_map.values())
+        return sum(s.get("playtime", 0) for s in self._stats_map.values())

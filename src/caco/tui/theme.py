@@ -1,13 +1,14 @@
-"""Centralized status colors and display configuration for the TUI."""
+"""Centralized status colors and display configuration for the TUI.
+
+Derived from db.STATUS_METADATA — single source of truth for all status info.
+"""
+
+from caco.db import STATUS_METADATA
 
 # Canonical status configuration: (display_name, rich_color, css_class)
 STATUS_CONFIG = {
-    "to-play": ("To Play", "dodger_blue1", "status-to-play"),
-    "backlog": ("Backlog", "yellow", "status-backlog"),
-    "playing": ("Playing", "green1", "status-playing"),
-    "finished": ("Finished", "grey50", "status-finished"),
-    "abandoned": ("Abandoned", "red", "status-abandoned"),
-    "awaiting-update": ("Awaiting Update", "magenta", "status-awaiting-update"),
+    status: (meta[0], meta[2], meta[3])
+    for status, meta in STATUS_METADATA.items()
 }
 
 

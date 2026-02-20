@@ -49,35 +49,33 @@ class StatsScreen(Screen):
     def on_mount(self) -> None:
         """Load and display statistics."""
         content = self.query_one("#stats-content", Vertical)
+        snap = db.get_stats_snapshot("month")
 
         # Overview
-        stats = db.get_library_stats()
         content.mount(Static("[bold]Overview[/bold]", classes="stats-section"))
-        content.mount(Static(f"  Total WADs: {stats['total_wads']}"))
-        content.mount(Static(f"  Total sessions: {stats['total_sessions']}"))
-        content.mount(Static(f"  Total playtime: {format_duration(stats['total_playtime'])}"))
-        content.mount(Static(f"  WADs played: {stats['wads_with_sessions']}"))
+        content.mount(Static(f"  Total WADs: {snap.total_wads}"))
+        content.mount(Static(f"  Total sessions: {snap.total_sessions}"))
+        content.mount(Static(f"  Total playtime: {format_duration(snap.total_playtime)}"))
+        content.mount(Static(f"  WADs played: {snap.wads_with_sessions}"))
 
         # Status breakdown
-        if stats["wads_by_status"]:
+        if snap.wads_by_status:
             content.mount(Static(""))
             content.mount(Static("[bold]By Status[/bold]", classes="stats-section"))
-            for status, count in sorted(stats["wads_by_status"].items()):
+            for status, count in sorted(snap.wads_by_status.items()):
                 content.mount(Static(f"  {status}: {count}"))
 
         # Completion stats
-        completion = db.get_completion_rate()
         content.mount(Static(""))
         content.mount(Static("[bold]Completion[/bold]", classes="stats-section"))
-        content.mount(Static(f"  Played: {completion['played_wads']}"))
-        content.mount(Static(f"  Finished: {completion['finished_wads']}"))
-        rate_pct = f"{completion['completion_rate']:.0%}"
+        content.mount(Static(f"  Played: {snap.played_wads}"))
+        content.mount(Static(f"  Finished: {snap.finished_wads}"))
+        rate_pct = f"{snap.completion_rate:.0%}"
         content.mount(Static(f"  Completion rate: {rate_pct}"))
-        content.mount(Static(f"  Total completions: {completion['total_completions']}"))
+        content.mount(Static(f"  Total completions: {snap.total_completions}"))
 
         # Monthly activity
-        activity = db.get_wads_played_by_period("month")
-        if activity:
+        if snap.activity:
             content.mount(Static(""))
             content.mount(Static("[bold]Monthly Activity[/bold]", classes="stats-section"))
 
@@ -89,7 +87,7 @@ class StatsScreen(Screen):
             table.add_column("Playtime", key="playtime", width=12)
             table.cursor_type = "row"
 
-            for row in activity[:12]:  # Show last 12 months
+            for row in snap.activity[:12]:  # Show last 12 months
                 table.add_row(
                     row["period"],
                     str(row["wad_count"]),

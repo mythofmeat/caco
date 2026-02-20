@@ -1,6 +1,11 @@
-"""Doom-inspired dark theme for the GUI."""
+"""Doom-inspired dark theme for the GUI.
+
+Status colors/display derived from db.STATUS_METADATA — single source of truth.
+"""
 
 from PySide6.QtGui import QColor
+
+from caco.db import STATUS_METADATA
 
 # Doom-inspired color palette
 DOOM_PALETTE = {
@@ -21,23 +26,9 @@ DOOM_PALETTE = {
     "grey": "#808080",
 }
 
-STATUS_COLORS = {
-    "to-play": QColor("#3366cc"),
-    "playing": QColor("#33cc33"),
-    "finished": QColor("#808080"),
-    "backlog": QColor("#cccc33"),
-    "abandoned": QColor("#cc3333"),
-    "awaiting-update": QColor("#cc33cc"),
-}
-
-STATUS_DISPLAY = {
-    "to-play": "To Play",
-    "backlog": "Backlog",
-    "playing": "Playing",
-    "finished": "Finished",
-    "abandoned": "Abandoned",
-    "awaiting-update": "Awaiting Update",
-}
+# Derived from STATUS_METADATA (hex_color at index 1)
+STATUS_COLORS = {status: QColor(meta[1]) for status, meta in STATUS_METADATA.items()}
+STATUS_DISPLAY = {status: meta[0] for status, meta in STATUS_METADATA.items()}
 
 
 def get_status_color(status: str) -> QColor:

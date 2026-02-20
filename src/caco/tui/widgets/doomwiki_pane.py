@@ -2,8 +2,8 @@
 
 from textual.widgets import DataTable, Static
 
-from caco import db
 from caco.doomwiki.models import WikiEntry
+from caco.services import ImportService
 from caco.sources.doomwiki import DoomwikiSource
 from caco.tui.widgets.base_search_pane import BaseSearchPane
 from caco.utils import format_author_year, truncate
@@ -67,18 +67,15 @@ class DoomwikiSearchPane(BaseSearchPane):
         )
 
     def _do_import(self, entry: WikiEntry) -> int | None:
-        existing = db.find_duplicate(
-            source_type=db.SourceType.DOOMWIKI,
-            source_id=str(entry.page_id),
-        )
-        if existing:
+        result = ImportService().import_doomwiki(entry)
+        if result.is_duplicate:
             self.notify(
-                f"Already in library: {existing['title']} (ID: {existing['id']})",
+                f"Already in library: {result.duplicate_title} (ID: {result.duplicate_id})",
                 severity="warning",
             )
-            status = self.query_one("#search-status", Static)
-            status.update("WAD already exists in library")
+            self.query_one("#search-status", Static).update("WAD already exists in library")
             return None
-
-        with DoomwikiSource() as source:
-            return source.import_wad(entry)
+        if result.error:
+            self.notify(f"Import failed: {result.error}", severity="error")
+            return None
+        return result.wad_id

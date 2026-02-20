@@ -211,74 +211,46 @@ class LocalImportPane(Widget):
 
         tags = [t.strip() for t in tags_str.split(",") if t.strip()] if tags_str else None
 
-        # Determine filename and cached_path
-        filename = path.name if path.suffix else None
-        cached_path = str(path) if path.exists() else None
-
         status = self.query_one("#status", Static)
         status.update(f"Importing {title}...")
 
         self.run_worker(
-            self._do_import(title, str(path), filename, cached_path, author, year, description, tags),
+            self._do_import(title, path_str, author, year, description, tags),
             exclusive=False,
         )
 
     async def _do_import(
         self,
         title: str,
-        source_url: str,
-        filename: str | None,
-        cached_path: str | None,
+        path: str,
         author: str | None,
         year: int | None,
         description: str | None,
         tags: list[str] | None,
     ) -> None:
         """Perform the import in a worker."""
-        from caco import db
+        from caco.services import ImportService
 
-        # Check for duplicates (by path for local imports)
-        existing = db.find_duplicate(
-            source_type=db.SourceType.LOCAL,
-            source_url=source_url,
+        result = ImportService().import_local(
+            title, path, author=author, year=year,
+            description=description, tags=tags,
         )
 
-        if existing:
+        status = self.query_one("#status", Static)
+        if result.is_duplicate:
             self.notify(
-                f"Already in library: {existing['title']} (ID: {existing['id']})",
+                f"Already in library: {result.duplicate_title} (ID: {result.duplicate_id})",
                 severity="warning",
             )
-            status = self.query_one("#status", Static)
             status.update("File already exists in library")
-            return
-
-        try:
-            wad_id = db.add_wad(
-                title=title,
-                source_type=db.SourceType.LOCAL,
-                source_url=source_url,
-                filename=filename,
-                cached_path=cached_path,
-                author=author,
-                year=year,
-                description=description,
-                tags=tags,
-            )
-
-            self.notify(f"Imported: {title} (ID: {wad_id})")
-            status = self.query_one("#status", Static)
-            status.update(f"Successfully imported as ID {wad_id}")
-
-            # Clear form for next import
+        elif result.error:
+            self.notify(f"Import failed: {result.error}", severity="error")
+            status.update(f"Import failed: {result.error}")
+        else:
+            self.notify(f"Imported: {title} (ID: {result.wad_id})")
+            status.update(f"Successfully imported as ID {result.wad_id}")
             self._clear_form()
-
-            # Notify parent to refresh library panes
-            self.post_message(self.WadImported(wad_id))
-
-        except Exception as e:
-            self.notify(f"Import failed: {e}", severity="error")
-            status = self.query_one("#status", Static)
-            status.update(f"Import failed: {e}")
+            self.post_message(self.WadImported(result.wad_id))
 
     def _clear_form(self) -> None:
         """Clear all form fields."""
