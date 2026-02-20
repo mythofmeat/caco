@@ -1,7 +1,0 @@
-- [ ] architect-review
-- [ ] code-review
-- [ ] qa-review
-- [ ] test-automation-review
-- [ ] refactoring-plan
-- [ ] python-quality-review
-- [ ] performance-review
