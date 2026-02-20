@@ -1,8 +1,14 @@
 """Doomworld forum source adapter."""
 
+import logging
+
+import httpx
+
 from caco.doomworld import DoomworldClient, ForumThread
 from caco.db import SourceType, add_wad
 from caco.utils import extract_year
+
+logger = logging.getLogger(__name__)
 
 
 class DoomworldSource:
@@ -37,7 +43,8 @@ class DoomworldSource:
         """
         try:
             return self.client.get_thread(url)
-        except Exception:
+        except (httpx.HTTPError, ValueError, KeyError) as e:
+            logger.debug("Failed to fetch thread %s: %s", url, e)
             return None
 
     def get_by_id(self, thread_id: int) -> ForumThread | None:
@@ -51,7 +58,8 @@ class DoomworldSource:
         """
         try:
             return self.client.get_thread_by_id(thread_id)
-        except Exception:
+        except (httpx.HTTPError, ValueError, KeyError) as e:
+            logger.debug("Failed to fetch thread %d: %s", thread_id, e)
             return None
 
     def import_wad(

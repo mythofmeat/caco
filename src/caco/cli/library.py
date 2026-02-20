@@ -567,14 +567,12 @@ def random_cmd(query: tuple[str, ...], info: bool):
         caco play $(caco random)           # Play a random WAD
         caco play $(caco random tag:megawad)  # Play a random megawad
     """
-    import random as rand
-
     query_str = " ".join(query) if query else None
-    wads = db.search_wads(query=query_str)
+    wads = db.search_wads(query=query_str, sort_by="random", limit=1)
     if not wads:
         err_console.print("[red]No matching WADs[/red]")
         sys.exit(1)
-    wad = rand.choice(wads)
+    wad = wads[0]
     if info:
         print(f"{wad['id']}\t{wad['title']}\t{wad['author'] or ''}")
     else:

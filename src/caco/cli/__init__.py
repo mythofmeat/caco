@@ -235,7 +235,7 @@ def _interactive_pick(
             return None
     else:
         try:
-            choice = click.prompt("Select [1-{}]".format(min(len(wads), 20)), type=int, default=0)
+            choice = click.prompt(f"Select [1-{min(len(wads), 20)}]", type=int, default=0)
             if choice == 0 or choice > len(wads):
                 return None
             return [wads[choice - 1]]
@@ -436,11 +436,17 @@ def _complete_query(ctx, param, incomplete: str) -> list[str]:
 def _parse_sort_option(sort: str | None) -> tuple[str | None, bool]:
     """Parse sort option. Returns (field, descending).
 
-    Supports suffix notation (like beets) to avoid CLI flag conflicts:
-        'playtime' -> ('playtime', True)   # Default (desc for numeric/date)
-        'title+' -> ('title', False)       # Explicit ascending
-        'title-' -> ('title', True)        # Explicit descending
-        '-title' -> ('title', False)       # Legacy prefix (still works)
+    Suffix notation (preferred — avoids CLI flag parsing issues):
+        'playtime'  -> ('playtime', True)   Bare field defaults to descending
+        'title+'    -> ('title', False)     '+' suffix = ascending
+        'title-'    -> ('title', True)      '-' suffix = descending
+
+    Legacy prefix notation (still supported for backward compat):
+        '-title'    -> ('title', False)     '-' prefix = ascending (inverted!)
+        '+title'    -> ('title', True)      '+' prefix = descending
+
+    Note: prefix semantics are inverted vs suffix (historical artifact).
+    Prefer suffix notation for clarity.
     """
     if not sort:
         return None, True

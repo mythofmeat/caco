@@ -8,7 +8,11 @@ Two entry points:
 - search_wiki_image(title): Search Doom Wiki by WAD title, then fetch image
 """
 
+import logging
+
 import httpx
+
+logger = logging.getLogger(__name__)
 
 API_URL = "https://doomwiki.org/w/api.php"
 _TIMEOUT = 15.0
@@ -82,8 +86,8 @@ def search_wiki_image(title: str) -> bytes | None:
             if result:
                 return result
 
-    except Exception:
-        pass
+    except (httpx.HTTPError, ValueError, KeyError) as e:
+        logger.debug("Wiki image search failed for '%s': %s", title, e)
 
     return None
 
@@ -175,7 +179,7 @@ def _fetch_image_for_page(page_title: str, client: httpx.Client | None = None) -
         if resp.headers.get("content-type", "").startswith("image/"):
             return resp.content
 
-    except Exception:
-        pass
+    except (httpx.HTTPError, ValueError, KeyError) as e:
+        logger.debug("Wiki image fetch failed for '%s': %s", page_title, e)
 
     return None

@@ -642,6 +642,7 @@ def search_wads(
     sort_by: str | None = None,
     sort_desc: bool = True,
     include_deleted: bool = False,
+    limit: int = 0,
 ) -> list[dict[str, Any]]:
     """
     Search WADs with beets-style query syntax.
@@ -716,6 +717,8 @@ def search_wads(
         order_by = "wads.id ASC"
         use_group_by = False
 
+    limit_clause = f" LIMIT {int(limit)}" if limit > 0 else ""
+
     with get_connection() as conn:
         if use_group_by:
             # For playtime/last_played, need to JOIN with sessions
@@ -725,10 +728,10 @@ def search_wads(
                 LEFT JOIN sessions ON sessions.wad_id = wads.id
                 WHERE {where}
                 GROUP BY wads.id
-                ORDER BY {order_by}
+                ORDER BY {order_by}{limit_clause}
             """
         else:
-            sql = f"SELECT wads.* FROM wads WHERE {where} ORDER BY {order_by}"
+            sql = f"SELECT wads.* FROM wads WHERE {where} ORDER BY {order_by}{limit_clause}"
 
         rows = conn.execute(sql, params).fetchall()
 
@@ -1474,6 +1477,30 @@ def get_library_stats() -> dict[str, Any]:
         }
 
 
+_PERIOD_QUERIES: dict[str, str] = {
+    "year": """
+        SELECT
+            strftime('%Y', started_at) as period,
+            COUNT(DISTINCT wad_id) as wad_count,
+            COUNT(*) as session_count,
+            COALESCE(SUM(duration_seconds), 0) as total_playtime
+        FROM sessions
+        GROUP BY strftime('%Y', started_at)
+        ORDER BY period DESC
+    """,
+    "month": """
+        SELECT
+            strftime('%Y-%m', started_at) as period,
+            COUNT(DISTINCT wad_id) as wad_count,
+            COUNT(*) as session_count,
+            COALESCE(SUM(duration_seconds), 0) as total_playtime
+        FROM sessions
+        GROUP BY strftime('%Y-%m', started_at)
+        ORDER BY period DESC
+    """,
+}
+
+
 def get_wads_played_by_period(period: str = "month") -> list[dict[str, Any]]:
     """Get activity grouped by time period.
 
@@ -1484,25 +1511,9 @@ def get_wads_played_by_period(period: str = "month") -> list[dict[str, Any]]:
         List of dicts with keys: period, wad_count, session_count, total_playtime
         Ordered by period descending (most recent first).
     """
-    # Map period to strftime format
-    if period == "year":
-        fmt = "%Y"
-    else:
-        fmt = "%Y-%m"
-
+    query = _PERIOD_QUERIES.get(period, _PERIOD_QUERIES["month"])
     with get_connection() as conn:
-        rows = conn.execute(
-            f"""
-            SELECT
-                strftime('{fmt}', started_at) as period,
-                COUNT(DISTINCT wad_id) as wad_count,
-                COUNT(*) as session_count,
-                COALESCE(SUM(duration_seconds), 0) as total_playtime
-            FROM sessions
-            GROUP BY strftime('{fmt}', started_at)
-            ORDER BY period DESC
-            """
-        ).fetchall()
+        rows = conn.execute(query).fetchall()
         return [dict(row) for row in rows]
 
 

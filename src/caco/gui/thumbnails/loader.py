@@ -11,6 +11,7 @@ IMPORTANT: Worker threads use QImage (thread-safe) exclusively.
 Conversion to QPixmap happens only on the main thread in _on_ready().
 """
 
+import threading
 from io import BytesIO
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, Slot
@@ -114,22 +115,24 @@ class ThumbnailLoader(QObject):
         super().__init__(parent)
         self._pool = QThreadPool.globalInstance()
         self._pending: set[int] = set()
+        self._lock = threading.Lock()
 
     def request(self, wad_id: int, cached_path: str | None = None,
                 source_type: str | None = None, source_url: str | None = None,
                 title: str = ""):
         """Request a thumbnail for a WAD. Results arrive via thumbnail_ready signal."""
-        if wad_id in self._pending:
-            return
-
-        self._pending.add(wad_id)
+        with self._lock:
+            if wad_id in self._pending:
+                return
+            self._pending.add(wad_id)
         worker = ThumbnailWorker(wad_id, cached_path, source_type, source_url, title)
         worker.signals.ready.connect(self._on_ready)
         self._pool.start(worker)
 
     def _on_ready(self, wad_id: int, image: QImage):
         """Convert QImage to QPixmap on the main thread and emit."""
-        self._pending.discard(wad_id)
+        with self._lock:
+            self._pending.discard(wad_id)
         pixmap = QPixmap.fromImage(image)
         self.thumbnail_ready.emit(wad_id, pixmap)
 
