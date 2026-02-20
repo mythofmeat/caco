@@ -6,12 +6,13 @@ import httpx
 
 from caco.doomworld import DoomworldClient, ForumThread
 from caco.db import SourceType, add_wad
+from caco.sources.base import BaseSource
 from caco.utils import extract_year
 
 logger = logging.getLogger(__name__)
 
 
-class DoomworldSource:
+class DoomworldSource(BaseSource):
     """Adapter for importing WADs from Doomworld forum threads.
 
     The Doomworld forums (doomworld.com/forum) host many WAD release threads,
@@ -25,12 +26,6 @@ class DoomworldSource:
 
     def __init__(self):
         self.client = DoomworldClient()
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        self.client.close()
 
     def get(self, url: str) -> ForumThread | None:
         """Get a forum thread by URL.

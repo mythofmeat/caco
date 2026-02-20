@@ -86,7 +86,7 @@ src/caco/
 │   └── widgets/    # Widget classes
 │       ├── base_search_pane.py # Abstract base for search panes
 │       ├── wad_table.py   # DataTable for WAD list (with vim bindings, batch stats)
-│       ├── wad_info.py    # Info panel widget (accepts pre-fetched stats)
+│       ├── wad_info.py    # Info panel widget (accepts pre-fetched stats + wad dict)
 │       ├── filter_input.py # Search/filter input
 │       ├── sort_select.py  # Sort dropdown widget (ID, Title, Author, Playtime, Last Played, Year, Rating)
 │       ├── library_pane.py # Reusable library view (table + panel + filter + delete/beaten/trash/stats/cache)
@@ -136,12 +136,13 @@ src/caco/
 │       ├── cache.py      # Thumbnail filesystem cache (~/.cache/caco/thumbnails/)
 │       └── loader.py     # Async QThreadPool-based thumbnail loader
 ├── sources/
-│   ├── idgames.py  # idgames archive adapter
-│   ├── doomwiki.py # Doom Wiki adapter
-│   └── doomworld.py # Doomworld forum adapter
+│   ├── base.py     # BaseSource mixin (shared context-manager lifecycle)
+│   ├── idgames.py  # idgames archive adapter (extends BaseSource)
+│   ├── doomwiki.py # Doom Wiki adapter (extends BaseSource)
+│   └── doomworld.py # Doomworld forum adapter (extends BaseSource)
 └── tests/          # pytest test suite
-    ├── conftest.py     # In-memory DB fixture
-    └── unit/           # Unit tests (utils, query parser, db, models, player)
+    ├── conftest.py     # Shared fixtures (in-memory DB, make_wad factory, tmp_config, populated_db)
+    └── unit/           # Unit tests (utils, query parser, db, sessions, config, parsers, CLI, models, player)
 ```
 
 **Data locations:**
@@ -151,11 +152,12 @@ src/caco/
 
 **Key patterns:**
 - `db.py` uses raw sqlite3 with `sqlite3.Row` for dict-like access; tag helpers (`_fetch_tags`, `_attach_tags`, `_fetch_tags_batch`) and batch query functions (`get_total_playtime_batch`, `get_last_played_batch`, `get_times_beaten_batch`, `get_session_count_batch`) reduce N+1 queries
-- TUI widgets use batch stats: `WadTable.load_wads()` batch-fetches all stats, `get_wad_stats()` exposes them to `WadInfoPanel`; `update_row()` handles incremental cell updates
+- TUI widgets use batch stats: `WadTable.load_wads()` batch-fetches all stats; `get_wad_stats()` and `get_wad_by_id()` expose cached data to `WadInfoPanel`; `update_row()` handles incremental cell updates
 - Status colors/display centralized in `tui/theme.py` (`STATUS_CONFIG` dict with `get_status_display/color/css_class` helpers)
-- Source adapters are context managers; clients inherit `BaseHttpClient` from `utils.py`; errors inherit `CacoSourceError`
+- Source adapters inherit `BaseSource` from `sources/base.py` for shared context-manager lifecycle; clients inherit `BaseHttpClient` from `utils.py`; errors inherit `CacoSourceError`
 - CLI uses Click's decorator registration pattern: each `cli/*.py` submodule imports `cli` from `caco.cli` and registers commands; `__init__.py` imports all submodules at bottom to trigger registration
-- `player.py` wraps sourceport execution to track session start/end times
+- `player.py` wraps sourceport execution to track session start/end times; decoupled from Rich — uses `ProgressCallback` for download progress; CLI creates Rich progress wrapper in `play_cmd.py`
+- `WadInfoPanel` and `DetailPanel` accept optional pre-fetched `wad` dict to avoid DB re-fetch on selection
 - Status enum: `to-play`, `backlog`, `playing`, `finished`, `abandoned`, `awaiting-update`
 - Import command uses flag-based source selection: `caco import <source> [--idgames|--doomwiki|--doomworld|--local|--url URL]`
 - Query syntax (beets-style):

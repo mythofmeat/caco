@@ -1,6 +1,7 @@
 """Configuration management for caco."""
 
 import shutil
+import sys
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -50,15 +51,12 @@ def load_config() -> dict[str, Any]:
                 user_config = tomllib.load(f)
                 config.update(user_config)
         except tomllib.TOMLDecodeError as e:
-            import sys
             print(f"Warning: Invalid TOML syntax in {CONFIG_FILE}: {e}", file=sys.stderr)
             print("Warning: Using default configuration.", file=sys.stderr)
         except PermissionError:
-            import sys
             print(f"Warning: Permission denied reading {CONFIG_FILE}", file=sys.stderr)
             print("Warning: Using default configuration.", file=sys.stderr)
         except Exception as e:
-            import sys
             print(f"Warning: Failed to load config: {e}", file=sys.stderr)
             print("Warning: Using default configuration.", file=sys.stderr)
 

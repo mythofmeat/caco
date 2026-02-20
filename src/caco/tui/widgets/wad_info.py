@@ -23,7 +23,7 @@ class WadInfoPanel(Vertical):
         yield Static("", id="info-status")
         yield Static("", id="info-details")
 
-    def update_wad(self, wad_id: int | None, stats: dict | None = None) -> None:
+    def update_wad(self, wad_id: int | None, stats: dict | None = None, wad: dict | None = None) -> None:
         """Update panel with WAD info.
 
         Args:
@@ -31,6 +31,7 @@ class WadInfoPanel(Vertical):
             stats: Optional pre-fetched stats dict with keys:
                    playtime, last_played, times_beaten, session_count.
                    If None, falls back to individual DB queries.
+            wad: Optional pre-fetched WAD dict. If None, fetches from DB.
         """
         self._wad_id = wad_id
 
@@ -46,7 +47,8 @@ class WadInfoPanel(Vertical):
             details_widget.update("")
             return
 
-        wad = db.get_wad(wad_id)
+        if wad is None:
+            wad = db.get_wad(wad_id)
         if not wad:
             title_widget.update("WAD not found")
             author_widget.update("")

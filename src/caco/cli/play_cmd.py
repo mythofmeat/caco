@@ -3,6 +3,7 @@
 import sys
 
 import click
+from rich.progress import Progress, BarColumn, DownloadColumn, TransferSpeedColumn
 
 from caco import db
 from caco.config import get_default_sourceport
@@ -47,13 +48,35 @@ def play_cmd(query: str | None, sourceport: str | None, yes: bool, extra_args: t
 
     console.print(f"[cyan]Playing {wad['title']}...[/cyan]")
 
+    # Create a Rich progress callback for download display
+    _progress = [None]  # Mutable container for lazy init
+
+    def _progress_callback(downloaded: int, total: int | None, filename: str) -> None:
+        if _progress[0] is None:
+            _progress[0] = Progress(
+                "[progress.description]{task.description}",
+                BarColumn(),
+                DownloadColumn(),
+                TransferSpeedColumn(),
+                console=console,
+            )
+            _progress[0].start()
+            _progress[0]._task = _progress[0].add_task(f"Downloading {filename}", total=total)
+        _progress[0].update(_progress[0]._task, completed=downloaded, total=total)
+
     try:
-        duration = play(wad_id, sourceport=port, extra_args=list(extra_args), console=console)
+        duration = play(
+            wad_id, sourceport=port, extra_args=list(extra_args),
+            progress_callback=_progress_callback,
+        )
         if duration:
             console.print(f"[green]Session ended:[/green] {format_duration(duration)}")
     except Exception as e:
         err_console.print(f"[red]Error: {e}[/red]")
         sys.exit(1)
+    finally:
+        if _progress[0] is not None:
+            _progress[0].stop()
 
 
 # Alias 'play' to 'play_cmd'

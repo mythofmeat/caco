@@ -182,15 +182,17 @@ class DetailPanel(QScrollArea):
         self._edit_btn.setEnabled(False)
         self._delete_btn.setEnabled(False)
 
-    def update_wad(self, wad_id: int, stats: dict | None = None):
+    def update_wad(self, wad_id: int, stats: dict | None = None, wad: dict | None = None):
         """Update the panel with a WAD's information.
 
         Args:
             wad_id: WAD ID to display.
             stats: Optional pre-fetched stats dict with keys:
                    playtime, last_played, times_beaten, session_count.
+            wad: Optional pre-fetched WAD dict. If None, fetches from DB.
         """
-        wad = db.get_wad(wad_id)
+        if wad is None:
+            wad = db.get_wad(wad_id)
         if not wad:
             self.clear()
             return

@@ -1,5 +1,6 @@
 """Command-line interface for caco."""
 
+import json
 import shutil
 import subprocess
 import sys
@@ -23,7 +24,7 @@ from caco.config import (
     get_list_config,
 )
 from caco.db import STATUS_SHORTCUTS
-from caco.player import play, format_duration
+from caco.player import format_duration
 from caco.utils import format_rating
 
 console = Console()
@@ -491,8 +492,6 @@ def _complete_sort(ctx, param, incomplete: str) -> list[str]:
 
 def _render_wad_list_json(wads: list[dict]) -> None:
     """JSON output for list command."""
-    import json as _json
-
     wad_ids = [w["id"] for w in wads]
     times_beaten = db.get_times_beaten_batch(wad_ids)
     playtimes = db.get_total_playtime_batch(wad_ids)
@@ -523,13 +522,11 @@ def _render_wad_list_json(wads: list[dict]) -> None:
             "created_at": wad.get("created_at"),
         })
 
-    print(_json.dumps(result, indent=2))
+    print(json.dumps(result, indent=2))
 
 
 def _render_wad_info_json(wad: dict) -> None:
     """JSON output for info command."""
-    import json as _json
-
     playtime = db.get_total_playtime(wad["id"])
     sessions = db.get_sessions(wad["id"])
     last_played = db.get_last_played(wad["id"])
@@ -563,7 +560,7 @@ def _render_wad_info_json(wad: dict) -> None:
         "updated_at": wad.get("updated_at"),
     }
 
-    print(_json.dumps(result, indent=2))
+    print(json.dumps(result, indent=2))
 
 
 def _render_wad_list_plain(wads: list[dict]) -> None:

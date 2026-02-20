@@ -8,20 +8,15 @@ from rich.progress import Progress, BarColumn, DownloadColumn, TransferSpeedColu
 
 from caco.config import get_download_mirror
 from caco.db import SourceType, add_wad
+from caco.sources.base import BaseSource
 from caco.utils import extract_year
 
 
-class IdgamesSource:
+class IdgamesSource(BaseSource):
     """Adapter for importing WADs from idgames archive."""
 
     def __init__(self):
         self.client = IdgamesClient()
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        self.client.close()
 
     def search(self, query: str) -> list[FileEntry]:
         """Search idgames for WADs."""

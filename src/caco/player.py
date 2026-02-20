@@ -1,12 +1,11 @@
 """Sourceport launcher and playtime tracking."""
 
 import json
+import logging
 import shutil
 import subprocess
 from pathlib import Path
 from typing import Callable
-
-from rich.console import Console
 
 from caco import db
 from caco.config import (
@@ -21,13 +20,14 @@ from caco.config import (
     resolve_sourceport,
 )
 
+logger = logging.getLogger(__name__)
+
 # Callback for download progress: (downloaded_bytes, total_bytes, filename) -> None
 ProgressCallback = Callable[[int, int | None, str], None]
 
 
 def get_wad_path(
     wad: dict,
-    console: Console | None = None,
     progress_callback: ProgressCallback | None = None,
 ) -> Path | None:
     """Get the local path to a WAD file, downloading if needed."""
@@ -52,7 +52,7 @@ def get_wad_path(
         with IdgamesSource() as source:
             entry = source.get(int(idgames_id))
             dest = source.download(
-                entry, cache_dir, console=console,
+                entry, cache_dir,
                 progress_callback=progress_callback,
             )
 
@@ -75,7 +75,7 @@ def get_wad_path(
 # =============================================================================
 
 
-def auto_clean_cache(console: Console | None = None) -> int:
+def auto_clean_cache() -> int:
     """Perform automatic cache cleanup based on config rules.
 
     Returns the number of files deleted.
@@ -157,8 +157,8 @@ def auto_clean_cache(console: Console | None = None) -> int:
                 total_size -= entry["size"]
 
     # Delete files
-    if to_delete and console:
-        console.print(f"[dim]Auto-cleaning {len(to_delete)} cached file(s)...[/dim]")
+    if to_delete:
+        logger.info("Auto-cleaning %d cached file(s)", len(to_delete))
 
     deleted = 0
     for entry in to_delete:
@@ -178,7 +178,6 @@ def play(
     wad_id: int,
     sourceport: str | None = None,
     extra_args: list[str] | None = None,
-    console: Console | None = None,
     progress_callback: ProgressCallback | None = None,
     process_ref: list | None = None,
 ) -> int | None:
@@ -192,10 +191,10 @@ def play(
         raise ValueError(f"WAD {wad_id} not found")
 
     # Auto-clean cache before potentially downloading new files
-    auto_clean_cache(console=console)
+    auto_clean_cache()
 
     # Get or download WAD file
-    wad_path = get_wad_path(wad, console=console, progress_callback=progress_callback)
+    wad_path = get_wad_path(wad, progress_callback=progress_callback)
     if not wad_path:
         # Build a helpful error message with source URL if available
         error_parts = [f"No WAD file linked for '{wad['title']}'"]

@@ -2,9 +2,10 @@
 
 from caco.doomwiki import DoomwikiClient, WikiEntry
 from caco.db import SourceType, add_wad
+from caco.sources.base import BaseSource
 
 
-class DoomwikiSource:
+class DoomwikiSource(BaseSource):
     """Adapter for importing WADs from Doom Wiki.
 
     The Doom Wiki (doomwiki.org) contains structured metadata about WADs
@@ -17,12 +18,6 @@ class DoomwikiSource:
 
     def __init__(self):
         self.client = DoomwikiClient()
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        self.client.close()
 
     def search(self, query: str, limit: int = 20) -> list[WikiEntry]:
         """Search Doom Wiki for WAD pages.

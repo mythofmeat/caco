@@ -205,6 +205,14 @@ class LibraryTab(QWidget):
         else:
             self._list_view.select_wad(wad_id)
 
+    def set_query(self, query: str):
+        """Set the filter bar text and refresh."""
+        self._filter.set_query(query)
+
+    def get_selected_wad_id(self) -> int | None:
+        """Return the currently selected WAD ID, or None."""
+        return self._detail._wad_id
+
     def focus_filter(self):
         """Focus the filter input."""
         self._filter.setFocus()
@@ -337,10 +345,10 @@ class LibraryTab(QWidget):
 
     def _on_wad_selected(self, wad_id: int):
         stats = self._model.get_wad_stats(wad_id)
-        self._detail.update_wad(wad_id, stats=stats)
+        wad = self._model.get_wad_by_id(wad_id)
+        self._detail.update_wad(wad_id, stats=stats, wad=wad)
 
         # Request thumbnail for detail panel
-        wad = self._model.get_wad_by_id(wad_id)
         if wad:
             self._thumb_loader.request(
                 wad_id,

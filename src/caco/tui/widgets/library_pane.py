@@ -260,7 +260,8 @@ class LibraryPane(Widget):
         if event.wad_id is not None:
             table = self.query_one("#wad-table", WadTable)
             stats = table.get_wad_stats(event.wad_id)
-            panel.update_wad(event.wad_id, stats=stats)
+            wad = table.get_wad_by_id(event.wad_id)
+            panel.update_wad(event.wad_id, stats=stats, wad=wad)
         else:
             panel.update_wad(None)
 

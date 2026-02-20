@@ -114,6 +114,13 @@ class WadTable(DataTable):
 
         return len(self._wads)
 
+    def get_wad_by_id(self, wad_id: int) -> dict | None:
+        """Get cached WAD data by ID (avoids DB re-fetch)."""
+        row_idx = self._wad_id_to_row.get(wad_id)
+        if row_idx is not None and row_idx < len(self._wads):
+            return self._wads[row_idx]
+        return None
+
     def get_wad_stats(self, wad_id: int) -> dict:
         """Get pre-fetched stats for a WAD (avoids extra DB queries).
 

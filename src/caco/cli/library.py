@@ -1,5 +1,6 @@
 """Library management commands: list, info, update, delete, restore, random, link."""
 
+import json
 import shutil
 import sys
 from pathlib import Path
@@ -180,7 +181,6 @@ def info(query: str, yes: bool, as_json: bool, plain: bool):
 
     # Per-WAD play config
     if wad.get("custom_iwad") or wad.get("custom_sourceport") or wad.get("custom_args"):
-        import json
         console.print()
         console.print("[bold]Custom play config:[/bold]")
         if wad.get("custom_iwad"):
@@ -245,8 +245,6 @@ def update(
     dry_run: bool,
 ):
     """Update WAD metadata. QUERY: ID, ID range (3-6,9), or query (tag:megawad)."""
-    import json
-
     updates = {}
     update_descriptions = []
 

@@ -1,5 +1,6 @@
 """Config and completions commands."""
 
+import os
 import shutil
 import subprocess
 import sys
@@ -25,8 +26,6 @@ def config(path: bool, edit: bool):
     Without options, displays the current config file contents.
     Edit the config file directly for full control over all settings.
     """
-    import os
-
     config_path = CONFIG_FILE
 
     if path:
@@ -95,8 +94,6 @@ sourceport_args = []
 @click.option("--install", is_flag=True, help="Install completions to shell config")
 def completions(shell: str | None, install: bool):
     """Generate or install shell completions."""
-    import os
-
     # Auto-detect shell if not specified
     if not shell:
         shell_path = os.environ.get("SHELL", "")
