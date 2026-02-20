@@ -148,7 +148,8 @@ class LLMParser(ABC):
             text = "\n".join(lines)
 
         try:
-            return json.loads(text)
+            result: dict[str, Any] = json.loads(text)
+            return result
         except json.JSONDecodeError as e:
             raise LLMError(f"Failed to parse LLM response as JSON: {e}")
 
@@ -275,8 +276,8 @@ class AnthropicParser(LLMParser):
     def parse(self, post_text: str) -> LLMExtractedMetadata:
         prompt = EXTRACTION_PROMPT.format(post_text=post_text[:8000])
 
-        headers = {
-            "x-api-key": self.api_key,
+        headers: dict[str, str] = {
+            "x-api-key": self.api_key or "",
             "Content-Type": "application/json",
             "anthropic-version": "2023-06-01",
         }
@@ -407,9 +408,11 @@ def get_parser(backend: str | None = None, model: str | None = None) -> LLMParse
 
         # Handle model parameter for API-based backends
         if backend == "claude-code":
-            return parser_class()
+            parser: LLMParser = parser_class()
+            return parser
         else:
-            return parser_class(model=model)
+            parser = parser_class(model=model)
+            return parser
 
     # Auto-detect backend in priority order
     available = get_available_backends()

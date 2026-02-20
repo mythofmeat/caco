@@ -59,13 +59,13 @@ class WadTableModel(QAbstractTableModel):
     def columnCount(self, parent=QModelIndex()):
         return len(self._columns)
 
-    def headerData(self, section, orientation, role=Qt.DisplayRole):
-        if role == Qt.DisplayRole and orientation == Qt.Horizontal:
+    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
+        if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Horizontal:
             if 0 <= section < len(self._columns):
                 return self._columns[section].header
         return None
 
-    def data(self, index, role=Qt.DisplayRole):
+    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
         if not index.isValid() or index.row() >= len(self._wads):
             return None
 
@@ -73,20 +73,20 @@ class WadTableModel(QAbstractTableModel):
         col = self._columns[index.column()]
         wad_id = wad["id"]
 
-        if role == Qt.DisplayRole:
+        if role == Qt.ItemDataRole.DisplayRole:
             return self._display_data(wad, col)
-        elif role == Qt.ForegroundRole:
+        elif role == Qt.ItemDataRole.ForegroundRole:
             if col == Column.STATUS:
                 return get_status_color(wad["status"])
-        elif role == Qt.TextAlignmentRole:
+        elif role == Qt.ItemDataRole.TextAlignmentRole:
             if col in (Column.ID, Column.YEAR, Column.BEATEN, Column.PLAYTIME):
-                return int(Qt.AlignRight | Qt.AlignVCenter)
+                return int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             if col == Column.RATING:
-                return int(Qt.AlignCenter | Qt.AlignVCenter)
-        elif role == Qt.UserRole:
+                return int(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+        elif role == Qt.ItemDataRole.UserRole:
             # Return the wad_id for selection tracking
             return wad_id
-        elif role == Qt.ToolTipRole:
+        elif role == Qt.ItemDataRole.ToolTipRole:
             if col == Column.TITLE and wad.get("description"):
                 desc = wad["description"]
                 return desc[:300] + "..." if len(desc) > 300 else desc
@@ -100,7 +100,7 @@ class WadTableModel(QAbstractTableModel):
         if col == Column.ID:
             return str(wad_id)
         elif col == Column.TITLE:
-            return wad["title"]
+            return str(wad["title"])
         elif col == Column.AUTHOR:
             return wad.get("author") or "-"
         elif col == Column.YEAR:
@@ -127,7 +127,8 @@ class WadTableModel(QAbstractTableModel):
                 return ", ".join(tags)
             return "-"
         elif col == Column.SOURCE:
-            return wad.get("source_type", "-")
+            result: str = wad.get("source_type", "-")
+            return result
 
         return "-"
 

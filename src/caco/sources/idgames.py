@@ -1,6 +1,7 @@
 """idgames archive source adapter."""
 
 from pathlib import Path
+from typing import Callable
 
 from caco.idgames import IdgamesClient, FileEntry
 from rich.console import Console
@@ -21,14 +22,15 @@ class IdgamesSource(BaseSource):
     def search(self, query: str) -> list[FileEntry]:
         """Search idgames for WADs."""
         # Search by title first, then filename if no results
-        results = self.client.search(query, type="title")
+        results: list[FileEntry] = self.client.search(query, type="title")
         if not results:
             results = self.client.search(query, type="filename")
         return results
 
     def get(self, file_id: int) -> FileEntry:
         """Get a specific file by ID."""
-        return self.client.get(id=file_id)
+        entry: FileEntry = self.client.get(id=file_id)
+        return entry
 
     def import_wad(
         self,
@@ -61,7 +63,7 @@ class IdgamesSource(BaseSource):
         dest: Path,
         mirror: int | None = None,
         console: Console | None = None,
-        progress_callback: "Callable | None" = None,
+        progress_callback: Callable | None = None,
     ) -> Path:
         """Download a WAD file. Returns the path to the downloaded file.
 

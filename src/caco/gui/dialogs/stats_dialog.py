@@ -2,6 +2,7 @@
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QDialog,
     QVBoxLayout,
     QHBoxLayout,
@@ -82,35 +83,35 @@ class StatsDialog(QDialog):
             table = QTableWidget(len(months), 4)
             table.setHorizontalHeaderLabels(["Period", "WADs", "Sessions", "Playtime"])
             table.setAlternatingRowColors(True)
-            table.setEditTriggers(QTableWidget.NoEditTriggers)
+            table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
             table.verticalHeader().setVisible(False)
 
             header = table.horizontalHeader()
-            header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-            header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-            header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-            header.setSectionResizeMode(3, QHeaderView.Stretch)
+            header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+            header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+            header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+            header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
 
             for row, entry in enumerate(months):
                 table.setItem(row, 0, QTableWidgetItem(entry["period"]))
 
                 wad_item = QTableWidgetItem(str(entry["wad_count"]))
-                wad_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                wad_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 table.setItem(row, 1, wad_item)
 
                 sess_item = QTableWidgetItem(str(entry["session_count"]))
-                sess_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                sess_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 table.setItem(row, 2, sess_item)
 
                 pt_str = format_duration(entry["total_playtime"]) if entry["total_playtime"] else "-"
                 pt_item = QTableWidgetItem(pt_str)
-                pt_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                pt_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 table.setItem(row, 3, pt_item)
 
             act_layout.addWidget(table)
             layout.addWidget(act_group)
 
         # Close
-        buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)

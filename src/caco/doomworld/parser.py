@@ -420,7 +420,7 @@ class DoomworldParser:
         result["first_post_text"] = self._html_to_text(first_post_html)
 
         # Extract technical metadata from first post
-        combined_text = first_post_html + " " + result["first_post_text"]
+        combined_text = first_post_html + " " + str(result["first_post_text"])
         result["download_links"] = extract_download_links(combined_text)
         result["complevel"] = extract_complevel(combined_text)
         result["iwad"] = extract_iwad(combined_text)
@@ -454,13 +454,14 @@ class DoomworldParser:
 
         for match in matches:
             try:
-                data = json.loads(match.strip())
+                data: Any = json.loads(match.strip())
 
                 # Handle @graph format (array of entities)
                 if isinstance(data, dict) and "@graph" in data:
                     for item in data["@graph"]:
                         if item.get("@type") == "DiscussionForumPosting":
-                            return item
+                            result: dict[str, Any] = item
+                            return result
                 # Direct DiscussionForumPosting
                 elif isinstance(data, dict):
                     if data.get("@type") == "DiscussionForumPosting":

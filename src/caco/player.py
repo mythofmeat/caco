@@ -5,7 +5,7 @@ import logging
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from caco import db
 from caco.config import (
@@ -51,7 +51,7 @@ def get_wad_path(
 
         with IdgamesSource() as source:
             entry = source.get(int(idgames_id))
-            dest = source.download(
+            dest: Path = source.download(
                 entry, cache_dir,
                 progress_callback=progress_callback,
             )
@@ -106,7 +106,7 @@ def auto_clean_cache() -> int:
     wad_ids = [w["id"] for w in eligible]
     last_played_map = db.get_last_played_batch(wad_ids) if wad_ids else {}
 
-    cache_entries = []
+    cache_entries: list[dict[str, Any]] = []
     for wad in eligible:
         path = Path(wad["cached_path"])
         if path.exists():

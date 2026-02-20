@@ -282,8 +282,8 @@ class DetailPanel(QScrollArea):
         scaled = pixmap.scaled(
             self._thumbnail.width() - 4,
             self._thumbnail.height() - 4,
-            Qt.KeepAspectRatio,
-            Qt.SmoothTransformation,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
         )
         self._thumbnail.setPixmap(scaled)
 

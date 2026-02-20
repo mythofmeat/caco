@@ -42,10 +42,11 @@ class SortControls(QWidget):
         self.sort_changed.emit(self.current_field(), self._desc)
 
     def current_field(self) -> str:
-        return self._combo.currentData() or "id"
+        data: str | None = self._combo.currentData()
+        return data or "id"
 
     def is_descending(self) -> bool:
-        return self._desc
+        return bool(self._desc)
 
     def set_sort(self, field: str, desc: bool) -> None:
         """Set sort field and direction programmatically (no signal emitted)."""

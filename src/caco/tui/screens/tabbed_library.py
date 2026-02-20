@@ -4,7 +4,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.css.query import NoMatches
 from textual.screen import Screen
-from textual.widgets import Footer, TabbedContent, TabPane, Tabs
+from textual.widgets import ContentSwitcher, Footer, TabbedContent, TabPane, Tabs
 
 from caco.config import get_tui_config
 from caco.tui.widgets.import_pane import ImportPane
@@ -123,17 +123,18 @@ class TabbedLibraryScreen(Screen):
         if active_tab == "tab-import":
             # Import tab handles its own focus via source selector
             try:
-                pane = self.query_one("#pane-import", ImportPane)
+                import_pane = self.query_one("#pane-import", ImportPane)
                 # Try to focus the search input of the active import source
-                pane._focus_active_pane(pane.query_one("#import-content").current or "source-idgames")
+                switcher = import_pane.query_one("#import-content", ContentSwitcher)
+                import_pane._focus_active_pane(switcher.current or "source-idgames")
             except NoMatches:
                 pass
         else:
             # Focus the wad table in library panes
             pane_id = active_tab.replace("tab-", "pane-")
             try:
-                pane = self.query_one(f"#{pane_id}", LibraryPane)
-                pane.query_one("#wad-table").focus()
+                library_pane = self.query_one(f"#{pane_id}", LibraryPane)
+                library_pane.query_one("#wad-table").focus()
             except NoMatches:
                 pass
 

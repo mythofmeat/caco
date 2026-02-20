@@ -47,7 +47,7 @@ class DeleteDialog(QDialog):
         if wad.get("author"):
             info_parts.append(f"by {wad['author']}")
         info_label = QLabel(" ".join(info_parts))
-        info_label.setTextFormat(Qt.RichText)
+        info_label.setTextFormat(Qt.TextFormat.RichText)
         layout.addWidget(info_label)
 
         # Stats
@@ -68,9 +68,9 @@ class DeleteDialog(QDialog):
         layout.addWidget(hint)
 
         # Buttons
-        buttons = QDialogButtonBox(QDialogButtonBox.Yes | QDialogButtonBox.No)
-        buttons.button(QDialogButtonBox.Yes).setText("Delete")
-        buttons.button(QDialogButtonBox.Yes).setStyleSheet(
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Yes | QDialogButtonBox.StandardButton.No)
+        buttons.button(QDialogButtonBox.StandardButton.Yes).setText("Delete")
+        buttons.button(QDialogButtonBox.StandardButton.Yes).setStyleSheet(
             f"color: {DOOM_PALETTE['red']};"
         )
         buttons.accepted.connect(self.accept)

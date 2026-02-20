@@ -301,7 +301,7 @@ class WadEditScreen(Screen):
 
         # Parse rating
         rating = None
-        if rating_str and rating_str != Select.BLANK:
+        if rating_str and rating_str != Select.BLANK and isinstance(rating_str, str):
             try:
                 rating = int(rating_str)
             except (ValueError, TypeError):

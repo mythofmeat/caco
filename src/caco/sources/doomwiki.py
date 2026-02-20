@@ -31,7 +31,8 @@ class DoomwikiSource(BaseSource):
         Returns:
             List of WikiEntry objects with parsed metadata
         """
-        return self.client.search_wads(query, limit=limit)
+        entries: list[WikiEntry] = self.client.search_wads(query, limit=limit)
+        return entries
 
     def get(self, title: str) -> WikiEntry | None:
         """Get a specific wiki page by title.
@@ -42,7 +43,8 @@ class DoomwikiSource(BaseSource):
         Returns:
             WikiEntry with parsed metadata, or None if not found
         """
-        return self.client.get_entry(title)
+        entry: WikiEntry | None = self.client.get_entry(title)
+        return entry
 
     def get_by_id(self, page_id: int) -> WikiEntry | None:
         """Get a specific wiki page by ID.
@@ -53,7 +55,8 @@ class DoomwikiSource(BaseSource):
         Returns:
             WikiEntry with parsed metadata, or None if not found
         """
-        return self.client.get_entry_by_id(page_id)
+        entry: WikiEntry | None = self.client.get_entry_by_id(page_id)
+        return entry
 
     def import_wad(
         self,

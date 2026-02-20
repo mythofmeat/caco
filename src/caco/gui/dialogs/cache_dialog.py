@@ -4,6 +4,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QDialog,
     QVBoxLayout,
     QHBoxLayout,
@@ -46,16 +47,16 @@ class CacheDialog(QDialog):
         self._table = QTableWidget(0, 4)
         self._table.setHorizontalHeaderLabels(["ID", "Title", "Path", "Size"])
         self._table.setAlternatingRowColors(True)
-        self._table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self._table.setSelectionBehavior(QTableWidget.SelectRows)
-        self._table.setSelectionMode(QTableWidget.SingleSelection)
+        self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self._table.verticalHeader().setVisible(False)
 
         header = self._table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.Stretch)
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
 
         self._layout.addWidget(self._table)
 
@@ -73,7 +74,7 @@ class CacheDialog(QDialog):
 
         btn_row.addStretch()
 
-        close_btn = QDialogButtonBox(QDialogButtonBox.Close)
+        close_btn = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         close_btn.rejected.connect(self.reject)
         btn_row.addWidget(close_btn)
 
@@ -105,10 +106,10 @@ class CacheDialog(QDialog):
                     total_size += size
                     file_count += 1
                     size_item = QTableWidgetItem(_format_size(size))
-                    size_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                    size_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 else:
                     size_item = QTableWidgetItem("missing")
-                    size_item.setForeground(Qt.red)
+                    size_item.setForeground(Qt.GlobalColor.red)
             else:
                 size_item = QTableWidgetItem("-")
 
@@ -148,9 +149,9 @@ class CacheDialog(QDialog):
             self,
             "Clear All Cache",
             "Delete all cached WAD files? They can be re-downloaded.",
-            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
-        if reply != QMessageBox.Yes:
+        if reply != QMessageBox.StandardButton.Yes:
             return
 
         # Delete actual files

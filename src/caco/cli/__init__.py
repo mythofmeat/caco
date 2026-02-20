@@ -62,7 +62,8 @@ def _check_and_import_entry(
         console.print("[dim]Use --force to import anyway[/dim]")
         return None
 
-    return source.import_wad(entry, tags=tags_list)
+    wad_id: int = source.import_wad(entry, tags=tags_list)
+    return wad_id
 
 
 # =============================================================================
@@ -136,7 +137,7 @@ def _parse_id_range_core(value: str) -> list[int]:
 
     Raises ValueError if the format is invalid.
     """
-    ids = []
+    ids: list[int] = []
     for part in value.split(","):
         part = part.strip()
         if "-" in part:
@@ -658,7 +659,7 @@ def _render_wad_list(wads: list[dict], title: str | None = None, list_config: di
     for col in columns:
         if col in column_defs:
             header, style, justify = column_defs[col]
-            table.add_column(header, style=style, justify=justify)
+            table.add_column(header, style=style, justify=justify)  # type: ignore[arg-type]
 
     for wad in wads:
         # Pre-computed batch values
@@ -755,9 +756,9 @@ from caco.cli import stats  # noqa: E402, F401
 # =============================================================================
 
 # Unix-like aliases for common commands
-cli.add_command(library.delete, name="rm")             # caco rm -> caco delete
-cli.add_command(library.list_cmd, name="ls")           # caco ls -> caco list
-cli.add_command(library.info, name="i")                # caco i -> caco info
+cli.add_command(library.delete, name="rm")             # type: ignore[has-type]  # caco rm -> caco delete
+cli.add_command(library.list_cmd, name="ls")           # type: ignore[has-type]  # caco ls -> caco list
+cli.add_command(library.info, name="i")                # type: ignore[has-type]  # caco i -> caco info
 
 
 if __name__ == "__main__":

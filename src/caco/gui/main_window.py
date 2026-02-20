@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QMenu,
     QProgressBar,
+    QDialog,
 )
 
 from caco import db
@@ -73,7 +74,7 @@ class MainWindow(QMainWindow):
         self._tab_bar = QTabBar()
         self._tab_bar.setExpanding(False)
         self._tab_bar.setDrawBase(False)
-        self._tab_bar.setContextMenuPolicy(Qt.CustomContextMenu)
+        self._tab_bar.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._tab_bar.customContextMenuRequested.connect(self._show_tab_context_menu)
 
         # Track which STATUS_TABS indices are visible (all by default)
@@ -403,7 +404,7 @@ class MainWindow(QMainWindow):
             from caco.gui.dialogs.link_dialog import WadUnavailableDialog
 
             dialog = WadUnavailableDialog(wad_id, parent=self)
-            if dialog.exec() == WadUnavailableDialog.Accepted:
+            if dialog.exec() == QDialog.DialogCode.Accepted:
                 self._library_tab.refresh()
                 self._library_tab.select_wad(wad_id)
                 self._on_play(wad_id)
@@ -449,14 +450,14 @@ class MainWindow(QMainWindow):
     def _on_edit(self, wad_id: int):
         """Open the edit dialog for a WAD."""
         dialog = EditDialog(wad_id, parent=self)
-        if dialog.exec() == EditDialog.Accepted:
+        if dialog.exec() == QDialog.DialogCode.Accepted:
             self._library_tab.refresh()
             self._library_tab.select_wad(wad_id)
 
     def _on_delete(self, wad_id: int):
         """Open the delete confirmation dialog."""
         dialog = DeleteDialog(wad_id, parent=self)
-        if dialog.exec() == DeleteDialog.Accepted:
+        if dialog.exec() == QDialog.DialogCode.Accepted:
             db.delete_wad(wad_id)
             self._library_tab.refresh()
 

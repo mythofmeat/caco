@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=7.0", "pytest-cov>=4.0", "pytest-mock>=3.12", "respx>=0.20"]
+test = ["pytest>=7.0", "pytest-cov>=4.0", "pytest-mock>=3.12", "respx>=0.20", "mypy>=1.8"]
 gui = ["PySide6>=6.5", "Pillow>=10.0"]
 
 [project.scripts]
@@ -50,3 +50,6 @@ python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true

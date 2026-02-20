@@ -206,6 +206,34 @@ class TestTagCommands:
         assert "No tags" in result.output
 
 
+class TestRandomCommand:
+    """Test 'caco random' WAD picker."""
+
+    def test_random_returns_id(self, populated_runner, populated_db):
+        result = populated_runner.invoke(cli, ["random"])
+        assert result.exit_code == 0
+        wad_id = int(result.output.strip())
+        assert wad_id in populated_db.values()
+
+    def test_random_with_query(self, populated_runner, populated_db):
+        result = populated_runner.invoke(cli, ["random", "status:playing"])
+        assert result.exit_code == 0
+        wad_id = int(result.output.strip())
+        assert wad_id == populated_db["sunlust"]
+
+    def test_random_info_flag(self, populated_runner, populated_db):
+        result = populated_runner.invoke(cli, ["random", "--info"])
+        assert result.exit_code == 0
+        parts = result.output.strip().split("\t")
+        assert len(parts) == 3
+        wad_id = int(parts[0])
+        assert wad_id in populated_db.values()
+
+    def test_random_empty_library(self, runner):
+        result = runner.invoke(cli, ["random"])
+        assert result.exit_code == 1
+
+
 class TestSortParsing:
     """Test _parse_sort_option helper."""
 

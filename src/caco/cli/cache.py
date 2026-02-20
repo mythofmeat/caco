@@ -265,6 +265,7 @@ def cache_clear(query: str | None, clear_all: bool, dry_run: bool, yes: bool):
     if clear_all:
         _clear_all_cache(cache_dir, dry_run, yes)
     else:
+        assert query is not None  # guarded by early return above
         _clear_specific_cache(query, cache_dir, dry_run, yes)
 
 

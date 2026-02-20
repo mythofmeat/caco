@@ -198,7 +198,7 @@ class LibraryTab(QWidget):
             model = self._model
             for row in range(model.rowCount()):
                 idx = model.index(row, 0)
-                if model.data(idx, Qt.UserRole) == wad_id:
+                if model.data(idx, Qt.ItemDataRole.UserRole) == wad_id:
                     self._grid_view.setCurrentIndex(idx)
                     self._grid_view.scrollTo(idx)
                     return
@@ -211,7 +211,8 @@ class LibraryTab(QWidget):
 
     def get_selected_wad_id(self) -> int | None:
         """Return the currently selected WAD ID, or None."""
-        return self._detail._wad_id
+        wad_id: int | None = self._detail._wad_id
+        return wad_id
 
     def focus_filter(self):
         """Focus the filter input."""
@@ -226,11 +227,13 @@ class LibraryTab(QWidget):
 
     def get_sort_field(self) -> str:
         """Return the current sort field name."""
-        return self._sort.current_field()
+        field: str = self._sort.current_field()
+        return field
 
     def is_sort_descending(self) -> bool:
         """Return whether the current sort is descending."""
-        return self._sort.is_descending()
+        desc: bool = self._sort.is_descending()
+        return desc
 
     # ── View management ──────────────────────────────────────────
 
@@ -240,7 +243,7 @@ class LibraryTab(QWidget):
 
     def is_grid_view(self) -> bool:
         """Return whether the grid view is currently active."""
-        return self._is_grid_view
+        return bool(self._is_grid_view)
 
     # ── Column management ────────────────────────────────────────
 
@@ -272,7 +275,8 @@ class LibraryTab(QWidget):
 
     def card_size(self) -> int:
         """Return current grid card width."""
-        return self._size_slider.value()
+        value: int = self._size_slider.value()
+        return value
 
     def _toggle_view(self):
         """Switch between list and grid views."""

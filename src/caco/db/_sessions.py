@@ -68,7 +68,8 @@ def get_total_playtime(wad_id: int) -> int:
             "SELECT COALESCE(SUM(duration_seconds), 0) as total FROM sessions WHERE wad_id = ?",
             (wad_id,),
         ).fetchone()
-        return row["total"]
+        total: int = row["total"]
+        return total
 
 
 # =============================================================================
@@ -331,7 +332,8 @@ def get_times_beaten(wad_id: int) -> int:
             "SELECT COUNT(*) as count FROM wad_completions WHERE wad_id = ?",
             (wad_id,),
         ).fetchone()
-        return row["count"]
+        count: int = row["count"]
+        return count
 
 
 def get_times_beaten_batch(wad_ids: list[int]) -> dict[int, int]:

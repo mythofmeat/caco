@@ -158,7 +158,7 @@ def _generate_placeholder_image(title: str, wad_id: int) -> QImage:
     else:
         initials = "?"
 
-    image = QImage(160, 100, QImage.Format_RGB32)
+    image = QImage(160, 100, QImage.Format.Format_RGB32)
     image.fill(bg_color)
 
     painter = QPainter(image)

@@ -2,6 +2,7 @@
 
 import sys
 from pathlib import Path
+from typing import cast
 
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QPalette, QColor, QIcon
@@ -16,7 +17,8 @@ def create_app(config: dict | None = None) -> tuple[QApplication, MainWindow]:
 
     Returns (app, window) tuple. Caller should call app.exec() to start.
     """
-    app = QApplication.instance() or QApplication(sys.argv)
+    existing = QApplication.instance()
+    app = cast(QApplication, existing) if existing else QApplication(sys.argv)
     app.setApplicationName("Caco")
     app.setApplicationDisplayName("Caco - Doom WAD Library")
     app.setDesktopFileName("caco")
@@ -30,19 +32,19 @@ def create_app(config: dict | None = None) -> tuple[QApplication, MainWindow]:
     palette = QPalette()
     p = DOOM_PALETTE
 
-    palette.setColor(QPalette.Window, QColor(p["bg_dark"]))
-    palette.setColor(QPalette.WindowText, QColor(p["text_primary"]))
-    palette.setColor(QPalette.Base, QColor(p["bg_dark"]))
-    palette.setColor(QPalette.AlternateBase, QColor(p["bg_medium"]))
-    palette.setColor(QPalette.Text, QColor(p["text_primary"]))
-    palette.setColor(QPalette.Button, QColor(p["bg_medium"]))
-    palette.setColor(QPalette.ButtonText, QColor(p["text_primary"]))
-    palette.setColor(QPalette.Highlight, QColor(p["bg_selected"]))
-    palette.setColor(QPalette.HighlightedText, QColor(p["text_primary"]))
-    palette.setColor(QPalette.ToolTipBase, QColor(p["bg_medium"]))
-    palette.setColor(QPalette.ToolTipText, QColor(p["text_primary"]))
-    palette.setColor(QPalette.PlaceholderText, QColor(p["text_secondary"]))
-    palette.setColor(QPalette.Link, QColor(p["text_accent"]))
+    palette.setColor(QPalette.ColorRole.Window, QColor(p["bg_dark"]))
+    palette.setColor(QPalette.ColorRole.WindowText, QColor(p["text_primary"]))
+    palette.setColor(QPalette.ColorRole.Base, QColor(p["bg_dark"]))
+    palette.setColor(QPalette.ColorRole.AlternateBase, QColor(p["bg_medium"]))
+    palette.setColor(QPalette.ColorRole.Text, QColor(p["text_primary"]))
+    palette.setColor(QPalette.ColorRole.Button, QColor(p["bg_medium"]))
+    palette.setColor(QPalette.ColorRole.ButtonText, QColor(p["text_primary"]))
+    palette.setColor(QPalette.ColorRole.Highlight, QColor(p["bg_selected"]))
+    palette.setColor(QPalette.ColorRole.HighlightedText, QColor(p["text_primary"]))
+    palette.setColor(QPalette.ColorRole.ToolTipBase, QColor(p["bg_medium"]))
+    palette.setColor(QPalette.ColorRole.ToolTipText, QColor(p["text_primary"]))
+    palette.setColor(QPalette.ColorRole.PlaceholderText, QColor(p["text_secondary"]))
+    palette.setColor(QPalette.ColorRole.Link, QColor(p["text_accent"]))
 
     app.setPalette(palette)
     app.setStyleSheet(APP_STYLESHEET)

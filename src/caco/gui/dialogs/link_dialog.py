@@ -57,7 +57,7 @@ class WadUnavailableDialog(QDialog):
         if wad.get("author"):
             info_parts.append(f"by {wad['author']}")
         info_label = QLabel(" ".join(info_parts))
-        info_label.setTextFormat(Qt.RichText)
+        info_label.setTextFormat(Qt.TextFormat.RichText)
         layout.addWidget(info_label)
 
         # Explanation

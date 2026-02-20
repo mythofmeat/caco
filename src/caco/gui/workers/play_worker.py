@@ -30,7 +30,7 @@ class PlayWorker(QThread):
     def run(self):
         try:
             duration = play(
-                self._wad_id, console=None,
+                self._wad_id,
                 progress_callback=self._on_progress,
                 process_ref=self._process_ref,
             )

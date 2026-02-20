@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Any, TypeVar
+
+_T = TypeVar("_T", bound="BaseSource")
+
 
 class BaseSource:
     """Mixin providing shared context-manager lifecycle for source adapters.
@@ -10,7 +14,9 @@ class BaseSource:
     (typically a ``BaseHttpClient`` subclass).
     """
 
-    def __enter__(self) -> BaseSource:
+    client: Any  # Concrete type set by subclass __init__
+
+    def __enter__(self: _T) -> _T:
         return self
 
     def __exit__(self, *args: object) -> None:

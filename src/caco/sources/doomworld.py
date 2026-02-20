@@ -37,7 +37,8 @@ class DoomworldSource(BaseSource):
             ForumThread with parsed metadata, or None if not found
         """
         try:
-            return self.client.get_thread(url)
+            thread: ForumThread | None = self.client.get_thread(url)
+            return thread
         except (httpx.HTTPError, ValueError, KeyError) as e:
             logger.debug("Failed to fetch thread %s: %s", url, e)
             return None
@@ -52,7 +53,8 @@ class DoomworldSource(BaseSource):
             ForumThread with parsed metadata, or None if not found
         """
         try:
-            return self.client.get_thread_by_id(thread_id)
+            thread: ForumThread | None = self.client.get_thread_by_id(thread_id)
+            return thread
         except (httpx.HTTPError, ValueError, KeyError) as e:
             logger.debug("Failed to fetch thread %d: %s", thread_id, e)
             return None

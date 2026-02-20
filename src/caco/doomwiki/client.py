@@ -40,7 +40,8 @@ class DoomwikiClient(BaseHttpClient):
         if "error" in data:
             raise DoomwikiError(data["error"].get("info", "Unknown error"))
 
-        return data
+        result: dict = data
+        return result
 
     def search(self, query: str, limit: int = 20) -> list[SearchResult]:
         """

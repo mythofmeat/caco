@@ -28,7 +28,7 @@ _MAX_ZIP_ENTRY_SIZE = 256 * 1024 * 1024
 try:
     from PIL import Image
 except ImportError:
-    Image = None
+    Image = None  # type: ignore[assignment]
 
 # Standard Doom PLAYPAL (first palette entry, 768 bytes = 256 * RGB).
 # This is public domain data from the Doom engine source release.
@@ -37,7 +37,7 @@ except ImportError:
 _DOOM_PALETTE = None  # Loaded lazily from WAD or embedded fallback
 
 
-def _read_palette_from_wad(wad_data: bytes) -> bytes | None:
+def _read_palette_from_wad(wad_data: bytes | mmap.mmap) -> bytes | None:
     """Try to read PLAYPAL lump from WAD data."""
     try:
         directory = _parse_wad_directory(wad_data)
@@ -49,7 +49,7 @@ def _read_palette_from_wad(wad_data: bytes) -> bytes | None:
     return None
 
 
-def _parse_wad_directory(wad_data: bytes) -> list[tuple[str, int, int]]:
+def _parse_wad_directory(wad_data: bytes | mmap.mmap) -> list[tuple[str, int, int]]:
     """Parse WAD header and directory. Returns [(name, offset, size), ...]."""
     if len(wad_data) < 12:
         return []
@@ -97,6 +97,7 @@ def _decode_doom_patch(data: bytes, palette: bytes, width: int = 320, height: in
 
     img = Image.new("RGB", (img_width, img_height), (0, 0, 0))
     pixels = img.load()
+    assert pixels is not None
 
     for col in range(img_width):
         col_offset = struct.unpack_from("<I", data, 8 + col * 4)[0]
@@ -150,7 +151,7 @@ def extract_titlepic(wad_path: str | Path) -> Image.Image | None:
     if not path.exists():
         return None
 
-    wad_data = None
+    wad_data: bytes | mmap.mmap | None = None
 
     # Check if it's a ZIP file containing a WAD
     if path.suffix.lower() == ".zip" or (path.suffix.lower() not in (".wad", ".pk3", ".pk7")):
@@ -176,6 +177,8 @@ def extract_titlepic(wad_path: str | Path) -> Image.Image | None:
                 wad_data = mm
             except (OSError, ValueError):
                 return None
+
+        assert wad_data is not None
 
         # Parse WAD directory
         directory = _parse_wad_directory(wad_data)

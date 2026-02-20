@@ -2,6 +2,7 @@
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QDialog,
     QVBoxLayout,
     QLabel,
@@ -50,16 +51,16 @@ class SessionsDialog(QDialog):
         table = QTableWidget(len(sessions), 5)
         table.setHorizontalHeaderLabels(["Date", "Started", "Duration", "Sourceport", "Notes"])
         table.setAlternatingRowColors(True)
-        table.setEditTriggers(QTableWidget.NoEditTriggers)
-        table.setSelectionBehavior(QTableWidget.SelectRows)
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         table.verticalHeader().setVisible(False)
 
         header_view = table.horizontalHeader()
-        header_view.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        header_view.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        header_view.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        header_view.setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        header_view.setSectionResizeMode(4, QHeaderView.Stretch)
+        header_view.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header_view.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header_view.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header_view.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        header_view.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
 
         for row, session in enumerate(sessions):
             started = session.get("started_at") or ""
@@ -76,7 +77,7 @@ class SessionsDialog(QDialog):
             table.setItem(row, 1, QTableWidgetItem(time_str))
 
             dur_item = QTableWidgetItem(dur_str)
-            dur_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            dur_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             table.setItem(row, 2, dur_item)
 
             table.setItem(row, 3, QTableWidgetItem(port))
@@ -85,6 +86,6 @@ class SessionsDialog(QDialog):
         layout.addWidget(table)
 
         # Close button
-        buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)

@@ -167,7 +167,8 @@ class WadTable(DataTable):
     def get_selected_wad_id(self) -> int | None:
         """Get the currently selected WAD ID."""
         if self.cursor_row is not None and 0 <= self.cursor_row < len(self._wads):
-            return self._wads[self.cursor_row]["id"]
+            wad_id: int = self._wads[self.cursor_row]["id"]
+            return wad_id
         return None
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
@@ -184,19 +185,19 @@ class WadTable(DataTable):
         if wad_id is not None:
             self.post_message(self.WadActivated(wad_id))
 
-    async def action_cursor_down(self) -> None:
+    def action_cursor_down(self) -> None:
         """Move cursor down (j key)."""
         self._g_pressed = False
         if self.cursor_row is not None and self.cursor_row < len(self._wads) - 1:
             self.move_cursor(row=self.cursor_row + 1)
 
-    async def action_cursor_up(self) -> None:
+    def action_cursor_up(self) -> None:
         """Move cursor up (k key)."""
         self._g_pressed = False
         if self.cursor_row is not None and self.cursor_row > 0:
             self.move_cursor(row=self.cursor_row - 1)
 
-    async def action_page_down(self) -> None:
+    def action_page_down(self) -> None:
         """Move cursor down by half page (Ctrl+d)."""
         self._g_pressed = False
         if self.cursor_row is not None:
@@ -204,7 +205,7 @@ class WadTable(DataTable):
             new_row = min(self.cursor_row + 10, len(self._wads) - 1)
             self.move_cursor(row=new_row)
 
-    async def action_page_up(self) -> None:
+    def action_page_up(self) -> None:
         """Move cursor up by half page (Ctrl+u)."""
         self._g_pressed = False
         if self.cursor_row is not None:

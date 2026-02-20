@@ -1,6 +1,6 @@
 """Card-based grid view using QListView in IconMode with a custom delegate."""
 
-from PySide6.QtCore import Qt, Signal, QSize, QRect, QModelIndex
+from PySide6.QtCore import Qt, Signal, QSize, QRect, QModelIndex, QPersistentModelIndex
 from PySide6.QtGui import QPixmap, QPainter, QColor, QFont, QFontMetrics, QPen
 from PySide6.QtWidgets import (
     QListView,
@@ -61,15 +61,15 @@ class WadCardDelegate(QStyledItemDelegate):
     def sizeHint(self, option, index):
         return QSize(self._card_width, self._card_height)
 
-    def paint(self, painter: QPainter, option, index: QModelIndex):
+    def paint(self, painter: QPainter, option, index: QModelIndex | QPersistentModelIndex):
         painter.save()
-        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         rect = option.rect
         card_w = self._card_width
         thumb_h = self._thumb_height
-        is_selected = option.state & QStyle.State_Selected
-        is_hover = option.state & QStyle.State_MouseOver
+        is_selected = option.state & QStyle.StateFlag.State_Selected
+        is_hover = option.state & QStyle.StateFlag.State_MouseOver
 
         # Background
         if is_selected:
@@ -85,7 +85,7 @@ class WadCardDelegate(QStyledItemDelegate):
 
         # Get WAD data from model
         model = index.model()
-        wad_id = model.data(model.index(index.row(), 0), Qt.UserRole)
+        wad_id = model.data(model.index(index.row(), 0), Qt.ItemDataRole.UserRole)
 
         # Thumbnail area
         thumb_rect = QRect(
@@ -99,8 +99,8 @@ class WadCardDelegate(QStyledItemDelegate):
             pixmap = self._thumbnails[wad_id]
             scaled = pixmap.scaled(
                 thumb_rect.size(),
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
             )
             # Center within thumb_rect
             x = thumb_rect.x() + (thumb_rect.width() - scaled.width()) // 2
@@ -109,7 +109,7 @@ class WadCardDelegate(QStyledItemDelegate):
         else:
             # Dark placeholder
             painter.setBrush(QColor(DOOM_PALETTE["bg_dark"]))
-            painter.setPen(Qt.NoPen)
+            painter.setPen(Qt.PenStyle.NoPen)
             painter.drawRoundedRect(thumb_rect, 4, 4)
 
         # Text area starts below thumbnail
@@ -123,9 +123,10 @@ class WadCardDelegate(QStyledItemDelegate):
         painter.setPen(QColor(DOOM_PALETTE["text_accent"]))
 
         # Get title from the model's display data
-        title = model.data(model.index(index.row(), _col_index(model, Column.TITLE)), Qt.DisplayRole) or ""
+        title_val = model.data(model.index(index.row(), _col_index(model, Column.TITLE)), Qt.ItemDataRole.DisplayRole)
+        title = str(title_val) if title_val else ""
         title_rect = QRect(rect.x() + PADDING, text_y, card_w - 2 * PADDING, TEXT_LINE_HEIGHT)
-        painter.drawText(title_rect, Qt.AlignLeft | Qt.TextSingleLine, _elide(painter.fontMetrics(), title, title_rect.width()))
+        painter.drawText(title_rect, Qt.AlignmentFlag.AlignLeft | Qt.TextFlag.TextSingleLine, _elide(painter.fontMetrics(), title, title_rect.width()))
 
         # Author
         text_y += TEXT_LINE_HEIGHT + 2
@@ -134,13 +135,15 @@ class WadCardDelegate(QStyledItemDelegate):
         painter.setFont(author_font)
         painter.setPen(QColor(DOOM_PALETTE["text_secondary"]))
 
-        author = model.data(model.index(index.row(), _col_index(model, Column.AUTHOR)), Qt.DisplayRole) or ""
+        author_val = model.data(model.index(index.row(), _col_index(model, Column.AUTHOR)), Qt.ItemDataRole.DisplayRole)
+        author = str(author_val) if author_val else ""
         author_rect = QRect(rect.x() + PADDING, text_y, card_w - 2 * PADDING, TEXT_LINE_HEIGHT)
-        painter.drawText(author_rect, Qt.AlignLeft | Qt.TextSingleLine, _elide(painter.fontMetrics(), author, author_rect.width()))
+        painter.drawText(author_rect, Qt.AlignmentFlag.AlignLeft | Qt.TextFlag.TextSingleLine, _elide(painter.fontMetrics(), author, author_rect.width()))
 
         # Status badge
         text_y += TEXT_LINE_HEIGHT + 4
-        status_text = model.data(model.index(index.row(), _col_index(model, Column.STATUS)), Qt.DisplayRole) or ""
+        status_val = model.data(model.index(index.row(), _col_index(model, Column.STATUS)), Qt.ItemDataRole.DisplayRole)
+        status_text = str(status_val) if status_val else ""
         raw_status = ""
         # Get raw status for color lookup
         wad = model.get_wad(index.row()) if hasattr(model, 'get_wad') else None
@@ -158,30 +161,33 @@ class WadCardDelegate(QStyledItemDelegate):
 
         status_color = get_status_color(raw_status) if raw_status else QColor(DOOM_PALETTE["text_secondary"])
         painter.setBrush(status_color)
-        painter.setPen(Qt.NoPen)
+        painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(badge_rect, 3, 3)
 
         painter.setPen(QColor(DOOM_PALETTE["bg_dark"]))
-        painter.drawText(badge_rect, Qt.AlignCenter, status_text)
+        painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, status_text)
 
         # Playtime (bottom-right)
-        playtime = model.data(model.index(index.row(), _col_index(model, Column.PLAYTIME)), Qt.DisplayRole) or ""
+        playtime_val = model.data(model.index(index.row(), _col_index(model, Column.PLAYTIME)), Qt.ItemDataRole.DisplayRole)
+        playtime = str(playtime_val) if playtime_val else ""
         if playtime and playtime != "-":
             pt_font = QFont()
             pt_font.setPixelSize(10)
             painter.setFont(pt_font)
             painter.setPen(QColor(DOOM_PALETTE["text_secondary"]))
             pt_rect = QRect(rect.x() + PADDING, text_y, card_w - 2 * PADDING, 16)
-            painter.drawText(pt_rect, Qt.AlignRight | Qt.AlignVCenter, playtime)
+            painter.drawText(pt_rect, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, playtime)
 
         painter.restore()
 
 
-def _col_index(model, column: Column) -> int:
+def _col_index(model: object, column: Column) -> int:
     """Find the column index for a Column enum in the model."""
-    if hasattr(model, '_columns'):
+    columns = getattr(model, '_columns', None)
+    if columns is not None:
         try:
-            return model._columns.index(column)
+            idx: int = columns.index(column)
+            return idx
         except ValueError:
             pass
     return 0
@@ -220,7 +226,7 @@ class WadGridView(QListView):
         self._update_grid_size()
         self.setSpacing(4)
         self.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
 
     def set_card_size(self, width: int):
@@ -239,7 +245,7 @@ class WadGridView(QListView):
         self._delegate.set_thumbnail(wad_id, pixmap)
         self.viewport().update()
 
-    def currentChanged(self, current: QModelIndex, previous: QModelIndex):
+    def currentChanged(self, current: QModelIndex | QPersistentModelIndex, previous: QModelIndex | QPersistentModelIndex):
         super().currentChanged(current, previous)
         wad_id = self._wad_id_at(current)
         if wad_id is not None:
@@ -263,10 +269,11 @@ class WadGridView(QListView):
         else:
             super().mouseDoubleClickEvent(event)
 
-    def _wad_id_at(self, index: QModelIndex) -> int | None:
+    def _wad_id_at(self, index: QModelIndex | QPersistentModelIndex) -> int | None:
         if index.isValid():
             idx = self.model().index(index.row(), 0)
-            return self.model().data(idx, Qt.UserRole)
+            result: int | None = self.model().data(idx, Qt.ItemDataRole.UserRole)
+            return result
         return None
 
     def _show_context_menu(self, pos):

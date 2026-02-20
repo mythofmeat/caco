@@ -5,6 +5,8 @@ import sys
 import click
 from rich.progress import Progress, BarColumn, DownloadColumn, TransferSpeedColumn
 
+from typing import Any
+
 from caco import db
 from caco.config import get_default_sourceport
 from caco.player import play, format_duration
@@ -28,6 +30,7 @@ def play_cmd(query: str | None, sourceport: str | None, yes: bool, extra_args: t
 
     With no arguments, plays the most recently played WAD.
     """
+    wad: dict[str, Any] | None
     if query:
         wads = resolve_wad_query(query, mode="pick", yes=yes)
         if not wads:
@@ -49,20 +52,23 @@ def play_cmd(query: str | None, sourceport: str | None, yes: bool, extra_args: t
     console.print(f"[cyan]Playing {wad['title']}...[/cyan]")
 
     # Create a Rich progress callback for download display
-    _progress = [None]  # Mutable container for lazy init
+    _progress: list[Progress | None] = [None]
+    _task_id: list[Any] = [None]
 
     def _progress_callback(downloaded: int, total: int | None, filename: str) -> None:
-        if _progress[0] is None:
-            _progress[0] = Progress(
+        prog = _progress[0]
+        if prog is None:
+            prog = Progress(
                 "[progress.description]{task.description}",
                 BarColumn(),
                 DownloadColumn(),
                 TransferSpeedColumn(),
                 console=console,
             )
-            _progress[0].start()
-            _progress[0]._task = _progress[0].add_task(f"Downloading {filename}", total=total)
-        _progress[0].update(_progress[0]._task, completed=downloaded, total=total)
+            _progress[0] = prog
+            prog.start()
+            _task_id[0] = prog.add_task(f"Downloading {filename}", total=total)
+        prog.update(_task_id[0], completed=downloaded, total=total)
 
     try:
         duration = play(

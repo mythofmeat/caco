@@ -4,6 +4,7 @@ import json
 import shutil
 import sys
 from pathlib import Path
+from typing import Any
 
 import click
 
@@ -245,8 +246,8 @@ def update(
     dry_run: bool,
 ):
     """Update WAD metadata. QUERY: ID, ID range (3-6,9), or query (tag:megawad)."""
-    updates = {}
-    update_descriptions = []
+    updates: dict[str, Any] = {}
+    update_descriptions: list[str] = []
 
     # Core metadata fields
     if title:

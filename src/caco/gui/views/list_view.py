@@ -1,10 +1,13 @@
 """WAD list view (QTableView) with context menu and keyboard shortcuts."""
 
-from PySide6.QtCore import Qt, Signal, QModelIndex
+from typing import cast
+
+from PySide6.QtCore import Qt, Signal, QModelIndex, QPersistentModelIndex
 from PySide6.QtGui import QKeySequence, QShortcut, QAction, QResizeEvent
 from PySide6.QtWidgets import QTableView, QHeaderView, QAbstractItemView, QMenu
 
 from caco.gui.constants import DEFAULT_COLUMNS, ALL_COLUMNS, Column
+from caco.gui.models.wad_model import WadTableModel
 
 
 class WadListView(QTableView):
@@ -26,19 +29,19 @@ class WadListView(QTableView):
 
         # Table appearance
         self.setAlternatingRowColors(True)
-        self.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.setShowGrid(False)
         self.setSortingEnabled(False)
         self.verticalHeader().setVisible(False)
-        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
 
         # Column sizing — proportional widths, recalculated on resize
         header = self.horizontalHeader()
         header.setStretchLastSection(False)
-        header.setSectionResizeMode(QHeaderView.Interactive)
-        header.setContextMenuPolicy(Qt.CustomContextMenu)
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         header.customContextMenuRequested.connect(self._show_header_context_menu)
 
         # Keyboard shortcuts
@@ -109,7 +112,7 @@ class WadListView(QTableView):
             last = self.model().index(self.model().rowCount() - 1, 0)
             self.setCurrentIndex(last)
 
-    def currentChanged(self, current: QModelIndex, previous: QModelIndex):
+    def currentChanged(self, current: QModelIndex | QPersistentModelIndex, previous: QModelIndex | QPersistentModelIndex):
         """Override to emit wad_selected when cursor moves."""
         super().currentChanged(current, previous)
         wad_id = self._wad_id_at(current)
@@ -136,12 +139,13 @@ class WadListView(QTableView):
         else:
             super().mouseDoubleClickEvent(event)
 
-    def _wad_id_at(self, index: QModelIndex) -> int | None:
+    def _wad_id_at(self, index: QModelIndex | QPersistentModelIndex) -> int | None:
         """Get wad_id from a model index using UserRole."""
         if index.isValid():
             # Always read from column 0 to get UserRole data
             idx = self.model().index(index.row(), 0)
-            return self.model().data(idx, Qt.UserRole)
+            result: int | None = self.model().data(idx, Qt.ItemDataRole.UserRole)
+            return result
         return None
 
     def _show_context_menu(self, pos):
@@ -182,7 +186,7 @@ class WadListView(QTableView):
             return False
         for row in range(model.rowCount()):
             idx = model.index(row, 0)
-            if model.data(idx, Qt.UserRole) == wad_id:
+            if model.data(idx, Qt.ItemDataRole.UserRole) == wad_id:
                 self.setCurrentIndex(idx)
                 self.scrollTo(idx)
                 return True
@@ -211,10 +215,11 @@ class WadListView(QTableView):
 
     def _toggle_column(self, col: Column, visible: bool):
         """Add or remove a column from the model."""
-        model = self.model()
-        if not model or not hasattr(model, "columns"):
+        raw_model = self.model()
+        if not raw_model or not hasattr(raw_model, "columns"):
             return
 
+        model = cast(WadTableModel, raw_model)
         current = model.columns
         if visible and col not in current:
             # Insert in canonical order (matching ALL_COLUMNS order)

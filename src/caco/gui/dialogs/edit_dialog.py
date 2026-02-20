@@ -90,12 +90,12 @@ class EditDialog(QDialog):
         basic_form.addRow("Status:", self._status_combo)
 
         self._rating_combo = QComboBox()
-        for display, value in _RATING_OPTIONS:
-            self._rating_combo.addItem(display, value)
+        for display, rating_val in _RATING_OPTIONS:
+            self._rating_combo.addItem(display, rating_val)
         # Select current rating
         current_rating = self._wad.get("rating")
-        for i, (_, value) in enumerate(_RATING_OPTIONS):
-            if value == current_rating:
+        for i, (_, rating_val) in enumerate(_RATING_OPTIONS):
+            if rating_val == current_rating:
                 self._rating_combo.setCurrentIndex(i)
                 break
         basic_form.addRow("Rating:", self._rating_combo)
@@ -150,7 +150,7 @@ class EditDialog(QDialog):
         layout.addWidget(launch_group)
 
         # -- Buttons --
-        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self._save)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)

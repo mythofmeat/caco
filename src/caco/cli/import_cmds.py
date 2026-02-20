@@ -111,22 +111,22 @@ def _do_auto_import(source: str, title: str | None, author: str | None,
             page_title = path.split("/")[-1].replace("_", " ")
 
         with DoomwikiSource() as wiki:
-            entry = wiki.get(page_title)
-            if not entry:
+            wiki_entry = wiki.get(page_title)
+            if not wiki_entry:
                 err_console.print(f"[red]Page not found:[/red] {page_title}")
                 return
 
             existing = db.find_duplicate(
                 db.SourceType.DOOMWIKI,
-                source_id=str(entry.page_id),
+                source_id=str(wiki_entry.page_id),
             )
             if existing and not force:
                 console.print(f"[yellow]Already in library:[/yellow] {existing['title']} (ID: {existing['id']})")
                 console.print("[dim]Use --force to import anyway[/dim]")
                 return
 
-            wad_id = wiki.import_wad(entry, tags=list(tags) if tags else None)
-            console.print(f"[green]Imported:[/green] {entry.display_name} (ID: {wad_id})")
+            wad_id = wiki.import_wad(wiki_entry, tags=list(tags) if tags else None)
+            console.print(f"[green]Imported:[/green] {wiki_entry.display_name} (ID: {wad_id})")
 
     elif source_type == "url":
         inferred_title = title or _infer_title_from_url(source)
@@ -233,18 +233,18 @@ def _do_auto_import(source: str, title: str | None, author: str | None,
 
         with IdgamesSource() as idgames:
             try:
-                entry = idgames.get(int(source))
+                ig_entry = idgames.get(int(source))
             except Exception as e:
                 err_console.print(f"[red]Failed to fetch idgames ID {source}: {e}[/red]")
                 return
 
-            wad_id = _check_and_import_entry(
-                idgames, entry, db.SourceType.IDGAMES,
+            wad_id_or_none = _check_and_import_entry(
+                idgames, ig_entry, db.SourceType.IDGAMES,
                 list(tags) if tags else None, force,
-                source_id=str(entry.id), filename=entry.filename, author=entry.author,
+                source_id=str(ig_entry.id), filename=ig_entry.filename, author=ig_entry.author,
             )
-            if wad_id:
-                console.print(f"[green]Imported:[/green] {entry.title} (ID: {wad_id})")
+            if wad_id_or_none:
+                console.print(f"[green]Imported:[/green] {ig_entry.title} (ID: {wad_id_or_none})")
             else:
                 return
 

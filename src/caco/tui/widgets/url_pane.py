@@ -194,7 +194,8 @@ class UrlImportPane(Widget):
             self.notify(f"Imported: {title} (ID: {result.wad_id})")
             status.update(f"Successfully imported as ID {result.wad_id}")
             self._clear_form()
-            self.post_message(self.WadImported(result.wad_id))
+            if result.wad_id is not None:
+                self.post_message(self.WadImported(result.wad_id))
 
     def _clear_form(self) -> None:
         """Clear all form fields."""

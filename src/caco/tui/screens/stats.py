@@ -79,7 +79,7 @@ class StatsScreen(Screen):
             content.mount(Static(""))
             content.mount(Static("[bold]Monthly Activity[/bold]", classes="stats-section"))
 
-            table = DataTable(id="activity-table")
+            table: DataTable[str] = DataTable(id="activity-table")
             content.mount(table)
             table.add_column("Period", key="period", width=10)
             table.add_column("WADs", key="wads", width=8)

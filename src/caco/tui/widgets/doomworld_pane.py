@@ -162,56 +162,55 @@ class DoomworldUrlPane(Widget):
         form.remove_children()
 
         # Build form rows
-        with form.batch_updates():
-            # Title row
-            title_row = Horizontal(classes="form-row")
-            title_row.compose_add_child(Static("Title:", classes="form-label"))
-            title_row.compose_add_child(Input(
-                value=self._thread.title if self._thread else "",
-                id="title-input",
-                classes="form-input",
-            ))
-            form.mount(title_row)
+        # Title row
+        title_row = Horizontal(classes="form-row")
+        title_row.compose_add_child(Static("Title:", classes="form-label"))
+        title_row.compose_add_child(Input(
+            value=self._thread.title if self._thread else "",
+            id="title-input",
+            classes="form-input",
+        ))
+        form.mount(title_row)
 
-            # Author row
-            author_row = Horizontal(classes="form-row")
-            author_row.compose_add_child(Static("Author:", classes="form-label"))
-            author_row.compose_add_child(Input(
-                value=self._thread.author if self._thread else "",
-                id="author-input",
-                classes="form-input",
-            ))
-            form.mount(author_row)
+        # Author row
+        author_row = Horizontal(classes="form-row")
+        author_row.compose_add_child(Static("Author:", classes="form-label"))
+        author_row.compose_add_child(Input(
+            value=self._thread.author if self._thread else "",
+            id="author-input",
+            classes="form-input",
+        ))
+        form.mount(author_row)
 
-            # Year row
-            year_value = ""
-            if self._thread and self._thread.posted_date:
-                try:
-                    year_value = self._thread.posted_date[:4]
-                except (ValueError, IndexError):
-                    pass
-            year_row = Horizontal(classes="form-row")
-            year_row.compose_add_child(Static("Year:", classes="form-label"))
-            year_row.compose_add_child(Input(
-                value=year_value,
-                id="year-input",
-                classes="form-input",
-                max_length=4,
-            ))
-            form.mount(year_row)
+        # Year row
+        year_value = ""
+        if self._thread and self._thread.posted_date:
+            try:
+                year_value = self._thread.posted_date[:4]
+            except (ValueError, IndexError):
+                pass
+        year_row = Horizontal(classes="form-row")
+        year_row.compose_add_child(Static("Year:", classes="form-label"))
+        year_row.compose_add_child(Input(
+            value=year_value,
+            id="year-input",
+            classes="form-input",
+            max_length=4,
+        ))
+        form.mount(year_row)
 
-            # Tags row
-            tags_row = Horizontal(classes="form-row")
-            tags_row.compose_add_child(Static("Tags:", classes="form-label"))
-            tags_row.compose_add_child(Input(
-                placeholder="comma,separated,tags",
-                id="tags-input",
-                classes="form-input",
-            ))
-            form.mount(tags_row)
+        # Tags row
+        tags_row = Horizontal(classes="form-row")
+        tags_row.compose_add_child(Static("Tags:", classes="form-label"))
+        tags_row.compose_add_child(Input(
+            placeholder="comma,separated,tags",
+            id="tags-input",
+            classes="form-input",
+        ))
+        form.mount(tags_row)
 
-            # Import button
-            form.mount(Button("Import", id="import-btn", variant="success"))
+        # Import button
+        form.mount(Button("Import", id="import-btn", variant="success"))
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         """Handle URL input submission."""
@@ -384,4 +383,5 @@ class DoomworldUrlPane(Widget):
             self.query_one("#preview-meta", Static).update("")
             self.query_one("#preview-excerpt", Static).update("")
 
-            self.post_message(self.WadImported(result.wad_id))
+            if result.wad_id is not None:
+                self.post_message(self.WadImported(result.wad_id))

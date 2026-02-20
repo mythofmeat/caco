@@ -45,17 +45,20 @@ class IdgamesClient(BaseHttpClient):
             # Warnings still contain content, just log and continue
             pass
 
-        return data.get("content", {})
+        result: dict = data.get("content", {})
+        return result
 
     def ping(self) -> str:
         """Check if the API server is responding."""
         content = self._request("ping")
-        return content.get("status", "")
+        status: str = content.get("status", "")
+        return status
 
     def dbping(self) -> str:
         """Check if the database is responding."""
         content = self._request("dbping")
-        return content.get("status", "")
+        status: str = content.get("status", "")
+        return status
 
     def about(self) -> ApiInfo:
         """Get API information."""
