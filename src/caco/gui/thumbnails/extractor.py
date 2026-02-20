@@ -13,11 +13,14 @@ Doom patch format (320x200):
   - Column ends with top_delta == 0xFF
 """
 
+import logging
 import mmap
 import struct
 import zipfile
 from io import BytesIO
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Maximum size for a WAD inside a ZIP (256 MB) — protects against decompression bombs
 _MAX_ZIP_ENTRY_SIZE = 256 * 1024 * 1024
@@ -41,8 +44,8 @@ def _read_palette_from_wad(wad_data: bytes) -> bytes | None:
         for name, offset, size in directory:
             if name == "PLAYPAL" and size >= 768:
                 return wad_data[offset:offset + 768]
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Failed to read PLAYPAL from WAD: %s", exc)
     return None
 
 
@@ -193,7 +196,8 @@ def extract_titlepic(wad_path: str | Path) -> Image.Image | None:
         if titlepic_data[:4] == b"\x89PNG":
             try:
                 return Image.open(BytesIO(titlepic_data))
-            except Exception:
+            except Exception as exc:
+                logger.debug("Failed to decode PNG TITLEPIC for %s: %s", wad_path, exc)
                 return None
 
         # Try Doom patch format — extract palette before closing mmap

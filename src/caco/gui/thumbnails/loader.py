@@ -11,8 +11,11 @@ IMPORTANT: Worker threads use QImage (thread-safe) exclusively.
 Conversion to QPixmap happens only on the main thread in _on_ready().
 """
 
+import logging
 import threading
 from io import BytesIO
+
+logger = logging.getLogger(__name__)
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, Slot
 from PySide6.QtGui import QPixmap, QImage, QColor, QPainter, QFont
@@ -45,7 +48,8 @@ class ThumbnailWorker(QRunnable):
         # Top-level try/except: signal MUST always emit so _pending is cleared
         try:
             image = self._load_image()
-        except Exception:
+        except Exception as exc:
+            logger.debug("Failed to load thumbnail for WAD %d: %s", self.wad_id, exc)
             image = None
 
         if image is None or image.isNull():
@@ -74,8 +78,8 @@ class ThumbnailWorker(QRunnable):
                     img = QImage()
                     if img.loadFromData(png_bytes):
                         return img
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Failed to extract TITLEPIC for WAD %d (%s): %s", self.wad_id, self.cached_path, exc)
 
         # 2. Check filesystem cache (wiki image or previous TITLEPIC)
         cached_bytes = thumb_cache.load(self.wad_id)
@@ -97,8 +101,8 @@ class ThumbnailWorker(QRunnable):
                 img = QImage()
                 if img.loadFromData(img_bytes):
                     return img
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to scrape wiki thumbnail for WAD %d (%s): %s", self.wad_id, self.title, exc)
 
         return None
 

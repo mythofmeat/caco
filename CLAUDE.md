@@ -56,7 +56,14 @@ src/caco/
 │   ├── config_cmd.py   # config, completions commands
 │   └── stats.py        # stats, beaten commands
 ├── utils.py        # Shared utilities (coerce_str, BaseHttpClient, CacoSourceError, extract_year)
-├── db.py           # SQLite database (models, queries, STATUS_SHORTCUTS)
+├── db/             # SQLite database package
+│   ├── __init__.py     # Re-exports all public symbols (backward compat)
+│   ├── _models.py      # Enums (Status, SourceType), WadRecord TypedDict, constants
+│   ├── _connection.py  # get_connection(), tag helpers, batch query chunking
+│   ├── _schema.py      # Schema SQL, migrations, init_db()
+│   ├── _query.py       # Query parser, search_wads(), find_duplicate()
+│   ├── _wads.py        # WAD CRUD (add/get/update/delete), tag add/remove
+│   └── _sessions.py    # Sessions, completions, batch stats, cache, StatsSnapshot
 ├── config.py       # TOML config in ~/.config/caco/
 ├── player.py       # Sourceport launcher + playtime tracking
 ├── idgames/        # idgames API client
@@ -151,7 +158,7 @@ src/caco/
 - WAD cache: `~/.cache/caco/wads/`
 
 **Key patterns:**
-- `db.py` uses raw sqlite3 with `sqlite3.Row` for dict-like access; tag helpers (`_fetch_tags`, `_attach_tags`, `_fetch_tags_batch`) and batch query functions (`get_total_playtime_batch`, `get_last_played_batch`, `get_times_beaten_batch`, `get_session_count_batch`) reduce N+1 queries
+- `db/` package uses raw sqlite3 with `sqlite3.Row` for dict-like access; tag helpers (`_fetch_tags`, `_attach_tags`, `_fetch_tags_batch`) and batch query functions (`get_total_playtime_batch`, `get_last_played_batch`, `get_times_beaten_batch`, `get_session_count_batch`) reduce N+1 queries; `__init__.py` re-exports everything so `from caco import db` and `from caco.db import Status` both work
 - TUI widgets use batch stats: `WadTable.load_wads()` batch-fetches all stats; `get_wad_stats()` and `get_wad_by_id()` expose cached data to `WadInfoPanel`; `update_row()` handles incremental cell updates
 - Status colors/display centralized in `tui/theme.py` (`STATUS_CONFIG` dict with `get_status_display/color/css_class` helpers)
 - Source adapters inherit `BaseSource` from `sources/base.py` for shared context-manager lifecycle; clients inherit `BaseHttpClient` from `utils.py`; errors inherit `CacoSourceError`

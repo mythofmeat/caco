@@ -218,6 +218,52 @@ class LibraryTab(QWidget):
         self._filter.setFocus()
         self._filter.selectAll()
 
+    # ── Sort management ─────────────────────────────────────────────
+
+    def set_sort(self, field: str, descending: bool) -> None:
+        """Set the sort field and direction."""
+        self._sort.set_sort(field, descending)
+
+    def get_sort_field(self) -> str:
+        """Return the current sort field name."""
+        return self._sort.current_field()
+
+    def is_sort_descending(self) -> bool:
+        """Return whether the current sort is descending."""
+        return self._sort.is_descending()
+
+    # ── View management ──────────────────────────────────────────
+
+    def toggle_view(self) -> None:
+        """Switch between list and grid views."""
+        self._toggle_view()
+
+    def is_grid_view(self) -> bool:
+        """Return whether the grid view is currently active."""
+        return self._is_grid_view
+
+    # ── Column management ────────────────────────────────────────
+
+    def set_visible_columns(self, columns: list) -> None:
+        """Set the visible columns for the list view."""
+        self._model.set_columns(columns)
+        self._list_view._apply_column_widths()
+
+    @property
+    def columns_changed(self):
+        """Signal emitted when list view columns change."""
+        return self._list_view.columns_changed
+
+    # ── Splitter state (for geometry persistence) ────────────────
+
+    def save_splitter_state(self):
+        """Return the current splitter state for persistence."""
+        return self._splitter.saveState()
+
+    def restore_splitter_state(self, state) -> None:
+        """Restore a previously saved splitter state."""
+        self._splitter.restoreState(state)
+
     # ── View toggle ────────────────────────────────────────────────
 
     def set_card_size(self, width: int):

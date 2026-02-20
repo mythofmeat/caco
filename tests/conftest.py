@@ -14,7 +14,7 @@ def tmp_db(tmp_path):
     db functions use the test database.
     """
     db_path = tmp_path / "test.db"
-    with patch("caco.db.get_db_path", return_value=db_path):
+    with patch("caco.config.get_db_path", return_value=db_path):
         from caco import db
         # Clear config cache between tests
         from caco import config

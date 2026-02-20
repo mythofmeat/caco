@@ -130,12 +130,12 @@ class MainWindow(QMainWindow):
         saved_desc = self._settings.value("sortDesc")
         sort_field = saved_sort if isinstance(saved_sort, str) else self._config.get("default_sort", "id")
         sort_desc = (saved_desc == "true" or saved_desc is True) if saved_desc is not None else self._config.get("default_sort_desc", False)
-        self._library_tab._sort.set_sort(sort_field, sort_desc)
+        self._library_tab.set_sort(sort_field, sort_desc)
 
         saved_view = self._settings.value("viewType")
         view_type = saved_view if isinstance(saved_view, str) else self._config.get("default_view", "list")
         if view_type == "grid":
-            self._library_tab._toggle_view()
+            self._library_tab.toggle_view()
 
         # Restore saved column visibility
         self._restore_columns()
@@ -150,7 +150,7 @@ class MainWindow(QMainWindow):
         self._restore_saved_searches()
 
         # Listen for column changes to persist them
-        self._library_tab._list_view.columns_changed.connect(self._on_columns_changed)
+        self._library_tab.columns_changed.connect(self._on_columns_changed)
 
         # Listen for card size changes to persist them
         self._library_tab.card_size_changed.connect(self._on_card_size_changed)
@@ -489,8 +489,7 @@ class MainWindow(QMainWindow):
             col_map = {c.name: c for c in ALL_COLUMNS}
             columns = [col_map[name] for name in saved if name in col_map]
             if columns:
-                self._library_tab._model.set_columns(columns)
-                self._library_tab._list_view._apply_column_widths()
+                self._library_tab.set_visible_columns(columns)
 
     def _on_columns_changed(self, columns):
         """Persist column visibility when user changes it."""
@@ -541,13 +540,13 @@ class MainWindow(QMainWindow):
             self.restoreState(state)
         splitter_state = self._settings.value("splitterState")
         if splitter_state:
-            self._library_tab._splitter.restoreState(splitter_state)
+            self._library_tab.restore_splitter_state(splitter_state)
 
     def closeEvent(self, event):
         """Save window state on close."""
         self._settings.setValue("geometry", self.saveGeometry())
         self._settings.setValue("windowState", self.saveState())
-        self._settings.setValue("splitterState", self._library_tab._splitter.saveState())
+        self._settings.setValue("splitterState", self._library_tab.save_splitter_state())
 
         # Save current tab by name
         self._settings.setValue("lastTabName", self._current_tab_name() or "All")
@@ -560,10 +559,10 @@ class MainWindow(QMainWindow):
         self._persist_custom_tabs()
 
         # Save sort order
-        self._settings.setValue("sortField", self._library_tab._sort.current_field())
-        self._settings.setValue("sortDesc", self._library_tab._sort.is_descending())
+        self._settings.setValue("sortField", self._library_tab.get_sort_field())
+        self._settings.setValue("sortDesc", self._library_tab.is_sort_descending())
 
         # Save view type
-        self._settings.setValue("viewType", "grid" if self._library_tab._is_grid_view else "list")
+        self._settings.setValue("viewType", "grid" if self._library_tab.is_grid_view() else "list")
 
         super().closeEvent(event)
