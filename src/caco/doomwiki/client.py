@@ -169,11 +169,49 @@ class DoomwikiClient(BaseHttpClient):
         parsed = self._parser.parse(wikitext, title, page_id)
         return WikiEntry(**parsed)
 
+    def get_pages_batch(self, titles: list[str]) -> dict[str, tuple[int, str]]:
+        """Fetch multiple page contents in a single API request.
+
+        Uses MediaWiki pipe-separated titles API (max 50 per request).
+
+        Args:
+            titles: List of page titles to fetch
+
+        Returns:
+            Dict mapping title -> (page_id, wikitext) for pages that exist
+        """
+        if not titles:
+            return {}
+
+        results: dict[str, tuple[int, str]] = {}
+
+        # MediaWiki API supports up to 50 titles per request
+        for i in range(0, len(titles), 50):
+            batch = titles[i:i + 50]
+            data = self._request(
+                action="query",
+                titles="|".join(batch),
+                prop="revisions",
+                rvprop="content",
+            )
+
+            for page_id_str, page_data in data.get("query", {}).get("pages", {}).items():
+                if page_id_str == "-1" or "missing" in page_data:
+                    continue
+                revisions = page_data.get("revisions", [])
+                if revisions:
+                    title = page_data.get("title", "")
+                    content = revisions[0].get("*", "")
+                    results[title] = (int(page_id_str), content)
+
+        return results
+
     def search_wads(self, query: str, limit: int = 20) -> list[WikiEntry]:
         """
         Search for WAD pages and return parsed entries.
 
         Only returns pages that contain a {{Wad}} infobox template.
+        Uses batch page fetch to minimize API requests.
 
         Args:
             query: Search query string
@@ -183,11 +221,16 @@ class DoomwikiClient(BaseHttpClient):
             List of WikiEntry objects for pages with WAD infoboxes
         """
         search_results = self.search(query, limit=limit)
-        entries = []
+        if not search_results:
+            return []
 
+        # Batch-fetch all page contents in one API call
+        titles = [r.title for r in search_results]
+        pages = self.get_pages_batch(titles)
+
+        entries = []
         for result in search_results:
-            # Use title to get page content (search results may not have pageid)
-            content_result = self.get_page_content(result.title)
+            content_result = pages.get(result.title)
             if content_result is None:
                 continue
 

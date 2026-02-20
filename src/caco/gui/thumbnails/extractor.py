@@ -13,10 +13,14 @@ Doom patch format (320x200):
   - Column ends with top_delta == 0xFF
 """
 
+import mmap
 import struct
 import zipfile
 from io import BytesIO
 from pathlib import Path
+
+# Maximum size for a WAD inside a ZIP (256 MB) — protects against decompression bombs
+_MAX_ZIP_ENTRY_SIZE = 256 * 1024 * 1024
 
 try:
     from PIL import Image
@@ -149,45 +153,58 @@ def extract_titlepic(wad_path: str | Path) -> Image.Image | None:
     if path.suffix.lower() == ".zip" or (path.suffix.lower() not in (".wad", ".pk3", ".pk7")):
         try:
             with zipfile.ZipFile(path) as zf:
-                for name in zf.namelist():
-                    if name.lower().endswith(".wad"):
-                        wad_data = zf.read(name)
+                for info in zf.infolist():
+                    if info.filename.lower().endswith(".wad"):
+                        if info.file_size > _MAX_ZIP_ENTRY_SIZE:
+                            break  # Skip oversized entries
+                        wad_data = zf.read(info)
                         break
         except (zipfile.BadZipFile, KeyError):
             pass
 
-    if wad_data is None:
-        try:
-            wad_data = path.read_bytes()
-        except OSError:
+    mm = None
+    fh = None
+    try:
+        if wad_data is None:
+            try:
+                # Use mmap for direct WAD files to avoid loading entire file into memory
+                fh = open(path, "rb")
+                mm = mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ)
+                wad_data = mm
+            except (OSError, ValueError):
+                return None
+
+        # Parse WAD directory
+        directory = _parse_wad_directory(wad_data)
+        if not directory:
             return None
 
-    # Parse WAD directory
-    directory = _parse_wad_directory(wad_data)
-    if not directory:
-        return None
+        # Find TITLEPIC lump
+        titlepic_data = None
+        for name, offset, size in directory:
+            if name == "TITLEPIC" and size > 0:
+                titlepic_data = bytes(wad_data[offset:offset + size])
+                break
 
-    # Find TITLEPIC lump
-    titlepic_data = None
-    for name, offset, size in directory:
-        if name == "TITLEPIC" and size > 0:
-            titlepic_data = wad_data[offset:offset + size]
-            break
-
-    if not titlepic_data:
-        return None
-
-    # Check if it's a PNG (modern WADs)
-    if titlepic_data[:4] == b"\x89PNG":
-        try:
-            return Image.open(BytesIO(titlepic_data))
-        except Exception:
+        if not titlepic_data:
             return None
 
-    # Try Doom patch format
-    palette = _read_palette_from_wad(wad_data)
-    if not palette:
-        # Use a basic grayscale fallback palette
-        palette = bytes(val for val in range(256) for _ in range(3))
+        # Check if it's a PNG (modern WADs)
+        if titlepic_data[:4] == b"\x89PNG":
+            try:
+                return Image.open(BytesIO(titlepic_data))
+            except Exception:
+                return None
 
-    return _decode_doom_patch(titlepic_data, palette)
+        # Try Doom patch format — extract palette before closing mmap
+        palette = _read_palette_from_wad(wad_data)
+        if not palette:
+            # Use a basic grayscale fallback palette
+            palette = bytes(val for val in range(256) for _ in range(3))
+
+        return _decode_doom_patch(titlepic_data, palette)
+    finally:
+        if mm is not None:
+            mm.close()
+        if fh is not None:
+            fh.close()
