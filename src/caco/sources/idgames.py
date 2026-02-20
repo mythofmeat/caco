@@ -66,7 +66,7 @@ class IdgamesSource:
         dest: Path,
         mirror: int | None = None,
         console: Console | None = None,
-        progress_callback: object = None,
+        progress_callback: "Callable | None" = None,
     ) -> Path:
         """Download a WAD file. Returns the path to the downloaded file.
 

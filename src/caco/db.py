@@ -7,7 +7,7 @@ from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import Any, TypedDict
 
 from caco.config import get_db_path
 
@@ -29,6 +29,37 @@ class SourceType(str, Enum):
     DOOMWORLD = "doomworld"
     URL = "url"
     LOCAL = "local"
+
+
+class WadRecord(TypedDict, total=False):
+    """Typed dictionary representing a WAD row with attached tags.
+
+    All fields except 'id', 'title', and 'source_type' are optional
+    (total=False). Functions returning WAD dicts should use this type
+    for better editor support and static analysis.
+    """
+    id: int
+    title: str
+    author: str | None
+    year: int | None
+    description: str | None
+    status: str
+    rating: int | None
+    notes: str | None
+    source_type: str
+    source_id: str | None
+    source_url: str | None
+    idgames_id: str | None
+    filename: str | None
+    cached_path: str | None
+    custom_iwad: str | None
+    custom_sourceport: str | None
+    custom_args: str | None
+    version: str | None
+    deleted_at: str | None
+    created_at: str
+    updated_at: str
+    tags: list[str]
 
 
 # =============================================================================

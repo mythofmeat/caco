@@ -1,9 +1,13 @@
 """Shared utilities for caco."""
 
+from __future__ import annotations
+
+from typing import Any
+
 import httpx
 
 
-def coerce_str(v):
+def coerce_str(v: Any) -> str:
     """Coerce None to empty string. Used as a Pydantic field validator."""
     return "" if v is None else v
 
@@ -80,8 +84,8 @@ class BaseHttpClient:
     def close(self) -> None:
         self._client.close()
 
-    def __enter__(self):
+    def __enter__(self) -> BaseHttpClient:
         return self
 
-    def __exit__(self, *args):
+    def __exit__(self, *args: object) -> None:
         self.close()

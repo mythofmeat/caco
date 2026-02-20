@@ -4,6 +4,7 @@ import json
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Callable
 
 from rich.console import Console
 
@@ -20,11 +21,14 @@ from caco.config import (
     resolve_sourceport,
 )
 
+# Callback for download progress: (downloaded_bytes, total_bytes, filename) -> None
+ProgressCallback = Callable[[int, int | None, str], None]
+
 
 def get_wad_path(
     wad: dict,
     console: Console | None = None,
-    progress_callback: object = None,
+    progress_callback: ProgressCallback | None = None,
 ) -> Path | None:
     """Get the local path to a WAD file, downloading if needed."""
     # If already cached, return cached path
@@ -175,7 +179,7 @@ def play(
     sourceport: str | None = None,
     extra_args: list[str] | None = None,
     console: Console | None = None,
-    progress_callback: object = None,
+    progress_callback: ProgressCallback | None = None,
     process_ref: list | None = None,
 ) -> int | None:
     """
