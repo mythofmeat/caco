@@ -130,6 +130,27 @@ def _fzf_select(
         return None
 
 
+def _parse_id_range_core(value: str) -> list[int]:
+    """Parse an ID range string like '3-6,9,11' into a list of ints.
+
+    Raises ValueError if the format is invalid.
+    """
+    ids = []
+    for part in value.split(","):
+        part = part.strip()
+        if "-" in part:
+            pieces = part.split("-", 1)
+            if len(pieces) != 2:
+                raise ValueError(f"Invalid range segment: {part}")
+            start, end = int(pieces[0]), int(pieces[1])
+            if start > end:
+                raise ValueError(f"Invalid range: {start}-{end}")
+            ids.extend(range(start, end + 1))
+        else:
+            ids.append(int(part))
+    return list(dict.fromkeys(ids))  # dedupe, preserve order
+
+
 class WadIdRange(click.ParamType):
     """Parse WAD ID ranges like '3-6,9,11' into a list of ints."""
 
@@ -139,17 +160,7 @@ class WadIdRange(click.ParamType):
         if isinstance(value, list):
             return value
         try:
-            ids = []
-            for part in value.split(","):
-                part = part.strip()
-                if "-" in part:
-                    start, end = map(int, part.split("-", 1))
-                    if start > end:
-                        self.fail(f"Invalid range: {start}-{end}", param, ctx)
-                    ids.extend(range(start, end + 1))
-                else:
-                    ids.append(int(part))
-            return list(dict.fromkeys(ids))  # dedupe, preserve order
+            return _parse_id_range_core(value)
         except ValueError:
             self.fail(f"Invalid format: {value}. Use '3-6,9,11'", param, ctx)
 
@@ -160,21 +171,7 @@ WAD_IDS = WadIdRange()
 def _parse_id_range(value: str) -> list[int] | None:
     """Try to parse a value as ID range (3-6,9,11). Returns None if not valid."""
     try:
-        ids = []
-        for part in value.split(","):
-            part = part.strip()
-            if "-" in part:
-                # Must be start-end format with valid ints
-                pieces = part.split("-", 1)
-                if len(pieces) != 2:
-                    return None
-                start, end = int(pieces[0]), int(pieces[1])
-                if start > end:
-                    return None
-                ids.extend(range(start, end + 1))
-            else:
-                ids.append(int(part))
-        return list(dict.fromkeys(ids))  # dedupe, preserve order
+        return _parse_id_range_core(value)
     except ValueError:
         return None
 
