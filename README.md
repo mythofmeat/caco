@@ -597,6 +597,19 @@ caco random --info                  # Prints ID, title, author (TSV)
 - **WAD cache**: `~/.cache/caco/wads/`
 - **Thumbnail cache**: `~/.cache/caco/thumbnails/`
 
+## Development
+
+```bash
+# Install in development mode with test dependencies
+pip install -e '.[test]'
+
+# Run tests
+pytest tests/ -v
+
+# Run tests with coverage
+pytest tests/ -v --cov=caco --cov-report=term-missing
+```
+
 ## License
 
 MIT
