@@ -18,17 +18,7 @@ from PySide6.QtWidgets import (
 
 from caco import db
 from caco.gui.theme import DOOM_PALETTE
-
-
-def _format_size(size_bytes: int) -> str:
-    """Format file size as human-readable string."""
-    if size_bytes >= 1024 * 1024 * 1024:
-        return f"{size_bytes / (1024 ** 3):.1f} GB"
-    elif size_bytes >= 1024 * 1024:
-        return f"{size_bytes / (1024 ** 2):.1f} MB"
-    elif size_bytes >= 1024:
-        return f"{size_bytes / 1024:.1f} KB"
-    return f"{size_bytes} B"
+from caco.utils import format_size as _format_size
 
 
 class CacheDialog(QDialog):

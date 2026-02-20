@@ -9,6 +9,7 @@ from textual.widgets import Static, Footer
 from caco import db
 from caco.player import format_duration
 from caco.tui.theme import get_status_display
+from caco.utils import format_rating, truncate
 
 
 class WadDetailScreen(Screen):
@@ -64,8 +65,7 @@ class WadDetailScreen(Screen):
         content.mount(self._make_row("Status", status_name))
 
         if wad.get("rating"):
-            stars = "★" * wad["rating"] + "☆" * (5 - wad["rating"])
-            content.mount(self._make_row("Rating", stars))
+            content.mount(self._make_row("Rating", format_rating(wad["rating"])))
 
         # Source info
         content.mount(Static(""))
@@ -114,11 +114,7 @@ class WadDetailScreen(Screen):
         if wad.get("description"):
             content.mount(Static(""))
             content.mount(Static("[bold]Description[/bold]", classes="detail-section"))
-            # Truncate very long descriptions
-            desc = wad["description"]
-            if len(desc) > 500:
-                desc = desc[:500] + "..."
-            content.mount(Static(desc))
+            content.mount(Static(truncate(wad["description"], 500)))
 
         # Notes
         if wad.get("notes"):

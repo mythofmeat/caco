@@ -16,6 +16,17 @@ _TIMEOUT = 15.0
 # Must match the pattern used by caco's existing doomwiki client.
 _HEADERS = {"User-Agent": "Caco/1.0 (Doom WAD library manager)"}
 
+# Shared httpx client (thread-safe for reads) — avoids creating a new client per thumbnail
+_shared_client: httpx.Client | None = None
+
+
+def _get_client() -> httpx.Client:
+    """Get (or lazily create) the shared httpx client."""
+    global _shared_client
+    if _shared_client is None:
+        _shared_client = httpx.Client(timeout=_TIMEOUT, headers=_HEADERS)
+    return _shared_client
+
 
 def fetch_wiki_image(wiki_url: str) -> bytes | None:
     """Try to fetch a title screen image from a Doom Wiki page URL.
@@ -49,27 +60,27 @@ def search_wiki_image(title: str) -> bytes | None:
         return None
 
     try:
-        with httpx.Client(timeout=_TIMEOUT, headers=_HEADERS) as client:
-            # Search for the WAD page by title
-            resp = client.get(API_URL, params={
-                "action": "opensearch",
-                "search": title,
-                "limit": "5",
-                "namespace": "0",
-                "format": "json",
-            })
-            resp.raise_for_status()
-            data = resp.json()
+        client = _get_client()
+        # Search for the WAD page by title
+        resp = client.get(API_URL, params={
+            "action": "opensearch",
+            "search": title,
+            "limit": "5",
+            "namespace": "0",
+            "format": "json",
+        })
+        resp.raise_for_status()
+        data = resp.json()
 
-            # opensearch returns [search_term, [titles], [descriptions], [urls]]
-            if len(data) < 2 or not data[1]:
-                return None
+        # opensearch returns [search_term, [titles], [descriptions], [urls]]
+        if len(data) < 2 or not data[1]:
+            return None
 
-            # Try each result — prefer exact or close matches
-            for page_title in data[1]:
-                result = _fetch_image_for_page(page_title, client=client)
-                if result:
-                    return result
+        # Try each result — prefer exact or close matches
+        for page_title in data[1]:
+            result = _fetch_image_for_page(page_title, client=client)
+            if result:
+                return result
 
     except Exception:
         pass
@@ -82,15 +93,14 @@ def _fetch_image_for_page(page_title: str, client: httpx.Client | None = None) -
 
     Args:
         page_title: MediaWiki page title (URL-decoded or encoded both work)
-        client: Optional existing httpx.Client to reuse
+        client: Optional existing httpx.Client to reuse (defaults to shared client)
 
     Returns:
         Image bytes if found, None otherwise.
     """
-    should_close = client is None
     try:
         if client is None:
-            client = httpx.Client(timeout=_TIMEOUT, headers=_HEADERS)
+            client = _get_client()
 
         # Step 1: Get images on the page
         resp = client.get(API_URL, params={
@@ -167,8 +177,5 @@ def _fetch_image_for_page(page_title: str, client: httpx.Client | None = None) -
 
     except Exception:
         pass
-    finally:
-        if should_close and client is not None:
-            client.close()
 
     return None

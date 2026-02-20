@@ -29,8 +29,19 @@ DEFAULT_LIST_CONFIG = {
 }
 
 
+_config_cache: dict[str, Any] | None = None
+
+
 def load_config() -> dict[str, Any]:
-    """Load configuration from file, creating defaults if needed."""
+    """Load configuration from file, creating defaults if needed.
+
+    Results are cached; call save_config() to invalidate.
+    Returns a shallow copy so callers can safely mutate top-level keys.
+    """
+    global _config_cache
+    if _config_cache is not None:
+        return _config_cache.copy()
+
     config = DEFAULT_CONFIG.copy()
 
     if CONFIG_FILE.exists():
@@ -51,16 +62,22 @@ def load_config() -> dict[str, Any]:
             print(f"Warning: Failed to load config: {e}", file=sys.stderr)
             print("Warning: Using default configuration.", file=sys.stderr)
 
-    return config
+    _config_cache = config
+    return config.copy()
 
 
 def save_config(config: dict[str, Any]) -> None:
-    """Save configuration to file."""
+    """Save configuration to file. Invalidates the load_config cache."""
+    global _config_cache
+    _config_cache = None
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
     lines = []
+    sections = []  # Nested dicts emitted after top-level keys (valid TOML order)
     for key, value in config.items():
-        if isinstance(value, str):
+        if isinstance(value, dict):
+            sections.append((key, value))
+        elif isinstance(value, str):
             lines.append(f'{key} = "{value}"')
         elif isinstance(value, bool):
             lines.append(f"{key} = {str(value).lower()}")
@@ -69,6 +86,20 @@ def save_config(config: dict[str, Any]) -> None:
         elif isinstance(value, list):
             items = ", ".join(f'"{v}"' for v in value)
             lines.append(f"{key} = [{items}]")
+
+    # Emit nested sections (e.g., [tui], [gui], [list])
+    for section_name, section_dict in sections:
+        lines.append(f"\n[{section_name}]")
+        for sub_key, sub_value in section_dict.items():
+            if isinstance(sub_value, str):
+                lines.append(f'{sub_key} = "{sub_value}"')
+            elif isinstance(sub_value, bool):
+                lines.append(f"{sub_key} = {str(sub_value).lower()}")
+            elif isinstance(sub_value, (int, float)):
+                lines.append(f"{sub_key} = {sub_value}")
+            elif isinstance(sub_value, list):
+                items = ", ".join(f'"{v}"' for v in sub_value)
+                lines.append(f"{sub_key} = [{items}]")
 
     CONFIG_FILE.write_text("\n".join(lines) + "\n")
 
@@ -184,22 +215,21 @@ def get_download_mirror() -> int:
     return int(config.get("download_mirror", 0))
 
 
+def _merge_section_config(section_name: str, defaults: dict[str, Any]) -> dict[str, Any]:
+    """Merge a [section] from user config over defaults. Only known keys are merged."""
+    config = load_config()
+    result = defaults.copy()
+    section = config.get(section_name)
+    if isinstance(section, dict):
+        for key in defaults:
+            if key in section:
+                result[key] = section[key]
+    return result
+
+
 def get_list_config() -> dict[str, Any]:
     """Get list display configuration, merging defaults with user config."""
-    config = load_config()
-    list_config = DEFAULT_LIST_CONFIG.copy()
-
-    # Merge user's [list] section if present
-    if "list" in config and isinstance(config["list"], dict):
-        user_list = config["list"]
-        if "format" in user_list:
-            list_config["format"] = user_list["format"]
-        if "sort" in user_list:
-            list_config["sort"] = user_list["sort"]
-        if "default_status" in user_list:
-            list_config["default_status"] = user_list["default_status"]
-
-    return list_config
+    return _merge_section_config("list", DEFAULT_LIST_CONFIG)
 
 
 # =============================================================================
@@ -239,19 +269,7 @@ DEFAULT_TUI_CONFIG = {
 
 def get_tui_config() -> dict[str, Any]:
     """Get TUI configuration, merging defaults with user config."""
-    config = load_config()
-    tui_config = DEFAULT_TUI_CONFIG.copy()
-
-    if "tui" in config and isinstance(config["tui"], dict):
-        user_tui = config["tui"]
-        if "default_tab" in user_tui:
-            tui_config["default_tab"] = user_tui["default_tab"]
-        if "default_sort" in user_tui:
-            tui_config["default_sort"] = user_tui["default_sort"]
-        if "default_sort_desc" in user_tui:
-            tui_config["default_sort_desc"] = user_tui["default_sort_desc"]
-
-    return tui_config
+    return _merge_section_config("tui", DEFAULT_TUI_CONFIG)
 
 
 # =============================================================================
@@ -273,13 +291,4 @@ DEFAULT_GUI_CONFIG = {
 
 def get_gui_config() -> dict[str, Any]:
     """Get GUI configuration, merging defaults with user config."""
-    config = load_config()
-    gui_config = DEFAULT_GUI_CONFIG.copy()
-
-    if "gui" in config and isinstance(config["gui"], dict):
-        user_gui = config["gui"]
-        for key in DEFAULT_GUI_CONFIG:
-            if key in user_gui:
-                gui_config[key] = user_gui[key]
-
-    return gui_config
+    return _merge_section_config("gui", DEFAULT_GUI_CONFIG)

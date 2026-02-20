@@ -6,6 +6,7 @@ from caco import db
 from caco.idgames.models import FileEntry
 from caco.sources.idgames import IdgamesSource
 from caco.tui.widgets.base_search_pane import BaseSearchPane
+from caco.utils import format_author_year, format_rating, truncate
 
 
 class IdgamesSearchPane(BaseSearchPane):
@@ -41,28 +42,23 @@ class IdgamesSearchPane(BaseSearchPane):
             entry.title or entry.filename
         )
 
-        author_parts = []
-        if entry.author:
-            author_parts.append(entry.author)
+        year = None
         if entry.date:
             year = entry.date.split("-")[0] if "-" in entry.date else entry.date[:4]
-            author_parts.append(f"({year})")
         self.query_one("#preview-author", Static).update(
-            " ".join(author_parts) if author_parts else "Unknown author"
+            format_author_year(entry.author, year)
         )
 
         extra = self.query_one("#preview-extra", Static)
         if entry.rating > 0:
-            stars_full = int(entry.rating)
-            stars = "\u2605" * stars_full + "\u2606" * (5 - stars_full)
+            stars = format_rating(int(entry.rating))
             extra.update(f"Rating: {stars} ({entry.rating:.1f}, {entry.votes} votes)")
         else:
             extra.update("Rating: Not rated")
 
-        description = entry.description or "No description available"
-        if len(description) > 500:
-            description = description[:500] + "..."
-        self.query_one("#preview-desc", Static).update(description)
+        self.query_one("#preview-desc", Static).update(
+            truncate(entry.description or "No description available", 500)
+        )
 
     def _do_import(self, entry: FileEntry) -> int | None:
         existing = db.find_duplicate(

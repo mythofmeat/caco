@@ -24,6 +24,7 @@ from caco.config import (
 )
 from caco.db import STATUS_SHORTCUTS
 from caco.player import play, format_duration
+from caco.utils import format_rating
 
 console = Console()
 err_console = Console(stderr=True)
@@ -378,7 +379,7 @@ def _complete_tags(ctx, param, incomplete):
 QUERY_FIELDS = ["id:", "title:", "name:", "author:", "year:", "filename:", "tag:", "status:", "source:"]
 
 # Valid status values for completion
-QUERY_STATUS_VALUES = ["to-play", "backlog", "playing", "finished", "abandoned"]
+QUERY_STATUS_VALUES = ["to-play", "backlog", "playing", "finished", "abandoned", "awaiting-update"]
 
 # Valid source values for completion
 QUERY_SOURCE_VALUES = ["idgames", "doomwiki", "doomworld", "url", "local"]
@@ -685,10 +686,8 @@ def _render_wad_list(wads: list[dict], title: str | None = None, list_config: di
             elif col == "status":
                 row_values.append(wad["status"])
             elif col == "rating":
-                if wad.get("rating"):
-                    row_values.append("\u2605" * wad["rating"] + "\u2606" * (5 - wad["rating"]))
-                else:
-                    row_values.append("-")
+                stars = format_rating(wad.get("rating"))
+                row_values.append(stars if stars else "-")
             elif col == "beaten":
                 count = times_beaten.get(wad["id"], 0)
                 row_values.append(str(count) if count else "-")

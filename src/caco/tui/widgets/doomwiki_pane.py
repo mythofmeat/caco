@@ -6,6 +6,7 @@ from caco import db
 from caco.doomwiki.models import WikiEntry
 from caco.sources.doomwiki import DoomwikiSource
 from caco.tui.widgets.base_search_pane import BaseSearchPane
+from caco.utils import format_author_year, truncate
 
 
 class DoomwikiSearchPane(BaseSearchPane):
@@ -47,13 +48,8 @@ class DoomwikiSearchPane(BaseSearchPane):
     def _update_preview(self, entry: WikiEntry) -> None:
         self.query_one("#preview-title", Static).update(entry.display_name)
 
-        author_parts = []
-        if entry.author:
-            author_parts.append(entry.author)
-        if entry.year:
-            author_parts.append(f"({entry.year})")
         self.query_one("#preview-author", Static).update(
-            " ".join(author_parts) if author_parts else "Unknown author"
+            format_author_year(entry.author, entry.year)
         )
 
         # Technical info (IWAD + Port)
@@ -66,10 +62,9 @@ class DoomwikiSearchPane(BaseSearchPane):
             " | ".join(tech_parts) if tech_parts else ""
         )
 
-        description = entry.description or "No description available"
-        if len(description) > 500:
-            description = description[:500] + "..."
-        self.query_one("#preview-desc", Static).update(description)
+        self.query_one("#preview-desc", Static).update(
+            truncate(entry.description or "No description available", 500)
+        )
 
     def _do_import(self, entry: WikiEntry) -> int | None:
         existing = db.find_duplicate(

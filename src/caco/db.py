@@ -84,6 +84,14 @@ STATUS_SHORTCUTS: MappingProxyType[str, str] = MappingProxyType({
 OR_SEPARATOR = " , "
 
 
+# Fields allowed in update_wad() — guards against SQL column-name injection
+ALLOWED_UPDATE_FIELDS = frozenset({
+    "title", "author", "year", "description", "status", "rating", "notes",
+    "source_url", "filename", "cached_path", "custom_iwad",
+    "custom_sourceport", "custom_args", "version", "idgames_id", "deleted_at",
+})
+
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS wads (
     id INTEGER PRIMARY KEY,
@@ -152,6 +160,13 @@ CREATE INDEX IF NOT EXISTS idx_sessions_wad_id ON sessions(wad_id);
 CREATE INDEX IF NOT EXISTS idx_wad_completions_wad_id ON wad_completions(wad_id);
 """
 
+# Indexes that depend on migration-added columns — run after init_db() migrations
+_POST_MIGRATION_INDEXES = """
+CREATE INDEX IF NOT EXISTS idx_wads_deleted_at ON wads(deleted_at);
+CREATE INDEX IF NOT EXISTS idx_wads_cached_path ON wads(cached_path);
+CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON sessions(wad_id, started_at DESC);
+"""
+
 
 def get_connection() -> sqlite3.Connection:
     """Get a database connection, creating the database if needed."""
@@ -160,6 +175,10 @@ def get_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA synchronous = NORMAL")
+    conn.execute("PRAGMA cache_size = -20000")  # 20 MB
+    conn.execute("PRAGMA temp_store = MEMORY")
     return conn
 
 
@@ -204,6 +223,8 @@ def init_db() -> None:
         _migrate_add_version(conn)
         _migrate_add_idgames_id(conn)
         _migrate_drop_map_completions(conn)
+        # Indexes on migration-added columns (must run after migrations)
+        conn.executescript(_POST_MIGRATION_INDEXES)
 
 
 def _migrate_add_custom_play_config(conn: sqlite3.Connection) -> None:
@@ -526,9 +547,10 @@ def _build_term_sql(term: QueryTerm) -> tuple[str, list[Any]]:
             clause = "wads.id IN (SELECT wad_id FROM tags WHERE tag LIKE ? ESCAPE '\\')"
             params = [like_pattern]
         else:
-            # Substring match for non-glob
-            clause = "wads.id IN (SELECT wad_id FROM tags WHERE tag LIKE ?)"
-            params = [f"%{tag_pattern}%"]
+            # Substring match for non-glob — escape SQL wildcards in the literal
+            escaped_tag = tag_pattern.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            clause = "wads.id IN (SELECT wad_id FROM tags WHERE tag LIKE ? ESCAPE '\\')"
+            params = [f"%{escaped_tag}%"]
 
     else:
         # Unknown field - treat as free text
@@ -682,9 +704,15 @@ def update_wad(wad_id: int, **fields) -> bool:
     """Update a WAD's fields. Returns True if updated.
 
     If status is set to 'finished', automatically records a completion.
+    Only fields in ALLOWED_UPDATE_FIELDS may be updated.
     """
     if not fields:
         return False
+
+    # Validate field names against whitelist (prevents SQL column injection)
+    invalid = set(fields.keys()) - ALLOWED_UPDATE_FIELDS
+    if invalid:
+        raise ValueError(f"Cannot update field(s): {', '.join(sorted(invalid))}")
 
     # Check if setting status to finished (before enum conversion)
     recording_completion = False
@@ -695,25 +723,27 @@ def update_wad(wad_id: int, **fields) -> bool:
         else:
             recording_completion = status_value == Status.FINISHED.value
 
-    # Convert enums to values
+    # Build clean copy with enums converted to values
+    clean_fields = {}
     for key, value in fields.items():
-        if isinstance(value, Enum):
-            fields[key] = value.value
+        clean_fields[key] = value.value if isinstance(value, Enum) else value
+    clean_fields["updated_at"] = datetime.now().isoformat()
 
-    fields["updated_at"] = datetime.now().isoformat()
-
-    set_clause = ", ".join(f"{k} = ?" for k in fields.keys())
+    set_clause = ", ".join(f"{k} = ?" for k in clean_fields.keys())
 
     with get_connection() as conn:
         cursor = conn.execute(
             f"UPDATE wads SET {set_clause} WHERE id = ?",
-            list(fields.values()) + [wad_id],
+            list(clean_fields.values()) + [wad_id],
         )
         updated = cursor.rowcount > 0
 
-    # Record completion if status was set to 'finished'
-    if updated and recording_completion:
-        add_wad_completion(wad_id)
+        # Record completion atomically if status was set to 'finished'
+        if updated and recording_completion:
+            conn.execute(
+                "INSERT INTO wad_completions (wad_id) VALUES (?)",
+                (wad_id,),
+            )
 
     return updated
 
@@ -1090,13 +1120,12 @@ def set_wad_completion_count(wad_id: int, count: int) -> None:
                 (wad_id, to_delete),
             )
         elif count > current:
-            # Add placeholder completions
+            # Add placeholder completions in bulk
             to_add = count - current
-            for _ in range(to_add):
-                conn.execute(
-                    "INSERT INTO wad_completions (wad_id, notes) VALUES (?, ?)",
-                    (wad_id, "Manually added"),
-                )
+            conn.executemany(
+                "INSERT INTO wad_completions (wad_id, notes) VALUES (?, ?)",
+                [(wad_id, "Manually added")] * to_add,
+            )
 
 
 def get_times_beaten(wad_id: int) -> int:

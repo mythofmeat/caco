@@ -155,7 +155,8 @@ class LocalImportPane(Widget):
         if path.exists():
             if path.is_file():
                 size = path.stat().st_size
-                size_str = self._format_size(size)
+                from caco.utils import format_size
+                size_str = format_size(size)
                 file_info.update(f"File exists: {size_str}")
 
                 # Auto-fill title from filename (without extension)
@@ -169,13 +170,7 @@ class LocalImportPane(Widget):
         else:
             file_info.update("File not found (will be recorded as reference)")
 
-    def _format_size(self, size: int) -> str:
-        """Format file size in human-readable form."""
-        for unit in ["B", "KB", "MB", "GB"]:
-            if size < 1024:
-                return f"{size:.1f} {unit}" if unit != "B" else f"{size} {unit}"
-            size /= 1024
-        return f"{size:.1f} TB"
+
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle import button click."""

@@ -1,6 +1,6 @@
 """Pydantic models for Doomworld forum data."""
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from caco.utils import coerce_str as _coerce_str
 
@@ -21,7 +21,7 @@ class ForumThread(BaseModel):
     thread_url: str = ""  # Full URL to the thread
 
     # Phase 2: Enhanced metadata extracted from post content
-    download_links: list[str] = []  # URLs to download files
+    download_links: list[str] = Field(default_factory=list)  # URLs to download files
     complevel: int | None = None  # Compatibility level (e.g., 9 for Boom)
     iwad: str | None = None  # Required IWAD (e.g., "doom2", "plutonia")
     sourceport: str | None = None  # Required sourceport (e.g., "gzdoom", "dsda-doom")

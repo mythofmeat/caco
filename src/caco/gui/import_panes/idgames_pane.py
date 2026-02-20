@@ -18,6 +18,7 @@ from caco import db
 from caco.gui.theme import DOOM_PALETTE
 from caco.gui.workers.search_worker import IdgamesSearchWorker
 from caco.gui.workers.import_worker import IdgamesImportWorker
+from caco.utils import format_rating
 
 
 class IdgamesPane(QWidget):
@@ -117,10 +118,7 @@ class IdgamesPane(QWidget):
             self._table.setItem(row, 1, QTableWidgetItem(entry.title or ""))
             self._table.setItem(row, 2, QTableWidgetItem(entry.author or ""))
 
-            rating_str = ""
-            if entry.rating is not None:
-                stars = round(entry.rating)
-                rating_str = "\u2605" * stars + "\u2606" * (5 - stars)
+            rating_str = format_rating(round(entry.rating)) if entry.rating is not None else ""
             self._table.setItem(row, 3, QTableWidgetItem(rating_str))
 
             date_str = entry.date[:10] if entry.date else ""
@@ -144,13 +142,10 @@ class IdgamesPane(QWidget):
             if entry.date:
                 parts.append(f"({entry.date[:4]})")
             if entry.rating is not None:
-                stars = round(entry.rating)
-                parts.append(f"<br>\u2605" * stars + "\u2606" * (5 - stars))
+                parts.append(f"<br>{format_rating(round(entry.rating))}")
             if entry.description:
-                desc = entry.description[:300]
-                if len(entry.description) > 300:
-                    desc += "..."
-                parts.append(f"<br><br>{desc}")
+                from caco.utils import truncate
+                parts.append(f"<br><br>{truncate(entry.description, 300)}")
 
             self._preview.setText(" ".join(parts))
         else:

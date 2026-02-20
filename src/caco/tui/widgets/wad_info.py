@@ -7,6 +7,7 @@ from textual.widgets import Static
 from caco import db
 from caco.player import format_duration
 from caco.tui.theme import get_status_display, get_status_css_class
+from caco.utils import format_author_year, format_rating, truncate
 
 
 class WadInfoPanel(Vertical):
@@ -57,12 +58,7 @@ class WadInfoPanel(Vertical):
         title_widget.update(wad["title"])
 
         # Author and year
-        author_parts = []
-        if wad.get("author"):
-            author_parts.append(wad["author"])
-        if wad.get("year"):
-            author_parts.append(f"({wad['year']})")
-        author_widget.update(" ".join(author_parts) if author_parts else "Unknown author")
+        author_widget.update(format_author_year(wad.get("author"), wad.get("year")))
 
         # Status with color
         status = wad["status"]
@@ -87,9 +83,7 @@ class WadInfoPanel(Vertical):
 
         # Rating (stars)
         if wad.get("rating"):
-            rating = wad["rating"]
-            stars = "★" * rating + "☆" * (5 - rating)
-            details_lines.append(f"[yellow]{stars}[/yellow]")
+            details_lines.append(f"[yellow]{format_rating(wad['rating'])}[/yellow]")
 
         # Playtime
         if playtime:
@@ -113,10 +107,7 @@ class WadInfoPanel(Vertical):
 
         # Description snippet
         if wad.get("description"):
-            desc = wad["description"]
-            if len(desc) > 120:
-                desc = desc[:120] + "..."
-            details_lines.append(f"\n[dim]{desc}[/dim]")
+            details_lines.append(f"\n[dim]{truncate(wad['description'], 120)}[/dim]")
 
         # Source
         details_lines.append(f"[dim]Source: {wad['source_type']}[/dim]")

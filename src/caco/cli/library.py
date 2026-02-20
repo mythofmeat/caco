@@ -9,6 +9,7 @@ import click
 from caco import db
 from caco.config import get_cache_dir, get_list_config
 from caco.player import format_duration
+from caco.utils import format_rating
 
 from caco.cli import (
     cli,
@@ -139,7 +140,7 @@ def info(query: str, yes: bool, as_json: bool, plain: bool):
         console.print(f"[bold]Version:[/bold] {wad['version']}")
 
     if wad["rating"]:
-        console.print(f"[bold]Rating:[/bold] {'\u2605' * wad['rating']}{'\u2606' * (5 - wad['rating'])}")
+        console.print(f"[bold]Rating:[/bold] {format_rating(wad['rating'])}")
 
     if wad.get("tags"):
         console.print(f"[bold]Tags:[/bold] {', '.join(wad['tags'])}")

@@ -236,7 +236,7 @@ class IdgamesClient(BaseHttpClient):
                 downloaded = 0
 
                 with open(partial, "wb") as f:
-                    for chunk in response.iter_bytes(chunk_size=8192):
+                    for chunk in response.iter_bytes(chunk_size=262144):
                         f.write(chunk)
                         downloaded += len(chunk)
                         yield downloaded, total

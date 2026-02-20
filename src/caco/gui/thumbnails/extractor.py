@@ -188,6 +188,6 @@ def extract_titlepic(wad_path: str | Path) -> Image.Image | None:
     palette = _read_palette_from_wad(wad_data)
     if not palette:
         # Use a basic grayscale fallback palette
-        palette = bytes(range(256)) * 3
+        palette = bytes(val for val in range(256) for _ in range(3))
 
     return _decode_doom_patch(titlepic_data, palette)

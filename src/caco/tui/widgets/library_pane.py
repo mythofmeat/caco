@@ -11,6 +11,7 @@ from caco import db
 from caco.config import get_tui_config
 from caco.db import STATUS_SHORTCUTS
 from caco.player import play
+from caco.utils import format_rating
 from caco.tui.widgets.filter_input import FilterInput
 from caco.tui.widgets.sort_select import SortSelect
 from caco.tui.widgets.wad_info import WadInfoPanel
@@ -403,8 +404,7 @@ class LibraryPane(Widget):
             self.notify("Rating cleared")
         else:
             db.update_wad(wad_id, rating=new_rating)
-            stars = "★" * new_rating + "☆" * (5 - new_rating)
-            self.notify(f"Rating: {stars}")
+            self.notify(f"Rating: {format_rating(new_rating)}")
 
         table.update_row(wad_id)
         panel = self.query_one("#info-panel", WadInfoPanel)

@@ -8,6 +8,7 @@ from rich.table import Table
 
 from caco import db
 from caco.config import get_cache_dir
+from caco.utils import format_size as _format_size
 
 from caco.cli import (
     cli,
@@ -15,22 +16,6 @@ from caco.cli import (
     err_console,
     resolve_wad_query,
 )
-
-
-# =============================================================================
-# Internal helpers
-# =============================================================================
-
-
-def _format_size(size_bytes: int) -> str:
-    """Format bytes as human-readable size."""
-    for unit in ["B", "KB", "MB", "GB"]:
-        if size_bytes < 1024:
-            if unit == "B":
-                return f"{size_bytes} {unit}"
-            return f"{size_bytes:.1f} {unit}"
-        size_bytes /= 1024
-    return f"{size_bytes:.1f} TB"
 
 
 def _list_orphaned_files(cache_dir: Path, plain: bool) -> None:

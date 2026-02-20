@@ -8,6 +8,44 @@ def coerce_str(v):
     return "" if v is None else v
 
 
+def format_rating(rating: int | None, max_stars: int = 5) -> str:
+    """Render a rating as filled/empty star characters (e.g., '★★★☆☆')."""
+    if not rating:
+        return ""
+    return "\u2605" * rating + "\u2606" * (max_stars - rating)
+
+
+def format_author_year(author: str | None, year: int | str | None) -> str:
+    """Format 'Author (Year)' with graceful fallbacks."""
+    parts = []
+    if author:
+        parts.append(str(author))
+    if year:
+        parts.append(f"({year})")
+    return " ".join(parts) if parts else "Unknown author"
+
+
+def truncate(text: str | None, max_len: int, suffix: str = "...") -> str:
+    """Truncate text to max_len, appending suffix if truncated."""
+    if not text:
+        return ""
+    if len(text) <= max_len:
+        return text
+    return text[:max_len - len(suffix)] + suffix
+
+
+def format_size(size_bytes: int) -> str:
+    """Format bytes as human-readable size (e.g., '12.3 MB')."""
+    value: float = float(size_bytes)
+    for unit in ("B", "KB", "MB", "GB"):
+        if value < 1024:
+            if unit == "B":
+                return f"{int(value)} {unit}"
+            return f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{value:.1f} TB"
+
+
 def extract_year(date_str: str | None) -> int | None:
     """Extract a 4-digit year from a date string (e.g. '2023-03-01' or '2023-03-01T...')."""
     if not date_str:

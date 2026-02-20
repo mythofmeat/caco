@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 
 from caco import db
 from caco.player import format_duration
+from caco.utils import format_author_year, format_rating, truncate
 from caco.gui.theme import (
     DOOM_PALETTE,
     get_status_color,
@@ -204,12 +205,7 @@ class DetailPanel(QScrollArea):
         self._title.setText(wad["title"])
 
         # Author + year
-        parts = []
-        if wad.get("author"):
-            parts.append(wad["author"])
-        if wad.get("year"):
-            parts.append(f"({wad['year']})")
-        self._author.setText(" ".join(parts) if parts else "Unknown author")
+        self._author.setText(format_author_year(wad.get("author"), wad.get("year")))
 
         # Status
         status = wad["status"]
@@ -221,9 +217,7 @@ class DetailPanel(QScrollArea):
         # Rating
         rating = wad.get("rating")
         if rating:
-            self._rating.setText(
-                "\u2605" * rating + "\u2606" * (5 - rating)
-            )
+            self._rating.setText(format_rating(rating))
             self._rating.setStyleSheet(f"color: {DOOM_PALETTE['yellow']}; font-size: 14px;")
         else:
             self._rating.setText("No rating")
@@ -266,10 +260,7 @@ class DetailPanel(QScrollArea):
             self._tags_layout.insertWidget(0, no_tags)
 
         # Description
-        desc = wad.get("description") or "No description"
-        if len(desc) > 500:
-            desc = desc[:500] + "..."
-        self._description.setText(desc)
+        self._description.setText(truncate(wad.get("description") or "No description", 500))
 
         # Source info
         source_parts = [f"Source: {wad.get('source_type', 'unknown')}"]

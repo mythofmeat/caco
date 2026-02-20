@@ -1,6 +1,7 @@
 """Sourceport launcher and playtime tracking."""
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -216,8 +217,13 @@ def play(
     if not port:
         raise ValueError("No sourceport specified and no default configured")
 
-    # Build command
+    # Build command — validate sourceport exists before launching
     port = resolve_sourceport(port)
+    if not shutil.which(port) and not Path(port).is_file():
+        raise FileNotFoundError(
+            f"Sourceport '{port}' not found on PATH or as a file. "
+            "Set a valid sourceport with: caco config set sourceport <name>"
+        )
     cmd = [port]
 
     # Add IWAD (CLI option would be in extra_args, so: WAD-specific > global config)

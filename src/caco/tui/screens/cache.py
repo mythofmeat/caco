@@ -8,18 +8,7 @@ from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Static
 
 from caco import db
-
-
-def _format_size(size_bytes: int) -> str:
-    """Format bytes into human-readable size."""
-    if size_bytes < 1024:
-        return f"{size_bytes} B"
-    elif size_bytes < 1024 * 1024:
-        return f"{size_bytes / 1024:.1f} KB"
-    elif size_bytes < 1024 * 1024 * 1024:
-        return f"{size_bytes / (1024 * 1024):.1f} MB"
-    else:
-        return f"{size_bytes / (1024 * 1024 * 1024):.2f} GB"
+from caco.utils import format_size as _format_size
 
 
 class CacheScreen(Screen):

@@ -6,6 +6,7 @@ from caco import db
 from caco.player import format_duration
 from caco.gui.constants import Column, DEFAULT_COLUMNS, ALL_COLUMNS
 from caco.gui.theme import get_status_color, get_status_display
+from caco.utils import format_rating
 
 
 class WadTableModel(QAbstractTableModel):
@@ -19,6 +20,7 @@ class WadTableModel(QAbstractTableModel):
         super().__init__(parent)
         self._columns = columns or DEFAULT_COLUMNS
         self._wads: list[dict] = []
+        self._wad_index: dict[int, int] = {}  # wad_id -> row index (O(1) lookup)
         # Batch-fetched stat maps
         self._playtime_map: dict[int, int] = {}
         self._last_played_map: dict[int, str] = {}
@@ -41,6 +43,9 @@ class WadTableModel(QAbstractTableModel):
             sort_desc=sort_desc,
             include_deleted=include_deleted,
         )
+
+        # Build O(1) wad_id → row index (mirrors TUI's _wad_id_to_row)
+        self._wad_index = {w["id"]: i for i, w in enumerate(self._wads)}
 
         # Batch-fetch all stats in bulk
         wad_ids = [w["id"] for w in self._wads]
@@ -115,10 +120,8 @@ class WadTableModel(QAbstractTableModel):
         elif col == Column.STATUS:
             return get_status_display(wad["status"])
         elif col == Column.RATING:
-            rating = wad.get("rating")
-            if rating:
-                return "\u2605" * rating + "\u2606" * (5 - rating)
-            return "-"
+            stars = format_rating(wad.get("rating"))
+            return stars if stars else "-"
         elif col == Column.BEATEN:
             count = self._times_beaten_map.get(wad_id, 0)
             return str(count) if count else "-"
@@ -160,10 +163,10 @@ class WadTableModel(QAbstractTableModel):
         return None
 
     def get_wad_by_id(self, wad_id: int) -> dict | None:
-        """Find a WAD dict by its ID."""
-        for w in self._wads:
-            if w["id"] == wad_id:
-                return w
+        """Find a WAD dict by its ID (O(1) via index)."""
+        row = self._wad_index.get(wad_id)
+        if row is not None:
+            return self._wads[row]
         return None
 
     def get_wad_stats(self, wad_id: int) -> dict:

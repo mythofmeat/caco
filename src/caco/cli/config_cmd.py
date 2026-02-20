@@ -1,5 +1,6 @@
 """Config and completions commands."""
 
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -68,6 +69,9 @@ sourceport_args = []
             config_path.write_text(default_content)
             console.print(f"[dim]Created default config at {config_path}[/dim]")
 
+        if not shutil.which(editor):
+            err_console.print(f"[red]Editor '{editor}' not found on PATH[/red]")
+            sys.exit(1)
         subprocess.run([editor, str(config_path)])
         return
 
