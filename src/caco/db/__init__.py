@@ -64,6 +64,7 @@ from caco.db._sessions import (  # noqa: F401
     clear_cached_path,
     delete_wad_completion,
     end_session,
+    update_wad_completion,
     get_cached_wads,
     get_completion_rate,
     get_last_played,
@@ -147,4 +148,5 @@ __all__ = [
     "get_wads_played_by_period",
     "set_wad_completion_count",
     "start_session",
+    "update_wad_completion",
 ]

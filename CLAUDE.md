@@ -12,7 +12,7 @@ Caco is a personal Doom WAD library manager inspired by `beets`. It tracks WADs 
 - Tag-based organization
 - On-demand downloading (WADs are cached, not stored permanently)
 - LLM-powered metadata extraction (optional, for Doomworld imports)
-- Completion tracking (times beaten per WAD)
+- Completion tracking (times beaten per WAD) with per-map stats import/export
 - Soft-delete with trash/restore lifecycle
 
 ## Commands
@@ -56,6 +56,7 @@ src/caco/
 │   ├── config_cmd.py   # config, completions commands
 │   └── stats.py        # stats, beaten commands
 ├── utils.py        # Shared utilities (coerce_str, BaseHttpClient, CacoSourceError, extract_year)
+├── wad_stats.py    # Per-map stats parser/formatter (stats.txt + levelstat.txt)
 ├── db/             # SQLite database package
 │   ├── __init__.py     # Re-exports all public symbols (backward compat)
 │   ├── _models.py      # Enums (Status, SourceType), WadRecord TypedDict, constants
@@ -89,6 +90,7 @@ src/caco/
 │   │   ├── sessions.py    # Session history
 │   │   ├── confirm_delete.py # Delete confirmation modal
 │   │   ├── stats.py       # Library statistics screen
+│   │   ├── wad_stats.py   # Per-map stats screen (stats.txt/levelstat.txt)
 │   │   └── cache.py       # Cache management screen
 │   └── widgets/    # Widget classes
 │       ├── base_search_pane.py # Abstract base for search panes
@@ -132,6 +134,7 @@ src/caco/
 │   │   ├── link_dialog.py    # WadUnavailableDialog: open source page, link local file
 │   │   ├── sessions_dialog.py # Session history table
 │   │   ├── stats_dialog.py   # Library statistics overview
+│   │   ├── wad_stats_dialog.py # Per-map stats table (stats.txt/levelstat.txt)
 │   │   └── cache_dialog.py   # Cache management
 │   ├── workers/
 │   │   ├── play_worker.py      # QThread for sourceport launch
@@ -199,11 +202,15 @@ src/caco/
 | `w`, `au`, `await`, `waiting`, `wip` | awaiting-update |
 
 **Beaten command group:**
-- `caco beaten list <query>` — show completion history (dates + notes) for a specific WAD
-- `caco beaten add <query> [--notes "text"]` — add a completion record
+- `caco beaten list <query>` — show completion history (dates + stats indicator) for a specific WAD
+- `caco beaten add <query> [--notes "text"] [--stats-file FILE]` — add a completion record, optionally with stats
+- `caco beaten attach <query> --stats-file FILE` — attach stats to an existing completion record
 - `caco beaten remove <query> [COMPLETION_ID]` — remove most recent or specific completion
 - `caco beaten set <query> <count>` — set exact completion count
-- Uses `wad_completions` table (auto-created via migration)
+- `caco beaten stats <query> [COMPLETION_ID] [--plain]` — view per-map statistics table for a completion
+- `caco beaten export <query> [COMPLETION_ID] [--output FILE]` — export stats back to original text format
+- Uses `wad_completions` table (auto-created via migration); stats stored as JSON in `stats_snapshot` column
+- Supports nyan-doom/dsda-doom `stats.txt` format (persistent per-map tracking) and `levelstat.txt` format (human-readable `-levelstat` output)
 
 **Output formats:**
 - `--plain` on `list`, `info`, `tag list`, `cache list`, `stats` — TSV/key=value for scripting

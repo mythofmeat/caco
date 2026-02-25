@@ -279,6 +279,34 @@ def get_wad_completions(wad_id: int) -> list[dict[str, Any]]:
         return [dict(row) for row in rows]
 
 
+def update_wad_completion(
+    completion_id: int,
+    stats_snapshot: str | None = None,
+    notes: str | None = None,
+) -> bool:
+    """Update a completion record's stats_snapshot and/or notes.
+
+    Only updates fields that are not None. Returns True if the record existed.
+    """
+    updates = []
+    params: list[Any] = []
+    if stats_snapshot is not None:
+        updates.append("stats_snapshot = ?")
+        params.append(stats_snapshot)
+    if notes is not None:
+        updates.append("notes = ?")
+        params.append(notes)
+    if not updates:
+        return False
+    params.append(completion_id)
+    with get_connection() as conn:
+        cursor = conn.execute(
+            f"UPDATE wad_completions SET {', '.join(updates)} WHERE id = ?",
+            params,
+        )
+        return cursor.rowcount > 0
+
+
 def delete_wad_completion(completion_id: int) -> bool:
     """Delete a specific completion record. Returns True if deleted."""
     with get_connection() as conn:
