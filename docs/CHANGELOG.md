@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.3.0] - 2026-02-25
+
+Per-map statistics import/export and session dialog cleanup.
+
+### Added
+
+- **Stats.txt import/export**: Import per-map completion statistics from
+  sourceport stats files and attach them to completion records
+  - Supports nyan-doom/dsda-doom `stats.txt` format (persistent per-map tracking
+    with kills, items, secrets, time, skill, exits, and best-of stats)
+  - Supports dsda-doom `levelstat.txt` format (human-readable `-levelstat` output)
+  - Auto-detects format; lossless round-trip (parse → store → export matches original)
+- **`caco beaten add --stats-file`**: Attach stats when adding a completion
+- **`caco beaten attach`**: Attach stats to an existing completion record
+- **`caco beaten stats`**: View full per-map statistics table for a completion
+- **`caco beaten export`**: Export stats back to original text format
+- **`beaten list` Stats column**: Shows indicator when a completion has stats attached
+- **GUI WadStatsDialog**: Per-map stats table with completion selector, accessible
+  via "Stats" button in detail panel
+- **TUI WadStatsScreen**: Per-map stats screen with n/p keys to switch completions,
+  accessible via `M` keybinding in library pane
+- **`wad_stats.py` module**: Parser, formatter, and JSON serialization for sourceport
+  per-map statistics (MapStats/WadStats dataclasses)
+- **`db.update_wad_completion()`**: Update stats_snapshot and/or notes on existing
+  completion records
+- **Fish completions**: Added missing `beaten`, `stats`, `restore`, `link`, `cache`
+  command completions, plus new `beaten stats`, `beaten attach`, `beaten export`
+
+### Removed
+
+- **Session Notes column**: Removed unused "Notes" column from GUI and TUI session
+  history dialogs (DB schema unchanged for forward-compatibility)
+
+---
+
 ## [1.2.2] - 2026-02-20
 
 Documentation accuracy overhaul and version alignment.

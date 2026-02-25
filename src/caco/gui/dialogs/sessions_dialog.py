@@ -20,8 +20,7 @@ from caco.gui.theme import DOOM_PALETTE
 class SessionsDialog(QDialog):
     """Modal dialog showing play session history for a WAD.
 
-    Columns mirror the TUI's sessions screen:
-    Date, Started, Duration, Sourceport, Notes.
+    Columns: Date, Started, Duration, Sourceport.
     """
 
     def __init__(self, wad_id: int, parent=None):
@@ -48,8 +47,8 @@ class SessionsDialog(QDialog):
         layout.addWidget(count_label)
 
         # Table
-        table = QTableWidget(len(sessions), 5)
-        table.setHorizontalHeaderLabels(["Date", "Started", "Duration", "Sourceport", "Notes"])
+        table = QTableWidget(len(sessions), 4)
+        table.setHorizontalHeaderLabels(["Date", "Started", "Duration", "Sourceport"])
         table.setAlternatingRowColors(True)
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -59,8 +58,7 @@ class SessionsDialog(QDialog):
         header_view.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         header_view.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         header_view.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        header_view.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        header_view.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        header_view.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
 
         for row, session in enumerate(sessions):
             started = session.get("started_at") or ""
@@ -71,7 +69,6 @@ class SessionsDialog(QDialog):
             dur_str = format_duration(duration) if duration else "-"
 
             port = session.get("sourceport") or "-"
-            notes = session.get("notes") or ""
 
             table.setItem(row, 0, QTableWidgetItem(date_str))
             table.setItem(row, 1, QTableWidgetItem(time_str))
@@ -81,7 +78,6 @@ class SessionsDialog(QDialog):
             table.setItem(row, 2, dur_item)
 
             table.setItem(row, 3, QTableWidgetItem(port))
-            table.setItem(row, 4, QTableWidgetItem(notes))
 
         layout.addWidget(table)
 

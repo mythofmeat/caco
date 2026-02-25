@@ -97,8 +97,19 @@ class DetailPanel(QScrollArea):
         self._sessions_label = QLabel()
         self._layout.addWidget(self._sessions_label)
 
+        beaten_row = QHBoxLayout()
+        beaten_row.setSpacing(8)
         self._beaten_label = QLabel()
-        self._layout.addWidget(self._beaten_label)
+        beaten_row.addWidget(self._beaten_label)
+
+        self._stats_btn = QPushButton("Stats")
+        self._stats_btn.setFixedWidth(50)
+        self._stats_btn.setToolTip("View per-map completion statistics")
+        self._stats_btn.clicked.connect(self._on_view_stats)
+        self._stats_btn.setVisible(False)
+        beaten_row.addWidget(self._stats_btn)
+        beaten_row.addStretch()
+        self._layout.addLayout(beaten_row)
 
         self._last_played_label = QLabel()
         self._layout.addWidget(self._last_played_label)
@@ -174,6 +185,7 @@ class DetailPanel(QScrollArea):
         self._playtime_label.setText("")
         self._sessions_label.setText("")
         self._beaten_label.setText("")
+        self._stats_btn.setVisible(False)
         self._last_played_label.setText("")
         self._description.setText("")
         self._source_label.setText("")
@@ -243,6 +255,13 @@ class DetailPanel(QScrollArea):
         )
         self._sessions_label.setText(f"Sessions: {session_count}")
         self._beaten_label.setText(f"Beaten: {times_beaten}")
+
+        # Check for stats on completions
+        has_stats = False
+        if times_beaten > 0:
+            completions = db.get_wad_completions(wad_id)
+            has_stats = any(c.get("stats_snapshot") for c in completions)
+        self._stats_btn.setVisible(has_stats)
         self._last_played_label.setText(
             f"Last played: {last_played[:10]}" if last_played else "Last played: -"
         )
@@ -305,3 +324,10 @@ class DetailPanel(QScrollArea):
     def _on_delete(self):
         if self._wad_id is not None:
             self.delete_requested.emit(self._wad_id)
+
+    def _on_view_stats(self):
+        if self._wad_id is None:
+            return
+        from caco.gui.dialogs.wad_stats_dialog import WadStatsDialog
+        dlg = WadStatsDialog(self._wad_id, parent=self)
+        dlg.exec()

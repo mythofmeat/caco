@@ -155,6 +155,7 @@ Use `Tab` key to switch between tabs.
 | `r` | Cycle rating (0→1→2→3→4→5→0) |
 | `R` | Clear rating |
 | `+` / `-` | Increment/decrement beaten count |
+| `M` | View per-map stats (if stats attached) |
 | `T` | Toggle trash view (All tab only) |
 | `u` | Restore WAD from trash (in trash view) |
 | `S` | Open library stats screen |
@@ -402,6 +403,34 @@ caco beaten remove 1 42              # Remove specific completion by record ID
 # Set exact completion count
 caco beaten set 1 3                  # Set to 3 completions
 ```
+
+### Per-Map Statistics
+
+Import and archive per-map statistics from sourceport stats files:
+
+```bash
+# Attach stats when adding a completion
+caco beaten add "Doom 2 In Retrospect" --stats-file ~/path/to/stats.txt
+
+# Attach stats to an existing completion record
+caco beaten attach "Doom 2 In Retrospect" --stats-file stats.txt
+caco beaten attach "Doom 2 In Retrospect" 42 -s stats.txt  # Specific completion ID
+
+# View per-map statistics table
+caco beaten stats "Doom 2 In Retrospect"
+caco beaten stats "Doom 2 In Retrospect" 42    # Specific completion ID
+caco beaten stats "Doom 2 In Retrospect" --plain  # TSV output for scripting
+
+# Export stats back to original format
+caco beaten export "Doom 2 In Retrospect"
+caco beaten export "Doom 2 In Retrospect" -o stats.txt  # Write to file
+```
+
+**Supported formats:**
+- **nyan-doom/dsda-doom `stats.txt`**: Persistent per-map tracking with kills, items, secrets, time, skill level, exit count, and best-of stats
+- **dsda-doom `levelstat.txt`**: Human-readable output from the `-levelstat` flag with per-map time, kills, items, and secrets
+
+Format is auto-detected. Exported files are lossless round-trips of the original.
 
 ### Library Statistics
 

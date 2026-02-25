@@ -56,6 +56,7 @@ class LibraryPane(Widget):
         # Beaten tracking
         Binding("+", "increment_beaten", "Beaten+", show=False),
         Binding("-", "decrement_beaten", "Beaten-", show=False),
+        Binding("M", "show_map_stats", "Map Stats", show=False, key_display="M"),
         # Trash view (All tab only)
         Binding("T", "toggle_trash", "Trash", show=False, key_display="T"),
         Binding("u", "restore_wad", "Restore", show=False),
@@ -467,6 +468,24 @@ class LibraryPane(Widget):
         panel = self.query_one("#info-panel", WadInfoPanel)
         panel.update_wad(wad_id)
         self.notify(f"Beaten: {count}x")
+
+    def action_show_map_stats(self) -> None:
+        """Show per-map statistics screen."""
+        table = self.query_one("#wad-table", WadTable)
+        wad_id = table.get_selected_wad_id()
+
+        if wad_id is None:
+            self.notify("No WAD selected", severity="warning")
+            return
+
+        completions = db.get_wad_completions(wad_id)
+        if not any(c.get("stats_snapshot") for c in completions):
+            self.notify("No map stats available", severity="warning")
+            return
+
+        from caco.tui.screens.wad_stats import WadStatsScreen
+
+        self.app.push_screen(WadStatsScreen(wad_id))
 
     # -------------------------------------------------------------------------
     # Status Mode
