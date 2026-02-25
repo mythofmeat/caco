@@ -11,3 +11,4 @@ venv/
 .coverage
 coverage.json
 htmlcov/
+.claude
