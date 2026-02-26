@@ -1,0 +1,2 @@
+- [ ] automatically fetch doomwiki info if none exists
+- [ ] significantly clean up cli command structure
