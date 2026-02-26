@@ -98,6 +98,7 @@ class MainWindow(QMainWindow):
         self._library_tab.edit_requested.connect(self._on_edit)
         self._library_tab.delete_requested.connect(self._on_delete)
         self._library_tab.sessions_requested.connect(self._on_sessions)
+        self._library_tab.wad_stats_requested.connect(self._on_wad_stats)
         self._library_tab.status_message.connect(self._update_status)
         self._stack.addWidget(self._library_tab)
 
@@ -465,6 +466,16 @@ class MainWindow(QMainWindow):
         """Open the session history dialog."""
         dialog = SessionsDialog(wad_id, parent=self)
         dialog.exec()
+
+    def _on_wad_stats(self, wad_id: int):
+        """Open the per-map stats dialog."""
+        from caco.gui.dialogs.wad_stats_dialog import WadStatsDialog
+
+        dialog = WadStatsDialog(wad_id, parent=self)
+        dialog.exec()
+        if dialog.changed:
+            self._library_tab.refresh()
+            self._library_tab.select_wad(wad_id)
 
     def _on_wad_imported(self, wad_id: int):
         """Called when a WAD is imported from any source."""

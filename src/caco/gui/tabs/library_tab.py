@@ -35,6 +35,7 @@ class LibraryTab(QWidget):
     edit_requested = Signal(int)
     delete_requested = Signal(int)
     sessions_requested = Signal(int)
+    wad_stats_requested = Signal(int)
     status_message = Signal(str)
     card_size_changed = Signal(int)
     saved_searches_changed = Signal(list)  # list of (name, query) tuples
@@ -126,6 +127,7 @@ class LibraryTab(QWidget):
         self._list_view.edit_requested.connect(self.edit_requested)
         self._list_view.delete_requested.connect(self.delete_requested)
         self._list_view.sessions_requested.connect(self.sessions_requested)
+        self._list_view.wad_stats_requested.connect(self.wad_stats_requested)
         self._view_stack.addWidget(self._list_view)
 
         # Grid view
@@ -138,6 +140,7 @@ class LibraryTab(QWidget):
         self._grid_view.edit_requested.connect(self.edit_requested)
         self._grid_view.delete_requested.connect(self.delete_requested)
         self._grid_view.sessions_requested.connect(self.sessions_requested)
+        self._grid_view.wad_stats_requested.connect(self.wad_stats_requested)
         self._view_stack.addWidget(self._grid_view)
 
         self._splitter.addWidget(self._view_stack)

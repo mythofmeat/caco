@@ -23,6 +23,7 @@ class WadListView(QTableView):
     edit_requested = Signal(int)
     delete_requested = Signal(int)
     sessions_requested = Signal(int)
+    wad_stats_requested = Signal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -166,6 +167,10 @@ class WadListView(QTableView):
         sessions_action = QAction("Sessions...", self)
         sessions_action.triggered.connect(lambda: self.sessions_requested.emit(wad_id))
         menu.addAction(sessions_action)
+
+        stats_action = QAction("Map Stats...", self)
+        stats_action.triggered.connect(lambda: self.wad_stats_requested.emit(wad_id))
+        menu.addAction(stats_action)
 
         edit_action = QAction("Edit...", self)
         edit_action.triggered.connect(lambda: self.edit_requested.emit(wad_id))

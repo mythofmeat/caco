@@ -79,6 +79,7 @@ caco --gui
 - **Detail panel**: Thumbnail, metadata, stats, tags, and action buttons
 - **WAD thumbnails**: Extracted from TITLEPIC in WAD files, scraped from Doom Wiki, or generated as colored placeholders
 - **Import from all sources**: idgames, Doom Wiki, Doomworld, URLs, local files
+- **Per-map stats import/export**: Import stats.txt or levelstat.txt files and attach to completions, export stats back to text — accessible from detail panel "Map Stats" button or right-click context menu
 - **WAD unavailable dialog**: When a WAD has no cached file, offers to open the source page, link a local file, or cancel
 - **Window state persistence**: Window position, size, and splitter state saved between sessions
 

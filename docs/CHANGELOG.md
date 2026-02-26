@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.3.1] - 2026-02-26
+
+GUI stats import/export and context menu access.
+
+### Added
+
+- **GUI stats import/export**: WadStatsDialog now has "Import Stats..." and
+  "Export Stats..." buttons for loading stats.txt/levelstat.txt files and
+  saving stats back to text files directly from the GUI
+- **GUI "Map Stats..." context menu**: Right-click any WAD in list or grid
+  view to open the per-map stats dialog
+- **Always-visible "Map Stats" button**: Detail panel shows the button for
+  all WADs (not just those with existing stats), enabling stats import on
+  any WAD
+
+### Changed
+
+- **Detail panel stats button**: Renamed from "Stats" to "Map Stats" for
+  clarity; now always visible when a WAD is selected
+- **WadStatsDialog**: Refactored to support import/export lifecycle — tracks
+  changes via `changed` property so callers refresh after import
+
+---
+
 ## [1.3.0] - 2026-02-25
 
 Per-map statistics import/export and session dialog cleanup.

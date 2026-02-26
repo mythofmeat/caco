@@ -102,9 +102,8 @@ class DetailPanel(QScrollArea):
         self._beaten_label = QLabel()
         beaten_row.addWidget(self._beaten_label)
 
-        self._stats_btn = QPushButton("Stats")
-        self._stats_btn.setFixedWidth(50)
-        self._stats_btn.setToolTip("View per-map completion statistics")
+        self._stats_btn = QPushButton("Map Stats")
+        self._stats_btn.setToolTip("View or import per-map statistics")
         self._stats_btn.clicked.connect(self._on_view_stats)
         self._stats_btn.setVisible(False)
         beaten_row.addWidget(self._stats_btn)
@@ -256,12 +255,8 @@ class DetailPanel(QScrollArea):
         self._sessions_label.setText(f"Sessions: {session_count}")
         self._beaten_label.setText(f"Beaten: {times_beaten}")
 
-        # Check for stats on completions
-        has_stats = False
-        if times_beaten > 0:
-            completions = db.get_wad_completions(wad_id)
-            has_stats = any(c.get("stats_snapshot") for c in completions)
-        self._stats_btn.setVisible(has_stats)
+        # Always show stats button so users can import stats
+        self._stats_btn.setVisible(True)
         self._last_played_label.setText(
             f"Last played: {last_played[:10]}" if last_played else "Last played: -"
         )
@@ -331,3 +326,5 @@ class DetailPanel(QScrollArea):
         from caco.gui.dialogs.wad_stats_dialog import WadStatsDialog
         dlg = WadStatsDialog(self._wad_id, parent=self)
         dlg.exec()
+        if dlg.changed:
+            self.update_wad(self._wad_id)

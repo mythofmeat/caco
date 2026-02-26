@@ -134,7 +134,7 @@ src/caco/
 │   │   ├── link_dialog.py    # WadUnavailableDialog: open source page, link local file
 │   │   ├── sessions_dialog.py # Session history table
 │   │   ├── stats_dialog.py   # Library statistics overview
-│   │   ├── wad_stats_dialog.py # Per-map stats table (stats.txt/levelstat.txt)
+│   │   ├── wad_stats_dialog.py # Per-map stats table with import/export
 │   │   └── cache_dialog.py   # Cache management
 │   ├── workers/
 │   │   ├── play_worker.py      # QThread for sourceport launch
