@@ -8,9 +8,10 @@ from typing import Any
 
 CONFIG_DIR = Path.home() / ".config" / "caco"
 CONFIG_FILE = CONFIG_DIR / "config.toml"
-CACHE_DIR = Path.home() / ".cache" / "caco" / "wads"
 DB_DIR = Path.home() / ".local" / "share" / "caco"
 DEFAULT_DB_PATH = DB_DIR / "library.db"
+CACHE_DIR = DB_DIR / "wads"
+IWAD_DIR = DB_DIR / "iwads"
 
 DEFAULT_CONFIG = {
     "sourceport": "",
@@ -138,6 +139,12 @@ def get_cache_dir() -> Path:
     """Get the WAD cache directory."""
     config = load_config()
     return Path(config.get("cache_dir", str(CACHE_DIR))).expanduser()
+
+
+def get_iwad_dir() -> Path:
+    """Get the managed IWAD directory."""
+    config = load_config()
+    return Path(config.get("iwad_dir", str(IWAD_DIR))).expanduser()
 
 
 def set_cache_dir(path: str) -> None:

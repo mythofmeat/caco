@@ -15,7 +15,9 @@ from caco.db._iwads import (
     _compute_md5,
     get_iwad_priority,
     identify_iwad,
+    managed_iwad_filename,
     normalize_iwad_name,
+    remove_iwad_with_paths,
 )
 
 
@@ -357,6 +359,125 @@ class TestDefaultIwadPriority:
 
     def test_doom_priority_order(self):
         assert DEFAULT_IWAD_PRIORITY["doom"] == ["v1.9ud", "v1.9", "bfg", "enhanced", "kex"]
+
+
+class TestManagedIwadFilename:
+    def test_basic(self):
+        assert managed_iwad_filename("doom2", "v1.9") == "doom2_v1.9.wad"
+
+    def test_bfg(self):
+        assert managed_iwad_filename("doom2", "bfg") == "doom2_bfg.wad"
+
+    def test_unknown(self):
+        assert managed_iwad_filename("doom", "unknown") == "doom_unknown.wad"
+
+
+class TestRemoveIwadWithPaths:
+    def test_remove_single_variant(self, db_mod):
+        db_mod.add_iwad("doom2", "v1.9", "/managed/doom2_v1.9.wad")
+        db_mod.add_iwad("doom2", "bfg", "/managed/doom2_bfg.wad")
+
+        paths = remove_iwad_with_paths("doom2", "bfg")
+        assert paths == ["/managed/doom2_bfg.wad"]
+        # v1.9 still exists
+        assert db_mod.get_iwad_variant("doom2", "v1.9") is not None
+        assert db_mod.get_iwad_variant("doom2", "bfg") is None
+
+    def test_remove_all_variants(self, db_mod):
+        db_mod.add_iwad("doom2", "v1.9", "/managed/doom2_v1.9.wad")
+        db_mod.add_iwad("doom2", "bfg", "/managed/doom2_bfg.wad")
+
+        paths = remove_iwad_with_paths("doom2")
+        assert set(paths) == {"/managed/doom2_v1.9.wad", "/managed/doom2_bfg.wad"}
+        assert db_mod.get_iwad("doom2") is None
+
+    def test_remove_nonexistent(self, db_mod):
+        paths = remove_iwad_with_paths("nonexistent")
+        assert paths == []
+
+    def test_remove_nonexistent_variant(self, db_mod):
+        db_mod.add_iwad("doom2", "v1.9", "/managed/doom2_v1.9.wad")
+        paths = remove_iwad_with_paths("doom2", "kex")
+        assert paths == []
+        # v1.9 still exists
+        assert db_mod.get_iwad_variant("doom2", "v1.9") is not None
+
+
+class TestCacheMigration:
+    """Test migration #10: WAD cache relocation."""
+
+    def test_files_moved_and_paths_updated(self, tmp_path, tmp_db):
+        """Migration moves files from old cache dir to new and updates DB."""
+        from caco import db as db_mod
+        from caco.db._schema import _migrate_relocate_wad_cache
+
+        # Create the expected directory structure under a fake home
+        home = tmp_path / "fakehome"
+        old_cache = home / ".cache" / "caco" / "wads"
+        new_cache = home / ".local" / "share" / "caco" / "wads"
+        old_cache.mkdir(parents=True)
+
+        wad_file = old_cache / "test.wad"
+        wad_file.write_bytes(b"test content")
+        old_cached_path = str(wad_file)
+
+        # Insert a WAD with the old cached_path
+        wad_id = db_mod.add_wad(
+            title="Test WAD",
+            source_type=db_mod.SourceType.IDGAMES,
+            cached_path=old_cached_path,
+            filename="test.wad",
+        )
+
+        # Run migration with patched Path.home and load_config
+        conn = db_mod.get_connection()
+        with patch("caco.config.load_config", return_value={"cache_dir": ""}):
+            with patch("pathlib.Path.home", return_value=home):
+                _migrate_relocate_wad_cache(conn)
+                conn.commit()
+        conn.close()
+
+        # Verify: file moved to new location
+        assert (new_cache / "test.wad").exists()
+        assert not wad_file.exists()
+
+        # Verify: DB path updated
+        wad = db_mod.get_wad(wad_id)
+        assert wad["cached_path"] == str(new_cache / "test.wad")
+
+    def test_skip_if_old_dir_missing(self, tmp_path, tmp_db):
+        """Migration is a no-op if old cache dir doesn't exist."""
+        from caco import db as db_mod
+        from caco.db._schema import _migrate_relocate_wad_cache
+
+        home = tmp_path / "fakehome"
+        # Don't create old cache dir
+
+        conn = db_mod.get_connection()
+        with patch("pathlib.Path.home", return_value=home):
+            _migrate_relocate_wad_cache(conn)
+            conn.commit()
+        conn.close()
+
+    def test_skip_if_custom_cache_dir(self, tmp_path, tmp_db):
+        """Migration skips when user has a custom cache_dir."""
+        from caco import db as db_mod
+        from caco.db._schema import _migrate_relocate_wad_cache
+
+        home = tmp_path / "fakehome"
+        old_cache = home / ".cache" / "caco" / "wads"
+        old_cache.mkdir(parents=True)
+        (old_cache / "test.wad").write_bytes(b"data")
+
+        conn = db_mod.get_connection()
+        with patch("caco.config.load_config", return_value={"cache_dir": "/custom/path"}):
+            with patch("pathlib.Path.home", return_value=home):
+                _migrate_relocate_wad_cache(conn)
+                conn.commit()
+        conn.close()
+
+        # File should NOT have been moved
+        assert (old_cache / "test.wad").exists()
 
 
 class TestComputeMd5:

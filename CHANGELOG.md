@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.5.0] - 2026-02-26
+
+Managed IWAD storage and WAD cache relocation.
+
+### Added
+
+- **Managed IWAD directory**: IWADs are now copied to `~/.local/share/caco/iwads/`
+  on import, giving caco full ownership of IWAD files
+- **`caco iwad import`**: unified command replaces `iwad add` + `iwad scan` — handles
+  both single files and directory scanning with auto-detection
+- **`managed_iwad_filename()`**: canonical naming for managed IWADs (`{family}_{variant}.wad`)
+- **`remove_iwad_with_paths()`**: atomic remove + path return to avoid TOCTOU races
+- **`get_iwad_dir()`**: configurable managed IWAD directory (`iwad_dir` config key)
+- **Migration #10**: automatically relocates WAD cache from `~/.cache/caco/wads/`
+  to `~/.local/share/caco/wads/` with file migration and DB path updates
+
+### Changed
+
+- **WAD cache relocated**: default cache directory moved from `~/.cache/caco/wads/`
+  to `~/.local/share/caco/wads/` — downloaded WADs are managed library data, not
+  ephemeral cache (thumbnail cache stays at `~/.cache/caco/thumbnails/`)
+- **`caco iwad remove`**: now also deletes the managed IWAD file (only if inside
+  the managed IWAD directory — safe for pre-migration external paths)
+
+### Removed
+
+- **`caco iwad add`**: replaced by `caco iwad import`
+- **`caco iwad scan`**: replaced by `caco iwad import <directory>`
+
+---
+
 ## [1.4.0] - 2026-02-26
 
 IWAD management — first-class IWAD registry with family/variant model and

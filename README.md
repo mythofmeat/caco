@@ -29,7 +29,7 @@ A personal Doom WAD library manager taking inspiration from beets. Track what yo
 - **IWAD management**
   - Register IWADs with family/variant model (e.g., doom2/v1.9, doom2/bfg)
   - Multiple variants per family with configurable priority resolution
-  - Auto-scan directories for known IWADs with MD5-based identification
+  - Import IWADs from files or directories with MD5-based identification
   - Freedoom fallback when primary IWAD is unavailable
   - Auto-link to registered IWADs on Doom Wiki import
 
@@ -501,15 +501,13 @@ cache_auto_clean = true
 IWADs are organized by **family** (doom, doom2, plutonia, tnt) with multiple **variants** per family (v1.9, bfg, enhanced, kex). Resolution uses a configurable priority list to pick the preferred variant.
 
 ```bash
-# Scan iwad_dirs for known IWADs (auto-detects family + variant by MD5)
-caco iwad scan
-caco iwad scan --dir ~/games/iwads      # Scan a specific directory
-caco iwad scan --yes                     # Register all without prompting
+# Import IWADs (auto-detects family + variant by MD5)
+caco iwad import ~/games/doom2.wad              # Import a single IWAD file
+caco iwad import ~/iwads/                        # Scan directory for IWADs
+caco iwad import ~/iwads/ --yes                  # Import all without prompting
 
-# Manually register an IWAD (auto-detects family/variant by MD5)
-caco iwad add ~/games/doom2.wad
-caco iwad add ~/games/doom2_bfg.wad     # Same family, different variant
-caco iwad add ~/wads/custom.wad --family doom2 --variant modded
+# Override family/variant for unrecognized IWADs
+caco iwad import ~/wads/custom.wad --family doom2 --variant modded
 
 # List registered IWADs (* marks preferred variant)
 caco iwad list
@@ -582,7 +580,7 @@ iwad = "doom2"
 iwad_dirs = ["/usr/share/games/doom", "~/.steam/steam/steamapps/common/Doom 2/base"]
 sourceport_args = ["-nomusic"]
 db_path = "~/.local/share/caco/library.db"
-cache_dir = "~/.cache/caco/wads"
+cache_dir = "~/.local/share/caco/wads"
 download_mirror = 0
 
 # Customize list display
@@ -718,8 +716,9 @@ caco random --info                  # Prints ID, title, author (TSV)
 *Default locations:*
 
 - **Database**: `~/.local/share/caco/library.db`
+- **Managed IWADs**: `~/.local/share/caco/iwads/`
 - **Config**: `~/.config/caco/config.toml`
-- **WAD cache**: `~/.cache/caco/wads/`
+- **WAD cache**: `~/.local/share/caco/wads/`
 - **Thumbnail cache**: `~/.cache/caco/thumbnails/`
 
 ## Development

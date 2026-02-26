@@ -378,6 +378,44 @@ def remove_iwad(family: str, variant: str | None = None) -> int:
         return cursor.rowcount
 
 
+def managed_iwad_filename(family: str, variant: str) -> str:
+    """Return the canonical filename for a managed IWAD: {family}_{variant}.wad."""
+    return f"{family}_{variant}.wad"
+
+
+def remove_iwad_with_paths(family: str, variant: str | None = None) -> list[str]:
+    """Remove registered IWAD(s) and return the paths of removed entries.
+
+    This avoids TOCTOU races vs. a separate fetch-then-delete pattern.
+
+    Args:
+        family: IWAD family to remove.
+        variant: If given, removes only that variant. If None, removes all
+                 variants of the family.
+
+    Returns:
+        List of file paths from the removed rows.
+    """
+    with get_connection() as conn:
+        if variant:
+            rows = conn.execute(
+                "SELECT path FROM iwads WHERE family = ? AND variant = ?",
+                (family, variant),
+            ).fetchall()
+            conn.execute(
+                "DELETE FROM iwads WHERE family = ? AND variant = ?",
+                (family, variant),
+            )
+        else:
+            rows = conn.execute(
+                "SELECT path FROM iwads WHERE family = ?", (family,)
+            ).fetchall()
+            conn.execute(
+                "DELETE FROM iwads WHERE family = ?", (family,)
+            )
+        return [r["path"] for r in rows]
+
+
 def resolve_iwad_from_db(name: str) -> str | None:
     """Look up a family name in the IWAD registry and return its path.
 

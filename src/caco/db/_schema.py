@@ -1,6 +1,8 @@
 """Database schema, migrations, and initialization."""
 
+import shutil
 import sqlite3
+from pathlib import Path
 from typing import Any
 
 from caco.db._connection import get_connection
@@ -256,6 +258,58 @@ def _migrate_iwads_family_variant(conn: sqlite3.Connection) -> None:
         )
 
 
+def _migrate_relocate_wad_cache(conn: sqlite3.Connection) -> None:
+    """Move WAD cache from ~/.cache/caco/wads/ to ~/.local/share/caco/wads/.
+
+    Updates cached_path in the database for all relocated files.
+    Skips if the user has a custom cache_dir that isn't the old or new default.
+    """
+    old_default = Path.home() / ".cache" / "caco" / "wads"
+    new_default = Path.home() / ".local" / "share" / "caco" / "wads"
+
+    # Skip if old directory doesn't exist
+    if not old_default.is_dir():
+        return
+
+    # Skip if user has a custom cache_dir that isn't old or new default
+    from caco.config import load_config
+    config = load_config()
+    user_cache_dir = config.get("cache_dir", "")
+    if user_cache_dir:
+        user_path = Path(user_cache_dir).expanduser()
+        if user_path != old_default and user_path != new_default:
+            return
+
+    # Ensure destination exists
+    new_default.mkdir(parents=True, exist_ok=True)
+
+    # Move files and update DB paths
+    for entry in old_default.iterdir():
+        if not entry.is_file():
+            continue
+        dest = new_default / entry.name
+        if not dest.exists():
+            shutil.move(str(entry), str(dest))
+
+        # Update cached_path in DB
+        old_path_str = str(entry)
+        new_path_str = str(dest)
+        conn.execute(
+            "UPDATE wads SET cached_path = ? WHERE cached_path = ?",
+            (new_path_str, old_path_str),
+        )
+
+    # Try to clean up old empty directories
+    try:
+        old_default.rmdir()
+    except OSError:
+        pass
+    try:
+        old_default.parent.rmdir()
+    except OSError:
+        pass
+
+
 # Ordered migration registry — append new migrations here with incrementing version
 _MIGRATIONS: list[tuple[int, str, Any]] = [
     (1, "add_custom_play_config", _migrate_add_custom_play_config),
@@ -267,4 +321,5 @@ _MIGRATIONS: list[tuple[int, str, Any]] = [
     (7, "drop_map_completions", _migrate_drop_map_completions),
     (8, "add_iwads_table", _migrate_add_iwads_table),
     (9, "iwads_family_variant", _migrate_iwads_family_variant),
+    (10, "relocate_wad_cache", _migrate_relocate_wad_cache),
 ]

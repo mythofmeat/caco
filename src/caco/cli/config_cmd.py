@@ -52,8 +52,8 @@ iwad_dirs = []
 # Path to the library database file
 db_path = "~/.local/share/caco/library.db"
 
-# Directory for caching downloaded WADs
-cache_dir = "~/.cache/caco/wads"
+# Directory for downloaded WADs
+cache_dir = "~/.local/share/caco/wads"
 
 # idgames download mirror (0-4, see https://www.doomworld.com/idgames/api/)
 download_mirror = 0

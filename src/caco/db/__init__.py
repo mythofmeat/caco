@@ -71,8 +71,10 @@ from caco.db._iwads import (  # noqa: F401
     get_iwad_priority,
     get_iwad_variant,
     identify_iwad,
+    managed_iwad_filename,
     normalize_iwad_name,
     remove_iwad,
+    remove_iwad_with_paths,
     resolve_iwad_from_db,
 )
 
@@ -155,8 +157,10 @@ __all__ = [
     "get_iwad_priority",
     "get_iwad_variant",
     "identify_iwad",
+    "managed_iwad_filename",
     "normalize_iwad_name",
     "remove_iwad",
+    "remove_iwad_with_paths",
     "resolve_iwad_from_db",
     # Sessions, stats, completions, cache
     "StatsSnapshot",

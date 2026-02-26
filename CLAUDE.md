@@ -56,7 +56,7 @@ src/caco/
 │   ├── cache.py        # cache list/clear/prune
 │   ├── config_cmd.py   # config, completions commands
 │   ├── stats.py        # stats, beaten commands
-│   └── iwad_cmd.py     # iwad list/add/remove/scan
+│   └── iwad_cmd.py     # iwad list/import/remove
 ├── utils.py        # Shared utilities (coerce_str, BaseHttpClient, CacoSourceError, extract_year)
 ├── wad_stats.py    # Per-map stats parser/formatter (stats.txt + levelstat.txt)
 ├── db/             # SQLite database package
@@ -68,7 +68,7 @@ src/caco/
 │   ├── _wads.py        # WAD CRUD (add/get/update/delete), tag add/remove
 │   ├── _sessions.py    # Sessions, completions, batch stats, cache, StatsSnapshot
 │   └── _iwads.py       # IWAD registry: family/variant model, priority resolution, CRUD
-├── config.py       # TOML config in ~/.config/caco/
+├── config.py       # TOML config in ~/.config/caco/; IWAD_DIR, get_iwad_dir()
 ├── player.py       # Sourceport launcher + playtime tracking
 ├── idgames/        # idgames API client
 │   ├── client.py   # HTTP client (inherits BaseHttpClient)
@@ -165,7 +165,8 @@ src/caco/
 **Data locations:**
 - Database: `~/.local/share/caco/library.db` (configurable via `db_path`)
 - Config: `~/.config/caco/config.toml`
-- WAD cache: `~/.cache/caco/wads/`
+- Managed IWADs: `~/.local/share/caco/iwads/`
+- WAD cache: `~/.local/share/caco/wads/`
 
 **Key patterns:**
 - `db/` package uses raw sqlite3 with `sqlite3.Row` for dict-like access; tag helpers (`_fetch_tags`, `_attach_tags`, `_fetch_tags_batch`) and batch query functions (`get_total_playtime_batch`, `get_last_played_batch`, `get_times_beaten_batch`, `get_session_count_batch`) reduce N+1 queries; `__init__.py` re-exports everything so `from caco import db` and `from caco.db import Status` both work
@@ -187,20 +188,19 @@ src/caco/
   - Free text searches title, author, and description
   - Multiple terms are joined with implicit AND
 - Per-WAD config: `custom_iwad`, `custom_sourceport`, `custom_args` (JSON array) columns in wads table
-- IWAD resolution: `iwad_dirs` config allows short names (e.g., `doom2` instead of full path); `resolve_iwad()` in `config.py` checks DB registry (with priority resolution) then searches dirs for exact name or name + `.wad`
+- IWAD resolution: `iwad_dirs` config allows short names (e.g., `doom2` instead of full path); `resolve_iwad()` in `config.py` checks DB registry (with priority resolution) then searches dirs for exact name or name + `.wad`; `IWAD_DIR` / `get_iwad_dir()` provides the managed IWAD directory path (`~/.local/share/caco/iwads/`)
 - Cross-source downloading: `idgames_id` column allows any WAD to download via idgames API (set with `caco update --idgames-id`)
 - Soft-delete: `deleted_at` column; `caco delete` moves to trash, `caco restore` recovers, `caco list --deleted` shows trash
 - `link` command: copies/moves a local file to cache and updates `cached_path`/`filename` for metadata-only entries (e.g., Doomwiki imports)
 - `version` column tracks WAD version strings for non-idgames releases
 - Database migrations run on `init_db()`: add columns, create tables, rename statuses
-- IWAD registry: `iwads` table with family/variant model; `KNOWN_IWADS` (MD5→(family, variant, title)), `KNOWN_IWAD_FILENAMES` (filename→(family, variant, title)), `IWAD_ALIASES` (free text→family), `DEFAULT_IWAD_PRIORITY` (family→variant order), `FAMILY_FALLBACKS` (family→fallback families) in `db/_iwads.py`; `get_iwad(family)` does priority resolution; `resolve_iwad()` checks DB registry before `iwad_dirs`; Doom Wiki imports auto-link to registered IWADs via `ImportService._auto_link_iwad()`
+- IWAD registry: `iwads` table with family/variant model; `KNOWN_IWADS` (MD5→(family, variant, title)), `KNOWN_IWAD_FILENAMES` (filename→(family, variant, title)), `IWAD_ALIASES` (free text→family), `DEFAULT_IWAD_PRIORITY` (family→variant order), `FAMILY_FALLBACKS` (family→fallback families) in `db/_iwads.py`; `get_iwad(family)` does priority resolution; `managed_iwad_filename()` generates canonical filenames for managed IWADs; `remove_iwad_with_paths()` returns removed paths for managed file cleanup; `resolve_iwad()` checks DB registry before `iwad_dirs`; Doom Wiki imports auto-link to registered IWADs via `ImportService._auto_link_iwad()`
 - IWAD priority: `get_iwad_priority(family)` checks config `[iwad_priority]` section first, then `DEFAULT_IWAD_PRIORITY`; freedoom is cross-family fallback via `FAMILY_FALLBACKS`
 
 **IWAD CLI commands:**
 - `caco iwad list [--plain]` — list registered IWADs (family, variant, title, path); preferred variant marked with `*`
-- `caco iwad add <path> [--family X] [--variant Y]` — register IWAD (auto-detects family+variant via MD5 then filename)
-- `caco iwad remove <family> [variant]` — without variant removes all variants (with warning); with variant removes one
-- `caco iwad scan [--dir PATH] [--yes]` — scan iwad_dirs for known IWADs, detecting family+variant
+- `caco iwad import <path> [--family X] [--variant Y] [--yes]` — register IWAD — copies to managed dir, auto-detects family+variant via MD5 then filename; PATH can be file or directory
+- `caco iwad remove <family> [variant]` — without variant removes all variants (with warning); with variant removes one; also deletes managed file if inside iwad_dir
 
 **Status shortcuts (complete list):**
 | Shortcut | Status |

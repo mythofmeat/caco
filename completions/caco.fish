@@ -36,25 +36,21 @@ complete -c caco -n __fish_use_subcommand -a cache -d "Manage WAD file cache"
 complete -c caco -n __fish_use_subcommand -a iwad -d "Manage IWAD registry"
 
 # iwad subcommands
-complete -c caco -n "__fish_seen_subcommand_from iwad; and not __fish_seen_subcommand_from list add remove scan" -a list -d "List registered IWADs"
-complete -c caco -n "__fish_seen_subcommand_from iwad; and not __fish_seen_subcommand_from list add remove scan" -a add -d "Register an IWAD file"
-complete -c caco -n "__fish_seen_subcommand_from iwad; and not __fish_seen_subcommand_from list add remove scan" -a remove -d "Unregister an IWAD"
-complete -c caco -n "__fish_seen_subcommand_from iwad; and not __fish_seen_subcommand_from list add remove scan" -a scan -d "Scan for known IWADs"
+complete -c caco -n "__fish_seen_subcommand_from iwad; and not __fish_seen_subcommand_from list import remove" -a list -d "List registered IWADs"
+complete -c caco -n "__fish_seen_subcommand_from iwad; and not __fish_seen_subcommand_from list import remove" -a import -d "Import IWAD file(s)"
+complete -c caco -n "__fish_seen_subcommand_from iwad; and not __fish_seen_subcommand_from list import remove" -a remove -d "Unregister an IWAD"
 
 # iwad list options
 complete -c caco -n "__fish_seen_subcommand_from iwad; and __fish_seen_subcommand_from list" -l plain -d "Output as TSV"
 
-# iwad add options
-complete -c caco -n "__fish_seen_subcommand_from iwad; and __fish_seen_subcommand_from add" -l family -d "Override auto-detected family"
-complete -c caco -n "__fish_seen_subcommand_from iwad; and __fish_seen_subcommand_from add" -l variant -d "Override auto-detected variant"
-complete -c caco -n "__fish_seen_subcommand_from iwad; and __fish_seen_subcommand_from add" -rF
+# iwad import options
+complete -c caco -n "__fish_seen_subcommand_from iwad; and __fish_seen_subcommand_from import" -l family -d "Override auto-detected family"
+complete -c caco -n "__fish_seen_subcommand_from iwad; and __fish_seen_subcommand_from import" -l variant -d "Override auto-detected variant"
+complete -c caco -n "__fish_seen_subcommand_from iwad; and __fish_seen_subcommand_from import" -s y -l yes -d "Import all without prompting"
+complete -c caco -n "__fish_seen_subcommand_from iwad; and __fish_seen_subcommand_from import" -rF
 
 # iwad remove - complete registered IWAD families and variants
 complete -c caco -n "__fish_seen_subcommand_from iwad; and __fish_seen_subcommand_from remove" -xa "(caco iwad list --plain 2>/dev/null | tail -n +2 | awk -F'\t' '{print \$1}' | sort -u)"
-
-# iwad scan options
-complete -c caco -n "__fish_seen_subcommand_from iwad; and __fish_seen_subcommand_from scan" -l dir -d "Directory to scan" -rF
-complete -c caco -n "__fish_seen_subcommand_from iwad; and __fish_seen_subcommand_from scan" -s y -l yes -d "Register all without prompting"
 
 # list options
 complete -c caco -n "__fish_seen_subcommand_from list" -s S -l sort -d "Sort results" -xa "playtime rating created title author last_played year playtime+ rating+ created+ title+ author+ last_played+ year+ playtime- rating- created- title- author- last_played- year-"
