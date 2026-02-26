@@ -41,6 +41,13 @@ def get_wad_path(
         if cached.exists():
             return cached
 
+        # Cached path is stale — check current cache dir for the same filename
+        cache_dir = get_cache_dir()
+        relocated = cache_dir / cached.name
+        if relocated.exists():
+            db.update_wad(wad["id"], cached_path=str(relocated))
+            return relocated
+
     # Download based on source type
     source_type = wad["source_type"]
 

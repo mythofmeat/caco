@@ -318,6 +318,22 @@ def _migrate_add_stats_snapshot(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE wads ADD COLUMN stats_snapshot TEXT")
 
 
+def _migrate_fix_stale_cache_paths(conn: sqlite3.Connection) -> None:
+    """Fix cached_path values still pointing to old ~/.cache/caco/wads/ location.
+
+    Migration 10 moved the files but the DB UPDATE may not have persisted.
+    This does a bulk string replacement as a safety net.
+    """
+    old_prefix = str(Path.home() / ".cache" / "caco" / "wads")
+    new_prefix = str(Path.home() / ".local" / "share" / "caco" / "wads")
+
+    conn.execute(
+        "UPDATE wads SET cached_path = REPLACE(cached_path, ?, ?) "
+        "WHERE cached_path LIKE ?",
+        (old_prefix, new_prefix, old_prefix + "%"),
+    )
+
+
 # Ordered migration registry — append new migrations here with incrementing version
 _MIGRATIONS: list[tuple[int, str, Any]] = [
     (1, "add_custom_play_config", _migrate_add_custom_play_config),
@@ -331,4 +347,5 @@ _MIGRATIONS: list[tuple[int, str, Any]] = [
     (9, "iwads_family_variant", _migrate_iwads_family_variant),
     (10, "relocate_wad_cache", _migrate_relocate_wad_cache),
     (11, "add_stats_snapshot", _migrate_add_stats_snapshot),
+    (12, "fix_stale_cache_paths", _migrate_fix_stale_cache_paths),
 ]
