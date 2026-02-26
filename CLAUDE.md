@@ -57,6 +57,7 @@ src/caco/
 │   ├── config_cmd.py   # config, completions commands
 │   ├── stats.py        # stats, beaten commands
 │   └── iwad_cmd.py     # iwad list/import/remove
+├── sourceports.py  # Sourceport family registry (exe→CLI flags for data/save redirection)
 ├── utils.py        # Shared utilities (coerce_str, BaseHttpClient, CacoSourceError, extract_year)
 ├── wad_stats.py    # Per-map stats parser/formatter (stats.txt + levelstat.txt)
 ├── db/             # SQLite database package
@@ -167,6 +168,7 @@ src/caco/
 - Config: `~/.config/caco/config.toml`
 - Managed IWADs: `~/.local/share/caco/iwads/`
 - WAD cache: `~/.local/share/caco/wads/`
+- WAD data: `~/.local/share/caco/data/` (per-WAD saves, stats, configs; configurable via `data_dir`)
 
 **Key patterns:**
 - `db/` package uses raw sqlite3 with `sqlite3.Row` for dict-like access; tag helpers (`_fetch_tags`, `_attach_tags`, `_fetch_tags_batch`) and batch query functions (`get_total_playtime_batch`, `get_last_played_batch`, `get_times_beaten_batch`, `get_session_count_batch`) reduce N+1 queries; `__init__.py` re-exports everything so `from caco import db` and `from caco.db import Status` both work
@@ -196,6 +198,8 @@ src/caco/
 - Database migrations run on `init_db()`: add columns, create tables, rename statuses
 - IWAD registry: `iwads` table with family/variant model; `KNOWN_IWADS` (MD5→(family, variant, title)), `KNOWN_IWAD_FILENAMES` (filename→(family, variant, title)), `IWAD_ALIASES` (free text→family), `DEFAULT_IWAD_PRIORITY` (family→variant order), `FAMILY_FALLBACKS` (family→fallback families) in `db/_iwads.py`; `get_iwad(family)` does priority resolution; `managed_iwad_filename()` generates canonical filenames for managed IWADs; `remove_iwad_with_paths()` returns removed paths for managed file cleanup; `resolve_iwad()` checks DB registry before `iwad_dirs`; Doom Wiki imports auto-link to registered IWADs via `ImportService._auto_link_iwad()`
 - IWAD priority: `get_iwad_priority(family)` checks config `[iwad_priority]` section first, then `DEFAULT_IWAD_PRIORITY`; freedoom is cross-family fallback via `FAMILY_FALLBACKS`
+- Sourceport families: `sourceports.py` maps executable basenames to CLI flags; `SOURCEPORT_FAMILIES` dict with dsda/zdoom/chocolate/woof/eternity families; `identify_sourceport_family()` strips path and matches basename; `get_data_dir_args()` returns `-data`/`-save` or `-savedir` args
+- Per-WAD data dirs: `player.py` injects data dir args when `manage_data_dirs=True` (default); `get_wad_data_dir(id, title)` returns `{data_dir}/{id}_{sanitized_title}/`; `find_wad_data_dir(id)` finds existing dir by ID prefix (handles title renames); `_sanitize_dirname()` lowercases, replaces non-alnum with hyphens, truncates to 64 chars
 
 **IWAD CLI commands:**
 - `caco iwad list [--plain]` — list registered IWADs (family, variant, title, path); preferred variant marked with `*`

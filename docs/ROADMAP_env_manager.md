@@ -4,47 +4,25 @@ This document captures the vision for expanding caco from a WAD library manager 
 
 ---
 
-## Per-WAD Data Directories
+## Per-WAD Data Directories — IMPLEMENTED (v1.6.0)
 
 **Goal:** Each WAD gets its own isolated directory for saves, stats, configs, and other sourceport-generated data.
 
 **Location:** `~/.local/share/caco/data/{id}_{sanitized_title}/`
 
-**Benefits:**
-- Zero-conflict stats tracking (each WAD's stats.txt is isolated)
-- Organized save games per WAD
-- Opens the door for save management, demo tracking, etc.
-- No pre/post diffing needed — the file belongs to exactly one WAD
+**Implementation:** `config.py` (get_wad_data_dir, find_wad_data_dir, _sanitize_dirname), `player.py` (data dir arg injection), `sourceports.py` (family registry)
 
-**How it works:**
-- When playing a WAD, caco injects sourceport arguments to redirect the save/data directory to the WAD's data dir (e.g., nyan-doom/dsda-doom: `-save {wad_dir}`)
-- The data dir is created automatically on first play
-- Existing saves/stats from before this feature can be manually moved into the correct directory
-
-**Opt-out by default:** A config option like `manage_data_dirs = true` (default true) controls this. Users who prefer the sourceport's default directory layout can set it to false.
+**Config:** `manage_data_dirs = true` (default), `data_dir` (custom base directory)
 
 ---
 
-## Sourceport Profiles
+## Sourceport Families — IMPLEMENTED (v1.6.0)
 
-**Goal:** Define per-sourceport configurations that tell caco how to redirect data directories.
+**Goal:** Hardcoded mapping of sourceport executables to CLI flags for data/save directory redirection.
 
-**Config example:**
-```toml
-[sourceports.nyan-doom]
-path = "nyan-doom"
-save_arg = "-save"        # Flag to redirect save/data directory
+**Implementation:** `sourceports.py` — `SOURCEPORT_FAMILIES` dict with dsda, zdoom, chocolate, woof, eternity families. `identify_sourceport_family()` strips path and matches basename. `get_data_dir_args()` returns the appropriate flags.
 
-[sourceports.dsda-doom]
-path = "dsda-doom"
-save_arg = "-save"        # Same CLI structure as nyan-doom
-```
-
-**Why per-sourceport:** Different sourceports use different CLI flags for setting the save directory, stats output, etc. Initially we'd just support nyan-doom/dsda-doom (which share the same CLI structure), then add profiles for GZDoom, Crispy Doom, etc. as needed.
-
-**Scope:** Start with just the save directory redirect. Future profiles could include config file paths, demo directories, etc.
-
-**User addendum:** i actually think these values should be hardcoded. they really aren't supposed to be "changed." we define them in the code with different sourceport "families" mapping onto multiple sourports. e.g., dsda-doom family cli args are used for nyan-doom (and any other dsda-doom) sourceports i decide to support
+**Families:** dsda (-data, -save), zdoom (-savedir), chocolate (-savedir), woof (-data, -save), eternity (-savedir)
 
 ---
 
@@ -66,14 +44,6 @@ save_arg = "-save"        # Same CLI structure as nyan-doom
 2. After exit, read again
 3. Only maps that changed during the session get attributed to this WAD
 4. This inherently prevents cross-WAD contamination
-
----
-
-## IWAD Management (Implemented)
-
-**Status:** Implemented with family/variant model and priority resolution.
-
-Proper IWAD registry with MD5-based identification, multiple variants per family (v1.9, BFG, Enhanced, KEX), configurable priority resolution, and freedoom cross-family fallbacks. See `caco iwad --help`.
 
 ---
 

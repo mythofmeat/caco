@@ -61,6 +61,11 @@ download_mirror = 0
 # Extra arguments to pass to sourceport
 sourceport_args = []
 
+# Manage per-WAD data directories for isolated saves and stats
+# When true, caco injects -data/-save flags to redirect sourceport output
+# to ~/.local/share/caco/data/{id}_{title}/ per WAD
+manage_data_dirs = true
+
 # [list] section for customizing list output (coming soon)
 # format = ["id", "title", "author", "status"]
 # sort = "id+"

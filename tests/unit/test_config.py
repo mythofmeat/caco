@@ -219,3 +219,97 @@ class TestHelpers:
         assert config.get_cache_max_size() == 0
         assert config.get_cache_max_age() == 0
         assert config.get_cache_auto_clean() is False
+
+
+class TestSanitizeDirname:
+    """Test _sanitize_dirname for various title edge cases."""
+
+    def test_simple_title(self):
+        assert config._sanitize_dirname("Eviternity") == "eviternity"
+
+    def test_spaces_and_special(self):
+        assert config._sanitize_dirname("Ancient Aliens") == "ancient-aliens"
+
+    def test_multiple_specials(self):
+        assert config._sanitize_dirname("Scythe 2: Electric Boogaloo!") == "scythe-2-electric-boogaloo"
+
+    def test_leading_trailing_specials(self):
+        assert config._sanitize_dirname("---Test WAD---") == "test-wad"
+
+    def test_truncation(self):
+        long_title = "A" * 100
+        result = config._sanitize_dirname(long_title)
+        assert len(result) <= 64
+
+    def test_numbers_preserved(self):
+        assert config._sanitize_dirname("Doom2 Map01") == "doom2-map01"
+
+    def test_empty_string(self):
+        assert config._sanitize_dirname("") == ""
+
+    def test_all_special_chars(self):
+        assert config._sanitize_dirname("!!!@@@###") == ""
+
+    def test_consecutive_hyphens_collapsed(self):
+        assert config._sanitize_dirname("foo   bar") == "foo-bar"
+
+
+class TestWadDataDir:
+    """Test per-WAD data directory helpers."""
+
+    def test_get_wad_data_dir(self, tmp_config):
+        config._config_cache = None
+        result = config.get_wad_data_dir(1, "Eviternity")
+        assert result.name == "1_eviternity"
+        assert result.parent == config.get_data_dir()
+
+    def test_find_wad_data_dir_exists(self, tmp_path, tmp_config):
+        config._config_cache = None
+        cfg = config.load_config()
+        cfg["data_dir"] = str(tmp_path / "data")
+        config.save_config(cfg)
+        config._config_cache = None
+
+        # Create the directory
+        data_dir = tmp_path / "data" / "42_sunlust"
+        data_dir.mkdir(parents=True)
+
+        result = config.find_wad_data_dir(42)
+        assert result is not None
+        assert result.name == "42_sunlust"
+
+    def test_find_wad_data_dir_missing(self, tmp_path, tmp_config):
+        config._config_cache = None
+        cfg = config.load_config()
+        cfg["data_dir"] = str(tmp_path / "data")
+        config.save_config(cfg)
+        config._config_cache = None
+
+        assert config.find_wad_data_dir(99) is None
+
+    def test_find_wad_data_dir_no_base_dir(self, tmp_path, tmp_config):
+        config._config_cache = None
+        cfg = config.load_config()
+        cfg["data_dir"] = str(tmp_path / "nonexistent")
+        config.save_config(cfg)
+        config._config_cache = None
+
+        assert config.find_wad_data_dir(1) is None
+
+    def test_manage_data_dirs_default(self, tmp_config):
+        config._config_cache = None
+        assert config.get_manage_data_dirs() is True
+
+    def test_manage_data_dirs_false(self, tmp_config):
+        tmp_config.write_text("manage_data_dirs = false\n")
+        config._config_cache = None
+        assert config.get_manage_data_dirs() is False
+
+    def test_get_data_dir_default(self, tmp_config):
+        config._config_cache = None
+        assert config.get_data_dir() == config.DATA_DIR
+
+    def test_get_data_dir_custom(self, tmp_config):
+        tmp_config.write_text('data_dir = "/tmp/caco-data"\n')
+        config._config_cache = None
+        assert str(config.get_data_dir()) == "/tmp/caco-data"

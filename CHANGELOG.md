@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.6.0] - 2026-02-26
+
+Per-WAD data directories and sourceport family registry.
+
+### Added
+
+- **Per-WAD data directories**: Each WAD gets an isolated data directory at
+  `~/.local/share/caco/data/{id}_{title}/` for saves, stats, and other
+  sourceport output — eliminates cross-WAD data conflicts
+- **Sourceport family registry** (`sourceports.py`): Hardcoded mapping of
+  sourceport executables to CLI flags for data/save directory redirection
+  - **dsda family**: dsda-doom, nyan-doom, nugget-doom, prboom+, glboom+ (`-data`, `-save`)
+  - **zdoom family**: gzdoom, lzdoom, vkdoom, qzdoom, zdoom (`-savedir`)
+  - **chocolate family**: chocolate-doom, crispy-doom (`-savedir`)
+  - **woof family**: woof (`-data`, `-save`)
+  - **eternity family**: eternity (`-savedir`)
+- **Automatic data dir injection**: When playing a WAD with a recognized
+  sourceport, caco injects `-data`/`-save` (or `-savedir`) flags to redirect
+  output to the WAD's data directory
+- **`manage_data_dirs` config option**: Controls per-WAD data directory
+  management (default: `true`); set to `false` to use sourceport defaults
+- **`data_dir` config option**: Custom base directory for WAD data
+  (default: `~/.local/share/caco/data/`)
+- **`find_wad_data_dir()`**: Finds existing data directories by ID prefix,
+  handling title renames gracefully
+
+---
+
 ## [1.5.0] - 2026-02-26
 
 Managed IWAD storage and WAD cache relocation.

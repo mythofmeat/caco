@@ -9,13 +9,16 @@ from typing import Any, Callable
 
 from caco import db
 from caco.config import (
+    find_wad_data_dir,
     get_cache_dir,
     get_cache_auto_clean,
     get_cache_max_age,
     get_cache_max_size,
     get_default_sourceport,
     get_iwad,
+    get_manage_data_dirs,
     get_sourceport_args,
+    get_wad_data_dir,
     resolve_iwad,
     resolve_sourceport,
 )
@@ -247,6 +250,16 @@ def play(
                 cmd.extend(wad_args)
         except json.JSONDecodeError:
             pass
+
+    # Inject per-WAD data directory args (if enabled and sourceport is recognized)
+    if get_manage_data_dirs():
+        from caco.sourceports import get_data_dir_args
+
+        wad_data_dir = find_wad_data_dir(wad_id) or get_wad_data_dir(wad_id, wad["title"])
+        wad_data_dir.mkdir(parents=True, exist_ok=True)
+        data_args = get_data_dir_args(port, str(wad_data_dir))
+        if data_args:
+            cmd.extend(data_args)
 
     # Add the WAD file
     cmd.extend(["-file", str(wad_path)])

@@ -12,6 +12,7 @@ DB_DIR = Path.home() / ".local" / "share" / "caco"
 DEFAULT_DB_PATH = DB_DIR / "library.db"
 CACHE_DIR = DB_DIR / "wads"
 IWAD_DIR = DB_DIR / "iwads"
+DATA_DIR = DB_DIR / "data"
 
 DEFAULT_CONFIG = {
     "sourceport": "",
@@ -305,3 +306,60 @@ DEFAULT_GUI_CONFIG = {
 def get_gui_config() -> dict[str, Any]:
     """Get GUI configuration, merging defaults with user config."""
     return _merge_section_config("gui", DEFAULT_GUI_CONFIG)
+
+
+# =============================================================================
+# Per-WAD Data Directories
+# =============================================================================
+
+
+def get_data_dir() -> Path:
+    """Get the base directory for per-WAD data directories."""
+    config = load_config()
+    return Path(config.get("data_dir", str(DATA_DIR))).expanduser()
+
+
+def get_manage_data_dirs() -> bool:
+    """Whether to manage per-WAD data directories (inject -data/-save args)."""
+    config = load_config()
+    return bool(config.get("manage_data_dirs", True))
+
+
+def _sanitize_dirname(title: str) -> str:
+    """Sanitize a WAD title for use as a directory name.
+
+    Lowercase, replace non-alphanumeric with hyphens, strip leading/trailing
+    hyphens, collapse runs, and truncate to 64 chars.
+    """
+    import re
+
+    name = title.lower()
+    name = re.sub(r"[^a-z0-9]+", "-", name)
+    name = name.strip("-")
+    # Collapse any remaining runs of hyphens
+    name = re.sub(r"-{2,}", "-", name)
+    return name[:64]
+
+
+def get_wad_data_dir(wad_id: int, title: str) -> Path:
+    """Return the per-WAD data directory path.
+
+    Format: {data_dir}/{id}_{sanitized_title}/
+    """
+    return get_data_dir() / f"{wad_id}_{_sanitize_dirname(title)}"
+
+
+def find_wad_data_dir(wad_id: int) -> Path | None:
+    """Find an existing per-WAD data directory by ID prefix.
+
+    Handles title renames — matches {id}_* pattern.
+    Returns the path if found, None otherwise.
+    """
+    base = get_data_dir()
+    if not base.is_dir():
+        return None
+    prefix = f"{wad_id}_"
+    for entry in base.iterdir():
+        if entry.is_dir() and entry.name.startswith(prefix):
+            return entry
+    return None

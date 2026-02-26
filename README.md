@@ -568,6 +568,8 @@ Config file: `~/.config/caco/config.toml` (see `config.example.toml` for a templ
 | `cache_max_size_gb` | Max cache size in GB (0 = unlimited) |
 | `cache_max_age_days` | Remove files not played in N days (0 = never) |
 | `cache_auto_clean` | Auto-cleanup cache on play (true/false) |
+| `manage_data_dirs` | Manage per-WAD data directories (default: true) |
+| `data_dir` | Base directory for per-WAD data (default: `~/.local/share/caco/data/`) |
 | `[list] format` | Columns to display (see config example) |
 | `[list] sort` | Default sort order |
 | `[list] default_status` | Default status filter (empty = all statuses) |
@@ -711,6 +713,29 @@ caco tag list --plain               # TSV output for scripting
 caco random --info                  # Prints ID, title, author (TSV)
 ```
 
+## Per-WAD Data Directories
+
+When playing a WAD, caco automatically creates an isolated data directory for each WAD's saves, stats, and other sourceport output. This prevents data conflicts between WADs (e.g., stats.txt getting mixed, save files piling up in one folder).
+
+**How it works:**
+- On play, caco injects `-data`/`-save` flags (or `-savedir` for GZDoom-family ports) to redirect sourceport output
+- Each WAD gets its own directory: `~/.local/share/caco/data/{id}_{title}/`
+- Sourceport family detection is automatic based on the executable name
+
+**Supported sourceports:**
+
+| Family | Executables | Flags |
+|--------|------------|-------|
+| dsda | dsda-doom, nyan-doom, nugget-doom, prboom+, glboom+ | `-data`, `-save` |
+| zdoom | gzdoom, lzdoom, vkdoom, qzdoom, zdoom | `-savedir` |
+| chocolate | chocolate-doom, crispy-doom | `-savedir` |
+| woof | woof | `-data`, `-save` |
+| eternity | eternity | `-savedir` |
+
+Unknown sourceports play normally without any injection.
+
+**Opt-out:** Set `manage_data_dirs = false` in config to disable data directory management.
+
 ## Data Storage
 
 *Default locations:*
@@ -719,6 +744,7 @@ caco random --info                  # Prints ID, title, author (TSV)
 - **Managed IWADs**: `~/.local/share/caco/iwads/`
 - **Config**: `~/.config/caco/config.toml`
 - **WAD cache**: `~/.local/share/caco/wads/`
+- **WAD data**: `~/.local/share/caco/data/` (per-WAD saves, stats, configs)
 - **Thumbnail cache**: `~/.cache/caco/thumbnails/`
 
 ## Development
