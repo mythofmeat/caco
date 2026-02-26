@@ -27,8 +27,10 @@ A personal Doom WAD library manager taking inspiration from beets. Track what yo
   - Automatically tracks how long you play each WAD
 
 - **IWAD management**
-  - Register IWADs with MD5-based identification
-  - Auto-scan directories for known IWADs
+  - Register IWADs with family/variant model (e.g., doom2/v1.9, doom2/bfg)
+  - Multiple variants per family with configurable priority resolution
+  - Auto-scan directories for known IWADs with MD5-based identification
+  - Freedoom fallback when primary IWAD is unavailable
   - Auto-link to registered IWADs on Doom Wiki import
 
 ## Installation
@@ -496,35 +498,57 @@ cache_auto_clean = true
 
 ## IWAD Management
 
-Register and manage your IWADs for automatic resolution:
+IWADs are organized by **family** (doom, doom2, plutonia, tnt) with multiple **variants** per family (v1.9, bfg, enhanced, kex). Resolution uses a configurable priority list to pick the preferred variant.
 
 ```bash
-# Scan iwad_dirs for known IWADs (auto-detects by MD5 checksum)
+# Scan iwad_dirs for known IWADs (auto-detects family + variant by MD5)
 caco iwad scan
 caco iwad scan --dir ~/games/iwads      # Scan a specific directory
 caco iwad scan --yes                     # Register all without prompting
 
-# Manually register an IWAD (auto-detects name/title by MD5)
+# Manually register an IWAD (auto-detects family/variant by MD5)
 caco iwad add ~/games/doom2.wad
-caco iwad add ~/wads/custom.wad --name mycustom   # Unknown IWAD with custom name
+caco iwad add ~/games/doom2_bfg.wad     # Same family, different variant
+caco iwad add ~/wads/custom.wad --family doom2 --variant modded
 
-# List registered IWADs
+# List registered IWADs (* marks preferred variant)
 caco iwad list
 caco iwad list --plain                   # TSV output for scripting
 
-# Remove a registered IWAD
-caco iwad remove doom2
+# Remove a specific variant or all variants of a family
+caco iwad remove doom2 bfg              # Remove just BFG variant
+caco iwad remove doom2                  # Remove all doom2 variants (with warning)
 ```
 
-Once registered, IWADs can be referenced by short name anywhere:
+Once registered, IWADs can be referenced by family name anywhere — the preferred variant is resolved automatically:
 
 ```bash
 # Global config
-iwad = "doom2"               # Resolves to registered path
+iwad = "doom2"               # Resolves to preferred variant's path
 
 # Per-WAD config
-caco update 1 --iwad doom2   # Uses registered IWAD path
+caco update 1 --iwad doom2   # Uses preferred variant's path
 ```
+
+### Variant Priority
+
+The default priority prefers original releases over newer ports:
+
+| Family | Priority Order |
+|--------|------|
+| doom | v1.9ud, v1.9, bfg, enhanced, kex |
+| doom2 | v1.9, bfg, enhanced, kex |
+| plutonia | v1.9, v1.9alt, unity, kex |
+| tnt | v1.9, v1.9alt, unity, kex |
+
+Override priority per-family in config:
+
+```toml
+[iwad_priority]
+doom2 = ["bfg", "v1.9", "enhanced", "kex"]
+```
+
+Freedoom is used as a cross-family fallback (freedoom2 for doom2/plutonia/tnt, freedoom1 for doom) when no variant of the requested family is registered.
 
 Doom Wiki imports automatically set `custom_iwad` when the entry's IWAD field matches a registered IWAD.
 

@@ -189,13 +189,71 @@ def _migrate_add_iwads_table(conn: sqlite3.Connection) -> None:
         conn.execute("""
             CREATE TABLE iwads (
                 id INTEGER PRIMARY KEY,
-                name TEXT NOT NULL UNIQUE,
+                family TEXT NOT NULL,
+                variant TEXT NOT NULL DEFAULT 'unknown',
                 title TEXT,
                 path TEXT NOT NULL,
                 md5 TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(family, variant)
             )
         """)
+
+
+def _migrate_iwads_family_variant(conn: sqlite3.Connection) -> None:
+    """Restructure iwads table: name -> family + variant columns.
+
+    Migrates existing rows by mapping name -> family and detecting variant
+    from MD5.  If the table already has the new schema (family column),
+    this is a no-op.
+    """
+    cursor = conn.execute("PRAGMA table_info(iwads)")
+    columns = {row[1] for row in cursor.fetchall()}
+
+    # Already migrated (or created fresh with migration #8 new schema)
+    if "family" in columns:
+        return
+
+    # Old schema has 'name' column — need to migrate
+    if "name" not in columns:
+        return
+
+    from caco.db._iwads import KNOWN_IWADS
+
+    # Read existing rows
+    old_rows = conn.execute("SELECT id, name, title, path, md5, created_at FROM iwads").fetchall()
+
+    # Drop and recreate with new schema
+    conn.execute("DROP TABLE iwads")
+    conn.execute("""
+        CREATE TABLE iwads (
+            id INTEGER PRIMARY KEY,
+            family TEXT NOT NULL,
+            variant TEXT NOT NULL DEFAULT 'unknown',
+            title TEXT,
+            path TEXT NOT NULL,
+            md5 TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(family, variant)
+        )
+    """)
+
+    # Re-insert with family/variant
+    for row in old_rows:
+        family = row[1]  # old 'name' becomes family
+        md5 = row[4]
+        variant = "unknown"
+
+        # Try to detect variant from MD5
+        if md5 and md5 in KNOWN_IWADS:
+            _, detected_variant, _ = KNOWN_IWADS[md5]
+            variant = detected_variant
+
+        conn.execute(
+            "INSERT OR IGNORE INTO iwads (family, variant, title, path, md5, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (family, variant, row[2], row[3], md5, row[5]),
+        )
 
 
 # Ordered migration registry — append new migrations here with incrementing version
@@ -208,4 +266,5 @@ _MIGRATIONS: list[tuple[int, str, Any]] = [
     (6, "add_idgames_id", _migrate_add_idgames_id),
     (7, "drop_map_completions", _migrate_drop_map_completions),
     (8, "add_iwads_table", _migrate_add_iwads_table),
+    (9, "iwads_family_variant", _migrate_iwads_family_variant),
 ]

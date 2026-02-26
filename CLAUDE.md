@@ -14,7 +14,7 @@ Caco is a personal Doom WAD library manager inspired by `beets`. It tracks WADs 
 - LLM-powered metadata extraction (optional, for Doomworld imports)
 - Completion tracking (times beaten per WAD) with per-map stats import/export
 - Soft-delete with trash/restore lifecycle
-- IWAD registry with MD5-based identification and auto-scan
+- IWAD registry with family/variant model, MD5-based identification, priority resolution, and auto-scan
 
 ## Commands
 
@@ -67,7 +67,7 @@ src/caco/
 │   ├── _query.py       # Query parser, search_wads(), find_duplicate()
 │   ├── _wads.py        # WAD CRUD (add/get/update/delete), tag add/remove
 │   ├── _sessions.py    # Sessions, completions, batch stats, cache, StatsSnapshot
-│   └── _iwads.py       # IWAD registry: known IWADs, identification, CRUD
+│   └── _iwads.py       # IWAD registry: family/variant model, priority resolution, CRUD
 ├── config.py       # TOML config in ~/.config/caco/
 ├── player.py       # Sourceport launcher + playtime tracking
 ├── idgames/        # idgames API client
@@ -187,19 +187,20 @@ src/caco/
   - Free text searches title, author, and description
   - Multiple terms are joined with implicit AND
 - Per-WAD config: `custom_iwad`, `custom_sourceport`, `custom_args` (JSON array) columns in wads table
-- IWAD resolution: `iwad_dirs` config allows short names (e.g., `doom2` instead of full path); `resolve_iwad()` in `config.py` searches dirs for exact name or name + `.wad`
+- IWAD resolution: `iwad_dirs` config allows short names (e.g., `doom2` instead of full path); `resolve_iwad()` in `config.py` checks DB registry (with priority resolution) then searches dirs for exact name or name + `.wad`
 - Cross-source downloading: `idgames_id` column allows any WAD to download via idgames API (set with `caco update --idgames-id`)
 - Soft-delete: `deleted_at` column; `caco delete` moves to trash, `caco restore` recovers, `caco list --deleted` shows trash
 - `link` command: copies/moves a local file to cache and updates `cached_path`/`filename` for metadata-only entries (e.g., Doomwiki imports)
 - `version` column tracks WAD version strings for non-idgames releases
 - Database migrations run on `init_db()`: add columns, create tables, rename statuses
-- IWAD registry: `iwads` table with MD5-based identification; `KNOWN_IWADS` (MD5→name), `KNOWN_IWAD_FILENAMES` (filename→name), `IWAD_ALIASES` (free text→short name) in `db/_iwads.py`; `resolve_iwad()` checks DB registry before `iwad_dirs`; Doom Wiki imports auto-link to registered IWADs via `ImportService._auto_link_iwad()`
+- IWAD registry: `iwads` table with family/variant model; `KNOWN_IWADS` (MD5→(family, variant, title)), `KNOWN_IWAD_FILENAMES` (filename→(family, variant, title)), `IWAD_ALIASES` (free text→family), `DEFAULT_IWAD_PRIORITY` (family→variant order), `FAMILY_FALLBACKS` (family→fallback families) in `db/_iwads.py`; `get_iwad(family)` does priority resolution; `resolve_iwad()` checks DB registry before `iwad_dirs`; Doom Wiki imports auto-link to registered IWADs via `ImportService._auto_link_iwad()`
+- IWAD priority: `get_iwad_priority(family)` checks config `[iwad_priority]` section first, then `DEFAULT_IWAD_PRIORITY`; freedoom is cross-family fallback via `FAMILY_FALLBACKS`
 
 **IWAD CLI commands:**
-- `caco iwad list [--plain]` — list registered IWADs (name, title, path, md5)
-- `caco iwad add <path> [--name X]` — register IWAD (auto-detects via MD5 then filename)
-- `caco iwad remove <name>` — unregister an IWAD
-- `caco iwad scan [--dir PATH] [--yes]` — scan iwad_dirs for known IWADs
+- `caco iwad list [--plain]` — list registered IWADs (family, variant, title, path); preferred variant marked with `*`
+- `caco iwad add <path> [--family X] [--variant Y]` — register IWAD (auto-detects family+variant via MD5 then filename)
+- `caco iwad remove <family> [variant]` — without variant removes all variants (with warning); with variant removes one
+- `caco iwad scan [--dir PATH] [--yes]` — scan iwad_dirs for known IWADs, detecting family+variant
 
 **Status shortcuts (complete list):**
 | Shortcut | Status |

@@ -9,30 +9,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [1.4.0] - 2026-02-26
 
-IWAD management — first-class IWAD registry with MD5-based identification.
+IWAD management — first-class IWAD registry with family/variant model and
+configurable priority resolution.
 
 ### Added
 
 - **IWAD registry**: `caco iwad` command group for managing IWADs as first-class
-  entities in the database (`iwads` table with name, title, path, MD5)
+  entities in the database (`iwads` table with family, variant, title, path, MD5)
+- **Family/variant model**: IWADs organized by family (doom, doom2, plutonia, tnt)
+  with multiple variants per family (v1.9, bfg, enhanced, kex, unity)
+- **Priority resolution**: `resolve_iwad("doom2")` returns the preferred variant
+  based on a configurable priority list; `[iwad_priority]` config section for
+  per-family overrides
+- **Cross-family fallbacks**: Freedoom used as last-resort fallback (freedoom2 for
+  doom2/plutonia/tnt, freedoom1 for doom)
 - **`caco iwad scan`**: Auto-discover known IWADs in `iwad_dirs` by MD5 checksum,
-  with filename fallback for modded/newer releases
-- **`caco iwad add`**: Register an IWAD file with auto-detection (MD5 → known IWAD
-  database), or `--name` override for custom/unknown IWADs
-- **`caco iwad list`**: Display registered IWADs with `--plain` TSV output
-- **`caco iwad remove`**: Unregister an IWAD by short name
-- **IWAD resolution from registry**: `resolve_iwad()` now checks the IWAD registry
-  before falling back to `iwad_dirs` filesystem search
+  detecting both family and variant; filename fallback for modded/newer releases
+- **`caco iwad add`**: Register an IWAD file with auto-detection (MD5 → family +
+  variant), or `--family`/`--variant` overrides for custom IWADs
+- **`caco iwad list`**: Display registered IWADs with Family, Variant, Title, Path
+  columns; preferred variant marked with `*`; `--plain` TSV output
+- **`caco iwad remove`**: Unregister by family + variant, or remove all variants
+  of a family (with confirmation prompt)
+- **Expanded MD5 database**: ~22 known MD5s across 4 primary families covering
+  v1.9, BFG, Enhanced, Unity, and KEX variants
+- **IWAD resolution from registry**: `resolve_iwad()` checks the IWAD registry
+  with priority resolution before falling back to `iwad_dirs` filesystem search
 - **Auto-link on Doom Wiki import**: When a Doom Wiki entry has an IWAD field
   (e.g., "Doom II"), automatically sets `custom_iwad` if that IWAD is registered
-- **Known IWAD database**: MD5 checksums for Ultimate Doom, Doom II, Plutonia, TNT,
-  Heretic, Hexen, Strife, Chex Quest and variants; filename fallback for Freedoom,
-  HacX, and others
 - **IWAD alias mapping**: Normalizes free-text IWAD names from wikis/forums to
-  short registry names (e.g., "Doom II: Hell on Earth" → "doom2")
-- **Fish completions**: `iwad` subcommand completions with dynamic IWAD name
-  completion for `iwad remove`
+  family names (e.g., "Doom II: Hell on Earth" → "doom2")
+- **New DB functions**: `get_iwad_variant()`, `get_family_iwads()`,
+  `get_iwad_priority()`
+- **Fish completions**: `iwad` subcommand completions with `--family`/`--variant`
+  flags and dynamic family completion for `iwad remove`
 - **Migration #8**: `iwads` table creation
+- **Migration #9**: Restructure `iwads` table from `name UNIQUE` to
+  `(family, variant) UNIQUE` with data migration
 
 ---
 

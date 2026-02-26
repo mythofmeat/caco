@@ -45,11 +45,12 @@ complete -c caco -n "__fish_seen_subcommand_from iwad; and not __fish_seen_subco
 complete -c caco -n "__fish_seen_subcommand_from iwad; and __fish_seen_subcommand_from list" -l plain -d "Output as TSV"
 
 # iwad add options
-complete -c caco -n "__fish_seen_subcommand_from iwad; and __fish_seen_subcommand_from add" -l name -d "Override auto-detected name"
+complete -c caco -n "__fish_seen_subcommand_from iwad; and __fish_seen_subcommand_from add" -l family -d "Override auto-detected family"
+complete -c caco -n "__fish_seen_subcommand_from iwad; and __fish_seen_subcommand_from add" -l variant -d "Override auto-detected variant"
 complete -c caco -n "__fish_seen_subcommand_from iwad; and __fish_seen_subcommand_from add" -rF
 
-# iwad remove - complete registered IWAD names
-complete -c caco -n "__fish_seen_subcommand_from iwad; and __fish_seen_subcommand_from remove" -xa "(caco iwad list --plain 2>/dev/null | tail -n +2 | awk -F'\t' '{print \$1}')"
+# iwad remove - complete registered IWAD families and variants
+complete -c caco -n "__fish_seen_subcommand_from iwad; and __fish_seen_subcommand_from remove" -xa "(caco iwad list --plain 2>/dev/null | tail -n +2 | awk -F'\t' '{print \$1}' | sort -u)"
 
 # iwad scan options
 complete -c caco -n "__fish_seen_subcommand_from iwad; and __fish_seen_subcommand_from scan" -l dir -d "Directory to scan" -rF

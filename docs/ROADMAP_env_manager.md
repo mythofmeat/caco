@@ -71,14 +71,17 @@ save_arg = "-save"        # Same CLI structure as nyan-doom
 
 ## IWAD Management (Implemented)
 
-**Status:** Implemented as the foundation for the above features.
+**Status:** Implemented with family/variant model and priority resolution.
 
-Proper IWAD registry with MD5-based identification. See `caco iwad --help`.
+Proper IWAD registry with MD5-based identification, multiple variants per family (v1.9, BFG, Enhanced, KEX), configurable priority resolution, and freedoom cross-family fallbacks. See `caco iwad --help`.
 
 ---
 
 ## Future Ideas (Not Designed Yet)
 
+- **Playing IWADs directly:** `caco play --iwad doom2` or `caco iwad play doom2` to
+  launch an IWAD directly without a PWAD, using the preferred variant's path.  Useful
+  for playing vanilla Doom/Doom II campaigns or testing IWAD setups.
 - **Save game management:** Browse, backup, restore saves per-WAD
 - **Demo recording/playback:** Track demo files per-WAD
 - **Sourceport config management:** Per-WAD sourceport configs (e.g., different compatibility settings)
