@@ -31,6 +31,7 @@ A personal Doom WAD library manager taking inspiration from beets. Track what yo
   - Register IWADs with family/variant model (e.g., doom2/v1.9, doom2/bfg)
   - Multiple variants per family with configurable priority resolution
   - Import IWADs from files or directories with MD5-based identification
+  - Auto-detect required IWAD from WAD file contents (TNT, Plutonia, Doom 1 vs 2)
   - Freedoom fallback when primary IWAD is unavailable
   - Auto-link to registered IWADs on Doom Wiki import
 
@@ -569,6 +570,17 @@ Freedoom is used as a cross-family fallback (freedoom2 for doom2/plutonia/tnt, f
 
 Doom Wiki imports automatically set `custom_iwad` when the entry's IWAD field matches a registered IWAD.
 
+### Auto-Detection
+
+On first play, caco inspects the WAD file to auto-detect the required IWAD:
+
+1. **PNAMES analysis** — checks for texture patches unique to TNT: Evilution or The Plutonia Experiment (strongest signal, unambiguous)
+2. **Map name format** — `E1M1`-style lumps indicate Doom 1, `MAP01`-style indicates Doom 2
+
+The detected IWAD is saved to `custom_iwad` so detection only runs once per WAD. Self-contained WADs that bundle their own patches are correctly handled (won't trigger false detection).
+
+**Opt-out:** Set `auto_detect_iwad = false` in config to disable auto-detection.
+
 ## Configuration
 
 Config file: `~/.config/caco/config.toml` (see `config.example.toml` for a template)
@@ -590,6 +602,7 @@ Config file: `~/.config/caco/config.toml` (see `config.example.toml` for a templ
 | `manage_data_dirs` | Manage per-WAD data directories (default: true) |
 | `data_dir` | Base directory for per-WAD data (default: `~/.local/share/caco/data/`) |
 | `auto_stats` | Auto-track per-map stats after play sessions (default: true) |
+| `auto_detect_iwad` | Auto-detect required IWAD from WAD file contents (default: true) |
 | `[list] format` | Columns to display (see config example) |
 | `[list] sort` | Default sort order |
 | `[list] default_status` | Default status filter (empty = all statuses) |

@@ -10,6 +10,7 @@ from typing import Any, Callable
 from caco import db
 from caco.config import (
     find_wad_data_dir,
+    get_auto_detect_iwad,
     get_auto_stats,
     get_cache_dir,
     get_cache_auto_clean,
@@ -280,6 +281,16 @@ def play(
             "Set a valid sourceport with: caco config set sourceport <name>"
         )
     cmd = [port]
+
+    # Auto-detect IWAD if not explicitly set
+    if not wad.get("custom_iwad") and wad_path and get_auto_detect_iwad():
+        from caco.iwad_detect import detect_iwad
+
+        detected = detect_iwad(wad_path)
+        if detected:
+            logger.info("Auto-detected IWAD: %s for WAD %d", detected, wad_id)
+            db.update_wad(wad_id, custom_iwad=detected)
+            wad["custom_iwad"] = detected
 
     # Add IWAD (CLI option would be in extra_args, so: WAD-specific > global config)
     iwad = wad.get("custom_iwad") or get_iwad()

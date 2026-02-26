@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import struct
 from typing import Any
 
 import httpx
@@ -48,6 +49,37 @@ def format_size(size_bytes: int) -> str:
             return f"{value:.1f} {unit}"
         value /= 1024
     return f"{value:.1f} TB"
+
+
+def parse_wad_directory(wad_data: bytes | memoryview) -> list[tuple[str, int, int]]:
+    """Parse WAD header and directory. Returns [(name, offset, size), ...].
+
+    Accepts raw bytes, mmap objects, or any buffer supporting slicing
+    and ``len()``.
+    """
+    if len(wad_data) < 12:
+        return []
+
+    magic = wad_data[:4]
+    if magic not in (b"IWAD", b"PWAD"):
+        return []
+
+    num_lumps = struct.unpack_from("<i", wad_data, 4)[0]
+    dir_offset = struct.unpack_from("<i", wad_data, 8)[0]
+
+    entries: list[tuple[str, int, int]] = []
+    for i in range(num_lumps):
+        entry_offset = dir_offset + i * 16
+        if entry_offset + 16 > len(wad_data):
+            break
+
+        lump_offset = struct.unpack_from("<i", wad_data, entry_offset)[0]
+        lump_size = struct.unpack_from("<i", wad_data, entry_offset + 4)[0]
+        name_bytes = wad_data[entry_offset + 8:entry_offset + 16]
+        name = bytes(name_bytes).split(b"\x00")[0].decode("ascii", errors="replace").upper()
+        entries.append((name, lump_offset, lump_size))
+
+    return entries
 
 
 def extract_year(date_str: str | None) -> int | None:

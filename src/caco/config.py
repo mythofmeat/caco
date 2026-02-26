@@ -313,6 +313,12 @@ def get_gui_config() -> dict[str, Any]:
 # =============================================================================
 
 
+def get_auto_detect_iwad() -> bool:
+    """Whether to auto-detect IWAD from WAD file contents on first play."""
+    config = load_config()
+    return bool(config.get("auto_detect_iwad", True))
+
+
 def get_auto_stats() -> bool:
     """Whether to auto-track stats after play sessions."""
     config = load_config()

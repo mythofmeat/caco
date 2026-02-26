@@ -1,6 +1,7 @@
 - [ ] auto-update config file
 - [ ] automatically fetch doomwiki info if none exists, especially useful for determining which iwad to use
-- [ ] try to find a way to figure out what iwad a wad requires automatically? there must be a way to programmatically determine this via inspecting the wad file, right?
+- [x] try to find a way to figure out what iwad a wad requires automatically? there must be a way to programmatically determine this via inspecting the wad file, right?
+  - Implemented: PNAMES analysis (TNT/Plutonia unique patches) + map lump names (ExMy vs MAPxx). Auto-detects and persists on first play.
 - [ ] significantly clean up cli command structure
 - [ ] figure out some way to deal with id24 wads
 - [ ] play IWADs directly: `caco play --iwad doom2` or `caco iwad play doom2` to launch without a PWAD
@@ -8,4 +9,4 @@
 - [ ] demo recording/playback: track demo files per-WAD
 - [ ] per-WAD sourceport configs: different compatibility settings per WAD
 - [ ] auto-detect installed sourceports
-- [x] use stats tracking updates to determine what maps were completed in a given session, allowing real-time tracking of how much time was spent on a given map
+- [ ] use stats tracking updates to determine what maps were completed in a given session, allowing real-time tracking of how much time was spent on a given map

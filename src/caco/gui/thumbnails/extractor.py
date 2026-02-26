@@ -20,6 +20,8 @@ import zipfile
 from io import BytesIO
 from pathlib import Path
 
+from caco.utils import parse_wad_directory
+
 logger = logging.getLogger(__name__)
 
 # Maximum size for a WAD inside a ZIP (256 MB) — protects against decompression bombs
@@ -40,40 +42,13 @@ _DOOM_PALETTE = None  # Loaded lazily from WAD or embedded fallback
 def _read_palette_from_wad(wad_data: bytes | mmap.mmap) -> bytes | None:
     """Try to read PLAYPAL lump from WAD data."""
     try:
-        directory = _parse_wad_directory(wad_data)
+        directory = parse_wad_directory(wad_data)
         for name, offset, size in directory:
             if name == "PLAYPAL" and size >= 768:
                 return wad_data[offset:offset + 768]
     except Exception as exc:
         logger.debug("Failed to read PLAYPAL from WAD: %s", exc)
     return None
-
-
-def _parse_wad_directory(wad_data: bytes | mmap.mmap) -> list[tuple[str, int, int]]:
-    """Parse WAD header and directory. Returns [(name, offset, size), ...]."""
-    if len(wad_data) < 12:
-        return []
-
-    magic = wad_data[:4]
-    if magic not in (b"IWAD", b"PWAD"):
-        return []
-
-    num_lumps = struct.unpack_from("<i", wad_data, 4)[0]
-    dir_offset = struct.unpack_from("<i", wad_data, 8)[0]
-
-    entries = []
-    for i in range(num_lumps):
-        entry_offset = dir_offset + i * 16
-        if entry_offset + 16 > len(wad_data):
-            break
-
-        lump_offset = struct.unpack_from("<i", wad_data, entry_offset)[0]
-        lump_size = struct.unpack_from("<i", wad_data, entry_offset + 4)[0]
-        name_bytes = wad_data[entry_offset + 8:entry_offset + 16]
-        name = name_bytes.split(b"\x00")[0].decode("ascii", errors="replace").upper()
-        entries.append((name, lump_offset, lump_size))
-
-    return entries
 
 
 def _decode_doom_patch(data: bytes, palette: bytes, width: int = 320, height: int = 200) -> Image.Image | None:
@@ -181,7 +156,7 @@ def extract_titlepic(wad_path: str | Path) -> Image.Image | None:
         assert wad_data is not None
 
         # Parse WAD directory
-        directory = _parse_wad_directory(wad_data)
+        directory = parse_wad_directory(wad_data)
         if not directory:
             return None
 

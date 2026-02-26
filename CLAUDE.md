@@ -15,6 +15,7 @@ Caco is a personal Doom WAD library manager inspired by `beets`. It tracks WADs 
 - Completion tracking (times beaten per WAD) with per-map stats import/export and auto-tracking
 - Soft-delete with trash/restore lifecycle
 - IWAD registry with family/variant model, MD5-based identification, priority resolution, and auto-scan
+- Auto-detect required IWAD from WAD file contents (PNAMES analysis + map lump names)
 
 ## Commands
 
@@ -57,8 +58,9 @@ src/caco/
 │   ├── config_cmd.py   # config, completions commands
 │   ├── stats.py        # stats, beaten commands
 │   └── iwad_cmd.py     # iwad list/import/remove
+├── iwad_detect.py  # Auto-detect IWAD family from WAD file PNAMES/map lumps
 ├── sourceports.py  # Sourceport family registry (exe→CLI flags for data/save redirection)
-├── utils.py        # Shared utilities (coerce_str, BaseHttpClient, CacoSourceError, extract_year)
+├── utils.py        # Shared utilities (coerce_str, BaseHttpClient, CacoSourceError, extract_year, parse_wad_directory)
 ├── wad_stats.py    # Per-map stats parser/formatter (stats.txt + levelstat.txt)
 ├── db/             # SQLite database package
 │   ├── __init__.py     # Re-exports all public symbols (backward compat)
@@ -160,7 +162,7 @@ src/caco/
 │   └── doomworld.py # Doomworld forum adapter (extends BaseSource)
 └── tests/          # pytest test suite
     ├── conftest.py     # Shared fixtures (in-memory DB, make_wad factory, tmp_config, populated_db)
-    └── unit/           # Unit tests (utils, query parser, db, sessions, config, parsers, CLI, models, player)
+    └── unit/           # Unit tests (utils, query parser, db, sessions, config, parsers, CLI, models, player, iwad_detect)
 ```
 
 **Data locations:**
@@ -201,6 +203,7 @@ src/caco/
 - IWAD priority: `get_iwad_priority(family)` checks config `[iwad_priority]` section first, then `DEFAULT_IWAD_PRIORITY`; freedoom is cross-family fallback via `FAMILY_FALLBACKS`
 - Sourceport families: `sourceports.py` maps executable basenames to CLI flags; `SOURCEPORT_FAMILIES` dict with dsda/zdoom/chocolate/woof/eternity families; `identify_sourceport_family()` strips path and matches basename; `get_data_dir_args()` returns `-data`/`-save` or `-savedir` args
 - Per-WAD data dirs: `player.py` injects data dir args when `manage_data_dirs=True` (default); `get_wad_data_dir(id, title)` returns `{data_dir}/{id}_{sanitized_title}/`; `find_wad_data_dir(id)` finds existing dir by ID prefix (handles title renames); `_sanitize_dirname()` lowercases, replaces non-alnum with hyphens, truncates to 64 chars
+- IWAD auto-detection: `iwad_detect.py` inspects PWAD file PNAMES lump for TNT-only (197) / Plutonia-only (78) patches, then falls back to map lump names (ExMy→doom, MAPxx→doom2); self-contained WADs (patches provided as lumps) don't trigger detection; result persisted to `custom_iwad` on first play; `auto_detect_iwad` config (default: true); `parse_wad_directory()` shared between `iwad_detect.py` and `gui/thumbnails/extractor.py` via `utils.py`
 
 **IWAD CLI commands:**
 - `caco iwad list [--plain]` — list registered IWADs (family, variant, title, path); preferred variant marked with `*`
@@ -247,6 +250,7 @@ src/caco/
 - `cache_max_age_days` — remove files not played in N days (0 = never)
 - `cache_auto_clean` — auto-cleanup on play (true/false)
 - `auto_stats` — auto-track per-map stats after play sessions (default: true, requires `manage_data_dirs`)
+- `auto_detect_iwad` — auto-detect required IWAD from WAD file contents on first play (default: true)
 
 **TUI config (`[tui]` section):**
 - `default_tab` — starting tab (all, playing, to-play, finished, backlog, other)
