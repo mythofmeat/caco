@@ -1,0 +1,1 @@
+- [ ] automatically fetch doomwiki info if none exists

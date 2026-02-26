@@ -1,10 +1,9 @@
-- [ ] demo recording/playback: track demo files per-WAD
-- [ ] save game management: browse, backup, restore saves per-WAD (leverages per-WAD data dirs)
-- [ ] automatically fetch doomwiki info if none exists
 - [ ] figure out some way to deal with id24 wads
 - [ ] manage sourceport configs
+  - potentially creating a centrally managed configuration within `$XDG_DATA_DIR/caco/sourceports/{sourceport}/{config_profile}.{ext}`? with the default config profile just being `default`. this would make command syntax like `caco play --config controller id:73` possible, and that seems nice?
 - [ ] use stats tracking updates to determine what maps were completed in a given session, allowing real-time tracking of how much time was spent on a given map
-- [ ] significantly clean up cli command structure
+- [ ] save dir is wrong for dsda-doom and nyan-doom: save dir should be `$XDG_DATA_DIR/caco/data/{id}_{title}/[nyan|dsda]_doom_data/{iwad}/{filename_stub}/`
+  - have a look at `/home/eshen/.local/share/caco/data/73_drake-o-brien-ovational-megawad/` to see what i mean. the save data should be in the same folder as the stats.txt file
 - [x] auto-update config file
   - Implemented: `ensure_config_keys()` in config.py auto-adds missing keys with defaults when config file exists. Runs on every `load_config()`.
 - [x] try to find a way to figure out what iwad a wad requires automatically? there must be a way to programmatically determine this via inspecting the wad file, right?
