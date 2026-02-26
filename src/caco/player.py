@@ -10,6 +10,7 @@ from typing import Any, Callable
 from caco import db
 from caco.config import (
     find_wad_data_dir,
+    get_auto_stats,
     get_cache_dir,
     get_cache_auto_clean,
     get_cache_max_age,
@@ -177,6 +178,47 @@ def auto_clean_cache() -> int:
     return deleted
 
 
+def _find_stats_file(directory: Path) -> Path | None:
+    """Search for a stats file in a WAD data directory.
+
+    nyan-doom nests stats as {iwad}/{wad}/stats.txt, so search recursively.
+    Prefers stats.txt over levelstat.txt.
+    """
+    for name in ("stats.txt", "levelstat.txt"):
+        matches = list(directory.rglob(name))
+        if matches:
+            return matches[0]
+    return None
+
+
+def _auto_track_stats(wad_id: int, wad: dict) -> None:
+    """Read stats from the WAD's data dir and store on the WAD record.
+
+    Silently skips if data dirs are disabled, no data dir exists,
+    no stats file is found, or parsing fails.
+    """
+    if not get_auto_stats() or not get_manage_data_dirs():
+        return
+
+    try:
+        data_dir = find_wad_data_dir(wad_id)
+        if not data_dir or not data_dir.is_dir():
+            return
+
+        stats_path = _find_stats_file(data_dir)
+        if not stats_path:
+            return
+
+        from caco.wad_stats import parse_stats_file, stats_to_json
+
+        wad_stats = parse_stats_file(stats_path)
+        json_str = stats_to_json(wad_stats)
+        db.update_wad(wad_id, stats_snapshot=json_str)
+        logger.info("Auto-tracked stats for WAD %d from %s", wad_id, stats_path)
+    except Exception:
+        logger.warning("Failed to auto-track stats for WAD %d", wad_id, exc_info=True)
+
+
 def play(
     wad_id: int,
     sourceport: str | None = None,
@@ -295,6 +337,9 @@ def play(
     finally:
         # End session and calculate duration
         db.end_session(session_id)
+
+    # Auto-track stats from data directory
+    _auto_track_stats(wad_id, wad)
 
     # Return duration
     sessions = db.get_sessions(wad_id)

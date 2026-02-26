@@ -22,6 +22,7 @@ A personal Doom WAD library manager taking inspiration from beets. Track what yo
 
 - **Completion tracking**
   - Track how many times you've beaten each WAD
+  - Auto-track per-map stats from sourceport output
 
 - **Playtime tracking**
   - Automatically tracks how long you play each WAD
@@ -440,6 +441,24 @@ caco beaten export "Doom 2 In Retrospect" -o stats.txt  # Write to file
 
 Format is auto-detected. Exported files are lossless round-trips of the original.
 
+### Automatic Stats Tracking
+
+When per-WAD data directories are enabled (default), caco automatically reads stats after each play session:
+
+1. After the sourceport exits, caco searches the WAD's data directory for `stats.txt` or `levelstat.txt`
+2. The stats are parsed and stored as a live snapshot on the WAD record
+3. When you mark the WAD as beaten (`caco beaten add` or `caco update --status finished`), the snapshot is automatically archived to the completion record
+
+This means you don't need to manually run `--stats-file` — just play and mark as beaten.
+
+```bash
+caco play 1                    # Stats auto-tracked after session
+caco beaten add 1              # Auto-attaches stored stats to completion
+caco beaten stats 1            # View the per-map stats
+```
+
+**Opt-out:** Set `auto_stats = false` in config to disable auto-tracking.
+
 ### Library Statistics
 
 ```bash
@@ -570,6 +589,7 @@ Config file: `~/.config/caco/config.toml` (see `config.example.toml` for a templ
 | `cache_auto_clean` | Auto-cleanup cache on play (true/false) |
 | `manage_data_dirs` | Manage per-WAD data directories (default: true) |
 | `data_dir` | Base directory for per-WAD data (default: `~/.local/share/caco/data/`) |
+| `auto_stats` | Auto-track per-map stats after play sessions (default: true) |
 | `[list] format` | Columns to display (see config example) |
 | `[list] sort` | Default sort order |
 | `[list] default_status` | Default status filter (empty = all statuses) |

@@ -109,9 +109,14 @@ def update_wad(wad_id: int, **fields) -> bool:
 
         # Record completion atomically if status was set to 'finished'
         if updated and recording_completion:
+            # Fetch current stats snapshot to archive with completion
+            row = conn.execute(
+                "SELECT stats_snapshot FROM wads WHERE id = ?", (wad_id,)
+            ).fetchone()
+            snapshot = row["stats_snapshot"] if row else None
             conn.execute(
-                "INSERT INTO wad_completions (wad_id) VALUES (?)",
-                (wad_id,),
+                "INSERT INTO wad_completions (wad_id, stats_snapshot) VALUES (?, ?)",
+                (wad_id, snapshot),
             )
 
     return updated

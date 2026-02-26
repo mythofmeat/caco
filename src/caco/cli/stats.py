@@ -235,6 +235,14 @@ def beaten_add(query: str, notes: str | None, stats_file: str | None, yes: bool)
         except (ValueError, OSError) as e:
             err_console.print(f"[red]Failed to parse stats file: {e}[/red]")
             return
+    elif wad.get("stats_snapshot"):
+        snapshot_json = wad["stats_snapshot"]
+        wad_stats = stats_from_json(snapshot_json)
+        played = wad_stats.played_maps
+        console.print(
+            f"[dim]Auto-attaching stats: {len(played)} map(s) played, "
+            f"total time {wad_stats.total_time_display}[/dim]"
+        )
 
     completion_id = db.add_wad_completion(
         wad["id"], stats_snapshot=snapshot_json, notes=notes

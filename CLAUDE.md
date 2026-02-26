@@ -12,7 +12,7 @@ Caco is a personal Doom WAD library manager inspired by `beets`. It tracks WADs 
 - Tag-based organization
 - On-demand downloading (WADs are cached, not stored permanently)
 - LLM-powered metadata extraction (optional, for Doomworld imports)
-- Completion tracking (times beaten per WAD) with per-map stats import/export
+- Completion tracking (times beaten per WAD) with per-map stats import/export and auto-tracking
 - Soft-delete with trash/restore lifecycle
 - IWAD registry with family/variant model, MD5-based identification, priority resolution, and auto-scan
 
@@ -190,6 +190,7 @@ src/caco/
   - Free text searches title, author, and description
   - Multiple terms are joined with implicit AND
 - Per-WAD config: `custom_iwad`, `custom_sourceport`, `custom_args` (JSON array) columns in wads table
+- Auto stats tracking: `stats_snapshot` TEXT column on `wads` table stores live per-map stats JSON; auto-read from data dir after play sessions; auto-archived to completion on `beaten add` or `update --status finished`; `auto_stats` config (default: true)
 - IWAD resolution: `iwad_dirs` config allows short names (e.g., `doom2` instead of full path); `resolve_iwad()` in `config.py` checks DB registry (with priority resolution) then searches dirs for exact name or name + `.wad`; `IWAD_DIR` / `get_iwad_dir()` provides the managed IWAD directory path (`~/.local/share/caco/iwads/`)
 - Cross-source downloading: `idgames_id` column allows any WAD to download via idgames API (set with `caco update --idgames-id`)
 - Soft-delete: `deleted_at` column; `caco delete` moves to trash, `caco restore` recovers, `caco list --deleted` shows trash
@@ -245,6 +246,7 @@ src/caco/
 - `cache_max_size_gb` — max cache size in GB (0 = unlimited)
 - `cache_max_age_days` — remove files not played in N days (0 = never)
 - `cache_auto_clean` — auto-cleanup on play (true/false)
+- `auto_stats` — auto-track per-map stats after play sessions (default: true, requires `manage_data_dirs`)
 
 **TUI config (`[tui]` section):**
 - `default_tab` — starting tab (all, playing, to-play, finished, backlog, other)

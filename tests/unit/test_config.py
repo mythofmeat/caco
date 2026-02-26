@@ -305,6 +305,15 @@ class TestWadDataDir:
         config._config_cache = None
         assert config.get_manage_data_dirs() is False
 
+    def test_auto_stats_default(self, tmp_config):
+        config._config_cache = None
+        assert config.get_auto_stats() is True
+
+    def test_auto_stats_false(self, tmp_config):
+        tmp_config.write_text("auto_stats = false\n")
+        config._config_cache = None
+        assert config.get_auto_stats() is False
+
     def test_get_data_dir_default(self, tmp_config):
         config._config_cache = None
         assert config.get_data_dir() == config.DATA_DIR

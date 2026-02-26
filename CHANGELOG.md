@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.7.0] - 2026-02-26
+
+Automatic per-map stats tracking after play sessions.
+
+### Added
+
+- **Auto stats tracking**: After each play session, caco automatically reads
+  `stats.txt` or `levelstat.txt` from the WAD's data directory and stores a
+  running stats snapshot on the WAD record (`wads.stats_snapshot` column)
+- **Auto-attach stats on completion**: When marking a WAD as beaten via
+  `caco beaten add` (without `--stats-file`) or `caco update --status finished`,
+  the WAD's live stats snapshot is automatically archived to the completion record
+- **Recursive stats file discovery**: Handles nyan-doom's nested directory
+  layout (`{iwad}/{wad}/stats.txt`) via recursive search
+- **`auto_stats` config option**: Controls auto-tracking (default: `true`);
+  requires `manage_data_dirs = true`
+- **Migration #11**: `stats_snapshot` TEXT column on `wads` table
+
+---
+
 ## [1.6.0] - 2026-02-26
 
 Per-WAD data directories and sourceport family registry.

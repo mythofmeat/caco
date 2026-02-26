@@ -313,6 +313,12 @@ def get_gui_config() -> dict[str, Any]:
 # =============================================================================
 
 
+def get_auto_stats() -> bool:
+    """Whether to auto-track stats after play sessions."""
+    config = load_config()
+    return bool(config.get("auto_stats", True))
+
+
 def get_data_dir() -> Path:
     """Get the base directory for per-WAD data directories."""
     config = load_config()

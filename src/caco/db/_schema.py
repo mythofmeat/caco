@@ -310,6 +310,14 @@ def _migrate_relocate_wad_cache(conn: sqlite3.Connection) -> None:
         pass
 
 
+def _migrate_add_stats_snapshot(conn: sqlite3.Connection) -> None:
+    """Add stats_snapshot column to wads for live stats tracking."""
+    cursor = conn.execute("PRAGMA table_info(wads)")
+    columns = {row[1] for row in cursor.fetchall()}
+    if "stats_snapshot" not in columns:
+        conn.execute("ALTER TABLE wads ADD COLUMN stats_snapshot TEXT")
+
+
 # Ordered migration registry — append new migrations here with incrementing version
 _MIGRATIONS: list[tuple[int, str, Any]] = [
     (1, "add_custom_play_config", _migrate_add_custom_play_config),
@@ -322,4 +330,5 @@ _MIGRATIONS: list[tuple[int, str, Any]] = [
     (8, "add_iwads_table", _migrate_add_iwads_table),
     (9, "iwads_family_variant", _migrate_iwads_family_variant),
     (10, "relocate_wad_cache", _migrate_relocate_wad_cache),
+    (11, "add_stats_snapshot", _migrate_add_stats_snapshot),
 ]

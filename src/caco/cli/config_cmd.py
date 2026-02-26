@@ -66,6 +66,11 @@ sourceport_args = []
 # to ~/.local/share/caco/data/{id}_{title}/ per WAD
 manage_data_dirs = true
 
+# Automatically track per-map stats after play sessions
+# Reads stats.txt/levelstat.txt from WAD data dir and stores on WAD record
+# Requires manage_data_dirs = true
+auto_stats = true
+
 # [list] section for customizing list output (coming soon)
 # format = ["id", "title", "author", "status"]
 # sort = "id+"

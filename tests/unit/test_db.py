@@ -167,3 +167,23 @@ class TestCompletions:
         assert db_mod.get_times_beaten(wad_id) == 5
         db_mod.set_wad_completion_count(wad_id, 2)
         assert db_mod.get_times_beaten(wad_id) == 2
+
+    def test_update_finished_copies_stats_snapshot(self, db_mod):
+        """Setting status to finished should copy stats_snapshot to completion."""
+        wad_id = db_mod.add_wad("Scythe", SourceType.IDGAMES)
+        snapshot = '{"format":"stats_txt","maps":[],"version":1,"header_total_kills":0}'
+        db_mod.update_wad(wad_id, stats_snapshot=snapshot)
+        db_mod.update_wad(wad_id, status=Status.FINISHED)
+
+        completions = db_mod.get_wad_completions(wad_id)
+        assert len(completions) == 1
+        assert completions[0]["stats_snapshot"] == snapshot
+
+    def test_update_finished_no_stats_snapshot(self, db_mod):
+        """Setting status to finished without stats_snapshot creates completion with None."""
+        wad_id = db_mod.add_wad("Scythe", SourceType.IDGAMES)
+        db_mod.update_wad(wad_id, status=Status.FINISHED)
+
+        completions = db_mod.get_wad_completions(wad_id)
+        assert len(completions) == 1
+        assert completions[0]["stats_snapshot"] is None

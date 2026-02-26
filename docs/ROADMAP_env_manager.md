@@ -26,24 +26,20 @@ This document captures the vision for expanding caco from a WAD library manager 
 
 ---
 
-## Auto Stats Tracking
+## Auto Stats Tracking — IMPLEMENTED (v1.7.0)
 
 **Goal:** After each play session, automatically read the WAD's stats.txt and update the stored per-map statistics.
 
+**Implementation:** `player.py` (_find_stats_file, _auto_track_stats), `db/_schema.py` (migration #11: stats_snapshot column on wads), `db/_wads.py` (copies stats_snapshot to completion on status→finished), `cli/stats.py` (auto-attaches WAD stats_snapshot when `beaten add` is called without --stats-file)
+
 **How it works:**
-1. After the sourceport exits, check if `{wad_data_dir}/stats.txt` exists
-2. Parse it with the existing `parse_stats_file()` infrastructure
-3. Find the most recent completion record for this WAD
-4. If it has a stats_snapshot, update it with the new file contents
-5. If no completion exists, create one with the stats
+1. After the sourceport exits, search `{wad_data_dir}/**/stats.txt` (recursive, handles nyan-doom nesting)
+2. Falls back to `levelstat.txt` if no stats.txt found
+3. Parse with existing `parse_stats_file()`, serialize with `stats_to_json()`
+4. Store JSON in `wads.stats_snapshot` column (live progress, not completion)
+5. When user marks WAD as beaten (`beaten add` or `update --status finished`), the snapshot is automatically archived to the completion record
 
-**Why this is simple with per-WAD data dirs:** Since each WAD has its own stats.txt, there's no conflict detection needed. The file always belongs to exactly one WAD.
-
-**Without per-WAD data dirs (shared stats.txt):** If multiple WADs share a stats file path, use pre/post snapshot comparison:
-1. Read the stats file BEFORE launching the sourceport
-2. After exit, read again
-3. Only maps that changed during the session get attributed to this WAD
-4. This inherently prevents cross-WAD contamination
+**Config:** `auto_stats = true` (default), requires `manage_data_dirs = true`
 
 ---
 
