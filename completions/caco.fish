@@ -200,7 +200,9 @@ complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcomm
 # beaten list/remove/set/stats/export options
 complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from list remove set stats export" -s y -l yes -d "Auto-select first match"
 complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from stats" -l plain -d "TSV output for scripting"
+complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from stats" -l live -d "Show only live stats"
 complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from export" -s o -l output -d "Write to file" -rF
+complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from export" -l live -d "Export live stats"
 
 # beaten subcommand WAD query completions
 complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from list add attach remove set stats export" -xa "(__caco_wads)"

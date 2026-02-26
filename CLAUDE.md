@@ -15,6 +15,7 @@ Caco is a personal Doom WAD library manager inspired by `beets`. It tracks WADs 
 - Completion tracking (times beaten per WAD) with per-map stats import/export and auto-tracking
 - Soft-delete with trash/restore lifecycle
 - IWAD registry with family/variant model, MD5-based identification, priority resolution, and auto-scan
+- Managed IWAD storage: `iwads/{variant}/{family}.wad` (canonical filenames for sourceport compatibility)
 - Auto-detect required IWAD from WAD file contents (PNAMES analysis + map lump names)
 
 ## Commands
@@ -168,7 +169,7 @@ src/caco/
 **Data locations:**
 - Database: `~/.local/share/caco/library.db` (configurable via `db_path`)
 - Config: `~/.config/caco/config.toml`
-- Managed IWADs: `~/.local/share/caco/iwads/`
+- Managed IWADs: `~/.local/share/caco/iwads/{variant}/{family}.wad`
 - WAD cache: `~/.local/share/caco/wads/`
 - WAD data: `~/.local/share/caco/data/` (per-WAD saves, stats, configs; configurable via `data_dir`)
 
@@ -192,14 +193,14 @@ src/caco/
   - Free text searches title, author, and description
   - Multiple terms are joined with implicit AND
 - Per-WAD config: `custom_iwad`, `custom_sourceport`, `custom_args` (JSON array) columns in wads table
-- Auto stats tracking: `stats_snapshot` TEXT column on `wads` table stores live per-map stats JSON; auto-read from data dir after play sessions; auto-archived to completion on `beaten add` or `update --status finished`; `auto_stats` config (default: true)
+- Auto stats tracking: `stats_snapshot` TEXT column on `wads` table stores live per-map stats JSON; auto-read from data dir after play sessions; auto-archived to completion on `beaten add` or `update --status finished`; `auto_stats` config (default: true); live stats shown as "Current (live)" entry in Map Stats dialog (GUI) and screen (TUI)
 - IWAD resolution: `iwad_dirs` config allows short names (e.g., `doom2` instead of full path); `resolve_iwad()` in `config.py` checks DB registry (with priority resolution) then searches dirs for exact name or name + `.wad`; `IWAD_DIR` / `get_iwad_dir()` provides the managed IWAD directory path (`~/.local/share/caco/iwads/`)
 - Cross-source downloading: `idgames_id` column allows any WAD to download via idgames API (set with `caco update --idgames-id`)
 - Soft-delete: `deleted_at` column; `caco delete` moves to trash, `caco restore` recovers, `caco list --deleted` shows trash
 - `link` command: copies/moves a local file to cache and updates `cached_path`/`filename` for metadata-only entries (e.g., Doomwiki imports)
 - `version` column tracks WAD version strings for non-idgames releases
 - Database migrations run on `init_db()`: add columns, create tables, rename statuses
-- IWAD registry: `iwads` table with family/variant model; `KNOWN_IWADS` (MD5→(family, variant, title)), `KNOWN_IWAD_FILENAMES` (filename→(family, variant, title)), `IWAD_ALIASES` (free text→family), `DEFAULT_IWAD_PRIORITY` (family→variant order), `FAMILY_FALLBACKS` (family→fallback families) in `db/_iwads.py`; `get_iwad(family)` does priority resolution; `managed_iwad_filename()` generates canonical filenames for managed IWADs; `remove_iwad_with_paths()` returns removed paths for managed file cleanup; `resolve_iwad()` checks DB registry before `iwad_dirs`; Doom Wiki imports auto-link to registered IWADs via `ImportService._auto_link_iwad()`
+- IWAD registry: `iwads` table with family/variant model; `KNOWN_IWADS` (MD5→(family, variant, title)), `KNOWN_IWAD_FILENAMES` (filename→(family, variant, title)), `IWAD_ALIASES` (free text→family), `DEFAULT_IWAD_PRIORITY` (family→variant order), `FAMILY_FALLBACKS` (family→fallback families) in `db/_iwads.py`; `get_iwad(family)` does priority resolution; `managed_iwad_filename()` returns `{variant}/{family}.wad` path for managed IWADs (canonical filenames for sourceport compatibility); `remove_iwad_with_paths()` returns removed paths for managed file cleanup; `resolve_iwad()` checks DB registry before `iwad_dirs`; Doom Wiki imports auto-link to registered IWADs via `ImportService._auto_link_iwad()`
 - IWAD priority: `get_iwad_priority(family)` checks config `[iwad_priority]` section first, then `DEFAULT_IWAD_PRIORITY`; freedoom is cross-family fallback via `FAMILY_FALLBACKS`
 - Sourceport families: `sourceports.py` maps executable basenames to CLI flags; `SOURCEPORT_FAMILIES` dict with dsda/zdoom/chocolate/woof/eternity families; `identify_sourceport_family()` strips path and matches basename; `get_data_dir_args()` returns `-data`/`-save` or `-savedir` args
 - Per-WAD data dirs: `player.py` injects data dir args when `manage_data_dirs=True` (default); `get_wad_data_dir(id, title)` returns `{data_dir}/{id}_{sanitized_title}/`; `find_wad_data_dir(id)` finds existing dir by ID prefix (handles title renames); `_sanitize_dirname()` lowercases, replaces non-alnum with hyphens, truncates to 64 chars
@@ -226,8 +227,8 @@ src/caco/
 - `caco beaten attach <query> --stats-file FILE` — attach stats to an existing completion record
 - `caco beaten remove <query> [COMPLETION_ID]` — remove most recent or specific completion
 - `caco beaten set <query> <count>` — set exact completion count
-- `caco beaten stats <query> [COMPLETION_ID] [--plain]` — view per-map statistics table for a completion
-- `caco beaten export <query> [COMPLETION_ID] [--output FILE]` — export stats back to original text format
+- `caco beaten stats <query> [COMPLETION_ID] [--live] [--plain]` — view per-map statistics; without ID shows all entries (live + completions); `--live` shows only live stats
+- `caco beaten export <query> [COMPLETION_ID] [--live] [--output FILE]` — export stats back to original text format; `--live` exports live stats snapshot
 - Uses `wad_completions` table (auto-created via migration); stats stored as JSON in `stats_snapshot` column
 - Supports nyan-doom/dsda-doom `stats.txt` format (persistent per-map tracking) and `levelstat.txt` format (human-readable `-levelstat` output)
 

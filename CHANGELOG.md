@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.7.2] - 2026-02-27
+
+Reworked `beaten stats` to show all stats entries and added `--live` flag.
+
+### Changed
+
+- **`caco beaten stats`**: Without a COMPLETION_ID, now shows all stats
+  entries — live stats first (from `wads.stats_snapshot`), then each
+  completion with stats — with section headers and summary lines
+- **`caco beaten export`**: Falls back to live stats when no completion
+  has stats attached (via `allow_live` in `_find_completion_with_stats()`)
+
+### Added
+
+- **`--live` flag on `beaten stats`**: Show only the current live stats
+  snapshot, skipping completion records
+- **`--live` flag on `beaten export`**: Export the WAD's live stats
+  snapshot instead of a completion's
+- **`_build_stats_entries()` helper**: Builds ordered list of stats
+  entries (live + completions), matching the GUI/TUI pattern
+- **CLI stats tests**: 14 new tests in `tests/unit/test_cli_stats.py`
+  covering all beaten stats and export scenarios
+- **Fish completions**: `--live` flag for `beaten stats` and `beaten export`
+
+---
+
+## [1.7.1] - 2026-02-27
+
+Managed IWAD directory restructure and live stats in GUI/TUI.
+
+### Changed
+
+- **IWAD managed path format**: Changed from `{family}_{variant}.wad` to
+  `{variant}/{family}.wad` — gives sourceports canonical filenames (e.g.,
+  `doom2.wad`, `tnt.wad`) while keeping variants in subdirectories
+- **Migration #13**: Automatically moves existing managed IWAD files to
+  new directory structure and updates DB paths
+- **GUI WadStatsDialog**: Now shows live stats as "Current (live)" entry
+  prepended before completion stats in the selector dropdown
+- **TUI WadStatsScreen**: Now shows live stats as "Current (live)" entry
+  navigable with n/p keys alongside completion stats
+- **IWAD remove cleanup**: Now cleans up empty variant subdirectories
+  after deleting managed IWAD files; uses `is_relative_to()` for safer
+  managed directory detection
+
+---
+
 ## [1.7.0] - 2026-02-26
 
 Automatic per-map stats tracking after play sessions.

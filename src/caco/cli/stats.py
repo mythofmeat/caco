@@ -387,14 +387,38 @@ def beaten_set(query: str, count: int, yes: bool):
     console.print(f"[green]Set {wad['title']} to {count} completion(s)[/green]")
 
 
+def _build_stats_entries(wad: dict) -> list[dict]:
+    """Build a list of stats entries: live first, then completions with stats.
+
+    Each entry has: stats_snapshot, label, _live flag, and completion fields.
+    Matches the pattern used by GUI/TUI for consistency.
+    """
+    entries = []
+
+    # Live stats from wad's stats_snapshot
+    if wad.get("stats_snapshot"):
+        entries.append({
+            "id": None,
+            "completed_at": None,
+            "stats_snapshot": wad["stats_snapshot"],
+            "notes": None,
+            "_live": True,
+        })
+
+    # Completions with stats
+    completions = db.get_wad_completions(wad["id"])
+    for c in completions:
+        if c.get("stats_snapshot"):
+            entries.append(c)
+
+    return entries
+
+
 def _find_completion_with_stats(
-    wad: dict, completion_id: int | None
+    wad: dict, completion_id: int | None, *, allow_live: bool = False,
 ) -> dict | None:
     """Find a completion with stats_snapshot, or None."""
     completions = db.get_wad_completions(wad["id"])
-    if not completions:
-        err_console.print(f"[dim]{wad['title']} has no completion records[/dim]")
-        return None
 
     if completion_id:
         for c in completions:
@@ -408,62 +432,126 @@ def _find_completion_with_stats(
         err_console.print(f"[red]Completion #{completion_id} not found[/red]")
         return None
 
-    # Find most recent with stats
+    # Find most recent completion with stats
     for c in completions:
         if c.get("stats_snapshot"):
             return c
 
-    err_console.print(f"[dim]No completions with stats found for {wad['title']}[/dim]")
+    # Fall back to live stats if allowed
+    if allow_live and wad.get("stats_snapshot"):
+        return {
+            "id": None,
+            "completed_at": None,
+            "stats_snapshot": wad["stats_snapshot"],
+            "notes": None,
+            "_live": True,
+        }
+
+    if not completions:
+        err_console.print(f"[dim]{wad['title']} has no completion records[/dim]")
+    else:
+        err_console.print(f"[dim]No completions with stats found for {wad['title']}[/dim]")
     return None
 
 
-@beaten_cmd.command(name="stats")
-@click.argument("query")
-@click.argument("completion_id", type=int, required=False)
-@click.option("--plain", is_flag=True, help="Output as TSV for scripting")
-@click.option("--yes", "-y", is_flag=True, help="Auto-select first match if multiple")
-def beaten_stats(query: str, completion_id: int | None, plain: bool, yes: bool):
-    """Show per-map statistics for a completion.
+def _entry_label(entry: dict) -> str:
+    """Build a display label for a stats entry."""
+    if entry.get("_live"):
+        return "Current (live)"
+    date = entry["completed_at"][:16].replace("T", " ") if entry.get("completed_at") else "-"
+    return f"Completion #{entry['id']} ({date})"
 
-    If COMPLETION_ID is not given, uses the most recent completion with stats.
 
-    \b
-    Examples:
-        caco beaten stats "Doom 2 In Retrospect"
-        caco beaten stats "Doom 2 In Retrospect" 42
-        caco beaten stats "Doom 2 In Retrospect" --plain
-    """
-    wads = resolve_wad_query(query, mode="pick", yes=yes)
-    if not wads:
-        return
-    wad = wads[0]
-
-    comp = _find_completion_with_stats(wad, completion_id)
-    if not comp:
-        return
-
-    wad_stats = stats_from_json(comp["stats_snapshot"])
+def _print_entry(entry: dict, *, plain: bool = False) -> None:
+    """Print a single stats entry (header + summary + table)."""
+    wad_stats = stats_from_json(entry["stats_snapshot"])
     played = wad_stats.played_maps
+    label = _entry_label(entry)
 
     if plain:
+        print(f"# {label}")
         _print_stats_plain(wad_stats)
         return
 
-    date = comp["completed_at"][:16].replace("T", " ") if comp["completed_at"] else "-"
-    console.print(
-        f"\n[bold]{wad['title']}[/bold] - "
-        f"Completion #{comp['id']} ({date})\n"
-    )
+    console.print(f"[bold]── {label} [/bold]" + "─" * max(0, 40 - len(label)))
     console.print(
         f"[dim]Format: {wad_stats.format} | "
-        f"Maps played: {len(played)} | "
-        f"Total time: {wad_stats.total_time_display}[/dim]\n"
+        f"Maps: {len(played)} | "
+        f"Time: {wad_stats.total_time_display}[/dim]\n"
     )
 
     if wad_stats.format == "stats_txt":
         _print_stats_txt_table(played)
     else:
         _print_levelstat_table(played)
+
+
+@beaten_cmd.command(name="stats")
+@click.argument("query")
+@click.argument("completion_id", type=int, required=False)
+@click.option("--live", is_flag=True, help="Show only live stats snapshot")
+@click.option("--plain", is_flag=True, help="Output as TSV for scripting")
+@click.option("--yes", "-y", is_flag=True, help="Auto-select first match if multiple")
+def beaten_stats(query: str, completion_id: int | None, live: bool, plain: bool, yes: bool):
+    """Show per-map statistics for a WAD.
+
+    Without COMPLETION_ID, shows all stats entries — live stats first,
+    then each completion with stats. With COMPLETION_ID, shows just that one.
+    Use --live to show only the current live stats snapshot.
+
+    \b
+    Examples:
+        caco beaten stats "Doom 2 In Retrospect"           # all entries
+        caco beaten stats "Doom 2 In Retrospect" 42        # specific completion
+        caco beaten stats "Doom 2 In Retrospect" --live    # live stats only
+        caco beaten stats "Doom 2 In Retrospect" --plain   # all, TSV format
+    """
+    wads = resolve_wad_query(query, mode="pick", yes=yes)
+    if not wads:
+        return
+    wad = wads[0]
+
+    # --live: show only the live stats snapshot
+    if live:
+        if not wad.get("stats_snapshot"):
+            err_console.print(f"[dim]No live stats for {wad['title']}[/dim]")
+            return
+        entry = {
+            "id": None, "completed_at": None,
+            "stats_snapshot": wad["stats_snapshot"],
+            "notes": None, "_live": True,
+        }
+        if not plain:
+            console.print(f"\n[bold]{wad['title']}[/bold] — Map Statistics\n")
+        _print_entry(entry, plain=plain)
+        return
+
+    # Specific completion ID: show just that one (original behavior)
+    if completion_id is not None:
+        comp = _find_completion_with_stats(wad, completion_id)
+        if not comp:
+            return
+        if not plain:
+            console.print(f"\n[bold]{wad['title']}[/bold] — Map Statistics\n")
+        _print_entry(comp, plain=plain)
+        return
+
+    # Default: show all entries (live + completions)
+    entries = _build_stats_entries(wad)
+    if not entries:
+        err_console.print(f"[dim]No stats available for {wad['title']}[/dim]")
+        return
+
+    if not plain:
+        console.print(f"\n[bold]{wad['title']}[/bold] — Map Statistics\n")
+
+    for i, entry in enumerate(entries):
+        if i > 0:
+            if plain:
+                print()
+            else:
+                console.print()
+        _print_entry(entry, plain=plain)
 
 
 def _print_stats_plain(wad_stats: WadStats) -> None:
@@ -550,29 +638,39 @@ def _print_levelstat_table(maps: list) -> None:
 @beaten_cmd.command(name="export")
 @click.argument("query")
 @click.argument("completion_id", type=int, required=False)
+@click.option("--live", is_flag=True, help="Export live stats snapshot instead of completion")
 @click.option("--output", "-o", type=click.Path(), help="Write to file instead of stdout")
 @click.option("--yes", "-y", is_flag=True, help="Auto-select first match if multiple")
-def beaten_export(query: str, completion_id: int | None, output: str | None, yes: bool):
+def beaten_export(query: str, completion_id: int | None, live: bool, output: str | None, yes: bool):
     """Export per-map stats back to original text format.
 
     If COMPLETION_ID is not given, uses the most recent completion with stats.
+    Use --live to export the current live stats snapshot instead.
 
     \b
     Examples:
         caco beaten export "Doom 2 In Retrospect"
         caco beaten export "Doom 2 In Retrospect" --output stats.txt
         caco beaten export "Doom 2 In Retrospect" 42 -o levelstat.txt
+        caco beaten export "Doom 2 In Retrospect" --live
     """
     wads = resolve_wad_query(query, mode="pick", yes=yes)
     if not wads:
         return
     wad = wads[0]
 
-    comp = _find_completion_with_stats(wad, completion_id)
-    if not comp:
-        return
+    if live:
+        if not wad.get("stats_snapshot"):
+            err_console.print(f"[dim]No live stats for {wad['title']}[/dim]")
+            return
+        snapshot = wad["stats_snapshot"]
+    else:
+        comp = _find_completion_with_stats(wad, completion_id, allow_live=True)
+        if not comp:
+            return
+        snapshot = comp["stats_snapshot"]
 
-    wad_stats = stats_from_json(comp["stats_snapshot"])
+    wad_stats = stats_from_json(snapshot)
     text = format_stats(wad_stats)
 
     if output:

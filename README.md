@@ -426,14 +426,16 @@ caco beaten add "Doom 2 In Retrospect" --stats-file ~/path/to/stats.txt
 caco beaten attach "Doom 2 In Retrospect" --stats-file stats.txt
 caco beaten attach "Doom 2 In Retrospect" 42 -s stats.txt  # Specific completion ID
 
-# View per-map statistics table
+# View per-map statistics (shows all: live + completions)
 caco beaten stats "Doom 2 In Retrospect"
-caco beaten stats "Doom 2 In Retrospect" 42    # Specific completion ID
+caco beaten stats "Doom 2 In Retrospect" 42      # Specific completion ID
+caco beaten stats "Doom 2 In Retrospect" --live   # Live stats only
 caco beaten stats "Doom 2 In Retrospect" --plain  # TSV output for scripting
 
 # Export stats back to original format
 caco beaten export "Doom 2 In Retrospect"
 caco beaten export "Doom 2 In Retrospect" -o stats.txt  # Write to file
+caco beaten export "Doom 2 In Retrospect" --live         # Export live stats
 ```
 
 **Supported formats:**
@@ -518,7 +520,7 @@ cache_auto_clean = true
 
 ## IWAD Management
 
-IWADs are organized by **family** (doom, doom2, plutonia, tnt) with multiple **variants** per family (v1.9, bfg, enhanced, kex). Resolution uses a configurable priority list to pick the preferred variant.
+IWADs are organized by **family** (doom, doom2, plutonia, tnt) with multiple **variants** per family (v1.9, bfg, enhanced, kex). Resolution uses a configurable priority list to pick the preferred variant. Managed IWADs are stored as `iwads/{variant}/{family}.wad` so sourceports see canonical filenames (e.g., `tnt.wad`).
 
 ```bash
 # Import IWADs (auto-detects family + variant by MD5)
@@ -774,7 +776,7 @@ Unknown sourceports play normally without any injection.
 *Default locations:*
 
 - **Database**: `~/.local/share/caco/library.db`
-- **Managed IWADs**: `~/.local/share/caco/iwads/`
+- **Managed IWADs**: `~/.local/share/caco/iwads/{variant}/{family}.wad`
 - **Config**: `~/.config/caco/config.toml`
 - **WAD cache**: `~/.local/share/caco/wads/`
 - **WAD data**: `~/.local/share/caco/data/` (per-WAD saves, stats, configs)
