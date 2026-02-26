@@ -171,16 +171,24 @@ def get_iwad_dirs() -> list[Path]:
 
 
 def resolve_iwad(name: str) -> str:
-    """Resolve an IWAD name to a full path using iwad_dirs.
+    """Resolve an IWAD name to a full path.
 
     Resolution order:
     1. If name is an existing absolute path, return as-is.
-    2. Search each iwad_dirs entry for name and name.wad.
-    3. If not found, return the original name unchanged.
+    2. Check the IWAD registry (iwads table) for a matching short name.
+    3. Search each iwad_dirs entry for name and name.wad.
+    4. If not found, return the original name unchanged.
     """
     path = Path(name).expanduser()
     if path.is_absolute() and path.exists():
         return str(path)
+
+    # Check IWAD registry
+    from caco.db._iwads import resolve_iwad_from_db
+
+    db_path = resolve_iwad_from_db(name)
+    if db_path:
+        return db_path
 
     for iwad_dir in get_iwad_dirs():
         if not iwad_dir.is_dir():

@@ -26,6 +26,11 @@ A personal Doom WAD library manager taking inspiration from beets. Track what yo
 - **Playtime tracking**
   - Automatically tracks how long you play each WAD
 
+- **IWAD management**
+  - Register IWADs with MD5-based identification
+  - Auto-scan directories for known IWADs
+  - Auto-link to registered IWADs on Doom Wiki import
+
 ## Installation
 
 Requires Python 3.10+.
@@ -488,6 +493,40 @@ cache_auto_clean = true
 ```
 
 **Note**: Only idgames sources are affected by cache commands. Local imports and URL imports are never deleted (they may not be re-downloadable).
+
+## IWAD Management
+
+Register and manage your IWADs for automatic resolution:
+
+```bash
+# Scan iwad_dirs for known IWADs (auto-detects by MD5 checksum)
+caco iwad scan
+caco iwad scan --dir ~/games/iwads      # Scan a specific directory
+caco iwad scan --yes                     # Register all without prompting
+
+# Manually register an IWAD (auto-detects name/title by MD5)
+caco iwad add ~/games/doom2.wad
+caco iwad add ~/wads/custom.wad --name mycustom   # Unknown IWAD with custom name
+
+# List registered IWADs
+caco iwad list
+caco iwad list --plain                   # TSV output for scripting
+
+# Remove a registered IWAD
+caco iwad remove doom2
+```
+
+Once registered, IWADs can be referenced by short name anywhere:
+
+```bash
+# Global config
+iwad = "doom2"               # Resolves to registered path
+
+# Per-WAD config
+caco update 1 --iwad doom2   # Uses registered IWAD path
+```
+
+Doom Wiki imports automatically set `custom_iwad` when the entry's IWAD field matches a registered IWAD.
 
 ## Configuration
 

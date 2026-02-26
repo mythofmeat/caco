@@ -56,6 +56,21 @@ from caco.db._wads import (  # noqa: F401
     update_wad,
 )
 
+# -- IWAD registry --
+from caco.db._iwads import (  # noqa: F401
+    IWAD_ALIASES,
+    KNOWN_IWAD_FILENAMES,
+    KNOWN_IWADS,
+    add_iwad,
+    get_all_iwads,
+    get_iwad,
+    get_iwad_by_path,
+    identify_iwad,
+    normalize_iwad_name,
+    remove_iwad,
+    resolve_iwad_from_db,
+)
+
 # -- Sessions, stats, completions, cache --
 from caco.db._sessions import (  # noqa: F401
     StatsSnapshot,
@@ -121,6 +136,18 @@ __all__ = [
     "remove_tag",
     "restore_wad",
     "update_wad",
+    # IWAD registry
+    "IWAD_ALIASES",
+    "KNOWN_IWAD_FILENAMES",
+    "KNOWN_IWADS",
+    "add_iwad",
+    "get_all_iwads",
+    "get_iwad",
+    "get_iwad_by_path",
+    "identify_iwad",
+    "normalize_iwad_name",
+    "remove_iwad",
+    "resolve_iwad_from_db",
     # Sessions, stats, completions, cache
     "StatsSnapshot",
     "add_wad_completion",

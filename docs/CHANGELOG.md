@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.4.0] - 2026-02-26
+
+IWAD management — first-class IWAD registry with MD5-based identification.
+
+### Added
+
+- **IWAD registry**: `caco iwad` command group for managing IWADs as first-class
+  entities in the database (`iwads` table with name, title, path, MD5)
+- **`caco iwad scan`**: Auto-discover known IWADs in `iwad_dirs` by MD5 checksum,
+  with filename fallback for modded/newer releases
+- **`caco iwad add`**: Register an IWAD file with auto-detection (MD5 → known IWAD
+  database), or `--name` override for custom/unknown IWADs
+- **`caco iwad list`**: Display registered IWADs with `--plain` TSV output
+- **`caco iwad remove`**: Unregister an IWAD by short name
+- **IWAD resolution from registry**: `resolve_iwad()` now checks the IWAD registry
+  before falling back to `iwad_dirs` filesystem search
+- **Auto-link on Doom Wiki import**: When a Doom Wiki entry has an IWAD field
+  (e.g., "Doom II"), automatically sets `custom_iwad` if that IWAD is registered
+- **Known IWAD database**: MD5 checksums for Ultimate Doom, Doom II, Plutonia, TNT,
+  Heretic, Hexen, Strife, Chex Quest and variants; filename fallback for Freedoom,
+  HacX, and others
+- **IWAD alias mapping**: Normalizes free-text IWAD names from wikis/forums to
+  short registry names (e.g., "Doom II: Hell on Earth" → "doom2")
+- **Fish completions**: `iwad` subcommand completions with dynamic IWAD name
+  completion for `iwad remove`
+- **Migration #8**: `iwads` table creation
+
+---
+
 ## [1.3.1] - 2026-02-26
 
 GUI stats import/export and context menu access.

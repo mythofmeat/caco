@@ -14,6 +14,7 @@ Caco is a personal Doom WAD library manager inspired by `beets`. It tracks WADs 
 - LLM-powered metadata extraction (optional, for Doomworld imports)
 - Completion tracking (times beaten per WAD) with per-map stats import/export
 - Soft-delete with trash/restore lifecycle
+- IWAD registry with MD5-based identification and auto-scan
 
 ## Commands
 
@@ -54,7 +55,8 @@ src/caco/
 │   ├── play_cmd.py     # play command
 │   ├── cache.py        # cache list/clear/prune
 │   ├── config_cmd.py   # config, completions commands
-│   └── stats.py        # stats, beaten commands
+│   ├── stats.py        # stats, beaten commands
+│   └── iwad_cmd.py     # iwad list/add/remove/scan
 ├── utils.py        # Shared utilities (coerce_str, BaseHttpClient, CacoSourceError, extract_year)
 ├── wad_stats.py    # Per-map stats parser/formatter (stats.txt + levelstat.txt)
 ├── db/             # SQLite database package
@@ -64,7 +66,8 @@ src/caco/
 │   ├── _schema.py      # Schema SQL, migrations, init_db()
 │   ├── _query.py       # Query parser, search_wads(), find_duplicate()
 │   ├── _wads.py        # WAD CRUD (add/get/update/delete), tag add/remove
-│   └── _sessions.py    # Sessions, completions, batch stats, cache, StatsSnapshot
+│   ├── _sessions.py    # Sessions, completions, batch stats, cache, StatsSnapshot
+│   └── _iwads.py       # IWAD registry: known IWADs, identification, CRUD
 ├── config.py       # TOML config in ~/.config/caco/
 ├── player.py       # Sourceport launcher + playtime tracking
 ├── idgames/        # idgames API client
@@ -190,6 +193,13 @@ src/caco/
 - `link` command: copies/moves a local file to cache and updates `cached_path`/`filename` for metadata-only entries (e.g., Doomwiki imports)
 - `version` column tracks WAD version strings for non-idgames releases
 - Database migrations run on `init_db()`: add columns, create tables, rename statuses
+- IWAD registry: `iwads` table with MD5-based identification; `KNOWN_IWADS` (MD5→name), `KNOWN_IWAD_FILENAMES` (filename→name), `IWAD_ALIASES` (free text→short name) in `db/_iwads.py`; `resolve_iwad()` checks DB registry before `iwad_dirs`; Doom Wiki imports auto-link to registered IWADs via `ImportService._auto_link_iwad()`
+
+**IWAD CLI commands:**
+- `caco iwad list [--plain]` — list registered IWADs (name, title, path, md5)
+- `caco iwad add <path> [--name X]` — register IWAD (auto-detects via MD5 then filename)
+- `caco iwad remove <name>` — unregister an IWAD
+- `caco iwad scan [--dir PATH] [--yes]` — scan iwad_dirs for known IWADs
 
 **Status shortcuts (complete list):**
 | Shortcut | Status |

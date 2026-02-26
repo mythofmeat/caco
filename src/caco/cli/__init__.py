@@ -749,6 +749,7 @@ from caco.cli import play_cmd as play_mod  # noqa: E402, F401
 from caco.cli import cache  # noqa: E402, F401
 from caco.cli import config_cmd  # noqa: E402, F401
 from caco.cli import stats  # noqa: E402, F401
+from caco.cli import iwad_cmd  # noqa: E402, F401
 
 
 # =============================================================================

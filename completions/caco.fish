@@ -33,6 +33,27 @@ complete -c caco -n __fish_use_subcommand -a beaten -d "Manage WAD completion re
 complete -c caco -n __fish_use_subcommand -a restore -d "Restore a deleted WAD"
 complete -c caco -n __fish_use_subcommand -a link -d "Link a local file to a WAD"
 complete -c caco -n __fish_use_subcommand -a cache -d "Manage WAD file cache"
+complete -c caco -n __fish_use_subcommand -a iwad -d "Manage IWAD registry"
+
+# iwad subcommands
+complete -c caco -n "__fish_seen_subcommand_from iwad; and not __fish_seen_subcommand_from list add remove scan" -a list -d "List registered IWADs"
+complete -c caco -n "__fish_seen_subcommand_from iwad; and not __fish_seen_subcommand_from list add remove scan" -a add -d "Register an IWAD file"
+complete -c caco -n "__fish_seen_subcommand_from iwad; and not __fish_seen_subcommand_from list add remove scan" -a remove -d "Unregister an IWAD"
+complete -c caco -n "__fish_seen_subcommand_from iwad; and not __fish_seen_subcommand_from list add remove scan" -a scan -d "Scan for known IWADs"
+
+# iwad list options
+complete -c caco -n "__fish_seen_subcommand_from iwad; and __fish_seen_subcommand_from list" -l plain -d "Output as TSV"
+
+# iwad add options
+complete -c caco -n "__fish_seen_subcommand_from iwad; and __fish_seen_subcommand_from add" -l name -d "Override auto-detected name"
+complete -c caco -n "__fish_seen_subcommand_from iwad; and __fish_seen_subcommand_from add" -rF
+
+# iwad remove - complete registered IWAD names
+complete -c caco -n "__fish_seen_subcommand_from iwad; and __fish_seen_subcommand_from remove" -xa "(caco iwad list --plain 2>/dev/null | tail -n +2 | awk -F'\t' '{print \$1}')"
+
+# iwad scan options
+complete -c caco -n "__fish_seen_subcommand_from iwad; and __fish_seen_subcommand_from scan" -l dir -d "Directory to scan" -rF
+complete -c caco -n "__fish_seen_subcommand_from iwad; and __fish_seen_subcommand_from scan" -s y -l yes -d "Register all without prompting"
 
 # list options
 complete -c caco -n "__fish_seen_subcommand_from list" -s S -l sort -d "Sort results" -xa "playtime rating created title author last_played year playtime+ rating+ created+ title+ author+ last_played+ year+ playtime- rating- created- title- author- last_played- year-"

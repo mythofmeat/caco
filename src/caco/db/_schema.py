@@ -180,6 +180,24 @@ def _migrate_drop_map_completions(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE IF EXISTS map_completions")
 
 
+def _migrate_add_iwads_table(conn: sqlite3.Connection) -> None:
+    """Create the iwads table for IWAD registry."""
+    cursor = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='iwads'"
+    )
+    if not cursor.fetchone():
+        conn.execute("""
+            CREATE TABLE iwads (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                title TEXT,
+                path TEXT NOT NULL,
+                md5 TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+
 # Ordered migration registry — append new migrations here with incrementing version
 _MIGRATIONS: list[tuple[int, str, Any]] = [
     (1, "add_custom_play_config", _migrate_add_custom_play_config),
@@ -189,4 +207,5 @@ _MIGRATIONS: list[tuple[int, str, Any]] = [
     (5, "add_version", _migrate_add_version),
     (6, "add_idgames_id", _migrate_add_idgames_id),
     (7, "drop_map_completions", _migrate_drop_map_completions),
+    (8, "add_iwads_table", _migrate_add_iwads_table),
 ]

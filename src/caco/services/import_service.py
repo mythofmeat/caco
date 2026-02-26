@@ -61,6 +61,27 @@ class ImportService:
             # Error — result.error has the message
     """
 
+    @staticmethod
+    def _auto_link_iwad(wad_id: int, iwad_text: str) -> None:
+        """Auto-set custom_iwad on a WAD if the IWAD name is registered.
+
+        Called after Doom Wiki imports when the entry has an iwad field.
+        """
+        from caco.db._iwads import normalize_iwad_name, get_iwad
+
+        short_name = normalize_iwad_name(iwad_text)
+        if not short_name:
+            return
+
+        # Only set if the IWAD is registered in the database
+        if not get_iwad(short_name):
+            return
+
+        # Only set if the WAD doesn't already have a custom_iwad
+        wad = db.get_wad(wad_id)
+        if wad and not wad.get("custom_iwad"):
+            db.update_wad(wad_id, custom_iwad=short_name)
+
     def import_idgames(
         self,
         entry,  # idgames.FileEntry
@@ -103,6 +124,7 @@ class ImportService:
         """Import from Doom Wiki.
 
         Duplicate detection: source_id (page_id).
+        After import, auto-links to a registered IWAD if the entry has an iwad field.
         """
         existing = db.find_duplicate(
             source_type=SourceType.DOOMWIKI,
@@ -119,6 +141,11 @@ class ImportService:
             from caco.sources.doomwiki import DoomwikiSource
             with DoomwikiSource() as source:
                 wad_id = source.import_wad(entry, tags=tags)
+
+            # Auto-link to registered IWAD if entry has an iwad field
+            if wad_id and getattr(entry, "iwad", ""):
+                self._auto_link_iwad(wad_id, entry.iwad)
+
             return ImportResult(wad_id=wad_id)
         except Exception as e:
             return ImportResult(error=str(e))
