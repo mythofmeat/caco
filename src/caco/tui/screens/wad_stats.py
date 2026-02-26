@@ -47,10 +47,22 @@ class WadStatsScreen(Screen):
             header.update("[red]WAD not found[/red]")
             return
 
+        self._completions = []
+
+        # Prepend live stats from wad's stats_snapshot if available
+        if wad.get("stats_snapshot"):
+            self._completions.append({
+                "id": None,
+                "completed_at": None,
+                "stats_snapshot": wad["stats_snapshot"],
+                "notes": None,
+                "_live": True,
+            })
+
         completions = db.get_wad_completions(self.wad_id)
-        self._completions = [
+        self._completions.extend(
             c for c in completions if c.get("stats_snapshot")
-        ]
+        )
 
         if not self._completions:
             header.update(f"[bold]{wad['title']}[/bold]")
@@ -72,12 +84,16 @@ class WadStatsScreen(Screen):
 
         # Update summary
         summary = self.query_one("#stats-summary", Static)
-        date = comp["completed_at"][:16].replace("T", " ") if comp["completed_at"] else "-"
         nav = ""
         if len(self._completions) > 1:
             nav = f" [dim]({index + 1}/{len(self._completions)}, n/p to switch)[/dim]"
+        if comp.get("_live"):
+            label = "Current (live)"
+        else:
+            date = comp["completed_at"][:16].replace("T", " ") if comp["completed_at"] else "-"
+            label = f"Completion #{comp['id']} ({date})"
         summary.update(
-            f"Completion #{comp['id']} ({date}) | "
+            f"{label} | "
             f"Format: {wad_stats.format} | "
             f"Maps: {len(played)} | "
             f"Time: {wad_stats.total_time_display}"

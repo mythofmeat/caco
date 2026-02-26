@@ -363,32 +363,32 @@ class TestDefaultIwadPriority:
 
 class TestManagedIwadFilename:
     def test_basic(self):
-        assert managed_iwad_filename("doom2", "v1.9") == "doom2_v1.9.wad"
+        assert managed_iwad_filename("doom2", "v1.9") == "v1.9/doom2.wad"
 
     def test_bfg(self):
-        assert managed_iwad_filename("doom2", "bfg") == "doom2_bfg.wad"
+        assert managed_iwad_filename("doom2", "bfg") == "bfg/doom2.wad"
 
     def test_unknown(self):
-        assert managed_iwad_filename("doom", "unknown") == "doom_unknown.wad"
+        assert managed_iwad_filename("doom", "unknown") == "unknown/doom.wad"
 
 
 class TestRemoveIwadWithPaths:
     def test_remove_single_variant(self, db_mod):
-        db_mod.add_iwad("doom2", "v1.9", "/managed/doom2_v1.9.wad")
-        db_mod.add_iwad("doom2", "bfg", "/managed/doom2_bfg.wad")
+        db_mod.add_iwad("doom2", "v1.9", "/managed/v1.9/doom2.wad")
+        db_mod.add_iwad("doom2", "bfg", "/managed/bfg/doom2.wad")
 
         paths = remove_iwad_with_paths("doom2", "bfg")
-        assert paths == ["/managed/doom2_bfg.wad"]
+        assert paths == ["/managed/bfg/doom2.wad"]
         # v1.9 still exists
         assert db_mod.get_iwad_variant("doom2", "v1.9") is not None
         assert db_mod.get_iwad_variant("doom2", "bfg") is None
 
     def test_remove_all_variants(self, db_mod):
-        db_mod.add_iwad("doom2", "v1.9", "/managed/doom2_v1.9.wad")
-        db_mod.add_iwad("doom2", "bfg", "/managed/doom2_bfg.wad")
+        db_mod.add_iwad("doom2", "v1.9", "/managed/v1.9/doom2.wad")
+        db_mod.add_iwad("doom2", "bfg", "/managed/bfg/doom2.wad")
 
         paths = remove_iwad_with_paths("doom2")
-        assert set(paths) == {"/managed/doom2_v1.9.wad", "/managed/doom2_bfg.wad"}
+        assert set(paths) == {"/managed/v1.9/doom2.wad", "/managed/bfg/doom2.wad"}
         assert db_mod.get_iwad("doom2") is None
 
     def test_remove_nonexistent(self, db_mod):
@@ -396,7 +396,7 @@ class TestRemoveIwadWithPaths:
         assert paths == []
 
     def test_remove_nonexistent_variant(self, db_mod):
-        db_mod.add_iwad("doom2", "v1.9", "/managed/doom2_v1.9.wad")
+        db_mod.add_iwad("doom2", "v1.9", "/managed/v1.9/doom2.wad")
         paths = remove_iwad_with_paths("doom2", "kex")
         assert paths == []
         # v1.9 still exists
@@ -494,3 +494,112 @@ class TestComputeMd5:
         a.write_bytes(b"content a")
         b.write_bytes(b"content b")
         assert _compute_md5(a) != _compute_md5(b)
+
+
+class TestIwadDirRestructureMigration:
+    """Test migration #13: IWAD directory restructure."""
+
+    def test_files_moved_and_paths_updated(self, tmp_path, tmp_db):
+        """Migration moves files from old format to {variant}/{family}.wad."""
+        from caco import db as db_mod
+        from caco.db._schema import _migrate_iwad_dir_restructure
+
+        iwad_dir = tmp_path / "iwads"
+        iwad_dir.mkdir()
+
+        # Create old-format files
+        old_file = iwad_dir / "doom2_v1.9.wad"
+        old_file.write_bytes(b"doom2 content")
+        old_tnt = iwad_dir / "tnt_v1.9.wad"
+        old_tnt.write_bytes(b"tnt content")
+
+        # Register with old paths
+        db_mod.add_iwad("doom2", "v1.9", str(old_file), title="Doom II")
+        db_mod.add_iwad("tnt", "v1.9", str(old_tnt), title="TNT")
+
+        # Run migration
+        conn = db_mod.get_connection()
+        with patch("caco.config.get_iwad_dir", return_value=iwad_dir):
+            _migrate_iwad_dir_restructure(conn)
+            conn.commit()
+        conn.close()
+
+        # Verify: files moved to new locations
+        new_doom2 = iwad_dir / "v1.9" / "doom2.wad"
+        new_tnt = iwad_dir / "v1.9" / "tnt.wad"
+        assert new_doom2.exists()
+        assert new_tnt.exists()
+        assert not old_file.exists()
+        assert not old_tnt.exists()
+
+        # Verify: DB paths updated
+        iwad = db_mod.get_iwad_variant("doom2", "v1.9")
+        assert iwad["path"] == str(new_doom2)
+        iwad = db_mod.get_iwad_variant("tnt", "v1.9")
+        assert iwad["path"] == str(new_tnt)
+
+    def test_skips_external_iwads(self, tmp_path, tmp_db):
+        """Migration doesn't touch IWADs outside the managed directory."""
+        from caco import db as db_mod
+        from caco.db._schema import _migrate_iwad_dir_restructure
+
+        iwad_dir = tmp_path / "iwads"
+        iwad_dir.mkdir()
+
+        external_path = "/usr/share/games/doom/doom2.wad"
+        db_mod.add_iwad("doom2", "v1.9", external_path)
+
+        conn = db_mod.get_connection()
+        with patch("caco.config.get_iwad_dir", return_value=iwad_dir):
+            _migrate_iwad_dir_restructure(conn)
+            conn.commit()
+        conn.close()
+
+        # Path should be unchanged
+        iwad = db_mod.get_iwad_variant("doom2", "v1.9")
+        assert iwad["path"] == external_path
+
+    def test_handles_missing_files(self, tmp_path, tmp_db):
+        """Migration updates DB path even if the file is missing on disk."""
+        from caco import db as db_mod
+        from caco.db._schema import _migrate_iwad_dir_restructure
+
+        iwad_dir = tmp_path / "iwads"
+        iwad_dir.mkdir()
+
+        # Register with path inside managed dir, but don't create the file
+        missing_path = str(iwad_dir / "doom2_v1.9.wad")
+        db_mod.add_iwad("doom2", "v1.9", missing_path)
+
+        conn = db_mod.get_connection()
+        with patch("caco.config.get_iwad_dir", return_value=iwad_dir):
+            _migrate_iwad_dir_restructure(conn)
+            conn.commit()
+        conn.close()
+
+        # DB path should still be updated to new format
+        iwad = db_mod.get_iwad_variant("doom2", "v1.9")
+        assert iwad["path"] == str(iwad_dir / "v1.9" / "doom2.wad")
+
+    def test_already_migrated_is_noop(self, tmp_path, tmp_db):
+        """Migration is a no-op for IWADs already at the new location."""
+        from caco import db as db_mod
+        from caco.db._schema import _migrate_iwad_dir_restructure
+
+        iwad_dir = tmp_path / "iwads"
+        new_path = iwad_dir / "v1.9" / "doom2.wad"
+        new_path.parent.mkdir(parents=True)
+        new_path.write_bytes(b"doom2 content")
+
+        db_mod.add_iwad("doom2", "v1.9", str(new_path))
+
+        conn = db_mod.get_connection()
+        with patch("caco.config.get_iwad_dir", return_value=iwad_dir):
+            _migrate_iwad_dir_restructure(conn)
+            conn.commit()
+        conn.close()
+
+        # File and path should remain unchanged
+        assert new_path.exists()
+        iwad = db_mod.get_iwad_variant("doom2", "v1.9")
+        assert iwad["path"] == str(new_path)

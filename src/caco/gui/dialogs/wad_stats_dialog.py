@@ -117,18 +117,34 @@ class WadStatsDialog(QDialog):
     def _reload_completions(self) -> None:
         """Reload completions from DB and refresh the UI."""
         self._all_completions = db.get_wad_completions(self._wad_id)
-        self._stats_completions = [
+        self._stats_completions = []
+
+        # Prepend live stats from wad's stats_snapshot if available
+        wad = db.get_wad(self._wad_id)
+        if wad and wad.get("stats_snapshot"):
+            self._stats_completions.append({
+                "id": None,
+                "completed_at": None,
+                "stats_snapshot": wad["stats_snapshot"],
+                "notes": None,
+                "_live": True,
+            })
+
+        self._stats_completions.extend(
             c for c in self._all_completions if c.get("stats_snapshot")
-        ]
+        )
 
         # Rebuild selector
         self._selector.blockSignals(True)
         self._selector.clear()
         for c in self._stats_completions:
-            date = c["completed_at"][:16].replace("T", " ") if c["completed_at"] else "-"
-            label = f"#{c['id']} ({date})"
-            if c.get("notes"):
-                label += f" - {c['notes']}"
+            if c.get("_live"):
+                label = "Current (live)"
+            else:
+                date = c["completed_at"][:16].replace("T", " ") if c["completed_at"] else "-"
+                label = f"#{c['id']} ({date})"
+                if c.get("notes"):
+                    label += f" - {c['notes']}"
             self._selector.addItem(label)
         self._selector.blockSignals(False)
 

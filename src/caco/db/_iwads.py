@@ -379,8 +379,12 @@ def remove_iwad(family: str, variant: str | None = None) -> int:
 
 
 def managed_iwad_filename(family: str, variant: str) -> str:
-    """Return the canonical filename for a managed IWAD: {family}_{variant}.wad."""
-    return f"{family}_{variant}.wad"
+    """Return the canonical path for a managed IWAD: {variant}/{family}.wad.
+
+    This gives sourceports the canonical filename (e.g., ``tnt.wad``) while
+    keeping variants separated in subdirectories.
+    """
+    return f"{variant}/{family}.wad"
 
 
 def remove_iwad_with_paths(family: str, variant: str | None = None) -> list[str]:

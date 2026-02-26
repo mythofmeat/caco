@@ -123,7 +123,7 @@ def _import_single_iwad(
     # Copy to managed directory
     dest_name = managed_iwad_filename(family, variant)
     dest = iwad_dir / dest_name
-    iwad_dir.mkdir(parents=True, exist_ok=True)
+    dest.parent.mkdir(parents=True, exist_ok=True)
 
     if dest.exists():
         err_console.print(f"[yellow]File already exists: {dest}[/yellow]")
@@ -277,10 +277,18 @@ def iwad_remove(family: str, variant: str | None):
 
 def _delete_managed_files(paths: list[str], iwad_dir: Path) -> None:
     """Delete files that live inside the managed IWAD directory."""
+    resolved_iwad_dir = iwad_dir.resolve()
     for path_str in paths:
         p = Path(path_str)
         try:
-            if p.exists() and p.parent.resolve() == iwad_dir.resolve():
+            resolved = p.resolve()
+            if p.exists() and resolved.is_relative_to(resolved_iwad_dir):
                 p.unlink()
+                # Clean up empty variant subdirectory
+                if p.parent.resolve() != resolved_iwad_dir:
+                    try:
+                        p.parent.rmdir()
+                    except OSError:
+                        pass  # Not empty or already gone
         except OSError:
             pass

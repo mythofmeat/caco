@@ -334,6 +334,53 @@ def _migrate_fix_stale_cache_paths(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_iwad_dir_restructure(conn: sqlite3.Connection) -> None:
+    """Restructure managed IWAD paths from {family}_{variant}.wad to {variant}/{family}.wad.
+
+    Moves files on disk and updates paths in the database.  Only touches
+    files inside the managed IWAD directory; user-managed IWADs are skipped.
+    """
+    from caco.config import get_iwad_dir
+
+    iwad_dir = get_iwad_dir()
+    resolved_iwad_dir = iwad_dir.resolve()
+
+    rows = conn.execute("SELECT id, family, variant, path FROM iwads").fetchall()
+    for row in rows:
+        old_path = Path(row[3])
+        try:
+            resolved_old = old_path.resolve()
+        except OSError:
+            continue
+
+        # Only migrate files inside the managed IWAD directory
+        if not resolved_old.is_relative_to(resolved_iwad_dir):
+            continue
+
+        new_path = iwad_dir / row[2] / f"{row[1]}.wad"  # {variant}/{family}.wad
+
+        # Skip if already at the new location
+        if old_path == new_path:
+            continue
+
+        # Create variant subdirectory and move file
+        new_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            if old_path.exists():
+                shutil.move(str(old_path), str(new_path))
+        except OSError:
+            pass
+
+        # Update DB path regardless (so future operations use new convention)
+        conn.execute(
+            "UPDATE iwads SET path = ? WHERE id = ?",
+            (str(new_path), row[0]),
+        )
+
+    # Clean up old empty files at iwad_dir root (there shouldn't be dirs to clean)
+    # No-op if nothing was moved
+
+
 # Ordered migration registry — append new migrations here with incrementing version
 _MIGRATIONS: list[tuple[int, str, Any]] = [
     (1, "add_custom_play_config", _migrate_add_custom_play_config),
@@ -348,4 +395,5 @@ _MIGRATIONS: list[tuple[int, str, Any]] = [
     (10, "relocate_wad_cache", _migrate_relocate_wad_cache),
     (11, "add_stats_snapshot", _migrate_add_stats_snapshot),
     (12, "fix_stale_cache_paths", _migrate_fix_stale_cache_paths),
+    (13, "iwad_dir_restructure", _migrate_iwad_dir_restructure),
 ]
