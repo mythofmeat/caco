@@ -1,3 +1,4 @@
+- [ ] auto-update config file
 - [ ] automatically fetch doomwiki info if none exists, especially useful for determining which iwad to use
 - [ ] try to find a way to figure out what iwad a wad requires automatically? there must be a way to programmatically determine this via inspecting the wad file, right?
 - [ ] significantly clean up cli command structure
