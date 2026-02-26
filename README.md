@@ -356,6 +356,11 @@ caco play 1 --sourceport /usr/bin/dsda-doom
 
 # Pass extra args to sourceport
 caco play 1 -- -warp 15 -skill 4
+
+# Play an IWAD directly (no PWAD needed)
+caco play iwad:doom2
+caco play iwad:doom2 -- -warp 1
+caco play iwad:doom2 -p gzdoom
 ```
 
 ### Per-WAD Custom Config
@@ -585,7 +590,8 @@ The detected IWAD is saved to `custom_iwad` so detection only runs once per WAD.
 
 ## Configuration
 
-Config file: `~/.config/caco/config.toml` (see `config.example.toml` for a template)
+Config file: `~/.config/caco/config.toml` (see `config.example.toml` for a template).
+New config keys are automatically added with default values when you update caco.
 
 ### Available Options
 

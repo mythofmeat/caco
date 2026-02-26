@@ -1,0 +1,15 @@
+- [ ] demo recording/playback: track demo files per-WAD
+- [ ] save game management: browse, backup, restore saves per-WAD (leverages per-WAD data dirs)
+- [ ] automatically fetch doomwiki info if none exists
+- [ ] figure out some way to deal with id24 wads
+- [ ] manage sourceport configs
+- [ ] use stats tracking updates to determine what maps were completed in a given session, allowing real-time tracking of how much time was spent on a given map
+- [ ] significantly clean up cli command structure
+- [x] auto-update config file
+  - Implemented: `ensure_config_keys()` in config.py auto-adds missing keys with defaults when config file exists. Runs on every `load_config()`.
+- [x] try to find a way to figure out what iwad a wad requires automatically? there must be a way to programmatically determine this via inspecting the wad file, right?
+  - Implemented: PNAMES analysis (TNT/Plutonia unique patches) + map lump names (ExMy vs MAPxx). Auto-detects and persists on first play.
+- [x] play IWADs directly: `caco play iwad:doom2` to launch without a PWAD
+  - Implemented: `iwad:` prefix in play query triggers `play_iwad()` — resolves IWAD, launches sourceport, no session tracking.
+- [x] auto-detect installed sourceports
+  - Implemented: `detect_sourceports()` in sourceports.py; play command error message lists found sourceports on PATH.

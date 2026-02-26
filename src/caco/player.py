@@ -366,6 +366,68 @@ def play(
     return None
 
 
+def play_iwad(
+    iwad_name: str,
+    sourceport: str | None = None,
+    extra_args: list[str] | None = None,
+) -> int:
+    """
+    Play an IWAD directly with no PWAD.
+
+    Returns the play session duration in seconds (wall clock).
+    """
+    import time
+
+    # Resolve IWAD
+    resolved = resolve_iwad(iwad_name)
+    if not Path(resolved).exists():
+        raise FileNotFoundError(
+            f"IWAD '{iwad_name}' not found. "
+            "Register it with: caco iwad import /path/to/iwad.wad"
+        )
+
+    # Determine sourceport
+    port = sourceport or get_default_sourceport()
+    if not port:
+        raise ValueError("No sourceport specified and no default configured")
+
+    port = resolve_sourceport(port)
+    if not shutil.which(port) and not Path(port).is_file():
+        raise FileNotFoundError(
+            f"Sourceport '{port}' not found on PATH or as a file. "
+            "Set a valid sourceport with: caco config set sourceport <name>"
+        )
+
+    # Build command
+    cmd = [port, "-iwad", resolved]
+
+    # Add default sourceport args from global config
+    default_args = get_sourceport_args()
+    if default_args:
+        cmd.extend(default_args)
+
+    if extra_args:
+        cmd.extend(extra_args)
+
+    # Launch
+    try:
+        proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL)
+    except FileNotFoundError:
+        raise FileNotFoundError(
+            f"Sourceport '{port}' not found. "
+            "Check that it's installed and available on your PATH."
+        ) from None
+    except PermissionError:
+        raise PermissionError(
+            f"Permission denied running sourceport '{port}'. "
+            "Check file permissions."
+        ) from None
+
+    start = time.monotonic()
+    proc.wait()
+    return int(time.monotonic() - start)
+
+
 def format_duration(seconds: int) -> str:
     """Format duration as human-readable string."""
     if seconds < 60:

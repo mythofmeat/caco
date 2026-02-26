@@ -159,6 +159,94 @@ class TestSectionConfig:
         assert "unknown_key" not in tui
 
 
+class TestEnsureConfigKeys:
+    """Test config auto-update with missing keys."""
+
+    def test_adds_missing_top_level_key(self, tmp_config):
+        """Missing top-level keys are added with defaults."""
+        tmp_config.write_text('sourceport = "gzdoom"\n')
+        config._config_cache = None
+
+        cfg = config.load_config()
+        assert cfg["sourceport"] == "gzdoom"
+
+        # Reload from disk to verify ensure_config_keys wrote missing keys
+        import tomllib
+        with open(tmp_config, "rb") as f:
+            on_disk = tomllib.load(f)
+        assert "iwad" in on_disk
+        assert "cache_dir" in on_disk
+        assert "sourceport_args" in on_disk
+
+    def test_no_config_file(self, tmp_config):
+        """Does nothing when config file doesn't exist."""
+        config._config_cache = None
+        # File doesn't exist — ensure_config_keys should be a no-op
+        config.ensure_config_keys()
+        assert not tmp_config.exists()
+
+    def test_backfills_section_keys(self, tmp_config):
+        """Missing keys in existing sections are added."""
+        tmp_config.write_text(
+            'sourceport = "gzdoom"\n\n'
+            "[tui]\n"
+            'default_tab = "playing"\n'
+        )
+        config._config_cache = None
+
+        config.load_config()
+
+        import tomllib
+        with open(tmp_config, "rb") as f:
+            on_disk = tomllib.load(f)
+        # default_sort and default_sort_desc should be backfilled
+        assert on_disk["tui"]["default_tab"] == "playing"
+        assert "default_sort" in on_disk["tui"]
+        assert "default_sort_desc" in on_disk["tui"]
+
+    def test_does_not_create_sections(self, tmp_config):
+        """Missing sections are NOT created — only backfill existing ones."""
+        tmp_config.write_text('sourceport = "gzdoom"\n')
+        config._config_cache = None
+
+        config.load_config()
+
+        import tomllib
+        with open(tmp_config, "rb") as f:
+            on_disk = tomllib.load(f)
+        assert "tui" not in on_disk
+        assert "gui" not in on_disk
+
+    def test_preserves_user_values(self, tmp_config):
+        """Existing user values are never overwritten."""
+        tmp_config.write_text('sourceport = "dsda-doom"\ndownload_mirror = 3\n')
+        config._config_cache = None
+
+        config.load_config()
+
+        import tomllib
+        with open(tmp_config, "rb") as f:
+            on_disk = tomllib.load(f)
+        assert on_disk["sourceport"] == "dsda-doom"
+        assert on_disk["download_mirror"] == 3
+
+    def test_no_write_when_complete(self, tmp_config):
+        """No rewrite when all keys are already present."""
+        # Write a complete config
+        config._config_cache = None
+        config.save_config(config.DEFAULT_CONFIG.copy())
+
+        # Record mtime
+        mtime_before = tmp_config.stat().st_mtime_ns
+
+        config._config_cache = None
+        config.load_config()
+
+        # File should not have been rewritten
+        mtime_after = tmp_config.stat().st_mtime_ns
+        assert mtime_before == mtime_after
+
+
 class TestResolveIwad:
     """Test IWAD resolution from iwad_dirs."""
 

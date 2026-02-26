@@ -42,6 +42,25 @@ for _family in SOURCEPORT_FAMILIES.values():
         _EXECUTABLE_MAP[_exe] = _family
 
 
+def detect_sourceports() -> list[tuple[str, str, str]]:
+    """Detect sourceports installed on the system.
+
+    Iterates all known executables in SOURCEPORT_FAMILIES and checks
+    each with shutil.which().
+
+    Returns a list of (executable_name, full_path, family_name) for found ports.
+    """
+    import shutil
+
+    found: list[tuple[str, str, str]] = []
+    for family_name, family in SOURCEPORT_FAMILIES.items():
+        for exe in family["executables"]:
+            path = shutil.which(exe)
+            if path:
+                found.append((exe, path, family_name))
+    return found
+
+
 def identify_sourceport_family(executable: str) -> dict | None:
     """Identify a sourceport family from an executable path or name.
 

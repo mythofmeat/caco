@@ -9,7 +9,7 @@ from typing import Any
 
 from caco import db
 from caco.config import get_default_sourceport
-from caco.player import play, format_duration
+from caco.player import play, play_iwad, format_duration
 
 from caco.cli import (
     cli,
@@ -20,6 +20,24 @@ from caco.cli import (
 )
 
 
+def _check_sourceport(sourceport: str | None) -> str:
+    """Resolve sourceport or exit with a helpful error listing detected ports."""
+    port = sourceport or get_default_sourceport()
+    if port:
+        return port
+
+    from caco.sourceports import detect_sourceports
+
+    msg = "No sourceport configured."
+    detected = detect_sourceports()
+    if detected:
+        names = ", ".join(exe for exe, _path, _fam in detected)
+        msg += f" Found on PATH: {names}."
+    msg += "\nSet one with: caco config set sourceport <name>"
+    err_console.print(f"[red]{msg}[/red]")
+    sys.exit(1)
+
+
 @cli.command()
 @click.argument("query", required=False, shell_complete=_complete_query)
 @click.option("--sourceport", "-p", help="Sourceport to use")
@@ -28,8 +46,27 @@ from caco.cli import (
 def play_cmd(query: str | None, sourceport: str | None, yes: bool, extra_args: tuple[str, ...]):
     """Play a WAD by ID or query (e.g., 'caco play 1' or 'caco play filename:tnto').
 
+    Use 'iwad:NAME' to play an IWAD directly (e.g., 'caco play iwad:doom2').
     With no arguments, plays the most recently played WAD.
     """
+    # Handle iwad: prefix — play an IWAD directly
+    if query and query.startswith("iwad:"):
+        iwad_name = query[5:]
+        if not iwad_name:
+            err_console.print("[red]Usage: caco play iwad:<name> (e.g., iwad:doom2)[/red]")
+            sys.exit(1)
+
+        port = _check_sourceport(sourceport)
+        console.print(f"[cyan]Playing IWAD {iwad_name}...[/cyan]")
+        try:
+            duration = play_iwad(iwad_name, sourceport=port, extra_args=list(extra_args))
+            if duration:
+                console.print(f"[green]Session ended:[/green] {format_duration(duration)}")
+        except Exception as e:
+            err_console.print(f"[red]Error: {e}[/red]")
+            sys.exit(1)
+        return
+
     wad: dict[str, Any] | None
     if query:
         wads = resolve_wad_query(query, mode="pick", yes=yes)
@@ -44,10 +81,7 @@ def play_cmd(query: str | None, sourceport: str | None, yes: bool, extra_args: t
             return
     wad_id = wad["id"]
 
-    port = sourceport or get_default_sourceport()
-    if not port:
-        err_console.print("[red]No sourceport specified. Use --sourceport or set default with 'caco config sourceport <path>'[/red]")
-        sys.exit(1)
+    port = _check_sourceport(sourceport)
 
     console.print(f"[cyan]Playing {wad['title']}...[/cyan]")
 

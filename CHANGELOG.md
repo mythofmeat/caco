@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.7.3] - 2026-02-27
+
+Playability improvements: direct IWAD play, sourceport detection, config auto-update.
+
+### Added
+
+- **Direct IWAD play**: `caco play iwad:doom2` launches an IWAD directly
+  without needing a PWAD in the library — supports `-p`/`--sourceport` and
+  extra args (e.g., `-- -warp 1`); no session tracking or WAD record created
+- **Sourceport auto-detection**: `detect_sourceports()` in `sourceports.py`
+  scans `SOURCEPORT_FAMILIES` executables via `shutil.which()`; play command
+  now lists detected sourceports when no sourceport is configured (e.g.,
+  "Found on PATH: gzdoom, dsda-doom")
+- **Config auto-update**: `ensure_config_keys()` runs on every `load_config()`
+  — compares existing config file against `DEFAULT_CONFIG` and section defaults
+  (`[tui]`, `[gui]`, `[list]`); adds missing keys with default values; only
+  writes if changes are made; recursion-guarded
+- **`play_iwad()` function** in `player.py`: standalone IWAD launcher with
+  sourceport resolution, config args, and wall-clock duration tracking
+- **Example config updated**: added `iwad_dir`, `data_dir`, `manage_data_dirs`,
+  `auto_stats`, `auto_detect_iwad`, `[tui]` section, `[gui]` section; fixed
+  `cache_dir` path (was `~/.cache/caco/wads`, now `~/.local/share/caco/wads`)
+- **Fish completions**: `iwad:` added to play query completions
+- **Tests**: 12 new tests for `play_iwad()`, `detect_sourceports()`, and
+  `ensure_config_keys()`
+
+---
+
 ## [1.7.2] - 2026-02-27
 
 Reworked `beaten stats` to show all stats entries and added `--live` flag.

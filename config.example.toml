@@ -18,7 +18,13 @@
 # db_path = "~/.local/share/caco/library.db"
 
 # WAD cache directory (downloaded WADs are stored here)
-# cache_dir = "~/.cache/caco/wads"
+# cache_dir = "~/.local/share/caco/wads"
+
+# Managed IWAD storage directory
+# iwad_dir = "~/.local/share/caco/iwads"
+
+# Per-WAD data directory (saves, stats, configs per WAD)
+# data_dir = "~/.local/share/caco/data"
 
 # Preferred idgames download mirror (0-4)
 # 0 = youfailit.net (default, fastest)
@@ -27,6 +33,25 @@
 # 3 = braindrainlan.nu
 # 4 = xvertigox.com
 # download_mirror = 0
+
+# Manage per-WAD data directories (inject -data/-save args to sourceport)
+# manage_data_dirs = true
+
+# Auto-track per-map stats after play sessions (requires manage_data_dirs)
+# auto_stats = true
+
+# Auto-detect required IWAD from WAD file contents on first play
+# auto_detect_iwad = true
+
+# Cache auto-cleanup settings
+# Maximum cache size in GB (0 = unlimited)
+# cache_max_size_gb = 0
+
+# Remove cached files not played in N days (0 = never expire)
+# cache_max_age_days = 0
+
+# Automatically clean cache before downloading new WADs
+# cache_auto_clean = false
 
 # List display configuration
 # [list]
@@ -41,12 +66,40 @@
 # Default status filter (empty array shows all statuses)
 # default_status = []
 
-# Cache auto-cleanup settings
-# Maximum cache size in GB (0 = unlimited)
-# cache_max_size_gb = 0
+# TUI configuration
+# [tui]
 
-# Remove cached files not played in N days (0 = never expire)
-# cache_max_age_days = 0
+# Starting tab (all, playing, to-play, finished, backlog, other)
+# default_tab = "all"
 
-# Automatically clean cache before downloading new WADs
-# cache_auto_clean = false
+# Default sort field (id, title, author, playtime, last_played, year, rating)
+# default_sort = "id"
+
+# Default sort direction (false = ascending, true = descending)
+# default_sort_desc = false
+
+# GUI configuration
+# [gui]
+
+# Starting tab (all, playing, to-play, finished, backlog, other)
+# default_tab = "all"
+
+# Default sort field (id, title, author, playtime, last_played, year, rating)
+# default_sort = "id"
+
+# Default sort direction (false = ascending, true = descending)
+# default_sort_desc = false
+
+# Default view mode ("list" or "grid")
+# default_view = "list"
+
+# Initial window dimensions (overridden by saved geometry after first launch)
+# window_width = 1200
+# window_height = 800
+
+# Detail panel width and visibility
+# detail_panel_width = 300
+# show_detail_panel = true
+
+# Thumbnail size in pixels (for grid view)
+# thumbnail_size = 160

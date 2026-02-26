@@ -5,7 +5,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from caco.player import format_duration, _find_stats_file, _auto_track_stats
+from caco.player import format_duration, _find_stats_file, _auto_track_stats, play_iwad
 
 
 SAMPLE_STATS_TXT = """\
@@ -73,6 +73,66 @@ class TestFindStatsFile:
         """Returns None when no stats file exists."""
         result = _find_stats_file(tmp_path)
         assert result is None
+
+
+class TestPlayIwad:
+    def test_iwad_not_found(self, tmp_path):
+        """Raises FileNotFoundError for missing IWAD."""
+        with patch("caco.player.resolve_iwad", return_value=str(tmp_path / "nope.wad")):
+            with pytest.raises(FileNotFoundError, match="IWAD.*not found"):
+                play_iwad("nope")
+
+    def test_no_sourceport(self, tmp_path):
+        """Raises ValueError when no sourceport configured."""
+        wad = tmp_path / "doom2.wad"
+        wad.touch()
+        with (
+            patch("caco.player.resolve_iwad", return_value=str(wad)),
+            patch("caco.player.get_default_sourceport", return_value=None),
+        ):
+            with pytest.raises(ValueError, match="No sourceport"):
+                play_iwad("doom2")
+
+    def test_launches_sourceport(self, tmp_path):
+        """Calls subprocess with correct args and returns duration."""
+        wad = tmp_path / "doom2.wad"
+        wad.touch()
+        mock_proc = MagicMock()
+        mock_proc.wait.return_value = 0
+
+        with (
+            patch("caco.player.resolve_iwad", return_value=str(wad)),
+            patch("caco.player.resolve_sourceport", return_value="/usr/bin/gzdoom"),
+            patch("caco.player.shutil.which", return_value="/usr/bin/gzdoom"),
+            patch("caco.player.get_sourceport_args", return_value=[]),
+            patch("subprocess.Popen", return_value=mock_proc) as mock_popen,
+        ):
+            duration = play_iwad("doom2", sourceport="gzdoom", extra_args=["-warp", "1"])
+            assert isinstance(duration, int)
+            cmd = mock_popen.call_args[0][0]
+            assert cmd[0] == "/usr/bin/gzdoom"
+            assert "-iwad" in cmd
+            assert str(wad) in cmd
+            assert "-warp" in cmd
+            assert "1" in cmd
+
+    def test_includes_default_sourceport_args(self, tmp_path):
+        """Default sourceport args from config are included."""
+        wad = tmp_path / "doom2.wad"
+        wad.touch()
+        mock_proc = MagicMock()
+        mock_proc.wait.return_value = 0
+
+        with (
+            patch("caco.player.resolve_iwad", return_value=str(wad)),
+            patch("caco.player.resolve_sourceport", return_value="/usr/bin/gzdoom"),
+            patch("caco.player.shutil.which", return_value="/usr/bin/gzdoom"),
+            patch("caco.player.get_sourceport_args", return_value=["-nomusic"]),
+            patch("subprocess.Popen", return_value=mock_proc) as mock_popen,
+        ):
+            play_iwad("doom2", sourceport="gzdoom")
+            cmd = mock_popen.call_args[0][0]
+            assert "-nomusic" in cmd
 
 
 class TestAutoTrackStats:

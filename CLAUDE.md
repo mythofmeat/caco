@@ -17,6 +17,9 @@ Caco is a personal Doom WAD library manager inspired by `beets`. It tracks WADs 
 - IWAD registry with family/variant model, MD5-based identification, priority resolution, and auto-scan
 - Managed IWAD storage: `iwads/{variant}/{family}.wad` (canonical filenames for sourceport compatibility)
 - Auto-detect required IWAD from WAD file contents (PNAMES analysis + map lump names)
+- Play IWADs directly (`caco play iwad:doom2`) without a PWAD in the library
+- Auto-detect installed sourceports with helpful error messages
+- Auto-update config file with missing keys on load
 
 ## Commands
 
@@ -205,6 +208,9 @@ src/caco/
 - Sourceport families: `sourceports.py` maps executable basenames to CLI flags; `SOURCEPORT_FAMILIES` dict with dsda/zdoom/chocolate/woof/eternity families; `identify_sourceport_family()` strips path and matches basename; `get_data_dir_args()` returns `-data`/`-save` or `-savedir` args
 - Per-WAD data dirs: `player.py` injects data dir args when `manage_data_dirs=True` (default); `get_wad_data_dir(id, title)` returns `{data_dir}/{id}_{sanitized_title}/`; `find_wad_data_dir(id)` finds existing dir by ID prefix (handles title renames); `_sanitize_dirname()` lowercases, replaces non-alnum with hyphens, truncates to 64 chars
 - IWAD auto-detection: `iwad_detect.py` inspects PWAD file PNAMES lump for TNT-only (197) / Plutonia-only (78) patches, then falls back to map lump names (ExMy→doom, MAPxx→doom2); self-contained WADs (patches provided as lumps) don't trigger detection; result persisted to `custom_iwad` on first play; `auto_detect_iwad` config (default: true); `parse_wad_directory()` shared between `iwad_detect.py` and `gui/thumbnails/extractor.py` via `utils.py`
+- Direct IWAD play: `caco play iwad:doom2` launches an IWAD directly via `play_iwad()` in `player.py`; no session tracking, no WAD record — just a clean sourceport launch; supports `-p`/`--sourceport` and extra args
+- Sourceport detection: `detect_sourceports()` in `sourceports.py` uses `shutil.which()` to find installed sourceports from `SOURCEPORT_FAMILIES`; play command error message lists detected ports when no sourceport is configured
+- Config auto-update: `ensure_config_keys()` in `config.py` runs on `load_config()` — compares existing config file against `DEFAULT_CONFIG` and section defaults (`[tui]`, `[gui]`, `[list]`); adds missing keys with default values; only runs if config file exists; only writes if changes are made; recursion-guarded
 
 **IWAD CLI commands:**
 - `caco iwad list [--plain]` — list registered IWADs (family, variant, title, path); preferred variant marked with `*`

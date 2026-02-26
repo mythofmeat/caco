@@ -33,6 +33,7 @@ DEFAULT_LIST_CONFIG = {
 
 
 _config_cache: dict[str, Any] | None = None
+_ensuring_config = False  # Recursion guard for ensure_config_keys
 
 
 def load_config() -> dict[str, Any]:
@@ -63,7 +64,62 @@ def load_config() -> dict[str, Any]:
             print("Warning: Using default configuration.", file=sys.stderr)
 
     _config_cache = config
+
+    # Auto-update config file with any missing keys
+    ensure_config_keys()
+
     return config.copy()
+
+
+def ensure_config_keys() -> None:
+    """Ensure the config file on disk has all known keys.
+
+    Compares the existing config file against DEFAULT_CONFIG and section
+    defaults (tui, gui, list). Adds missing keys with their default values.
+    Only runs if the config file already exists.  Writes only if changes
+    were made.
+    """
+    global _ensuring_config
+    if _ensuring_config or not CONFIG_FILE.exists():
+        return
+
+    _ensuring_config = True
+    try:
+        with open(CONFIG_FILE, "rb") as f:
+            on_disk = tomllib.load(f)
+    except Exception:
+        return  # Can't read — skip silently
+    finally:
+        _ensuring_config = False
+
+    changed = False
+
+    # Check top-level scalar keys
+    for key, default in DEFAULT_CONFIG.items():
+        if key not in on_disk:
+            on_disk[key] = default
+            changed = True
+
+    # Check section defaults
+    section_defaults: dict[str, dict[str, Any]] = {
+        "tui": DEFAULT_TUI_CONFIG,
+        "gui": DEFAULT_GUI_CONFIG,
+        "list": DEFAULT_LIST_CONFIG,
+    }
+    for section_name, defaults in section_defaults.items():
+        if section_name in on_disk and isinstance(on_disk[section_name], dict):
+            for key, default in defaults.items():
+                if key not in on_disk[section_name]:
+                    on_disk[section_name][key] = default
+                    changed = True
+        # Don't create missing sections — only backfill keys in existing ones
+
+    if changed:
+        _ensuring_config = True
+        try:
+            save_config(on_disk)
+        finally:
+            _ensuring_config = False
 
 
 def save_config(config: dict[str, Any]) -> None:

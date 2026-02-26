@@ -104,6 +104,7 @@ complete -c caco -n "__fish_seen_subcommand_from delete" -s y -l yes -d "Skip co
 
 # play options
 complete -c caco -n "__fish_seen_subcommand_from play" -s p -l sourceport -d "Sourceport to use" -rF
+complete -c caco -n "__fish_seen_subcommand_from play" -a "iwad:" -d "Play IWAD directly (e.g., iwad:doom2)"
 
 # import options (unified command with source flags)
 complete -c caco -n "__fish_seen_subcommand_from import" -l idgames -d "Force idgames source"
