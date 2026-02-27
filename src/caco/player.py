@@ -199,32 +199,45 @@ def _find_stats_file(directory: Path) -> Path | None:
     return None
 
 
-def _auto_track_stats(wad_id: int, wad: dict) -> None:
-    """Read stats from the WAD's data dir and store on the WAD record.
+def _read_stats_snapshot(wad_id: int) -> str | None:
+    """Read and parse stats from the WAD's data dir, returning JSON string or None.
 
-    Silently skips if data dirs are disabled, no data dir exists,
+    Silently returns None if data dirs are disabled, no data dir exists,
     no stats file is found, or parsing fails.
     """
     if not get_auto_stats() or not get_manage_data_dirs():
-        return
+        return None
 
     try:
         data_dir = find_wad_data_dir(wad_id)
         if not data_dir or not data_dir.is_dir():
-            return
+            return None
 
         stats_path = _find_stats_file(data_dir)
         if not stats_path:
-            return
+            return None
 
         from caco.wad_stats import parse_stats_file, stats_to_json
 
         wad_stats = parse_stats_file(stats_path)
-        json_str = stats_to_json(wad_stats)
-        db.update_wad(wad_id, stats_snapshot=json_str)
-        logger.info("Auto-tracked stats for WAD %d from %s", wad_id, stats_path)
+        return stats_to_json(wad_stats)
     except Exception:
-        logger.warning("Failed to auto-track stats for WAD %d", wad_id, exc_info=True)
+        logger.warning("Failed to read stats for WAD %d", wad_id, exc_info=True)
+        return None
+
+
+def _auto_track_stats(wad_id: int, wad: dict) -> str | None:
+    """Read stats from the WAD's data dir and store on the WAD record.
+
+    Returns the JSON stats string if successful, None otherwise.
+    Silently skips if data dirs are disabled, no data dir exists,
+    no stats file is found, or parsing fails.
+    """
+    json_str = _read_stats_snapshot(wad_id)
+    if json_str:
+        db.update_wad(wad_id, stats_snapshot=json_str)
+        logger.info("Auto-tracked stats for WAD %d", wad_id)
+    return json_str
 
 
 def play(
@@ -373,6 +386,9 @@ def play(
     if process_ref is not None:
         process_ref.append(proc)
 
+    # Capture stats snapshot before play for per-session map tracking
+    stats_before = _read_stats_snapshot(wad_id)
+
     # Only start tracking the session after a successful launch
     session_id = db.start_session(wad_id, sourceport=port)
 
@@ -383,7 +399,11 @@ def play(
         db.end_session(session_id)
 
     # Auto-track stats from data directory
-    _auto_track_stats(wad_id, wad)
+    stats_after = _auto_track_stats(wad_id, wad)
+
+    # Attach before/after snapshots to the session for per-session map tracking
+    if stats_before or stats_after:
+        db.update_session_stats(session_id, stats_before, stats_after)
 
     # Return duration
     sessions = db.get_sessions(wad_id)

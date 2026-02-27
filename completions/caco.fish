@@ -28,6 +28,7 @@ complete -c caco -n __fish_use_subcommand -a config -d "View or edit configurati
 complete -c caco -n __fish_use_subcommand -a random -d "Pick a random WAD (prints ID)"
 complete -c caco -n __fish_use_subcommand -a completions -d "Generate shell completions"
 complete -c caco -n __fish_use_subcommand -a stats -d "Show library statistics"
+complete -c caco -n __fish_use_subcommand -a sessions -d "Show play session history"
 complete -c caco -n __fish_use_subcommand -a beaten -d "Manage WAD completion records"
 complete -c caco -n __fish_use_subcommand -a cache -d "Manage WAD file cache"
 
@@ -179,6 +180,18 @@ complete -c caco -n "__fish_seen_subcommand_from random" -a "source:" -d "Filter
 complete -c caco -n "__fish_seen_subcommand_from stats; and not __fish_seen_subcommand_from list add remove set export" -s p -l period -d "Group by period" -xa "month year"
 complete -c caco -n "__fish_seen_subcommand_from stats; and not __fish_seen_subcommand_from list add remove set export" -s n -l limit -d "Number of periods"
 complete -c caco -n "__fish_seen_subcommand_from stats; and not __fish_seen_subcommand_from list add remove set export" -l plain -d "Key=value output"
+
+# =============================================================================
+# sessions command
+# =============================================================================
+complete -c caco -n "__fish_seen_subcommand_from sessions" -l plain -d "TSV output for scripting"
+complete -c caco -n "__fish_seen_subcommand_from sessions" -s y -l yes -d "Auto-select first match"
+complete -c caco -n "__fish_seen_subcommand_from sessions" -xa "(__caco_wads)"
+complete -c caco -n "__fish_seen_subcommand_from sessions" -a "id:" -d "Filter by ID"
+complete -c caco -n "__fish_seen_subcommand_from sessions" -a "title:" -d "Filter by title"
+complete -c caco -n "__fish_seen_subcommand_from sessions" -a "author:" -d "Filter by author"
+complete -c caco -n "__fish_seen_subcommand_from sessions" -a "tag:" -d "Filter by tag"
+complete -c caco -n "__fish_seen_subcommand_from sessions" -a "status:" -d "Filter by status"
 
 # =============================================================================
 # cache subcommands

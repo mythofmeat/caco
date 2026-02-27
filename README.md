@@ -23,6 +23,7 @@ A personal Doom WAD library manager taking inspiration from beets. Track what yo
 - **Completion tracking**
   - Track how many times you've beaten each WAD
   - Auto-track per-map stats from sourceport output
+  - Per-session map tracking (which maps were completed in each play session)
 
 - **Playtime tracking**
   - Automatically tracks how long you play each WAD
@@ -512,6 +513,18 @@ caco beaten stats 1                 # View the per-map stats
 ```
 
 **Opt-out:** Set `auto_stats = false` in config to disable auto-tracking.
+
+### Session History
+
+View play session history with per-session map tracking:
+
+```bash
+caco sessions "Eviternity"         # Show session history with maps played
+caco sessions id:42                # By ID
+caco sessions "Eviternity" --plain # TSV output for scripting
+```
+
+When stats tracking is enabled, each session records which maps were completed — so you can see exactly what you played and when.
 
 ### Library Statistics
 

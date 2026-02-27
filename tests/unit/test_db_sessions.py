@@ -222,13 +222,59 @@ class TestUpdateWadFieldWhitelist:
         assert wad["author"] == "New Author"
 
 
+class TestUpdateSessionStats:
+    """Test update_session_stats for per-session map tracking."""
+
+    def test_attach_before_after(self, db_mod, make_wad):
+        wad_id = make_wad()
+        session_id = db_mod.start_session(wad_id, sourceport="dsda-doom")
+        db_mod.end_session(session_id)
+
+        db_mod.update_session_stats(session_id, '{"before":1}', '{"after":2}')
+
+        sessions = db_mod.get_sessions(wad_id)
+        assert sessions[0]["stats_before"] == '{"before":1}'
+        assert sessions[0]["stats_after"] == '{"after":2}'
+
+    def test_null_before(self, db_mod, make_wad):
+        """First play session has no before snapshot."""
+        wad_id = make_wad()
+        session_id = db_mod.start_session(wad_id)
+        db_mod.end_session(session_id)
+
+        db_mod.update_session_stats(session_id, None, '{"after":1}')
+
+        sessions = db_mod.get_sessions(wad_id)
+        assert sessions[0]["stats_before"] is None
+        assert sessions[0]["stats_after"] == '{"after":1}'
+
+    def test_old_sessions_have_null_stats(self, db_mod, make_wad):
+        """Sessions created before migration have NULL stats columns."""
+        wad_id = make_wad()
+        session_id = db_mod.start_session(wad_id)
+        db_mod.end_session(session_id)
+
+        sessions = db_mod.get_sessions(wad_id)
+        assert sessions[0]["stats_before"] is None
+        assert sessions[0]["stats_after"] is None
+
+
 class TestMigrationVersioning:
     """Test that schema_migrations table is populated."""
 
     def test_schema_migrations_populated(self, db_mod, tmp_db):
         conn = db_mod.get_connection()
         rows = conn.execute("SELECT version, name FROM schema_migrations ORDER BY version").fetchall()
-        assert len(rows) == 14
+        assert len(rows) == 15
         assert rows[0]["version"] == 1
-        assert rows[13]["version"] == 14
+        assert rows[14]["version"] == 15
+        conn.close()
+
+    def test_sessions_has_stats_columns(self, db_mod, tmp_db):
+        """Migration 15 adds stats_before and stats_after to sessions."""
+        conn = db_mod.get_connection()
+        cursor = conn.execute("PRAGMA table_info(sessions)")
+        columns = {row[1] for row in cursor.fetchall()}
+        assert "stats_before" in columns
+        assert "stats_after" in columns
         conn.close()

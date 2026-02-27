@@ -5,6 +5,7 @@ import pytest
 from caco.wad_stats import (
     MapStats,
     WadStats,
+    compute_stats_delta,
     format_stats,
     format_time_secs,
     format_time_tics,
@@ -244,3 +245,119 @@ class TestSkillName:
 
     def test_unknown_skill(self):
         assert skill_name(99) == "99"
+
+
+class TestComputeStatsDelta:
+    """Test compute_stats_delta for per-session map tracking."""
+
+    def test_stats_txt_new_exits(self):
+        """Maps with increased total_exits are detected as played."""
+        before = WadStats(format="stats_txt", maps=[
+            MapStats(lump="MAP01", best_skill=3, best_time=1000, total_exits=1,
+                     kills=50, total_kills=50, items=10, total_items=10,
+                     secrets=2, total_secrets=3),
+            MapStats(lump="MAP02", best_skill=3, best_time=2000, total_exits=1,
+                     kills=40, total_kills=50, items=8, total_items=10,
+                     secrets=1, total_secrets=3),
+        ])
+        after = WadStats(format="stats_txt", maps=[
+            MapStats(lump="MAP01", best_skill=3, best_time=1000, total_exits=1,
+                     kills=50, total_kills=50, items=10, total_items=10,
+                     secrets=2, total_secrets=3),
+            MapStats(lump="MAP02", best_skill=4, best_time=1800, total_exits=2,
+                     kills=50, total_kills=50, items=10, total_items=10,
+                     secrets=3, total_secrets=3),
+        ])
+        delta = compute_stats_delta(before, after)
+        assert delta["maps_played"] == ["MAP02"]
+        assert len(delta["deltas"]) == 1
+        d = delta["deltas"][0]
+        assert d["lump"] == "MAP02"
+        assert d["new_map"] is False
+        assert d["exits_delta"] == 1
+        assert d["kills_delta"] == 10
+        assert d["time_improved"] is True
+
+    def test_stats_txt_new_map(self):
+        """A brand new map in after (not in before) is detected."""
+        before = WadStats(format="stats_txt", maps=[
+            MapStats(lump="MAP01", best_skill=3, best_time=1000, total_exits=1,
+                     kills=50, total_kills=50, items=10, total_items=10,
+                     secrets=2, total_secrets=3),
+        ])
+        after = WadStats(format="stats_txt", maps=[
+            MapStats(lump="MAP01", best_skill=3, best_time=1000, total_exits=1,
+                     kills=50, total_kills=50, items=10, total_items=10,
+                     secrets=2, total_secrets=3),
+            MapStats(lump="MAP02", best_skill=4, best_time=2000, total_exits=1,
+                     kills=50, total_kills=50, items=10, total_items=10,
+                     secrets=3, total_secrets=3),
+        ])
+        delta = compute_stats_delta(before, after)
+        assert delta["maps_played"] == ["MAP02"]
+        assert delta["deltas"][0]["new_map"] is True
+
+    def test_stats_txt_no_changes(self):
+        """No maps played if nothing changed."""
+        before = WadStats(format="stats_txt", maps=[
+            MapStats(lump="MAP01", best_skill=3, best_time=1000, total_exits=1,
+                     kills=50, total_kills=50, items=10, total_items=10,
+                     secrets=2, total_secrets=3),
+        ])
+        after = WadStats(format="stats_txt", maps=[
+            MapStats(lump="MAP01", best_skill=3, best_time=1000, total_exits=1,
+                     kills=50, total_kills=50, items=10, total_items=10,
+                     secrets=2, total_secrets=3),
+        ])
+        delta = compute_stats_delta(before, after)
+        assert delta["maps_played"] == []
+        assert delta["deltas"] == []
+
+    def test_stats_txt_before_none(self):
+        """None before means first play — all played maps are new."""
+        after = WadStats(format="stats_txt", maps=[
+            MapStats(lump="MAP01", best_skill=4, best_time=1000, total_exits=1,
+                     kills=50, total_kills=50, items=10, total_items=10,
+                     secrets=2, total_secrets=3),
+            MapStats(lump="MAP02", best_skill=0, best_time=-1, total_exits=0,
+                     kills=0, total_kills=-1, items=0, total_items=-1,
+                     secrets=0, total_secrets=-1),
+        ])
+        delta = compute_stats_delta(None, after)
+        # MAP01 played, MAP02 unplayed (best_skill=0)
+        assert delta["maps_played"] == ["MAP01"]
+        assert len(delta["deltas"]) == 1
+        assert delta["deltas"][0]["new_map"] is True
+
+    def test_levelstat_all_maps_this_session(self):
+        """levelstat.txt is rewritten each run — all maps are this session's."""
+        after = WadStats(format="levelstat_txt", maps=[
+            MapStats(lump="MAP01", time_secs=32.97, total_time_secs=32.97,
+                     kills=100, total_kills=100, items=50, total_items=50,
+                     secrets=5, total_secrets=5, best_skill=4),
+            MapStats(lump="MAP02", time_secs=83.45, total_time_secs=116.42,
+                     kills=80, total_kills=100, items=40, total_items=50,
+                     secrets=3, total_secrets=5, best_skill=4),
+        ])
+        delta = compute_stats_delta(None, after)
+        assert delta["maps_played"] == ["MAP01", "MAP02"]
+        assert len(delta["deltas"]) == 2
+        assert delta["deltas"][0]["time_secs"] == pytest.approx(32.97)
+
+    def test_levelstat_ignores_before(self):
+        """levelstat before is irrelevant — all after maps are this session's."""
+        before = WadStats(format="levelstat_txt", maps=[
+            MapStats(lump="MAP01", time_secs=10.0, total_time_secs=10.0,
+                     kills=50, total_kills=100, items=25, total_items=50,
+                     secrets=2, total_secrets=5, best_skill=4),
+        ])
+        after = WadStats(format="levelstat_txt", maps=[
+            MapStats(lump="MAP01", time_secs=32.97, total_time_secs=32.97,
+                     kills=100, total_kills=100, items=50, total_items=50,
+                     secrets=5, total_secrets=5, best_skill=4),
+            MapStats(lump="MAP02", time_secs=83.45, total_time_secs=116.42,
+                     kills=80, total_kills=100, items=40, total_items=50,
+                     secrets=3, total_secrets=5, best_skill=4),
+        ])
+        delta = compute_stats_delta(before, after)
+        assert delta["maps_played"] == ["MAP01", "MAP02"]

@@ -1,4 +1,4 @@
-"""Stats and beaten commands."""
+"""Stats, sessions, and beaten commands."""
 
 import click
 from rich.table import Table
@@ -7,6 +7,7 @@ from caco import db
 from caco.player import format_duration
 from caco.wad_stats import (
     WadStats,
+    compute_stats_delta,
     format_stats,
     format_time_tics,
     format_time_secs,
@@ -153,6 +154,96 @@ def stats(period: str, limit: int, plain: bool):
         if len(activity) > limit:
             console.print(f"[dim]... and {len(activity) - limit} more period(s)[/dim]")
 
+    console.print()
+
+
+# =============================================================================
+# Sessions (Play History with Per-Session Maps)
+# =============================================================================
+
+
+def _session_maps_played(session: dict) -> list[str]:
+    """Extract maps played from a session's before/after stats snapshots."""
+    stats_after = session.get("stats_after")
+    if not stats_after:
+        return []
+
+    try:
+        after = stats_from_json(stats_after)
+    except (ValueError, KeyError):
+        return []
+
+    stats_before = session.get("stats_before")
+    before = None
+    if stats_before:
+        try:
+            before = stats_from_json(stats_before)
+        except (ValueError, KeyError):
+            pass
+
+    delta = compute_stats_delta(before, after)
+    return delta["maps_played"]
+
+
+@cli.command()
+@click.argument("query")
+@click.option("--plain", is_flag=True, help="Output as TSV for scripting")
+@click.option("--yes", "-y", is_flag=True, help="Auto-select first match if multiple")
+def sessions(query: str, plain: bool, yes: bool):
+    """Show play session history with per-session map info.
+
+    Displays when you played a WAD, for how long, which sourceport
+    was used, and which maps were completed in each session.
+
+    \b
+    Examples:
+        caco sessions "Eviternity"
+        caco sessions id:42
+        caco sessions "Eviternity" --plain
+    """
+    wads = resolve_wad_query(query, mode="pick", yes=yes)
+    if not wads:
+        return
+    wad = wads[0]
+
+    all_sessions = db.get_sessions(wad["id"])
+
+    if not all_sessions:
+        console.print(f"[dim]No play sessions for {wad['title']}[/dim]")
+        return
+
+    if plain:
+        print("date\tstarted\tduration\tsourceport\tmaps")
+        for s in all_sessions:
+            date = s["started_at"][:10] if s["started_at"] else "-"
+            started = s["started_at"][11:16] if s["started_at"] else "-"
+            dur = format_duration(s["duration_seconds"]) if s.get("duration_seconds") else "-"
+            port = s.get("sourceport") or "-"
+            maps = _session_maps_played(s)
+            maps_str = ", ".join(maps) if maps else "-"
+            print(f"{date}\t{started}\t{dur}\t{port}\t{maps_str}")
+        return
+
+    console.print(f"\n[bold]Session History: {wad['title']}[/bold]\n")
+
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Date", style="dim")
+    table.add_column("Started")
+    table.add_column("Duration", justify="right")
+    table.add_column("Sourceport")
+    table.add_column("Maps Played")
+
+    for s in all_sessions:
+        date = s["started_at"][:10] if s["started_at"] else "-"
+        started = s["started_at"][11:16] if s["started_at"] else "-"
+        dur = format_duration(s["duration_seconds"]) if s.get("duration_seconds") else "-"
+        port = s.get("sourceport") or "-"
+        maps = _session_maps_played(s)
+        maps_str = ", ".join(maps) if maps else "[dim]\u2014[/dim]"
+
+        table.add_row(date, started, dur, port, maps_str)
+
+    console.print(table)
     console.print()
 
 

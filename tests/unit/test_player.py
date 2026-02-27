@@ -5,7 +5,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from caco.player import format_duration, _find_stats_file, _auto_track_stats, play_iwad
+from caco.player import format_duration, _find_stats_file, _auto_track_stats, _read_stats_snapshot, play_iwad
 
 
 SAMPLE_STATS_TXT = """\
@@ -135,9 +135,58 @@ class TestPlayIwad:
             assert "-nomusic" in cmd
 
 
+class TestReadStatsSnapshot:
+    """Test _read_stats_snapshot helper."""
+
+    def test_returns_json(self, tmp_path):
+        """Returns JSON string when stats file exists."""
+        data_dir = tmp_path / "1_test-wad"
+        data_dir.mkdir()
+        (data_dir / "stats.txt").write_text(SAMPLE_STATS_TXT)
+
+        with (
+            patch("caco.player.get_auto_stats", return_value=True),
+            patch("caco.player.get_manage_data_dirs", return_value=True),
+            patch("caco.player.find_wad_data_dir", return_value=data_dir),
+        ):
+            result = _read_stats_snapshot(1)
+            assert result is not None
+            import json
+            data = json.loads(result)
+            assert data["format"] == "stats_txt"
+            assert len(data["maps"]) == 2
+
+    def test_returns_none_no_data_dir(self):
+        """Returns None when no data dir exists."""
+        with (
+            patch("caco.player.get_auto_stats", return_value=True),
+            patch("caco.player.get_manage_data_dirs", return_value=True),
+            patch("caco.player.find_wad_data_dir", return_value=None),
+        ):
+            assert _read_stats_snapshot(1) is None
+
+    def test_returns_none_disabled(self):
+        """Returns None when auto_stats is disabled."""
+        with patch("caco.player.get_auto_stats", return_value=False):
+            assert _read_stats_snapshot(1) is None
+
+    def test_returns_none_on_parse_error(self, tmp_path):
+        """Returns None (not raises) on parse errors."""
+        data_dir = tmp_path / "1_test-wad"
+        data_dir.mkdir()
+        (data_dir / "stats.txt").write_text("invalid\ndata\nnope")
+
+        with (
+            patch("caco.player.get_auto_stats", return_value=True),
+            patch("caco.player.get_manage_data_dirs", return_value=True),
+            patch("caco.player.find_wad_data_dir", return_value=data_dir),
+        ):
+            assert _read_stats_snapshot(1) is None
+
+
 class TestAutoTrackStats:
-    def test_updates_wad(self, tmp_path):
-        """Auto-tracking parses stats and calls update_wad with snapshot."""
+    def test_updates_wad_and_returns_json(self, tmp_path):
+        """Auto-tracking parses stats, calls update_wad, and returns JSON."""
         data_dir = tmp_path / "1_test-wad"
         data_dir.mkdir()
         (data_dir / "stats.txt").write_text(SAMPLE_STATS_TXT)
@@ -150,15 +199,16 @@ class TestAutoTrackStats:
             patch("caco.player.find_wad_data_dir", return_value=data_dir),
             patch("caco.player.db") as mock_db,
         ):
-            _auto_track_stats(1, wad)
+            result = _auto_track_stats(1, wad)
             mock_db.update_wad.assert_called_once()
             call_args = mock_db.update_wad.call_args
             assert call_args[0][0] == 1
             assert "stats_snapshot" in call_args[1]
             assert call_args[1]["stats_snapshot"] is not None
+            assert result is not None
 
-    def test_no_data_dir(self, tmp_path):
-        """Gracefully skips when no data dir exists."""
+    def test_no_data_dir_returns_none(self, tmp_path):
+        """Returns None when no data dir exists."""
         wad = {"id": 1, "title": "Test WAD"}
 
         with (
@@ -167,8 +217,9 @@ class TestAutoTrackStats:
             patch("caco.player.find_wad_data_dir", return_value=None),
             patch("caco.player.db") as mock_db,
         ):
-            _auto_track_stats(1, wad)
+            result = _auto_track_stats(1, wad)
             mock_db.update_wad.assert_not_called()
+            assert result is None
 
     def test_auto_stats_disabled(self, tmp_path):
         """Skips when auto_stats config is false."""
@@ -178,8 +229,9 @@ class TestAutoTrackStats:
             patch("caco.player.get_auto_stats", return_value=False),
             patch("caco.player.db") as mock_db,
         ):
-            _auto_track_stats(1, wad)
+            result = _auto_track_stats(1, wad)
             mock_db.update_wad.assert_not_called()
+            assert result is None
 
     def test_manage_data_dirs_disabled(self, tmp_path):
         """Skips when manage_data_dirs is false."""
@@ -190,11 +242,12 @@ class TestAutoTrackStats:
             patch("caco.player.get_manage_data_dirs", return_value=False),
             patch("caco.player.db") as mock_db,
         ):
-            _auto_track_stats(1, wad)
+            result = _auto_track_stats(1, wad)
             mock_db.update_wad.assert_not_called()
+            assert result is None
 
-    def test_parse_error_logged(self, tmp_path):
-        """Parse errors are logged as warnings, not raised."""
+    def test_parse_error_returns_none(self, tmp_path):
+        """Parse errors are logged as warnings, returns None."""
         data_dir = tmp_path / "1_test-wad"
         data_dir.mkdir()
         (data_dir / "stats.txt").write_text("not a valid stats file\nreally\nnope")
@@ -206,12 +259,10 @@ class TestAutoTrackStats:
             patch("caco.player.get_manage_data_dirs", return_value=True),
             patch("caco.player.find_wad_data_dir", return_value=data_dir),
             patch("caco.player.db") as mock_db,
-            patch("caco.player.logger") as mock_logger,
         ):
-            # Should not raise
-            _auto_track_stats(1, wad)
+            result = _auto_track_stats(1, wad)
             mock_db.update_wad.assert_not_called()
-            mock_logger.warning.assert_called_once()
+            assert result is None
 
     def test_no_stats_file(self, tmp_path):
         """Skips when data dir exists but contains no stats file."""
@@ -226,5 +277,6 @@ class TestAutoTrackStats:
             patch("caco.player.find_wad_data_dir", return_value=data_dir),
             patch("caco.player.db") as mock_db,
         ):
-            _auto_track_stats(1, wad)
+            result = _auto_track_stats(1, wad)
             mock_db.update_wad.assert_not_called()
+            assert result is None

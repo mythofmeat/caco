@@ -389,6 +389,16 @@ def _migrate_add_companion_files(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE wads ADD COLUMN companion_files TEXT")
 
 
+def _migrate_add_session_stats(conn: sqlite3.Connection) -> None:
+    """Add stats_before and stats_after columns to sessions for per-session map tracking."""
+    cursor = conn.execute("PRAGMA table_info(sessions)")
+    columns = {row[1] for row in cursor.fetchall()}
+    if "stats_before" not in columns:
+        conn.execute("ALTER TABLE sessions ADD COLUMN stats_before TEXT")
+    if "stats_after" not in columns:
+        conn.execute("ALTER TABLE sessions ADD COLUMN stats_after TEXT")
+
+
 # Ordered migration registry — append new migrations here with incrementing version
 _MIGRATIONS: list[tuple[int, str, Any]] = [
     (1, "add_custom_play_config", _migrate_add_custom_play_config),
@@ -405,4 +415,5 @@ _MIGRATIONS: list[tuple[int, str, Any]] = [
     (12, "fix_stale_cache_paths", _migrate_fix_stale_cache_paths),
     (13, "iwad_dir_restructure", _migrate_iwad_dir_restructure),
     (14, "add_companion_files", _migrate_add_companion_files),
+    (15, "add_session_stats", _migrate_add_session_stats),
 ]

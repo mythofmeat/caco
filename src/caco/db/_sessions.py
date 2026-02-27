@@ -51,6 +51,26 @@ def end_session(session_id: int, notes: str | None = None) -> None:
             )
 
 
+def update_session_stats(
+    session_id: int,
+    stats_before: str | None,
+    stats_after: str | None,
+) -> None:
+    """Attach before/after stats snapshots to a session record.
+
+    Called after end_session() to store the stats diff data without
+    modifying the critical session lifecycle code.
+    """
+    with get_connection() as conn:
+        conn.execute(
+            """
+            UPDATE sessions SET stats_before = ?, stats_after = ?
+            WHERE id = ?
+            """,
+            (stats_before, stats_after, session_id),
+        )
+
+
 def get_sessions(wad_id: int) -> list[dict[str, Any]]:
     """Get all play sessions for a WAD."""
     with get_connection() as conn:

@@ -197,6 +197,7 @@ src/caco/
 - Per-WAD config: `custom_iwad`, `custom_sourceport`, `custom_args` (JSON array), `companion_files` (JSON array of absolute paths) columns in wads table
 - Companion files: `companion_files` TEXT column stores JSON array of absolute file paths; DEH/BEX files auto-detected by extension and loaded with `-deh` (non-zdoom) or `-file` (zdoom); managed via `caco modify --add-file`/`--remove-file`; `uses_deh_flag()` in `sourceports.py` determines correct flag per family
 - Auto stats tracking: `stats_snapshot` TEXT column on `wads` table stores live per-map stats JSON; auto-read from data dir after play sessions; auto-archived to completion on `beaten add` or `modify status=finished`; `auto_stats` config (default: true); live stats shown as "Current (live)" entry in Map Stats dialog (GUI) and screen (TUI)
+- Per-session map tracking: `stats_before`/`stats_after` TEXT columns on `sessions` table store stats snapshots captured before/after each play session; `compute_stats_delta()` in `wad_stats.py` diffs these to determine which maps were played; `_read_stats_snapshot()` in `player.py` reads stats file to JSON; `caco sessions` command displays session history with maps played per session
 - IWAD resolution: `iwad_dirs` config allows short names (e.g., `doom2` instead of full path); `resolve_iwad()` in `config.py` checks DB registry (with priority resolution) then searches dirs for exact name or name + `.wad`; `IWAD_DIR` / `get_iwad_dir()` provides the managed IWAD directory path (`~/.local/share/caco/iwads/`)
 - Cross-source downloading: `idgames_id` column allows any WAD to download via idgames API (set with `caco modify id:N idgames-id=XXXXX`)
 - Soft-delete: `deleted_at` column; `caco trash` moves to trash, `caco trash --restore` recovers, `caco trash --list` shows trash
@@ -226,6 +227,9 @@ src/caco/
 | `f`, `fin`, `done` | finished |
 | `a`, `drop`, `dropped` | abandoned |
 | `w`, `au`, `await`, `waiting`, `wip` | awaiting-update |
+
+**Sessions command:**
+- `caco sessions <query> [--plain] [--yes]` — show play session history with per-session map tracking; displays date, time, duration, sourceport, and maps played per session; sessions without stats data show `—` in maps column
 
 **Beaten command group:**
 - `caco beaten list <query>` — show completion history (dates + stats indicator) for a specific WAD

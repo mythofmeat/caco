@@ -187,3 +187,61 @@ class TestBeatenExportLive:
         result = runner.invoke(cli, ["beaten", "export", str(wad_live_only)])
         assert result.exit_code == 0
         assert "MAP01" in result.output
+
+
+class TestSessionsCommand:
+    """Test caco sessions command."""
+
+    def test_no_sessions(self, runner, make_wad):
+        wad_id = make_wad(title="Never Played")
+        result = runner.invoke(cli, ["sessions", str(wad_id)])
+        assert result.exit_code == 0
+        assert "No play sessions" in result.output
+
+    def test_sessions_with_data(self, runner, make_wad, db_mod):
+        wad_id = make_wad(title="Played WAD")
+        s_id = db_mod.start_session(wad_id, sourceport="dsda-doom")
+        db_mod.end_session(s_id)
+
+        result = runner.invoke(cli, ["sessions", str(wad_id)])
+        assert result.exit_code == 0
+        assert "Session History" in result.output
+        assert "dsda-doom" in result.output
+
+    def test_sessions_with_stats(self, runner, make_wad, db_mod):
+        """Sessions with before/after stats show maps played."""
+        wad_id = make_wad(title="Stats WAD")
+        s_id = db_mod.start_session(wad_id, sourceport="dsda-doom")
+        db_mod.end_session(s_id)
+
+        before_json = _make_stats_json(maps=1)
+        after_json = _make_stats_json(maps=3)
+        db_mod.update_session_stats(s_id, before_json, after_json)
+
+        result = runner.invoke(cli, ["sessions", str(wad_id)])
+        assert result.exit_code == 0
+        # MAP02 and MAP03 should show as played (new exits vs before)
+        assert "MAP02" in result.output
+
+    def test_sessions_plain(self, runner, make_wad, db_mod):
+        wad_id = make_wad(title="Plain WAD")
+        s_id = db_mod.start_session(wad_id, sourceport="gzdoom")
+        db_mod.end_session(s_id)
+
+        result = runner.invoke(cli, ["sessions", str(wad_id), "--plain"])
+        assert result.exit_code == 0
+        assert "gzdoom" in result.output
+        # TSV format: has tabs
+        assert "\t" in result.output
+
+    def test_sessions_no_stats_shows_dash(self, runner, make_wad, db_mod):
+        """Sessions without stats show dash in maps column."""
+        wad_id = make_wad(title="No Stats WAD")
+        s_id = db_mod.start_session(wad_id, sourceport="gzdoom")
+        db_mod.end_session(s_id)
+
+        result = runner.invoke(cli, ["sessions", str(wad_id), "--plain"])
+        assert result.exit_code == 0
+        # Maps column should be "-"
+        lines = result.output.strip().split("\n")
+        assert lines[1].endswith("-")

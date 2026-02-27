@@ -330,6 +330,90 @@ def stats_to_json(stats: WadStats) -> str:
     return json.dumps(data, separators=(",", ":"))
 
 
+def compute_stats_delta(
+    before: WadStats | None,
+    after: WadStats,
+) -> dict[str, Any]:
+    """Compute which maps were played in a session by diffing before/after snapshots.
+
+    Args:
+        before: Stats snapshot taken before the session (None for first play).
+        after: Stats snapshot taken after the session.
+
+    Returns:
+        Dict with:
+        - maps_played: list of map lump names that were played this session
+        - deltas: list of per-map delta dicts with detailed changes
+
+    For stats.txt (persistent/cumulative): a map is "played" if total_exits
+    increased or the map is new. For levelstat.txt (rewritten each run): all
+    maps in `after` are this session's maps.
+    """
+    if after.format == "levelstat_txt":
+        # levelstat.txt is rewritten each run — all maps are this session's
+        maps_played = [m.lump for m in after.maps]
+        deltas = []
+        for m in after.maps:
+            deltas.append({
+                "lump": m.lump,
+                "new_map": True,
+                "time_secs": m.time_secs,
+                "kills": m.kills,
+                "total_kills": m.total_kills,
+                "items": m.items,
+                "total_items": m.total_items,
+                "secrets": m.secrets,
+                "total_secrets": m.total_secrets,
+            })
+        return {"maps_played": maps_played, "deltas": deltas}
+
+    # stats.txt: diff field-by-field
+    before_map: dict[str, MapStats] = {}
+    if before:
+        for m in before.maps:
+            before_map[m.lump] = m
+
+    maps_played = []
+    deltas = []
+    for m in after.maps:
+        prev = before_map.get(m.lump)
+        if prev is None:
+            # New map not in before snapshot
+            if m.played:
+                maps_played.append(m.lump)
+                deltas.append({
+                    "lump": m.lump,
+                    "new_map": True,
+                    "exits_delta": m.total_exits,
+                    "kills_delta": m.kills,
+                    "items_delta": m.items,
+                    "secrets_delta": m.secrets,
+                    "best_time_before": -1,
+                    "best_time_after": m.best_time,
+                    "time_improved": m.best_time > 0,
+                })
+        else:
+            exits_delta = m.total_exits - prev.total_exits
+            if exits_delta > 0:
+                maps_played.append(m.lump)
+                deltas.append({
+                    "lump": m.lump,
+                    "new_map": False,
+                    "exits_delta": exits_delta,
+                    "kills_delta": m.kills - prev.kills,
+                    "items_delta": m.items - prev.items,
+                    "secrets_delta": m.secrets - prev.secrets,
+                    "best_time_before": prev.best_time,
+                    "best_time_after": m.best_time,
+                    "time_improved": (
+                        m.best_time > 0
+                        and (prev.best_time < 0 or m.best_time < prev.best_time)
+                    ),
+                })
+
+    return {"maps_played": maps_played, "deltas": deltas}
+
+
 def stats_from_json(json_str: str) -> WadStats:
     """Deserialize WadStats from JSON."""
     data = json.loads(json_str)
