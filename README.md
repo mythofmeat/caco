@@ -582,6 +582,36 @@ cache_auto_clean = true
 
 **Note**: Only idgames sources are affected by cache commands. Local imports and URL imports are never deleted (they may not be re-downloadable).
 
+### Save Game Management
+
+Manage save files and backups for per-WAD data directories:
+
+```bash
+# List save files for a WAD
+caco saves list 1
+caco saves list "Eviternity" --plain     # TSV output
+
+# Backup a WAD's entire data directory (saves + stats + configs)
+caco saves backup 1
+caco saves backup "Eviternity"
+
+# List existing backups
+caco saves backups                        # All backups
+caco saves backups 1                      # Backups for WAD 1
+
+# Restore from a backup (latest if no backup specified)
+caco saves restore 1
+caco saves restore 1 1_eviternity_20240101_120000_000000.zip
+
+# Clean save files only (keeps stats and configs)
+caco saves clean 1 --dry-run             # Preview what would be deleted
+caco saves clean 1 -y                    # Delete without confirmation
+```
+
+**Backup location:** `~/.local/share/caco/backups/`
+
+Save files are identified by extension: `.dsg` (dsda, chocolate, woof, eternity families) and `.zds` (zdoom family). The `clean` command only removes save files — stats, configs, and other data are preserved.
+
 ## IWAD Management
 
 IWADs are organized by **family** (doom, doom2, plutonia, tnt) with multiple **variants** per family (v1.9, bfg, enhanced, kex). Resolution uses a configurable priority list to pick the preferred variant. Managed IWADs are stored as `iwads/{variant}/{family}.wad` so sourceports see canonical filenames (e.g., `tnt.wad`).
@@ -837,6 +867,7 @@ Unknown sourceports play normally without any injection.
 - **Config**: `~/.config/caco/config.toml`
 - **WAD cache**: `~/.local/share/caco/wads/`
 - **WAD data**: `~/.local/share/caco/data/` (per-WAD saves, stats, configs)
+- **WAD backups**: `~/.local/share/caco/backups/`
 - **Thumbnail cache**: `~/.cache/caco/thumbnails/`
 
 ## Development

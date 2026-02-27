@@ -60,8 +60,10 @@ src/caco/
 │   ├── play_cmd.py     # play command (--first, --iwad)
 │   ├── cache.py        # cache list/clear/prune
 │   ├── config_cmd.py   # config, completions commands
-│   └── stats.py        # stats, beaten commands
+│   ├── stats.py        # stats, beaten commands
+│   └── saves_cmd.py    # saves list/backup/restore/clean/backups
 ├── iwad_detect.py  # Auto-detect IWAD family from WAD file PNAMES/map lumps
+├── saves.py        # Save game management: find, backup, restore, clean save files
 ├── sourceports.py  # Sourceport family registry (exe→CLI flags for data/save redirection)
 ├── utils.py        # Shared utilities (coerce_str, BaseHttpClient, CacoSourceError, extract_year, parse_wad_directory)
 ├── wad_stats.py    # Per-map stats parser/formatter (stats.txt + levelstat.txt)
@@ -212,6 +214,7 @@ src/caco/
 - Direct IWAD play: `caco play --iwad doom2` launches an IWAD directly via `play_iwad()` in `player.py`; no session tracking, no WAD record — just a clean sourceport launch; supports `-p`/`--sourceport` and extra args
 - Sourceport detection: `detect_sourceports()` in `sourceports.py` uses `shutil.which()` to find installed sourceports from `SOURCEPORT_FAMILIES`; play command error message lists detected ports when no sourceport is configured
 - Config auto-update: `ensure_config_keys()` in `config.py` runs on `load_config()` — compares existing config file against `DEFAULT_CONFIG` and section defaults (`[tui]`, `[gui]`, `[list]`); adds missing keys with default values; only runs if config file exists; only writes if changes are made; recursion-guarded
+- Save game management: `saves.py` provides core logic (no CLI dependency) — `find_save_files()` recursively scans data dirs for `.dsg`/`.zds` files; `create_backup()`/`restore_backup()` zip/unzip entire data dirs; `SAVE_EXTENSIONS` and `ALL_SAVE_EXTENSIONS` in `sourceports.py` define known extensions; backups stored at `~/.local/share/caco/backups/` (`BACKUP_DIR` / `get_backup_dir()` in `config.py`)
 
 **IWAD CLI commands:**
 - `caco ls --iwad [-o plain]` — list registered IWADs (family, variant, title, path); preferred variant marked with `*`
@@ -241,6 +244,15 @@ src/caco/
 - `caco beaten export <query> [COMPLETION_ID] [--live] [--output FILE]` — export stats back to original text format; `--live` exports live stats snapshot
 - Uses `wad_completions` table (auto-created via migration); stats stored as JSON in `stats_snapshot` column
 - Supports nyan-doom/dsda-doom `stats.txt` format (persistent per-map tracking) and `levelstat.txt` format (human-readable `-levelstat` output)
+
+**Saves command group:**
+- `caco saves list <query> [--plain]` — list save files (.dsg, .zds) for a WAD's data directory
+- `caco saves backup <query>` — zip the WAD's entire data directory to `~/.local/share/caco/backups/`
+- `caco saves restore <query> [BACKUP]` — restore from zip (latest if omitted); prompts before overwriting
+- `caco saves clean <query> [--dry-run]` — delete only save files, keeping stats and configs
+- `caco saves backups [query] [--plain]` — list existing backup zips; without query lists all backups
+- Save discovery scans recursively for `.dsg` (dsda/chocolate/woof/eternity) and `.zds` (zdoom) extensions
+- Backup format: `{wad_id}_{sanitized_title}_{timestamp}.zip` containing entire data dir contents
 
 **Output formats:**
 - `-o plain` on `ls`, `info`, `trash --list`, `cache list`, `stats` — TSV/key=value for scripting

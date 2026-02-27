@@ -13,6 +13,7 @@ DEFAULT_DB_PATH = DB_DIR / "library.db"
 CACHE_DIR = DB_DIR / "wads"
 IWAD_DIR = DB_DIR / "iwads"
 DATA_DIR = DB_DIR / "data"
+BACKUP_DIR = DB_DIR / "backups"
 
 DEFAULT_CONFIG = {
     "sourceport": "",
@@ -393,6 +394,11 @@ def get_data_dir() -> Path:
     """Get the base directory for per-WAD data directories."""
     config = load_config()
     return Path(config.get("data_dir", str(DATA_DIR))).expanduser()
+
+
+def get_backup_dir() -> Path:
+    """Get the directory for WAD data backups."""
+    return BACKUP_DIR
 
 
 def get_manage_data_dirs() -> bool:

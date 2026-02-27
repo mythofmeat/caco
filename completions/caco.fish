@@ -231,3 +231,25 @@ complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcomm
 complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from export" -l live -d "Export live stats"
 
 complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from list add attach remove set stats export" -xa "(__caco_wads)"
+
+# =============================================================================
+# saves subcommands
+# =============================================================================
+complete -c caco -n __fish_use_subcommand -a saves -d "Manage WAD save files and backups"
+
+complete -c caco -n "__fish_seen_subcommand_from saves; and not __fish_seen_subcommand_from list backup restore clean backups" -a list -d "List save files for a WAD"
+complete -c caco -n "__fish_seen_subcommand_from saves; and not __fish_seen_subcommand_from list backup restore clean backups" -a backup -d "Backup a WAD's data directory"
+complete -c caco -n "__fish_seen_subcommand_from saves; and not __fish_seen_subcommand_from list backup restore clean backups" -a restore -d "Restore from a backup"
+complete -c caco -n "__fish_seen_subcommand_from saves; and not __fish_seen_subcommand_from list backup restore clean backups" -a clean -d "Delete save files (keep stats)"
+complete -c caco -n "__fish_seen_subcommand_from saves; and not __fish_seen_subcommand_from list backup restore clean backups" -a backups -d "List backup files"
+
+complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcommand_from list" -l plain -d "Output as TSV"
+complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcommand_from list" -s y -l yes -d "Auto-select first match"
+complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcommand_from backup" -s y -l yes -d "Auto-select first match"
+complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcommand_from restore" -s y -l yes -d "Skip confirmation"
+complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcommand_from clean" -l dry-run -d "Show what would be deleted"
+complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcommand_from clean" -s y -l yes -d "Skip confirmation"
+complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcommand_from backups" -l plain -d "Output as TSV"
+complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcommand_from backups" -s y -l yes -d "Auto-select first match"
+
+complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcommand_from list backup restore clean backups" -xa "(__caco_wads)"

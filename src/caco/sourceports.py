@@ -2,6 +2,18 @@
 
 from pathlib import Path
 
+# Save file extensions by sourceport family
+SAVE_EXTENSIONS: dict[str, set[str]] = {
+    "dsda": {".dsg"},
+    "zdoom": {".zds"},
+    "chocolate": {".dsg"},
+    "woof": {".dsg"},
+    "eternity": {".dsg"},
+}
+ALL_SAVE_EXTENSIONS: frozenset[str] = frozenset(
+    ext for exts in SAVE_EXTENSIONS.values() for ext in exts
+)
+
 SOURCEPORT_FAMILIES: dict[str, dict] = {
     "dsda": {
         "executables": [

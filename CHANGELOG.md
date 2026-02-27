@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.3.0] - 2026-02-27
+
+Save game management: list, backup, restore, and clean save files per-WAD.
+
+### Added
+
+- **`caco saves` command group**: Full save game lifecycle management
+  - **`saves list <query>`**: List save files for a WAD with size and
+    modification time; `--plain` for TSV output
+  - **`saves backup <query>`**: Zip the WAD's entire data directory (saves,
+    stats, configs) to `~/.local/share/caco/backups/`
+  - **`saves restore <query> [BACKUP]`**: Restore from a backup zip; uses
+    latest backup if omitted; prompts before overwriting existing files
+  - **`saves clean <query>`**: Delete only save files (.dsg, .zds) while
+    keeping stats and configs; `--dry-run` for preview
+  - **`saves backups [query]`**: List existing backup files; without query
+    lists all backups across all WADs; `--plain` for TSV output
+- **`saves.py` module**: Core save management logic decoupled from CLI —
+  `find_save_files()`, `create_backup()`, `restore_backup()`,
+  `list_backups()`, `list_all_backups()`, `clean_save_files()`,
+  `resolve_backup_path()`
+- **Save extension constants** in `sourceports.py`: `SAVE_EXTENSIONS` dict
+  mapping sourceport families to save file extensions, `ALL_SAVE_EXTENSIONS`
+  frozenset for unified matching
+- **`BACKUP_DIR`** and **`get_backup_dir()`** in `config.py`: Backup
+  directory constant and accessor (`~/.local/share/caco/backups/`)
+- **Fish completions**: `saves` group with all subcommands and flags
+- **Tests**: 24 new tests covering save file discovery, backup/restore,
+  backup listing, save cleanup, and backup path resolution
+
+---
+
 ## [2.2.0] - 2026-02-27
 
 Per-session map tracking: see which maps were completed in each play session.
