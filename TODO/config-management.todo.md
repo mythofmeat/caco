@@ -1,0 +1,2 @@
+- [ ] manage sourceport configs
+  - potentially creating a centrally managed configuration within `$XDG_DATA_DIR/caco/sourceports/{sourceport}/{config_profile}.{ext}`? with the default config profile just being `default`. this would make command syntax like `caco play --config controller id:73` possible, and that seems nice?

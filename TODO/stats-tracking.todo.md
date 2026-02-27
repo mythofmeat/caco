@@ -1,0 +1,1 @@
+- [ ] use stats tracking updates to determine what maps were completed in a given session, allowing real-time tracking of how much time was spent on a given map
