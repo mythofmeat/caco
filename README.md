@@ -761,6 +761,7 @@ When playing a WAD, caco automatically creates an isolated data directory for ea
 **How it works:**
 - On play, caco injects `-data`/`-save` flags (or `-savedir` for GZDoom-family ports) to redirect sourceport output
 - Each WAD gets its own directory: `~/.local/share/caco/data/{id}_{title}/`
+- For dsda-family ports, `-save` points to the nested stats directory (`{exe}_data/{iwad}/{wad_stem}/`) so saves live alongside per-map stats
 - Sourceport family detection is automatic based on the executable name
 
 **Supported sourceports:**

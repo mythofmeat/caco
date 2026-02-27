@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.7.4] - 2026-02-27
+
+Fix dsda-family sourceport save directory placement.
+
+### Fixed
+
+- **dsda-family save directory**: For dsda-doom, nyan-doom, nugget-doom, and
+  prboom+, saves now go to the nested stats directory
+  (`{data_dir}/{exe}_data/{iwad}/{wad_stem}/`) instead of the data dir root —
+  keeps saves alongside per-map stats where they belong
+- **`get_dsda_save_dir()`**: New function in `sourceports.py` computes the
+  nested save path and creates the directory
+- **`get_data_dir_args()`**: Now accepts optional `iwad` and `wad_path` keyword
+  args; dsda family uses the nested path for `-save` when both are provided,
+  falls back to previous behavior otherwise
+- **Tests**: 11 new tests for `get_dsda_save_dir()` and nested save dir behavior
+
+---
+
 ## [1.7.3] - 2026-02-27
 
 Playability improvements: direct IWAD play, sourceport detection, config auto-update.

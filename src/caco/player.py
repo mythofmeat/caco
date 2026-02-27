@@ -317,7 +317,8 @@ def play(
 
         wad_data_dir = find_wad_data_dir(wad_id) or get_wad_data_dir(wad_id, wad["title"])
         wad_data_dir.mkdir(parents=True, exist_ok=True)
-        data_args = get_data_dir_args(port, str(wad_data_dir))
+        iwad_name = wad.get("custom_iwad") or get_iwad() or None
+        data_args = get_data_dir_args(port, str(wad_data_dir), iwad=iwad_name, wad_path=str(wad_path))
         if data_args:
             cmd.extend(data_args)
 

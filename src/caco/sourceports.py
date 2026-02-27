@@ -35,11 +35,13 @@ SOURCEPORT_FAMILIES: dict[str, dict] = {
     },
 }
 
-# Build reverse lookup: executable name -> family dict
+# Build reverse lookups: executable name -> family dict / family name
 _EXECUTABLE_MAP: dict[str, dict] = {}
-for _family in SOURCEPORT_FAMILIES.values():
+_EXECUTABLE_FAMILY_NAME: dict[str, str] = {}
+for _name, _family in SOURCEPORT_FAMILIES.items():
     for _exe in _family["executables"]:
         _EXECUTABLE_MAP[_exe] = _family
+        _EXECUTABLE_FAMILY_NAME[_exe] = _name
 
 
 def detect_sourceports() -> list[tuple[str, str, str]]:
@@ -71,11 +73,36 @@ def identify_sourceport_family(executable: str) -> dict | None:
     return _EXECUTABLE_MAP.get(basename)
 
 
-def get_data_dir_args(executable: str, data_dir: str) -> list[str]:
+def get_dsda_save_dir(executable: str, data_dir: str, iwad: str, wad_path: str) -> str:
+    """Compute the nested save directory for dsda-family sourceports.
+
+    dsda-family ports nest data as {exe}_data/{iwad}/{wad_stem}/stats.txt,
+    but saves go to the root of -save by default. This returns the nested
+    path so saves end up alongside stats.
+
+    Returns path like: {data_dir}/{exe}_data/{iwad}/{wad_stem}/
+    """
+    exe_stem = Path(executable).stem.replace("-", "_") + "_data"
+    wad_stem = Path(wad_path).stem.lower()
+    save_dir = Path(data_dir) / exe_stem / iwad / wad_stem
+    save_dir.mkdir(parents=True, exist_ok=True)
+    return str(save_dir)
+
+
+def get_data_dir_args(
+    executable: str,
+    data_dir: str,
+    *,
+    iwad: str | None = None,
+    wad_path: str | None = None,
+) -> list[str]:
     """Return CLI args to redirect sourceport data/save dirs.
 
     Returns e.g. ["-data", dir, "-save", dir] for dsda family,
     ["-savedir", dir] for zdoom family, or [] for unknown sourceports.
+
+    For dsda-family ports, if iwad and wad_path are provided, -save points
+    to the nested directory where stats live so saves end up alongside them.
     """
     family = identify_sourceport_family(executable)
     if not family:
@@ -85,5 +112,12 @@ def get_data_dir_args(executable: str, data_dir: str) -> list[str]:
     if "data_arg" in family:
         args.extend([family["data_arg"], data_dir])
     if "save_arg" in family:
-        args.extend([family["save_arg"], data_dir])
+        # For dsda family, use nested save dir if we have enough info
+        basename = Path(executable).stem
+        family_name = _EXECUTABLE_FAMILY_NAME.get(basename)
+        if family_name == "dsda" and iwad and wad_path:
+            save_dir = get_dsda_save_dir(executable, data_dir, iwad, wad_path)
+        else:
+            save_dir = data_dir
+        args.extend([family["save_arg"], save_dir])
     return args

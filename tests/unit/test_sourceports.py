@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from caco.sourceports import get_data_dir_args, identify_sourceport_family, detect_sourceports
+from caco.sourceports import get_data_dir_args, get_dsda_save_dir, identify_sourceport_family, detect_sourceports
 
 
 class TestIdentifySourceportFamily:
@@ -115,3 +115,67 @@ class TestDetectSourceports:
             mock_which.side_effect = lambda exe: "/usr/bin/woof" if exe == "woof" else None
             result = detect_sourceports()
             assert any(fam == "woof" for _exe, _path, fam in result)
+
+
+class TestGetDsdaSaveDir:
+    """Test dsda-family nested save directory computation."""
+
+    def test_nyan_doom(self, tmp_path):
+        result = get_dsda_save_dir("nyan-doom", str(tmp_path), "tnt", "/wads/73_DrakeRC2.wad")
+        assert result == str(tmp_path / "nyan_doom_data" / "tnt" / "73_drakerc2")
+        assert (tmp_path / "nyan_doom_data" / "tnt" / "73_drakerc2").is_dir()
+
+    def test_dsda_doom(self, tmp_path):
+        result = get_dsda_save_dir("dsda-doom", str(tmp_path), "doom2", "/wads/MyWad.wad")
+        assert result == str(tmp_path / "dsda_doom_data" / "doom2" / "mywad")
+
+    def test_full_path_executable(self, tmp_path):
+        result = get_dsda_save_dir("/usr/bin/nyan-doom", str(tmp_path), "doom2", "/wads/test.wad")
+        assert result == str(tmp_path / "nyan_doom_data" / "doom2" / "test")
+
+    def test_creates_directory(self, tmp_path):
+        save_dir = get_dsda_save_dir("dsda-doom", str(tmp_path), "doom", "/wads/e1m1.wad")
+        assert (tmp_path / "dsda_doom_data" / "doom" / "e1m1").is_dir()
+
+
+class TestGetDataDirArgsDsdaNested:
+    """Test that dsda family uses nested save dir when iwad and wad_path are provided."""
+
+    def test_dsda_with_iwad_and_wad_path(self, tmp_path):
+        args = get_data_dir_args(
+            "dsda-doom", str(tmp_path),
+            iwad="doom2", wad_path="/wads/MyWad.wad",
+        )
+        expected_save = str(tmp_path / "dsda_doom_data" / "doom2" / "mywad")
+        assert args == ["-data", str(tmp_path), "-save", expected_save]
+
+    def test_nyan_with_iwad_and_wad_path(self, tmp_path):
+        args = get_data_dir_args(
+            "nyan-doom", str(tmp_path),
+            iwad="tnt", wad_path="/wads/73_DrakeRC2.wad",
+        )
+        expected_save = str(tmp_path / "nyan_doom_data" / "tnt" / "73_drakerc2")
+        assert args == ["-data", str(tmp_path), "-save", expected_save]
+
+    def test_dsda_without_iwad_falls_back(self):
+        """Without iwad, dsda family falls back to same dir for both."""
+        args = get_data_dir_args("dsda-doom", "/tmp/data", wad_path="/wads/test.wad")
+        assert args == ["-data", "/tmp/data", "-save", "/tmp/data"]
+
+    def test_dsda_without_wad_path_falls_back(self):
+        """Without wad_path, dsda family falls back to same dir for both."""
+        args = get_data_dir_args("dsda-doom", "/tmp/data", iwad="doom2")
+        assert args == ["-data", "/tmp/data", "-save", "/tmp/data"]
+
+    def test_woof_unaffected(self):
+        """Woof also has -data/-save but should NOT use nested save dir."""
+        args = get_data_dir_args("woof", "/tmp/data", iwad="doom2", wad_path="/wads/test.wad")
+        assert args == ["-data", "/tmp/data", "-save", "/tmp/data"]
+
+    def test_zdoom_unaffected(self):
+        """zdoom family should be completely unaffected."""
+        args = get_data_dir_args("gzdoom", "/tmp/data", iwad="doom2", wad_path="/wads/test.wad")
+        assert args == ["-savedir", "/tmp/data"]
+
+    def test_unknown_unaffected(self):
+        assert get_data_dir_args("unknown-port", "/tmp/data", iwad="doom2", wad_path="/wads/test.wad") == []
