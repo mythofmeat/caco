@@ -1,4 +1,0 @@
-- [x] use stats tracking updates to determine what maps were completed in a given session, allowing real-time tracking of how much time was spent on a given map ✅
-  - `stats_before`/`stats_after` columns on sessions table capture snapshots around play
-  - `compute_stats_delta()` in `wad_stats.py` diffs before/after to find maps played
-  - `caco sessions <query>` command shows session history with per-session map info

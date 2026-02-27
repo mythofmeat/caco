@@ -1,2 +1,0 @@
-- [x] save game management: browse, backup, restore saves per-WAD (leverages per-WAD data dirs) ✅
-- [x] demo recording/playback: track demo files per-WAD ✅
