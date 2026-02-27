@@ -265,9 +265,9 @@ class TestMigrationVersioning:
     def test_schema_migrations_populated(self, db_mod, tmp_db):
         conn = db_mod.get_connection()
         rows = conn.execute("SELECT version, name FROM schema_migrations ORDER BY version").fetchall()
-        assert len(rows) == 15
+        assert len(rows) == 16
         assert rows[0]["version"] == 1
-        assert rows[14]["version"] == 15
+        assert rows[15]["version"] == 16
         conn.close()
 
     def test_sessions_has_stats_columns(self, db_mod, tmp_db):
@@ -277,4 +277,12 @@ class TestMigrationVersioning:
         columns = {row[1] for row in cursor.fetchall()}
         assert "stats_before" in columns
         assert "stats_after" in columns
+        conn.close()
+
+    def test_sessions_has_demo_file_column(self, db_mod, tmp_db):
+        """Migration 16 adds demo_file to sessions."""
+        conn = db_mod.get_connection()
+        cursor = conn.execute("PRAGMA table_info(sessions)")
+        columns = {row[1] for row in cursor.fetchall()}
+        assert "demo_file" in columns
         conn.close()

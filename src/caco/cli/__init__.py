@@ -694,6 +694,7 @@ from caco.cli import cache  # noqa: E402, F401
 from caco.cli import config_cmd  # noqa: E402, F401
 from caco.cli import stats  # noqa: E402, F401
 from caco.cli import saves_cmd  # noqa: E402, F401
+from caco.cli import demos_cmd  # noqa: E402, F401
 
 
 # =============================================================================

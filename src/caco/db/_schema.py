@@ -399,6 +399,14 @@ def _migrate_add_session_stats(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE sessions ADD COLUMN stats_after TEXT")
 
 
+def _migrate_add_demo_file(conn: sqlite3.Connection) -> None:
+    """Add demo_file column to sessions for linking recorded demos."""
+    cursor = conn.execute("PRAGMA table_info(sessions)")
+    columns = {row[1] for row in cursor.fetchall()}
+    if "demo_file" not in columns:
+        conn.execute("ALTER TABLE sessions ADD COLUMN demo_file TEXT")
+
+
 # Ordered migration registry — append new migrations here with incrementing version
 _MIGRATIONS: list[tuple[int, str, Any]] = [
     (1, "add_custom_play_config", _migrate_add_custom_play_config),
@@ -416,4 +424,5 @@ _MIGRATIONS: list[tuple[int, str, Any]] = [
     (13, "iwad_dir_restructure", _migrate_iwad_dir_restructure),
     (14, "add_companion_files", _migrate_add_companion_files),
     (15, "add_session_stats", _migrate_add_session_stats),
+    (16, "add_demo_file", _migrate_add_demo_file),
 ]

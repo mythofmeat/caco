@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.4.0] - 2026-02-27
+
+Demo recording and playback: record, list, play back, and clean demo files per-WAD.
+
+### Added
+
+- **`--record`/`-r` flag on `caco play`**: Record a demo during play; auto-generates
+  a timestamped name or accepts a custom name (`caco play 1 --record`,
+  `caco play 1 --record mydemo`)
+- **`caco demos` command group**: Full demo file lifecycle management
+  - **`demos list <query>`**: List `.lmp` demo files with size and modification time;
+    `--plain` for TSV output
+  - **`demos play <query> [DEMO]`**: Play back a recorded demo; plays most recent if
+    DEMO omitted; supports `--sourceport`/`-p` override
+  - **`demos clean <query>`**: Delete demo files; `--dry-run` for preview
+- **`demos.py` module**: Core demo management logic decoupled from CLI —
+  `find_demo_files()`, `clean_demo_files()`, `generate_demo_name()`, `get_demos_dir()`
+- **`demo_file` column on sessions table** (migration 16): Links recorded demos to
+  play sessions; `update_session_demo()` DB function
+- **Fish completions**: `demos` group with all subcommands and flags; `--record` on play
+- **Tests**: 15 new tests covering demo file discovery, cleanup, name generation
+
+---
+
 ## [2.3.0] - 2026-02-27
 
 Save game management: list, backup, restore, and clean save files per-WAD.

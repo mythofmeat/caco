@@ -71,6 +71,15 @@ def update_session_stats(
         )
 
 
+def update_session_demo(session_id: int, demo_file: str) -> None:
+    """Attach a recorded demo file path to a session record."""
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE sessions SET demo_file = ? WHERE id = ?",
+            (demo_file, session_id),
+        )
+
+
 def get_sessions(wad_id: int) -> list[dict[str, Any]]:
     """Get all play sessions for a WAD."""
     with get_connection() as conn:

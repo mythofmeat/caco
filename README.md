@@ -377,6 +377,10 @@ caco play 1 --sourceport /usr/bin/dsda-doom
 # Pass extra args to sourceport
 caco play 1 -- -warp 15 -skill 4
 
+# Record a demo while playing
+caco play 1 --record                   # Auto-named demo
+caco play 1 --record mydemo            # Custom name
+
 # Play an IWAD directly (no PWAD needed)
 caco play --iwad doom2
 caco play --iwad doom2 -- -warp 1
@@ -611,6 +615,34 @@ caco saves clean 1 -y                    # Delete without confirmation
 **Backup location:** `~/.local/share/caco/backups/`
 
 Save files are identified by extension: `.dsg` (dsda, chocolate, woof, eternity families) and `.zds` (zdoom family). The `clean` command only removes save files — stats, configs, and other data are preserved.
+
+### Demo Recording & Playback
+
+Record and play back Doom demo files (`.lmp`) per-WAD:
+
+```bash
+# Record a demo while playing (auto-generated name)
+caco play 1 --record
+caco play 1 -r
+
+# Record with a custom name
+caco play 1 --record mydemo
+
+# List recorded demos for a WAD
+caco demos list 1
+caco demos list "Eviternity" --plain     # TSV output
+
+# Play back a demo (most recent if no name given)
+caco demos play 1
+caco demos play 1 mydemo.lmp
+caco demos play 1 -p dsda-doom           # With specific sourceport
+
+# Clean up demo files
+caco demos clean 1 --dry-run             # Preview what would be deleted
+caco demos clean 1 -y                    # Delete without confirmation
+```
+
+Demos are stored in `{data_dir}/demos/` within per-WAD data directories. Recorded demos are automatically linked to the play session in the database.
 
 ## IWAD Management
 

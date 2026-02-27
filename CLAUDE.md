@@ -61,9 +61,11 @@ src/caco/
 │   ├── cache.py        # cache list/clear/prune
 │   ├── config_cmd.py   # config, completions commands
 │   ├── stats.py        # stats, beaten commands
-│   └── saves_cmd.py    # saves list/backup/restore/clean/backups
+│   ├── saves_cmd.py    # saves list/backup/restore/clean/backups
+│   └── demos_cmd.py   # demos list/play/clean
 ├── iwad_detect.py  # Auto-detect IWAD family from WAD file PNAMES/map lumps
 ├── saves.py        # Save game management: find, backup, restore, clean save files
+├── demos.py        # Demo file management: find, clean, generate names
 ├── sourceports.py  # Sourceport family registry (exe→CLI flags for data/save redirection)
 ├── utils.py        # Shared utilities (coerce_str, BaseHttpClient, CacoSourceError, extract_year, parse_wad_directory)
 ├── wad_stats.py    # Per-map stats parser/formatter (stats.txt + levelstat.txt)
@@ -253,6 +255,15 @@ src/caco/
 - `caco saves backups [query] [--plain]` — list existing backup zips; without query lists all backups
 - Save discovery scans recursively for `.dsg` (dsda/chocolate/woof/eternity) and `.zds` (zdoom) extensions
 - Backup format: `{wad_id}_{sanitized_title}_{timestamp}.zip` containing entire data dir contents
+
+**Demos command group:**
+- `caco demos list <query> [--plain]` — list `.lmp` demo files for a WAD's demos directory
+- `caco demos play <query> [DEMO] [-p PORT]` — play back a demo; most recent if DEMO omitted
+- `caco demos clean <query> [--dry-run]` — delete demo files
+- `caco play --record` / `caco play -r` — record a demo (auto-name); `caco play --record NAME` for custom name
+- Demo files stored in `{data_dir}/demos/` within per-WAD data directories
+- `demo_file` column on sessions table links recorded demos to play sessions
+- `demos.py` module: `find_demo_files()`, `clean_demo_files()`, `generate_demo_name()`, `get_demos_dir()`
 
 **Output formats:**
 - `-o plain` on `ls`, `info`, `trash --list`, `cache list`, `stats` — TSV/key=value for scripting

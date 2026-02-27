@@ -246,6 +246,7 @@ def play(
     extra_args: list[str] | None = None,
     progress_callback: ProgressCallback | None = None,
     process_ref: list | None = None,
+    record: str | bool | None = None,
 ) -> int | None:
     """
     Play a WAD with the specified sourceport.
@@ -335,6 +336,28 @@ def play(
         if data_args:
             cmd.extend(data_args)
 
+    # Handle demo recording
+    demo_path: str | None = None
+    if record:
+        from caco.demos import generate_demo_name, get_demos_dir
+
+        if get_manage_data_dirs():
+            demos_dir = get_demos_dir(wad_data_dir)
+        else:
+            demos_dir = get_demos_dir(
+                find_wad_data_dir(wad_id) or get_wad_data_dir(wad_id, wad["title"])
+            )
+        demos_dir.mkdir(parents=True, exist_ok=True)
+
+        if isinstance(record, str):
+            demo_name = record
+        else:
+            wad_stem = Path(wad_path).stem if wad_path else wad["title"]
+            demo_name = generate_demo_name(wad_stem)
+
+        demo_path = str(demos_dir / demo_name)
+        cmd.extend(["-record", demo_path])
+
     # Build -file list: companion WADs + main WAD
     file_args = []
     deh_args = []
@@ -404,6 +427,14 @@ def play(
     # Attach before/after snapshots to the session for per-session map tracking
     if stats_before or stats_after:
         db.update_session_stats(session_id, stats_before, stats_after)
+
+    # Link recorded demo to the session
+    if demo_path:
+        # Sourceport appends .lmp if it wasn't already there
+        lmp_path = demo_path if demo_path.endswith(".lmp") else demo_path + ".lmp"
+        if Path(lmp_path).exists():
+            db.update_session_demo(session_id, lmp_path)
+            logger.info("Recorded demo: %s", lmp_path)
 
     # Return duration
     sessions = db.get_sessions(wad_id)

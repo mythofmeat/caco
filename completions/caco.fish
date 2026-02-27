@@ -126,6 +126,7 @@ complete -c caco -n "__fish_seen_subcommand_from trash" -a "status:" -d "Filter 
 complete -c caco -n "__fish_seen_subcommand_from play" -s p -l sourceport -d "Sourceport to use" -rF
 complete -c caco -n "__fish_seen_subcommand_from play" -s 1 -l first -d "Auto-select first match"
 complete -c caco -n "__fish_seen_subcommand_from play" -l iwad -d "Play IWAD directly (e.g., doom2)"
+complete -c caco -n "__fish_seen_subcommand_from play" -s r -l record -d "Record a demo (auto-name or specify name)"
 complete -c caco -n "__fish_seen_subcommand_from play" -xa "(__caco_wads)"
 complete -c caco -n "__fish_seen_subcommand_from play" -a "id:" -d "Filter by ID"
 complete -c caco -n "__fish_seen_subcommand_from play" -a "title:" -d "Filter by title"
@@ -253,3 +254,21 @@ complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcomma
 complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcommand_from backups" -s y -l yes -d "Auto-select first match"
 
 complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcommand_from list backup restore clean backups" -xa "(__caco_wads)"
+
+# =============================================================================
+# demos subcommands
+# =============================================================================
+complete -c caco -n __fish_use_subcommand -a demos -d "Manage WAD demo recordings"
+
+complete -c caco -n "__fish_seen_subcommand_from demos; and not __fish_seen_subcommand_from list play clean" -a list -d "List demo files for a WAD"
+complete -c caco -n "__fish_seen_subcommand_from demos; and not __fish_seen_subcommand_from list play clean" -a play -d "Play back a recorded demo"
+complete -c caco -n "__fish_seen_subcommand_from demos; and not __fish_seen_subcommand_from list play clean" -a clean -d "Delete demo files"
+
+complete -c caco -n "__fish_seen_subcommand_from demos; and __fish_seen_subcommand_from list" -l plain -d "Output as TSV"
+complete -c caco -n "__fish_seen_subcommand_from demos; and __fish_seen_subcommand_from list" -s y -l yes -d "Auto-select first match"
+complete -c caco -n "__fish_seen_subcommand_from demos; and __fish_seen_subcommand_from play" -s p -l sourceport -d "Sourceport to use" -rF
+complete -c caco -n "__fish_seen_subcommand_from demos; and __fish_seen_subcommand_from play" -s y -l yes -d "Auto-select first match"
+complete -c caco -n "__fish_seen_subcommand_from demos; and __fish_seen_subcommand_from clean" -l dry-run -d "Show what would be deleted"
+complete -c caco -n "__fish_seen_subcommand_from demos; and __fish_seen_subcommand_from clean" -s y -l yes -d "Skip confirmation"
+
+complete -c caco -n "__fish_seen_subcommand_from demos; and __fish_seen_subcommand_from list play clean" -xa "(__caco_wads)"

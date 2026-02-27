@@ -43,8 +43,9 @@ def _check_sourceport(sourceport: str | None) -> str:
 @click.option("--sourceport", "-p", help="Sourceport to use")
 @click.option("--first", "-1", is_flag=True, help="Auto-select first match if multiple")
 @click.option("--iwad", "iwad_name", type=str, help="Play an IWAD directly (e.g., --iwad doom2)")
+@click.option("--record", "-r", "record_demo", is_flag=False, flag_value=True, default=None, help="Record a demo (auto-name or specify name)")
 @click.argument("extra_args", nargs=-1)
-def play_cmd(query: str | None, sourceport: str | None, first: bool, iwad_name: str | None, extra_args: tuple[str, ...]):
+def play_cmd(query: str | None, sourceport: str | None, first: bool, iwad_name: str | None, record_demo: str | bool | None, extra_args: tuple[str, ...]):
     """Play a WAD by ID or query (e.g., 'caco play 1' or 'caco play filename:tnto').
 
     \b
@@ -105,6 +106,7 @@ def play_cmd(query: str | None, sourceport: str | None, first: bool, iwad_name: 
         duration = play(
             wad_id, sourceport=port, extra_args=list(extra_args),
             progress_callback=_progress_callback,
+            record=record_demo,
         )
         if duration:
             console.print(f"[green]Session ended:[/green] {format_duration(duration)}")
