@@ -1,13 +1,7 @@
-- [x] dsda-doom / nyan-doom (first class)
-  - [x] save dir and data dir flags
-  - [x] stats.txt / levelstats info and syncing
-  - [x] config management (profile system: default auto-created, --config flag, per-WAD custom_config, caco profile command group)
-  - [x] complevel injection (-complevel N)
-  - [x] crash detection (exit_code tracking, warnings in CLI/TUI/GUI, session history indicators)
-
 - [ ] Helion (deferred)
   - [ ] save dir and data dir flags
   - [ ] stats.txt / levelstats info and syncing
+  - [ ] complevel injection
   - [ ] config management
   - [x] crash detection (generic exit code check)
 
@@ -29,4 +23,5 @@
   - [ ] save dir and data dir flags
   - [ ] stats.txt / levelstats info and syncing
   - [ ] config management
+  - [ ] complevel injection
   - [x] crash detection (generic exit code check)
