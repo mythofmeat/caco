@@ -135,6 +135,13 @@ class DetailPanel(QScrollArea):
         self._description.setStyleSheet(f"color: {DOOM_PALETTE['text_secondary']};")
         self._layout.addWidget(self._description)
 
+        # Companion files
+        self._companion_label = QLabel()
+        self._companion_label.setWordWrap(True)
+        self._companion_label.setStyleSheet(f"color: {DOOM_PALETTE['text_secondary']}; font-size: 11px;")
+        self._companion_label.setVisible(False)
+        self._layout.addWidget(self._companion_label)
+
         # Separator
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.HLine)
@@ -187,6 +194,7 @@ class DetailPanel(QScrollArea):
         self._stats_btn.setVisible(False)
         self._last_played_label.setText("")
         self._description.setText("")
+        self._companion_label.setVisible(False)
         self._source_label.setText("")
         self._clear_tags()
         self._play_btn.setEnabled(False)
@@ -277,6 +285,23 @@ class DetailPanel(QScrollArea):
 
         # Description
         self._description.setText(truncate(wad.get("description") or "No description", 500))
+
+        # Companion files
+        if wad.get("companion_files"):
+            import json
+            from pathlib import Path
+            try:
+                files = json.loads(wad["companion_files"])
+                if files:
+                    names = ", ".join(Path(f).name for f in files)
+                    self._companion_label.setText(f"Companion files: {names}")
+                    self._companion_label.setVisible(True)
+                else:
+                    self._companion_label.setVisible(False)
+            except json.JSONDecodeError:
+                self._companion_label.setVisible(False)
+        else:
+            self._companion_label.setVisible(False)
 
         # Source info
         source_parts = [f"Source: {wad.get('source_type', 'unknown')}"]

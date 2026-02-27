@@ -147,6 +147,21 @@ class EditDialog(QDialog):
         self._args_input.setPlaceholderText("Extra sourceport arguments")
         launch_form.addRow("Extra Args:", self._args_input)
 
+        # Parse existing companion_files JSON into newline-separated string
+        companion_str = ""
+        if self._wad.get("companion_files"):
+            try:
+                companion_list = json.loads(self._wad["companion_files"])
+                if isinstance(companion_list, list):
+                    companion_str = "\n".join(companion_list)
+            except json.JSONDecodeError:
+                pass
+        self._companion_input = QTextEdit()
+        self._companion_input.setPlainText(companion_str)
+        self._companion_input.setPlaceholderText("One file path per line (DEH, music WADs, etc.)")
+        self._companion_input.setMaximumHeight(80)
+        launch_form.addRow("Companion Files:", self._companion_input)
+
         layout.addWidget(launch_group)
 
         # -- Buttons --
@@ -194,6 +209,14 @@ class EditDialog(QDialog):
             fields["custom_args"] = json.dumps(args_text.split())
         else:
             fields["custom_args"] = None
+
+        # Parse companion files (one per line)
+        companion_text = self._companion_input.toPlainText().strip()
+        if companion_text:
+            companion_list = [line.strip() for line in companion_text.splitlines() if line.strip()]
+            fields["companion_files"] = json.dumps(companion_list) if companion_list else None
+        else:
+            fields["companion_files"] = None
 
         # Update WAD in database
         db.update_wad(self._wad_id, **fields)

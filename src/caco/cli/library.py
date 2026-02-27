@@ -318,7 +318,7 @@ def info(query: str, output: str | None):
             console.print()
             console.print(f"[bold]Times beaten:[/bold] {times_beaten}")
 
-        if wad.get("custom_iwad") or wad.get("custom_sourceport") or wad.get("custom_args"):
+        if wad.get("custom_iwad") or wad.get("custom_sourceport") or wad.get("custom_args") or wad.get("companion_files"):
             console.print()
             console.print("[bold]Custom play config:[/bold]")
             if wad.get("custom_iwad"):
@@ -331,6 +331,14 @@ def info(query: str, output: str | None):
                     console.print(f"  Args: {' '.join(parsed_args)}")
                 except json.JSONDecodeError:
                     console.print(f"  Args: {wad['custom_args']}")
+            if wad.get("companion_files"):
+                try:
+                    files = json.loads(wad["companion_files"])
+                    console.print(f"  Companion files:")
+                    for f in files:
+                        console.print(f"    {f}")
+                except json.JSONDecodeError:
+                    pass
 
 
 @cli.command()
@@ -338,7 +346,10 @@ def info(query: str, output: str | None):
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation for multi-WAD updates")
 @click.option("--dry-run", is_flag=True, help="Show what would change without making changes")
 @click.option("--link", "link_path", type=click.Path(exists=True), help="Link a local file to the WAD(s)")
-def modify(args: tuple[str, ...], yes: bool, dry_run: bool, link_path: str | None):
+@click.option("--add-file", "add_files", multiple=True, type=click.Path(exists=True), help="Add a companion file (DEH, music WAD, etc.)")
+@click.option("--remove-file", "remove_files", multiple=True, help="Remove a companion file (by basename or full path)")
+def modify(args: tuple[str, ...], yes: bool, dry_run: bool, link_path: str | None,
+           add_files: tuple[str, ...], remove_files: tuple[str, ...]):
     """Modify WAD metadata using beets-style field=value syntax.
 
     \b
@@ -355,6 +366,13 @@ def modify(args: tuple[str, ...], yes: bool, dry_run: bool, link_path: str | Non
       caco modify id:1 !tag:slaughter          # Remove matching tags
 
     \b
+    Companion files (DEH patches, music WADs, etc.):
+      caco modify id:1 --add-file /path/to/music.wad
+      caco modify id:1 --add-file /path/to/patch.deh
+      caco modify id:1 --remove-file music.wad    # Remove by basename
+      caco modify id:1 --remove-file /full/path   # Remove by full path
+
+    \b
     Link a file:
       caco modify id:1 --link ~/Downloads/wad.wad
 
@@ -366,7 +384,7 @@ def modify(args: tuple[str, ...], yes: bool, dry_run: bool, link_path: str | Non
 
     query_terms, actions, _sort = parse_modify_args(args)
 
-    if not actions and not link_path:
+    if not actions and not link_path and not add_files and not remove_files:
         err_console.print("[yellow]No modifications specified[/yellow]")
         err_console.print("[dim]Use field=value to set, !field to clear, tag=name to add tags[/dim]")
         return
@@ -395,6 +413,10 @@ def modify(args: tuple[str, ...], yes: bool, dry_run: bool, link_path: str | Non
             descriptions.append(f"remove tags matching: {action.pattern}")
     if link_path:
         descriptions.append(f"link file: {link_path}")
+    for af in add_files:
+        descriptions.append(f"add companion file: {af}")
+    for rf in remove_files:
+        descriptions.append(f"remove companion file: {rf}")
 
     if dry_run:
         console.print(f"\n[bold]Would modify {len(wads)} WAD(s):[/bold]\n")
@@ -469,6 +491,32 @@ def modify(args: tuple[str, ...], yes: bool, dry_run: bool, link_path: str | Non
                 sys.exit(1)
 
             db.update_wad(wad["id"], cached_path=str(dest), filename=source.name)
+
+    # Handle --add-file / --remove-file
+    if add_files or remove_files:
+        for wad in wads:
+            existing_raw = wad.get("companion_files")
+            try:
+                existing: list[str] = json.loads(existing_raw) if existing_raw else []
+            except json.JSONDecodeError:
+                existing = []
+
+            # Add files (resolve to absolute, deduplicate)
+            for af in add_files:
+                abs_path = str(Path(af).resolve())
+                if abs_path not in existing:
+                    existing.append(abs_path)
+
+            # Remove files (match by basename or full path)
+            for rf in remove_files:
+                rf_basename = Path(rf).name
+                existing = [
+                    p for p in existing
+                    if p != rf and Path(p).name != rf_basename
+                ]
+
+            companion_json = json.dumps(existing) if existing else None
+            db.update_wad(wad["id"], companion_files=companion_json)
 
     console.print(f"[green]Modified {len(wads)} WAD(s)[/green]")
 

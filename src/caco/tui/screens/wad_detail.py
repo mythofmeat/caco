@@ -100,7 +100,7 @@ class WadDetailScreen(Screen):
             content.mount(Static(", ".join(wad["tags"])))
 
         # Custom config
-        if wad.get("custom_iwad") or wad.get("custom_sourceport") or wad.get("custom_args"):
+        if wad.get("custom_iwad") or wad.get("custom_sourceport") or wad.get("custom_args") or wad.get("companion_files"):
             content.mount(Static(""))
             content.mount(Static("[bold]Custom Config[/bold]", classes="detail-section"))
             if wad.get("custom_iwad"):
@@ -109,6 +109,14 @@ class WadDetailScreen(Screen):
                 content.mount(self._make_row("Sourceport", wad["custom_sourceport"]))
             if wad.get("custom_args"):
                 content.mount(self._make_row("Args", wad["custom_args"]))
+            if wad.get("companion_files"):
+                import json as _json
+                try:
+                    files = _json.loads(wad["companion_files"])
+                    for f in files:
+                        content.mount(self._make_row("File", f))
+                except _json.JSONDecodeError:
+                    pass
 
         # Description
         if wad.get("description"):

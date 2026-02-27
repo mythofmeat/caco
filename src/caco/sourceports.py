@@ -89,6 +89,17 @@ def get_dsda_save_dir(executable: str, data_dir: str, iwad: str, wad_path: str) 
     return str(save_dir)
 
 
+def uses_deh_flag(executable: str) -> bool:
+    """Return True if this sourceport uses -deh for DEH/BEX files.
+
+    ZDoom-family ports load DEH via -file; all others use -deh.
+    Returns True (use -deh) for unknown sourceports as the safe default.
+    """
+    basename = Path(executable).stem
+    family_name = _EXECUTABLE_FAMILY_NAME.get(basename)
+    return family_name != "zdoom"
+
+
 def get_data_dir_args(
     executable: str,
     data_dir: str,

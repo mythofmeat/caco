@@ -403,6 +403,32 @@ caco modify id:1 !iwad !sourceport !args
 
 Priority: CLI arguments > Per-WAD config > Global config
 
+### Companion Files
+
+Many WADs ship with companion files — DEH patches, music WADs, additional PWADs — that need to be loaded together. Caco manages these automatically:
+
+```bash
+# Add companion files to a WAD
+caco modify id:1 --add-file /path/to/music.wad
+caco modify id:1 --add-file /path/to/patch.deh
+
+# Add multiple at once
+caco modify id:1 --add-file /path/to/music.wad --add-file /path/to/patch.deh
+
+# Remove by basename or full path
+caco modify id:1 --remove-file music.wad
+caco modify id:1 --remove-file /path/to/patch.deh
+
+# View companion files
+caco info 1
+```
+
+**DEH/BEX handling**: `.deh` and `.bex` files are automatically loaded with the correct flag:
+- **dsda, chocolate, woof, eternity families**: Uses `-deh` flag
+- **zdoom family** (GZDoom, etc.): Uses `-file` flag (zdoom loads DEH via `-file`)
+
+Companion files are also editable in the GUI edit dialog (one path per line) and displayed in the TUI detail view.
+
 ### Cross-Source Downloading
 
 WADs imported from non-idgames sources (Doomwiki, Doomworld, etc.) can be linked to an idgames file ID for auto-downloading:

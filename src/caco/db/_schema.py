@@ -381,6 +381,14 @@ def _migrate_iwad_dir_restructure(conn: sqlite3.Connection) -> None:
     # No-op if nothing was moved
 
 
+def _migrate_add_companion_files(conn: sqlite3.Connection) -> None:
+    """Add companion_files column for multi-file WAD support."""
+    cursor = conn.execute("PRAGMA table_info(wads)")
+    columns = {row[1] for row in cursor.fetchall()}
+    if "companion_files" not in columns:
+        conn.execute("ALTER TABLE wads ADD COLUMN companion_files TEXT")
+
+
 # Ordered migration registry — append new migrations here with incrementing version
 _MIGRATIONS: list[tuple[int, str, Any]] = [
     (1, "add_custom_play_config", _migrate_add_custom_play_config),
@@ -396,4 +404,5 @@ _MIGRATIONS: list[tuple[int, str, Any]] = [
     (11, "add_stats_snapshot", _migrate_add_stats_snapshot),
     (12, "fix_stale_cache_paths", _migrate_fix_stale_cache_paths),
     (13, "iwad_dir_restructure", _migrate_iwad_dir_restructure),
+    (14, "add_companion_files", _migrate_add_companion_files),
 ]

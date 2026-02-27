@@ -494,6 +494,7 @@ def _render_wad_info_json(wad: dict) -> None:
         "custom_iwad": wad.get("custom_iwad"),
         "custom_sourceport": wad.get("custom_sourceport"),
         "custom_args": wad.get("custom_args"),
+        "companion_files": json.loads(wad["companion_files"]) if wad.get("companion_files") else [],
         "playtime_seconds": playtime,
         "playtime": format_duration(playtime) if playtime else None,
         "session_count": len(sessions),
@@ -553,6 +554,8 @@ def _render_wad_info_plain(wad: dict) -> None:
         print(f"custom_sourceport={wad['custom_sourceport']}")
     if wad.get("custom_args"):
         print(f"custom_args={wad['custom_args']}")
+    if wad.get("companion_files"):
+        print(f"companion_files={wad['companion_files']}")
 
 
 def _render_wad_list(wads: list[dict], title: str | None = None, list_config: dict | None = None) -> None:

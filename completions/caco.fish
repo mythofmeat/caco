@@ -69,6 +69,8 @@ complete -c caco -n "__fish_seen_subcommand_from info" -a "status:" -d "Filter b
 complete -c caco -n "__fish_seen_subcommand_from modify" -s y -l yes -d "Skip confirmation"
 complete -c caco -n "__fish_seen_subcommand_from modify" -l dry-run -d "Preview changes"
 complete -c caco -n "__fish_seen_subcommand_from modify" -l link -d "Link a local file" -rF
+complete -c caco -n "__fish_seen_subcommand_from modify" -l add-file -d "Add companion file (DEH, music, etc.)" -rF
+complete -c caco -n "__fish_seen_subcommand_from modify" -l remove-file -d "Remove companion file" -x
 complete -c caco -n "__fish_seen_subcommand_from modify" -xa "(__caco_wads)"
 
 # modify field=value completions

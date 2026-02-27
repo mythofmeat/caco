@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.1.0] - 2026-02-27
+
+Multi-file WAD support: companion files (DEH patches, music WADs, additional PWADs) stored and auto-loaded with WADs.
+
+### Added
+
+- **Companion files**: WADs can now have associated companion files (DEH
+  patches, music WADs, extra PWADs) that are automatically loaded on play
+- **`--add-file` / `--remove-file` on `modify`**: Add or remove companion
+  files by path; `--add-file` resolves to absolute path with dedup;
+  `--remove-file` matches by basename or full path
+- **DEH/BEX auto-detection**: `.deh` and `.bex` files automatically use
+  `-deh` flag for dsda/chocolate/woof/eternity families, `-file` for
+  zdoom family
+- **`uses_deh_flag()` in `sourceports.py`**: Helper to determine correct
+  DEH loading flag per sourceport family
+- **Display in all UIs**: Companion files shown in `caco info` (rich,
+  plain, JSON), TUI detail/info panels, GUI detail panel, and GUI edit
+  dialog
+- **GUI edit dialog**: New "Companion Files" field (one path per line)
+  in the Launch Config section
+- **Migration #14**: `companion_files` TEXT column (JSON array) on `wads`
+  table
+- **Fish completions**: `--add-file` and `--remove-file` for modify command
+- **Tests**: 32 new tests covering DEH flag detection, DB migration,
+  CLI add/remove/dedup/info output, and player command building with
+  companion files
+
+---
+
 ## [2.0.0] - 2026-02-27
 
 **Breaking**: CLI rework to follow beets conventions more closely.

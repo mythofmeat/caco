@@ -322,8 +322,33 @@ def play(
         if data_args:
             cmd.extend(data_args)
 
-    # Add the WAD file
-    cmd.extend(["-file", str(wad_path)])
+    # Build -file list: companion WADs + main WAD
+    file_args = []
+    deh_args = []
+    if wad.get("companion_files"):
+        try:
+            companions = json.loads(wad["companion_files"])
+            if isinstance(companions, list):
+                from caco.sourceports import uses_deh_flag
+
+                deh_extensions = {".deh", ".bex"}
+                for comp in companions:
+                    if Path(comp).suffix.lower() in deh_extensions:
+                        if uses_deh_flag(port):
+                            deh_args.extend(["-deh", comp])
+                        else:
+                            file_args.append(comp)
+                    else:
+                        file_args.append(comp)
+        except json.JSONDecodeError:
+            pass
+
+    # Add DEH args before -file
+    if deh_args:
+        cmd.extend(deh_args)
+
+    # Add the WAD file (plus any companion WADs on the same -file)
+    cmd.extend(["-file"] + file_args + [str(wad_path)])
 
     # Add extra args from command line (highest priority, can override anything)
     if extra_args:

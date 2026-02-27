@@ -1,5 +1,7 @@
 """WAD info panel widget."""
 
+from pathlib import Path
+
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.widgets import Static
@@ -110,6 +112,17 @@ class WadInfoPanel(Vertical):
         # Description snippet
         if wad.get("description"):
             details_lines.append(f"\n[dim]{truncate(wad['description'], 120)}[/dim]")
+
+        # Companion files
+        if wad.get("companion_files"):
+            import json as _json
+            try:
+                files = _json.loads(wad["companion_files"])
+                if files:
+                    names = ", ".join(Path(f).name for f in files)
+                    details_lines.append(f"Files: {names}")
+            except _json.JSONDecodeError:
+                pass
 
         # Source
         details_lines.append(f"[dim]Source: {wad['source_type']}[/dim]")
