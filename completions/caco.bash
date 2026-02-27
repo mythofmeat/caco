@@ -71,7 +71,7 @@ _caco() {
                     -o|--output|-p|--sourceport|--period|-n|--limit|--notes|\
                     --iwad|--tag|--url|--llm-backend|--llm-model|\
                     -t|--title|-a|--author|--year|-d|--description|\
-                    -s|--stats-file|--link)
+                    -s|--stats-file|--link|-b|--date)
                         ((i++))
                         ;;
                 esac

@@ -33,12 +33,12 @@ def _check_sourceport(sourceport: str | None) -> str:
     if detected:
         names = ", ".join(exe for exe, _path, _fam in detected)
         msg += f" Found on PATH: {names}."
-    msg += "\nSet one with: caco config set sourceport <name>"
+    msg += "\nSet one with: caco config -e"
     err_console.print(f"[red]{msg}[/red]")
     sys.exit(1)
 
 
-@cli.command()
+@cli.command(name="play")
 @click.argument("query", required=False, shell_complete=_complete_query)
 @click.option("--sourceport", "-p", help="Sourceport to use")
 @click.option("--first", "-1", is_flag=True, help="Auto-select first match if multiple")
@@ -114,7 +114,3 @@ def play_cmd(query: str | None, sourceport: str | None, first: bool, iwad_name: 
     finally:
         if _progress[0] is not None:
             _progress[0].stop()
-
-
-# Alias 'play' to 'play_cmd'
-cli.add_command(play_cmd, name="play")

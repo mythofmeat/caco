@@ -722,15 +722,19 @@ def modify(
                     old.unlink()
 
             try:
-                if link_mode == "move":
-                    shutil.move(str(source), str(dest))
-                else:
-                    shutil.copy2(str(source), str(dest))
+                shutil.copy2(str(source), str(dest))
             except OSError as e:
-                err_console.print(f"[red]Failed to {link_mode} file: {e}[/red]")
+                err_console.print(f"[red]Failed to copy file: {e}[/red]")
                 sys.exit(1)
 
             db.update_wad(wad["id"], cached_path=str(dest), filename=source.name)
+
+        # Remove original after all copies succeed (move semantics)
+        if link_mode == "move":
+            try:
+                source.unlink()
+            except OSError:
+                pass
 
     # Print generic "Modified" for non-beaten actions
     non_beaten_actions = [a for a in actions if not a.action.startswith("beaten_")]

@@ -62,8 +62,11 @@ def complete_cmd(context: str) -> None:
     elif context == "modify-fields":
         for field_name in MODIFY_FIELDS:
             print(f"{field_name}=")
-            # Clear variant (skip tag — it has special !tag: syntax)
-            if field_name != "tag":
+            if field_name == "tag":
+                # Tag has special removal syntax
+                print("!tag")
+                print("!tag:")
+            else:
                 print(f"!{field_name}")
         # Beaten action tokens
         print("beaten+")
