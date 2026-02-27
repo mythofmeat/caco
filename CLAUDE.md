@@ -182,7 +182,7 @@ src/caco/
 - Source adapters inherit `BaseSource` from `sources/base.py` for shared context-manager lifecycle; clients inherit `BaseHttpClient` from `utils.py`; errors inherit `CacoSourceError`
 - CLI uses Click's decorator registration pattern: each `cli/*.py` submodule imports `cli` from `caco.cli` and registers commands; `__init__.py` imports all submodules at bottom to trigger registration
 - `player.py` wraps sourceport execution to track session start/end times; decoupled from Rich — uses `ProgressCallback` for download progress; CLI creates Rich progress wrapper in `play_cmd.py`
-- `ImportService` in `services/import_service.py` centralizes duplicate-check-and-import for all 5 source types; used by CLI, TUI, and GUI
+- `ImportService` in `services/import_service.py` centralizes duplicate-check-and-import for all 5 source types; used by CLI, TUI, and GUI; auto-enriches non-Doomwiki imports with Doom Wiki metadata (`_auto_enrich_doomwiki`) — fills missing author/year, appends wiki description, auto-links IWAD; config-gated via `auto_doomwiki_enrich` (default: true); failures silently logged
 - `WadInfoPanel` and `DetailPanel` accept optional pre-fetched `wad` dict to avoid DB re-fetch on selection
 - Status enum: `to-play`, `backlog`, `playing`, `finished`, `abandoned`, `awaiting-update`
 - Import command uses flag-based source selection: `caco import <source> [--idgames|--doomwiki|--doomworld|--local|--url URL]`
@@ -257,6 +257,7 @@ src/caco/
 - `cache_auto_clean` — auto-cleanup on play (true/false)
 - `auto_stats` — auto-track per-map stats after play sessions (default: true, requires `manage_data_dirs`)
 - `auto_detect_iwad` — auto-detect required IWAD from WAD file contents on first play (default: true)
+- `auto_doomwiki_enrich` — auto-enrich non-Doomwiki imports with Doom Wiki metadata (default: true)
 
 **TUI config (`[tui]` section):**
 - `default_tab` — starting tab (all, playing, to-play, finished, backlog, other)

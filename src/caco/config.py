@@ -389,6 +389,12 @@ def get_auto_stats() -> bool:
     return bool(config.get("auto_stats", True))
 
 
+def get_auto_doomwiki_enrich() -> bool:
+    """Whether to auto-enrich imports with Doom Wiki metadata."""
+    config = load_config()
+    return bool(config.get("auto_doomwiki_enrich", True))
+
+
 def get_data_dir() -> Path:
     """Get the base directory for per-WAD data directories."""
     config = load_config()

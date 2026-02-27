@@ -9,6 +9,7 @@ A personal Doom WAD library manager taking inspiration from beets. Track what yo
   - Doom Wiki (doomwiki.org)
   - Doomworld forums (with optional LLM-powered metadata extraction)
   - URLs / local files
+  - Auto-enrich imports with Doom Wiki metadata (author, year, description, IWAD)
 
 - **Lazy downloads**
   - WADs from idgames are downloaded and cached when you play
@@ -628,6 +629,7 @@ New config keys are automatically added with default values when you update caco
 | `data_dir` | Base directory for per-WAD data (default: `~/.local/share/caco/data/`) |
 | `auto_stats` | Auto-track per-map stats after play sessions (default: true) |
 | `auto_detect_iwad` | Auto-detect required IWAD from WAD file contents (default: true) |
+| `auto_doomwiki_enrich` | Auto-enrich non-Doomwiki imports with Doom Wiki metadata (default: true) |
 | `[list] format` | Columns to display (see config example) |
 | `[list] sort` | Default sort order |
 | `[list] default_status` | Default status filter (empty = all statuses) |
