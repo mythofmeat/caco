@@ -89,6 +89,30 @@ def get_dsda_save_dir(executable: str, data_dir: str, iwad: str, wad_path: str) 
     return str(save_dir)
 
 
+def get_complevel_args(executable: str, complevel: int) -> list[str]:
+    """Return CLI args to set complevel for the sourceport.
+
+    Only dsda-family ports support -complevel. Returns [] for others.
+    """
+    basename = Path(executable).stem
+    family_name = _EXECUTABLE_FAMILY_NAME.get(basename)
+    if family_name == "dsda":
+        return ["-complevel", str(complevel)]
+    return []
+
+
+def get_config_args(executable: str, config_path: str) -> list[str]:
+    """Return CLI args to set the config file for the sourceport.
+
+    Only dsda-family ports support -config. Returns [] for others.
+    """
+    basename = Path(executable).stem
+    family_name = _EXECUTABLE_FAMILY_NAME.get(basename)
+    if family_name == "dsda":
+        return ["-config", config_path]
+    return []
+
+
 def get_data_dir_args(
     executable: str,
     data_dir: str,

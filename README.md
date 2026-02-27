@@ -25,8 +25,15 @@ A personal Doom WAD library manager taking inspiration from beets. Track what yo
   - Track how many times you've beaten each WAD
   - Auto-track per-map stats from sourceport output
 
+- **Sourceport config profiles**
+  - Managed config files at `~/.local/share/caco/sourceports/{exe}/{profile}.cfg`
+  - Auto-created default profile on first play (dsda-family ports)
+  - Per-WAD config profile override
+  - `caco profile` command group for managing profiles
+
 - **Playtime tracking**
   - Automatically tracks how long you play each WAD
+  - Crash detection: warns on non-zero exit codes, records in session history
 
 - **IWAD management**
   - Register IWADs with family/variant model (e.g., doom2/v1.9, doom2/bfg)
@@ -294,6 +301,9 @@ caco ls tag:megawad                     # By tag (supports globs: tag:caco*)
 caco ls status:playing                  # By status (shortcuts: status:p)
 caco ls source:idgames                  # By source type (idgames, doomwiki, url, local)
 caco ls iwad:doom2                      # By IWAD (matches custom_iwad)
+caco ls complevel:boom                  # By complevel (aliases: vanilla, boom, mbf, mbf21)
+caco ls complevel:9                     # By complevel (numeric)
+caco ls config:controller               # By config profile name
 caco ls author:alm title:scythe         # Combine filters (AND logic)
 
 # Combine query + sort
@@ -341,6 +351,10 @@ caco modify id:1 !tag                           # Remove all tags
 caco modify id:1 !tag:slaughter                 # Remove specific tag
 caco modify id:1 "!tag:caco*"                   # Remove tags matching glob
 
+# Set complevel (int or alias: vanilla, boom, mbf, mbf21)
+caco modify id:1 complevel=boom                 # Sets complevel to 9
+caco modify id:1 !complevel                     # Clear complevel
+
 # Link a local file to a metadata-only entry
 caco modify id:1 --link ~/Downloads/heartland.wad
 
@@ -377,16 +391,24 @@ caco play 1 --sourceport /usr/bin/dsda-doom
 # Pass extra args to sourceport
 caco play 1 -- -warp 15 -skill 4
 
+# Override complevel (dsda-family ports get -complevel flag automatically)
+caco play 1 --complevel boom             # -complevel 9
+caco play 1 -c 21                        # -complevel 21
+
 # Play an IWAD directly (no PWAD needed)
 caco play --iwad doom2
 caco play --iwad doom2 -- -warp 1
 caco play --iwad doom2 -p gzdoom
 caco play --iwad doom2/v1.9            # Exact variant
+
+# Use a specific config profile (dsda-family ports)
+caco play 1 --config controller        # Use "controller" profile
+caco play 1 -C fast                    # Short form
 ```
 
 ### Per-WAD Custom Config
 
-Set WAD-specific IWAD, sourceport, or extra arguments:
+Set WAD-specific IWAD, sourceport, complevel, or extra arguments:
 
 ```bash
 # Set custom IWAD for a WAD
@@ -395,11 +417,17 @@ caco modify id:1 iwad=tnt
 # Set custom sourceport
 caco modify id:1 sourceport=dsda-doom
 
+# Set complevel (auto-injected as -complevel N for dsda-family ports)
+caco modify id:1 complevel=boom          # Aliases: vanilla(2), boom(9), mbf(11), mbf21(21)
+
 # Set custom arguments
-caco modify id:1 args="-complevel 2 -warp 1"
+caco modify id:1 args="-warp 1"
+
+# Set config profile (dsda-family ports)
+caco modify id:1 config=controller
 
 # Clear custom settings
-caco modify id:1 !iwad !sourceport !args
+caco modify id:1 !iwad !sourceport !args !complevel !config
 ```
 
 Priority: CLI arguments > Per-WAD config > Global config
@@ -606,6 +634,20 @@ The detected IWAD is saved to `custom_iwad` so detection only runs once per WAD.
 
 **Opt-out:** Set `auto_detect_iwad = false` in config to disable auto-detection.
 
+### Complevel Auto-Detection
+
+On first play, caco also inspects the WAD to auto-detect the compatibility level (complevel):
+
+1. **UMAPINFO** lump present → MBF21 (complevel 21)
+2. **DEHACKED** with MBF21 codepointers → MBF21 (21)
+3. **DEHACKED** with MBF codepointers → MBF (11)
+4. **ExMy maps only**, no special lumps → Vanilla (2)
+5. Other cases → ambiguous, skipped
+
+The detected complevel is saved to the WAD record. For dsda-family sourceports, `-complevel N` is automatically added to the command line.
+
+**Opt-out:** Set `auto_detect_complevel = false` in config to disable auto-detection.
+
 ## Configuration
 
 Config file: `~/.config/caco/config.toml` (see `config.example.toml` for a template).
@@ -791,6 +833,42 @@ Unknown sourceports play normally without any injection.
 
 **Opt-out:** Set `manage_data_dirs = false` in config to disable data directory management.
 
+## Sourceport Config Profiles
+
+Caco manages sourceport config files (`.cfg`) for dsda-family ports, keeping settings isolated per-sourceport and per-profile. Profiles are stored at `~/.local/share/caco/sourceports/{exe}/{profile}.cfg`.
+
+```bash
+# List all profiles
+caco profile ls
+
+# List profiles for a specific sourceport
+caco profile ls -p dsda-doom
+
+# Create a new profile
+caco profile create controller
+caco profile create controller -p nyan-doom    # For a specific sourceport
+
+# Edit a profile in $EDITOR
+caco profile edit controller
+
+# Copy a profile
+caco profile cp default controller
+
+# Remove a profile (warns if WADs reference it)
+caco profile rm controller
+
+# Print path to a profile file
+caco profile path controller
+```
+
+**How it works:**
+- On first play with a dsda-family port, an empty `default.cfg` is auto-created and passed via `-config` — the sourceport populates it with defaults on first launch
+- Resolution order: CLI `--config` > WAD's `custom_config` > `"default"`
+- Only dsda-family ports (dsda-doom, nyan-doom, nugget-doom, prboom+, glboom+) support `-config` injection
+- Set a per-WAD profile: `caco modify id:1 config=controller`
+- Override for a session: `caco play --config controller id:1`
+- Search by profile: `caco ls config:controller`
+
 ## Data Storage
 
 *Default locations:*
@@ -800,6 +878,7 @@ Unknown sourceports play normally without any injection.
 - **Config**: `~/.config/caco/config.toml`
 - **WAD cache**: `~/.local/share/caco/wads/`
 - **WAD data**: `~/.local/share/caco/data/` (per-WAD saves, stats, configs)
+- **Sourceport configs**: `~/.local/share/caco/sourceports/{exe}/{profile}.cfg`
 - **Thumbnail cache**: `~/.cache/caco/thumbnails/`
 
 ## Development

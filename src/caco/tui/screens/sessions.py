@@ -48,13 +48,16 @@ class SessionsScreen(Screen):
         table.add_column("Started", key="started", width=10)
         table.add_column("Duration", key="duration", width=12)
         table.add_column("Sourceport", key="sourceport", width=15)
+        table.add_column("Status", key="status", width=12)
 
         # Load sessions
         sessions = db.get_sessions(self.wad_id)
 
         if not sessions:
-            table.add_row("No sessions", "", "", "")
+            table.add_row("No sessions", "", "", "", "")
             return
+
+        from rich.text import Text
 
         for session in sessions:
             # Parse started_at
@@ -69,7 +72,14 @@ class SessionsScreen(Screen):
             # Sourceport
             sourceport = session.get("sourceport") or "-"
 
-            table.add_row(date, time, duration_str, sourceport)
+            # Exit status
+            exit_code = session.get("exit_code")
+            if exit_code is not None and exit_code != 0:
+                status = Text(f"Crash ({exit_code})", style="red")
+            else:
+                status = Text("")
+
+            table.add_row(date, time, duration_str, sourceport, status)
 
         table.focus()
 

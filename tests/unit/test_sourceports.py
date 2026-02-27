@@ -179,3 +179,26 @@ class TestGetDataDirArgsDsdaNested:
 
     def test_unknown_unaffected(self):
         assert get_data_dir_args("unknown-port", "/tmp/data", iwad="doom2", wad_path="/wads/test.wad") == []
+
+
+class TestGetComplevelArgs:
+    """Test get_complevel_args() for sourceport-specific complevel injection."""
+
+    def test_dsda_family(self):
+        from caco.sourceports import get_complevel_args
+        assert get_complevel_args("dsda-doom", 9) == ["-complevel", "9"]
+        assert get_complevel_args("nyan-doom", 21) == ["-complevel", "21"]
+
+    def test_non_dsda_family(self):
+        from caco.sourceports import get_complevel_args
+        assert get_complevel_args("gzdoom", 9) == []
+        assert get_complevel_args("woof", 9) == []
+        assert get_complevel_args("chocolate-doom", 2) == []
+
+    def test_unknown_port(self):
+        from caco.sourceports import get_complevel_args
+        assert get_complevel_args("unknown-port", 9) == []
+
+    def test_full_path(self):
+        from caco.sourceports import get_complevel_args
+        assert get_complevel_args("/usr/bin/dsda-doom", 11) == ["-complevel", "11"]

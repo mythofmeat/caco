@@ -222,6 +222,19 @@ def _build_term_sql(term: QueryTerm) -> tuple[str, list[Any]]:
         clause = "wads.custom_iwad LIKE ?"
         params = [f"%{term.value}%"]
 
+    elif term.field == "complevel":
+        from caco.complevel import parse_complevel
+        cl = parse_complevel(term.value)
+        if cl is not None:
+            clause = "wads.complevel = ?"
+            params = [cl]
+        else:
+            return "", []
+
+    elif term.field == "config":
+        clause = "wads.custom_config LIKE ?"
+        params = [f"%{term.value}%"]
+
     else:
         # Unknown field - treat as free text
         clause = "(wads.title LIKE ? OR wads.author LIKE ? OR wads.description LIKE ?)"

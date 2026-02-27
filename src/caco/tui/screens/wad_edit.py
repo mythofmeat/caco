@@ -187,6 +187,22 @@ class WadEditScreen(Screen):
                     )
 
                 with Horizontal(classes="form-row"):
+                    yield Label("Complevel:", classes="form-label")
+                    yield Input(
+                        id="input-complevel",
+                        classes="form-input",
+                        placeholder="e.g., 9, boom, mbf21",
+                    )
+
+                with Horizontal(classes="form-row"):
+                    yield Label("Config:", classes="form-label")
+                    yield Input(
+                        id="input-config",
+                        classes="form-input",
+                        placeholder="e.g., default, controller",
+                    )
+
+                with Horizontal(classes="form-row"):
                     yield Label("Extra Args:", classes="form-label")
                     yield Input(
                         id="input-args",
@@ -251,6 +267,9 @@ class WadEditScreen(Screen):
         self.query_one("#input-sourceport", Input).value = (
             wad.get("custom_sourceport") or ""
         )
+        complevel = wad.get("complevel")
+        self.query_one("#input-complevel", Input).value = str(complevel) if complevel is not None else ""
+        self.query_one("#input-config", Input).value = wad.get("custom_config") or ""
         self.query_one("#input-args", Input).value = wad.get("custom_args") or ""
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -280,6 +299,8 @@ class WadEditScreen(Screen):
         custom_sourceport = (
             self.query_one("#input-sourceport", Input).value.strip() or None
         )
+        complevel_str = self.query_one("#input-complevel", Input).value.strip()
+        custom_config = self.query_one("#input-config", Input).value.strip() or None
         custom_args = self.query_one("#input-args", Input).value.strip() or None
 
         # Validate
@@ -297,6 +318,15 @@ class WadEditScreen(Screen):
                     return
             except ValueError:
                 self.notify("Invalid year", severity="error")
+                return
+
+        # Parse complevel
+        complevel = None
+        if complevel_str:
+            from caco.complevel import parse_complevel
+            complevel = parse_complevel(complevel_str)
+            if complevel is None:
+                self.notify("Invalid complevel (use integer or alias: vanilla, boom, mbf, mbf21)", severity="error")
                 return
 
         # Parse rating
@@ -324,6 +354,8 @@ class WadEditScreen(Screen):
             description=description,
             custom_iwad=custom_iwad,
             custom_sourceport=custom_sourceport,
+            complevel=complevel,
+            custom_config=custom_config,
             custom_args=custom_args,
         )
 

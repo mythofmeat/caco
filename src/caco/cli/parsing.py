@@ -21,6 +21,8 @@ MODIFY_FIELDS = {
     "args": "custom_args",
     "idgames-id": "idgames_id",
     "version": "version",
+    "complevel": "complevel",
+    "config": "custom_config",
     "tag": "tag",  # special handling
 }
 
@@ -195,6 +197,13 @@ def parse_modify_args(
                         int(value)
                     except ValueError:
                         raise click.UsageError(f"Year must be an integer, got: '{value}'")
+
+                if field_name == "complevel":
+                    from caco.complevel import parse_complevel
+                    cl = parse_complevel(value)
+                    if cl is None:
+                        raise click.UsageError(f"Invalid complevel: '{value}' (use integer or alias: vanilla, boom, mbf, mbf21)")
+                    value = str(cl)
 
                 if field_name == "args":
                     # Accept JSON array or space-separated

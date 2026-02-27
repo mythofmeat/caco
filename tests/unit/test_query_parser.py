@@ -191,3 +191,21 @@ class TestBuildTermSql:
         term = QueryTerm(field="iwad", value="doom2", negated=True)
         sql, params = _build_term_sql(term)
         assert sql.startswith("NOT")
+
+    def test_complevel_field_int(self):
+        term = QueryTerm(field="complevel", value="9")
+        sql, params = _build_term_sql(term)
+        assert "complevel = ?" in sql
+        assert params == [9]
+
+    def test_complevel_field_alias(self):
+        term = QueryTerm(field="complevel", value="boom")
+        sql, params = _build_term_sql(term)
+        assert "complevel = ?" in sql
+        assert params == [9]
+
+    def test_complevel_field_invalid(self):
+        term = QueryTerm(field="complevel", value="invalid")
+        sql, params = _build_term_sql(term)
+        assert sql == ""
+        assert params == []

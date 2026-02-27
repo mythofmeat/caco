@@ -151,14 +151,20 @@ class WadDetailScreen(Screen):
         from caco.player import play
 
         error = None
+        result = None
         with self.app.suspend():
             try:
-                play(self.wad_id)
+                result = play(self.wad_id)
             except ValueError as e:
                 error = str(e)
 
         if error:
             self.notify(error, severity="error", timeout=10)
+        elif result and result.crashed:
+            self.notify(
+                f"Sourceport exited with code {result.exit_code}",
+                severity="warning",
+            )
         else:
             self.notify(f"Finished playing {wad['title']}")
 

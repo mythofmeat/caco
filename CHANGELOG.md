@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.1.1] - 2026-02-27
+
+### Fixed
+
+- **Config auto-update**: `manage_data_dirs`, `auto_stats`, `auto_detect_iwad`,
+  `auto_detect_complevel`, `cache_max_size_gb`, `cache_max_age_days`, and
+  `cache_auto_clean` are now included in `DEFAULT_CONFIG` so they appear in
+  the config file via `ensure_config_keys()` — previously they were only
+  defined as `.get()` defaults and not discoverable in the config file
+
+---
+
+## [2.1.0] - 2026-02-27
+
+Sourceport config profile management for dsda-family ports.
+
+### Added
+
+- **Config profile management**: Managed sourceport config files stored at
+  `~/.local/share/caco/sourceports/{exe}/{profile}.cfg` — caco owns the config
+  lifecycle so settings persist cleanly per-sourceport
+- **`caco profile` command group**: `ls`, `create`, `edit`, `cp`, `rm`, `path`
+  subcommands for managing config profiles
+- **`play --config`/`-C` option**: Override config profile for a play session
+  (e.g., `caco play --config controller id:1`)
+- **Per-WAD `custom_config`**: Store a profile override per WAD via
+  `caco modify id:1 config=controller` — automatically used on play
+- **`config:` query field**: Search WADs by config profile name
+  (e.g., `caco ls config:controller`)
+- **Auto-created default profile**: On first play with a dsda-family port, an
+  empty `default.cfg` is created and passed via `-config` — the sourceport
+  populates it with defaults on first launch
+- **Profile injection**: For dsda-family ports, `-config <path>` is always
+  injected; resolution order: CLI `--config` > WAD's `custom_config` > `"default"`
+- **Config helpers**: `get_sourceport_dir()`, `get_profile_path()`,
+  `list_profiles()` in `config.py`; `get_config_args()` in `sourceports.py`
+- **TUI/GUI support**: Config profile shown in info panel and editable in
+  WAD edit forms
+- **Fish completions**: `profile` subcommands, `play --config`, `modify config=`,
+  `ls config:` completions
+- **Migration #16**: `custom_config TEXT` column on wads table
+
+---
+
 ## [2.0.1] - 2026-02-27
 
 Auto-enrich imports with Doom Wiki metadata.

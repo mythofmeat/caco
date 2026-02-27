@@ -13,6 +13,7 @@ DEFAULT_DB_PATH = DB_DIR / "library.db"
 CACHE_DIR = DB_DIR / "wads"
 IWAD_DIR = DB_DIR / "iwads"
 DATA_DIR = DB_DIR / "data"
+SOURCEPORT_DIR = DB_DIR / "sourceports"
 
 DEFAULT_CONFIG = {
     "sourceport": "",
@@ -23,6 +24,13 @@ DEFAULT_CONFIG = {
     "sourceport_args": [],
     "download_mirror": 0,
     "link_mode": "move",
+    "manage_data_dirs": True,
+    "auto_stats": True,
+    "auto_detect_iwad": True,
+    "auto_detect_complevel": True,
+    "cache_max_size_gb": 0,
+    "cache_max_age_days": 0,
+    "cache_auto_clean": False,
 }
 
 # Default list configuration
@@ -266,6 +274,55 @@ def resolve_iwad(name: str) -> str:
     return name
 
 
+def get_sourceport_dir() -> Path:
+    """Get the sourceport config profiles directory."""
+    config = load_config()
+    custom = config.get("sourceport_dir", "")
+    return Path(custom).expanduser() if custom else SOURCEPORT_DIR
+
+
+def get_profile_path(sourceport: str, profile: str) -> Path:
+    """Return the path to a sourceport config profile file.
+
+    Path: {sourceport_dir}/{basename}/{profile}.cfg
+    """
+    basename = Path(sourceport).stem
+    return get_sourceport_dir() / basename / f"{profile}.cfg"
+
+
+def list_profiles(sourceport: str | None = None) -> dict[str, list[str]]:
+    """Scan the sourceport config directory for profiles.
+
+    Args:
+        sourceport: If given, only list profiles for this sourceport basename.
+                    Otherwise, list all sourceports and their profiles.
+
+    Returns:
+        Dict mapping sourceport basename to sorted list of profile names.
+    """
+    sp_dir = get_sourceport_dir()
+    if not sp_dir.is_dir():
+        return {}
+
+    result: dict[str, list[str]] = {}
+
+    if sourceport:
+        basename = Path(sourceport).stem
+        port_dir = sp_dir / basename
+        if port_dir.is_dir():
+            profiles = sorted(p.stem for p in port_dir.glob("*.cfg"))
+            if profiles:
+                result[basename] = profiles
+    else:
+        for entry in sorted(sp_dir.iterdir()):
+            if entry.is_dir():
+                profiles = sorted(p.stem for p in entry.glob("*.cfg"))
+                if profiles:
+                    result[entry.name] = profiles
+
+    return result
+
+
 def get_sourceport_args() -> list[str]:
     """Get the default sourceport arguments."""
     config = load_config()
@@ -381,6 +438,12 @@ def get_auto_detect_iwad() -> bool:
     """Whether to auto-detect IWAD from WAD file contents on first play."""
     config = load_config()
     return bool(config.get("auto_detect_iwad", True))
+
+
+def get_auto_detect_complevel() -> bool:
+    """Whether to auto-detect complevel from WAD file contents on first play."""
+    config = load_config()
+    return bool(config.get("auto_detect_complevel", True))
 
 
 def get_auto_stats() -> bool:

@@ -5,7 +5,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from caco.player import format_duration, _find_stats_file, _auto_track_stats, play_iwad
+from caco.player import format_duration, _find_stats_file, _auto_track_stats, play_iwad, PlayResult
 
 
 SAMPLE_STATS_TXT = """\
@@ -19,6 +19,29 @@ SAMPLE_LEVELSTAT_TXT = """\
 MAP01 - 0:32.97 (0:32.97)  K: 100/100  I: 50/50  S: 5/5
 MAP02 - 1:23.45 (1:56.42)  K: 80/100  I: 40/50  S: 3/5
 """
+
+
+class TestPlayResult:
+    def test_crashed_true_nonzero(self):
+        r = PlayResult(duration=60, exit_code=255)
+        assert r.crashed is True
+
+    def test_crashed_true_negative(self):
+        r = PlayResult(duration=60, exit_code=-1)
+        assert r.crashed is True
+
+    def test_crashed_false_zero(self):
+        r = PlayResult(duration=60, exit_code=0)
+        assert r.crashed is False
+
+    def test_crashed_false_none(self):
+        r = PlayResult(duration=60, exit_code=None)
+        assert r.crashed is False
+
+    def test_duration_none(self):
+        r = PlayResult(duration=None, exit_code=0)
+        assert r.duration is None
+        assert r.crashed is False
 
 
 class TestFormatDuration:
@@ -94,11 +117,12 @@ class TestPlayIwad:
                 play_iwad("doom2")
 
     def test_launches_sourceport(self, tmp_path):
-        """Calls subprocess with correct args and returns duration."""
+        """Calls subprocess with correct args and returns PlayResult."""
         wad = tmp_path / "doom2.wad"
         wad.touch()
         mock_proc = MagicMock()
         mock_proc.wait.return_value = 0
+        mock_proc.returncode = 0
 
         with (
             patch("caco.player.resolve_iwad", return_value=str(wad)),
@@ -107,8 +131,11 @@ class TestPlayIwad:
             patch("caco.player.get_sourceport_args", return_value=[]),
             patch("subprocess.Popen", return_value=mock_proc) as mock_popen,
         ):
-            duration = play_iwad("doom2", sourceport="gzdoom", extra_args=["-warp", "1"])
-            assert isinstance(duration, int)
+            result = play_iwad("doom2", sourceport="gzdoom", extra_args=["-warp", "1"])
+            assert isinstance(result, PlayResult)
+            assert isinstance(result.duration, int)
+            assert result.exit_code == 0
+            assert result.crashed is False
             cmd = mock_popen.call_args[0][0]
             assert cmd[0] == "/usr/bin/gzdoom"
             assert "-iwad" in cmd
@@ -122,6 +149,7 @@ class TestPlayIwad:
         wad.touch()
         mock_proc = MagicMock()
         mock_proc.wait.return_value = 0
+        mock_proc.returncode = 0
 
         with (
             patch("caco.player.resolve_iwad", return_value=str(wad)),

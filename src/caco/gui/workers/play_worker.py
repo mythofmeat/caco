@@ -2,7 +2,7 @@
 
 from PySide6.QtCore import QThread, Signal
 
-from caco.player import play
+from caco.player import play, PlayResult
 
 
 class PlayWorker(QThread):
@@ -15,7 +15,7 @@ class PlayWorker(QThread):
     launches, allowing stop_sourceport() to terminate it from outside.
     """
 
-    finished = Signal(int, object)  # (wad_id, duration_seconds | None)
+    finished = Signal(int, object)  # (wad_id, PlayResult)
     error = Signal(int, str)        # (wad_id, error_message)
     download_progress = Signal(int, int, str)  # (downloaded, total, filename)
 
@@ -29,12 +29,12 @@ class PlayWorker(QThread):
 
     def run(self):
         try:
-            duration = play(
+            result = play(
                 self._wad_id,
                 progress_callback=self._on_progress,
                 process_ref=self._process_ref,
             )
-            self.finished.emit(self._wad_id, duration)
+            self.finished.emit(self._wad_id, result)
         except Exception as e:
             self.error.emit(self._wad_id, str(e))
 
