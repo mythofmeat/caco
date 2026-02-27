@@ -96,6 +96,8 @@ complete -c caco -n "__fish_seen_subcommand_from modify" -a "tag=" -d "Add tag"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "iwad=" -d "Set custom IWAD"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "sourceport=" -d "Set custom sourceport"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "idgames-id=" -d "Set idgames ID"
+complete -c caco -n "__fish_seen_subcommand_from modify" -a "description=" -d "Set description"
+complete -c caco -n "__fish_seen_subcommand_from modify" -a "args=" -d "Set custom args"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "version=" -d "Set version"
 
 # modify clear completions
@@ -193,9 +195,9 @@ complete -c caco -n "__fish_seen_subcommand_from random" -a "source:" -d "Filter
 # =============================================================================
 # stats command
 # =============================================================================
-complete -c caco -n "__fish_seen_subcommand_from stats; and not __fish_seen_subcommand_from list add remove set export" -s p -l period -d "Group by period" -xa "month year"
-complete -c caco -n "__fish_seen_subcommand_from stats; and not __fish_seen_subcommand_from list add remove set export" -s n -l limit -d "Number of periods"
-complete -c caco -n "__fish_seen_subcommand_from stats; and not __fish_seen_subcommand_from list add remove set export" -l plain -d "Key=value output"
+complete -c caco -n "__fish_seen_subcommand_from stats" -s p -l period -d "Group by period" -xa "month year"
+complete -c caco -n "__fish_seen_subcommand_from stats" -s n -l limit -d "Number of periods"
+complete -c caco -n "__fish_seen_subcommand_from stats" -l plain -d "Key=value output"
 
 # =============================================================================
 # cache subcommands

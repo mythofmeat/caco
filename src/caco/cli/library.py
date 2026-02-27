@@ -117,7 +117,7 @@ def ls_cmd(args: tuple[str, ...], output: str | None, deleted: bool, tags: bool,
 
         if not iwads:
             console.print("[dim]No IWADs registered[/dim]")
-            console.print("[dim]Use 'caco iwad import <path>' to import an IWAD file or directory[/dim]")
+            console.print("[dim]Use 'caco import <path>' to import an IWAD file or directory[/dim]")
             return
 
         preferred: set[tuple[str, str]] = set()
@@ -984,7 +984,7 @@ def _delete_managed_files(paths: list[str], iwad_dir: Path) -> None:
 def random_cmd(query: tuple[str, ...], info: bool):
     """Pick a random WAD. Prints the WAD ID (for scripting).
 
-    Supports the same query syntax as 'caco list' for filtering.
+    Supports the same query syntax as 'caco ls' for filtering.
 
     \b
     Examples:

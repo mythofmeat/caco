@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 Merge `beaten` command group into `modify` and `info`.
 
+### Fixed
+
+- **Fish stats completions**: Removed stale `beaten` subcommand guard
+  (`and not __fish_seen_subcommand_from list add remove set export`)
+- **`ls --iwad` help text**: Fixed stale `caco iwad import` reference → `caco import`
+- **`random` docstring**: Fixed stale `caco list` reference → `caco ls`
+- **Fish modify completions**: Added missing `description=` and `args=` field suggestions
+
 ### Added
 
 - **Beaten syntax in `modify`**: `beaten+N` adds N completions, `beaten-N`
