@@ -474,6 +474,7 @@ def _render_wad_info_json(wad: dict) -> None:
     sessions = db.get_sessions(wad["id"])
     last_played = db.get_last_played(wad["id"])
     times_beaten = db.get_times_beaten(wad["id"])
+    completions = db.get_wad_completions(wad["id"])
 
     result = {
         "id": wad["id"],
@@ -501,6 +502,14 @@ def _render_wad_info_json(wad: dict) -> None:
         "last_played": last_played,
         "created_at": wad.get("created_at"),
         "updated_at": wad.get("updated_at"),
+        "completions": [
+            {
+                "completed_at": c["completed_at"],
+                "notes": c.get("notes"),
+                "has_stats": bool(c.get("stats_snapshot")),
+            }
+            for c in completions
+        ],
     }
 
     print(json.dumps(result, indent=2))
@@ -547,6 +556,11 @@ def _render_wad_info_plain(wad: dict) -> None:
     print(f"sessions={len(sessions)}")
     print(f"last_played={last_played[:10] if last_played else ''}")
     print(f"times_beaten={times_beaten}")
+    completions = db.get_wad_completions(wad["id"])
+    for ci, c in enumerate(completions):
+        print(f"completion_{ci}_date={c['completed_at'] or ''}")
+        print(f"completion_{ci}_notes={c.get('notes') or ''}")
+        print(f"completion_{ci}_has_stats={'true' if c.get('stats_snapshot') else 'false'}")
     if wad.get("custom_iwad"):
         print(f"custom_iwad={wad['custom_iwad']}")
     if wad.get("custom_sourceport"):

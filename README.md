@@ -418,49 +418,49 @@ caco play "Eviternity"
 caco modify Eviternity !idgames-id
 ```
 
-### Completion Count Tracking
+### Completion Tracking
 
-Track how many times you've beaten each WAD:
+Track how many times you've beaten each WAD, with optional notes, stats, and backdating:
 
 ```bash
-# View completion history for a specific WAD
-caco beaten list scythe              # Show dates and notes for each completion
-caco beaten list id:1                # By ID
+# Add completions (via modify with beaten+ syntax)
+caco modify id:1 beaten+1                              # Mark as beaten once
+caco modify id:1 beaten+3                              # Add 3 completions at once
+caco modify id:1 beaten+1 --notes "UV max"             # With notes
+caco modify id:1 beaten+1 --date 2024-06-15            # Backdate
+caco modify id:1 beaten+1 -s stats.txt                 # With stats file attached
+caco modify id:1 beaten+1 status=finished              # Combine with status change
 
-# Add a completion record
-caco beaten add 1                    # Mark as beaten
-caco beaten add 1 --notes "UV-max"   # With notes
+# Remove completions
+caco modify id:1 beaten-1                              # Remove most recent
+caco modify id:1 beaten-2024-06-15T18:30:00            # Remove by timestamp
 
-# Remove a completion record
-caco beaten remove 1                 # Remove most recent completion (with confirmation)
-caco beaten remove 1 42              # Remove specific completion by record ID
+# Set exact count
+caco modify id:1 beaten=5                              # Set to 5 completions
+caco modify id:1 beaten=0                              # Reset to 0
 
-# Set exact completion count
-caco beaten set 1 3                  # Set to 3 completions
+# View completion history (shown in info output)
+caco info id:1                                         # Shows completions section
+caco info id:1 -o json                                 # Includes completions array
 ```
 
 ### Per-Map Statistics
 
-Import and archive per-map statistics from sourceport stats files:
+Import and view per-map statistics from sourceport stats files:
 
 ```bash
 # Attach stats when adding a completion
-caco beaten add "Doom 2 In Retrospect" --stats-file ~/path/to/stats.txt
+caco modify id:1 beaten+1 -s ~/path/to/stats.txt
 
-# Attach stats to an existing completion record
-caco beaten attach "Doom 2 In Retrospect" --stats-file stats.txt
-caco beaten attach "Doom 2 In Retrospect" 42 -s stats.txt  # Specific completion ID
+# Attach stats to an existing completion (standalone --stats-file)
+caco modify id:1 -s stats.txt                          # Attach to most recent
+caco modify id:1 -s stats.txt -b 2024-06-15            # Attach to specific completion
 
-# View per-map statistics (shows all: live + completions)
-caco beaten stats "Doom 2 In Retrospect"
-caco beaten stats "Doom 2 In Retrospect" 42      # Specific completion ID
-caco beaten stats "Doom 2 In Retrospect" --live   # Live stats only
-caco beaten stats "Doom 2 In Retrospect" --plain  # TSV output for scripting
-
-# Export stats back to original format
-caco beaten export "Doom 2 In Retrospect"
-caco beaten export "Doom 2 In Retrospect" -o stats.txt  # Write to file
-caco beaten export "Doom 2 In Retrospect" --live         # Export live stats
+# View per-map statistics (via info --levelstats)
+caco info id:1 --levelstats                            # All entries (live + completions)
+caco info id:1 --levelstats --live                     # Live stats only
+caco info id:1 --levelstats -b 2024-06-15              # Specific completion
+caco info id:1 --levelstats --plain                    # TSV output for scripting
 ```
 
 **Supported formats:**
@@ -475,14 +475,14 @@ When per-WAD data directories are enabled (default), caco automatically reads st
 
 1. After the sourceport exits, caco searches the WAD's data directory for `stats.txt` or `levelstat.txt`
 2. The stats are parsed and stored as a live snapshot on the WAD record
-3. When you mark the WAD as beaten (`caco beaten add` or `caco update --status finished`), the snapshot is automatically archived to the completion record
+3. When you add a completion (`caco modify id:1 beaten+1` or `caco modify id:1 status=finished`), the snapshot is automatically archived to the completion record
 
 This means you don't need to manually run `--stats-file` — just play and mark as beaten.
 
 ```bash
 caco play 1                         # Stats auto-tracked after session
-caco beaten add 1                   # Auto-attaches stored stats to completion
-caco beaten stats 1                 # View the per-map stats
+caco modify id:1 beaten+1           # Auto-attaches stored stats to completion
+caco info 1 --levelstats            # View the per-map stats
 ```
 
 **Opt-out:** Set `auto_stats = false` in config to disable auto-tracking.

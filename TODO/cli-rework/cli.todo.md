@@ -68,5 +68,15 @@
 - [x] update after CLI rework is done
 
 # beaten / stats
-- deferring until later
-- beaten / stats should probably be merged somehow
+- [x] merge `beaten` command group into `modify` and `info`
+  - [x] `beaten+N` / `beaten-N` / `beaten=N` syntax in `modify`
+  - [x] `beaten-TIMESTAMP` for removing by date
+  - [x] `--notes`, `--stats-file/-s`, `--date` on modify
+  - [x] standalone `--stats-file` attach (modify -s without beaten action)
+  - [x] suppress auto-completion when beaten actions handle it
+  - [x] completions section in `info` output (replaces "Times beaten: N")
+  - [x] `--levelstats` / `--live` / `--plain` / `-b` on info
+  - [x] deleted entire `beaten` command group (7 subcommands)
+  - [x] kept helper functions in stats.py for reuse
+  - [x] updated shell completions (fish/bash/zsh)
+  - [x] tests for parsing, modify beaten, info levelstats

@@ -69,10 +69,11 @@ def get_wad(wad_id: int, include_deleted: bool = False) -> dict[str, Any] | None
         return None
 
 
-def update_wad(wad_id: int, **fields) -> bool:
+def update_wad(wad_id: int, record_completion: bool = True, **fields) -> bool:
     """Update a WAD's fields. Returns True if updated.
 
-    If status is set to 'finished', automatically records a completion.
+    If status is set to 'finished', automatically records a completion
+    (unless record_completion=False).
     Only fields in ALLOWED_UPDATE_FIELDS may be updated.
     """
     if not fields:
@@ -85,12 +86,13 @@ def update_wad(wad_id: int, **fields) -> bool:
 
     # Check if setting status to finished (before enum conversion)
     recording_completion = False
-    status_value = fields.get("status")
-    if status_value:
-        if isinstance(status_value, Status):
-            recording_completion = status_value == Status.FINISHED
-        else:
-            recording_completion = status_value == Status.FINISHED.value
+    if record_completion:
+        status_value = fields.get("status")
+        if status_value:
+            if isinstance(status_value, Status):
+                recording_completion = status_value == Status.FINISHED
+            else:
+                recording_completion = status_value == Status.FINISHED.value
 
     # Build clean copy with enums converted to values
     clean_fields = {}

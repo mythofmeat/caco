@@ -88,6 +88,10 @@ _caco_ls() {
 _caco_info() {
     _arguments \
         '(-o --output)'{-o,--output}'[Output format]:format:(json plain)' \
+        '--levelstats[Show per-map statistics]' \
+        '-b[Target completion by timestamp]:timestamp:' \
+        '--live[Show only live stats]' \
+        '--plain[TSV output for stats]' \
         '--help[Show help]' \
         '*:query:__caco_wads_or_query'
 }
@@ -97,6 +101,10 @@ _caco_modify() {
         '(-y --yes)'{-y,--yes}'[Skip confirmation]' \
         '--dry-run[Preview changes]' \
         '--link[Link a local file]:file:_files' \
+        '--notes[Notes for beaten+N]:notes:' \
+        '(-s --stats-file)'{-s,--stats-file}'[Stats file for beaten+N or attach]:file:_files' \
+        '--date[Backdate completion (ISO)]:date:' \
+        '-b[Target completion by timestamp]:timestamp:' \
         '--help[Show help]' \
         '*:query:__caco_wads_query_modify'
 }
@@ -212,68 +220,6 @@ _caco_cache() {
     esac
 }
 
-_caco_beaten() {
-    local -a subcmds
-    subcmds=(
-        'list:List completion records'
-        'add:Add a completion record'
-        'attach:Attach stats to existing completion'
-        'remove:Remove a completion record'
-        'set:Set completion count'
-        'stats:Show per-map statistics'
-        'export:Export stats to file'
-    )
-
-    if (( CURRENT == 2 )); then
-        _describe 'beaten command' subcmds
-        return
-    fi
-
-    local subcmd="${words[2]}"
-    (( CURRENT-- ))
-    shift words
-
-    case "$subcmd" in
-        add)
-            _arguments \
-                '(-n --notes)'{-n,--notes}'[Notes for this completion]:notes:' \
-                '(-s --stats-file)'{-s,--stats-file}'[Import stats from file]:file:_files' \
-                '(-y --yes)'{-y,--yes}'[Auto-select first match]' \
-                '--help[Show help]' \
-                '*:query:__caco_wads_or_query'
-            ;;
-        attach)
-            _arguments \
-                '(-s --stats-file)'{-s,--stats-file}'[Stats file to attach]:file:_files' \
-                '(-y --yes)'{-y,--yes}'[Auto-select first match]' \
-                '--help[Show help]' \
-                '*:query:__caco_wads_or_query'
-            ;;
-        stats)
-            _arguments \
-                '--plain[TSV output for scripting]' \
-                '--live[Show only live stats]' \
-                '(-y --yes)'{-y,--yes}'[Auto-select first match]' \
-                '--help[Show help]' \
-                '*:query:__caco_wads_or_query'
-            ;;
-        export)
-            _arguments \
-                '(-o --output)'{-o,--output}'[Write to file]:file:_files' \
-                '--live[Export live stats]' \
-                '(-y --yes)'{-y,--yes}'[Auto-select first match]' \
-                '--help[Show help]' \
-                '*:query:__caco_wads_or_query'
-            ;;
-        list|remove|set)
-            _arguments \
-                '(-y --yes)'{-y,--yes}'[Auto-select first match]' \
-                '--help[Show help]' \
-                '*:query:__caco_wads_or_query'
-            ;;
-    esac
-}
-
 # ---------------------------------------------------------------------------
 # Main dispatcher
 # ---------------------------------------------------------------------------
@@ -293,7 +239,6 @@ _caco() {
         'random:Pick a random WAD'
         'completions:Generate shell completions'
         'stats:Show library statistics'
-        'beaten:Manage WAD completion records'
         'cache:Manage WAD file cache'
     )
 
@@ -325,7 +270,6 @@ _caco() {
         random) _caco_random ;;
         stats) _caco_stats ;;
         cache) _caco_cache ;;
-        beaten) _caco_beaten ;;
     esac
 }
 

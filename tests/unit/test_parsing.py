@@ -145,6 +145,68 @@ class TestParseModifyArgs:
         assert actions[0].field == "idgames_id"
 
 
+class TestBeatenParsing:
+    """Test beaten+N / beaten-N / beaten=N parsing in parse_modify_args()."""
+
+    def test_beaten_add_1(self):
+        query, actions, sort = parse_modify_args(["id:1", "beaten+1"])
+        assert query == ["id:1"]
+        assert len(actions) == 1
+        assert actions[0].action == "beaten_add"
+        assert actions[0].value == "1"
+
+    def test_beaten_add_3(self):
+        query, actions, sort = parse_modify_args(["id:1", "beaten+3"])
+        assert actions[0].action == "beaten_add"
+        assert actions[0].value == "3"
+
+    def test_beaten_add_implicit_1(self):
+        """beaten+ (no number) means beaten+1."""
+        query, actions, sort = parse_modify_args(["id:1", "beaten+"])
+        assert actions[0].action == "beaten_add"
+        assert actions[0].value == "1"
+
+    def test_beaten_remove_1(self):
+        query, actions, sort = parse_modify_args(["id:1", "beaten-1"])
+        assert actions[0].action == "beaten_remove"
+        assert actions[0].value == "1"
+
+    def test_beaten_remove_timestamp(self):
+        query, actions, sort = parse_modify_args(["id:1", "beaten-2024-06-15T18:30:00"])
+        assert actions[0].action == "beaten_remove_ts"
+        assert actions[0].value == "2024-06-15T18:30:00"
+
+    def test_beaten_set_5(self):
+        query, actions, sort = parse_modify_args(["id:1", "beaten=5"])
+        assert actions[0].action == "beaten_set"
+        assert actions[0].value == "5"
+
+    def test_beaten_set_0(self):
+        query, actions, sort = parse_modify_args(["id:1", "beaten=0"])
+        assert actions[0].action == "beaten_set"
+        assert actions[0].value == "0"
+
+    def test_beaten_add_0_error(self):
+        with pytest.raises(click.UsageError, match="positive"):
+            parse_modify_args(["id:1", "beaten+0"])
+
+    def test_beaten_set_negative_error(self):
+        with pytest.raises(click.UsageError, match="negative"):
+            parse_modify_args(["id:1", "beaten=-1"])
+
+    def test_beaten_remove_bare_error(self):
+        with pytest.raises(click.UsageError, match="ambiguous"):
+            parse_modify_args(["id:1", "beaten-"])
+
+    def test_beaten_mixed_with_field(self):
+        """Beaten actions coexist with field=value actions."""
+        query, actions, sort = parse_modify_args(["id:1", "beaten+1", "status=finished"])
+        assert len(actions) == 2
+        assert actions[0].action == "beaten_add"
+        assert actions[1].action == "set"
+        assert actions[1].field == "status"
+
+
 class TestParseSortOption:
     """Test _parse_sort_option helper."""
 

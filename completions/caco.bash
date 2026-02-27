@@ -91,7 +91,7 @@ _caco() {
         if [[ "$cur" == -* ]]; then
             COMPREPLY=($(compgen -W "--tui --gui --help" -- "$cur"))
         else
-            COMPREPLY=($(compgen -W "ls info modify trash play import config random completions stats beaten cache" -- "$cur"))
+            COMPREPLY=($(compgen -W "ls info modify trash play import config random completions stats cache" -- "$cur"))
         fi
         return
     fi
@@ -109,7 +109,7 @@ _caco() {
             ;;
         info)
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "-o --output --help" -- "$cur"))
+                COMPREPLY=($(compgen -W "-o --output --levelstats -b --live --plain --help" -- "$cur"))
             elif [[ "$prev" == -o || "$prev" == --output ]]; then
                 COMPREPLY=($(compgen -W "json plain" -- "$cur"))
             else
@@ -119,8 +119,8 @@ _caco() {
             ;;
         modify)
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "-y --yes --dry-run --link --help" -- "$cur"))
-            elif [[ "$prev" == --link ]]; then
+                COMPREPLY=($(compgen -W "-y --yes --dry-run --link --notes -s --stats-file --date -b --help" -- "$cur"))
+            elif [[ "$prev" == --link || "$prev" == -s || "$prev" == --stats-file ]]; then
                 _caco_filedir
             else
                 _caco_wads
@@ -198,60 +198,6 @@ _caco() {
                         ;;
                     prune)
                         COMPREPLY=($(compgen -W "--dry-run -y --yes --help" -- "$cur"))
-                        ;;
-                esac
-            fi
-            ;;
-        beaten)
-            if [[ -z "$subcmd" ]]; then
-                COMPREPLY=($(compgen -W "list add attach remove set stats export" -- "$cur"))
-            else
-                case "$subcmd" in
-                    add)
-                        if [[ "$cur" == -* ]]; then
-                            COMPREPLY=($(compgen -W "-n --notes -s --stats-file -y --yes --help" -- "$cur"))
-                        elif [[ "$prev" == -s || "$prev" == --stats-file ]]; then
-                            _caco_filedir
-                        else
-                            _caco_wads
-                            _caco_query_fields
-                        fi
-                        ;;
-                    attach)
-                        if [[ "$cur" == -* ]]; then
-                            COMPREPLY=($(compgen -W "-s --stats-file -y --yes --help" -- "$cur"))
-                        elif [[ "$prev" == -s || "$prev" == --stats-file ]]; then
-                            _caco_filedir
-                        else
-                            _caco_wads
-                            _caco_query_fields
-                        fi
-                        ;;
-                    stats)
-                        if [[ "$cur" == -* ]]; then
-                            COMPREPLY=($(compgen -W "--plain --live -y --yes --help" -- "$cur"))
-                        else
-                            _caco_wads
-                            _caco_query_fields
-                        fi
-                        ;;
-                    export)
-                        if [[ "$cur" == -* ]]; then
-                            COMPREPLY=($(compgen -W "-o --output --live -y --yes --help" -- "$cur"))
-                        elif [[ "$prev" == -o || "$prev" == --output ]]; then
-                            _caco_filedir
-                        else
-                            _caco_wads
-                            _caco_query_fields
-                        fi
-                        ;;
-                    list|remove|set)
-                        if [[ "$cur" == -* ]]; then
-                            COMPREPLY=($(compgen -W "-y --yes --help" -- "$cur"))
-                        else
-                            _caco_wads
-                            _caco_query_fields
-                        fi
                         ;;
                 esac
             fi

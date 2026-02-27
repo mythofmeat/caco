@@ -41,7 +41,6 @@ complete -c caco -n __fish_use_subcommand -a config -d "View or edit configurati
 complete -c caco -n __fish_use_subcommand -a random -d "Pick a random WAD (prints ID)"
 complete -c caco -n __fish_use_subcommand -a completions -d "Generate shell completions"
 complete -c caco -n __fish_use_subcommand -a stats -d "Show library statistics"
-complete -c caco -n __fish_use_subcommand -a beaten -d "Manage WAD completion records"
 complete -c caco -n __fish_use_subcommand -a cache -d "Manage WAD file cache"
 
 # =============================================================================
@@ -69,6 +68,10 @@ complete -c caco -n "__fish_seen_subcommand_from ls" -a "id+ id- playtime+ playt
 # info command
 # =============================================================================
 complete -c caco -n "__fish_seen_subcommand_from info" -s o -l output -d "Output format" -xa "json plain"
+complete -c caco -n "__fish_seen_subcommand_from info" -l levelstats -d "Show per-map statistics"
+complete -c caco -n "__fish_seen_subcommand_from info" -s b -d "Target completion by timestamp"
+complete -c caco -n "__fish_seen_subcommand_from info" -l live -d "Show only live stats"
+complete -c caco -n "__fish_seen_subcommand_from info" -l plain -d "TSV output for stats"
 complete -c caco -n "__fish_seen_subcommand_from info" -xa "(__caco_wads)"
 complete -c caco -n "__fish_seen_subcommand_from info" -a "id:" -d "Filter by ID"
 complete -c caco -n "__fish_seen_subcommand_from info" -a "title:" -d "Filter by title"
@@ -82,6 +85,10 @@ complete -c caco -n "__fish_seen_subcommand_from info" -a "status:" -d "Filter b
 complete -c caco -n "__fish_seen_subcommand_from modify" -s y -l yes -d "Skip confirmation"
 complete -c caco -n "__fish_seen_subcommand_from modify" -l dry-run -d "Preview changes"
 complete -c caco -n "__fish_seen_subcommand_from modify" -l link -d "Link a local file" -rF
+complete -c caco -n "__fish_seen_subcommand_from modify" -l notes -d "Notes for beaten+N"
+complete -c caco -n "__fish_seen_subcommand_from modify" -s s -l stats-file -d "Stats file for beaten+N or attach" -rF
+complete -c caco -n "__fish_seen_subcommand_from modify" -l date -d "Backdate completion (ISO)"
+complete -c caco -n "__fish_seen_subcommand_from modify" -s b -d "Target completion by timestamp"
 complete -c caco -n "__fish_seen_subcommand_from modify" -xa "(__caco_wads)"
 
 # modify field=value completions
@@ -107,6 +114,11 @@ complete -c caco -n "__fish_seen_subcommand_from modify" -a "!iwad" -d "Clear cu
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!sourceport" -d "Clear custom sourceport"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!tag" -d "Remove all tags"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!tag:" -d "Remove tags matching pattern"
+
+# modify beaten completions
+complete -c caco -n "__fish_seen_subcommand_from modify" -a "beaten+" -d "Add completion(s)"
+complete -c caco -n "__fish_seen_subcommand_from modify" -a "beaten-" -d "Remove completion(s)"
+complete -c caco -n "__fish_seen_subcommand_from modify" -a "beaten=" -d "Set completion count"
 
 # modify query fields
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "id:" -d "Filter by ID"
@@ -206,29 +218,6 @@ complete -c caco -n "__fish_seen_subcommand_from cache; and __fish_seen_subcomma
 complete -c caco -n "__fish_seen_subcommand_from cache; and __fish_seen_subcommand_from prune" -l dry-run -d "Show what would be deleted"
 complete -c caco -n "__fish_seen_subcommand_from cache; and __fish_seen_subcommand_from prune" -s y -l yes -d "Skip confirmation"
 
-# =============================================================================
-# beaten subcommands
-# =============================================================================
-complete -c caco -n "__fish_seen_subcommand_from beaten; and not __fish_seen_subcommand_from list add attach remove set stats export" -a list -d "List completion records"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and not __fish_seen_subcommand_from list add attach remove set stats export" -a add -d "Add a completion record"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and not __fish_seen_subcommand_from list add attach remove set stats export" -a attach -d "Attach stats to existing completion"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and not __fish_seen_subcommand_from list add attach remove set stats export" -a remove -d "Remove a completion record"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and not __fish_seen_subcommand_from list add attach remove set stats export" -a set -d "Set completion count"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and not __fish_seen_subcommand_from list add attach remove set stats export" -a stats -d "Show per-map statistics"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and not __fish_seen_subcommand_from list add attach remove set stats export" -a export -d "Export stats to file"
-
-complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from add" -s n -l notes -d "Notes for this completion"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from add" -s s -l stats-file -d "Import stats from file" -rF
-complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from add" -s y -l yes -d "Auto-select first match"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from attach" -s s -l stats-file -d "Stats file to attach" -rF
-complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from attach" -s y -l yes -d "Auto-select first match"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from list remove set stats export" -s y -l yes -d "Auto-select first match"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from stats" -l plain -d "TSV output for scripting"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from stats" -l live -d "Show only live stats"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from export" -s o -l output -d "Write to file" -rF
-complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from export" -l live -d "Export live stats"
-
-complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from list add attach remove set stats export" -xa "(__caco_wads)"
 """
 
 BASH_SCRIPT = r"""# Bash completions for caco
@@ -324,7 +313,7 @@ _caco() {
         if [[ "$cur" == -* ]]; then
             COMPREPLY=($(compgen -W "--tui --gui --help" -- "$cur"))
         else
-            COMPREPLY=($(compgen -W "ls info modify trash play import config random completions stats beaten cache" -- "$cur"))
+            COMPREPLY=($(compgen -W "ls info modify trash play import config random completions stats cache" -- "$cur"))
         fi
         return
     fi
@@ -342,7 +331,7 @@ _caco() {
             ;;
         info)
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "-o --output --help" -- "$cur"))
+                COMPREPLY=($(compgen -W "-o --output --levelstats -b --live --plain --help" -- "$cur"))
             elif [[ "$prev" == -o || "$prev" == --output ]]; then
                 COMPREPLY=($(compgen -W "json plain" -- "$cur"))
             else
@@ -352,8 +341,8 @@ _caco() {
             ;;
         modify)
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "-y --yes --dry-run --link --help" -- "$cur"))
-            elif [[ "$prev" == --link ]]; then
+                COMPREPLY=($(compgen -W "-y --yes --dry-run --link --notes -s --stats-file --date -b --help" -- "$cur"))
+            elif [[ "$prev" == --link || "$prev" == -s || "$prev" == --stats-file ]]; then
                 _caco_filedir
             else
                 _caco_wads
@@ -431,60 +420,6 @@ _caco() {
                         ;;
                     prune)
                         COMPREPLY=($(compgen -W "--dry-run -y --yes --help" -- "$cur"))
-                        ;;
-                esac
-            fi
-            ;;
-        beaten)
-            if [[ -z "$subcmd" ]]; then
-                COMPREPLY=($(compgen -W "list add attach remove set stats export" -- "$cur"))
-            else
-                case "$subcmd" in
-                    add)
-                        if [[ "$cur" == -* ]]; then
-                            COMPREPLY=($(compgen -W "-n --notes -s --stats-file -y --yes --help" -- "$cur"))
-                        elif [[ "$prev" == -s || "$prev" == --stats-file ]]; then
-                            _caco_filedir
-                        else
-                            _caco_wads
-                            _caco_query_fields
-                        fi
-                        ;;
-                    attach)
-                        if [[ "$cur" == -* ]]; then
-                            COMPREPLY=($(compgen -W "-s --stats-file -y --yes --help" -- "$cur"))
-                        elif [[ "$prev" == -s || "$prev" == --stats-file ]]; then
-                            _caco_filedir
-                        else
-                            _caco_wads
-                            _caco_query_fields
-                        fi
-                        ;;
-                    stats)
-                        if [[ "$cur" == -* ]]; then
-                            COMPREPLY=($(compgen -W "--plain --live -y --yes --help" -- "$cur"))
-                        else
-                            _caco_wads
-                            _caco_query_fields
-                        fi
-                        ;;
-                    export)
-                        if [[ "$cur" == -* ]]; then
-                            COMPREPLY=($(compgen -W "-o --output --live -y --yes --help" -- "$cur"))
-                        elif [[ "$prev" == -o || "$prev" == --output ]]; then
-                            _caco_filedir
-                        else
-                            _caco_wads
-                            _caco_query_fields
-                        fi
-                        ;;
-                    list|remove|set)
-                        if [[ "$cur" == -* ]]; then
-                            COMPREPLY=($(compgen -W "-y --yes --help" -- "$cur"))
-                        else
-                            _caco_wads
-                            _caco_query_fields
-                        fi
                         ;;
                 esac
             fi
@@ -585,6 +520,10 @@ _caco_ls() {
 _caco_info() {
     _arguments \
         '(-o --output)'{-o,--output}'[Output format]:format:(json plain)' \
+        '--levelstats[Show per-map statistics]' \
+        '-b[Target completion by timestamp]:timestamp:' \
+        '--live[Show only live stats]' \
+        '--plain[TSV output for stats]' \
         '--help[Show help]' \
         '*:query:__caco_wads_or_query'
 }
@@ -594,6 +533,10 @@ _caco_modify() {
         '(-y --yes)'{-y,--yes}'[Skip confirmation]' \
         '--dry-run[Preview changes]' \
         '--link[Link a local file]:file:_files' \
+        '--notes[Notes for beaten+N]:notes:' \
+        '(-s --stats-file)'{-s,--stats-file}'[Stats file for beaten+N or attach]:file:_files' \
+        '--date[Backdate completion (ISO)]:date:' \
+        '-b[Target completion by timestamp]:timestamp:' \
         '--help[Show help]' \
         '*:query:__caco_wads_query_modify'
 }
@@ -709,68 +652,6 @@ _caco_cache() {
     esac
 }
 
-_caco_beaten() {
-    local -a subcmds
-    subcmds=(
-        'list:List completion records'
-        'add:Add a completion record'
-        'attach:Attach stats to existing completion'
-        'remove:Remove a completion record'
-        'set:Set completion count'
-        'stats:Show per-map statistics'
-        'export:Export stats to file'
-    )
-
-    if (( CURRENT == 2 )); then
-        _describe 'beaten command' subcmds
-        return
-    fi
-
-    local subcmd="${words[2]}"
-    (( CURRENT-- ))
-    shift words
-
-    case "$subcmd" in
-        add)
-            _arguments \
-                '(-n --notes)'{-n,--notes}'[Notes for this completion]:notes:' \
-                '(-s --stats-file)'{-s,--stats-file}'[Import stats from file]:file:_files' \
-                '(-y --yes)'{-y,--yes}'[Auto-select first match]' \
-                '--help[Show help]' \
-                '*:query:__caco_wads_or_query'
-            ;;
-        attach)
-            _arguments \
-                '(-s --stats-file)'{-s,--stats-file}'[Stats file to attach]:file:_files' \
-                '(-y --yes)'{-y,--yes}'[Auto-select first match]' \
-                '--help[Show help]' \
-                '*:query:__caco_wads_or_query'
-            ;;
-        stats)
-            _arguments \
-                '--plain[TSV output for scripting]' \
-                '--live[Show only live stats]' \
-                '(-y --yes)'{-y,--yes}'[Auto-select first match]' \
-                '--help[Show help]' \
-                '*:query:__caco_wads_or_query'
-            ;;
-        export)
-            _arguments \
-                '(-o --output)'{-o,--output}'[Write to file]:file:_files' \
-                '--live[Export live stats]' \
-                '(-y --yes)'{-y,--yes}'[Auto-select first match]' \
-                '--help[Show help]' \
-                '*:query:__caco_wads_or_query'
-            ;;
-        list|remove|set)
-            _arguments \
-                '(-y --yes)'{-y,--yes}'[Auto-select first match]' \
-                '--help[Show help]' \
-                '*:query:__caco_wads_or_query'
-            ;;
-    esac
-}
-
 # ---------------------------------------------------------------------------
 # Main dispatcher
 # ---------------------------------------------------------------------------
@@ -790,7 +671,6 @@ _caco() {
         'random:Pick a random WAD'
         'completions:Generate shell completions'
         'stats:Show library statistics'
-        'beaten:Manage WAD completion records'
         'cache:Manage WAD file cache'
     )
 
@@ -822,7 +702,6 @@ _caco() {
         random) _caco_random ;;
         stats) _caco_stats ;;
         cache) _caco_cache ;;
-        beaten) _caco_beaten ;;
     esac
 }
 

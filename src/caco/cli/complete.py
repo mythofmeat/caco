@@ -65,6 +65,10 @@ def complete_cmd(context: str) -> None:
             # Clear variant (skip tag — it has special !tag: syntax)
             if field_name != "tag":
                 print(f"!{field_name}")
+        # Beaten action tokens
+        print("beaten+")
+        print("beaten-")
+        print("beaten=")
 
     elif context == "query-fields":
         from caco.cli import QUERY_FIELDS

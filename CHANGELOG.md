@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.1.0] - 2026-02-27
+
+Merge `beaten` command group into `modify` and `info`.
+
+### Added
+
+- **Beaten syntax in `modify`**: `beaten+N` adds N completions, `beaten-N`
+  removes N most recent, `beaten=N` sets exact count, `beaten-TIMESTAMP`
+  removes by date — all coexist with field=value actions in a single command
+- **`modify --notes`**: Annotate completions when adding (`beaten+1 --notes "UV max"`)
+- **`modify --stats-file`/`-s`**: Attach stats file to completion; standalone
+  use (without beaten action) attaches to most recent or `-b`-targeted completion
+- **`modify --date`**: Backdate completions with ISO timestamp
+- **`info --levelstats`**: Per-map statistics display (reuses stats helpers);
+  shows all entries (live + completions) by default
+- **`info --live`**: Show only live stats snapshot
+- **`info --plain`**: TSV output for levelstats
+- **`info -b TIMESTAMP`**: Target specific completion by timestamp prefix match
+- **Completions section in `info`**: Replaces simple "Times beaten: N" with
+  date/notes/stats listing; included in JSON and plain output formats
+- **DB functions**: `delete_wad_completion_by_timestamp()`,
+  `find_completion_by_timestamp()`, `completed_at` parameter on
+  `add_wad_completion()`
+- **`update_wad()` `record_completion` parameter**: Suppresses auto-completion
+  when beaten actions already handle it
+
+### Removed
+
+- **`beaten` command group**: All 7 subcommands (`list`, `add`, `attach`,
+  `remove`, `set`, `stats`, `export`) removed — functionality merged into
+  `modify` and `info`
+
+### Changed
+
+- **Shell completions**: Removed beaten subcommand completions; added new
+  modify flags (`--notes`, `-s`, `--date`, `-b`, `beaten+`/`beaten-`/`beaten=`)
+  and info flags (`--levelstats`, `--live`, `--plain`, `-b`)
+- **Stats entry labels**: Use timestamp format ("Completion (2024-06-15 18:30)")
+  instead of ID-based ("Completion #42")
+
+---
+
 ## [2.0.2] - 2026-02-27
 
 ### Added

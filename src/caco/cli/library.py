@@ -197,15 +197,37 @@ def ls_cmd(args: tuple[str, ...], output: str | None, deleted: bool, tags: bool,
 @cli.command()
 @click.argument("query")
 @click.option("--output", "-o", type=click.Choice(["json", "plain"]), help="Output format")
-def info(query: str, output: str | None):
+@click.option("--levelstats", is_flag=True, help="Show per-map statistics")
+@click.option("-b", "beaten_target", help="Target completion by timestamp (for --levelstats)")
+@click.option("--live", is_flag=True, help="Show only live stats (with --levelstats)")
+@click.option("--plain", "stats_plain", is_flag=True, help="TSV output (with --levelstats)")
+def info(
+    query: str,
+    output: str | None,
+    levelstats: bool,
+    beaten_target: str | None,
+    live: bool,
+    stats_plain: bool,
+):
     """Show details about a WAD.
 
     Multiple matches are displayed in sequence, separated by a rule.
 
     \b
     QUERY: WAD ID, ID range (3-6,9), or query (e.g., filename:tnto).
+
+    \b
+    Levelstats mode:
+      caco info 1 --levelstats                  # All stats entries
+      caco info 1 --levelstats --live            # Live stats only
+      caco info 1 --levelstats -b 2024-06-15    # Specific completion
+      caco info 1 --levelstats --plain           # TSV output
     """
     from caco.cli import _parse_id_range
+
+    # --levelstats mode implied by related flags
+    if beaten_target or live or stats_plain:
+        levelstats = True
 
     # Try ID range first
     ids = _parse_id_range(query)
@@ -228,6 +250,62 @@ def info(query: str, output: str | None):
         err_console.print(f"[red]No WADs matching '{query}'[/red]")
         sys.exit(1)
 
+    # --levelstats mode: show per-map statistics
+    if levelstats:
+        from caco.cli.stats import _build_stats_entries, _print_entry, _entry_label
+
+        for wi, wad in enumerate(wads):
+            if wi > 0:
+                if stats_plain:
+                    print()
+                else:
+                    console.print()
+
+            if live:
+                if not wad.get("stats_snapshot"):
+                    err_console.print(f"[dim]No live stats for {wad['title']}[/dim]")
+                    continue
+                entry = {
+                    "id": None, "completed_at": None,
+                    "stats_snapshot": wad["stats_snapshot"],
+                    "notes": None, "_live": True,
+                }
+                if not stats_plain:
+                    console.print(f"\n[bold]{wad['title']}[/bold] — Map Statistics\n")
+                _print_entry(entry, plain=stats_plain)
+                continue
+
+            if beaten_target:
+                comp = db.find_completion_by_timestamp(wad["id"], beaten_target)
+                if not comp:
+                    err_console.print(f"[red]No completion matching '{beaten_target}' for {wad['title']}[/red]")
+                    continue
+                if not comp.get("stats_snapshot"):
+                    err_console.print(f"[dim]Completion has no stats attached[/dim]")
+                    continue
+                if not stats_plain:
+                    console.print(f"\n[bold]{wad['title']}[/bold] — Map Statistics\n")
+                _print_entry(comp, plain=stats_plain)
+                continue
+
+            # Default: show all entries
+            entries = _build_stats_entries(wad)
+            if not entries:
+                err_console.print(f"[dim]No stats available for {wad['title']}[/dim]")
+                continue
+
+            if not stats_plain:
+                console.print(f"\n[bold]{wad['title']}[/bold] — Map Statistics\n")
+
+            for ei, entry in enumerate(entries):
+                if ei > 0:
+                    if stats_plain:
+                        print()
+                    else:
+                        console.print()
+                _print_entry(entry, plain=stats_plain)
+        return
+
     if output == "json":
         if len(wads) == 1:
             _render_wad_info_json(wads[0])
@@ -239,6 +317,7 @@ def info(query: str, output: str | None):
                 sessions = db.get_sessions(wad["id"])
                 last_played = db.get_last_played(wad["id"])
                 times_beaten = db.get_times_beaten(wad["id"])
+                completions = db.get_wad_completions(wad["id"])
                 results.append({
                     "id": wad["id"],
                     "title": wad["title"],
@@ -252,6 +331,14 @@ def info(query: str, output: str | None):
                     "session_count": len(sessions),
                     "times_beaten": times_beaten,
                     "last_played": last_played,
+                    "completions": [
+                        {
+                            "completed_at": c["completed_at"],
+                            "notes": c.get("notes"),
+                            "has_stats": bool(c.get("stats_snapshot")),
+                        }
+                        for c in completions
+                    ],
                 })
             print(json.dumps(results, indent=2))
         return
@@ -313,10 +400,20 @@ def info(query: str, output: str | None):
             console.print("[bold]Notes:[/bold]")
             console.print(wad["notes"])
 
-        times_beaten = db.get_times_beaten(wad_id)
-        if times_beaten > 0:
+        # Completions section (replaces simple "Times beaten: N")
+        completions = db.get_wad_completions(wad_id)
+        if completions:
             console.print()
-            console.print(f"[bold]Times beaten:[/bold] {times_beaten}")
+            console.print(f"[bold]Completions ({len(completions)}):[/bold]")
+            for c in completions:
+                c_date = c["completed_at"][:16].replace("T", " ") if c.get("completed_at") else "-"
+                c_notes = c.get("notes") or ""
+                c_stats = " [green]*[/green]" if c.get("stats_snapshot") else ""
+                parts = [f"  {c_date}"]
+                if c_notes:
+                    parts.append(f"  {c_notes}")
+                parts.append(c_stats)
+                console.print("".join(parts))
 
         if wad.get("custom_iwad") or wad.get("custom_sourceport") or wad.get("custom_args"):
             console.print()
@@ -338,7 +435,21 @@ def info(query: str, output: str | None):
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation for multi-WAD updates")
 @click.option("--dry-run", is_flag=True, help="Show what would change without making changes")
 @click.option("--link", "link_path", type=click.Path(exists=True), help="Link a local file to the WAD(s)")
-def modify(args: tuple[str, ...], yes: bool, dry_run: bool, link_path: str | None):
+@click.option("--notes", help="Notes for beaten+N completions")
+@click.option("--stats-file", "-s", type=click.Path(exists=True),
+              help="Stats file for beaten+N or standalone attach")
+@click.option("--date", help="Backdate completion (ISO date/datetime, for beaten+N)")
+@click.option("-b", "beaten_target", help="Target completion by timestamp (for --stats-file attach)")
+def modify(
+    args: tuple[str, ...],
+    yes: bool,
+    dry_run: bool,
+    link_path: str | None,
+    notes: str | None,
+    stats_file: str | None,
+    date: str | None,
+    beaten_target: str | None,
+):
     """Modify WAD metadata using beets-style field=value syntax.
 
     \b
@@ -355,6 +466,18 @@ def modify(args: tuple[str, ...], yes: bool, dry_run: bool, link_path: str | Non
       caco modify id:1 !tag:slaughter          # Remove matching tags
 
     \b
+    Completion tracking:
+      caco modify id:1 beaten+1                       # Add a completion
+      caco modify id:1 beaten+1 --notes "UV max"      # With notes
+      caco modify id:1 beaten+1 --date 2024-06-15     # Backdated
+      caco modify id:1 beaten+1 -s stats.txt          # With stats file
+      caco modify id:1 beaten-1                        # Remove most recent
+      caco modify id:1 beaten-2024-06-15T18:30:00      # Remove by timestamp
+      caco modify id:1 beaten=5                        # Set exact count
+      caco modify id:1 -s stats.txt                    # Attach stats to most recent
+      caco modify id:1 -s stats.txt -b 2024-06-15     # Attach to specific
+
+    \b
     Link a file:
       caco modify id:1 --link ~/Downloads/wad.wad
 
@@ -363,12 +486,33 @@ def modify(args: tuple[str, ...], yes: bool, dry_run: bool, link_path: str | Non
       notes, iwad, sourceport, args, idgames-id, version, tag
     """
     from caco.config import get_link_mode
+    from caco.wad_stats import parse_stats_file, stats_to_json, stats_from_json
 
     query_terms, actions, _sort = parse_modify_args(args)
 
-    if not actions and not link_path:
+    # Check for beaten actions in the parsed actions
+    beaten_actions = [a for a in actions if a.action.startswith("beaten_")]
+
+    # Validate flag combinations
+    if notes and not any(a.action == "beaten_add" for a in beaten_actions):
+        err_console.print("[red]--notes requires a beaten+N action[/red]")
+        sys.exit(1)
+    if date and not any(a.action == "beaten_add" for a in beaten_actions):
+        err_console.print("[red]--date requires a beaten+N action[/red]")
+        sys.exit(1)
+    if beaten_target and beaten_actions:
+        err_console.print("[red]-b cannot combine with beaten+/beaten-/beaten= actions[/red]")
+        sys.exit(1)
+    if beaten_target and not stats_file:
+        err_console.print("[red]-b requires --stats-file[/red]")
+        sys.exit(1)
+
+    # Standalone --stats-file attach (no beaten action) counts as a modification
+    standalone_attach = stats_file and not beaten_actions
+
+    if not actions and not link_path and not standalone_attach:
         err_console.print("[yellow]No modifications specified[/yellow]")
-        err_console.print("[dim]Use field=value to set, !field to clear, tag=name to add tags[/dim]")
+        err_console.print("[dim]Use field=value to set, !field to clear, tag=name to add tags, beaten+N to add completions[/dim]")
         return
 
     if not query_terms:
@@ -393,8 +537,26 @@ def modify(args: tuple[str, ...], yes: bool, dry_run: bool, link_path: str | Non
             descriptions.append("remove all tags")
         elif action.action == "remove_tag":
             descriptions.append(f"remove tags matching: {action.pattern}")
+        elif action.action == "beaten_add":
+            desc = f"beaten +{action.value}"
+            if notes:
+                desc += f" (notes: {notes})"
+            if date:
+                desc += f" (date: {date})"
+            if stats_file:
+                desc += f" (stats: {stats_file})"
+            descriptions.append(desc)
+        elif action.action == "beaten_remove":
+            descriptions.append(f"beaten -{action.value}")
+        elif action.action == "beaten_remove_ts":
+            descriptions.append(f"beaten remove @ {action.value}")
+        elif action.action == "beaten_set":
+            descriptions.append(f"beaten ={action.value}")
     if link_path:
         descriptions.append(f"link file: {link_path}")
+    if standalone_attach:
+        target_desc = f" @ {beaten_target}" if beaten_target else " (most recent)"
+        descriptions.append(f"attach stats: {stats_file}{target_desc}")
 
     if dry_run:
         console.print(f"\n[bold]Would modify {len(wads)} WAD(s):[/bold]\n")
@@ -407,6 +569,22 @@ def modify(args: tuple[str, ...], yes: bool, dry_run: bool, link_path: str | Non
             console.print(f"  \u2022 {desc}")
         console.print("\n[dim]No changes made (dry run)[/dim]")
         return
+
+    # Parse stats file once if provided
+    snapshot_json: str | None = None
+    if stats_file:
+        try:
+            wad_stats_parsed = parse_stats_file(stats_file)
+            snapshot_json = stats_to_json(wad_stats_parsed)
+            played = wad_stats_parsed.played_maps
+            console.print(
+                f"[dim]Parsed {wad_stats_parsed.format}: "
+                f"{len(played)} map(s) played, "
+                f"total time {wad_stats_parsed.total_time_display}[/dim]"
+            )
+        except (ValueError, OSError) as e:
+            err_console.print(f"[red]Failed to parse stats file: {e}[/red]")
+            sys.exit(1)
 
     # Apply modifications
     for wad in wads:
@@ -435,8 +613,92 @@ def modify(args: tuple[str, ...], yes: bool, dry_run: bool, link_path: str | Non
             elif action.action == "remove_tag":
                 db.remove_tags_by_pattern(wad["id"], action.pattern)
 
+            elif action.action == "beaten_add":
+                n = int(action.value)
+                for i in range(n):
+                    comp_snapshot = None
+                    comp_notes = None
+                    comp_date = None
+                    if i == 0:
+                        comp_notes = notes
+                        comp_date = date
+                        if snapshot_json:
+                            comp_snapshot = snapshot_json
+                        elif wad.get("stats_snapshot"):
+                            comp_snapshot = wad["stats_snapshot"]
+                            ws = stats_from_json(comp_snapshot)
+                            console.print(
+                                f"[dim]Auto-attaching stats: {len(ws.played_maps)} map(s) played, "
+                                f"total time {ws.total_time_display}[/dim]"
+                            )
+                    else:
+                        comp_notes = "Manually added"
+                    db.add_wad_completion(
+                        wad["id"],
+                        stats_snapshot=comp_snapshot,
+                        notes=comp_notes,
+                        completed_at=comp_date,
+                    )
+                count = db.get_times_beaten(wad["id"])
+                msg = f"[green]Added {n} completion(s) for {wad['title']}[/green] (now beaten {count} time(s))"
+                if snapshot_json or (n == 1 and wad.get("stats_snapshot")):
+                    msg += " [dim](with stats)[/dim]"
+                console.print(msg)
+
+            elif action.action == "beaten_remove":
+                n = int(action.value)
+                completions = db.get_wad_completions(wad["id"])
+                if not completions:
+                    console.print(f"[dim]{wad['title']} has no completion records[/dim]")
+                    continue
+                to_remove = completions[:n]  # Already sorted DESC
+                for c in to_remove:
+                    db.delete_wad_completion(c["id"])
+                count = db.get_times_beaten(wad["id"])
+                console.print(
+                    f"[green]Removed {len(to_remove)} completion(s) from {wad['title']}[/green] "
+                    f"(now beaten {count} time(s))"
+                )
+
+            elif action.action == "beaten_remove_ts":
+                if db.delete_wad_completion_by_timestamp(wad["id"], action.value):
+                    count = db.get_times_beaten(wad["id"])
+                    console.print(
+                        f"[green]Removed completion @ {action.value} from {wad['title']}[/green] "
+                        f"(now beaten {count} time(s))"
+                    )
+                else:
+                    err_console.print(
+                        f"[red]No completion at {action.value} for {wad['title']}[/red]"
+                    )
+
+            elif action.action == "beaten_set":
+                n = int(action.value)
+                db.set_wad_completion_count(wad["id"], n)
+                console.print(f"[green]Set {wad['title']} to {n} completion(s)[/green]")
+
         if updates:
-            db.update_wad(wad["id"], **updates)
+            # Skip auto-completion when beaten actions already handle it
+            skip_auto = bool(beaten_actions)
+            db.update_wad(wad["id"], record_completion=not skip_auto, **updates)
+
+        # Standalone --stats-file attach
+        if standalone_attach and snapshot_json:
+            if beaten_target:
+                comp = db.find_completion_by_timestamp(wad["id"], beaten_target)
+                if not comp:
+                    err_console.print(f"[red]No completion matching '{beaten_target}' for {wad['title']}[/red]")
+                    continue
+            else:
+                completions = db.get_wad_completions(wad["id"])
+                if not completions:
+                    err_console.print(f"[dim]{wad['title']} has no completion records[/dim]")
+                    continue
+                comp = completions[0]
+
+            db.update_wad_completion(comp["id"], stats_snapshot=snapshot_json)
+            comp_date = comp["completed_at"][:16].replace("T", " ") if comp.get("completed_at") else "-"
+            console.print(f"[green]Attached stats to completion ({comp_date}) for {wad['title']}[/green]")
 
     # Handle --link
     if link_path:
@@ -470,7 +732,10 @@ def modify(args: tuple[str, ...], yes: bool, dry_run: bool, link_path: str | Non
 
             db.update_wad(wad["id"], cached_path=str(dest), filename=source.name)
 
-    console.print(f"[green]Modified {len(wads)} WAD(s)[/green]")
+    # Print generic "Modified" for non-beaten actions
+    non_beaten_actions = [a for a in actions if not a.action.startswith("beaten_")]
+    if non_beaten_actions or link_path:
+        console.print(f"[green]Modified {len(wads)} WAD(s)[/green]")
 
 
 

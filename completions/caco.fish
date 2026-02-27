@@ -35,7 +35,6 @@ complete -c caco -n __fish_use_subcommand -a config -d "View or edit configurati
 complete -c caco -n __fish_use_subcommand -a random -d "Pick a random WAD (prints ID)"
 complete -c caco -n __fish_use_subcommand -a completions -d "Generate shell completions"
 complete -c caco -n __fish_use_subcommand -a stats -d "Show library statistics"
-complete -c caco -n __fish_use_subcommand -a beaten -d "Manage WAD completion records"
 complete -c caco -n __fish_use_subcommand -a cache -d "Manage WAD file cache"
 
 # =============================================================================
@@ -63,6 +62,10 @@ complete -c caco -n "__fish_seen_subcommand_from ls" -a "id+ id- playtime+ playt
 # info command
 # =============================================================================
 complete -c caco -n "__fish_seen_subcommand_from info" -s o -l output -d "Output format" -xa "json plain"
+complete -c caco -n "__fish_seen_subcommand_from info" -l levelstats -d "Show per-map statistics"
+complete -c caco -n "__fish_seen_subcommand_from info" -s b -d "Target completion by timestamp"
+complete -c caco -n "__fish_seen_subcommand_from info" -l live -d "Show only live stats"
+complete -c caco -n "__fish_seen_subcommand_from info" -l plain -d "TSV output for stats"
 complete -c caco -n "__fish_seen_subcommand_from info" -xa "(__caco_wads)"
 complete -c caco -n "__fish_seen_subcommand_from info" -a "id:" -d "Filter by ID"
 complete -c caco -n "__fish_seen_subcommand_from info" -a "title:" -d "Filter by title"
@@ -76,6 +79,10 @@ complete -c caco -n "__fish_seen_subcommand_from info" -a "status:" -d "Filter b
 complete -c caco -n "__fish_seen_subcommand_from modify" -s y -l yes -d "Skip confirmation"
 complete -c caco -n "__fish_seen_subcommand_from modify" -l dry-run -d "Preview changes"
 complete -c caco -n "__fish_seen_subcommand_from modify" -l link -d "Link a local file" -rF
+complete -c caco -n "__fish_seen_subcommand_from modify" -l notes -d "Notes for beaten+N"
+complete -c caco -n "__fish_seen_subcommand_from modify" -s s -l stats-file -d "Stats file for beaten+N or attach" -rF
+complete -c caco -n "__fish_seen_subcommand_from modify" -l date -d "Backdate completion (ISO)"
+complete -c caco -n "__fish_seen_subcommand_from modify" -s b -d "Target completion by timestamp"
 complete -c caco -n "__fish_seen_subcommand_from modify" -xa "(__caco_wads)"
 
 # modify field=value completions
@@ -101,6 +108,11 @@ complete -c caco -n "__fish_seen_subcommand_from modify" -a "!iwad" -d "Clear cu
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!sourceport" -d "Clear custom sourceport"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!tag" -d "Remove all tags"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!tag:" -d "Remove tags matching pattern"
+
+# modify beaten completions
+complete -c caco -n "__fish_seen_subcommand_from modify" -a "beaten+" -d "Add completion(s)"
+complete -c caco -n "__fish_seen_subcommand_from modify" -a "beaten-" -d "Remove completion(s)"
+complete -c caco -n "__fish_seen_subcommand_from modify" -a "beaten=" -d "Set completion count"
 
 # modify query fields
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "id:" -d "Filter by ID"
@@ -199,27 +211,3 @@ complete -c caco -n "__fish_seen_subcommand_from cache; and __fish_seen_subcomma
 complete -c caco -n "__fish_seen_subcommand_from cache; and __fish_seen_subcommand_from clear" -s y -l yes -d "Skip confirmation"
 complete -c caco -n "__fish_seen_subcommand_from cache; and __fish_seen_subcommand_from prune" -l dry-run -d "Show what would be deleted"
 complete -c caco -n "__fish_seen_subcommand_from cache; and __fish_seen_subcommand_from prune" -s y -l yes -d "Skip confirmation"
-
-# =============================================================================
-# beaten subcommands
-# =============================================================================
-complete -c caco -n "__fish_seen_subcommand_from beaten; and not __fish_seen_subcommand_from list add attach remove set stats export" -a list -d "List completion records"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and not __fish_seen_subcommand_from list add attach remove set stats export" -a add -d "Add a completion record"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and not __fish_seen_subcommand_from list add attach remove set stats export" -a attach -d "Attach stats to existing completion"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and not __fish_seen_subcommand_from list add attach remove set stats export" -a remove -d "Remove a completion record"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and not __fish_seen_subcommand_from list add attach remove set stats export" -a set -d "Set completion count"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and not __fish_seen_subcommand_from list add attach remove set stats export" -a stats -d "Show per-map statistics"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and not __fish_seen_subcommand_from list add attach remove set stats export" -a export -d "Export stats to file"
-
-complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from add" -s n -l notes -d "Notes for this completion"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from add" -s s -l stats-file -d "Import stats from file" -rF
-complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from add" -s y -l yes -d "Auto-select first match"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from attach" -s s -l stats-file -d "Stats file to attach" -rF
-complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from attach" -s y -l yes -d "Auto-select first match"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from list remove set stats export" -s y -l yes -d "Auto-select first match"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from stats" -l plain -d "TSV output for scripting"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from stats" -l live -d "Show only live stats"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from export" -s o -l output -d "Write to file" -rF
-complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from export" -l live -d "Export live stats"
-
-complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from list add attach remove set stats export" -xa "(__caco_wads)"

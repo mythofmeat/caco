@@ -60,7 +60,7 @@ src/caco/
 │   ├── play_cmd.py     # play command (--first, --iwad)
 │   ├── cache.py        # cache list/clear/prune
 │   ├── config_cmd.py   # config, completions commands
-│   ├── stats.py        # stats, beaten commands
+│   ├── stats.py        # library stats command + per-map stats helpers
 │   ├── complete.py     # hidden _complete command for shell completions
 │   └── _completion_scripts.py  # Embedded fish/bash/zsh completion scripts
 ├── iwad_detect.py  # Auto-detect IWAD family from WAD file PNAMES/map lumps
@@ -197,7 +197,7 @@ src/caco/
   - Free text searches title, author, and description
   - Multiple terms are joined with implicit AND
 - Per-WAD config: `custom_iwad`, `custom_sourceport`, `custom_args` (JSON array) columns in wads table
-- Auto stats tracking: `stats_snapshot` TEXT column on `wads` table stores live per-map stats JSON; auto-read from data dir after play sessions; auto-archived to completion on `beaten add` or `modify status=finished`; `auto_stats` config (default: true); live stats shown as "Current (live)" entry in Map Stats dialog (GUI) and screen (TUI)
+- Auto stats tracking: `stats_snapshot` TEXT column on `wads` table stores live per-map stats JSON; auto-read from data dir after play sessions; auto-archived to completion on `modify beaten+N` or `modify status=finished`; `auto_stats` config (default: true); live stats shown as "Current (live)" entry in Map Stats dialog (GUI) and screen (TUI)
 - IWAD resolution: `iwad_dirs` config allows short names (e.g., `doom2` instead of full path); `resolve_iwad()` in `config.py` checks DB registry (with priority resolution) then searches dirs for exact name or name + `.wad`; `IWAD_DIR` / `get_iwad_dir()` provides the managed IWAD directory path (`~/.local/share/caco/iwads/`)
 - Cross-source downloading: `idgames_id` column allows any WAD to download via idgames API (set with `caco modify id:N idgames-id=XXXXX`)
 - Soft-delete: `deleted_at` column; `caco trash` moves to trash, `caco trash --restore` recovers, `caco trash --list` shows trash
@@ -228,14 +228,22 @@ src/caco/
 | `a`, `drop`, `dropped` | abandoned |
 | `w`, `au`, `await`, `waiting`, `wip` | awaiting-update |
 
-**Beaten command group:**
-- `caco beaten list <query>` — show completion history (dates + stats indicator) for a specific WAD
-- `caco beaten add <query> [--notes "text"] [--stats-file FILE]` — add a completion record, optionally with stats
-- `caco beaten attach <query> --stats-file FILE` — attach stats to an existing completion record
-- `caco beaten remove <query> [COMPLETION_ID]` — remove most recent or specific completion
-- `caco beaten set <query> <count>` — set exact completion count
-- `caco beaten stats <query> [COMPLETION_ID] [--live] [--plain]` — view per-map statistics; without ID shows all entries (live + completions); `--live` shows only live stats
-- `caco beaten export <query> [COMPLETION_ID] [--live] [--output FILE]` — export stats back to original text format; `--live` exports live stats snapshot
+**Completion tracking (via modify):**
+- `caco modify <query> beaten+N` — add N completions (implicit 1 if bare `beaten+`)
+- `caco modify <query> beaten+1 --notes "text" --date ISO --stats-file FILE` — add with metadata
+- `caco modify <query> beaten-N` — remove N most recent completions
+- `caco modify <query> beaten-TIMESTAMP` — remove completion by exact timestamp
+- `caco modify <query> beaten=N` — set exact completion count
+- `caco modify <query> -s FILE` — attach stats to most recent completion (standalone)
+- `caco modify <query> -s FILE -b TIMESTAMP` — attach stats to specific completion
+- Beaten actions coexist with field=value actions (e.g., `beaten+1 status=finished`)
+- Auto-completion on `status=finished` is suppressed when beaten actions are present (`record_completion=False`)
+
+**Per-map stats (via info):**
+- `caco info <query> --levelstats` — show all stats entries (live + completions)
+- `caco info <query> --levelstats --live` — show only live stats
+- `caco info <query> --levelstats -b TIMESTAMP` — show specific completion's stats
+- `caco info <query> --levelstats --plain` — TSV output
 - Uses `wad_completions` table (auto-created via migration); stats stored as JSON in `stats_snapshot` column
 - Supports nyan-doom/dsda-doom `stats.txt` format (persistent per-map tracking) and `levelstat.txt` format (human-readable `-levelstat` output)
 

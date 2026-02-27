@@ -1,4 +1,4 @@
-"""Stats and beaten commands."""
+"""Stats command and per-map stats helpers (used by info --levelstats)."""
 
 import click
 from rich.table import Table
@@ -7,20 +7,16 @@ from caco import db
 from caco.player import format_duration
 from caco.wad_stats import (
     WadStats,
-    format_stats,
     format_time_tics,
     format_time_secs,
-    parse_stats_file,
     skill_name,
     stats_from_json,
-    stats_to_json,
 )
 
 from caco.cli import (
     cli,
     console,
     err_console,
-    resolve_wad_query,
 )
 
 
@@ -156,237 +152,6 @@ def stats(period: str, limit: int, plain: bool):
     console.print()
 
 
-# =============================================================================
-# Beaten (WAD Completions)
-# =============================================================================
-
-
-@cli.group(name="beaten")
-def beaten_cmd():
-    """Manage WAD completion records (times beaten)."""
-    pass
-
-
-@beaten_cmd.command(name="list")
-@click.argument("query")
-@click.option("--yes", "-y", is_flag=True, help="Auto-select first match if multiple")
-def beaten_list(query: str, yes: bool):
-    """List completion records for a WAD (when it was beaten)."""
-    wads = resolve_wad_query(query, mode="pick", yes=yes)
-    if not wads:
-        return
-    wad = wads[0]
-
-    completions = db.get_wad_completions(wad["id"])
-
-    if not completions:
-        console.print(f"[dim]{wad['title']} has not been marked as beaten[/dim]")
-        return
-
-    console.print(f"\n[bold]{wad['title']}[/bold] - Completion History ({len(completions)} time(s))\n")
-
-    table = Table()
-    table.add_column("ID", style="dim")
-    table.add_column("Date")
-    table.add_column("Notes")
-    table.add_column("Stats", justify="center")
-
-    for c in completions:
-        date = c["completed_at"][:16].replace("T", " ") if c["completed_at"] else "-"
-        has_stats = "[green]*[/green]" if c.get("stats_snapshot") else ""
-        table.add_row(str(c["id"]), date, c["notes"] or "-", has_stats)
-
-    console.print(table)
-
-
-@beaten_cmd.command(name="add")
-@click.argument("query")
-@click.option("--notes", "-n", help="Notes for this completion")
-@click.option("--stats-file", "-s", type=click.Path(exists=True),
-              help="Import per-map stats from a stats.txt or levelstat.txt file")
-@click.option("--yes", "-y", is_flag=True, help="Auto-select first match if multiple")
-def beaten_add(query: str, notes: str | None, stats_file: str | None, yes: bool):
-    """Manually add a completion record (mark as beaten).
-
-    \b
-    Optionally attach per-map statistics from a sourceport stats file:
-        caco beaten add <query> --stats-file path/to/stats.txt
-
-    Supported formats:
-    - nyan-doom/dsda-doom stats.txt (persistent per-map tracking)
-    - dsda-doom levelstat.txt (-levelstat flag output)
-    """
-    wads = resolve_wad_query(query, mode="pick", yes=yes)
-    if not wads:
-        return
-    wad = wads[0]
-
-    snapshot_json: str | None = None
-    if stats_file:
-        try:
-            wad_stats = parse_stats_file(stats_file)
-            snapshot_json = stats_to_json(wad_stats)
-            played = wad_stats.played_maps
-            console.print(
-                f"[dim]Parsed {wad_stats.format}: "
-                f"{len(played)} map(s) played, "
-                f"total time {wad_stats.total_time_display}[/dim]"
-            )
-        except (ValueError, OSError) as e:
-            err_console.print(f"[red]Failed to parse stats file: {e}[/red]")
-            return
-    elif wad.get("stats_snapshot"):
-        snapshot_json = wad["stats_snapshot"]
-        wad_stats = stats_from_json(snapshot_json)
-        played = wad_stats.played_maps
-        console.print(
-            f"[dim]Auto-attaching stats: {len(played)} map(s) played, "
-            f"total time {wad_stats.total_time_display}[/dim]"
-        )
-
-    completion_id = db.add_wad_completion(
-        wad["id"], stats_snapshot=snapshot_json, notes=notes
-    )
-    count = db.get_times_beaten(wad["id"])
-    msg = f"[green]Added completion for {wad['title']}[/green] (now beaten {count} time(s))"
-    if snapshot_json:
-        msg += " [dim](with stats)[/dim]"
-    console.print(msg)
-
-
-@beaten_cmd.command(name="attach")
-@click.argument("query")
-@click.argument("completion_id", type=int, required=False)
-@click.option("--stats-file", "-s", type=click.Path(exists=True), required=True,
-              help="Stats file to attach (stats.txt or levelstat.txt)")
-@click.option("--yes", "-y", is_flag=True, help="Auto-select first match if multiple")
-def beaten_attach(query: str, completion_id: int | None, stats_file: str, yes: bool):
-    """Attach a stats file to an existing completion record.
-
-    If COMPLETION_ID is not given, attaches to the most recent completion.
-
-    \b
-    Examples:
-        caco beaten attach "Doom 2 In Retrospect" --stats-file stats.txt
-        caco beaten attach "Doom 2 In Retrospect" 42 -s stats.txt
-    """
-    wads = resolve_wad_query(query, mode="pick", yes=yes)
-    if not wads:
-        return
-    wad = wads[0]
-
-    completions = db.get_wad_completions(wad["id"])
-    if not completions:
-        err_console.print(f"[dim]{wad['title']} has no completion records[/dim]")
-        return
-
-    if completion_id:
-        target = None
-        for c in completions:
-            if c["id"] == completion_id:
-                target = c
-                break
-        if not target:
-            err_console.print(f"[red]Completion #{completion_id} not found[/red]")
-            return
-    else:
-        target = completions[0]  # Most recent
-
-    try:
-        wad_stats = parse_stats_file(stats_file)
-        snapshot_json = stats_to_json(wad_stats)
-        played = wad_stats.played_maps
-    except (ValueError, OSError) as e:
-        err_console.print(f"[red]Failed to parse stats file: {e}[/red]")
-        return
-
-    if target.get("stats_snapshot") and not yes:
-        console.print(f"Completion #{target['id']} already has stats attached. Overwrite?")
-        if not click.confirm("Proceed?"):
-            return
-
-    db.update_wad_completion(target["id"], stats_snapshot=snapshot_json)
-    date = target["completed_at"][:16].replace("T", " ") if target["completed_at"] else "-"
-    console.print(
-        f"[green]Attached stats to completion #{target['id']} ({date})[/green] "
-        f"[dim]({wad_stats.format}: {len(played)} map(s), "
-        f"time {wad_stats.total_time_display})[/dim]"
-    )
-
-
-@beaten_cmd.command(name="remove")
-@click.argument("query")
-@click.argument("completion_id", type=int, required=False)
-@click.option("--yes", "-y", is_flag=True, help="Skip confirmation / auto-select")
-def beaten_remove(query: str, completion_id: int | None, yes: bool):
-    """Remove a completion record.
-
-    If COMPLETION_ID is provided, removes that specific record.
-    Otherwise, removes the most recent completion.
-    """
-    wads = resolve_wad_query(query, mode="pick", yes=yes)
-    if not wads:
-        return
-    wad = wads[0]
-
-    completions = db.get_wad_completions(wad["id"])
-    if not completions:
-        console.print(f"[dim]{wad['title']} has no completion records[/dim]")
-        return
-
-    if completion_id:
-        # Remove specific completion
-        if db.delete_wad_completion(completion_id):
-            count = db.get_times_beaten(wad["id"])
-            console.print(f"[green]Removed completion #{completion_id}[/green] (now beaten {count} time(s))")
-        else:
-            err_console.print(f"[red]Completion #{completion_id} not found[/red]")
-    else:
-        # Remove most recent (first in list, since sorted DESC)
-        latest = completions[0]
-        if not yes:
-            date = latest["completed_at"][:16].replace("T", " ") if latest["completed_at"] else "unknown date"
-            console.print(f"Remove most recent completion from {date}?")
-            if not click.confirm("Proceed?"):
-                return
-
-        db.delete_wad_completion(latest["id"])
-        count = db.get_times_beaten(wad["id"])
-        console.print(f"[green]Removed most recent completion[/green] (now beaten {count} time(s))")
-
-
-@beaten_cmd.command(name="set")
-@click.argument("query")
-@click.argument("count", type=int)
-@click.option("--yes", "-y", is_flag=True, help="Skip confirmation / auto-select")
-def beaten_set(query: str, count: int, yes: bool):
-    """Set completion count to a specific number."""
-    if count < 0:
-        err_console.print("[red]Count cannot be negative[/red]")
-        return
-
-    wads = resolve_wad_query(query, mode="pick", yes=yes)
-    if not wads:
-        return
-    wad = wads[0]
-
-    current = db.get_times_beaten(wad["id"])
-    if current == count:
-        console.print(f"[dim]{wad['title']} is already set to {count} completion(s)[/dim]")
-        return
-
-    if not yes:
-        if count > current:
-            console.print(f"This will add {count - current} completion record(s)")
-        else:
-            console.print(f"This will remove {current - count} completion record(s)")
-        if not click.confirm("Proceed?"):
-            return
-
-    db.set_wad_completion_count(wad["id"], count)
-    console.print(f"[green]Set {wad['title']} to {count} completion(s)[/green]")
-
-
 def _build_stats_entries(wad: dict) -> list[dict]:
     """Build a list of stats entries: live first, then completions with stats.
 
@@ -414,52 +179,12 @@ def _build_stats_entries(wad: dict) -> list[dict]:
     return entries
 
 
-def _find_completion_with_stats(
-    wad: dict, completion_id: int | None, *, allow_live: bool = False,
-) -> dict | None:
-    """Find a completion with stats_snapshot, or None."""
-    completions = db.get_wad_completions(wad["id"])
-
-    if completion_id:
-        for c in completions:
-            if c["id"] == completion_id:
-                if not c.get("stats_snapshot"):
-                    err_console.print(
-                        f"[dim]Completion #{completion_id} has no stats attached[/dim]"
-                    )
-                    return None
-                return c
-        err_console.print(f"[red]Completion #{completion_id} not found[/red]")
-        return None
-
-    # Find most recent completion with stats
-    for c in completions:
-        if c.get("stats_snapshot"):
-            return c
-
-    # Fall back to live stats if allowed
-    if allow_live and wad.get("stats_snapshot"):
-        return {
-            "id": None,
-            "completed_at": None,
-            "stats_snapshot": wad["stats_snapshot"],
-            "notes": None,
-            "_live": True,
-        }
-
-    if not completions:
-        err_console.print(f"[dim]{wad['title']} has no completion records[/dim]")
-    else:
-        err_console.print(f"[dim]No completions with stats found for {wad['title']}[/dim]")
-    return None
-
-
 def _entry_label(entry: dict) -> str:
     """Build a display label for a stats entry."""
     if entry.get("_live"):
         return "Current (live)"
     date = entry["completed_at"][:16].replace("T", " ") if entry.get("completed_at") else "-"
-    return f"Completion #{entry['id']} ({date})"
+    return f"Completion ({date})"
 
 
 def _print_entry(entry: dict, *, plain: bool = False) -> None:
@@ -484,74 +209,6 @@ def _print_entry(entry: dict, *, plain: bool = False) -> None:
         _print_stats_txt_table(played)
     else:
         _print_levelstat_table(played)
-
-
-@beaten_cmd.command(name="stats")
-@click.argument("query")
-@click.argument("completion_id", type=int, required=False)
-@click.option("--live", is_flag=True, help="Show only live stats snapshot")
-@click.option("--plain", is_flag=True, help="Output as TSV for scripting")
-@click.option("--yes", "-y", is_flag=True, help="Auto-select first match if multiple")
-def beaten_stats(query: str, completion_id: int | None, live: bool, plain: bool, yes: bool):
-    """Show per-map statistics for a WAD.
-
-    Without COMPLETION_ID, shows all stats entries — live stats first,
-    then each completion with stats. With COMPLETION_ID, shows just that one.
-    Use --live to show only the current live stats snapshot.
-
-    \b
-    Examples:
-        caco beaten stats "Doom 2 In Retrospect"           # all entries
-        caco beaten stats "Doom 2 In Retrospect" 42        # specific completion
-        caco beaten stats "Doom 2 In Retrospect" --live    # live stats only
-        caco beaten stats "Doom 2 In Retrospect" --plain   # all, TSV format
-    """
-    wads = resolve_wad_query(query, mode="pick", yes=yes)
-    if not wads:
-        return
-    wad = wads[0]
-
-    # --live: show only the live stats snapshot
-    if live:
-        if not wad.get("stats_snapshot"):
-            err_console.print(f"[dim]No live stats for {wad['title']}[/dim]")
-            return
-        entry = {
-            "id": None, "completed_at": None,
-            "stats_snapshot": wad["stats_snapshot"],
-            "notes": None, "_live": True,
-        }
-        if not plain:
-            console.print(f"\n[bold]{wad['title']}[/bold] — Map Statistics\n")
-        _print_entry(entry, plain=plain)
-        return
-
-    # Specific completion ID: show just that one (original behavior)
-    if completion_id is not None:
-        comp = _find_completion_with_stats(wad, completion_id)
-        if not comp:
-            return
-        if not plain:
-            console.print(f"\n[bold]{wad['title']}[/bold] — Map Statistics\n")
-        _print_entry(comp, plain=plain)
-        return
-
-    # Default: show all entries (live + completions)
-    entries = _build_stats_entries(wad)
-    if not entries:
-        err_console.print(f"[dim]No stats available for {wad['title']}[/dim]")
-        return
-
-    if not plain:
-        console.print(f"\n[bold]{wad['title']}[/bold] — Map Statistics\n")
-
-    for i, entry in enumerate(entries):
-        if i > 0:
-            if plain:
-                print()
-            else:
-                console.print()
-        _print_entry(entry, plain=plain)
 
 
 def _print_stats_plain(wad_stats: WadStats) -> None:
@@ -635,47 +292,3 @@ def _print_levelstat_table(maps: list) -> None:
     console.print(table)
 
 
-@beaten_cmd.command(name="export")
-@click.argument("query")
-@click.argument("completion_id", type=int, required=False)
-@click.option("--live", is_flag=True, help="Export live stats snapshot instead of completion")
-@click.option("--output", "-o", type=click.Path(), help="Write to file instead of stdout")
-@click.option("--yes", "-y", is_flag=True, help="Auto-select first match if multiple")
-def beaten_export(query: str, completion_id: int | None, live: bool, output: str | None, yes: bool):
-    """Export per-map stats back to original text format.
-
-    If COMPLETION_ID is not given, uses the most recent completion with stats.
-    Use --live to export the current live stats snapshot instead.
-
-    \b
-    Examples:
-        caco beaten export "Doom 2 In Retrospect"
-        caco beaten export "Doom 2 In Retrospect" --output stats.txt
-        caco beaten export "Doom 2 In Retrospect" 42 -o levelstat.txt
-        caco beaten export "Doom 2 In Retrospect" --live
-    """
-    wads = resolve_wad_query(query, mode="pick", yes=yes)
-    if not wads:
-        return
-    wad = wads[0]
-
-    if live:
-        if not wad.get("stats_snapshot"):
-            err_console.print(f"[dim]No live stats for {wad['title']}[/dim]")
-            return
-        snapshot = wad["stats_snapshot"]
-    else:
-        comp = _find_completion_with_stats(wad, completion_id, allow_live=True)
-        if not comp:
-            return
-        snapshot = comp["stats_snapshot"]
-
-    wad_stats = stats_from_json(snapshot)
-    text = format_stats(wad_stats)
-
-    if output:
-        from pathlib import Path
-        Path(output).write_text(text)
-        console.print(f"[green]Exported stats to {output}[/green]")
-    else:
-        print(text, end="")
