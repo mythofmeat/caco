@@ -1,7 +1,0 @@
-- [x] manage sourceport configs
-  - centrally managed configuration within `~/.local/share/caco/sourceports/{sourceport}/{config_profile}.cfg`
-  - `caco play --config controller id:73` syntax
-  - `caco profile` command group (ls, create, edit, cp, rm, path)
-  - auto-created `default` profile on first play for dsda-family ports
-  - per-WAD `custom_config` column for profile override
-  - `config:` query field for searching by profile name
