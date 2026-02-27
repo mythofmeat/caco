@@ -1,0 +1,2 @@
+- [ ] support for having additional files automatically loaded with a given wad (such as music WADs or DEH patches or multiple PWADs)
+- [ ] not sure what the cli syntax of this should be
