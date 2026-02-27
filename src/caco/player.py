@@ -264,7 +264,7 @@ def play(
                 error_parts.append(f"\nSource: {source_url}")
 
         error_parts.append(f"\n\nDownload the WAD file, then link it with:")
-        error_parts.append(f"  caco link {wad_id} /path/to/downloaded.wad")
+        error_parts.append(f"  caco modify id:{wad_id} --link /path/to/downloaded.wad")
 
         raise ValueError("".join(error_parts))
 
@@ -384,7 +384,7 @@ def play_iwad(
     if not Path(resolved).exists():
         raise FileNotFoundError(
             f"IWAD '{iwad_name}' not found. "
-            "Register it with: caco iwad import /path/to/iwad.wad"
+            "Register it with: caco import /path/to/iwad.wad"
         )
 
     # Determine sourceport

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.1.1] - 2026-02-27
+
+Final QA pass on CLI rework.
+
+### Fixed
+
+- **`player.py` stale error messages**: `caco link {id}` → `caco modify id:{id} --link`,
+  `caco iwad import` → `caco import`
+
+### Removed
+
+- **`TODO/cli-rework/`**: All items completed; removed folder
+
+---
+
 ## [2.1.0] - 2026-02-27
 
 Merge `beaten` command group into `modify` and `info`.
