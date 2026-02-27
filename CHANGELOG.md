@@ -2,12 +2,11 @@
 
 All notable changes to Caco are documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/),
-and this project adheres to [Semantic Versioning](https://semver.org/).
+Development log for Caco.
 
 ---
 
-## [2.6.1] - 2026-02-28
+## 2026-02-28
 
 Consolidate complevel to single `complevel INTEGER` column and remove redundant `beaten` command group.
 
@@ -31,7 +30,7 @@ Consolidate complevel to single `complevel INTEGER` column and remove redundant 
 
 ---
 
-## [2.6.0] - 2026-02-28
+## 2026-02-28
 
 id24 play integration: COMPLVL lump detection, auto-load id24 resource WADs during play, and complevel flags for compatible sourceports.
 
@@ -72,7 +71,7 @@ id24 play integration: COMPLVL lump detection, auto-load id24 resource WADs duri
 
 ---
 
-## [2.5.0] - 2026-02-27
+## 2026-02-27
 
 id24 WAD management: register, list, and remove id24 content files (Legacy of Rust, id24res, modder packs) from the 2024 Doom re-release.
 
@@ -97,7 +96,7 @@ id24 WAD management: register, list, and remove id24 content files (Legacy of Ru
 
 ---
 
-## [2.4.0] - 2026-02-27
+## 2026-02-27
 
 Demo recording and playback: record, list, play back, and clean demo files per-WAD.
 
@@ -121,7 +120,7 @@ Demo recording and playback: record, list, play back, and clean demo files per-W
 
 ---
 
-## [2.3.0] - 2026-02-27
+## 2026-02-27
 
 Save game management: list, backup, restore, and clean save files per-WAD.
 
@@ -153,7 +152,7 @@ Save game management: list, backup, restore, and clean save files per-WAD.
 
 ---
 
-## [2.2.0] - 2026-02-27
+## 2026-02-27
 
 Per-session map tracking: see which maps were completed in each play session.
 
@@ -187,11 +186,11 @@ Per-session map tracking: see which maps were completed in each play session.
 ### Removed
 
 - **`TODO/wad-features/multi-file-wads.todo.md`**: Deleted — companion files
-  feature fully implemented in v2.1.0
+  feature fully implemented
 
 ---
 
-## [2.1.1] - 2026-02-27
+## 2026-02-27
 
 Final QA pass on CLI rework.
 
@@ -211,7 +210,7 @@ Final QA pass on CLI rework.
 
 ---
 
-## [2.1.0] - 2026-02-27
+## 2026-02-27
 
 Multi-file WAD support, beaten command merge into modify/info, sourceport config profile management, crash detection, and complevel auto-detection.
 
@@ -314,7 +313,7 @@ Multi-file WAD support, beaten command merge into modify/info, sourceport config
 
 ---
 
-## [2.0.2] - 2026-02-27
+## 2026-02-27
 
 ### Added
 
@@ -350,7 +349,7 @@ Multi-file WAD support, beaten command merge into modify/info, sourceport config
 
 ---
 
-## [2.0.1] - 2026-02-27
+## 2026-02-27
 
 Auto-enrich imports with Doom Wiki metadata.
 
@@ -367,7 +366,7 @@ Auto-enrich imports with Doom Wiki metadata.
 
 ---
 
-## [2.0.0] - 2026-02-27
+## 2026-02-27
 
 **Breaking**: CLI rework to follow beets conventions more closely.
 
@@ -421,7 +420,7 @@ Auto-enrich imports with Doom Wiki metadata.
 
 ---
 
-## [1.7.4] - 2026-02-27
+## 2026-02-27
 
 Fix dsda-family sourceport save directory placement.
 
@@ -440,7 +439,7 @@ Fix dsda-family sourceport save directory placement.
 
 ---
 
-## [1.7.3] - 2026-02-27
+## 2026-02-27
 
 Playability improvements: direct IWAD play, sourceport detection, config auto-update.
 
@@ -468,7 +467,7 @@ Playability improvements: direct IWAD play, sourceport detection, config auto-up
 
 ---
 
-## [1.7.2] - 2026-02-27
+## 2026-02-27
 
 Reworked `beaten stats` to show all stats entries and added `--live` flag.
 
@@ -494,7 +493,7 @@ Reworked `beaten stats` to show all stats entries and added `--live` flag.
 
 ---
 
-## [1.7.1] - 2026-02-27
+## 2026-02-27
 
 Managed IWAD directory restructure and live stats in GUI/TUI.
 
@@ -515,7 +514,7 @@ Managed IWAD directory restructure and live stats in GUI/TUI.
 
 ---
 
-## [1.7.0] - 2026-02-26
+## 2026-02-26
 
 Automatic per-map stats tracking after play sessions.
 
@@ -535,7 +534,7 @@ Automatic per-map stats tracking after play sessions.
 
 ---
 
-## [1.6.0] - 2026-02-26
+## 2026-02-26
 
 Per-WAD data directories and sourceport family registry.
 
@@ -563,7 +562,7 @@ Per-WAD data directories and sourceport family registry.
 
 ---
 
-## [1.5.0] - 2026-02-26
+## 2026-02-26
 
 Managed IWAD storage and WAD cache relocation.
 
@@ -594,7 +593,7 @@ Managed IWAD storage and WAD cache relocation.
 
 ---
 
-## [1.4.0] - 2026-02-26
+## 2026-02-26
 
 IWAD management — first-class IWAD registry with family/variant model and
 configurable priority resolution.
@@ -636,7 +635,7 @@ configurable priority resolution.
 
 ---
 
-## [1.3.1] - 2026-02-26
+## 2026-02-26
 
 GUI stats import/export and context menu access.
 
@@ -660,7 +659,7 @@ GUI stats import/export and context menu access.
 
 ---
 
-## [1.3.0] - 2026-02-25
+## 2026-02-25
 
 Per-map statistics import/export and session dialog cleanup.
 
@@ -695,7 +694,7 @@ Per-map statistics import/export and session dialog cleanup.
 
 ---
 
-## [1.2.2] - 2026-02-20
+## 2026-02-20
 
 Documentation accuracy overhaul and version alignment.
 
@@ -728,7 +727,7 @@ Documentation accuracy overhaul and version alignment.
 
 ---
 
-## [1.2.1] - 2026-02-20
+## 2026-02-20
 
 Major internal quality overhaul: database refactoring, security hardening,
 performance improvements, comprehensive test suite, and code modernization
