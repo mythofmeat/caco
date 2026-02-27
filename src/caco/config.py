@@ -24,6 +24,13 @@ DEFAULT_CONFIG = {
     "sourceport_args": [],
     "download_mirror": 0,
     "link_mode": "move",
+    "manage_data_dirs": True,
+    "auto_stats": True,
+    "auto_detect_iwad": True,
+    "auto_detect_complevel": True,
+    "cache_max_size_gb": 0,
+    "cache_max_age_days": 0,
+    "cache_auto_clean": False,
 }
 
 # Default list configuration
