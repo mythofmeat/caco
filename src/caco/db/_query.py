@@ -226,8 +226,8 @@ def _build_term_sql(term: QueryTerm) -> tuple[str, list[Any]]:
         from caco.complevel import parse_complevel
         cl = parse_complevel(term.value)
         if cl is not None:
-            clause = "(wads.custom_complevel = ? OR wads.complevel = ?)"
-            params = [str(cl), cl]
+            clause = "wads.complevel = ?"
+            params = [cl]
         else:
             return "", []
 

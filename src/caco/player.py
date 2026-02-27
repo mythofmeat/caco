@@ -259,12 +259,20 @@ def _auto_track_stats(wad_id: int, wad: dict) -> str | None:
 def _get_id24_resource_args(wad: dict, wad_path: Path | None) -> list[str]:
     """Return id24 resource WAD paths to prepend to the -file list.
 
-    - Any WAD with custom_complevel set (COMPLVL lump = id24 signal) gets id24res.wad
+    - Any WAD with a COMPLVL lump (id24 signal) gets id24res.wad
     - When playing id1.wad specifically, also load id1-res, id1-tex, id1-weap, id1-mus
     """
     file_args: list[str] = []
 
-    if not wad.get("custom_complevel"):
+    # Check for COMPLVL lump directly — this correctly identifies id24 WADs
+    # without relying on any DB column (a regular WAD with heuristic-detected
+    # complevel should NOT trigger id24 resource loading)
+    has_complvl = False
+    if wad_path and Path(wad_path).exists():
+        from caco.iwad_detect import detect_complvl
+        has_complvl = detect_complvl(wad_path) is not None
+
+    if not has_complvl:
         return file_args
 
     # Load id24res.wad for any id24 WAD
@@ -355,25 +363,25 @@ def play(
             db.update_wad(wad_id, custom_iwad=detected)
             wad["custom_iwad"] = detected
 
-    # Auto-detect complevel from COMPLVL lump (id24 signal) if not explicitly set
-    if not wad.get("custom_complevel") and wad_path and get_auto_detect_complevel():
+    # Auto-detect complevel if not explicitly set
+    if wad.get("complevel") is None and wad_path and get_auto_detect_complevel():
+        # Try COMPLVL lump first (id24 signal)
         from caco.iwad_detect import detect_complvl
 
         detected_cl = detect_complvl(wad_path)
         if detected_cl is not None:
             logger.info("Auto-detected complevel (COMPLVL lump): %d for WAD %d", detected_cl, wad_id)
-            db.update_wad(wad_id, custom_complevel=str(detected_cl))
-            wad["custom_complevel"] = str(detected_cl)
-
-    # Auto-detect complevel from heuristics if not set by either method
-    if wad.get("complevel") is None and not wad.get("custom_complevel") and wad_path and get_auto_detect_complevel():
-        from caco.complevel_detect import detect_complevel
-
-        detected_cl = detect_complevel(wad_path)
-        if detected_cl is not None:
-            logger.info("Auto-detected complevel (heuristic): %d for WAD %d", detected_cl, wad_id)
             db.update_wad(wad_id, complevel=detected_cl)
             wad["complevel"] = detected_cl
+        else:
+            # Fall back to heuristic detection
+            from caco.complevel_detect import detect_complevel
+
+            detected_cl = detect_complevel(wad_path)
+            if detected_cl is not None:
+                logger.info("Auto-detected complevel (heuristic): %d for WAD %d", detected_cl, wad_id)
+                db.update_wad(wad_id, complevel=detected_cl)
+                wad["complevel"] = detected_cl
 
     # Add IWAD (CLI option would be in extra_args, so: WAD-specific > global config)
     iwad = wad.get("custom_iwad") or get_iwad()
@@ -386,12 +394,12 @@ def play(
         cmd.extend(default_args)
 
     # Inject complevel flag if set and not already present in args
-    if wad.get("custom_complevel"):
+    if wad.get("complevel") is not None:
         all_args = cmd + (extra_args or [])
         if "-complevel" not in all_args:
             from caco.sourceports import get_complevel_args
 
-            cl_args = get_complevel_args(port, int(wad["custom_complevel"]))
+            cl_args = get_complevel_args(port, wad["complevel"])
             if cl_args:
                 cmd.extend(cl_args)
 
@@ -416,16 +424,6 @@ def play(
         if not profile_path.exists():
             profile_path.touch()
         cmd.extend(config_args)
-
-    # Auto-inject complevel arg from heuristic detection (if custom_complevel didn't already inject)
-    if wad.get("complevel") is not None and not wad.get("custom_complevel"):
-        all_args = cmd + (extra_args or [])
-        if "-complevel" not in all_args:
-            from caco.sourceports import get_complevel_args
-
-            cl_args = get_complevel_args(port, wad["complevel"])
-            if cl_args:
-                cmd.extend(cl_args)
 
     # Inject per-WAD data directory args (if enabled and sourceport is recognized)
     if get_manage_data_dirs():

@@ -36,14 +36,6 @@ COMPLEVEL_PATTERNS = {
     r'\bdsda[- ]?doom\b': lambda m: 21,  # Usually implies MBF21 support
 }
 
-# Backward-compat alias — prefer caco.complevel.COMPLEVEL_ALIASES for new code
-COMPLEVEL_SHORTCUTS: dict[str, int] = {
-    "vanilla": 2,
-    "boom": 9,
-    "mbf": 11,
-    "mbf21": 21,
-}
-
 
 def extract_complevel(text: str) -> int | None:
     """Extract complevel from post text.

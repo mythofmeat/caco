@@ -5,7 +5,6 @@ from caco.doomworld.models import ForumThread
 from caco.complevel import complevel_name  # noqa: F401
 from caco.doomworld.parser import (
     COMPLEVEL_NAMES,
-    COMPLEVEL_SHORTCUTS,
     DoomworldParser,
     extract_download_links,
     extract_complevel,
@@ -36,7 +35,6 @@ __all__ = [
     "ForumThread",
     # Constants
     "COMPLEVEL_NAMES",
-    "COMPLEVEL_SHORTCUTS",
     # Extraction functions
     "extract_download_links",
     "extract_complevel",

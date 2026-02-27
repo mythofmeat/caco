@@ -293,7 +293,7 @@ class TestMigrationVersioning:
     def test_schema_migrations_populated(self, db_mod, tmp_db):
         conn = db_mod.get_connection()
         rows = conn.execute("SELECT version, name FROM schema_migrations ORDER BY version").fetchall()
-        assert len(rows) == 21
+        assert len(rows) == 22
         assert rows[0]["version"] == 1
         conn.close()
 

@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.6.1] - 2026-02-28
+
+Consolidate complevel to single `complevel INTEGER` column and remove redundant `beaten` command group.
+
+### Changed
+
+- **Complevel column consolidation**: Merged `custom_complevel TEXT` into
+  `complevel INTEGER`; migration 22 copies non-null values; single column
+  used for both COMPLVL lump detection and heuristic detection
+- **id24 resource loading**: `_get_id24_resource_args()` now checks for COMPLVL
+  lump directly via `detect_complvl()` instead of relying on a DB column
+- **Complevel query**: `complevel:` field now queries single `complevel` column
+  (was OR-ing two columns)
+
+### Removed
+
+- **`beaten` command group**: Removed `caco beaten list/add/attach/remove/set`;
+  use `caco modify beaten+/beaten-/beaten=` instead
+- **`COMPLEVEL_SHORTCUTS`** in `doomworld/parser.py`: Redundant with
+  `caco.complevel.COMPLEVEL_ALIASES`
+- **`custom_complevel`** from `WadRecord` TypedDict and `ALLOWED_UPDATE_FIELDS`
+
+---
+
 ## [2.6.0] - 2026-02-28
 
 id24 play integration: COMPLVL lump detection, auto-load id24 resource WADs during play, and complevel flags for compatible sourceports.
@@ -15,14 +39,14 @@ id24 play integration: COMPLVL lump detection, auto-load id24 resource WADs duri
 
 - **COMPLVL lump detection** (`iwad_detect.py`): `detect_complvl()` inspects WAD
   files for the COMPLVL lump (id24 signal) and returns the complevel byte value;
-  auto-detected on first play and persisted to `custom_complevel` column
+  auto-detected on first play and persisted to `complevel` column
 - **Auto-load id24 resource WADs** (`player.py`): When a WAD has a COMPLVL lump,
   `id24res.wad` is automatically injected into the `-file` list; when playing
   `id1.wad` (Legacy of Rust), also loads `id1-res`, `id1-tex`, `id1-weap`,
   `id1-mus` from the id24 registry
 - **Complevel flags** (`sourceports.py`): `get_complevel_args()` passes
   `-complevel N` to sourceports that support it (dsda and woof families);
-  automatically injected during play when `custom_complevel` is set
+  automatically injected during play when `complevel` is set
 - **`complevel` modify field**: `caco modify id:1 complevel=boom` — accepts
   integer values or named shortcuts (vanilla=2, boom=9, mbf=11, mbf21=21);
   `!complevel` to clear
@@ -32,9 +56,8 @@ id24 play integration: COMPLVL lump detection, auto-load id24 resource WADs duri
   config section with human-readable name from `COMPLEVEL_NAMES`
 - **`auto_detect_complevel` config option** (default: true): Controls whether
   COMPLVL lump detection runs on first play
-- **`COMPLEVEL_SHORTCUTS`** in `doomworld/parser.py`: Named shortcut mapping
-  (vanilla, boom, mbf, mbf21) re-exported from `doomworld/__init__.py`
 - **Database migration 18**: Adds `custom_complevel TEXT` column to wads table
+  (superseded by migration 22 which consolidates to `complevel INTEGER`)
 - **Fish completions**: `complevel:` for ls queries, `complevel=` for modify,
   `!complevel` for clearing
 - **Tests**: COMPLVL detection (with/without lump, ZIP handling, edge cases),

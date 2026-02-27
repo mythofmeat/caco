@@ -530,7 +530,7 @@ def test_load_wad_data_nonexistent():
 
 
 def test_player_auto_detect_complevel(tmp_db, tmp_path):
-    """play() should detect COMPLVL lump and persist to custom_complevel."""
+    """play() should detect COMPLVL lump and persist to complevel."""
     from caco import db
 
     wad_id = db.add_wad(
@@ -565,11 +565,11 @@ def test_player_auto_detect_complevel(tmp_db, tmp_path):
         play(wad_id)
 
     updated = db.get_wad(wad_id)
-    assert updated["custom_complevel"] == "21"
+    assert updated["complevel"] == 21
 
 
 def test_player_skips_complevel_when_set(tmp_db, tmp_path):
-    """play() should skip COMPLVL detection when custom_complevel already set."""
+    """play() should skip complevel detection when complevel already set."""
     from caco import db
 
     wad_id = db.add_wad(
@@ -581,7 +581,7 @@ def test_player_skips_complevel_when_set(tmp_db, tmp_path):
     wad_data = _build_wad([("COMPLVL", bytes([21])), ("MAP01", b"")])
     wad_path = tmp_path / "test.wad"
     wad_path.write_bytes(wad_data)
-    db.update_wad(wad_id, cached_path=str(wad_path), custom_complevel="9")
+    db.update_wad(wad_id, cached_path=str(wad_path), complevel=9)
 
     with (
         patch("caco.player.get_auto_detect_iwad", return_value=False),
@@ -602,6 +602,6 @@ def test_player_skips_complevel_when_set(tmp_db, tmp_path):
         from caco.player import play
         play(wad_id)
 
-    # Should remain "9", not overwritten with "21"
+    # Should remain 9, not overwritten with 21
     updated = db.get_wad(wad_id)
-    assert updated["custom_complevel"] == "9"
+    assert updated["complevel"] == 9
