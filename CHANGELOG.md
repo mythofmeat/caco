@@ -8,6 +8,26 @@ Development log for Caco.
 
 ## 2026-02-28
 
+Strip version numbers and clean up git branches — project is pre-release alpha,
+not following semver.
+
+### Changed
+
+- **Changelog**: Stripped version numbers from all section headers (dates only);
+  replaced semver preamble with plain description
+- **Package version**: Set to `0.0.1-dev` in both `pyproject.toml` and
+  `src/caco/__init__.py`
+
+### Removed
+
+- **Git branches**: Deleted 18 stale remote branches (versioned releases,
+  feature branches, worktrees) and 9 local branches; only `main` and `dev`
+  remain
+
+---
+
+## 2026-02-28
+
 Consolidate complevel to single `complevel INTEGER` column and remove redundant `beaten` command group.
 
 ### Changed
