@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.1.1] - 2026-02-27
+
+### Fixed
+
+- **Config auto-update**: `manage_data_dirs`, `auto_stats`, `auto_detect_iwad`,
+  `auto_detect_complevel`, `cache_max_size_gb`, `cache_max_age_days`, and
+  `cache_auto_clean` are now included in `DEFAULT_CONFIG` so they appear in
+  the config file via `ensure_config_keys()` — previously they were only
+  defined as `.get()` defaults and not discoverable in the config file
+
+---
+
 ## [2.1.0] - 2026-02-27
 
 Sourceport config profile management for dsda-family ports.
