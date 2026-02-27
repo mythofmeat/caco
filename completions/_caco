@@ -1,0 +1,332 @@
+#compdef caco
+
+# Zsh completions for caco
+# Install: caco completions --install
+# Or place in a directory in your $fpath
+
+# ---------------------------------------------------------------------------
+# Dynamic data helpers (call caco _complete for live data)
+# ---------------------------------------------------------------------------
+
+__caco_wads() {
+    local -a wads
+    local id title
+    while IFS=$'\t' read -r id title; do
+        [[ -n "$id" ]] && wads+=("${id}:${title//:/\\:}")
+    done < <(caco _complete wads 2>/dev/null)
+    _describe 'WAD' wads
+}
+
+__caco_tags() {
+    local -a tags
+    tags=("${(@f)$(caco _complete tags 2>/dev/null)}")
+    compadd -a tags
+}
+
+__caco_iwads() {
+    local -a iwads
+    iwads=("${(@f)$(caco _complete iwads 2>/dev/null)}")
+    compadd -a iwads
+}
+
+__caco_sourceports() {
+    local -a ports
+    ports=("${(@f)$(caco _complete sourceports 2>/dev/null)}")
+    compadd -a ports
+}
+
+# ---------------------------------------------------------------------------
+# Static completion helpers
+# ---------------------------------------------------------------------------
+
+__caco_query_fields() {
+    local -a fields
+    fields=(
+        'id\::Filter by ID'
+        'title\::Filter by title'
+        'author\::Filter by author'
+        'year\::Filter by year'
+        'filename\::Filter by filename'
+        'tag\::Filter by tag'
+        'status\::Filter by status'
+        'source\::Filter by source'
+        'iwad\::Filter by IWAD'
+    )
+    _describe 'query field' fields
+}
+
+__caco_sort_fields() {
+    local -a fields
+    fields=("${(@f)$(caco _complete sort-fields 2>/dev/null)}")
+    compadd -a fields
+}
+
+__caco_modify_fields() {
+    local -a fields
+    fields=("${(@f)$(caco _complete modify-fields 2>/dev/null)}")
+    compadd -a fields
+}
+
+# Combined completion actions for _arguments specs
+__caco_query_or_sort() { __caco_query_fields; __caco_sort_fields; }
+__caco_wads_or_query() { __caco_wads; __caco_query_fields; }
+__caco_wads_query_modify() { __caco_wads; __caco_query_fields; __caco_modify_fields; }
+
+# ---------------------------------------------------------------------------
+# Per-command completions
+# ---------------------------------------------------------------------------
+
+_caco_ls() {
+    _arguments \
+        '(-o --output)'{-o,--output}'[Output format]:format:(json plain)' \
+        '--tags[List all tags with counts]' \
+        '--iwad[List registered IWADs]' \
+        '--help[Show help]' \
+        '*:query:__caco_query_or_sort'
+}
+
+_caco_info() {
+    _arguments \
+        '(-o --output)'{-o,--output}'[Output format]:format:(json plain)' \
+        '--help[Show help]' \
+        '*:query:__caco_wads_or_query'
+}
+
+_caco_modify() {
+    _arguments \
+        '(-y --yes)'{-y,--yes}'[Skip confirmation]' \
+        '--dry-run[Preview changes]' \
+        '--link[Link a local file]:file:_files' \
+        '--help[Show help]' \
+        '*:query:__caco_wads_query_modify'
+}
+
+_caco_trash() {
+    _arguments \
+        '--list[Show trashed WADs]' \
+        '--purge[Permanently delete]' \
+        '--restore[Restore from trash]' \
+        '--iwad[Remove IWAD]:iwad:__caco_iwads' \
+        '(-y --yes)'{-y,--yes}'[Skip confirmation]' \
+        '--dry-run[Preview changes]' \
+        '(-o --output)'{-o,--output}'[Output format]:format:(json plain)' \
+        '--help[Show help]' \
+        '*:query:__caco_wads_or_query'
+}
+
+_caco_play() {
+    _arguments \
+        '(-p --sourceport)'{-p,--sourceport}'[Sourceport to use]:sourceport:__caco_sourceports' \
+        '(-1 --first)'{-1,--first}'[Auto-select first match]' \
+        '--iwad[Play IWAD directly]:iwad:__caco_iwads' \
+        '--help[Show help]' \
+        '*:query:__caco_wads_or_query'
+}
+
+_caco_import() {
+    _arguments \
+        '--idgames[Force idgames source]' \
+        '--doomwiki[Force Doom Wiki source]' \
+        '--doomworld[Force Doomworld forum source]' \
+        '--local[Force local file import]' \
+        '--url[Import from URL]:url:' \
+        '(-t --title)'{-t,--title}'[Override title]:title:' \
+        '(-a --author)'{-a,--author}'[Author name]:author:' \
+        '--year[Year released]:year:' \
+        '*--tag[Add tag]:tag:__caco_tags' \
+        '(-f --force)'{-f,--force}'[Import even if duplicate exists]' \
+        '(-m --multi)'{-m,--multi}'[Allow multi-select]' \
+        '(-d --description)'{-d,--description}'[Description]:description:' \
+        '(-s --smart)'{-s,--smart}'[Use LLM for metadata extraction]' \
+        '--llm-backend[LLM backend]:backend:(claude-code openrouter anthropic openai)' \
+        '--llm-model[Model override]:model:' \
+        '--help[Show help]' \
+        '*:source:'
+}
+
+_caco_config() {
+    _arguments \
+        '(-e --edit)'{-e,--edit}'[Open config in editor]' \
+        '--help[Show help]'
+}
+
+_caco_completions() {
+    _arguments \
+        '--install[Install completions to shell config]' \
+        '--help[Show help]' \
+        '1:shell:(bash fish zsh)'
+}
+
+_caco_random() {
+    _arguments \
+        '--info[Print ID, title, and author]' \
+        '--help[Show help]' \
+        '*:query:__caco_query_fields'
+}
+
+_caco_stats() {
+    _arguments \
+        '(-p --period)'{-p,--period}'[Group by period]:period:(month year)' \
+        '(-n --limit)'{-n,--limit}'[Number of periods]:limit:' \
+        '--plain[Key=value output]' \
+        '--help[Show help]'
+}
+
+_caco_cache() {
+    local -a subcmds
+    subcmds=(
+        'list:List cached files'
+        'clear:Remove cached files'
+        'prune:Remove orphaned files'
+    )
+
+    if (( CURRENT == 2 )); then
+        _describe 'cache command' subcmds
+        return
+    fi
+
+    local subcmd="${words[2]}"
+    (( CURRENT-- ))
+    shift words
+
+    case "$subcmd" in
+        list)
+            _arguments \
+                '--plain[Output as TSV]' \
+                '--orphans[Show orphaned files]' \
+                '--help[Show help]'
+            ;;
+        clear)
+            _arguments \
+                '--all[Clear entire cache]' \
+                '--dry-run[Show what would be deleted]' \
+                '(-y --yes)'{-y,--yes}'[Skip confirmation]' \
+                '--help[Show help]'
+            ;;
+        prune)
+            _arguments \
+                '--dry-run[Show what would be deleted]' \
+                '(-y --yes)'{-y,--yes}'[Skip confirmation]' \
+                '--help[Show help]'
+            ;;
+    esac
+}
+
+_caco_beaten() {
+    local -a subcmds
+    subcmds=(
+        'list:List completion records'
+        'add:Add a completion record'
+        'attach:Attach stats to existing completion'
+        'remove:Remove a completion record'
+        'set:Set completion count'
+        'stats:Show per-map statistics'
+        'export:Export stats to file'
+    )
+
+    if (( CURRENT == 2 )); then
+        _describe 'beaten command' subcmds
+        return
+    fi
+
+    local subcmd="${words[2]}"
+    (( CURRENT-- ))
+    shift words
+
+    case "$subcmd" in
+        add)
+            _arguments \
+                '(-n --notes)'{-n,--notes}'[Notes for this completion]:notes:' \
+                '(-s --stats-file)'{-s,--stats-file}'[Import stats from file]:file:_files' \
+                '(-y --yes)'{-y,--yes}'[Auto-select first match]' \
+                '--help[Show help]' \
+                '*:query:__caco_wads_or_query'
+            ;;
+        attach)
+            _arguments \
+                '(-s --stats-file)'{-s,--stats-file}'[Stats file to attach]:file:_files' \
+                '(-y --yes)'{-y,--yes}'[Auto-select first match]' \
+                '--help[Show help]' \
+                '*:query:__caco_wads_or_query'
+            ;;
+        stats)
+            _arguments \
+                '--plain[TSV output for scripting]' \
+                '--live[Show only live stats]' \
+                '(-y --yes)'{-y,--yes}'[Auto-select first match]' \
+                '--help[Show help]' \
+                '*:query:__caco_wads_or_query'
+            ;;
+        export)
+            _arguments \
+                '(-o --output)'{-o,--output}'[Write to file]:file:_files' \
+                '--live[Export live stats]' \
+                '(-y --yes)'{-y,--yes}'[Auto-select first match]' \
+                '--help[Show help]' \
+                '*:query:__caco_wads_or_query'
+            ;;
+        list|remove|set)
+            _arguments \
+                '(-y --yes)'{-y,--yes}'[Auto-select first match]' \
+                '--help[Show help]' \
+                '*:query:__caco_wads_or_query'
+            ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
+# Main dispatcher
+# ---------------------------------------------------------------------------
+
+_caco() {
+    local state
+
+    local -a commands
+    commands=(
+        'ls:List WADs in your library'
+        'info:Show details about a WAD'
+        'modify:Modify WAD metadata'
+        'trash:Manage trash and removals'
+        'play:Play a WAD'
+        'import:Import WADs from various sources'
+        'config:View or edit configuration'
+        'random:Pick a random WAD'
+        'completions:Generate shell completions'
+        'stats:Show library statistics'
+        'beaten:Manage WAD completion records'
+        'cache:Manage WAD file cache'
+    )
+
+    if (( CURRENT == 2 )); then
+        _describe 'caco command' commands
+        local -a options
+        options=(
+            '--tui:Launch TUI interface'
+            '--gui:Launch GUI interface'
+            '--help:Show help'
+        )
+        _describe 'option' options
+        return
+    fi
+
+    local cmd="${words[2]}"
+    (( CURRENT-- ))
+    shift words
+
+    case "$cmd" in
+        ls) _caco_ls ;;
+        info) _caco_info ;;
+        modify) _caco_modify ;;
+        trash) _caco_trash ;;
+        play) _caco_play ;;
+        import) _caco_import ;;
+        config) _caco_config ;;
+        completions) _caco_completions ;;
+        random) _caco_random ;;
+        stats) _caco_stats ;;
+        cache) _caco_cache ;;
+        beaten) _caco_beaten ;;
+    esac
+}
+
+_caco "$@"

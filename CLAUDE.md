@@ -61,7 +61,8 @@ src/caco/
 │   ├── cache.py        # cache list/clear/prune
 │   ├── config_cmd.py   # config, completions commands
 │   ├── stats.py        # stats, beaten commands
-│   └── complete.py     # hidden _complete command for shell completions
+│   ├── complete.py     # hidden _complete command for shell completions
+│   └── _completion_scripts.py  # Embedded fish/bash/zsh completion scripts
 ├── iwad_detect.py  # Auto-detect IWAD family from WAD file PNAMES/map lumps
 ├── sourceports.py  # Sourceport family registry (exe→CLI flags for data/save redirection)
 ├── utils.py        # Shared utilities (coerce_str, BaseHttpClient, CacoSourceError, extract_year, parse_wad_directory)
@@ -297,9 +298,11 @@ src/caco/
 
 ## Completions
 - Always ensure that completions and `--help` flags are synced with any and all changes to functionality
-- Fish completions are in `completions/caco.fish`
+- Hand-crafted completion scripts for fish, bash, and zsh — all use `caco _complete` for dynamic data
+- Scripts embedded in `src/caco/cli/_completion_scripts.py` (works from installed packages); convenience copies at `completions/caco.fish`, `completions/caco.bash`, `completions/_caco`
+- `caco completions [shell]` outputs our hand-crafted scripts (not Click's generic completions)
 - Dynamic completion data via hidden `caco _complete <context>` command (contexts: `wads`, `tags`, `iwads`, `statuses`, `sort-fields`, `sourceports`, `modify-fields`, `query-fields`)
-- Fish helpers (`__caco_wads`, `__caco_tags`, `__caco_iwads`, `__caco_sourceports`) call `caco _complete` for fast, purpose-built data
+- Shell helpers (`__caco_wads`, `__caco_tags`, `__caco_iwads`, `__caco_sourceports`) call `caco _complete` for fast, purpose-built data
 
 ## Git Instructions
 - Commit working changes to git

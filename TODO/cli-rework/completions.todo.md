@@ -14,5 +14,10 @@
 
 ## Notes
 - Build on top of final command structure (implement after CLI rework)
-- Generate fish/bash/zsh scripts that call back to `caco _complete`
+- [x] Generate fish/bash/zsh scripts that call back to `caco _complete`
 - [x] Fish completions updated to use `caco _complete` helpers
+- [x] Bash completions using `_caco()` function + `caco _complete` helpers
+- [x] Zsh completions using `_arguments` + `_describe` + `caco _complete` helpers
+- [x] `caco completions [shell]` outputs hand-crafted scripts (not Click generic)
+- [x] Scripts embedded in `src/caco/cli/_completion_scripts.py` for installed packages
+- [x] Convenience copies at `completions/caco.bash` and `completions/_caco`

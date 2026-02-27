@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.0.2] - 2026-02-27
+
+### Added
+
+- **Hand-crafted bash completions**: Full `_caco()` completion function with
+  subcommand detection, dynamic WAD/tag/IWAD/sourceport lookups via
+  `caco _complete`, nested `beaten`/`cache` subcommand handling, and file
+  fallback for `--link`/`--stats-file` paths
+- **Hand-crafted zsh completions**: `_arguments`-based structured completion
+  with `_describe` for ID:Title WAD pairs, `_files` for path options, nested
+  dispatch for `beaten`/`cache` groups, and combined completion actions
+- **Embedded completion scripts**: `src/caco/cli/_completion_scripts.py` module
+  stores all three shell scripts as string constants — works from installed
+  packages, not just editable installs
+- **Convenience copies**: `completions/caco.bash` and `completions/_caco` (zsh)
+  alongside the existing `completions/caco.fish`
+
+### Changed
+
+- **`caco completions` command**: Now outputs hand-crafted scripts instead of
+  Click's generic completion mechanism; uses `click.echo()` to avoid Rich
+  mangling shell `[` brackets in output
+
+---
+
 ## [2.0.1] - 2026-02-27
 
 ### Added

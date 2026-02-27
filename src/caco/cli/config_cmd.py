@@ -98,20 +98,15 @@ def completions(shell: str | None, install: bool):
             err_console.print("[red]Could not detect shell. Specify: bash, fish, or zsh[/red]")
             sys.exit(1)
 
-    # Get completion script
-    from click.shell_completion import get_completion_class
+    # Get hand-crafted completion script
+    from caco.cli._completion_scripts import FISH_SCRIPT, BASH_SCRIPT, ZSH_SCRIPT
 
-    comp_cls = get_completion_class(shell)
-    if not comp_cls:
-        err_console.print(f"[red]Unsupported shell: {shell}[/red]")
-        sys.exit(1)
-
-    comp = comp_cls(cli, {}, "caco", "_CACO_COMPLETE")
-    script = comp.source()
+    scripts = {"fish": FISH_SCRIPT, "bash": BASH_SCRIPT, "zsh": ZSH_SCRIPT}
+    script = scripts[shell]
 
     if not install:
-        # Just print the script
-        console.print(script)
+        # Use click.echo to avoid Rich interpreting [ ] as markup in shell code
+        click.echo(script)
         return
 
     # Install to appropriate location

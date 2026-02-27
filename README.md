@@ -727,10 +727,18 @@ caco completions --install
 caco completions fish --install
 ```
 
-Manual installation (fish):
+Manual installation:
 
 ```bash
+# Fish
 cp completions/caco.fish ~/.config/fish/completions/
+
+# Bash — add to ~/.bashrc
+source ~/.local/share/bash-completion/completions/caco
+# Or: cp completions/caco.bash ~/.local/share/bash-completion/completions/caco
+
+# Zsh — add to ~/.zshrc: fpath=(~/.zfunc $fpath) && compinit
+cp completions/_caco ~/.zfunc/_caco
 ```
 
 ## Scripting
