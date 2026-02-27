@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.2.0] - 2026-02-27
+
+Per-session map tracking: see which maps were completed in each play session.
+
+### Added
+
+- **Per-session map tracking**: Each play session now captures stats snapshots
+  before and after launching the sourceport, enabling per-session map delta
+  tracking
+- **`caco sessions` command**: Show play session history with per-session map
+  info — displays date, start time, duration, sourceport, and maps completed;
+  `--plain` for TSV output, `--yes`/`-y` for auto-select
+- **`compute_stats_delta()`** in `wad_stats.py`: Diffs before/after
+  `WadStats` snapshots to determine which maps were played in a session;
+  handles both stats.txt (persistent/cumulative — detects exit count changes)
+  and levelstat.txt (all maps are this session's) semantics
+- **`_read_stats_snapshot()`** in `player.py`: Extracted from
+  `_auto_track_stats()` — reads stats file to JSON string for reuse
+- **`update_session_stats()`** in `db/_sessions.py`: Attaches before/after
+  stats snapshots to session records
+- **Migration #15**: `stats_before` and `stats_after` TEXT columns on
+  `sessions` table
+- **Fish completions**: `sessions` command with `--plain` and `--yes`
+- **Tests**: 21 new tests covering delta computation, session stats CRUD,
+  migration, `_read_stats_snapshot`, and CLI sessions command
+
+### Changed
+
+- **`_auto_track_stats()`**: Now returns the JSON string (or None) in
+  addition to storing it, enabling capture of the "after" snapshot
+
+### Removed
+
+- **`TODO/wad-features/multi-file-wads.todo.md`**: Deleted — companion files
+  feature fully implemented in v2.1.0
+
+---
+
 ## [2.1.0] - 2026-02-27
 
 Multi-file WAD support: companion files (DEH patches, music WADs, additional PWADs) stored and auto-loaded with WADs.
