@@ -1,1 +1,1 @@
-- [ ] automatically fetch doomwiki info if none exists
+- [x] automatically fetch doomwiki info if none exists

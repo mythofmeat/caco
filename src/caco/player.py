@@ -4,12 +4,14 @@ import json
 import logging
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
 from caco import db
 from caco.config import (
     find_wad_data_dir,
+    get_auto_detect_complevel,
     get_auto_detect_iwad,
     get_auto_stats,
     get_cache_dir,
@@ -19,6 +21,7 @@ from caco.config import (
     get_default_sourceport,
     get_iwad,
     get_manage_data_dirs,
+    get_profile_path,
     get_sourceport_args,
     get_wad_data_dir,
     resolve_iwad,
@@ -29,6 +32,19 @@ logger = logging.getLogger(__name__)
 
 # Callback for download progress: (downloaded_bytes, total_bytes, filename) -> None
 ProgressCallback = Callable[[int, int | None, str], None]
+
+
+@dataclass
+class PlayResult:
+    """Result of a play session."""
+
+    duration: int | None
+    exit_code: int | None
+
+    @property
+    def crashed(self) -> bool:
+        """True if the sourceport exited with a non-zero code."""
+        return self.exit_code is not None and self.exit_code != 0
 
 
 def get_wad_path(
@@ -233,11 +249,12 @@ def play(
     extra_args: list[str] | None = None,
     progress_callback: ProgressCallback | None = None,
     process_ref: list | None = None,
-) -> int | None:
+    config_profile: str | None = None,
+) -> PlayResult:
     """
     Play a WAD with the specified sourceport.
 
-    Returns the play session duration in seconds, or None if cancelled.
+    Returns a PlayResult with duration and exit code.
     """
     wad = db.get_wad(wad_id)
     if not wad:
@@ -292,6 +309,16 @@ def play(
             db.update_wad(wad_id, custom_iwad=detected)
             wad["custom_iwad"] = detected
 
+    # Auto-detect complevel if not explicitly set
+    if wad.get("complevel") is None and wad_path and get_auto_detect_complevel():
+        from caco.complevel_detect import detect_complevel
+
+        detected_cl = detect_complevel(wad_path)
+        if detected_cl is not None:
+            logger.info("Auto-detected complevel: %d for WAD %d", detected_cl, wad_id)
+            db.update_wad(wad_id, complevel=detected_cl)
+            wad["complevel"] = detected_cl
+
     # Add IWAD (CLI option would be in extra_args, so: WAD-specific > global config)
     iwad = wad.get("custom_iwad") or get_iwad()
     if iwad:
@@ -310,6 +337,27 @@ def play(
                 cmd.extend(wad_args)
         except json.JSONDecodeError:
             pass
+
+    # Inject managed config profile for dsda-family ports
+    profile_name = config_profile or wad.get("custom_config") or "default"
+    from caco.sourceports import get_config_args
+
+    profile_path = get_profile_path(port, profile_name)
+    config_args = get_config_args(port, str(profile_path))
+    if config_args:
+        # Auto-create profile if it doesn't exist
+        profile_path.parent.mkdir(parents=True, exist_ok=True)
+        if not profile_path.exists():
+            profile_path.touch()
+        cmd.extend(config_args)
+
+    # Auto-inject complevel arg if set on the WAD
+    if wad.get("complevel") is not None:
+        from caco.sourceports import get_complevel_args
+
+        cl_args = get_complevel_args(port, wad["complevel"])
+        if cl_args:
+            cmd.extend(cl_args)
 
     # Inject per-WAD data directory args (if enabled and sourceport is recognized)
     if get_manage_data_dirs():
@@ -354,28 +402,28 @@ def play(
     try:
         proc.wait()
     finally:
-        # End session and calculate duration
-        db.end_session(session_id)
+        # End session and calculate duration; always record exit code
+        db.end_session(session_id, exit_code=proc.returncode)
 
     # Auto-track stats from data directory
     _auto_track_stats(wad_id, wad)
 
-    # Return duration
+    # Build result
     sessions = db.get_sessions(wad_id)
-    if sessions:
-        return sessions[0].get("duration_seconds")
-    return None
+    duration = sessions[0].get("duration_seconds") if sessions else None
+    return PlayResult(duration=duration, exit_code=proc.returncode)
 
 
 def play_iwad(
     iwad_name: str,
     sourceport: str | None = None,
     extra_args: list[str] | None = None,
-) -> int:
+    config_profile: str | None = None,
+) -> PlayResult:
     """
     Play an IWAD directly with no PWAD.
 
-    Returns the play session duration in seconds (wall clock).
+    Returns a PlayResult with duration and exit code.
     """
     import time
 
@@ -407,6 +455,18 @@ def play_iwad(
     if default_args:
         cmd.extend(default_args)
 
+    # Inject managed config profile for dsda-family ports
+    profile_name = config_profile or "default"
+    from caco.sourceports import get_config_args
+
+    profile_path = get_profile_path(port, profile_name)
+    config_args = get_config_args(port, str(profile_path))
+    if config_args:
+        profile_path.parent.mkdir(parents=True, exist_ok=True)
+        if not profile_path.exists():
+            profile_path.touch()
+        cmd.extend(config_args)
+
     if extra_args:
         cmd.extend(extra_args)
 
@@ -426,7 +486,8 @@ def play_iwad(
 
     start = time.monotonic()
     proc.wait()
-    return int(time.monotonic() - start)
+    duration = int(time.monotonic() - start)
+    return PlayResult(duration=duration, exit_code=proc.returncode)
 
 
 def format_duration(seconds: int) -> str:

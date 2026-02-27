@@ -51,6 +51,19 @@ class TestUpdateWad:
         wad_id = db_mod.add_wad("Scythe", SourceType.IDGAMES)
         assert db_mod.update_wad(wad_id) is False
 
+    def test_update_complevel(self, db_mod):
+        wad_id = db_mod.add_wad("Scythe", SourceType.IDGAMES)
+        db_mod.update_wad(wad_id, complevel=9)
+        wad = db_mod.get_wad(wad_id)
+        assert wad["complevel"] == 9
+
+    def test_update_complevel_clear(self, db_mod):
+        wad_id = db_mod.add_wad("Scythe", SourceType.IDGAMES)
+        db_mod.update_wad(wad_id, complevel=9)
+        db_mod.update_wad(wad_id, complevel=None)
+        wad = db_mod.get_wad(wad_id)
+        assert wad["complevel"] is None
+
 
 class TestDeleteAndRestore:
     def test_soft_delete(self, db_mod):

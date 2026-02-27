@@ -65,7 +65,7 @@ def ls_cmd(args: tuple[str, ...], output: str | None, deleted: bool, tags: bool,
 
     \b
     Sort fields: id, playtime, rating, created, title, author, last_played, year
-    Query fields: id:, title:, author:, year:, filename:, tag:, status:, source:, iwad:
+    Query fields: id:, title:, author:, year:, filename:, tag:, status:, source:, iwad:, config:
     """
     # Mutually exclusive modes
     if tags and iwad_flag:
@@ -415,13 +415,18 @@ def info(
                 parts.append(c_stats)
                 console.print("".join(parts))
 
-        if wad.get("custom_iwad") or wad.get("custom_sourceport") or wad.get("custom_args"):
+        if wad.get("custom_iwad") or wad.get("custom_sourceport") or wad.get("custom_args") or wad.get("complevel") is not None or wad.get("custom_config"):
             console.print()
             console.print("[bold]Custom play config:[/bold]")
             if wad.get("custom_iwad"):
                 console.print(f"  IWAD: {wad['custom_iwad']}")
             if wad.get("custom_sourceport"):
                 console.print(f"  Sourceport: {wad['custom_sourceport']}")
+            if wad.get("complevel") is not None:
+                from caco.complevel import complevel_name
+                console.print(f"  Complevel: {wad['complevel']} ({complevel_name(wad['complevel'])})")
+            if wad.get("custom_config"):
+                console.print(f"  Config: {wad['custom_config']}")
             if wad.get("custom_args"):
                 try:
                     parsed_args = json.loads(wad["custom_args"])
@@ -483,7 +488,7 @@ def modify(
 
     \b
     Modifiable fields: title, author, year, description, status, rating,
-      notes, iwad, sourceport, args, idgames-id, version, tag
+      notes, iwad, sourceport, args, idgames-id, version, complevel, config, tag
     """
     from caco.config import get_link_mode
     from caco.wad_stats import parse_stats_file, stats_to_json, stats_from_json
@@ -595,9 +600,7 @@ def modify(
                 value: Any = action.value
                 if action.field == "status":
                     value = db.Status(value)
-                elif action.field == "rating":
-                    value = int(value)
-                elif action.field == "year":
+                elif action.field in ("rating", "year", "complevel"):
                     value = int(value)
                 updates[action.field] = value
 

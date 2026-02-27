@@ -15,6 +15,11 @@ Final QA pass on CLI rework.
 
 - **`player.py` stale error messages**: `caco link {id}` → `caco modify id:{id} --link`,
   `caco iwad import` → `caco import`
+- **Config auto-update**: `manage_data_dirs`, `auto_stats`, `auto_detect_iwad`,
+  `auto_detect_complevel`, `cache_max_size_gb`, `cache_max_age_days`, and
+  `cache_auto_clean` are now included in `DEFAULT_CONFIG` so they appear in
+  the config file via `ensure_config_keys()` — previously they were only
+  defined as `.get()` defaults and not discoverable in the config file
 
 ### Removed
 
@@ -24,7 +29,7 @@ Final QA pass on CLI rework.
 
 ## [2.1.0] - 2026-02-27
 
-Merge `beaten` command group into `modify` and `info`.
+Merge `beaten` command group into `modify` and `info`. Sourceport config profile management.
 
 ### Fixed
 
@@ -55,6 +60,29 @@ Merge `beaten` command group into `modify` and `info`.
   `add_wad_completion()`
 - **`update_wad()` `record_completion` parameter**: Suppresses auto-completion
   when beaten actions already handle it
+- **Config profile management**: Managed sourceport config files stored at
+  `~/.local/share/caco/sourceports/{exe}/{profile}.cfg` — caco owns the config
+  lifecycle so settings persist cleanly per-sourceport
+- **`caco profile` command group**: `ls`, `create`, `edit`, `cp`, `rm`, `path`
+  subcommands for managing config profiles
+- **`play --config`/`-C` option**: Override config profile for a play session
+  (e.g., `caco play --config controller id:1`)
+- **Per-WAD `custom_config`**: Store a profile override per WAD via
+  `caco modify id:1 config=controller` — automatically used on play
+- **`config:` query field**: Search WADs by config profile name
+  (e.g., `caco ls config:controller`)
+- **Auto-created default profile**: On first play with a dsda-family port, an
+  empty `default.cfg` is created and passed via `-config` — the sourceport
+  populates it with defaults on first launch
+- **Profile injection**: For dsda-family ports, `-config <path>` is always
+  injected; resolution order: CLI `--config` > WAD's `custom_config` > `"default"`
+- **Config helpers**: `get_sourceport_dir()`, `get_profile_path()`,
+  `list_profiles()` in `config.py`; `get_config_args()` in `sourceports.py`
+- **TUI/GUI support**: Config profile shown in info panel and editable in
+  WAD edit forms
+- **Fish completions**: `profile` subcommands, `play --config`, `modify config=`,
+  `ls config:` completions
+- **Migration #16**: `custom_config TEXT` column on wads table
 
 ### Removed
 
@@ -88,19 +116,6 @@ Merge `beaten` command group into `modify` and `info`.
   packages, not just editable installs
 - **Convenience copies**: `completions/caco.bash` and `completions/_caco` (zsh)
   alongside the existing `completions/caco.fish`
-
-### Changed
-
-- **`caco completions` command**: Now outputs hand-crafted scripts instead of
-  Click's generic completion mechanism; uses `click.echo()` to avoid Rich
-  mangling shell `[` brackets in output
-
----
-
-## [2.0.1] - 2026-02-27
-
-### Added
-
 - **`caco _complete` hidden command**: Purpose-built completion data for shell
   scripts — replaces slow `caco ls -o plain | awk` with direct SQL/registry
   lookups; supports 8 contexts: `wads`, `tags`, `iwads`, `statuses`,
@@ -114,6 +129,27 @@ Merge `beaten` command group into `modify` and `info`.
 
 - **Fish completions**: `__caco_wads` and `__caco_tags` now call
   `caco _complete` instead of parsing `caco ls -o plain` output through `awk`
+
+- **`caco completions` command**: Now outputs hand-crafted scripts instead of
+  Click's generic completion mechanism; uses `click.echo()` to avoid Rich
+  mangling shell `[` brackets in output
+
+---
+
+## [2.0.1] - 2026-02-27
+
+Auto-enrich imports with Doom Wiki metadata.
+
+### Added
+
+- **Auto Doom Wiki enrichment**: After importing from idgames, Doomworld, URL,
+  or local sources, caco automatically searches Doom Wiki for a matching title
+  and backfills missing author/year, appends wiki description (with separator),
+  and auto-links IWAD — never overwrites existing fields
+- **`auto_doomwiki_enrich` config option**: Controls auto-enrichment (default:
+  `true`); failures are silently logged and never affect the import result
+- **Fuzzy title matching**: `_normalize_title()` / `_titles_match()` helpers
+  strip accents, punctuation, and whitespace for reliable title comparison
 
 ---
 

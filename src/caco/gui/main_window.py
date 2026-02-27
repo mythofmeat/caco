@@ -430,16 +430,26 @@ class MainWindow(QMainWindow):
             # Unknown total: use indeterminate mode
             self._download_bar.setMaximum(0)
 
-    def _on_play_finished(self, wad_id: int, duration):
-        """Called when sourceport exits normally."""
+    def _on_play_finished(self, wad_id: int, result):
+        """Called when sourceport exits."""
         self._download_bar.hide()
-        from caco.player import format_duration
-        if duration:
+        from caco.player import format_duration, PlayResult
+
+        if isinstance(result, PlayResult) and result.duration:
             self._status_bar.showMessage(
-                f"Session ended ({format_duration(duration)})", 5000
+                f"Session ended ({format_duration(result.duration)})", 5000
             )
         else:
             self._status_bar.showMessage("Session ended", 5000)
+
+        if isinstance(result, PlayResult) and result.crashed:
+            QMessageBox.warning(
+                self,
+                "Sourceport Crash",
+                f"Sourceport exited with code {result.exit_code}.\n\n"
+                "The session was still recorded.",
+            )
+
         self._library_tab.refresh()
 
     def _on_play_error(self, wad_id: int, error_msg: str):

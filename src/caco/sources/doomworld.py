@@ -5,7 +5,7 @@ import logging
 import httpx
 
 from caco.doomworld import DoomworldClient, ForumThread
-from caco.db import SourceType, add_wad
+from caco.db import SourceType, add_wad, update_wad
 from caco.sources.base import BaseSource
 from caco.utils import extract_year
 
@@ -67,6 +67,7 @@ class DoomworldSource(BaseSource):
         author: str | None = None,
         year: int | None = None,
         version: str | None = None,
+        complevel: int | None = None,
     ) -> int:
         """Import a WAD from a Doomworld forum thread into the local database.
 
@@ -77,6 +78,7 @@ class DoomworldSource(BaseSource):
             author: Override author (defaults to thread author/OP)
             year: Override year (extracted from posted_date if not provided)
             version: Version string (e.g., 'v1.0', 'RC2') if known
+            complevel: Compatibility level (e.g., 9 for Boom)
 
         Returns:
             The new WAD's database ID
@@ -92,7 +94,7 @@ class DoomworldSource(BaseSource):
         if len(description) > 2000:
             description = description[:1997] + "..."
 
-        return add_wad(
+        wad_id = add_wad(
             title=final_title,
             author=final_author,
             year=final_year,
@@ -103,3 +105,8 @@ class DoomworldSource(BaseSource):
             tags=tags,
             version=version,
         )
+
+        if complevel is not None:
+            update_wad(wad_id, complevel=complevel)
+
+        return wad_id

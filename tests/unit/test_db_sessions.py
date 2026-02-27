@@ -29,6 +29,34 @@ class TestSessions:
         sessions = db_mod.get_sessions(wad_id)
         assert len(sessions) == 2
 
+    def test_end_session_with_exit_code_zero(self, db_mod, make_wad):
+        wad_id = make_wad()
+        session_id = db_mod.start_session(wad_id, sourceport="dsda-doom")
+        db_mod.end_session(session_id, exit_code=0)
+        sessions = db_mod.get_sessions(wad_id)
+        assert sessions[0]["exit_code"] == 0
+
+    def test_end_session_with_exit_code_nonzero(self, db_mod, make_wad):
+        wad_id = make_wad()
+        session_id = db_mod.start_session(wad_id, sourceport="dsda-doom")
+        db_mod.end_session(session_id, exit_code=255)
+        sessions = db_mod.get_sessions(wad_id)
+        assert sessions[0]["exit_code"] == 255
+
+    def test_end_session_with_exit_code_negative(self, db_mod, make_wad):
+        wad_id = make_wad()
+        session_id = db_mod.start_session(wad_id, sourceport="dsda-doom")
+        db_mod.end_session(session_id, exit_code=-1)
+        sessions = db_mod.get_sessions(wad_id)
+        assert sessions[0]["exit_code"] == -1
+
+    def test_end_session_exit_code_none_by_default(self, db_mod, make_wad):
+        wad_id = make_wad()
+        session_id = db_mod.start_session(wad_id, sourceport="gzdoom")
+        db_mod.end_session(session_id)
+        sessions = db_mod.get_sessions(wad_id)
+        assert sessions[0]["exit_code"] is None
+
     def test_get_sessions_empty(self, db_mod, make_wad):
         wad_id = make_wad()
         sessions = db_mod.get_sessions(wad_id)
@@ -228,7 +256,7 @@ class TestMigrationVersioning:
     def test_schema_migrations_populated(self, db_mod, tmp_db):
         conn = db_mod.get_connection()
         rows = conn.execute("SELECT version, name FROM schema_migrations ORDER BY version").fetchall()
-        assert len(rows) == 13
+        assert len(rows) == 16
         assert rows[0]["version"] == 1
-        assert rows[12]["version"] == 13
+        assert rows[15]["version"] == 16
         conn.close()

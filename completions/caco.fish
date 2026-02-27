@@ -36,6 +36,7 @@ complete -c caco -n __fish_use_subcommand -a random -d "Pick a random WAD (print
 complete -c caco -n __fish_use_subcommand -a completions -d "Generate shell completions"
 complete -c caco -n __fish_use_subcommand -a stats -d "Show library statistics"
 complete -c caco -n __fish_use_subcommand -a cache -d "Manage WAD file cache"
+complete -c caco -n __fish_use_subcommand -a profile -d "Manage sourceport config profiles"
 
 # =============================================================================
 # ls command
@@ -54,6 +55,8 @@ complete -c caco -n "__fish_seen_subcommand_from ls" -a "tag:" -d "Filter by tag
 complete -c caco -n "__fish_seen_subcommand_from ls" -a "status:" -d "Filter by status"
 complete -c caco -n "__fish_seen_subcommand_from ls" -a "source:" -d "Filter by source"
 complete -c caco -n "__fish_seen_subcommand_from ls" -a "iwad:" -d "Filter by IWAD"
+complete -c caco -n "__fish_seen_subcommand_from ls" -a "complevel:" -d "Filter by complevel"
+complete -c caco -n "__fish_seen_subcommand_from ls" -a "config:" -d "Filter by config profile"
 
 # ls inline sort completions
 complete -c caco -n "__fish_seen_subcommand_from ls" -a "id+ id- playtime+ playtime- rating+ rating- created+ created- title+ title- author+ author- last_played+ last_played- year+ year-" -d "Sort"
@@ -99,6 +102,8 @@ complete -c caco -n "__fish_seen_subcommand_from modify" -a "idgames-id=" -d "Se
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "description=" -d "Set description"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "args=" -d "Set custom args"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "version=" -d "Set version"
+complete -c caco -n "__fish_seen_subcommand_from modify" -a "complevel=" -d "Set complevel (int or alias)"
+complete -c caco -n "__fish_seen_subcommand_from modify" -a "config=" -d "Set config profile"
 
 # modify clear completions
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!author" -d "Clear author"
@@ -108,6 +113,8 @@ complete -c caco -n "__fish_seen_subcommand_from modify" -a "!notes" -d "Clear n
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!rating" -d "Clear rating"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!iwad" -d "Clear custom IWAD"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!sourceport" -d "Clear custom sourceport"
+complete -c caco -n "__fish_seen_subcommand_from modify" -a "!complevel" -d "Clear complevel"
+complete -c caco -n "__fish_seen_subcommand_from modify" -a "!config" -d "Clear config profile"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!tag" -d "Remove all tags"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!tag:" -d "Remove tags matching pattern"
 
@@ -144,6 +151,8 @@ complete -c caco -n "__fish_seen_subcommand_from trash" -a "status:" -d "Filter 
 complete -c caco -n "__fish_seen_subcommand_from play" -s p -l sourceport -d "Sourceport to use" -xa "(__caco_sourceports)"
 complete -c caco -n "__fish_seen_subcommand_from play" -s 1 -l first -d "Auto-select first match"
 complete -c caco -n "__fish_seen_subcommand_from play" -l iwad -d "Play IWAD directly (e.g., doom2)" -xa "(__caco_iwads)"
+complete -c caco -n "__fish_seen_subcommand_from play" -s c -l complevel -d "Override complevel (int or alias)" -xa "vanilla boom mbf mbf21 2 9 11 21"
+complete -c caco -n "__fish_seen_subcommand_from play" -s C -l config -d "Sourceport config profile name"
 complete -c caco -n "__fish_seen_subcommand_from play" -xa "(__caco_wads)"
 complete -c caco -n "__fish_seen_subcommand_from play" -a "id:" -d "Filter by ID"
 complete -c caco -n "__fish_seen_subcommand_from play" -a "title:" -d "Filter by title"
@@ -213,3 +222,22 @@ complete -c caco -n "__fish_seen_subcommand_from cache; and __fish_seen_subcomma
 complete -c caco -n "__fish_seen_subcommand_from cache; and __fish_seen_subcommand_from clear" -s y -l yes -d "Skip confirmation"
 complete -c caco -n "__fish_seen_subcommand_from cache; and __fish_seen_subcommand_from prune" -l dry-run -d "Show what would be deleted"
 complete -c caco -n "__fish_seen_subcommand_from cache; and __fish_seen_subcommand_from prune" -s y -l yes -d "Skip confirmation"
+
+# =============================================================================
+# profile subcommands
+# =============================================================================
+complete -c caco -n "__fish_seen_subcommand_from profile; and not __fish_seen_subcommand_from ls create edit cp rm path" -a ls -d "List config profiles"
+complete -c caco -n "__fish_seen_subcommand_from profile; and not __fish_seen_subcommand_from ls create edit cp rm path" -a create -d "Create a config profile"
+complete -c caco -n "__fish_seen_subcommand_from profile; and not __fish_seen_subcommand_from ls create edit cp rm path" -a edit -d "Edit a config profile"
+complete -c caco -n "__fish_seen_subcommand_from profile; and not __fish_seen_subcommand_from ls create edit cp rm path" -a cp -d "Copy a config profile"
+complete -c caco -n "__fish_seen_subcommand_from profile; and not __fish_seen_subcommand_from ls create edit cp rm path" -a rm -d "Delete a config profile"
+complete -c caco -n "__fish_seen_subcommand_from profile; and not __fish_seen_subcommand_from ls create edit cp rm path" -a path -d "Print profile path"
+
+complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from ls" -s p -l sourceport -d "Sourceport to list profiles for"
+complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from create" -s p -l sourceport -d "Sourceport (defaults to configured)"
+complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from create" -l from -d "Copy from existing profile"
+complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from edit" -s p -l sourceport -d "Sourceport (defaults to configured)"
+complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from cp" -s p -l sourceport -d "Sourceport (defaults to configured)"
+complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from rm" -s p -l sourceport -d "Sourceport (defaults to configured)"
+complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from rm" -s y -l yes -d "Skip confirmation"
+complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from path" -s p -l sourceport -d "Sourceport (defaults to configured)"

@@ -6,11 +6,16 @@ Each UI layer calls ImportService methods and interprets the ImportResult.
 
 from __future__ import annotations
 
+import logging
+import re
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
 from caco import db
 from caco.db import SourceType
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -47,6 +52,27 @@ def normalize_tags(tags: str | list | tuple | None) -> list[str] | None:
     return items if items else None
 
 
+def _normalize_title(title: str) -> str:
+    """Normalize a title for fuzzy comparison.
+
+    Lowercase, strip accents/diacritics, remove punctuation, collapse whitespace.
+    """
+    title = title.lower()
+    # Decompose unicode and strip combining marks (accents)
+    title = unicodedata.normalize("NFD", title)
+    title = "".join(c for c in title if unicodedata.category(c) != "Mn")
+    # Remove punctuation (keep alphanumeric and spaces)
+    title = re.sub(r"[^a-z0-9\s]", "", title)
+    # Collapse whitespace
+    title = re.sub(r"\s+", " ", title).strip()
+    return title
+
+
+def _titles_match(a: str, b: str) -> bool:
+    """Check if two titles match after normalization."""
+    return _normalize_title(a) == _normalize_title(b)
+
+
 class ImportService:
     """Handles duplicate checking and WAD import for all source types.
 
@@ -60,6 +86,34 @@ class ImportService:
         else:
             # Error — result.error has the message
     """
+
+    @staticmethod
+    def _auto_link_complevel(wad_id: int, port_text: str) -> None:
+        """Auto-set complevel based on Doom Wiki 'port' field heuristic.
+
+        Maps common port requirement strings to complevels:
+        - "Boom-compatible" / "Boom" -> 9
+        - "MBF21" -> 21
+        - "MBF-compatible" / "MBF" -> 11
+        - "Vanilla" -> 2
+        - "Limit-removing" -> 2
+        """
+        mapping = {
+            "boom": 9,
+            "mbf21": 21,
+            "mbf": 11,
+            "vanilla": 2,
+            "limit-removing": 2,
+            "limit removing": 2,
+        }
+
+        text = port_text.lower().strip()
+        for key, cl in mapping.items():
+            if key in text:
+                wad = db.get_wad(wad_id)
+                if wad and wad.get("complevel") is None:
+                    db.update_wad(wad_id, complevel=cl)
+                return
 
     @staticmethod
     def _auto_link_iwad(wad_id: int, iwad_text: str) -> None:
@@ -81,6 +135,67 @@ class ImportService:
         wad = db.get_wad(wad_id)
         if wad and not wad.get("custom_iwad"):
             db.update_wad(wad_id, custom_iwad=short_name)
+
+    def _auto_enrich_doomwiki(self, wad_id: int, title: str) -> None:
+        """Auto-enrich a WAD with Doom Wiki metadata after import.
+
+        Searches Doom Wiki for a matching title and backfills missing fields.
+        Never overwrites existing author/year/custom_iwad.
+        Appends wiki description to existing description with separator.
+        Silently ignores all errors.
+        """
+        try:
+            from caco.config import get_auto_doomwiki_enrich
+
+            if not get_auto_doomwiki_enrich():
+                return
+
+            from caco.doomwiki import DoomwikiClient
+
+            client = DoomwikiClient()
+            results = client.search_wads(title, limit=5)
+            if not results:
+                return
+
+            # Find first result with matching title
+            entry = None
+            for r in results:
+                if _titles_match(title, r.display_name):
+                    entry = r
+                    break
+            if entry is None:
+                return
+
+            wad = db.get_wad(wad_id)
+            if not wad:
+                return
+
+            updates: dict = {}
+
+            # Fill missing fields (never overwrite)
+            if not wad.get("author") and entry.author:
+                updates["author"] = entry.author
+            if not wad.get("year") and entry.year:
+                updates["year"] = entry.year
+
+            # Append wiki description
+            if entry.description:
+                existing = wad.get("description") or ""
+                separator = "\n\n---\nFrom Doom Wiki:\n"
+                if existing:
+                    updates["description"] = existing + separator + entry.description
+                else:
+                    updates["description"] = entry.description
+
+            if updates:
+                db.update_wad(wad_id, **updates)
+
+            # Auto-link IWAD if wiki entry has one
+            if entry.iwad:
+                self._auto_link_iwad(wad_id, entry.iwad)
+
+        except Exception:
+            logger.debug("Auto-enrich from Doom Wiki failed for WAD %d (%s)", wad_id, title, exc_info=True)
 
     def import_idgames(
         self,
@@ -110,9 +225,11 @@ class ImportService:
             from caco.sources.idgames import IdgamesSource
             with IdgamesSource() as source:
                 wad_id = source.import_wad(entry, tags=tags)
-            return ImportResult(wad_id=wad_id)
         except Exception as e:
             return ImportResult(error=str(e))
+
+        self._auto_enrich_doomwiki(wad_id, entry.title)
+        return ImportResult(wad_id=wad_id)
 
     def import_doomwiki(
         self,
@@ -146,6 +263,10 @@ class ImportService:
             if wad_id and getattr(entry, "iwad", ""):
                 self._auto_link_iwad(wad_id, entry.iwad)
 
+            # Auto-set complevel from port requirement field
+            if wad_id and getattr(entry, "port", ""):
+                self._auto_link_complevel(wad_id, entry.port)
+
             return ImportResult(wad_id=wad_id)
         except Exception as e:
             return ImportResult(error=str(e))
@@ -159,6 +280,7 @@ class ImportService:
         author: str | None = None,
         year: int | None = None,
         version: str | None = None,
+        complevel: int | None = None,
         force: bool = False,
     ) -> ImportResult:
         """Import from Doomworld forum thread.
@@ -181,11 +303,14 @@ class ImportService:
             with DoomworldSource() as source:
                 wad_id = source.import_wad(
                     thread, tags=tags, title=title, author=author,
-                    year=year, version=version,
+                    year=year, version=version, complevel=complevel,
                 )
-            return ImportResult(wad_id=wad_id)
         except Exception as e:
             return ImportResult(error=str(e))
+
+        wad_title = title or thread.title
+        self._auto_enrich_doomwiki(wad_id, wad_title)
+        return ImportResult(wad_id=wad_id)
 
     def import_url(
         self,
@@ -223,9 +348,11 @@ class ImportService:
                 description=description,
                 tags=tags,
             )
-            return ImportResult(wad_id=wad_id)
         except Exception as e:
             return ImportResult(error=str(e))
+
+        self._auto_enrich_doomwiki(wad_id, title)
+        return ImportResult(wad_id=wad_id)
 
     def import_local(
         self,
@@ -271,6 +398,8 @@ class ImportService:
                 description=description,
                 tags=tags,
             )
-            return ImportResult(wad_id=wad_id)
         except Exception as e:
             return ImportResult(error=str(e))
+
+        self._auto_enrich_doomwiki(wad_id, title)
+        return ImportResult(wad_id=wad_id)

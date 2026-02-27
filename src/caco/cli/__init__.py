@@ -369,7 +369,7 @@ def _complete_tags(ctx, param, incomplete):
 
 
 # Query field prefixes for completion
-QUERY_FIELDS = ["id:", "title:", "name:", "author:", "year:", "filename:", "tag:", "status:", "source:", "iwad:"]
+QUERY_FIELDS = ["id:", "title:", "name:", "author:", "year:", "filename:", "tag:", "status:", "source:", "iwad:", "complevel:", "config:"]
 
 # Valid status values for completion
 QUERY_STATUS_VALUES = ["to-play", "backlog", "playing", "finished", "abandoned", "awaiting-update"]
@@ -458,6 +458,7 @@ def _render_wad_list_json(wads: list[dict]) -> None:
             "idgames_id": wad.get("idgames_id"),
             "filename": wad.get("filename"),
             "version": wad.get("version"),
+            "complevel": wad.get("complevel"),
             "playtime_seconds": playtime,
             "playtime": format_duration(playtime) if playtime else None,
             "times_beaten": beaten,
@@ -495,6 +496,8 @@ def _render_wad_info_json(wad: dict) -> None:
         "custom_iwad": wad.get("custom_iwad"),
         "custom_sourceport": wad.get("custom_sourceport"),
         "custom_args": wad.get("custom_args"),
+        "custom_config": wad.get("custom_config"),
+        "complevel": wad.get("complevel"),
         "playtime_seconds": playtime,
         "playtime": format_duration(playtime) if playtime else None,
         "session_count": len(sessions),
@@ -565,6 +568,10 @@ def _render_wad_info_plain(wad: dict) -> None:
         print(f"custom_iwad={wad['custom_iwad']}")
     if wad.get("custom_sourceport"):
         print(f"custom_sourceport={wad['custom_sourceport']}")
+    if wad.get("complevel") is not None:
+        print(f"complevel={wad['complevel']}")
+    if wad.get("custom_config"):
+        print(f"custom_config={wad['custom_config']}")
     if wad.get("custom_args"):
         print(f"custom_args={wad['custom_args']}")
 
@@ -705,6 +712,7 @@ from caco.cli import cache  # noqa: E402, F401
 from caco.cli import config_cmd  # noqa: E402, F401
 from caco.cli import stats  # noqa: E402, F401
 from caco.cli import complete  # noqa: E402, F401
+from caco.cli import profile_cmd as profile_mod  # noqa: E402, F401
 
 
 # =============================================================================

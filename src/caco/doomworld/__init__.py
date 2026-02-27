@@ -2,13 +2,13 @@
 
 from caco.doomworld.client import DoomworldClient, DoomworldError
 from caco.doomworld.models import ForumThread
+from caco.complevel import complevel_name  # noqa: F401
 from caco.doomworld.parser import (
     DoomworldParser,
     extract_download_links,
     extract_complevel,
     extract_iwad,
     extract_sourceport,
-    complevel_name,
     iwad_display_name,
     sourceport_display_name,
 )
