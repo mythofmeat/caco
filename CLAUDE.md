@@ -61,8 +61,10 @@ src/caco/
 │   ├── cache.py        # cache list/clear/prune
 │   ├── config_cmd.py   # config, completions commands
 │   └── stats.py        # stats, beaten commands
+├── complevel.py    # Shared complevel names, aliases, parse_complevel()
+├── complevel_detect.py # Auto-detect complevel from WAD lumps (UMAPINFO, DEHACKED)
 ├── iwad_detect.py  # Auto-detect IWAD family from WAD file PNAMES/map lumps
-├── sourceports.py  # Sourceport family registry (exe→CLI flags for data/save redirection)
+├── sourceports.py  # Sourceport family registry (exe→CLI flags for data/save/complevel)
 ├── utils.py        # Shared utilities (coerce_str, BaseHttpClient, CacoSourceError, extract_year, parse_wad_directory)
 ├── wad_stats.py    # Per-map stats parser/formatter (stats.txt + levelstat.txt)
 ├── db/             # SQLite database package
@@ -165,7 +167,7 @@ src/caco/
 │   └── doomworld.py # Doomworld forum adapter (extends BaseSource)
 └── tests/          # pytest test suite
     ├── conftest.py     # Shared fixtures (in-memory DB, make_wad factory, tmp_config, populated_db)
-    └── unit/           # Unit tests (utils, query parser, db, sessions, config, parsers, CLI, models, player, iwad_detect)
+    └── unit/           # Unit tests (utils, query parser, db, sessions, config, parsers, CLI, models, player, iwad_detect, complevel, complevel_detect, sourceports)
 ```
 
 **Data locations:**
@@ -187,14 +189,14 @@ src/caco/
 - Status enum: `to-play`, `backlog`, `playing`, `finished`, `abandoned`, `awaiting-update`
 - Import command uses flag-based source selection: `caco import <source> [--idgames|--doomwiki|--doomworld|--local|--url URL]`
 - Query syntax (beets-style):
-  - Fields: `id:`, `title:`, `author:`, `year:`, `filename:`, `tag:`, `status:`, `source:`, `iwad:`
+  - Fields: `id:`, `title:`, `author:`, `year:`, `filename:`, `tag:`, `status:`, `source:`, `iwad:`, `complevel:`
   - OR queries: `"status:playing , status:to-play"` (comma with spaces — spaces required!)
   - Negation: `^status:finished` (prefer `^` prefix, `-` also works but may conflict with CLI flags)
   - Status shortcuts: `status:p` (playing), `status:f` (finished), etc.
   - Glob patterns: `tag:caco*` (matches cacoward, etc.)
   - Free text searches title, author, and description
   - Multiple terms are joined with implicit AND
-- Per-WAD config: `custom_iwad`, `custom_sourceport`, `custom_args` (JSON array) columns in wads table
+- Per-WAD config: `custom_iwad`, `custom_sourceport`, `custom_args` (JSON array), `complevel` (INTEGER) columns in wads table
 - Auto stats tracking: `stats_snapshot` TEXT column on `wads` table stores live per-map stats JSON; auto-read from data dir after play sessions; auto-archived to completion on `beaten add` or `modify status=finished`; `auto_stats` config (default: true); live stats shown as "Current (live)" entry in Map Stats dialog (GUI) and screen (TUI)
 - IWAD resolution: `iwad_dirs` config allows short names (e.g., `doom2` instead of full path); `resolve_iwad()` in `config.py` checks DB registry (with priority resolution) then searches dirs for exact name or name + `.wad`; `IWAD_DIR` / `get_iwad_dir()` provides the managed IWAD directory path (`~/.local/share/caco/iwads/`)
 - Cross-source downloading: `idgames_id` column allows any WAD to download via idgames API (set with `caco modify id:N idgames-id=XXXXX`)
@@ -207,6 +209,7 @@ src/caco/
 - Sourceport families: `sourceports.py` maps executable basenames to CLI flags; `SOURCEPORT_FAMILIES` dict with dsda/zdoom/chocolate/woof/eternity families; `identify_sourceport_family()` strips path and matches basename; `get_data_dir_args()` returns `-data`/`-save` or `-savedir` args; for dsda family, `-save` points to nested stats dir (`{exe}_data/{iwad}/{wad_stem}/`) via `get_dsda_save_dir()` when `iwad` and `wad_path` are provided
 - Per-WAD data dirs: `player.py` injects data dir args when `manage_data_dirs=True` (default); `get_wad_data_dir(id, title)` returns `{data_dir}/{id}_{sanitized_title}/`; `find_wad_data_dir(id)` finds existing dir by ID prefix (handles title renames); `_sanitize_dirname()` lowercases, replaces non-alnum with hyphens, truncates to 64 chars
 - IWAD auto-detection: `iwad_detect.py` inspects PWAD file PNAMES lump for TNT-only (197) / Plutonia-only (78) patches, then falls back to map lump names (ExMy→doom, MAPxx→doom2); self-contained WADs (patches provided as lumps) don't trigger detection; result persisted to `custom_iwad` on first play; `auto_detect_iwad` config (default: true); `parse_wad_directory()` shared between `iwad_detect.py` and `gui/thumbnails/extractor.py` via `utils.py`
+- Complevel: `complevel.py` has shared names/aliases/parser; `complevel_detect.py` auto-detects from WAD lumps (UMAPINFO→21, DEHACKED with MBF codepointers→11, ExMy-only→2); `sourceports.py` `get_complevel_args()` injects `-complevel N` for dsda-family ports; `player.py` auto-detects on first play and auto-injects; CLI `play --complevel`/`-c` overrides; `complevel:` query field supports ints and aliases (vanilla/boom/mbf/mbf21); `modify complevel=boom` sets; Doomworld imports store extracted complevel; Doomwiki imports auto-link from `port` field
 - Direct IWAD play: `caco play --iwad doom2` launches an IWAD directly via `play_iwad()` in `player.py`; no session tracking, no WAD record — just a clean sourceport launch; supports `-p`/`--sourceport` and extra args
 - Sourceport detection: `detect_sourceports()` in `sourceports.py` uses `shutil.which()` to find installed sourceports from `SOURCEPORT_FAMILIES`; play command error message lists detected ports when no sourceport is configured
 - Config auto-update: `ensure_config_keys()` in `config.py` runs on `load_config()` — compares existing config file against `DEFAULT_CONFIG` and section defaults (`[tui]`, `[gui]`, `[list]`); adds missing keys with default values; only runs if config file exists; only writes if changes are made; recursion-guarded
@@ -257,6 +260,7 @@ src/caco/
 - `cache_auto_clean` — auto-cleanup on play (true/false)
 - `auto_stats` — auto-track per-map stats after play sessions (default: true, requires `manage_data_dirs`)
 - `auto_detect_iwad` — auto-detect required IWAD from WAD file contents on first play (default: true)
+- `auto_detect_complevel` — auto-detect complevel from WAD lumps on first play (default: true)
 
 **TUI config (`[tui]` section):**
 - `default_tab` — starting tab (all, playing, to-play, finished, backlog, other)

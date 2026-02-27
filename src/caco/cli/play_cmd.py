@@ -43,8 +43,9 @@ def _check_sourceport(sourceport: str | None) -> str:
 @click.option("--sourceport", "-p", help="Sourceport to use")
 @click.option("--first", "-1", is_flag=True, help="Auto-select first match if multiple")
 @click.option("--iwad", "iwad_name", type=str, help="Play an IWAD directly (e.g., --iwad doom2)")
+@click.option("--complevel", "-c", type=str, help="Override complevel (int or alias: vanilla, boom, mbf, mbf21)")
 @click.argument("extra_args", nargs=-1)
-def play_cmd(query: str | None, sourceport: str | None, first: bool, iwad_name: str | None, extra_args: tuple[str, ...]):
+def play_cmd(query: str | None, sourceport: str | None, first: bool, iwad_name: str | None, complevel: str | None, extra_args: tuple[str, ...]):
     """Play a WAD by ID or query (e.g., 'caco play 1' or 'caco play filename:tnto').
 
     \b
@@ -54,9 +55,17 @@ def play_cmd(query: str | None, sourceport: str | None, first: bool, iwad_name: 
     # Handle --iwad: play an IWAD directly
     if iwad_name:
         port = _check_sourceport(sourceport)
+        iwad_extra = list(extra_args)
+        if complevel:
+            from caco.complevel import parse_complevel
+            cl = parse_complevel(complevel)
+            if cl is None:
+                err_console.print(f"[red]Invalid complevel: '{complevel}' (use integer or alias: vanilla, boom, mbf, mbf21)[/red]")
+                sys.exit(1)
+            iwad_extra.extend(["-complevel", str(cl)])
         console.print(f"[cyan]Playing IWAD {iwad_name}...[/cyan]")
         try:
-            duration = play_iwad(iwad_name, sourceport=port, extra_args=list(extra_args))
+            duration = play_iwad(iwad_name, sourceport=port, extra_args=iwad_extra)
             if duration:
                 console.print(f"[green]Session ended:[/green] {format_duration(duration)}")
         except Exception as e:
@@ -79,6 +88,16 @@ def play_cmd(query: str | None, sourceport: str | None, first: bool, iwad_name: 
     wad_id = wad["id"]
 
     port = _check_sourceport(sourceport)
+
+    # Parse --complevel and inject into extra_args
+    extra = list(extra_args)
+    if complevel:
+        from caco.complevel import parse_complevel
+        cl = parse_complevel(complevel)
+        if cl is None:
+            err_console.print(f"[red]Invalid complevel: '{complevel}' (use integer or alias: vanilla, boom, mbf, mbf21)[/red]")
+            sys.exit(1)
+        extra.extend(["-complevel", str(cl)])
 
     console.print(f"[cyan]Playing {wad['title']}...[/cyan]")
 
@@ -103,7 +122,7 @@ def play_cmd(query: str | None, sourceport: str | None, first: bool, iwad_name: 
 
     try:
         duration = play(
-            wad_id, sourceport=port, extra_args=list(extra_args),
+            wad_id, sourceport=port, extra_args=extra,
             progress_callback=_progress_callback,
         )
         if duration:

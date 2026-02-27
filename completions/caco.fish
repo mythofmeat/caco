@@ -48,6 +48,7 @@ complete -c caco -n "__fish_seen_subcommand_from ls" -a "tag:" -d "Filter by tag
 complete -c caco -n "__fish_seen_subcommand_from ls" -a "status:" -d "Filter by status"
 complete -c caco -n "__fish_seen_subcommand_from ls" -a "source:" -d "Filter by source"
 complete -c caco -n "__fish_seen_subcommand_from ls" -a "iwad:" -d "Filter by IWAD"
+complete -c caco -n "__fish_seen_subcommand_from ls" -a "complevel:" -d "Filter by complevel"
 
 # ls inline sort completions
 complete -c caco -n "__fish_seen_subcommand_from ls" -a "id+ id- playtime+ playtime- rating+ rating- created+ created- title+ title- author+ author- last_played+ last_played- year+ year-" -d "Sort"
@@ -83,6 +84,7 @@ complete -c caco -n "__fish_seen_subcommand_from modify" -a "iwad=" -d "Set cust
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "sourceport=" -d "Set custom sourceport"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "idgames-id=" -d "Set idgames ID"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "version=" -d "Set version"
+complete -c caco -n "__fish_seen_subcommand_from modify" -a "complevel=" -d "Set complevel (int or alias)"
 
 # modify clear completions
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!author" -d "Clear author"
@@ -92,6 +94,7 @@ complete -c caco -n "__fish_seen_subcommand_from modify" -a "!notes" -d "Clear n
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!rating" -d "Clear rating"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!iwad" -d "Clear custom IWAD"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!sourceport" -d "Clear custom sourceport"
+complete -c caco -n "__fish_seen_subcommand_from modify" -a "!complevel" -d "Clear complevel"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!tag" -d "Remove all tags"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!tag:" -d "Remove tags matching pattern"
 
@@ -123,6 +126,7 @@ complete -c caco -n "__fish_seen_subcommand_from trash" -a "status:" -d "Filter 
 complete -c caco -n "__fish_seen_subcommand_from play" -s p -l sourceport -d "Sourceport to use" -rF
 complete -c caco -n "__fish_seen_subcommand_from play" -s 1 -l first -d "Auto-select first match"
 complete -c caco -n "__fish_seen_subcommand_from play" -l iwad -d "Play IWAD directly (e.g., doom2)"
+complete -c caco -n "__fish_seen_subcommand_from play" -s c -l complevel -d "Override complevel (int or alias)" -xa "vanilla boom mbf mbf21 2 9 11 21"
 complete -c caco -n "__fish_seen_subcommand_from play" -xa "(__caco_wads)"
 complete -c caco -n "__fish_seen_subcommand_from play" -a "id:" -d "Filter by ID"
 complete -c caco -n "__fish_seen_subcommand_from play" -a "title:" -d "Filter by title"

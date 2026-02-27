@@ -134,6 +134,13 @@ class EditDialog(QDialog):
         self._sourceport_input.setPlaceholderText("Override global sourceport")
         launch_form.addRow("Sourceport:", self._sourceport_input)
 
+        self._complevel_input = QLineEdit(
+            str(self._wad["complevel"]) if self._wad.get("complevel") is not None else ""
+        )
+        self._complevel_input.setPlaceholderText("e.g., 9, boom, mbf21")
+        self._complevel_input.setMaximumWidth(120)
+        launch_form.addRow("Complevel:", self._complevel_input)
+
         # Parse existing custom_args JSON into space-separated string
         args_str = ""
         if self._wad.get("custom_args"):
@@ -175,6 +182,19 @@ class EditDialog(QDialog):
                 QMessageBox.warning(self, "Validation Error", "Year must be a number.")
                 return
 
+        # Validate complevel
+        complevel = None
+        complevel_text = self._complevel_input.text().strip()
+        if complevel_text:
+            from caco.complevel import parse_complevel
+            complevel = parse_complevel(complevel_text)
+            if complevel is None:
+                QMessageBox.warning(
+                    self, "Validation Error",
+                    "Invalid complevel. Use integer or alias (vanilla, boom, mbf, mbf21)."
+                )
+                return
+
         # Build update fields
         fields = {
             "title": title,
@@ -186,6 +206,7 @@ class EditDialog(QDialog):
             "description": self._desc_input.toPlainText().strip() or None,
             "custom_iwad": self._iwad_input.text().strip() or None,
             "custom_sourceport": self._sourceport_input.text().strip() or None,
+            "complevel": complevel,
         }
 
         # Parse extra args into JSON array

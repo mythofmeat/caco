@@ -1,7 +1,21 @@
-- [ ] add a `complevel` field that has auto-detection and the ability to be overridden.
-- [ ] define complevel by both integer (e.g., `9`) and string (e.g., `boom`)
-- [ ] pass the complevel argument to the sourceport on launch
-- [ ] this should be a searchable field in `caco ls complevel:` and modifiable by `caco modify [query] complevel=[9|boom]`
+- [x] add a `complevel` field that has auto-detection and the ability to be overridden.
+- [x] define complevel by both integer (e.g., `9`) and string (e.g., `boom`)
+- [x] pass the complevel argument to the sourceport on launch
+- [x] this should be a searchable field in `caco ls complevel:` and modifiable by `caco modify [query] complevel=[9|boom]`
+
+## Implementation (completed)
+
+- `complevel.py` — shared names, aliases, `parse_complevel()`
+- `complevel_detect.py` — auto-detect from WAD lumps (UMAPINFO, DEHACKED, map names)
+- DB migration #14 — `ALTER TABLE wads ADD COLUMN complevel INTEGER`
+- `sourceports.py` `get_complevel_args()` — `-complevel N` for dsda-family
+- `player.py` — auto-detect on first play + auto-inject on every play
+- CLI `play --complevel/-c` — override from command line
+- `complevel:` query field — supports ints and aliases
+- `modify complevel=boom` — set/clear via CLI
+- Import flow — Doomworld stores extracted complevel, Doomwiki auto-links from `port` field
+- TUI/GUI — display in info panel, edit in form dialog
+- Fish completions updated
 
 ## complevel integer/string relationship
 0 	Doom v1.2 (note: flawed in PrBoom; requires PrBoom+ 2.5.0.8 or later)

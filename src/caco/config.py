@@ -383,6 +383,12 @@ def get_auto_detect_iwad() -> bool:
     return bool(config.get("auto_detect_iwad", True))
 
 
+def get_auto_detect_complevel() -> bool:
+    """Whether to auto-detect complevel from WAD file contents on first play."""
+    config = load_config()
+    return bool(config.get("auto_detect_complevel", True))
+
+
 def get_auto_stats() -> bool:
     """Whether to auto-track stats after play sessions."""
     config = load_config()

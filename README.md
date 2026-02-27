@@ -293,6 +293,8 @@ caco ls tag:megawad                     # By tag (supports globs: tag:caco*)
 caco ls status:playing                  # By status (shortcuts: status:p)
 caco ls source:idgames                  # By source type (idgames, doomwiki, url, local)
 caco ls iwad:doom2                      # By IWAD (matches custom_iwad)
+caco ls complevel:boom                  # By complevel (aliases: vanilla, boom, mbf, mbf21)
+caco ls complevel:9                     # By complevel (numeric)
 caco ls author:alm title:scythe         # Combine filters (AND logic)
 
 # Combine query + sort
@@ -340,6 +342,10 @@ caco modify id:1 !tag                           # Remove all tags
 caco modify id:1 !tag:slaughter                 # Remove specific tag
 caco modify id:1 "!tag:caco*"                   # Remove tags matching glob
 
+# Set complevel (int or alias: vanilla, boom, mbf, mbf21)
+caco modify id:1 complevel=boom                 # Sets complevel to 9
+caco modify id:1 !complevel                     # Clear complevel
+
 # Link a local file to a metadata-only entry
 caco modify id:1 --link ~/Downloads/heartland.wad
 
@@ -376,6 +382,10 @@ caco play 1 --sourceport /usr/bin/dsda-doom
 # Pass extra args to sourceport
 caco play 1 -- -warp 15 -skill 4
 
+# Override complevel (dsda-family ports get -complevel flag automatically)
+caco play 1 --complevel boom             # -complevel 9
+caco play 1 -c 21                        # -complevel 21
+
 # Play an IWAD directly (no PWAD needed)
 caco play --iwad doom2
 caco play --iwad doom2 -- -warp 1
@@ -385,7 +395,7 @@ caco play --iwad doom2/v1.9            # Exact variant
 
 ### Per-WAD Custom Config
 
-Set WAD-specific IWAD, sourceport, or extra arguments:
+Set WAD-specific IWAD, sourceport, complevel, or extra arguments:
 
 ```bash
 # Set custom IWAD for a WAD
@@ -394,11 +404,14 @@ caco modify id:1 iwad=tnt
 # Set custom sourceport
 caco modify id:1 sourceport=dsda-doom
 
+# Set complevel (auto-injected as -complevel N for dsda-family ports)
+caco modify id:1 complevel=boom          # Aliases: vanilla(2), boom(9), mbf(11), mbf21(21)
+
 # Set custom arguments
-caco modify id:1 args="-complevel 2 -warp 1"
+caco modify id:1 args="-warp 1"
 
 # Clear custom settings
-caco modify id:1 !iwad !sourceport !args
+caco modify id:1 !iwad !sourceport !args !complevel
 ```
 
 Priority: CLI arguments > Per-WAD config > Global config
@@ -604,6 +617,20 @@ On first play, caco inspects the WAD file to auto-detect the required IWAD:
 The detected IWAD is saved to `custom_iwad` so detection only runs once per WAD. Self-contained WADs that bundle their own patches are correctly handled (won't trigger false detection).
 
 **Opt-out:** Set `auto_detect_iwad = false` in config to disable auto-detection.
+
+### Complevel Auto-Detection
+
+On first play, caco also inspects the WAD to auto-detect the compatibility level (complevel):
+
+1. **UMAPINFO** lump present → MBF21 (complevel 21)
+2. **DEHACKED** with MBF21 codepointers → MBF21 (21)
+3. **DEHACKED** with MBF codepointers → MBF (11)
+4. **ExMy maps only**, no special lumps → Vanilla (2)
+5. Other cases → ambiguous, skipped
+
+The detected complevel is saved to the WAD record. For dsda-family sourceports, `-complevel N` is automatically added to the command line.
+
+**Opt-out:** Set `auto_detect_complevel = false` in config to disable auto-detection.
 
 ## Configuration
 

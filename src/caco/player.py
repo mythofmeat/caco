@@ -10,6 +10,7 @@ from typing import Any, Callable
 from caco import db
 from caco.config import (
     find_wad_data_dir,
+    get_auto_detect_complevel,
     get_auto_detect_iwad,
     get_auto_stats,
     get_cache_dir,
@@ -292,6 +293,16 @@ def play(
             db.update_wad(wad_id, custom_iwad=detected)
             wad["custom_iwad"] = detected
 
+    # Auto-detect complevel if not explicitly set
+    if wad.get("complevel") is None and wad_path and get_auto_detect_complevel():
+        from caco.complevel_detect import detect_complevel
+
+        detected_cl = detect_complevel(wad_path)
+        if detected_cl is not None:
+            logger.info("Auto-detected complevel: %d for WAD %d", detected_cl, wad_id)
+            db.update_wad(wad_id, complevel=detected_cl)
+            wad["complevel"] = detected_cl
+
     # Add IWAD (CLI option would be in extra_args, so: WAD-specific > global config)
     iwad = wad.get("custom_iwad") or get_iwad()
     if iwad:
@@ -310,6 +321,14 @@ def play(
                 cmd.extend(wad_args)
         except json.JSONDecodeError:
             pass
+
+    # Auto-inject complevel arg if set on the WAD
+    if wad.get("complevel") is not None:
+        from caco.sourceports import get_complevel_args
+
+        cl_args = get_complevel_args(port, wad["complevel"])
+        if cl_args:
+            cmd.extend(cl_args)
 
     # Inject per-WAD data directory args (if enabled and sourceport is recognized)
     if get_manage_data_dirs():

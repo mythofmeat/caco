@@ -318,13 +318,16 @@ def info(query: str, output: str | None):
             console.print()
             console.print(f"[bold]Times beaten:[/bold] {times_beaten}")
 
-        if wad.get("custom_iwad") or wad.get("custom_sourceport") or wad.get("custom_args"):
+        if wad.get("custom_iwad") or wad.get("custom_sourceport") or wad.get("custom_args") or wad.get("complevel") is not None:
             console.print()
             console.print("[bold]Custom play config:[/bold]")
             if wad.get("custom_iwad"):
                 console.print(f"  IWAD: {wad['custom_iwad']}")
             if wad.get("custom_sourceport"):
                 console.print(f"  Sourceport: {wad['custom_sourceport']}")
+            if wad.get("complevel") is not None:
+                from caco.complevel import complevel_name
+                console.print(f"  Complevel: {wad['complevel']} ({complevel_name(wad['complevel'])})")
             if wad.get("custom_args"):
                 try:
                     parsed_args = json.loads(wad["custom_args"])
@@ -360,7 +363,7 @@ def modify(args: tuple[str, ...], yes: bool, dry_run: bool, link_path: str | Non
 
     \b
     Modifiable fields: title, author, year, description, status, rating,
-      notes, iwad, sourceport, args, idgames-id, version, tag
+      notes, iwad, sourceport, args, idgames-id, version, complevel, tag
     """
     from caco.config import get_link_mode
 
@@ -417,9 +420,7 @@ def modify(args: tuple[str, ...], yes: bool, dry_run: bool, link_path: str | Non
                 value: Any = action.value
                 if action.field == "status":
                     value = db.Status(value)
-                elif action.field == "rating":
-                    value = int(value)
-                elif action.field == "year":
+                elif action.field in ("rating", "year", "complevel"):
                     value = int(value)
                 updates[action.field] = value
 

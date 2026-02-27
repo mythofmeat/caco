@@ -62,6 +62,34 @@ class ImportService:
     """
 
     @staticmethod
+    def _auto_link_complevel(wad_id: int, port_text: str) -> None:
+        """Auto-set complevel based on Doom Wiki 'port' field heuristic.
+
+        Maps common port requirement strings to complevels:
+        - "Boom-compatible" / "Boom" -> 9
+        - "MBF21" -> 21
+        - "MBF-compatible" / "MBF" -> 11
+        - "Vanilla" -> 2
+        - "Limit-removing" -> 2
+        """
+        mapping = {
+            "boom": 9,
+            "mbf21": 21,
+            "mbf": 11,
+            "vanilla": 2,
+            "limit-removing": 2,
+            "limit removing": 2,
+        }
+
+        text = port_text.lower().strip()
+        for key, cl in mapping.items():
+            if key in text:
+                wad = db.get_wad(wad_id)
+                if wad and wad.get("complevel") is None:
+                    db.update_wad(wad_id, complevel=cl)
+                return
+
+    @staticmethod
     def _auto_link_iwad(wad_id: int, iwad_text: str) -> None:
         """Auto-set custom_iwad on a WAD if the IWAD name is registered.
 
@@ -146,6 +174,10 @@ class ImportService:
             if wad_id and getattr(entry, "iwad", ""):
                 self._auto_link_iwad(wad_id, entry.iwad)
 
+            # Auto-set complevel from port requirement field
+            if wad_id and getattr(entry, "port", ""):
+                self._auto_link_complevel(wad_id, entry.port)
+
             return ImportResult(wad_id=wad_id)
         except Exception as e:
             return ImportResult(error=str(e))
@@ -159,6 +191,7 @@ class ImportService:
         author: str | None = None,
         year: int | None = None,
         version: str | None = None,
+        complevel: int | None = None,
         force: bool = False,
     ) -> ImportResult:
         """Import from Doomworld forum thread.
@@ -181,7 +214,7 @@ class ImportService:
             with DoomworldSource() as source:
                 wad_id = source.import_wad(
                     thread, tags=tags, title=title, author=author,
-                    year=year, version=version,
+                    year=year, version=version, complevel=complevel,
                 )
             return ImportResult(wad_id=wad_id)
         except Exception as e:
