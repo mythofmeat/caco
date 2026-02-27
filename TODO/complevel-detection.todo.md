@@ -1,5 +1,6 @@
 - [ ] add a `complevel` field that has auto-detection and the ability to be overridden.
 - [ ] define complevel by both integer (e.g., `9`) and string (e.g., `boom`)
+- [ ] pass the complevel argument to the sourceport on launch
 
 ## complevel integer/string relationship
 0 	Doom v1.2 (note: flawed in PrBoom; requires PrBoom+ 2.5.0.8 or later)
