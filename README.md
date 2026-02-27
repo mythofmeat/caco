@@ -26,6 +26,7 @@ A personal Doom WAD library manager taking inspiration from beets. Track what yo
 
 - **Playtime tracking**
   - Automatically tracks how long you play each WAD
+  - Crash detection: warns on non-zero exit codes, records in session history
 
 - **IWAD management**
   - Register IWADs with family/variant model (e.g., doom2/v1.9, doom2/bfg)

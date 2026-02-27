@@ -19,6 +19,7 @@ Caco is a personal Doom WAD library manager inspired by `beets`. It tracks WADs 
 - Auto-detect required IWAD from WAD file contents (PNAMES analysis + map lump names)
 - Play IWADs directly (`caco play --iwad doom2`) without a PWAD in the library
 - Auto-detect installed sourceports with helpful error messages
+- Sourceport crash detection (exit code tracking, warnings, session history indicators)
 - Auto-update config file with missing keys on load
 
 ## Commands
@@ -183,7 +184,7 @@ src/caco/
 - Status colors/display centralized in `tui/theme.py` (`STATUS_CONFIG` dict with `get_status_display/color/css_class` helpers)
 - Source adapters inherit `BaseSource` from `sources/base.py` for shared context-manager lifecycle; clients inherit `BaseHttpClient` from `utils.py`; errors inherit `CacoSourceError`
 - CLI uses Click's decorator registration pattern: each `cli/*.py` submodule imports `cli` from `caco.cli` and registers commands; `__init__.py` imports all submodules at bottom to trigger registration
-- `player.py` wraps sourceport execution to track session start/end times; decoupled from Rich — uses `ProgressCallback` for download progress; CLI creates Rich progress wrapper in `play_cmd.py`
+- `player.py` wraps sourceport execution to track session start/end times; returns `PlayResult(duration, exit_code)` with `.crashed` property; decoupled from Rich — uses `ProgressCallback` for download progress; CLI creates Rich progress wrapper in `play_cmd.py`
 - `ImportService` in `services/import_service.py` centralizes duplicate-check-and-import for all 5 source types; used by CLI, TUI, and GUI
 - `WadInfoPanel` and `DetailPanel` accept optional pre-fetched `wad` dict to avoid DB re-fetch on selection
 - Status enum: `to-play`, `backlog`, `playing`, `finished`, `abandoned`, `awaiting-update`
@@ -197,6 +198,7 @@ src/caco/
   - Free text searches title, author, and description
   - Multiple terms are joined with implicit AND
 - Per-WAD config: `custom_iwad`, `custom_sourceport`, `custom_args` (JSON array), `complevel` (INTEGER) columns in wads table
+- Crash detection: `exit_code` INTEGER column on sessions table; `PlayResult` dataclass in `player.py` with `crashed` property (non-zero exit code); CLI/TUI/GUI warn on crash; session history views show "Crash (N)" indicator
 - Auto stats tracking: `stats_snapshot` TEXT column on `wads` table stores live per-map stats JSON; auto-read from data dir after play sessions; auto-archived to completion on `beaten add` or `modify status=finished`; `auto_stats` config (default: true); live stats shown as "Current (live)" entry in Map Stats dialog (GUI) and screen (TUI)
 - IWAD resolution: `iwad_dirs` config allows short names (e.g., `doom2` instead of full path); `resolve_iwad()` in `config.py` checks DB registry (with priority resolution) then searches dirs for exact name or name + `.wad`; `IWAD_DIR` / `get_iwad_dir()` provides the managed IWAD directory path (`~/.local/share/caco/iwads/`)
 - Cross-source downloading: `idgames_id` column allows any WAD to download via idgames API (set with `caco modify id:N idgames-id=XXXXX`)

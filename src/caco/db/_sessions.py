@@ -28,7 +28,11 @@ def start_session(wad_id: int, sourceport: str | None = None) -> int:
         return session_id
 
 
-def end_session(session_id: int, notes: str | None = None) -> None:
+def end_session(
+    session_id: int,
+    notes: str | None = None,
+    exit_code: int | None = None,
+) -> None:
     """End a play session."""
     ended_at = datetime.now()
 
@@ -44,10 +48,11 @@ def end_session(session_id: int, notes: str | None = None) -> None:
 
             conn.execute(
                 """
-                UPDATE sessions SET ended_at = ?, duration_seconds = ?, notes = ?
+                UPDATE sessions
+                SET ended_at = ?, duration_seconds = ?, notes = ?, exit_code = ?
                 WHERE id = ?
                 """,
-                (ended_at.isoformat(), duration, notes, session_id),
+                (ended_at.isoformat(), duration, notes, exit_code, session_id),
             )
 
 

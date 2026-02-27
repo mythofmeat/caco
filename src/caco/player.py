@@ -4,6 +4,7 @@ import json
 import logging
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
@@ -30,6 +31,19 @@ logger = logging.getLogger(__name__)
 
 # Callback for download progress: (downloaded_bytes, total_bytes, filename) -> None
 ProgressCallback = Callable[[int, int | None, str], None]
+
+
+@dataclass
+class PlayResult:
+    """Result of a play session."""
+
+    duration: int | None
+    exit_code: int | None
+
+    @property
+    def crashed(self) -> bool:
+        """True if the sourceport exited with a non-zero code."""
+        return self.exit_code is not None and self.exit_code != 0
 
 
 def get_wad_path(
@@ -234,11 +248,11 @@ def play(
     extra_args: list[str] | None = None,
     progress_callback: ProgressCallback | None = None,
     process_ref: list | None = None,
-) -> int | None:
+) -> PlayResult:
     """
     Play a WAD with the specified sourceport.
 
-    Returns the play session duration in seconds, or None if cancelled.
+    Returns a PlayResult with duration and exit code.
     """
     wad = db.get_wad(wad_id)
     if not wad:
@@ -373,28 +387,27 @@ def play(
     try:
         proc.wait()
     finally:
-        # End session and calculate duration
-        db.end_session(session_id)
+        # End session and calculate duration; always record exit code
+        db.end_session(session_id, exit_code=proc.returncode)
 
     # Auto-track stats from data directory
     _auto_track_stats(wad_id, wad)
 
-    # Return duration
+    # Build result
     sessions = db.get_sessions(wad_id)
-    if sessions:
-        return sessions[0].get("duration_seconds")
-    return None
+    duration = sessions[0].get("duration_seconds") if sessions else None
+    return PlayResult(duration=duration, exit_code=proc.returncode)
 
 
 def play_iwad(
     iwad_name: str,
     sourceport: str | None = None,
     extra_args: list[str] | None = None,
-) -> int:
+) -> PlayResult:
     """
     Play an IWAD directly with no PWAD.
 
-    Returns the play session duration in seconds (wall clock).
+    Returns a PlayResult with duration and exit code.
     """
     import time
 
@@ -445,7 +458,8 @@ def play_iwad(
 
     start = time.monotonic()
     proc.wait()
-    return int(time.monotonic() - start)
+    duration = int(time.monotonic() - start)
+    return PlayResult(duration=duration, exit_code=proc.returncode)
 
 
 def format_duration(seconds: int) -> str:

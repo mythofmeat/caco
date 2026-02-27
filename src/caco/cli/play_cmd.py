@@ -9,7 +9,7 @@ from typing import Any
 
 from caco import db
 from caco.config import get_default_sourceport
-from caco.player import play, play_iwad, format_duration
+from caco.player import play, play_iwad, format_duration, PlayResult
 
 from caco.cli import (
     cli,
@@ -65,9 +65,11 @@ def play_cmd(query: str | None, sourceport: str | None, first: bool, iwad_name: 
             iwad_extra.extend(["-complevel", str(cl)])
         console.print(f"[cyan]Playing IWAD {iwad_name}...[/cyan]")
         try:
-            duration = play_iwad(iwad_name, sourceport=port, extra_args=iwad_extra)
-            if duration:
-                console.print(f"[green]Session ended:[/green] {format_duration(duration)}")
+            result = play_iwad(iwad_name, sourceport=port, extra_args=iwad_extra)
+            if result.duration:
+                console.print(f"[green]Session ended:[/green] {format_duration(result.duration)}")
+            if result.crashed:
+                console.print(f"[yellow]Warning: sourceport exited with code {result.exit_code}[/yellow]")
         except Exception as e:
             err_console.print(f"[red]Error: {e}[/red]")
             sys.exit(1)
@@ -121,12 +123,14 @@ def play_cmd(query: str | None, sourceport: str | None, first: bool, iwad_name: 
         prog.update(_task_id[0], completed=downloaded, total=total)
 
     try:
-        duration = play(
+        result = play(
             wad_id, sourceport=port, extra_args=extra,
             progress_callback=_progress_callback,
         )
-        if duration:
-            console.print(f"[green]Session ended:[/green] {format_duration(duration)}")
+        if result.duration:
+            console.print(f"[green]Session ended:[/green] {format_duration(result.duration)}")
+        if result.crashed:
+            console.print(f"[yellow]Warning: sourceport exited with code {result.exit_code}[/yellow]")
     except Exception as e:
         err_console.print(f"[red]Error: {e}[/red]")
         sys.exit(1)
