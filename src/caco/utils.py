@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import struct
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -80,6 +82,15 @@ def parse_wad_directory(wad_data: bytes | memoryview) -> list[tuple[str, int, in
         entries.append((name, lump_offset, lump_size))
 
     return entries
+
+
+def compute_md5(path: str | Path) -> str:
+    """Compute MD5 hex digest of a file."""
+    h = hashlib.md5()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def extract_year(date_str: str | None) -> int | None:

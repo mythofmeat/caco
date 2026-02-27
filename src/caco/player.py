@@ -222,7 +222,7 @@ def _read_stats_snapshot(wad_id: int) -> str | None:
 
         wad_stats = parse_stats_file(stats_path)
         return stats_to_json(wad_stats)
-    except Exception:
+    except (OSError, ValueError, KeyError):
         logger.warning("Failed to read stats for WAD %d", wad_id, exc_info=True)
         return None
 
@@ -488,6 +488,8 @@ def play(
         if Path(lmp_path).exists():
             db.update_session_demo(session_id, lmp_path)
             logger.info("Recorded demo: %s", lmp_path)
+        else:
+            logger.warning("Demo file not found after recording: %s", lmp_path)
 
     # Return duration
     sessions = db.get_sessions(wad_id)

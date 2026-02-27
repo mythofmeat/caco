@@ -6,13 +6,13 @@ from unittest.mock import patch
 
 import pytest
 
+from caco.utils import compute_md5
 from caco.db._iwads import (
     DEFAULT_IWAD_PRIORITY,
     FAMILY_FALLBACKS,
     IWAD_ALIASES,
     KNOWN_IWAD_FILENAMES,
     KNOWN_IWADS,
-    _compute_md5,
     get_iwad_priority,
     identify_iwad,
     managed_iwad_filename,
@@ -26,7 +26,7 @@ class TestIdentifyIwad:
         """identify_iwad returns (family, variant, title) for a known MD5."""
         wad = tmp_path / "doom2.wad"
         wad.write_bytes(b"fake doom2 content")
-        fake_md5 = _compute_md5(wad)
+        fake_md5 = compute_md5(wad)
 
         with patch.dict(KNOWN_IWADS, {fake_md5: ("doom2", "v1.9", "Doom II: Hell on Earth")}):
             result = identify_iwad(wad)
@@ -485,7 +485,7 @@ class TestComputeMd5:
         """MD5 computation is consistent."""
         wad = tmp_path / "test.wad"
         wad.write_bytes(b"hello world")
-        assert _compute_md5(wad) == _compute_md5(wad)
+        assert compute_md5(wad) == compute_md5(wad)
 
     def test_different_content(self, tmp_path):
         """Different files produce different MD5s."""
@@ -493,7 +493,7 @@ class TestComputeMd5:
         b = tmp_path / "b.wad"
         a.write_bytes(b"content a")
         b.write_bytes(b"content b")
-        assert _compute_md5(a) != _compute_md5(b)
+        assert compute_md5(a) != compute_md5(b)
 
 
 class TestIwadDirRestructureMigration:

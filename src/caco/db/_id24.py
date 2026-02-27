@@ -5,12 +5,12 @@ resource WADs, modder packs).  Unlike IWADs, each id24 file is a distinct entity
 with at most one registered copy — no family/variant model needed.
 """
 
-import hashlib
 import sqlite3
 from pathlib import Path
 from typing import Any
 
 from caco.db._connection import get_connection
+from caco.utils import compute_md5
 
 # =============================================================================
 # Known id24 MD5 checksums -> (name, version, title)
@@ -56,15 +56,6 @@ KNOWN_ID24_FILENAMES: dict[str, tuple[str, str, str]] = {
 # =============================================================================
 
 
-def _compute_md5(path: str | Path) -> str:
-    """Compute MD5 hex digest of a file."""
-    h = hashlib.md5()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
 def identify_id24(path: str | Path) -> tuple[str, str, str] | None:
     """Identify an id24 WAD file by MD5 hash, falling back to filename.
 
@@ -74,7 +65,7 @@ def identify_id24(path: str | Path) -> tuple[str, str, str] | None:
     if not path.exists():
         return None
 
-    md5 = _compute_md5(path)
+    md5 = compute_md5(path)
     if md5 in KNOWN_ID24_WADS:
         return KNOWN_ID24_WADS[md5]
 

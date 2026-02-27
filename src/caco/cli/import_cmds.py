@@ -84,7 +84,8 @@ def _register_iwad(path, family: str, variant: str, title: str) -> None:
     """Register an IWAD file: copy to managed dir and add to DB."""
     import shutil
     from caco.config import get_iwad_dir
-    from caco.db._iwads import _compute_md5, add_iwad, get_iwad_variant, managed_iwad_filename
+    from caco.utils import compute_md5
+    from caco.db._iwads import add_iwad, get_iwad_variant, managed_iwad_filename
 
     existing = get_iwad_variant(family, variant)
     if existing:
@@ -97,7 +98,7 @@ def _register_iwad(path, family: str, variant: str, title: str) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(str(path), str(dest))
 
-    md5 = _compute_md5(path)
+    md5 = compute_md5(path)
     add_iwad(family, variant, str(dest), title=title, md5=md5)
     console.print(f"[green]Registered IWAD:[/green] {title} ({family}/{variant})")
 
@@ -106,7 +107,8 @@ def _register_id24(path, name: str, version: str, title: str) -> None:
     """Register an id24 WAD file: copy to managed dir and add to DB."""
     import shutil
     from caco.config import get_id24_dir
-    from caco.db._id24 import _compute_md5, add_id24, get_id24
+    from caco.utils import compute_md5
+    from caco.db._id24 import add_id24, get_id24
 
     existing = get_id24(name)
     if existing:
@@ -118,7 +120,7 @@ def _register_id24(path, name: str, version: str, title: str) -> None:
     dest = id24_dir / f"{name}.wad"
     shutil.copy2(str(path), str(dest))
 
-    md5 = _compute_md5(path)
+    md5 = compute_md5(path)
     add_id24(name, str(dest), version=version, title=title, md5=md5)
     console.print(f"[green]Registered id24:[/green] {title} ({version})")
 

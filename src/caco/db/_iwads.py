@@ -5,12 +5,12 @@ multiple **variants** per family (v1.9, bfg, enhanced, kex, ...).  Resolution
 uses a configurable priority list to pick the preferred variant.
 """
 
-import hashlib
 import sqlite3
 from pathlib import Path
 from typing import Any
 
 from caco.db._connection import get_connection
+from caco.utils import compute_md5
 
 # =============================================================================
 # Known IWAD MD5 checksums -> (family, variant, display_title)
@@ -172,15 +172,6 @@ FAMILY_FALLBACKS: dict[str, list[str]] = {
 # =============================================================================
 
 
-def _compute_md5(path: str | Path) -> str:
-    """Compute MD5 hex digest of a file."""
-    h = hashlib.md5()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
 def identify_iwad(path: str | Path) -> tuple[str, str, str] | None:
     """Identify an IWAD file by MD5 hash, falling back to filename.
 
@@ -190,7 +181,7 @@ def identify_iwad(path: str | Path) -> tuple[str, str, str] | None:
     if not path.exists():
         return None
 
-    md5 = _compute_md5(path)
+    md5 = compute_md5(path)
     if md5 in KNOWN_IWADS:
         return KNOWN_IWADS[md5]
 
