@@ -39,6 +39,9 @@ A personal Doom WAD library manager taking inspiration from beets. Track what yo
 - **id24 WAD management**
   - Register id24 content (Legacy of Rust, id24res, modder packs) with MD5-based identification
   - Auto-detect on import — `caco import` recognizes id24 files from local paths
+  - Auto-load id24 resource WADs during play (id24res.wad, id1 resources)
+  - COMPLVL lump detection — auto-detect complevel from WAD files
+  - Complevel flags (`-complevel N`) for dsda and woof family sourceports
   - Managed storage at `~/.local/share/caco/id24/`
 
 ## Installation
@@ -299,6 +302,7 @@ caco ls tag:megawad                     # By tag (supports globs: tag:caco*)
 caco ls status:playing                  # By status (shortcuts: status:p)
 caco ls source:idgames                  # By source type (idgames, doomwiki, url, local)
 caco ls iwad:doom2                      # By IWAD (matches custom_iwad)
+caco ls complevel:boom                  # By complevel (shortcuts: vanilla, boom, mbf, mbf21)
 caco ls author:alm title:scythe         # Combine filters (AND logic)
 
 # Combine query + sort
@@ -405,10 +409,14 @@ caco modify id:1 iwad=tnt
 caco modify id:1 sourceport=dsda-doom
 
 # Set custom arguments
-caco modify id:1 args="-complevel 2 -warp 1"
+caco modify id:1 args="-warp 1"
+
+# Set complevel (integer or shortcut: vanilla, boom, mbf, mbf21)
+caco modify id:1 complevel=boom          # Sets complevel 9
+caco modify id:1 complevel=21            # Sets complevel 21 (MBF21)
 
 # Clear custom settings
-caco modify id:1 !iwad !sourceport !args
+caco modify id:1 !iwad !sourceport !args !complevel
 ```
 
 Priority: CLI arguments > Per-WAD config > Global config
@@ -757,6 +765,7 @@ New config keys are automatically added with default values when you update caco
 | `data_dir` | Base directory for per-WAD data (default: `~/.local/share/caco/data/`) |
 | `auto_stats` | Auto-track per-map stats after play sessions (default: true) |
 | `auto_detect_iwad` | Auto-detect required IWAD from WAD file contents (default: true) |
+| `auto_detect_complevel` | Auto-detect complevel from WAD COMPLVL lump (default: true) |
 | `[list] format` | Columns to display (see config example) |
 | `[list] sort` | Default sort order |
 | `[list] default_status` | Default status filter (empty = all statuses) |

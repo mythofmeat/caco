@@ -80,11 +80,10 @@ PLUTONIA_ONLY_PATCHES: frozenset[str] = frozenset({
 # fmt: on
 
 
-def detect_iwad(wad_path: str | Path) -> str | None:
-    """Detect the required IWAD family for a PWAD file.
+def _load_wad_data(wad_path: str | Path) -> bytes | None:
+    """Load WAD data from a file, handling ZIP-wrapped WADs.
 
-    Returns an IWAD family name ("doom", "doom2", "tnt", "plutonia")
-    or None if detection is inconclusive.
+    Returns the raw WAD bytes, or None if the file can't be read.
     """
     path = Path(wad_path)
     if not path.exists():
@@ -111,6 +110,19 @@ def detect_iwad(wad_path: str | Path) -> str | None:
         except OSError:
             return None
 
+    return wad_data
+
+
+def detect_iwad(wad_path: str | Path) -> str | None:
+    """Detect the required IWAD family for a PWAD file.
+
+    Returns an IWAD family name ("doom", "doom2", "tnt", "plutonia")
+    or None if detection is inconclusive.
+    """
+    wad_data = _load_wad_data(wad_path)
+    if wad_data is None:
+        return None
+
     try:
         directory = parse_wad_directory(wad_data)
     except Exception:
@@ -130,6 +142,36 @@ def detect_iwad(wad_path: str | Path) -> str | None:
 
     # Priority 2: Map name format (Doom 1 vs Doom 2 family)
     return _detect_from_maps(lump_names)
+
+
+def detect_complvl(wad_path: str | Path) -> int | None:
+    """Detect complevel from a WAD file's COMPLVL lump.
+
+    The COMPLVL lump is an id24 signal — a single byte indicating the
+    compatibility level the WAD was designed for.
+
+    Returns the complevel as an integer, or None if no COMPLVL lump found.
+    """
+    wad_data = _load_wad_data(wad_path)
+    if wad_data is None:
+        return None
+
+    try:
+        directory = parse_wad_directory(wad_data)
+    except Exception:
+        return None
+
+    if not directory:
+        return None
+
+    for name, offset, size in directory:
+        if name == "COMPLVL" and size >= 1:
+            try:
+                return wad_data[offset]
+            except IndexError:
+                return None
+
+    return None
 
 
 def _parse_pnames(wad_data: bytes, directory: list[tuple[str, int, int]]) -> set[str] | None:

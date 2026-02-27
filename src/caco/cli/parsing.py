@@ -21,6 +21,7 @@ MODIFY_FIELDS = {
     "args": "custom_args",
     "idgames-id": "idgames_id",
     "version": "version",
+    "complevel": "custom_complevel",
     "tag": "tag",  # special handling
 }
 
@@ -195,6 +196,20 @@ def parse_modify_args(
                         int(value)
                     except ValueError:
                         raise click.UsageError(f"Year must be an integer, got: '{value}'")
+
+                if field_name == "complevel":
+                    from caco.doomworld.parser import COMPLEVEL_SHORTCUTS
+                    lower_val = value.lower()
+                    if lower_val in COMPLEVEL_SHORTCUTS:
+                        value = str(COMPLEVEL_SHORTCUTS[lower_val])
+                    else:
+                        try:
+                            int(value)
+                        except ValueError:
+                            shortcuts = ", ".join(COMPLEVEL_SHORTCUTS.keys())
+                            raise click.UsageError(
+                                f"Invalid complevel: '{value}' (use integer or: {shortcuts})"
+                            )
 
                 if field_name == "args":
                     # Accept JSON array or space-separated

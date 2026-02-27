@@ -144,6 +144,33 @@ class TestParseModifyArgs:
         query, actions, sort = parse_modify_args(["id:1", "idgames-id=12345"])
         assert actions[0].field == "idgames_id"
 
+    def test_complevel_numeric(self):
+        query, actions, sort = parse_modify_args(["id:1", "complevel=9"])
+        assert actions[0].field == "custom_complevel"
+        assert actions[0].value == "9"
+
+    def test_complevel_shortcut_boom(self):
+        query, actions, sort = parse_modify_args(["id:1", "complevel=boom"])
+        assert actions[0].field == "custom_complevel"
+        assert actions[0].value == "9"
+
+    def test_complevel_shortcut_mbf21(self):
+        query, actions, sort = parse_modify_args(["id:1", "complevel=mbf21"])
+        assert actions[0].value == "21"
+
+    def test_complevel_shortcut_vanilla(self):
+        query, actions, sort = parse_modify_args(["id:1", "complevel=vanilla"])
+        assert actions[0].value == "2"
+
+    def test_complevel_invalid(self):
+        with pytest.raises(click.UsageError, match="Invalid complevel"):
+            parse_modify_args(["id:1", "complevel=notreal"])
+
+    def test_clear_complevel(self):
+        query, actions, sort = parse_modify_args(["id:1", "!complevel"])
+        assert actions[0].field == "custom_complevel"
+        assert actions[0].action == "clear"
+
 
 class TestParseSortOption:
     """Test _parse_sort_option helper."""

@@ -426,6 +426,14 @@ def _migrate_add_id24_wads_table(conn: sqlite3.Connection) -> None:
         """)
 
 
+def _migrate_add_custom_complevel(conn: sqlite3.Connection) -> None:
+    """Add custom_complevel column for per-WAD complevel setting."""
+    cursor = conn.execute("PRAGMA table_info(wads)")
+    columns = {row[1] for row in cursor.fetchall()}
+    if "custom_complevel" not in columns:
+        conn.execute("ALTER TABLE wads ADD COLUMN custom_complevel TEXT")
+
+
 # Ordered migration registry — append new migrations here with incrementing version
 _MIGRATIONS: list[tuple[int, str, Any]] = [
     (1, "add_custom_play_config", _migrate_add_custom_play_config),
@@ -445,4 +453,5 @@ _MIGRATIONS: list[tuple[int, str, Any]] = [
     (15, "add_session_stats", _migrate_add_session_stats),
     (16, "add_demo_file", _migrate_add_demo_file),
     (17, "add_id24_wads_table", _migrate_add_id24_wads_table),
+    (18, "add_custom_complevel", _migrate_add_custom_complevel),
 ]

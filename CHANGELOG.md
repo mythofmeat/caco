@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.6.0] - 2026-02-28
+
+id24 play integration: COMPLVL lump detection, auto-load id24 resource WADs during play, and complevel flags for compatible sourceports.
+
+### Added
+
+- **COMPLVL lump detection** (`iwad_detect.py`): `detect_complvl()` inspects WAD
+  files for the COMPLVL lump (id24 signal) and returns the complevel byte value;
+  auto-detected on first play and persisted to `custom_complevel` column
+- **Auto-load id24 resource WADs** (`player.py`): When a WAD has a COMPLVL lump,
+  `id24res.wad` is automatically injected into the `-file` list; when playing
+  `id1.wad` (Legacy of Rust), also loads `id1-res`, `id1-tex`, `id1-weap`,
+  `id1-mus` from the id24 registry
+- **Complevel flags** (`sourceports.py`): `get_complevel_args()` passes
+  `-complevel N` to sourceports that support it (dsda and woof families);
+  automatically injected during play when `custom_complevel` is set
+- **`complevel` modify field**: `caco modify id:1 complevel=boom` — accepts
+  integer values or named shortcuts (vanilla=2, boom=9, mbf=11, mbf21=21);
+  `!complevel` to clear
+- **`complevel:` query field**: `caco ls complevel:boom` — filter WADs by
+  complevel value (accepts same shortcuts)
+- **Complevel in `info` output**: Shows "Complevel: 9 (Boom)" in custom play
+  config section with human-readable name from `COMPLEVEL_NAMES`
+- **`auto_detect_complevel` config option** (default: true): Controls whether
+  COMPLVL lump detection runs on first play
+- **`COMPLEVEL_SHORTCUTS`** in `doomworld/parser.py`: Named shortcut mapping
+  (vanilla, boom, mbf, mbf21) re-exported from `doomworld/__init__.py`
+- **Database migration 18**: Adds `custom_complevel TEXT` column to wads table
+- **Fish completions**: `complevel:` for ls queries, `complevel=` for modify,
+  `!complevel` for clearing
+- **Tests**: COMPLVL detection (with/without lump, ZIP handling, edge cases),
+  `get_complevel_args()` for each sourceport family, query and modify validation,
+  player integration (auto-detect, skip-when-set)
+
+### Changed
+
+- **`_load_wad_data()` extracted** from `detect_iwad()`: Shared helper for
+  loading WAD bytes (handles ZIP-wrapped WADs), used by both `detect_iwad()`
+  and `detect_complvl()`
+
+---
+
 ## [2.5.0] - 2026-02-27
 
 id24 WAD management: register, list, and remove id24 content files (Legacy of Rust, id24res, modder packs) from the 2024 Doom re-release.

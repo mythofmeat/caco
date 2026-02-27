@@ -27,6 +27,7 @@ SOURCEPORT_FAMILIES: dict[str, dict] = {
         ],
         "data_arg": "-data",
         "save_arg": "-save",
+        "complevel_arg": "-complevel",
     },
     "zdoom": {
         "executables": ["gzdoom", "lzdoom", "vkdoom", "qzdoom", "zdoom"],
@@ -40,6 +41,7 @@ SOURCEPORT_FAMILIES: dict[str, dict] = {
         "executables": ["woof"],
         "data_arg": "-data",
         "save_arg": "-save",
+        "complevel_arg": "-complevel",
     },
     "eternity": {
         "executables": ["eternity"],
@@ -110,6 +112,21 @@ def uses_deh_flag(executable: str) -> bool:
     basename = Path(executable).stem
     family_name = _EXECUTABLE_FAMILY_NAME.get(basename)
     return family_name != "zdoom"
+
+
+def get_complevel_args(executable: str, complevel: int) -> list[str]:
+    """Return CLI args to set the compatibility level for a sourceport.
+
+    Only dsda and woof families support -complevel.
+    Returns e.g. ["-complevel", "9"] or [] for unsupported sourceports.
+    """
+    family = identify_sourceport_family(executable)
+    if not family:
+        return []
+    arg = family.get("complevel_arg")
+    if arg:
+        return [arg, str(complevel)]
+    return []
 
 
 def get_data_dir_args(

@@ -50,6 +50,7 @@ complete -c caco -n "__fish_seen_subcommand_from ls" -a "tag:" -d "Filter by tag
 complete -c caco -n "__fish_seen_subcommand_from ls" -a "status:" -d "Filter by status"
 complete -c caco -n "__fish_seen_subcommand_from ls" -a "source:" -d "Filter by source"
 complete -c caco -n "__fish_seen_subcommand_from ls" -a "iwad:" -d "Filter by IWAD"
+complete -c caco -n "__fish_seen_subcommand_from ls" -a "complevel:" -d "Filter by complevel"
 
 # ls inline sort completions
 complete -c caco -n "__fish_seen_subcommand_from ls" -a "id+ id- playtime+ playtime- rating+ rating- created+ created- title+ title- author+ author- last_played+ last_played- year+ year-" -d "Sort"
@@ -87,6 +88,7 @@ complete -c caco -n "__fish_seen_subcommand_from modify" -a "iwad=" -d "Set cust
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "sourceport=" -d "Set custom sourceport"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "idgames-id=" -d "Set idgames ID"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "version=" -d "Set version"
+complete -c caco -n "__fish_seen_subcommand_from modify" -a "complevel=" -d "Set complevel (integer or vanilla/boom/mbf/mbf21)"
 
 # modify clear completions
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!author" -d "Clear author"
@@ -96,6 +98,7 @@ complete -c caco -n "__fish_seen_subcommand_from modify" -a "!notes" -d "Clear n
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!rating" -d "Clear rating"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!iwad" -d "Clear custom IWAD"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!sourceport" -d "Clear custom sourceport"
+complete -c caco -n "__fish_seen_subcommand_from modify" -a "!complevel" -d "Clear complevel"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!tag" -d "Remove all tags"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!tag:" -d "Remove tags matching pattern"
 

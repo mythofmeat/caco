@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from caco.sourceports import get_data_dir_args, get_dsda_save_dir, identify_sourceport_family, detect_sourceports
+from caco.sourceports import get_complevel_args, get_data_dir_args, get_dsda_save_dir, identify_sourceport_family, detect_sourceports
 
 
 class TestIdentifySourceportFamily:
@@ -179,3 +179,32 @@ class TestGetDataDirArgsDsdaNested:
 
     def test_unknown_unaffected(self):
         assert get_data_dir_args("unknown-port", "/tmp/data", iwad="doom2", wad_path="/wads/test.wad") == []
+
+
+class TestGetComplevelArgs:
+    """Test complevel CLI arg generation."""
+
+    def test_dsda_family(self):
+        assert get_complevel_args("dsda-doom", 9) == ["-complevel", "9"]
+
+    def test_nyan_doom(self):
+        assert get_complevel_args("nyan-doom", 21) == ["-complevel", "21"]
+
+    def test_woof(self):
+        assert get_complevel_args("woof", 2) == ["-complevel", "2"]
+
+    def test_zdoom_unsupported(self):
+        """zdoom family doesn't support -complevel."""
+        assert get_complevel_args("gzdoom", 9) == []
+
+    def test_chocolate_unsupported(self):
+        assert get_complevel_args("chocolate-doom", 2) == []
+
+    def test_eternity_unsupported(self):
+        assert get_complevel_args("eternity", 11) == []
+
+    def test_unknown_port(self):
+        assert get_complevel_args("my-custom-port", 9) == []
+
+    def test_with_full_path(self):
+        assert get_complevel_args("/usr/bin/dsda-doom", 21) == ["-complevel", "21"]

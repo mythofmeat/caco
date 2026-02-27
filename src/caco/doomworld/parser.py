@@ -34,6 +34,14 @@ COMPLEVEL_PATTERNS = {
     r'\bdsda[- ]?doom\b': lambda m: 21,  # Usually implies MBF21 support
 }
 
+# Named shortcut -> complevel value (for CLI modify and query)
+COMPLEVEL_SHORTCUTS: dict[str, int] = {
+    "vanilla": 2,
+    "boom": 9,
+    "mbf": 11,
+    "mbf21": 21,
+}
+
 # Common complevel descriptions for display
 COMPLEVEL_NAMES = {
     0: "Doom v1.2",

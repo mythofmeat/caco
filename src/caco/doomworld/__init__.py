@@ -3,6 +3,8 @@
 from caco.doomworld.client import DoomworldClient, DoomworldError
 from caco.doomworld.models import ForumThread
 from caco.doomworld.parser import (
+    COMPLEVEL_NAMES,
+    COMPLEVEL_SHORTCUTS,
     DoomworldParser,
     extract_download_links,
     extract_complevel,
@@ -32,6 +34,9 @@ __all__ = [
     # Parser
     "DoomworldParser",
     "ForumThread",
+    # Constants
+    "COMPLEVEL_NAMES",
+    "COMPLEVEL_SHORTCUTS",
     # Extraction functions
     "extract_download_links",
     "extract_complevel",

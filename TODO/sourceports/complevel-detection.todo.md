@@ -1,7 +1,7 @@
-- [ ] add a `complevel` field that has auto-detection and the ability to be overridden.
-- [ ] define complevel by both integer (e.g., `9`) and string (e.g., `boom`)
-- [ ] pass the complevel argument to the sourceport on launch
-- [ ] this should be a searchable field in `caco ls complevel:` and modifiable by `caco modify [query] complevel=[9|boom]`
+- [x] add a `complevel` field that has auto-detection and the ability to be overridden.
+- [x] define complevel by both integer (e.g., `9`) and string (e.g., `boom`)
+- [x] pass the complevel argument to the sourceport on launch
+- [x] this should be a searchable field in `caco ls complevel:` and modifiable by `caco modify [query] complevel=[9|boom]`
 
 ## complevel integer/string relationship
 0 	Doom v1.2 (note: flawed in PrBoom; requires PrBoom+ 2.5.0.8 or later)

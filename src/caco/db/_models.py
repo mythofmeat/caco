@@ -49,6 +49,7 @@ class WadRecord(TypedDict, total=False):
     custom_iwad: str | None
     custom_sourceport: str | None
     custom_args: str | None
+    custom_complevel: str | None
     companion_files: str | None
     version: str | None
     stats_snapshot: str | None
@@ -126,6 +127,6 @@ OR_SEPARATOR = " , "
 ALLOWED_UPDATE_FIELDS = frozenset({
     "title", "author", "year", "description", "status", "rating", "notes",
     "source_url", "filename", "cached_path", "custom_iwad",
-    "custom_sourceport", "custom_args", "companion_files", "version",
+    "custom_sourceport", "custom_args", "custom_complevel", "companion_files", "version",
     "idgames_id", "deleted_at", "stats_snapshot",
 })

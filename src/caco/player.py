@@ -10,6 +10,7 @@ from typing import Any, Callable
 from caco import db
 from caco.config import (
     find_wad_data_dir,
+    get_auto_detect_complevel,
     get_auto_detect_iwad,
     get_auto_stats,
     get_cache_dir,
@@ -240,6 +241,38 @@ def _auto_track_stats(wad_id: int, wad: dict) -> str | None:
     return json_str
 
 
+def _get_id24_resource_args(wad: dict, wad_path: Path | None) -> list[str]:
+    """Return id24 resource WAD paths to prepend to the -file list.
+
+    - Any WAD with custom_complevel set (COMPLVL lump = id24 signal) gets id24res.wad
+    - When playing id1.wad specifically, also load id1-res, id1-tex, id1-weap, id1-mus
+    """
+    file_args: list[str] = []
+
+    if not wad.get("custom_complevel"):
+        return file_args
+
+    # Load id24res.wad for any id24 WAD
+    id24res = db.get_id24("id24res")
+    if id24res and Path(id24res["path"]).exists():
+        file_args.append(id24res["path"])
+
+    # Check if this is id1.wad (Legacy of Rust) — load its specific resources
+    is_id1 = False
+    if wad_path:
+        stem = Path(wad_path).stem.lower()
+        if stem == "id1":
+            is_id1 = True
+
+    if is_id1:
+        for name in ("id1-res", "id1-tex", "id1-weap", "id1-mus"):
+            entry = db.get_id24(name)
+            if entry and Path(entry["path"]).exists():
+                file_args.append(entry["path"])
+
+    return file_args
+
+
 def play(
     wad_id: int,
     sourceport: str | None = None,
@@ -306,6 +339,16 @@ def play(
             db.update_wad(wad_id, custom_iwad=detected)
             wad["custom_iwad"] = detected
 
+    # Auto-detect complevel from COMPLVL lump if not explicitly set
+    if not wad.get("custom_complevel") and wad_path and get_auto_detect_complevel():
+        from caco.iwad_detect import detect_complvl
+
+        detected_cl = detect_complvl(wad_path)
+        if detected_cl is not None:
+            logger.info("Auto-detected complevel: %d for WAD %d", detected_cl, wad_id)
+            db.update_wad(wad_id, custom_complevel=str(detected_cl))
+            wad["custom_complevel"] = str(detected_cl)
+
     # Add IWAD (CLI option would be in extra_args, so: WAD-specific > global config)
     iwad = wad.get("custom_iwad") or get_iwad()
     if iwad:
@@ -315,6 +358,16 @@ def play(
     default_args = get_sourceport_args()
     if default_args:
         cmd.extend(default_args)
+
+    # Inject complevel flag if set and not already present in args
+    if wad.get("custom_complevel"):
+        all_args = cmd + (extra_args or [])
+        if "-complevel" not in all_args:
+            from caco.sourceports import get_complevel_args
+
+            cl_args = get_complevel_args(port, int(wad["custom_complevel"]))
+            if cl_args:
+                cmd.extend(cl_args)
 
     # Add per-WAD custom args
     if wad.get("custom_args"):
@@ -358,8 +411,8 @@ def play(
         demo_path = str(demos_dir / demo_name)
         cmd.extend(["-record", demo_path])
 
-    # Build -file list: companion WADs + main WAD
-    file_args = []
+    # Build -file list: id24 resources + companion WADs + main WAD
+    file_args = _get_id24_resource_args(wad, wad_path)
     deh_args = []
     if wad.get("companion_files"):
         try:

@@ -194,14 +194,14 @@ src/caco/
 - Status enum: `to-play`, `backlog`, `playing`, `finished`, `abandoned`, `awaiting-update`
 - Import command uses flag-based source selection: `caco import <source> [--idgames|--doomwiki|--doomworld|--local|--url URL]`
 - Query syntax (beets-style):
-  - Fields: `id:`, `title:`, `author:`, `year:`, `filename:`, `tag:`, `status:`, `source:`, `iwad:`
+  - Fields: `id:`, `title:`, `author:`, `year:`, `filename:`, `tag:`, `status:`, `source:`, `iwad:`, `complevel:`
   - OR queries: `"status:playing , status:to-play"` (comma with spaces — spaces required!)
   - Negation: `^status:finished` (prefer `^` prefix, `-` also works but may conflict with CLI flags)
   - Status shortcuts: `status:p` (playing), `status:f` (finished), etc.
   - Glob patterns: `tag:caco*` (matches cacoward, etc.)
   - Free text searches title, author, and description
   - Multiple terms are joined with implicit AND
-- Per-WAD config: `custom_iwad`, `custom_sourceport`, `custom_args` (JSON array), `companion_files` (JSON array of absolute paths) columns in wads table
+- Per-WAD config: `custom_iwad`, `custom_sourceport`, `custom_args` (JSON array), `custom_complevel` (TEXT), `companion_files` (JSON array of absolute paths) columns in wads table
 - Companion files: `companion_files` TEXT column stores JSON array of absolute file paths; DEH/BEX files auto-detected by extension and loaded with `-deh` (non-zdoom) or `-file` (zdoom); managed via `caco modify --add-file`/`--remove-file`; `uses_deh_flag()` in `sourceports.py` determines correct flag per family
 - Auto stats tracking: `stats_snapshot` TEXT column on `wads` table stores live per-map stats JSON; auto-read from data dir after play sessions; auto-archived to completion on `beaten add` or `modify status=finished`; `auto_stats` config (default: true); live stats shown as "Current (live)" entry in Map Stats dialog (GUI) and screen (TUI)
 - Per-session map tracking: `stats_before`/`stats_after` TEXT columns on `sessions` table store stats snapshots captured before/after each play session; `compute_stats_delta()` in `wad_stats.py` diffs these to determine which maps were played; `_read_stats_snapshot()` in `player.py` reads stats file to JSON; `caco sessions` command displays session history with maps played per session
@@ -216,6 +216,10 @@ src/caco/
 - Sourceport families: `sourceports.py` maps executable basenames to CLI flags; `SOURCEPORT_FAMILIES` dict with dsda/zdoom/chocolate/woof/eternity families; `identify_sourceport_family()` strips path and matches basename; `get_data_dir_args()` returns `-data`/`-save` or `-savedir` args; for dsda family, `-save` points to nested stats dir (`{exe}_data/{iwad}/{wad_stem}/`) via `get_dsda_save_dir()` when `iwad` and `wad_path` are provided
 - Per-WAD data dirs: `player.py` injects data dir args when `manage_data_dirs=True` (default); `get_wad_data_dir(id, title)` returns `{data_dir}/{id}_{sanitized_title}/`; `find_wad_data_dir(id)` finds existing dir by ID prefix (handles title renames); `_sanitize_dirname()` lowercases, replaces non-alnum with hyphens, truncates to 64 chars
 - IWAD auto-detection: `iwad_detect.py` inspects PWAD file PNAMES lump for TNT-only (197) / Plutonia-only (78) patches, then falls back to map lump names (ExMy→doom, MAPxx→doom2); self-contained WADs (patches provided as lumps) don't trigger detection; result persisted to `custom_iwad` on first play; `auto_detect_iwad` config (default: true); `parse_wad_directory()` shared between `iwad_detect.py` and `gui/thumbnails/extractor.py` via `utils.py`
+- COMPLVL detection: `detect_complvl()` in `iwad_detect.py` reads COMPLVL lump (single byte = id24 signal); auto-detected on first play, persisted to `custom_complevel`; `auto_detect_complevel` config (default: true); `_load_wad_data()` shared helper handles ZIP-wrapped WADs
+- Complevel flags: `get_complevel_args()` in `sourceports.py` passes `-complevel N` to dsda and woof families; auto-injected during play when `custom_complevel` is set; won't double-inject if already in args
+- id24 resource auto-loading: `_get_id24_resource_args()` in `player.py` injects `id24res.wad` for any WAD with `custom_complevel`; also loads id1-specific resources (id1-res, id1-tex, id1-weap, id1-mus) when playing id1.wad
+- Complevel shortcuts: `COMPLEVEL_SHORTCUTS` in `doomworld/parser.py` maps vanilla→2, boom→9, mbf→11, mbf21→21; used by modify validation and query resolution; `COMPLEVEL_NAMES` maps integer→display name
 - Direct IWAD play: `caco play --iwad doom2` launches an IWAD directly via `play_iwad()` in `player.py`; no session tracking, no WAD record — just a clean sourceport launch; supports `-p`/`--sourceport` and extra args
 - Sourceport detection: `detect_sourceports()` in `sourceports.py` uses `shutil.which()` to find installed sourceports from `SOURCEPORT_FAMILIES`; play command error message lists detected ports when no sourceport is configured
 - Config auto-update: `ensure_config_keys()` in `config.py` runs on `load_config()` — compares existing config file against `DEFAULT_CONFIG` and section defaults (`[tui]`, `[gui]`, `[list]`); adds missing keys with default values; only runs if config file exists; only writes if changes are made; recursion-guarded

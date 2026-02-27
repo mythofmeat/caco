@@ -265,9 +265,9 @@ class TestMigrationVersioning:
     def test_schema_migrations_populated(self, db_mod, tmp_db):
         conn = db_mod.get_connection()
         rows = conn.execute("SELECT version, name FROM schema_migrations ORDER BY version").fetchall()
-        assert len(rows) == 17
+        assert len(rows) == 18
         assert rows[0]["version"] == 1
-        assert rows[16]["version"] == 17
+        assert rows[17]["version"] == 18
         conn.close()
 
     def test_sessions_has_stats_columns(self, db_mod, tmp_db):

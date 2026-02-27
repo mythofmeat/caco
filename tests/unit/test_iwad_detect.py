@@ -10,10 +10,12 @@ import pytest
 from caco.iwad_detect import (
     PLUTONIA_ONLY_PATCHES,
     TNT_ONLY_PATCHES,
+    detect_complvl,
     detect_iwad,
     _detect_from_maps,
     _detect_from_pnames,
     _get_lump_names,
+    _load_wad_data,
     _parse_pnames,
 )
 
@@ -430,3 +432,171 @@ def test_player_respects_config_disabled(tmp_db, tmp_path):
     # custom_iwad should NOT have been set
     updated = db.get_wad(wad_id)
     assert not updated.get("custom_iwad")
+
+
+# ─── COMPLVL Detection ────────────────────────────────────────────────
+
+
+def test_detect_complvl_present(tmp_path):
+    """WAD with COMPLVL lump should return its value."""
+    wad = _build_wad([
+        ("COMPLVL", bytes([21])),  # MBF21
+        ("MAP01", b""),
+    ])
+    path = tmp_path / "id24.wad"
+    path.write_bytes(wad)
+    assert detect_complvl(path) == 21
+
+
+def test_detect_complvl_zero(tmp_path):
+    """COMPLVL lump with value 0 should return 0."""
+    wad = _build_wad([
+        ("COMPLVL", bytes([0])),
+        ("MAP01", b""),
+    ])
+    path = tmp_path / "cl0.wad"
+    path.write_bytes(wad)
+    assert detect_complvl(path) == 0
+
+
+def test_detect_complvl_absent(tmp_path):
+    """WAD without COMPLVL lump should return None."""
+    wad = _build_wad([("MAP01", b""), ("MAP02", b"")])
+    path = tmp_path / "noid24.wad"
+    path.write_bytes(wad)
+    assert detect_complvl(path) is None
+
+
+def test_detect_complvl_empty_lump(tmp_path):
+    """COMPLVL lump with size 0 should return None."""
+    wad = _build_wad([("COMPLVL", b""), ("MAP01", b"")])
+    path = tmp_path / "empty_cl.wad"
+    path.write_bytes(wad)
+    assert detect_complvl(path) is None
+
+
+def test_detect_complvl_zip_wrapped(tmp_path):
+    """COMPLVL detection should work inside ZIP files."""
+    wad = _build_wad([("COMPLVL", bytes([9])), ("MAP01", b"")])
+    zip_path = tmp_path / "id24.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("mywad.wad", wad)
+    assert detect_complvl(zip_path) == 9
+
+
+def test_detect_complvl_nonexistent():
+    """Nonexistent file should return None."""
+    assert detect_complvl(Path("/nonexistent/path.wad")) is None
+
+
+def test_detect_complvl_bad_file(tmp_path):
+    """Non-WAD file should return None."""
+    path = tmp_path / "notawad.wad"
+    path.write_bytes(b"NOT A WAD FILE")
+    assert detect_complvl(path) is None
+
+
+# ─── _load_wad_data helper ────────────────────────────────────────────
+
+
+def test_load_wad_data_direct(tmp_path):
+    """_load_wad_data reads .wad files directly."""
+    wad = _build_wad([("MAP01", b"")])
+    path = tmp_path / "test.wad"
+    path.write_bytes(wad)
+    data = _load_wad_data(path)
+    assert data == wad
+
+
+def test_load_wad_data_zip(tmp_path):
+    """_load_wad_data extracts .wad from ZIP files."""
+    wad = _build_wad([("MAP01", b"")])
+    zip_path = tmp_path / "test.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("inner.wad", wad)
+    data = _load_wad_data(zip_path)
+    assert data == wad
+
+
+def test_load_wad_data_nonexistent():
+    """_load_wad_data returns None for missing files."""
+    assert _load_wad_data(Path("/nonexistent/path.wad")) is None
+
+
+# ─── Player COMPLVL Integration ──────────────────────────────────────
+
+
+def test_player_auto_detect_complevel(tmp_db, tmp_path):
+    """play() should detect COMPLVL lump and persist to custom_complevel."""
+    from caco import db
+
+    wad_id = db.add_wad(
+        title="id24 WAD",
+        source_type=db.SourceType.LOCAL,
+        source_url=str(tmp_path / "test.wad"),
+    )
+
+    # Build a WAD with COMPLVL lump
+    wad_data = _build_wad([("COMPLVL", bytes([21])), ("MAP01", b"")])
+    wad_path = tmp_path / "test.wad"
+    wad_path.write_bytes(wad_data)
+    db.update_wad(wad_id, cached_path=str(wad_path))
+
+    with (
+        patch("caco.player.get_auto_detect_iwad", return_value=False),
+        patch("caco.player.get_auto_detect_complevel", return_value=True),
+        patch("caco.player.get_default_sourceport", return_value="dsda-doom"),
+        patch("caco.player.resolve_sourceport", return_value="/usr/bin/dsda-doom"),
+        patch("caco.player.resolve_iwad", return_value="/path/to/doom2.wad"),
+        patch("caco.player.get_iwad", return_value="doom2"),
+        patch("caco.player.get_sourceport_args", return_value=[]),
+        patch("caco.player.get_manage_data_dirs", return_value=False),
+        patch("caco.player.get_cache_auto_clean", return_value=False),
+        patch("shutil.which", return_value="/usr/bin/dsda-doom"),
+        patch("subprocess.Popen") as mock_popen,
+    ):
+        mock_popen.return_value.wait.return_value = 0
+
+        from caco.player import play
+        play(wad_id)
+
+    updated = db.get_wad(wad_id)
+    assert updated["custom_complevel"] == "21"
+
+
+def test_player_skips_complevel_when_set(tmp_db, tmp_path):
+    """play() should skip COMPLVL detection when custom_complevel already set."""
+    from caco import db
+
+    wad_id = db.add_wad(
+        title="Already Set CL",
+        source_type=db.SourceType.LOCAL,
+        source_url=str(tmp_path / "test.wad"),
+    )
+
+    wad_data = _build_wad([("COMPLVL", bytes([21])), ("MAP01", b"")])
+    wad_path = tmp_path / "test.wad"
+    wad_path.write_bytes(wad_data)
+    db.update_wad(wad_id, cached_path=str(wad_path), custom_complevel="9")
+
+    with (
+        patch("caco.player.get_auto_detect_iwad", return_value=False),
+        patch("caco.player.get_auto_detect_complevel", return_value=True),
+        patch("caco.player.get_default_sourceport", return_value="dsda-doom"),
+        patch("caco.player.resolve_sourceport", return_value="/usr/bin/dsda-doom"),
+        patch("caco.player.resolve_iwad", return_value="/path/to/doom2.wad"),
+        patch("caco.player.get_iwad", return_value="doom2"),
+        patch("caco.player.get_sourceport_args", return_value=[]),
+        patch("caco.player.get_manage_data_dirs", return_value=False),
+        patch("caco.player.get_cache_auto_clean", return_value=False),
+        patch("shutil.which", return_value="/usr/bin/dsda-doom"),
+        patch("subprocess.Popen") as mock_popen,
+    ):
+        mock_popen.return_value.wait.return_value = 0
+
+        from caco.player import play
+        play(wad_id)
+
+    # Should remain "9", not overwritten with "21"
+    updated = db.get_wad(wad_id)
+    assert updated["custom_complevel"] == "9"
