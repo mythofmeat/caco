@@ -141,6 +141,10 @@ class EditDialog(QDialog):
         self._complevel_input.setMaximumWidth(120)
         launch_form.addRow("Complevel:", self._complevel_input)
 
+        self._config_input = QLineEdit(self._wad.get("custom_config") or "")
+        self._config_input.setPlaceholderText("e.g., default, controller")
+        launch_form.addRow("Config Profile:", self._config_input)
+
         # Parse existing custom_args JSON into space-separated string
         args_str = ""
         if self._wad.get("custom_args"):
@@ -207,6 +211,7 @@ class EditDialog(QDialog):
             "custom_iwad": self._iwad_input.text().strip() or None,
             "custom_sourceport": self._sourceport_input.text().strip() or None,
             "complevel": complevel,
+            "custom_config": self._config_input.text().strip() or None,
         }
 
         # Parse extra args into JSON array

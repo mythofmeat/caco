@@ -13,6 +13,7 @@ DEFAULT_DB_PATH = DB_DIR / "library.db"
 CACHE_DIR = DB_DIR / "wads"
 IWAD_DIR = DB_DIR / "iwads"
 DATA_DIR = DB_DIR / "data"
+SOURCEPORT_DIR = DB_DIR / "sourceports"
 
 DEFAULT_CONFIG = {
     "sourceport": "",
@@ -264,6 +265,55 @@ def resolve_iwad(name: str) -> str:
                 return str(candidate)
 
     return name
+
+
+def get_sourceport_dir() -> Path:
+    """Get the sourceport config profiles directory."""
+    config = load_config()
+    custom = config.get("sourceport_dir", "")
+    return Path(custom).expanduser() if custom else SOURCEPORT_DIR
+
+
+def get_profile_path(sourceport: str, profile: str) -> Path:
+    """Return the path to a sourceport config profile file.
+
+    Path: {sourceport_dir}/{basename}/{profile}.cfg
+    """
+    basename = Path(sourceport).stem
+    return get_sourceport_dir() / basename / f"{profile}.cfg"
+
+
+def list_profiles(sourceport: str | None = None) -> dict[str, list[str]]:
+    """Scan the sourceport config directory for profiles.
+
+    Args:
+        sourceport: If given, only list profiles for this sourceport basename.
+                    Otherwise, list all sourceports and their profiles.
+
+    Returns:
+        Dict mapping sourceport basename to sorted list of profile names.
+    """
+    sp_dir = get_sourceport_dir()
+    if not sp_dir.is_dir():
+        return {}
+
+    result: dict[str, list[str]] = {}
+
+    if sourceport:
+        basename = Path(sourceport).stem
+        port_dir = sp_dir / basename
+        if port_dir.is_dir():
+            profiles = sorted(p.stem for p in port_dir.glob("*.cfg"))
+            if profiles:
+                result[basename] = profiles
+    else:
+        for entry in sorted(sp_dir.iterdir()):
+            if entry.is_dir():
+                profiles = sorted(p.stem for p in entry.glob("*.cfg"))
+                if profiles:
+                    result[entry.name] = profiles
+
+    return result
 
 
 def get_sourceport_args() -> list[str]:

@@ -22,6 +22,7 @@ MODIFY_FIELDS = {
     "idgames-id": "idgames_id",
     "version": "version",
     "complevel": "complevel",
+    "config": "custom_config",
     "tag": "tag",  # special handling
 }
 

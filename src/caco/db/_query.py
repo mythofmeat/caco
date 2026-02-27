@@ -231,6 +231,10 @@ def _build_term_sql(term: QueryTerm) -> tuple[str, list[Any]]:
         else:
             return "", []
 
+    elif term.field == "config":
+        clause = "wads.custom_config LIKE ?"
+        params = [f"%{term.value}%"]
+
     else:
         # Unknown field - treat as free text
         clause = "(wads.title LIKE ? OR wads.author LIKE ? OR wads.description LIKE ?)"

@@ -195,6 +195,14 @@ class WadEditScreen(Screen):
                     )
 
                 with Horizontal(classes="form-row"):
+                    yield Label("Config:", classes="form-label")
+                    yield Input(
+                        id="input-config",
+                        classes="form-input",
+                        placeholder="e.g., default, controller",
+                    )
+
+                with Horizontal(classes="form-row"):
                     yield Label("Extra Args:", classes="form-label")
                     yield Input(
                         id="input-args",
@@ -261,6 +269,7 @@ class WadEditScreen(Screen):
         )
         complevel = wad.get("complevel")
         self.query_one("#input-complevel", Input).value = str(complevel) if complevel is not None else ""
+        self.query_one("#input-config", Input).value = wad.get("custom_config") or ""
         self.query_one("#input-args", Input).value = wad.get("custom_args") or ""
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -291,6 +300,7 @@ class WadEditScreen(Screen):
             self.query_one("#input-sourceport", Input).value.strip() or None
         )
         complevel_str = self.query_one("#input-complevel", Input).value.strip()
+        custom_config = self.query_one("#input-config", Input).value.strip() or None
         custom_args = self.query_one("#input-args", Input).value.strip() or None
 
         # Validate
@@ -345,6 +355,7 @@ class WadEditScreen(Screen):
             custom_iwad=custom_iwad,
             custom_sourceport=custom_sourceport,
             complevel=complevel,
+            custom_config=custom_config,
             custom_args=custom_args,
         )
 

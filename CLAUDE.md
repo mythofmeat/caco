@@ -20,6 +20,7 @@ Caco is a personal Doom WAD library manager inspired by `beets`. It tracks WADs 
 - Play IWADs directly (`caco play --iwad doom2`) without a PWAD in the library
 - Auto-detect installed sourceports with helpful error messages
 - Sourceport crash detection (exit code tracking, warnings, session history indicators)
+- Sourceport config profile management (managed `.cfg` files, per-WAD overrides, `caco profile` command group)
 - Auto-update config file with missing keys on load
 
 ## Commands
@@ -61,11 +62,12 @@ src/caco/
 │   ├── play_cmd.py     # play command (--first, --iwad)
 │   ├── cache.py        # cache list/clear/prune
 │   ├── config_cmd.py   # config, completions commands
+│   ├── profile_cmd.py  # profile command group (ls, create, edit, cp, rm, path)
 │   └── stats.py        # stats, beaten commands
 ├── complevel.py    # Shared complevel names, aliases, parse_complevel()
 ├── complevel_detect.py # Auto-detect complevel from WAD lumps (UMAPINFO, DEHACKED)
 ├── iwad_detect.py  # Auto-detect IWAD family from WAD file PNAMES/map lumps
-├── sourceports.py  # Sourceport family registry (exe→CLI flags for data/save/complevel)
+├── sourceports.py  # Sourceport family registry (exe→CLI flags for data/save/complevel/config)
 ├── utils.py        # Shared utilities (coerce_str, BaseHttpClient, CacoSourceError, extract_year, parse_wad_directory)
 ├── wad_stats.py    # Per-map stats parser/formatter (stats.txt + levelstat.txt)
 ├── db/             # SQLite database package
@@ -77,7 +79,7 @@ src/caco/
 │   ├── _wads.py        # WAD CRUD (add/get/update/delete), tag add/remove
 │   ├── _sessions.py    # Sessions, completions, batch stats, cache, StatsSnapshot
 │   └── _iwads.py       # IWAD registry: family/variant model, priority resolution, CRUD
-├── config.py       # TOML config in ~/.config/caco/; IWAD_DIR, get_iwad_dir()
+├── config.py       # TOML config in ~/.config/caco/; IWAD_DIR, get_iwad_dir(), SOURCEPORT_DIR, get_sourceport_dir(), get_profile_path(), list_profiles()
 ├── player.py       # Sourceport launcher + playtime tracking
 ├── idgames/        # idgames API client
 │   ├── client.py   # HTTP client (inherits BaseHttpClient)
@@ -177,6 +179,7 @@ src/caco/
 - Managed IWADs: `~/.local/share/caco/iwads/{variant}/{family}.wad`
 - WAD cache: `~/.local/share/caco/wads/`
 - WAD data: `~/.local/share/caco/data/` (per-WAD saves, stats, configs; configurable via `data_dir`)
+- Sourceport configs: `~/.local/share/caco/sourceports/{exe}/{profile}.cfg` (configurable via `sourceport_dir`)
 
 **Key patterns:**
 - `db/` package uses raw sqlite3 with `sqlite3.Row` for dict-like access; tag helpers (`_fetch_tags`, `_attach_tags`, `_fetch_tags_batch`) and batch query functions (`get_total_playtime_batch`, `get_last_played_batch`, `get_times_beaten_batch`, `get_session_count_batch`) reduce N+1 queries; `__init__.py` re-exports everything so `from caco import db` and `from caco.db import Status` both work
@@ -190,14 +193,14 @@ src/caco/
 - Status enum: `to-play`, `backlog`, `playing`, `finished`, `abandoned`, `awaiting-update`
 - Import command uses flag-based source selection: `caco import <source> [--idgames|--doomwiki|--doomworld|--local|--url URL]`
 - Query syntax (beets-style):
-  - Fields: `id:`, `title:`, `author:`, `year:`, `filename:`, `tag:`, `status:`, `source:`, `iwad:`, `complevel:`
+  - Fields: `id:`, `title:`, `author:`, `year:`, `filename:`, `tag:`, `status:`, `source:`, `iwad:`, `complevel:`, `config:`
   - OR queries: `"status:playing , status:to-play"` (comma with spaces — spaces required!)
   - Negation: `^status:finished` (prefer `^` prefix, `-` also works but may conflict with CLI flags)
   - Status shortcuts: `status:p` (playing), `status:f` (finished), etc.
   - Glob patterns: `tag:caco*` (matches cacoward, etc.)
   - Free text searches title, author, and description
   - Multiple terms are joined with implicit AND
-- Per-WAD config: `custom_iwad`, `custom_sourceport`, `custom_args` (JSON array), `complevel` (INTEGER) columns in wads table
+- Per-WAD config: `custom_iwad`, `custom_sourceport`, `custom_args` (JSON array), `complevel` (INTEGER), `custom_config` (TEXT) columns in wads table
 - Crash detection: `exit_code` INTEGER column on sessions table; `PlayResult` dataclass in `player.py` with `crashed` property (non-zero exit code); CLI/TUI/GUI warn on crash; session history views show "Crash (N)" indicator
 - Auto stats tracking: `stats_snapshot` TEXT column on `wads` table stores live per-map stats JSON; auto-read from data dir after play sessions; auto-archived to completion on `beaten add` or `modify status=finished`; `auto_stats` config (default: true); live stats shown as "Current (live)" entry in Map Stats dialog (GUI) and screen (TUI)
 - IWAD resolution: `iwad_dirs` config allows short names (e.g., `doom2` instead of full path); `resolve_iwad()` in `config.py` checks DB registry (with priority resolution) then searches dirs for exact name or name + `.wad`; `IWAD_DIR` / `get_iwad_dir()` provides the managed IWAD directory path (`~/.local/share/caco/iwads/`)
@@ -208,7 +211,8 @@ src/caco/
 - Database migrations run on `init_db()`: add columns, create tables, rename statuses
 - IWAD registry: `iwads` table with family/variant model; `KNOWN_IWADS` (MD5→(family, variant, title)), `KNOWN_IWAD_FILENAMES` (filename→(family, variant, title)), `IWAD_ALIASES` (free text→family), `DEFAULT_IWAD_PRIORITY` (family→variant order), `FAMILY_FALLBACKS` (family→fallback families) in `db/_iwads.py`; `get_iwad(family)` does priority resolution; `managed_iwad_filename()` returns `{variant}/{family}.wad` path for managed IWADs (canonical filenames for sourceport compatibility); `remove_iwad_with_paths()` returns removed paths for managed file cleanup; `resolve_iwad()` checks DB registry before `iwad_dirs`; Doom Wiki imports auto-link to registered IWADs via `ImportService._auto_link_iwad()`
 - IWAD priority: `get_iwad_priority(family)` checks config `[iwad_priority]` section first, then `DEFAULT_IWAD_PRIORITY`; freedoom is cross-family fallback via `FAMILY_FALLBACKS`
-- Sourceport families: `sourceports.py` maps executable basenames to CLI flags; `SOURCEPORT_FAMILIES` dict with dsda/zdoom/chocolate/woof/eternity families; `identify_sourceport_family()` strips path and matches basename; `get_data_dir_args()` returns `-data`/`-save` or `-savedir` args; for dsda family, `-save` points to nested stats dir (`{exe}_data/{iwad}/{wad_stem}/`) via `get_dsda_save_dir()` when `iwad` and `wad_path` are provided
+- Sourceport families: `sourceports.py` maps executable basenames to CLI flags; `SOURCEPORT_FAMILIES` dict with dsda/zdoom/chocolate/woof/eternity families; `identify_sourceport_family()` strips path and matches basename; `get_data_dir_args()` returns `-data`/`-save` or `-savedir` args; for dsda family, `-save` points to nested stats dir (`{exe}_data/{iwad}/{wad_stem}/`) via `get_dsda_save_dir()` when `iwad` and `wad_path` are provided; `get_config_args()` returns `-config <path>` for dsda-family ports
+- Config profiles: `SOURCEPORT_DIR = DB_DIR / "sourceports"`; `get_sourceport_dir()` / `get_profile_path(sourceport, profile)` / `list_profiles()` in `config.py`; auto-created `default.cfg` on first play for dsda-family ports; resolution: CLI `--config` > WAD `custom_config` > `"default"`; `caco profile` command group (ls, create, edit, cp, rm, path); `config:` query field searches `custom_config` column
 - Per-WAD data dirs: `player.py` injects data dir args when `manage_data_dirs=True` (default); `get_wad_data_dir(id, title)` returns `{data_dir}/{id}_{sanitized_title}/`; `find_wad_data_dir(id)` finds existing dir by ID prefix (handles title renames); `_sanitize_dirname()` lowercases, replaces non-alnum with hyphens, truncates to 64 chars
 - IWAD auto-detection: `iwad_detect.py` inspects PWAD file PNAMES lump for TNT-only (197) / Plutonia-only (78) patches, then falls back to map lump names (ExMy→doom, MAPxx→doom2); self-contained WADs (patches provided as lumps) don't trigger detection; result persisted to `custom_iwad` on first play; `auto_detect_iwad` config (default: true); `parse_wad_directory()` shared between `iwad_detect.py` and `gui/thumbnails/extractor.py` via `utils.py`
 - Complevel: `complevel.py` has shared names/aliases/parser; `complevel_detect.py` auto-detects from WAD lumps (UMAPINFO→21, DEHACKED with MBF codepointers→11, ExMy-only→2); `sourceports.py` `get_complevel_args()` injects `-complevel N` for dsda-family ports; `player.py` auto-detects on first play and auto-injects; CLI `play --complevel`/`-c` overrides; `complevel:` query field supports ints and aliases (vanilla/boom/mbf/mbf21); `modify complevel=boom` sets; Doomworld imports store extracted complevel; Doomwiki imports auto-link from `port` field
@@ -230,6 +234,19 @@ src/caco/
 | `f`, `fin`, `done` | finished |
 | `a`, `drop`, `dropped` | abandoned |
 | `w`, `au`, `await`, `waiting`, `wip` | awaiting-update |
+
+**Profile command group:**
+- `caco profile ls [-p SOURCEPORT]` — list config profiles (all or for a specific port)
+- `caco profile create <name> [-p SOURCEPORT]` — create a new profile (empty .cfg file)
+- `caco profile edit <name> [-p SOURCEPORT]` — open profile in `$EDITOR`
+- `caco profile cp <source> <dest> [-p SOURCEPORT]` — copy a profile
+- `caco profile rm <name> [-p SOURCEPORT]` — remove a profile (warns if WADs reference it)
+- `caco profile path <name> [-p SOURCEPORT]` — print absolute path to profile file
+
+**Play `--config`/`-C` option:**
+- `caco play --config controller id:1` — use "controller" config profile for this session
+- Resolution order: CLI `--config` > WAD's `custom_config` > `"default"`
+- Only injects `-config` flag for dsda-family sourceports
 
 **Beaten command group:**
 - `caco beaten list <query>` — show completion history (dates + stats indicator) for a specific WAD

@@ -1,7 +1,7 @@
 - [ ] dsda-doom / nyan-doom (first class)
   - [x] save dir and data dir flags
   - [x] stats.txt / levelstats info and syncing
-  - [ ] config management
+  - [x] config management (profile system: default auto-created, --config flag, per-WAD custom_config, caco profile command group)
   - [x] crash detection (exit_code tracking, warnings in CLI/TUI/GUI, session history indicators)
 
 - [ ] Helion (deferred)

@@ -44,8 +44,9 @@ def _check_sourceport(sourceport: str | None) -> str:
 @click.option("--first", "-1", is_flag=True, help="Auto-select first match if multiple")
 @click.option("--iwad", "iwad_name", type=str, help="Play an IWAD directly (e.g., --iwad doom2)")
 @click.option("--complevel", "-c", type=str, help="Override complevel (int or alias: vanilla, boom, mbf, mbf21)")
+@click.option("--config", "-C", "config_profile", type=str, help="Sourceport config profile name")
 @click.argument("extra_args", nargs=-1)
-def play_cmd(query: str | None, sourceport: str | None, first: bool, iwad_name: str | None, complevel: str | None, extra_args: tuple[str, ...]):
+def play_cmd(query: str | None, sourceport: str | None, first: bool, iwad_name: str | None, complevel: str | None, config_profile: str | None, extra_args: tuple[str, ...]):
     """Play a WAD by ID or query (e.g., 'caco play 1' or 'caco play filename:tnto').
 
     \b
@@ -65,7 +66,7 @@ def play_cmd(query: str | None, sourceport: str | None, first: bool, iwad_name: 
             iwad_extra.extend(["-complevel", str(cl)])
         console.print(f"[cyan]Playing IWAD {iwad_name}...[/cyan]")
         try:
-            result = play_iwad(iwad_name, sourceport=port, extra_args=iwad_extra)
+            result = play_iwad(iwad_name, sourceport=port, extra_args=iwad_extra, config_profile=config_profile)
             if result.duration:
                 console.print(f"[green]Session ended:[/green] {format_duration(result.duration)}")
             if result.crashed:
@@ -126,6 +127,7 @@ def play_cmd(query: str | None, sourceport: str | None, first: bool, iwad_name: 
         result = play(
             wad_id, sourceport=port, extra_args=extra,
             progress_callback=_progress_callback,
+            config_profile=config_profile,
         )
         if result.duration:
             console.print(f"[green]Session ended:[/green] {format_duration(result.duration)}")

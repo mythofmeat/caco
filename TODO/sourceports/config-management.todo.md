@@ -1,2 +1,7 @@
-- [ ] manage sourceport configs
-  - potentially creating a centrally managed configuration within `$XDG_DATA_DIR/caco/sourceports/{sourceport}/{config_profile}.{ext}`? with the default config profile just being `default`. this would make command syntax like `caco play --config controller id:73` possible, and that seems nice?
+- [x] manage sourceport configs
+  - centrally managed configuration within `~/.local/share/caco/sourceports/{sourceport}/{config_profile}.cfg`
+  - `caco play --config controller id:73` syntax
+  - `caco profile` command group (ls, create, edit, cp, rm, path)
+  - auto-created `default` profile on first play for dsda-family ports
+  - per-WAD `custom_config` column for profile override
+  - `config:` query field for searching by profile name

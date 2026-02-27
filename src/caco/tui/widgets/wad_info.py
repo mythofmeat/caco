@@ -112,6 +112,10 @@ class WadInfoPanel(Vertical):
             from caco.complevel import complevel_name
             details_lines.append(f"CL: {wad['complevel']} ({complevel_name(wad['complevel'])})")
 
+        # Config profile
+        if wad.get("custom_config"):
+            details_lines.append(f"Config: {wad['custom_config']}")
+
         # Description snippet
         if wad.get("description"):
             details_lines.append(f"\n[dim]{truncate(wad['description'], 120)}[/dim]")

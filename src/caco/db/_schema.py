@@ -397,6 +397,14 @@ def _migrate_add_session_exit_code(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE sessions ADD COLUMN exit_code INTEGER")
 
 
+def _migrate_add_custom_config_column(conn: sqlite3.Connection) -> None:
+    """Add custom_config column for sourceport config profile name."""
+    cursor = conn.execute("PRAGMA table_info(wads)")
+    columns = {row[1] for row in cursor.fetchall()}
+    if "custom_config" not in columns:
+        conn.execute("ALTER TABLE wads ADD COLUMN custom_config TEXT")
+
+
 # Ordered migration registry — append new migrations here with incrementing version
 _MIGRATIONS: list[tuple[int, str, Any]] = [
     (1, "add_custom_play_config", _migrate_add_custom_play_config),
@@ -414,4 +422,5 @@ _MIGRATIONS: list[tuple[int, str, Any]] = [
     (13, "iwad_dir_restructure", _migrate_iwad_dir_restructure),
     (14, "add_complevel", _migrate_add_complevel),
     (15, "add_session_exit_code", _migrate_add_session_exit_code),
+    (16, "add_custom_config", _migrate_add_custom_config_column),
 ]

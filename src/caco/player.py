@@ -21,6 +21,7 @@ from caco.config import (
     get_default_sourceport,
     get_iwad,
     get_manage_data_dirs,
+    get_profile_path,
     get_sourceport_args,
     get_wad_data_dir,
     resolve_iwad,
@@ -248,6 +249,7 @@ def play(
     extra_args: list[str] | None = None,
     progress_callback: ProgressCallback | None = None,
     process_ref: list | None = None,
+    config_profile: str | None = None,
 ) -> PlayResult:
     """
     Play a WAD with the specified sourceport.
@@ -336,6 +338,19 @@ def play(
         except json.JSONDecodeError:
             pass
 
+    # Inject managed config profile for dsda-family ports
+    profile_name = config_profile or wad.get("custom_config") or "default"
+    from caco.sourceports import get_config_args
+
+    profile_path = get_profile_path(port, profile_name)
+    config_args = get_config_args(port, str(profile_path))
+    if config_args:
+        # Auto-create profile if it doesn't exist
+        profile_path.parent.mkdir(parents=True, exist_ok=True)
+        if not profile_path.exists():
+            profile_path.touch()
+        cmd.extend(config_args)
+
     # Auto-inject complevel arg if set on the WAD
     if wad.get("complevel") is not None:
         from caco.sourceports import get_complevel_args
@@ -403,6 +418,7 @@ def play_iwad(
     iwad_name: str,
     sourceport: str | None = None,
     extra_args: list[str] | None = None,
+    config_profile: str | None = None,
 ) -> PlayResult:
     """
     Play an IWAD directly with no PWAD.
@@ -438,6 +454,18 @@ def play_iwad(
     default_args = get_sourceport_args()
     if default_args:
         cmd.extend(default_args)
+
+    # Inject managed config profile for dsda-family ports
+    profile_name = config_profile or "default"
+    from caco.sourceports import get_config_args
+
+    profile_path = get_profile_path(port, profile_name)
+    config_args = get_config_args(port, str(profile_path))
+    if config_args:
+        profile_path.parent.mkdir(parents=True, exist_ok=True)
+        if not profile_path.exists():
+            profile_path.touch()
+        cmd.extend(config_args)
 
     if extra_args:
         cmd.extend(extra_args)
