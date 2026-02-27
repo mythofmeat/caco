@@ -1,0 +1,1 @@
+- [ ] the current readme is both way too long and also hard to follow. it needs to be simplified and aimed at a wider audience
