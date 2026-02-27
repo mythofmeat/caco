@@ -18,19 +18,13 @@ from caco.cli import (
 
 
 @cli.command()
-@click.option("--path", is_flag=True, help="Print config file path")
 @click.option("--edit", "-e", is_flag=True, help="Open config in $EDITOR")
-def config(path: bool, edit: bool):
+def config(edit: bool):
     """View or edit configuration.
 
-    Without options, displays the current config file contents.
-    Edit the config file directly for full control over all settings.
+    Without options, prints the raw config file to stdout (pipeable).
     """
     config_path = CONFIG_FILE
-
-    if path:
-        click.echo(config_path)
-        return
 
     if edit:
         editor = os.environ.get("EDITOR", os.environ.get("VISUAL", "nano"))
@@ -61,22 +55,17 @@ download_mirror = 0
 # Extra arguments to pass to sourceport
 sourceport_args = []
 
+# Link mode: "move" or "copy" (for caco modify --link)
+link_mode = "move"
+
 # Manage per-WAD data directories for isolated saves and stats
-# When true, caco injects -data/-save flags to redirect sourceport output
-# to ~/.local/share/caco/data/{id}_{title}/ per WAD
 manage_data_dirs = true
 
 # Automatically track per-map stats after play sessions
-# Reads stats.txt/levelstat.txt from WAD data dir and stores on WAD record
-# Requires manage_data_dirs = true
 auto_stats = true
-
-# [list] section for customizing list output (coming soon)
-# format = ["id", "title", "author", "status"]
-# sort = "id+"
 '''
             config_path.write_text(default_content)
-            console.print(f"[dim]Created default config at {config_path}[/dim]")
+            err_console.print(f"[dim]Created default config at {config_path}[/dim]")
 
         if not shutil.which(editor):
             err_console.print(f"[red]Editor '{editor}' not found on PATH[/red]")
@@ -84,19 +73,11 @@ auto_stats = true
         subprocess.run([editor, str(config_path)])
         return
 
-    # Default: show config contents
-    console.print(f"[dim]Config file: {config_path}[/dim]")
-    console.print()
-
+    # Default: print raw config to stdout (pipeable)
     if config_path.exists():
-        from rich.panel import Panel
-        from rich.syntax import Syntax
-
-        content = config_path.read_text()
-        syntax = Syntax(content, "toml", theme="monokai", line_numbers=False)
-        console.print(Panel(syntax, title="config.toml", border_style="dim"))
+        print(config_path.read_text(), end="")
     else:
-        console.print("[dim]No config file exists. Run 'caco config --edit' to create one.[/dim]")
+        err_console.print("[dim]No config file exists. Run 'caco config -e' to create one.[/dim]")
 
 
 @cli.command()

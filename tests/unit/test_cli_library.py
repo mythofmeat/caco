@@ -1,4 +1,4 @@
-"""CLI integration tests for library and tag commands."""
+"""CLI integration tests for library commands (new command structure)."""
 
 import json
 
@@ -20,22 +20,22 @@ def populated_runner(runner, populated_db):
     return runner
 
 
-class TestListCommand:
-    """Test 'caco list' output modes."""
+class TestLsCommand:
+    """Test 'caco ls' output modes."""
 
-    def test_list_empty(self, runner):
-        result = runner.invoke(cli, ["list"])
+    def test_ls_empty(self, runner):
+        result = runner.invoke(cli, ["ls"])
         assert result.exit_code == 0
         assert "No WADs" in result.output
 
-    def test_list_with_wads(self, populated_runner):
-        result = populated_runner.invoke(cli, ["list"])
+    def test_ls_with_wads(self, populated_runner):
+        result = populated_runner.invoke(cli, ["ls"])
         assert result.exit_code == 0
         assert "Eviternity" in result.output
         assert "Sunlust" in result.output
 
-    def test_list_json(self, populated_runner):
-        result = populated_runner.invoke(cli, ["list", "--json"])
+    def test_ls_json(self, populated_runner):
+        result = populated_runner.invoke(cli, ["ls", "-o", "json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert isinstance(data, list)
@@ -43,35 +43,57 @@ class TestListCommand:
         titles = {w["title"] for w in data}
         assert "Eviternity" in titles
 
-    def test_list_plain(self, populated_runner):
-        result = populated_runner.invoke(cli, ["list", "--plain"])
+    def test_ls_plain(self, populated_runner):
+        result = populated_runner.invoke(cli, ["ls", "-o", "plain"])
         assert result.exit_code == 0
         lines = result.output.strip().split("\n")
         # Header + 5 WADs
         assert len(lines) == 6
         assert lines[0].startswith("ID\t")
 
-    def test_list_with_query(self, populated_runner):
-        result = populated_runner.invoke(cli, ["list", "status:playing"])
+    def test_ls_with_query(self, populated_runner):
+        result = populated_runner.invoke(cli, ["ls", "status:playing"])
         assert result.exit_code == 0
         assert "Sunlust" in result.output
 
-    def test_list_with_sort(self, populated_runner):
-        result = populated_runner.invoke(cli, ["list", "--sort", "title+"])
+    def test_ls_inline_sort(self, populated_runner):
+        result = populated_runner.invoke(cli, ["ls", "title+"])
         assert result.exit_code == 0
-        # Should not error
         assert "Library" in result.output or "WADs" in result.output
 
-    def test_list_invalid_sort(self, populated_runner):
-        result = populated_runner.invoke(cli, ["list", "--sort", "invalid"])
-        assert result.exit_code == 1
+    def test_ls_invalid_sort(self, populated_runner):
+        """Unknown field with +/- is still a query term, not a sort error."""
+        result = populated_runner.invoke(cli, ["ls", "invalid+"])
+        assert result.exit_code == 0  # Treated as query term
 
-    def test_list_deleted(self, runner, make_wad, db_mod):
+    def test_ls_deleted(self, runner, make_wad, db_mod):
         wad_id = make_wad(title="To Delete")
         db_mod.delete_wad(wad_id)
-        result = runner.invoke(cli, ["list", "--deleted"])
+        result = runner.invoke(cli, ["ls", "--deleted"])
         assert result.exit_code == 0
         assert "To Delete" in result.output
+
+    def test_ls_tags(self, populated_runner):
+        result = populated_runner.invoke(cli, ["ls", "--tags"])
+        assert result.exit_code == 0
+        assert "megawad" in result.output
+
+    def test_ls_tags_plain(self, populated_runner):
+        result = populated_runner.invoke(cli, ["ls", "--tags", "-o", "plain"])
+        assert result.exit_code == 0
+        lines = result.output.strip().split("\n")
+        assert lines[0] == "Tag\tCount"
+
+    def test_ls_tags_empty(self, runner):
+        result = runner.invoke(cli, ["ls", "--tags"])
+        assert result.exit_code == 0
+        assert "No tags" in result.output
+
+    def test_ls_iwad(self, runner):
+        result = runner.invoke(cli, ["ls", "--iwad"])
+        assert result.exit_code == 0
+        # Should work even with no IWADs registered
+        assert "No IWADs" in result.output or "Registered" in result.output
 
 
 class TestInfoCommand:
@@ -86,7 +108,7 @@ class TestInfoCommand:
 
     def test_info_json(self, populated_runner, populated_db):
         wad_id = populated_db["eviternity"]
-        result = populated_runner.invoke(cli, ["info", str(wad_id), "--json"])
+        result = populated_runner.invoke(cli, ["info", str(wad_id), "-o", "json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["title"] == "Eviternity"
@@ -94,7 +116,7 @@ class TestInfoCommand:
 
     def test_info_plain(self, populated_runner, populated_db):
         wad_id = populated_db["eviternity"]
-        result = populated_runner.invoke(cli, ["info", str(wad_id), "--plain"])
+        result = populated_runner.invoke(cli, ["info", str(wad_id), "-o", "plain"])
         assert result.exit_code == 0
         assert "title=Eviternity" in result.output
 
@@ -102,108 +124,138 @@ class TestInfoCommand:
         result = runner.invoke(cli, ["info", "999"])
         assert result.exit_code == 1
 
-
-class TestUpdateCommand:
-    """Test 'caco update' modifications."""
-
-    def test_update_title(self, runner, make_wad, db_mod):
-        wad_id = make_wad(title="Original")
-        result = runner.invoke(cli, ["update", str(wad_id), "--title", "Updated Title"])
+    def test_info_multiple_matches(self, populated_runner):
+        """Multiple matches should all be displayed."""
+        result = populated_runner.invoke(cli, ["info", "tag:megawad"])
         assert result.exit_code == 0
-        assert "Updated" in result.output
+        # Should show multiple WADs
+        assert "Eviternity" in result.output
+        assert "Sunlust" in result.output
 
-        wad = db_mod.get_wad(wad_id)
-        assert wad["title"] == "Updated Title"
+    def test_info_multiple_json(self, populated_runner):
+        result = populated_runner.invoke(cli, ["info", "tag:megawad", "-o", "json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert isinstance(data, list)
+        assert len(data) >= 2
 
-    def test_update_status(self, runner, make_wad, db_mod):
+
+class TestModifyCommand:
+    """Test 'caco modify' with beets-style syntax."""
+
+    def test_modify_status(self, runner, make_wad, db_mod):
         wad_id = make_wad()
-        result = runner.invoke(cli, ["update", str(wad_id), "--status", "playing"])
+        result = runner.invoke(cli, ["modify", str(wad_id), "status=playing"])
         assert result.exit_code == 0
+        assert "Modified" in result.output
 
         wad = db_mod.get_wad(wad_id)
         assert wad["status"] == "playing"
 
-    def test_update_no_args(self, runner, make_wad):
-        wad_id = make_wad()
-        result = runner.invoke(cli, ["update", str(wad_id)])
-        assert result.exit_code == 0
-        assert "No updates" in result.output
-
-    def test_update_dry_run(self, runner, make_wad, db_mod):
+    def test_modify_title(self, runner, make_wad, db_mod):
         wad_id = make_wad(title="Original")
-        result = runner.invoke(cli, ["update", str(wad_id), "--title", "New", "--dry-run"])
+        result = runner.invoke(cli, ["modify", str(wad_id), "title=Updated Title"])
+        assert result.exit_code == 0
+
+        wad = db_mod.get_wad(wad_id)
+        assert wad["title"] == "Updated Title"
+
+    def test_modify_add_tag(self, runner, make_wad, db_mod):
+        wad_id = make_wad()
+        result = runner.invoke(cli, ["modify", str(wad_id), "tag=megawad"])
+        assert result.exit_code == 0
+
+        wad = db_mod.get_wad(wad_id)
+        assert "megawad" in wad["tags"]
+
+    def test_modify_clear_field(self, runner, make_wad, db_mod):
+        wad_id = make_wad(author="Some Author")
+        result = runner.invoke(cli, ["modify", str(wad_id), "!author"])
+        assert result.exit_code == 0
+
+        wad = db_mod.get_wad(wad_id)
+        assert wad["author"] is None
+
+    def test_modify_remove_all_tags(self, runner, make_wad, db_mod):
+        wad_id = make_wad(tags=["megawad", "cacoward"])
+        result = runner.invoke(cli, ["modify", str(wad_id), "!tag"])
+        assert result.exit_code == 0
+
+        wad = db_mod.get_wad(wad_id)
+        assert wad["tags"] == []
+
+    def test_modify_remove_tag_pattern(self, runner, make_wad, db_mod):
+        wad_id = make_wad(tags=["megawad", "cacoward", "slaughter"])
+        result = runner.invoke(cli, ["modify", str(wad_id), "!tag:slaughter"])
+        assert result.exit_code == 0
+
+        wad = db_mod.get_wad(wad_id)
+        assert "slaughter" not in wad["tags"]
+        assert "megawad" in wad["tags"]
+
+    def test_modify_no_args(self, runner, make_wad):
+        wad_id = make_wad()
+        result = runner.invoke(cli, ["modify", str(wad_id)])
+        assert result.exit_code == 0
+        assert "No modifications" in result.output
+
+    def test_modify_no_query(self, runner):
+        result = runner.invoke(cli, ["modify", "status=playing"])
+        # status=playing is an action, not a query — should error about no query
+        assert result.exit_code == 1
+        assert "No query" in result.output
+
+    def test_modify_dry_run(self, runner, make_wad, db_mod):
+        wad_id = make_wad(title="Original")
+        result = runner.invoke(cli, ["modify", str(wad_id), "title=New", "--dry-run"])
         assert result.exit_code == 0
         assert "dry run" in result.output.lower()
 
-        # Original title unchanged
         wad = db_mod.get_wad(wad_id)
         assert wad["title"] == "Original"
 
 
-class TestDeleteRestoreCommand:
-    """Test delete (soft) and restore."""
+class TestTrashCommand:
+    """Test unified 'caco trash' command."""
 
-    def test_delete_soft(self, runner, make_wad, db_mod):
+    def test_trash_soft_delete(self, runner, make_wad, db_mod):
         wad_id = make_wad(title="Sacrifice")
-        result = runner.invoke(cli, ["delete", str(wad_id), "--yes"])
+        result = runner.invoke(cli, ["trash", str(wad_id), "--yes"])
         assert result.exit_code == 0
         assert "trash" in result.output.lower()
 
-        # WAD should not appear in normal list
         wads = db_mod.search_wads()
         assert all(w["id"] != wad_id for w in wads)
 
-    def test_restore(self, runner, make_wad, db_mod):
+    def test_trash_list(self, runner, make_wad, db_mod):
+        wad_id = make_wad(title="Trashed WAD")
+        db_mod.delete_wad(wad_id)
+        result = runner.invoke(cli, ["trash", "--list"])
+        assert result.exit_code == 0
+        assert "Trashed WAD" in result.output
+
+    def test_trash_restore(self, runner, make_wad, db_mod):
         wad_id = make_wad(title="Comeback")
         db_mod.delete_wad(wad_id)
 
-        # restore uses search_wads which treats bare strings as free text
-        result = runner.invoke(cli, ["restore", "Comeback"])
+        result = runner.invoke(cli, ["trash", "--restore", "Comeback"])
         assert result.exit_code == 0
         assert "Restored" in result.output
 
         wad = db_mod.get_wad(wad_id)
         assert wad["deleted_at"] is None
 
+    def test_trash_purge_all(self, runner, make_wad, db_mod):
+        wad_id = make_wad(title="Gone")
+        db_mod.delete_wad(wad_id)
 
-class TestTagCommands:
-    """Test tag add, remove, list."""
-
-    def test_tag_add(self, runner, make_wad, db_mod):
-        wad_id = make_wad()
-        result = runner.invoke(cli, ["tag", "add", str(wad_id), "megawad", "slaughter"])
+        result = runner.invoke(cli, ["trash", "--purge", "--yes"])
         assert result.exit_code == 0
-        assert "Added" in result.output
+        assert "Permanently deleted" in result.output
 
-        wad = db_mod.get_wad(wad_id)
-        assert "megawad" in wad["tags"]
-        assert "slaughter" in wad["tags"]
-
-    def test_tag_remove(self, runner, make_wad, db_mod):
-        wad_id = make_wad(tags=["megawad", "cacoward"])
-        result = runner.invoke(cli, ["tag", "remove", str(wad_id), "megawad"])
-        assert result.exit_code == 0
-        assert "Removed" in result.output
-
-        wad = db_mod.get_wad(wad_id)
-        assert "megawad" not in wad["tags"]
-        assert "cacoward" in wad["tags"]
-
-    def test_tag_list(self, populated_runner):
-        result = populated_runner.invoke(cli, ["tag", "list"])
-        assert result.exit_code == 0
-        assert "megawad" in result.output
-
-    def test_tag_list_plain(self, populated_runner):
-        result = populated_runner.invoke(cli, ["tag", "list", "--plain"])
-        assert result.exit_code == 0
-        lines = result.output.strip().split("\n")
-        assert lines[0] == "Tag\tCount"
-
-    def test_tag_list_empty(self, runner):
-        result = runner.invoke(cli, ["tag", "list"])
-        assert result.exit_code == 0
-        assert "No tags" in result.output
+    def test_trash_no_query(self, runner):
+        result = runner.invoke(cli, ["trash"])
+        assert result.exit_code == 1
 
 
 class TestRandomCommand:
@@ -235,7 +287,7 @@ class TestRandomCommand:
 
 
 class TestSortParsing:
-    """Test _parse_sort_option helper."""
+    """Test _parse_sort_option helper (re-exported from parsing.py)."""
 
     def test_suffix_ascending(self):
         from caco.cli import _parse_sort_option
@@ -259,3 +311,40 @@ class TestSortParsing:
         from caco.cli import _parse_sort_option
         field, desc = _parse_sort_option(None)
         assert field is None
+
+
+# =============================================================================
+# Backward compatibility: old command names should still work
+# (registered through Click as the old name, or through aliases)
+# =============================================================================
+
+
+class TestOldListCommand:
+    """Old 'caco list' is now 'caco ls' but tests verify the new name."""
+
+    def test_list_empty(self, runner):
+        result = runner.invoke(cli, ["ls"])
+        assert result.exit_code == 0
+        assert "No WADs" in result.output
+
+    def test_list_with_wads(self, populated_runner):
+        result = populated_runner.invoke(cli, ["ls"])
+        assert result.exit_code == 0
+        assert "Eviternity" in result.output
+        assert "Sunlust" in result.output
+
+    def test_list_json(self, populated_runner):
+        result = populated_runner.invoke(cli, ["ls", "-o", "json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert isinstance(data, list)
+        assert len(data) == 5
+        titles = {w["title"] for w in data}
+        assert "Eviternity" in titles
+
+    def test_list_plain(self, populated_runner):
+        result = populated_runner.invoke(cli, ["ls", "-o", "plain"])
+        assert result.exit_code == 0
+        lines = result.output.strip().split("\n")
+        assert len(lines) == 6
+        assert lines[0].startswith("ID\t")

@@ -58,14 +58,14 @@ caco import https://www.doomworld.com/forum/topic/134292-myhousewad/  # Doomworl
 caco import ~/Downloads/map.wad                     # Local file
 
 # List your library
-caco ls                       # Alias for 'list'
+caco ls
 
 # Play a WAD (interactive picker if multiple match)
 caco play scythe
 
 # Update status after playing
-caco update scythe --status finished --rating 5
-caco update scythe -s f -r 5  # Short form (f=finished)
+caco modify scythe status=finished rating=5
+caco modify scythe status=f rating=5   # Short form (f=finished)
 ```
 
 ## GUI (Graphical User Interface)
@@ -230,7 +230,7 @@ Press `s` then one of:
 
 The search filter supports live filtering as you type (debounced). The status column is color-coded by status type.
 
-The filter supports the same beets-style query syntax as `caco list`.
+The filter supports the same beets-style query syntax as `caco ls`.
 
 ## Usage
 
@@ -263,82 +263,100 @@ caco import scythe                  # Opens fzf fuzzy picker
 caco import "doom 2" --multi        # Multi-select mode
 
 # Link a downloaded file to a metadata-only entry (e.g., Doomwiki import)
-caco link 73 ~/Downloads/heartland.wad
-caco link "Heartland" ~/Downloads/heartland.wad --move  # Move instead of copy
+caco modify id:73 --link ~/Downloads/heartland.wad
 ```
 
 ### Managing Library
 
 ```bash
 # List all WADs (sorted by ID ascending by default)
-caco list
+caco ls
 
-# Sort by different fields
-caco list --sort playtime              # Most played first
-caco list --sort rating                # Highest rated first
-caco list --sort title+                # Alphabetical (A-Z, ascending)
-caco list --sort title-                # Reverse alphabetical (Z-A, descending)
-caco list --sort last_played           # Recently played first (default)
-caco list --sort last_played+          # Oldest played first
+# Inline sort (append + for ascending, - for descending)
+caco ls playtime-                       # Most played first
+caco ls rating-                         # Highest rated first
+caco ls title+                          # Alphabetical (A-Z, ascending)
+caco ls title-                          # Reverse alphabetical (Z-A)
+caco ls last_played-                    # Recently played first
 
-# Available sort fields: playtime, rating, created, title, author, last_played, year
+# Available sort fields: id, playtime, rating, created, title, author, last_played, year
 # Suffix + for ascending, - for descending
 
 # Search with beets-style queries
-caco list scythe                    # Free text (title/author/description)
-caco list id:1                      # By database ID
-caco list title:"scythe"            # By title (or name:)
-caco list author:"erik alm"         # By author
-caco list year:2020                 # By year
-caco list filename:scythe2          # By filename
-caco list tag:megawad               # By tag (supports globs: tag:caco*)
-caco list status:playing            # By status (shortcuts: status:p)
-caco list source:idgames            # By source type (idgames, doomwiki, url, local)
-caco list author:alm title:scythe   # Combine filters (AND logic)
+caco ls scythe                          # Free text (title/author/description)
+caco ls id:1                            # By database ID
+caco ls title:"scythe"                  # By title (or name:)
+caco ls author:"erik alm"               # By author
+caco ls year:2020                       # By year
+caco ls filename:scythe2                # By filename
+caco ls tag:megawad                     # By tag (supports globs: tag:caco*)
+caco ls status:playing                  # By status (shortcuts: status:p)
+caco ls source:idgames                  # By source type (idgames, doomwiki, url, local)
+caco ls iwad:doom2                      # By IWAD (matches custom_iwad)
+caco ls author:alm title:scythe         # Combine filters (AND logic)
+
+# Combine query + sort
+caco ls status:playing playtime-        # Playing WADs, most played first
 
 # OR queries (comma with spaces)
-caco list "status:playing , status:to-play"   # Match either status
-caco list "tag:megawad , tag:cacoward"        # Match either tag
+caco ls "status:playing , status:to-play"   # Match either status
+caco ls "tag:megawad , tag:cacoward"        # Match either tag
 
 # Negation (use ^ prefix to exclude)
-caco list ^status:finished          # Exclude finished WADs
-caco list status:playing ^tag:slaughter   # Playing but not slaughter-tagged
+caco ls ^status:finished                # Exclude finished WADs
+caco ls status:playing ^tag:slaughter   # Playing but not slaughter-tagged
+
+# List tags with counts
+caco ls --tags                          # Rich table of all tags with counts
+caco ls --tags -o plain                 # TSV output for scripting
+
+# List registered IWADs
+caco ls --iwad                          # IWAD registry table
 
 # View details (by ID or query)
 caco info id:1
 caco info filename:tnto
 caco info "TNT: Overcharged"
+caco info tag:megawad                   # Multiple matches shown in sequence
 
-# Update metadata (supports ID ranges and queries)
-caco update 1 --status playing
-caco update 1-5 --rating 4                      # ID range
-caco update tag:megawad --rating 5 --yes        # Query with confirmation skip
-caco update 1 --rating 4 --notes "Great level design"
+# Modify metadata (beets-style field=value syntax)
+caco modify id:1 status=playing
+caco modify tag:megawad rating=5 --yes         # Query with confirmation skip
+caco modify id:1 rating=4 notes="Great level design"
 
-# Edit core metadata (title, author, year, description, version)
-caco update 1 --title "My Custom Title"
-caco update 1 --author "John Romero" --year 1994
-caco update 1 --description "A classic megawad"
-caco update 1 --version "v1.0"                  # Track version for non-idgames releases
-caco update 1 --clear-author --clear-year       # Clear optional fields
-caco update 1 --clear-description               # Clear description
-caco update 1 --clear-version                   # Clear version string
+# Edit core metadata
+caco modify id:1 title="My Custom Title"
+caco modify id:1 author="John Romero" year=1994
+caco modify id:1 description="A classic megawad"
+caco modify id:1 version="v1.0"                # Track version for non-idgames releases
 
-# Delete WADs (soft delete - can be restored)
-caco rm 1                                       # Move to trash (alias for delete)
-caco delete status:abandoned                    # Shows preview, prompts
-caco delete 1 --dry-run                         # Preview what would be deleted
-caco delete 1 --purge                           # Permanent deletion
+# Clear fields (! prefix)
+caco modify id:1 !author !year                 # Clear optional fields
+caco modify id:1 !description                  # Clear description
+
+# Tag management via modify
+caco modify id:1 tag=megawad tag=slaughter      # Add tags
+caco modify id:1 !tag                           # Remove all tags
+caco modify id:1 !tag:slaughter                 # Remove specific tag
+caco modify id:1 "!tag:caco*"                   # Remove tags matching glob
+
+# Link a local file to a metadata-only entry
+caco modify id:1 --link ~/Downloads/heartland.wad
+
+# Trash (soft delete - can be restored)
+caco trash id:1                                 # Move to trash
+caco trash status:abandoned --yes               # Trash with confirmation skip
+caco trash id:1 --dry-run                       # Preview what would be trashed
 
 # View and restore from trash
-caco list --deleted                             # Show deleted WADs
-caco restore 1                                  # Restore from trash
-caco delete --purge-all                         # Empty trash
+caco trash --list                               # Show trashed WADs
+caco trash --restore id:1                       # Restore from trash
+caco trash --purge --yes                        # Empty trash (permanently delete all)
+caco trash --purge id:1 --yes                   # Permanently delete specific WAD
 
-# Manage tags (supports ID ranges and queries)
-caco tag add 1 megawad slaughter
-caco tag add author:romero classic --yes        # Tag all WADs by author
-caco tag remove 1 slaughter
+# Remove IWADs via trash
+caco trash --iwad doom2/bfg                     # Remove BFG variant
+caco trash --iwad doom2                         # Remove all doom2 variants
 ```
 
 ### Playing
@@ -347,9 +365,10 @@ caco tag remove 1 slaughter
 # Play a WAD by ID
 caco play 1
 
-# Play by query (must match exactly one WAD)
+# Play by query (auto-select first match with --first/-1)
 caco play filename:tnto
 caco play "TNT: Overcharged"
+caco play --first scythe               # Auto-select first match (scripting)
 
 # Use a specific sourceport
 caco play 1 --sourceport /usr/bin/dsda-doom
@@ -358,9 +377,10 @@ caco play 1 --sourceport /usr/bin/dsda-doom
 caco play 1 -- -warp 15 -skill 4
 
 # Play an IWAD directly (no PWAD needed)
-caco play iwad:doom2
-caco play iwad:doom2 -- -warp 1
-caco play iwad:doom2 -p gzdoom
+caco play --iwad doom2
+caco play --iwad doom2 -- -warp 1
+caco play --iwad doom2 -p gzdoom
+caco play --iwad doom2/v1.9            # Exact variant
 ```
 
 ### Per-WAD Custom Config
@@ -369,16 +389,16 @@ Set WAD-specific IWAD, sourceport, or extra arguments:
 
 ```bash
 # Set custom IWAD for a WAD
-caco update 1 --iwad /path/to/tnt.wad
+caco modify id:1 iwad=tnt
 
 # Set custom sourceport
-caco update 1 --sourceport /usr/bin/dsda-doom
+caco modify id:1 sourceport=dsda-doom
 
 # Set custom arguments
-caco update 1 --args "-complevel 2 -warp 1"
+caco modify id:1 args="-complevel 2 -warp 1"
 
 # Clear custom settings
-caco update 1 --clear-iwad --clear-sourceport --clear-args
+caco modify id:1 !iwad !sourceport !args
 ```
 
 Priority: CLI arguments > Per-WAD config > Global config
@@ -389,13 +409,13 @@ WADs imported from non-idgames sources (Doomwiki, Doomworld, etc.) can be linked
 
 ```bash
 # Set idgames file ID for a WAD imported from another source
-caco update "Eviternity" --idgames-id 19509
+caco modify Eviternity idgames-id=19509
 
 # Now `caco play` will auto-download from idgames
 caco play "Eviternity"
 
 # Clear the idgames ID
-caco update "Eviternity" --clear-idgames-id
+caco modify Eviternity !idgames-id
 ```
 
 ### Completion Count Tracking
@@ -460,9 +480,9 @@ When per-WAD data directories are enabled (default), caco automatically reads st
 This means you don't need to manually run `--stats-file` — just play and mark as beaten.
 
 ```bash
-caco play 1                    # Stats auto-tracked after session
-caco beaten add 1              # Auto-attaches stored stats to completion
-caco beaten stats 1            # View the per-map stats
+caco play 1                         # Stats auto-tracked after session
+caco beaten add 1                   # Auto-attaches stored stats to completion
+caco beaten stats 1                 # View the per-map stats
 ```
 
 **Opt-out:** Set `auto_stats = false` in config to disable auto-tracking.
@@ -529,20 +549,17 @@ IWADs are organized by **family** (doom, doom2, plutonia, tnt) with multiple **v
 
 ```bash
 # Import IWADs (auto-detects family + variant by MD5)
-caco iwad import ~/games/doom2.wad              # Import a single IWAD file
-caco iwad import ~/iwads/                        # Scan directory for IWADs
-caco iwad import ~/iwads/ --yes                  # Import all without prompting
-
-# Override family/variant for unrecognized IWADs
-caco iwad import ~/wads/custom.wad --family doom2 --variant modded
+caco import ~/games/doom2.wad                   # Auto-detected as IWAD
+caco import ~/iwads/                             # Scan directory for IWADs
+caco import ~/iwads/ --yes                       # Import all without prompting
 
 # List registered IWADs (* marks preferred variant)
-caco iwad list
-caco iwad list --plain                   # TSV output for scripting
+caco ls --iwad
+caco ls --iwad -o plain                          # TSV output for scripting
 
 # Remove a specific variant or all variants of a family
-caco iwad remove doom2 bfg              # Remove just BFG variant
-caco iwad remove doom2                  # Remove all doom2 variants (with warning)
+caco trash --iwad doom2/bfg                      # Remove just BFG variant
+caco trash --iwad doom2                          # Remove all doom2 variants (with warning)
 ```
 
 Once registered, IWADs can be referenced by family name anywhere — the preferred variant is resolved automatically:
@@ -552,7 +569,7 @@ Once registered, IWADs can be referenced by family name anywhere — the preferr
 iwad = "doom2"               # Resolves to preferred variant's path
 
 # Per-WAD config
-caco update 1 --iwad doom2   # Uses preferred variant's path
+caco modify id:1 iwad=doom2  # Uses preferred variant's path
 ```
 
 ### Variant Priority
@@ -659,12 +676,8 @@ default_sort_desc = false
 
 ## Command Aliases
 
-Unix-like shortcuts for common commands:
-
 | Alias | Full Command |
 |-------|--------------|
-| `caco rm` | `caco delete` |
-| `caco ls` | `caco list` |
 | `caco i` | `caco info` |
 
 ## Status Shortcuts
@@ -681,21 +694,19 @@ Use single letters or abbreviations for status values:
 | `w`, `au`, `await`, `waiting`, `wip` | awaiting-update |
 
 ```bash
-caco update 1 -s p     # Set status to "playing"
-caco list status:f     # List finished WADs (query syntax)
+caco modify id:1 status=p   # Set status to "playing"
+caco ls status:f             # List finished WADs (query syntax)
 ```
 
 ### CLI Commands
 
 ```bash
-# View config file contents
+# View config file contents (pipeable)
 caco config
 
 # Open config in $EDITOR
 caco config --edit
-
-# Get config file path (for scripting)
-caco config --path
+caco config -e
 ```
 
 ## Shell Completions
@@ -724,31 +735,31 @@ cp completions/caco.fish ~/.config/fish/completions/
 
 ## Scripting
 
-Use `--plain` for TSV output or `--json` for structured data:
+Use `-o plain` for TSV output or `-o json` for structured data:
 
 ```bash
 # List WADs as TSV (tab-separated)
-caco list --plain
+caco ls -o plain
 # Output: ID	Title	Author	Status	Beaten	Playtime	LastPlayed
 
 # Get WAD info as key=value pairs
-caco info 1 --plain
+caco info 1 -o plain
 # Output: id=1
 #         title=Scythe 2
 #         author=Erik Alm
 #         ...
 
 # JSON output (includes all fields, computed stats, tags)
-caco list --json
-caco list status:playing --json
-caco info 1 --json
+caco ls -o json
+caco ls status:playing -o json
+caco info 1 -o json
 
 # Stats output for scripting
 caco stats --plain                  # Key=value output
 
 # Tag list shows WAD counts
-caco tag list                       # Rich table with Tag + Count columns
-caco tag list --plain               # TSV output for scripting
+caco ls --tags                      # Rich table with Tag + Count columns
+caco ls --tags -o plain             # TSV output for scripting
 
 # Random WAD with metadata
 caco random --info                  # Prints ID, title, author (TSV)

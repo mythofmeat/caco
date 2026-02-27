@@ -41,21 +41,18 @@ def _check_sourceport(sourceport: str | None) -> str:
 @cli.command()
 @click.argument("query", required=False, shell_complete=_complete_query)
 @click.option("--sourceport", "-p", help="Sourceport to use")
-@click.option("--yes", "-y", is_flag=True, help="Auto-select first match if multiple")
+@click.option("--first", "-1", is_flag=True, help="Auto-select first match if multiple")
+@click.option("--iwad", "iwad_name", type=str, help="Play an IWAD directly (e.g., --iwad doom2)")
 @click.argument("extra_args", nargs=-1)
-def play_cmd(query: str | None, sourceport: str | None, yes: bool, extra_args: tuple[str, ...]):
+def play_cmd(query: str | None, sourceport: str | None, first: bool, iwad_name: str | None, extra_args: tuple[str, ...]):
     """Play a WAD by ID or query (e.g., 'caco play 1' or 'caco play filename:tnto').
 
-    Use 'iwad:NAME' to play an IWAD directly (e.g., 'caco play iwad:doom2').
+    \b
+    Use --iwad to play an IWAD directly: caco play --iwad doom2
     With no arguments, plays the most recently played WAD.
     """
-    # Handle iwad: prefix — play an IWAD directly
-    if query and query.startswith("iwad:"):
-        iwad_name = query[5:]
-        if not iwad_name:
-            err_console.print("[red]Usage: caco play iwad:<name> (e.g., iwad:doom2)[/red]")
-            sys.exit(1)
-
+    # Handle --iwad: play an IWAD directly
+    if iwad_name:
         port = _check_sourceport(sourceport)
         console.print(f"[cyan]Playing IWAD {iwad_name}...[/cyan]")
         try:
@@ -69,7 +66,7 @@ def play_cmd(query: str | None, sourceport: str | None, yes: bool, extra_args: t
 
     wad: dict[str, Any] | None
     if query:
-        wads = resolve_wad_query(query, mode="pick", yes=yes)
+        wads = resolve_wad_query(query, mode="pick", yes=first)
         if not wads:
             return  # User cancelled
         wad = wads[0]

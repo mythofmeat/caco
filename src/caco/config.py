@@ -22,6 +22,7 @@ DEFAULT_CONFIG = {
     "iwad_dirs": [],
     "sourceport_args": [],
     "download_mirror": 0,
+    "link_mode": "move",
 }
 
 # Default list configuration
@@ -277,6 +278,13 @@ def set_sourceport_args(args: list[str]) -> None:
     config = load_config()
     config["sourceport_args"] = args
     save_config(config)
+
+
+def get_link_mode() -> str:
+    """Get the link mode (copy or move)."""
+    config = load_config()
+    mode = config.get("link_mode", "move")
+    return mode if mode in ("copy", "move") else "move"
 
 
 def get_download_mirror() -> int:

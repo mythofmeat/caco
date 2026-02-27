@@ -51,7 +51,9 @@ from caco.db._wads import (  # noqa: F401
     get_tag_counts,
     get_wad,
     purge_all_deleted,
+    remove_all_tags,
     remove_tag,
+    remove_tags_by_pattern,
     restore_wad,
     update_wad,
 )
@@ -140,7 +142,9 @@ __all__ = [
     "get_tag_counts",
     "get_wad",
     "purge_all_deleted",
+    "remove_all_tags",
     "remove_tag",
+    "remove_tags_by_pattern",
     "restore_wad",
     "update_wad",
     # IWAD registry

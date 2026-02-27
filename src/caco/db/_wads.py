@@ -182,6 +182,35 @@ def remove_tag(wad_id: int, tag: str) -> bool:
         return cursor.rowcount > 0
 
 
+def remove_all_tags(wad_id: int) -> int:
+    """Remove all tags from a WAD. Returns count of tags removed."""
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "DELETE FROM tags WHERE wad_id = ?",
+            (wad_id,),
+        )
+        return cursor.rowcount
+
+
+def remove_tags_by_pattern(wad_id: int, glob_pattern: str) -> int:
+    """Remove tags matching a glob pattern from a WAD. Returns count removed."""
+    from caco.db._query import _glob_to_like, _is_glob_pattern
+
+    with get_connection() as conn:
+        if _is_glob_pattern(glob_pattern):
+            like_pattern = _glob_to_like(glob_pattern)
+            cursor = conn.execute(
+                r"DELETE FROM tags WHERE wad_id = ? AND tag LIKE ? ESCAPE '\'",
+                (wad_id, like_pattern),
+            )
+        else:
+            cursor = conn.execute(
+                "DELETE FROM tags WHERE wad_id = ? AND tag = ?",
+                (wad_id, glob_pattern.lower()),
+            )
+        return cursor.rowcount
+
+
 def get_all_tags() -> list[str]:
     """Get all unique tags."""
     with get_connection() as conn:

@@ -17,7 +17,7 @@ Caco is a personal Doom WAD library manager inspired by `beets`. It tracks WADs 
 - IWAD registry with family/variant model, MD5-based identification, priority resolution, and auto-scan
 - Managed IWAD storage: `iwads/{variant}/{family}.wad` (canonical filenames for sourceport compatibility)
 - Auto-detect required IWAD from WAD file contents (PNAMES analysis + map lump names)
-- Play IWADs directly (`caco play iwad:doom2`) without a PWAD in the library
+- Play IWADs directly (`caco play --iwad doom2`) without a PWAD in the library
 - Auto-detect installed sourceports with helpful error messages
 - Auto-update config file with missing keys on load
 
@@ -34,14 +34,14 @@ pip install -e .
 caco <command>
 
 # Example: list library
-caco list
+caco ls
 
 # Example: test with plain output
-caco list --plain
+caco ls -o plain
 
 # Example: JSON output (for scripting)
-caco list --json
-caco info 1 --json
+caco ls -o json
+caco info 1 -o json
 
 # Run tests
 pip install -e '.[test]'
@@ -54,14 +54,13 @@ pytest tests/ -v
 src/caco/
 ├── cli/            # Click-based CLI (split into submodules)
 │   ├── __init__.py     # cli group, shared helpers, command aliases, JSON/plain renderers
-│   ├── library.py      # list, info, update, delete, restore, link, random
+│   ├── parsing.py      # Argument classification: sort extraction, modify parsing, ModifyAction
+│   ├── library.py      # ls, info, modify, trash, random
 │   ├── import_cmds.py  # unified import command with source flags
-│   ├── tags.py         # tag add/remove/list
-│   ├── play_cmd.py     # play command
+│   ├── play_cmd.py     # play command (--first, --iwad)
 │   ├── cache.py        # cache list/clear/prune
 │   ├── config_cmd.py   # config, completions commands
-│   ├── stats.py        # stats, beaten commands
-│   └── iwad_cmd.py     # iwad list/import/remove
+│   └── stats.py        # stats, beaten commands
 ├── iwad_detect.py  # Auto-detect IWAD family from WAD file PNAMES/map lumps
 ├── sourceports.py  # Sourceport family registry (exe→CLI flags for data/save redirection)
 ├── utils.py        # Shared utilities (coerce_str, BaseHttpClient, CacoSourceError, extract_year, parse_wad_directory)
@@ -188,7 +187,7 @@ src/caco/
 - Status enum: `to-play`, `backlog`, `playing`, `finished`, `abandoned`, `awaiting-update`
 - Import command uses flag-based source selection: `caco import <source> [--idgames|--doomwiki|--doomworld|--local|--url URL]`
 - Query syntax (beets-style):
-  - Fields: `id:`, `title:`, `author:`, `year:`, `filename:`, `tag:`, `status:`, `source:`
+  - Fields: `id:`, `title:`, `author:`, `year:`, `filename:`, `tag:`, `status:`, `source:`, `iwad:`
   - OR queries: `"status:playing , status:to-play"` (comma with spaces — spaces required!)
   - Negation: `^status:finished` (prefer `^` prefix, `-` also works but may conflict with CLI flags)
   - Status shortcuts: `status:p` (playing), `status:f` (finished), etc.
@@ -196,11 +195,11 @@ src/caco/
   - Free text searches title, author, and description
   - Multiple terms are joined with implicit AND
 - Per-WAD config: `custom_iwad`, `custom_sourceport`, `custom_args` (JSON array) columns in wads table
-- Auto stats tracking: `stats_snapshot` TEXT column on `wads` table stores live per-map stats JSON; auto-read from data dir after play sessions; auto-archived to completion on `beaten add` or `update --status finished`; `auto_stats` config (default: true); live stats shown as "Current (live)" entry in Map Stats dialog (GUI) and screen (TUI)
+- Auto stats tracking: `stats_snapshot` TEXT column on `wads` table stores live per-map stats JSON; auto-read from data dir after play sessions; auto-archived to completion on `beaten add` or `modify status=finished`; `auto_stats` config (default: true); live stats shown as "Current (live)" entry in Map Stats dialog (GUI) and screen (TUI)
 - IWAD resolution: `iwad_dirs` config allows short names (e.g., `doom2` instead of full path); `resolve_iwad()` in `config.py` checks DB registry (with priority resolution) then searches dirs for exact name or name + `.wad`; `IWAD_DIR` / `get_iwad_dir()` provides the managed IWAD directory path (`~/.local/share/caco/iwads/`)
-- Cross-source downloading: `idgames_id` column allows any WAD to download via idgames API (set with `caco update --idgames-id`)
-- Soft-delete: `deleted_at` column; `caco delete` moves to trash, `caco restore` recovers, `caco list --deleted` shows trash
-- `link` command: copies/moves a local file to cache and updates `cached_path`/`filename` for metadata-only entries (e.g., Doomwiki imports)
+- Cross-source downloading: `idgames_id` column allows any WAD to download via idgames API (set with `caco modify id:N idgames-id=XXXXX`)
+- Soft-delete: `deleted_at` column; `caco trash` moves to trash, `caco trash --restore` recovers, `caco trash --list` shows trash
+- `modify --link PATH`: copies/moves a local file to cache and updates `cached_path`/`filename` for metadata-only entries (e.g., Doomwiki imports); behavior controlled by `link_mode` config ("move" or "copy")
 - `version` column tracks WAD version strings for non-idgames releases
 - Database migrations run on `init_db()`: add columns, create tables, rename statuses
 - IWAD registry: `iwads` table with family/variant model; `KNOWN_IWADS` (MD5→(family, variant, title)), `KNOWN_IWAD_FILENAMES` (filename→(family, variant, title)), `IWAD_ALIASES` (free text→family), `DEFAULT_IWAD_PRIORITY` (family→variant order), `FAMILY_FALLBACKS` (family→fallback families) in `db/_iwads.py`; `get_iwad(family)` does priority resolution; `managed_iwad_filename()` returns `{variant}/{family}.wad` path for managed IWADs (canonical filenames for sourceport compatibility); `remove_iwad_with_paths()` returns removed paths for managed file cleanup; `resolve_iwad()` checks DB registry before `iwad_dirs`; Doom Wiki imports auto-link to registered IWADs via `ImportService._auto_link_iwad()`
@@ -208,14 +207,14 @@ src/caco/
 - Sourceport families: `sourceports.py` maps executable basenames to CLI flags; `SOURCEPORT_FAMILIES` dict with dsda/zdoom/chocolate/woof/eternity families; `identify_sourceport_family()` strips path and matches basename; `get_data_dir_args()` returns `-data`/`-save` or `-savedir` args; for dsda family, `-save` points to nested stats dir (`{exe}_data/{iwad}/{wad_stem}/`) via `get_dsda_save_dir()` when `iwad` and `wad_path` are provided
 - Per-WAD data dirs: `player.py` injects data dir args when `manage_data_dirs=True` (default); `get_wad_data_dir(id, title)` returns `{data_dir}/{id}_{sanitized_title}/`; `find_wad_data_dir(id)` finds existing dir by ID prefix (handles title renames); `_sanitize_dirname()` lowercases, replaces non-alnum with hyphens, truncates to 64 chars
 - IWAD auto-detection: `iwad_detect.py` inspects PWAD file PNAMES lump for TNT-only (197) / Plutonia-only (78) patches, then falls back to map lump names (ExMy→doom, MAPxx→doom2); self-contained WADs (patches provided as lumps) don't trigger detection; result persisted to `custom_iwad` on first play; `auto_detect_iwad` config (default: true); `parse_wad_directory()` shared between `iwad_detect.py` and `gui/thumbnails/extractor.py` via `utils.py`
-- Direct IWAD play: `caco play iwad:doom2` launches an IWAD directly via `play_iwad()` in `player.py`; no session tracking, no WAD record — just a clean sourceport launch; supports `-p`/`--sourceport` and extra args
+- Direct IWAD play: `caco play --iwad doom2` launches an IWAD directly via `play_iwad()` in `player.py`; no session tracking, no WAD record — just a clean sourceport launch; supports `-p`/`--sourceport` and extra args
 - Sourceport detection: `detect_sourceports()` in `sourceports.py` uses `shutil.which()` to find installed sourceports from `SOURCEPORT_FAMILIES`; play command error message lists detected ports when no sourceport is configured
 - Config auto-update: `ensure_config_keys()` in `config.py` runs on `load_config()` — compares existing config file against `DEFAULT_CONFIG` and section defaults (`[tui]`, `[gui]`, `[list]`); adds missing keys with default values; only runs if config file exists; only writes if changes are made; recursion-guarded
 
 **IWAD CLI commands:**
-- `caco iwad list [--plain]` — list registered IWADs (family, variant, title, path); preferred variant marked with `*`
-- `caco iwad import <path> [--family X] [--variant Y] [--yes]` — register IWAD — copies to managed dir, auto-detects family+variant via MD5 then filename; PATH can be file or directory
-- `caco iwad remove <family> [variant]` — without variant removes all variants (with warning); with variant removes one; also deletes managed file if inside iwad_dir
+- `caco ls --iwad [-o plain]` — list registered IWADs (family, variant, title, path); preferred variant marked with `*`
+- `caco import <path>` — auto-detects IWAD via MD5 and registers; copies to managed dir
+- `caco trash --iwad FAMILY[/VARIANT]` — without variant removes all variants (with warning); with variant removes one; also deletes managed file if inside iwad_dir
 
 **Status shortcuts (complete list):**
 | Shortcut | Status |
@@ -239,8 +238,8 @@ src/caco/
 - Supports nyan-doom/dsda-doom `stats.txt` format (persistent per-map tracking) and `levelstat.txt` format (human-readable `-levelstat` output)
 
 **Output formats:**
-- `--plain` on `list`, `info`, `tag list`, `cache list`, `stats` — TSV/key=value for scripting
-- `--json` on `list`, `info` — JSON output with computed stats
+- `-o plain` on `ls`, `info`, `trash --list`, `cache list`, `stats` — TSV/key=value for scripting
+- `-o json` on `ls`, `info` — JSON output with computed stats
 - `--info` on `random` — print ID, title, author (TSV)
 
 **Stats command options:**

@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.0.0] - 2026-02-27
+
+**Breaking**: CLI rework to follow beets conventions more closely.
+
+### Added
+
+- **`modify` command**: Replaces `update` with beets-style `field=value` syntax
+  (e.g., `caco modify id:1 status=playing rating=5`); supports `!field` to clear
+  fields, `tag=value` to add tags, `!tag` to remove all tags, `!tag:pattern` to
+  remove matching tags; `--link PATH` absorbs the old `link` command; `--dry-run`
+  for previewing changes
+- **`trash` command**: Unified trash management replacing `delete`/`restore` —
+  `caco trash <query>` soft-deletes, `--list` shows trash, `--restore` recovers,
+  `--purge` permanently deletes, `--iwad FAMILY[/VARIANT]` removes IWADs
+- **Inline sort syntax**: `caco ls status:playing playtime-` instead of
+  `--sort playtime-`; sort terms extracted from query args by `+`/`-` suffix on
+  known fields
+- **`ls --tags` flag**: Lists all tags with counts, replacing `tag list`
+- **`ls --iwad` flag**: Lists registered IWADs, replacing `iwad list`
+- **`iwad:` query field**: `caco ls iwad:doom2` filters by custom_iwad column
+- **`play --iwad` option**: `caco play --iwad doom2` replaces `caco play iwad:doom2`
+  prefix syntax; supports `FAMILY/VARIANT` format
+- **`play --first`/`-1`**: Replaces `--yes`/`-y` for auto-selecting first match
+- **`parsing.py` module**: New `cli/parsing.py` with `extract_sort_from_args()`,
+  `parse_modify_args()`, `ModifyAction` dataclass, and field validation
+- **`link_mode` config**: Controls whether `modify --link` copies or moves files
+  (default: "move")
+- **DB tag functions**: `remove_all_tags()` and `remove_tags_by_pattern()` in
+  `db/_wads.py`
+
+### Changed
+
+- **`list` → `ls`**: `ls` is now the primary command name (not an alias)
+- **`--json`/`--plain` → `--output`/`-o`**: Unified output format flag on `ls`,
+  `info`, and `trash --list` (`-o json`, `-o plain`)
+- **`info` multiple matches**: Now displays all results in sequence instead of
+  interactive picker; `--yes` removed
+- **`config` default**: Prints raw config text to stdout (pipeable); `--path`
+  removed
+
+### Removed
+
+- **`update` command**: Replaced by `modify`
+- **`delete` command**: Replaced by `trash`
+- **`restore` command**: Replaced by `trash --restore`
+- **`link` command**: Replaced by `modify --link`
+- **`tag` command group**: Tag management folded into `modify` and `ls --tags`
+- **`iwad` command group**: IWAD management folded into `ls --iwad`, `trash --iwad`
+- **`rm` alias**: Removed (use `trash`)
+- **`--sort`/`-S` flag on `ls`**: Use inline sort syntax instead
+- **`config --path`**: Use `caco config` (prints to stdout) instead
+
+---
+
 ## [1.7.4] - 2026-02-27
 
 Fix dsda-family sourceport save directory placement.

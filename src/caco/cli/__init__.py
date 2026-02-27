@@ -323,8 +323,9 @@ def resolve_wad_query(
     return results
 
 
-SORT_FIELDS = ["id", "playtime", "rating", "created", "title", "author", "last_played", "year"]
-
+# Re-export from parsing for backward compat
+from caco.cli.parsing import SORT_FIELDS  # noqa: F401
+from caco.cli.parsing import _parse_sort_option  # noqa: F401
 
 
 def _normalize_status(value: str | None) -> str | None:
@@ -368,7 +369,7 @@ def _complete_tags(ctx, param, incomplete):
 
 
 # Query field prefixes for completion
-QUERY_FIELDS = ["id:", "title:", "name:", "author:", "year:", "filename:", "tag:", "status:", "source:"]
+QUERY_FIELDS = ["id:", "title:", "name:", "author:", "year:", "filename:", "tag:", "status:", "source:", "iwad:"]
 
 # Valid status values for completion
 QUERY_STATUS_VALUES = ["to-play", "backlog", "playing", "finished", "abandoned", "awaiting-update"]
@@ -428,65 +429,6 @@ def _complete_query(ctx, param, incomplete: str) -> list[str]:
                     completions.append(f"{prefix}tag:{tag}")
         except Exception:
             pass
-
-    return completions
-
-
-def _parse_sort_option(sort: str | None) -> tuple[str | None, bool]:
-    """Parse sort option. Returns (field, descending).
-
-    Suffix notation (preferred — avoids CLI flag parsing issues):
-        'playtime'  -> ('playtime', True)   Bare field defaults to descending
-        'title+'    -> ('title', False)     '+' suffix = ascending
-        'title-'    -> ('title', True)      '-' suffix = descending
-
-    Legacy prefix notation (still supported for backward compat):
-        '-title'    -> ('title', False)     '-' prefix = ascending (inverted!)
-        '+title'    -> ('title', True)      '+' prefix = descending
-
-    Note: prefix semantics are inverted vs suffix (historical artifact).
-    Prefer suffix notation for clarity.
-    """
-    if not sort:
-        return None, True
-
-    # Suffix notation (preferred - avoids CLI flag issues)
-    if sort.endswith("+"):
-        return sort[:-1], False  # Ascending
-    if sort.endswith("-"):
-        return sort[:-1], True   # Descending
-
-    # Legacy prefix notation (still supported)
-    if sort.startswith("-"):
-        return sort[1:], False
-    if sort.startswith("+"):
-        return sort[1:], True
-
-    return sort, True
-
-
-def _complete_sort(ctx, param, incomplete: str) -> list[str]:
-    """Shell completion for sort fields.
-
-    Completes field names and suggests +/- suffix for direction.
-    """
-    completions = []
-
-    # Check for direction suffix
-    if incomplete.endswith("+") or incomplete.endswith("-"):
-        # Already has direction, complete the field part
-        field_part = incomplete[:-1]
-        suffix = incomplete[-1]
-        for field in SORT_FIELDS:
-            if field.startswith(field_part):
-                completions.append(f"{field}{suffix}")
-    else:
-        # Complete field names, offer with +/- variants
-        for field in SORT_FIELDS:
-            if field.startswith(incomplete):
-                completions.append(field)      # Default direction
-                completions.append(f"{field}+")  # Ascending
-                completions.append(f"{field}-")  # Descending
 
     return completions
 
@@ -744,21 +686,16 @@ def cli(ctx, tui: bool, gui: bool):
 
 from caco.cli import library  # noqa: E402, F401
 from caco.cli import import_cmds  # noqa: E402, F401
-from caco.cli import tags  # noqa: E402, F401
 from caco.cli import play_cmd as play_mod  # noqa: E402, F401
 from caco.cli import cache  # noqa: E402, F401
 from caco.cli import config_cmd  # noqa: E402, F401
 from caco.cli import stats  # noqa: E402, F401
-from caco.cli import iwad_cmd  # noqa: E402, F401
 
 
 # =============================================================================
 # Command Aliases
 # =============================================================================
 
-# Unix-like aliases for common commands
-cli.add_command(library.delete, name="rm")             # type: ignore[has-type]  # caco rm -> caco delete
-cli.add_command(library.list_cmd, name="ls")           # type: ignore[has-type]  # caco ls -> caco list
 cli.add_command(library.info, name="i")                # type: ignore[has-type]  # caco i -> caco info
 
 

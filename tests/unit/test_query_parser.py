@@ -180,3 +180,14 @@ class TestBuildTermSql:
         term = QueryTerm(field="id", value="abc")
         sql, params = _build_term_sql(term)
         assert sql == ""
+
+    def test_iwad_field(self):
+        term = QueryTerm(field="iwad", value="doom2")
+        sql, params = _build_term_sql(term)
+        assert "custom_iwad LIKE ?" in sql
+        assert params == ["%doom2%"]
+
+    def test_iwad_field_negated(self):
+        term = QueryTerm(field="iwad", value="doom2", negated=True)
+        sql, params = _build_term_sql(term)
+        assert sql.startswith("NOT")

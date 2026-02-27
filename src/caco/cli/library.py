@@ -1,4 +1,4 @@
-"""Library management commands: list, info, update, delete, restore, random, link."""
+"""Library management commands: ls, info, modify, trash, random."""
 
 import json
 import shutil
@@ -7,9 +7,10 @@ from pathlib import Path
 from typing import Any
 
 import click
+from rich.table import Table
 
 from caco import db
-from caco.config import get_cache_dir, get_list_config
+from caco.config import get_cache_dir, get_iwad_dir, get_list_config
 from caco.player import format_duration
 from caco.utils import format_rating
 
@@ -18,73 +19,159 @@ from caco.cli import (
     console,
     err_console,
     resolve_wad_query,
-    StatusChoice,
-    SORT_FIELDS,
     _complete_query,
-    _complete_sort,
-    _parse_sort_option,
     _render_wad_list,
     _render_wad_list_plain,
     _render_wad_list_json,
     _render_wad_info_plain,
     _render_wad_info_json,
 )
+from caco.cli.parsing import (
+    SORT_FIELDS,
+    _parse_sort_option,
+    extract_sort_from_args,
+    parse_modify_args,
+)
 
 
-@cli.command(name="list")
-@click.argument("query", nargs=-1, shell_complete=_complete_query)
-@click.option("--sort", "-S", shell_complete=_complete_sort, help="Sort by: playtime, rating, created, title, author, last_played, year (suffix + for asc, - for desc)")
-@click.option("--deleted", is_flag=True, help="Show deleted WADs (trash)")
-@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
-@click.option("--plain", is_flag=True, help="Output as TSV (for scripting)")
-def list_cmd(query: tuple[str, ...], sort: str | None, deleted: bool, as_json: bool, plain: bool):
+@cli.command(name="ls")
+@click.argument("args", nargs=-1, shell_complete=_complete_query)
+@click.option("--output", "-o", type=click.Choice(["json", "plain"]), help="Output format")
+@click.option("--deleted", is_flag=True, hidden=True, help="Show deleted WADs (use 'trash --list')")
+@click.option("--tags", is_flag=True, help="List all tags with counts")
+@click.option("--iwad", "iwad_flag", is_flag=True, help="List registered IWADs")
+def ls_cmd(args: tuple[str, ...], output: str | None, deleted: bool, tags: bool, iwad_flag: bool):
     """List WADs in your library.
 
-    Uses beets-style query syntax:
+    \b
+    Sort inline with field+ (ascending) or field- (descending):
+      caco ls playtime-                    # Sort by playtime descending
+      caco ls status:playing title+        # Filter + sort by title ascending
 
     \b
-      caco list status:playing              # Filter by status
-      caco list author:romero year:1994     # Multiple filters (implicit AND)
-      caco list "status:playing , status:to-play"  # OR queries (spaces around comma!)
-      caco list ^status:finished            # Negation (prefer ^ over -)
-      caco list tag:megawad ^tag:slaughter  # Combined filters
-      caco list "ancient aliens"            # Free text (title/author/description)
-      caco list tag:caco*                   # Glob patterns (* and ? supported)
+    Query syntax (beets-style):
+      caco ls status:playing               # Filter by status
+      caco ls author:romero year:1994      # Multiple filters (implicit AND)
+      caco ls "status:playing , status:to-play"  # OR queries
+      caco ls ^status:finished             # Negation
+      caco ls tag:megawad ^tag:slaughter   # Combined filters
+      caco ls "ancient aliens"             # Free text search
+      caco ls tag:caco*                    # Glob patterns
 
     \b
-    Query fields: id:, title:, author:, year:, filename:, tag:, status:, source:
-    Status shortcuts: t/tp (to-play), b (backlog), p (playing), f (finished),
-                      a (abandoned), w (awaiting-update)
+    Special modes:
+      caco ls --tags                       # List all tags with counts
+      caco ls --iwad                       # List registered IWADs
 
     \b
-    Notes:
-      - OR syntax requires spaces around comma: " , " (not just ",")
-      - Prefer ^ for negation over - (which can conflict with CLI flags)
-      - Free text searches title, author, and description fields
-      - Glob patterns work in field queries: tag:caco*, filename:scythe?
-      - Multiple terms without commas are joined with implicit AND
-
-    Customize display via config file: columns, colors, default sort.
+    Sort fields: id, playtime, rating, created, title, author, last_played, year
+    Query fields: id:, title:, author:, year:, filename:, tag:, status:, source:, iwad:
     """
-    # Load list config for defaults
+    # Mutually exclusive modes
+    if tags and iwad_flag:
+        err_console.print("[red]--tags and --iwad are mutually exclusive[/red]")
+        sys.exit(1)
+
+    # --tags mode: show tag counts
+    if tags:
+        tag_counts = db.get_tag_counts()
+        if not tag_counts:
+            if output == "plain":
+                return
+            console.print("[dim]No tags[/dim]")
+            return
+
+        if output == "json":
+            print(json.dumps([{"tag": t, "count": c} for t, c in tag_counts], indent=2))
+            return
+        if output == "plain":
+            print("Tag\tCount")
+            for tag, count in tag_counts:
+                print(f"{tag}\t{count}")
+            return
+
+        table = Table(title=f"Tags ({len(tag_counts)})")
+        table.add_column("Tag", style="cyan")
+        table.add_column("WADs", justify="right")
+        for tag, count in tag_counts:
+            table.add_row(tag, str(count))
+        console.print(table)
+        return
+
+    # --iwad mode: show registered IWADs
+    if iwad_flag:
+        iwads = db.get_all_iwads()
+
+        if output == "plain":
+            print("Family\tVariant\tTitle\tPath\tMD5")
+            for iwad in iwads:
+                print(
+                    f"{iwad['family']}\t{iwad['variant']}\t{iwad.get('title') or ''}"
+                    f"\t{iwad['path']}\t{iwad.get('md5') or ''}"
+                )
+            return
+
+        if output == "json":
+            print(json.dumps([dict(i) for i in iwads], indent=2))
+            return
+
+        if not iwads:
+            console.print("[dim]No IWADs registered[/dim]")
+            console.print("[dim]Use 'caco iwad import <path>' to import an IWAD file or directory[/dim]")
+            return
+
+        preferred: set[tuple[str, str]] = set()
+        families_seen: set[str] = set()
+        for iwad in iwads:
+            fam = iwad["family"]
+            if fam not in families_seen:
+                families_seen.add(fam)
+                pref = db.get_iwad(fam)
+                if pref:
+                    preferred.add((pref["family"], pref["variant"]))
+
+        table = Table(title=f"Registered IWADs ({len(iwads)})")
+        table.add_column("Family", style="cyan")
+        table.add_column("Variant")
+        table.add_column("Title")
+        table.add_column("Path", style="dim")
+
+        for iwad in iwads:
+            path_str = iwad["path"]
+            if not Path(path_str).exists():
+                path_str = f"[red]{path_str} (missing)[/red]"
+            is_preferred = (iwad["family"], iwad["variant"]) in preferred
+            variant_display = iwad["variant"]
+            if is_preferred:
+                variant_display = f"[bold green]{variant_display} *[/bold green]"
+            table.add_row(
+                iwad["family"],
+                variant_display,
+                iwad.get("title") or "-",
+                path_str,
+            )
+        console.print(table)
+        return
+
+    # Default mode: list WADs
     list_config = get_list_config()
 
-    # Join query arguments
-    query_str = " ".join(query) if query else None
+    # Extract inline sort from args
+    remaining, sort_str = extract_sort_from_args(args)
+    query_str = " ".join(remaining) if remaining else None
 
-    # Handle config default_status (convert list to OR query)
+    # Handle config default_status
     if not query_str and list_config.get("default_status"):
         default_statuses = list_config["default_status"]
         if default_statuses:
-            # Convert ["playing", "to-play"] -> "status:playing , status:to-play"
             status_queries = [f"status:{s}" for s in default_statuses]
             query_str = " , ".join(status_queries)
 
-    # Use config sort if not specified via CLI
-    if sort is None and list_config.get("sort"):
-        sort = list_config["sort"]
+    # Use config sort if not specified inline
+    if sort_str is None and list_config.get("sort"):
+        sort_str = list_config["sort"]
 
-    sort_field, sort_desc = _parse_sort_option(sort)
+    sort_field, sort_desc = _parse_sort_option(sort_str)
     if sort_field and sort_field not in SORT_FIELDS:
         err_console.print(f"[red]Invalid sort field: {sort_field}[/red]")
         err_console.print(f"[dim]Valid fields: {', '.join(SORT_FIELDS)}[/dim]")
@@ -97,12 +184,11 @@ def list_cmd(query: tuple[str, ...], sort: str | None, deleted: bool, as_json: b
         include_deleted=deleted,
     )
 
-    # Adjust title for deleted view
     title = "Trash" if deleted else None
 
-    if as_json:
+    if output == "json":
         _render_wad_list_json(wads)
-    elif plain:
+    elif output == "plain":
         _render_wad_list_plain(wads)
     else:
         _render_wad_list(wads, title=title, list_config=list_config)
@@ -110,444 +196,521 @@ def list_cmd(query: tuple[str, ...], sort: str | None, deleted: bool, as_json: b
 
 @cli.command()
 @click.argument("query")
-@click.option("--yes", "-y", is_flag=True, help="Auto-select first match if multiple")
-@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
-@click.option("--plain", is_flag=True, help="Output as key=value pairs (for scripting)")
-def info(query: str, yes: bool, as_json: bool, plain: bool):
-    """Show details about a WAD. QUERY: WAD ID or query (e.g., filename:tnto)."""
-    wads = resolve_wad_query(query, mode="pick", yes=yes)
+@click.option("--output", "-o", type=click.Choice(["json", "plain"]), help="Output format")
+def info(query: str, output: str | None):
+    """Show details about a WAD.
+
+    Multiple matches are displayed in sequence, separated by a rule.
+
+    \b
+    QUERY: WAD ID, ID range (3-6,9), or query (e.g., filename:tnto).
+    """
+    from caco.cli import _parse_id_range
+
+    # Try ID range first
+    ids = _parse_id_range(query)
+    if ids is not None:
+        wads = []
+        missing = []
+        for wad_id in ids:
+            wad = db.get_wad(wad_id)
+            if wad:
+                wads.append(wad)
+            else:
+                missing.append(wad_id)
+        if missing:
+            err_console.print(f"[red]WAD(s) not found: {', '.join(map(str, missing))}[/red]")
+            sys.exit(1)
+    else:
+        wads = db.search_wads(query=query)
+
     if not wads:
-        return  # User cancelled
-    wad = wads[0]
-    wad_id = wad["id"]
+        err_console.print(f"[red]No WADs matching '{query}'[/red]")
+        sys.exit(1)
 
-    if as_json:
-        _render_wad_info_json(wad)
+    if output == "json":
+        if len(wads) == 1:
+            _render_wad_info_json(wads[0])
+        else:
+            # Multiple: output as JSON array
+            results = []
+            for wad in wads:
+                playtime = db.get_total_playtime(wad["id"])
+                sessions = db.get_sessions(wad["id"])
+                last_played = db.get_last_played(wad["id"])
+                times_beaten = db.get_times_beaten(wad["id"])
+                results.append({
+                    "id": wad["id"],
+                    "title": wad["title"],
+                    "author": wad.get("author"),
+                    "year": wad.get("year"),
+                    "status": wad["status"],
+                    "rating": wad.get("rating"),
+                    "tags": wad.get("tags", []),
+                    "playtime_seconds": playtime,
+                    "playtime": format_duration(playtime) if playtime else None,
+                    "session_count": len(sessions),
+                    "times_beaten": times_beaten,
+                    "last_played": last_played,
+                })
+            print(json.dumps(results, indent=2))
         return
 
-    if plain:
-        _render_wad_info_plain(wad)
-        return
+    for i, wad in enumerate(wads):
+        if i > 0:
+            if output == "plain":
+                print("---")
+            else:
+                console.rule()
 
-    console.print(f"[bold cyan]{wad['title']}[/bold cyan]")
-    console.print(f"[dim]ID: {wad['id']}[/dim]")
-    console.print()
+        wad_id = wad["id"]
 
-    if wad["author"]:
-        console.print(f"[bold]Author:[/bold] {wad['author']}")
-    if wad["year"]:
-        console.print(f"[bold]Year:[/bold] {wad['year']}")
-    console.print(f"[bold]Status:[/bold] {wad['status']}")
-    if wad.get("version"):
-        console.print(f"[bold]Version:[/bold] {wad['version']}")
+        if output == "plain":
+            _render_wad_info_plain(wad)
+            continue
 
-    if wad["rating"]:
-        console.print(f"[bold]Rating:[/bold] {format_rating(wad['rating'])}")
-
-    if wad.get("tags"):
-        console.print(f"[bold]Tags:[/bold] {', '.join(wad['tags'])}")
-
-    console.print()
-    console.print(f"[bold]Source:[/bold] {wad['source_type']}")
-    if wad["source_url"]:
-        console.print(f"[bold]URL:[/bold] {wad['source_url']}")
-    if wad.get("idgames_id"):
-        console.print(f"[bold]idgames ID:[/bold] {wad['idgames_id']}")
-
-    if wad["description"]:
+        console.print(f"[bold cyan]{wad['title']}[/bold cyan]")
+        console.print(f"[dim]ID: {wad['id']}[/dim]")
         console.print()
-        console.print("[bold]Description:[/bold]")
-        console.print(wad["description"])
 
-    # Playtime stats
-    playtime = db.get_total_playtime(wad_id)
-    sessions = db.get_sessions(wad_id)
-    last_played = db.get_last_played(wad_id)
-    if sessions:
-        console.print()
-        console.print(f"[bold]Playtime:[/bold] {format_duration(playtime)} ({len(sessions)} sessions)")
-        if last_played:
-            console.print(f"[bold]Last played:[/bold] {last_played[:16].replace('T', ' ')}")
+        if wad["author"]:
+            console.print(f"[bold]Author:[/bold] {wad['author']}")
+        if wad["year"]:
+            console.print(f"[bold]Year:[/bold] {wad['year']}")
+        console.print(f"[bold]Status:[/bold] {wad['status']}")
+        if wad.get("version"):
+            console.print(f"[bold]Version:[/bold] {wad['version']}")
 
-    if wad["notes"]:
-        console.print()
-        console.print("[bold]Notes:[/bold]")
-        console.print(wad["notes"])
+        if wad["rating"]:
+            console.print(f"[bold]Rating:[/bold] {format_rating(wad['rating'])}")
 
-    # Completion stats
-    times_beaten = db.get_times_beaten(wad_id)
-    if times_beaten > 0:
-        console.print()
-        console.print(f"[bold]Times beaten:[/bold] {times_beaten}")
+        if wad.get("tags"):
+            console.print(f"[bold]Tags:[/bold] {', '.join(wad['tags'])}")
 
-    # Per-WAD play config
-    if wad.get("custom_iwad") or wad.get("custom_sourceport") or wad.get("custom_args"):
         console.print()
-        console.print("[bold]Custom play config:[/bold]")
-        if wad.get("custom_iwad"):
-            console.print(f"  IWAD: {wad['custom_iwad']}")
-        if wad.get("custom_sourceport"):
-            console.print(f"  Sourceport: {wad['custom_sourceport']}")
-        if wad.get("custom_args"):
-            try:
-                args = json.loads(wad["custom_args"])
-                console.print(f"  Args: {' '.join(args)}")
-            except json.JSONDecodeError:
-                console.print(f"  Args: {wad['custom_args']}")
+        console.print(f"[bold]Source:[/bold] {wad['source_type']}")
+        if wad["source_url"]:
+            console.print(f"[bold]URL:[/bold] {wad['source_url']}")
+        if wad.get("idgames_id"):
+            console.print(f"[bold]idgames ID:[/bold] {wad['idgames_id']}")
+
+        if wad["description"]:
+            console.print()
+            console.print("[bold]Description:[/bold]")
+            console.print(wad["description"])
+
+        playtime = db.get_total_playtime(wad_id)
+        sessions = db.get_sessions(wad_id)
+        last_played = db.get_last_played(wad_id)
+        if sessions:
+            console.print()
+            console.print(f"[bold]Playtime:[/bold] {format_duration(playtime)} ({len(sessions)} sessions)")
+            if last_played:
+                console.print(f"[bold]Last played:[/bold] {last_played[:16].replace('T', ' ')}")
+
+        if wad["notes"]:
+            console.print()
+            console.print("[bold]Notes:[/bold]")
+            console.print(wad["notes"])
+
+        times_beaten = db.get_times_beaten(wad_id)
+        if times_beaten > 0:
+            console.print()
+            console.print(f"[bold]Times beaten:[/bold] {times_beaten}")
+
+        if wad.get("custom_iwad") or wad.get("custom_sourceport") or wad.get("custom_args"):
+            console.print()
+            console.print("[bold]Custom play config:[/bold]")
+            if wad.get("custom_iwad"):
+                console.print(f"  IWAD: {wad['custom_iwad']}")
+            if wad.get("custom_sourceport"):
+                console.print(f"  Sourceport: {wad['custom_sourceport']}")
+            if wad.get("custom_args"):
+                try:
+                    parsed_args = json.loads(wad["custom_args"])
+                    console.print(f"  Args: {' '.join(parsed_args)}")
+                except json.JSONDecodeError:
+                    console.print(f"  Args: {wad['custom_args']}")
 
 
 @cli.command()
-@click.argument("query")
-@click.option("--title", "-t", help="Set WAD title")
-@click.option("--author", "-a", help="Set WAD author")
-@click.option("--clear-author", is_flag=True, help="Clear author")
-@click.option("--year", type=int, help="Set release year")
-@click.option("--clear-year", is_flag=True, help="Clear release year")
-@click.option("--description", "-d", help="Set WAD description")
-@click.option("--clear-description", is_flag=True, help="Clear description")
-@click.option("--version", "-V", "version_str", help="Set version string (e.g., 'v1.0', 'RC2')")
-@click.option("--clear-version", is_flag=True, help="Clear version")
-@click.option("--status", "-s", type=StatusChoice())
-@click.option("--rating", "-r", type=click.IntRange(1, 5))
-@click.option("--notes", "-n")
-@click.option("--iwad", help="Custom IWAD path for this WAD")
-@click.option("--clear-iwad", is_flag=True, help="Clear custom IWAD")
-@click.option("--sourceport", help="Custom sourceport for this WAD")
-@click.option("--clear-sourceport", is_flag=True, help="Clear custom sourceport")
-@click.option("--args", "custom_args", help="Custom arguments (JSON array or space-separated)")
-@click.option("--clear-args", is_flag=True, help="Clear custom arguments")
-@click.option("--idgames-id", help="Set idgames file ID for downloading")
-@click.option("--clear-idgames-id", is_flag=True, help="Clear idgames file ID")
+@click.argument("args", nargs=-1)
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation for multi-WAD updates")
 @click.option("--dry-run", is_flag=True, help="Show what would change without making changes")
-def update(
-    query: str,
-    title: str | None,
-    author: str | None,
-    clear_author: bool,
-    year: int | None,
-    clear_year: bool,
-    description: str | None,
-    clear_description: bool,
-    version_str: str | None,
-    clear_version: bool,
-    status: str | None,
-    rating: int | None,
-    notes: str | None,
-    iwad: str | None,
-    clear_iwad: bool,
-    sourceport: str | None,
-    clear_sourceport: bool,
-    custom_args: str | None,
-    clear_args: bool,
-    idgames_id: str | None,
-    clear_idgames_id: bool,
-    yes: bool,
-    dry_run: bool,
-):
-    """Update WAD metadata. QUERY: ID, ID range (3-6,9), or query (tag:megawad)."""
-    updates: dict[str, Any] = {}
-    update_descriptions: list[str] = []
+@click.option("--link", "link_path", type=click.Path(exists=True), help="Link a local file to the WAD(s)")
+def modify(args: tuple[str, ...], yes: bool, dry_run: bool, link_path: str | None):
+    """Modify WAD metadata using beets-style field=value syntax.
 
-    # Core metadata fields
-    if title:
-        updates["title"] = title
-        update_descriptions.append(f"title \u2192 \"{title}\"")
-    if author:
-        updates["author"] = author
-        update_descriptions.append(f"author \u2192 \"{author}\"")
-    elif clear_author:
-        updates["author"] = None
-        update_descriptions.append("author \u2192 (cleared)")
-    if year:
-        updates["year"] = year
-        update_descriptions.append(f"year \u2192 {year}")
-    elif clear_year:
-        updates["year"] = None
-        update_descriptions.append("year \u2192 (cleared)")
-    if description:
-        updates["description"] = description
-        desc_preview = description[:30] + "..." if len(description) > 30 else description
-        update_descriptions.append(f"description \u2192 \"{desc_preview}\"")
-    elif clear_description:
-        updates["description"] = None
-        update_descriptions.append("description \u2192 (cleared)")
-    if version_str:
-        updates["version"] = version_str
-        update_descriptions.append(f"version \u2192 \"{version_str}\"")
-    elif clear_version:
-        updates["version"] = None
-        update_descriptions.append("version \u2192 (cleared)")
+    \b
+    Set fields:
+      caco modify id:1 status=playing          # Set status
+      caco modify id:1 rating=4 notes="great"  # Set multiple fields
+      caco modify id:1 tag=megawad             # Add a tag
+      caco modify id:1 iwad=doom2              # Set custom IWAD
 
-    # Status and user fields
-    if status:
-        updates["status"] = db.Status(status)
-        update_descriptions.append(f"status \u2192 {status}")
-    if rating:
-        updates["rating"] = rating
-        update_descriptions.append(f"rating \u2192 {'\u2605' * rating}")
-    if notes:
-        updates["notes"] = notes
-        update_descriptions.append(f"notes \u2192 \"{notes[:30]}{'...' if len(notes) > 30 else ''}\"")
+    \b
+    Clear fields:
+      caco modify id:1 !author                 # Clear author
+      caco modify id:1 !tag                    # Remove all tags
+      caco modify id:1 !tag:slaughter          # Remove matching tags
 
-    # Per-WAD play config
-    if iwad:
-        updates["custom_iwad"] = iwad
-        update_descriptions.append(f"custom_iwad \u2192 {iwad}")
-    elif clear_iwad:
-        updates["custom_iwad"] = None
-        update_descriptions.append("custom_iwad \u2192 (cleared)")
-    if sourceport:
-        updates["custom_sourceport"] = sourceport
-        update_descriptions.append(f"custom_sourceport \u2192 {sourceport}")
-    elif clear_sourceport:
-        updates["custom_sourceport"] = None
-        update_descriptions.append("custom_sourceport \u2192 (cleared)")
-    if custom_args:
-        # Accept JSON array or space-separated string
-        try:
-            args_list = json.loads(custom_args)
-        except json.JSONDecodeError:
-            args_list = custom_args.split()
-        updates["custom_args"] = json.dumps(args_list)
-        update_descriptions.append(f"custom_args \u2192 {args_list}")
-    elif clear_args:
-        updates["custom_args"] = None
-        update_descriptions.append("custom_args \u2192 (cleared)")
+    \b
+    Link a file:
+      caco modify id:1 --link ~/Downloads/wad.wad
 
-    # Cross-source idgames download ID
-    if idgames_id:
-        updates["idgames_id"] = idgames_id
-        update_descriptions.append(f"idgames_id \u2192 {idgames_id}")
-    elif clear_idgames_id:
-        updates["idgames_id"] = None
-        update_descriptions.append("idgames_id \u2192 (cleared)")
+    \b
+    Modifiable fields: title, author, year, description, status, rating,
+      notes, iwad, sourceport, args, idgames-id, version, tag
+    """
+    from caco.config import get_link_mode
 
-    if not updates:
-        err_console.print("[yellow]No updates specified[/yellow]")
+    query_terms, actions, _sort = parse_modify_args(args)
+
+    if not actions and not link_path:
+        err_console.print("[yellow]No modifications specified[/yellow]")
+        err_console.print("[dim]Use field=value to set, !field to clear, tag=name to add tags[/dim]")
         return
 
-    wads = resolve_wad_query(query, mode="multiple", yes=yes)
+    if not query_terms:
+        err_console.print("[red]No query specified — provide a WAD ID or query to match[/red]")
+        sys.exit(1)
+
+    query_str = " ".join(query_terms)
+    wads = resolve_wad_query(query_str, mode="multiple", yes=yes)
     if not wads:
-        return  # User cancelled
+        return
+
+    # Build descriptions for dry-run / confirmation
+    descriptions: list[str] = []
+    for action in actions:
+        if action.action == "set":
+            descriptions.append(f"{action.field} \u2192 \"{action.value}\"")
+        elif action.action == "clear":
+            descriptions.append(f"{action.field} \u2192 (cleared)")
+        elif action.action == "add_tag":
+            descriptions.append(f"add tag: {action.value}")
+        elif action.action == "remove_all_tags":
+            descriptions.append("remove all tags")
+        elif action.action == "remove_tag":
+            descriptions.append(f"remove tags matching: {action.pattern}")
+    if link_path:
+        descriptions.append(f"link file: {link_path}")
 
     if dry_run:
-        console.print(f"\n[bold]Would update {len(wads)} WAD(s):[/bold]\n")
+        console.print(f"\n[bold]Would modify {len(wads)} WAD(s):[/bold]\n")
         for wad in wads[:10]:
             console.print(f"  [dim][{wad['id']}][/dim] {wad['title']}")
         if len(wads) > 10:
             console.print(f"  [dim]... and {len(wads) - 10} more[/dim]")
         console.print(f"\n[bold]Changes:[/bold]")
-        for desc in update_descriptions:
+        for desc in descriptions:
             console.print(f"  \u2022 {desc}")
         console.print("\n[dim]No changes made (dry run)[/dim]")
         return
 
+    # Apply modifications
     for wad in wads:
-        db.update_wad(wad["id"], **updates)
+        updates: dict[str, Any] = {}
 
-    console.print(f"[green]Updated {len(wads)} WAD(s)[/green]")
+        for action in actions:
+            if action.action == "set":
+                value: Any = action.value
+                if action.field == "status":
+                    value = db.Status(value)
+                elif action.field == "rating":
+                    value = int(value)
+                elif action.field == "year":
+                    value = int(value)
+                updates[action.field] = value
+
+            elif action.action == "clear":
+                updates[action.field] = None
+
+            elif action.action == "add_tag":
+                db.add_tag(wad["id"], action.value)
+
+            elif action.action == "remove_all_tags":
+                db.remove_all_tags(wad["id"])
+
+            elif action.action == "remove_tag":
+                db.remove_tags_by_pattern(wad["id"], action.pattern)
+
+        if updates:
+            db.update_wad(wad["id"], **updates)
+
+    # Handle --link
+    if link_path:
+        source = Path(link_path).resolve()
+        if not source.is_file():
+            err_console.print(f"[red]Error: {link_path} is not a regular file[/red]")
+            sys.exit(1)
+
+        cache_dir = get_cache_dir()
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        link_mode = get_link_mode()
+
+        for wad in wads:
+            dest_filename = f"{wad['id']}_{source.name}"
+            dest = cache_dir / dest_filename
+
+            # Remove old linked file if exists
+            if wad.get("cached_path"):
+                old = Path(wad["cached_path"])
+                if old.exists():
+                    old.unlink()
+
+            try:
+                if link_mode == "move":
+                    shutil.move(str(source), str(dest))
+                else:
+                    shutil.copy2(str(source), str(dest))
+            except OSError as e:
+                err_console.print(f"[red]Failed to {link_mode} file: {e}[/red]")
+                sys.exit(1)
+
+            db.update_wad(wad["id"], cached_path=str(dest), filename=source.name)
+
+    console.print(f"[green]Modified {len(wads)} WAD(s)[/green]")
+
+
 
 
 @cli.command()
-@click.argument("query", required=False)
+@click.argument("args", nargs=-1)
+@click.option("--list", "list_trash", is_flag=True, help="Show trashed WADs")
+@click.option("--purge", is_flag=True, help="Permanently delete (no query = purge all trash)")
+@click.option("--restore", "restore_flag", is_flag=True, help="Restore from trash")
+@click.option("--iwad", "iwad_target", type=str, help="Remove IWAD (FAMILY or FAMILY/VARIANT)")
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
-@click.option("--dry-run", is_flag=True, help="Show what would be deleted without deleting")
-@click.option("--purge", is_flag=True, help="Permanently delete (skip trash)")
-@click.option("--purge-all", is_flag=True, help="Permanently delete all items in trash")
-def delete(query: str | None, yes: bool, dry_run: bool, purge: bool, purge_all: bool):
-    """Delete WAD(s) from the library.
+@click.option("--dry-run", is_flag=True, help="Show what would happen without making changes")
+@click.option("--output", "-o", type=click.Choice(["json", "plain"]), help="Output format (with --list)")
+def trash(
+    args: tuple[str, ...],
+    list_trash: bool,
+    purge: bool,
+    restore_flag: bool,
+    iwad_target: str | None,
+    yes: bool,
+    dry_run: bool,
+    output: str | None,
+):
+    """Manage trash and removals.
 
-    By default, WADs are moved to trash and can be restored with 'caco restore'.
-    Use --purge to permanently delete, or --purge-all to empty the trash.
-
-    QUERY: ID, ID range (3-6,9), or query (status:abandoned).
+    \b
+    Modes:
+      caco trash <query>               # Move WAD(s) to trash
+      caco trash --list                # Show trashed WADs
+      caco trash --purge               # Permanently delete all trash
+      caco trash --purge <query>       # Permanently delete matching trash
+      caco trash --restore <query>     # Restore from trash
+      caco trash --iwad doom2          # Remove IWAD family
+      caco trash --iwad doom2/bfg      # Remove IWAD variant
     """
-    # Handle --purge-all: empty the trash
-    if purge_all:
+    from caco.db._iwads import remove_iwad_with_paths
+
+    # --iwad mode: remove IWAD
+    if iwad_target:
+        iwad_dir = get_iwad_dir()
+        if "/" in iwad_target:
+            family, variant = iwad_target.split("/", 1)
+        else:
+            family = iwad_target
+            variant = None
+
+        if variant:
+            paths = remove_iwad_with_paths(family, variant)
+            if paths:
+                if not dry_run:
+                    _delete_managed_files(paths, iwad_dir)
+                console.print(f"[green]Removed:[/green] {family}/{variant}")
+            else:
+                err_console.print(f"[red]IWAD '{family}/{variant}' not found[/red]")
+                sys.exit(1)
+        else:
+            variants = db.get_family_iwads(family)
+            if not variants:
+                err_console.print(f"[red]No IWADs registered for family '{family}'[/red]")
+                sys.exit(1)
+
+            if len(variants) > 1 and not yes:
+                variant_names = ", ".join(v["variant"] for v in variants)
+                if not click.confirm(
+                    f"Remove all {len(variants)} variants of {family} ({variant_names})?",
+                    default=False,
+                ):
+                    return
+
+            if dry_run:
+                console.print(f"[bold]Would remove {len(variants)} variant(s) of {family}[/bold]")
+                console.print("\n[dim]No changes made (dry run)[/dim]")
+                return
+
+            paths = remove_iwad_with_paths(family)
+            _delete_managed_files(paths, iwad_dir)
+            console.print(f"[green]Removed {len(paths)} variant(s) of {family}[/green]")
+        return
+
+    # --list mode: show trashed WADs
+    if list_trash:
+        wads = db.search_wads(include_deleted=True)
+        if output == "json":
+            _render_wad_list_json(wads)
+        elif output == "plain":
+            _render_wad_list_plain(wads)
+        else:
+            _render_wad_list(wads, title="Trash")
+        return
+
+    # --restore mode
+    if restore_flag:
+        query_str = " ".join(args) if args else None
+        if not query_str:
+            err_console.print("[red]Query required for --restore[/red]")
+            sys.exit(1)
+
+        wads = db.search_wads(query=query_str, include_deleted=True)
+        if not wads:
+            err_console.print(f"[red]No deleted WADs matching '{query_str}'[/red]")
+            sys.exit(1)
+
         if dry_run:
-            trash = db.search_wads(include_deleted=True)
-            console.print(f"\n[bold]Would permanently delete {len(trash)} WAD(s) from trash[/bold]")
+            console.print(f"\n[bold]Would restore {len(wads)} WAD(s)[/bold]")
+            for wad in wads[:10]:
+                console.print(f"  [dim][{wad['id']}][/dim] {wad['title']}")
             console.print("\n[dim]No changes made (dry run)[/dim]")
             return
 
-        if not yes:
-            trash = db.search_wads(include_deleted=True)
-            if not trash:
-                console.print("[dim]Trash is empty[/dim]")
-                return
-            console.print(f"[yellow]This will permanently delete {len(trash)} WAD(s) from trash[/yellow]")
-            if not click.confirm("Proceed?"):
+        console.print(f"\n[bold]The following WADs will be restored:[/bold]\n")
+        for wad in wads:
+            console.print(f"  [dim][{wad['id']}][/dim] {wad['title']}")
+
+        if not yes and len(wads) > 1:
+            console.print()
+            if not click.confirm(f"Restore {len(wads)} WAD(s)?"):
                 console.print("[dim]Cancelled[/dim]")
                 return
 
-        count = db.purge_all_deleted()
-        console.print(f"[green]Permanently deleted {count} WAD(s) from trash[/green]")
+        restored = 0
+        for wad in wads:
+            if db.restore_wad(wad["id"]):
+                restored += 1
+        console.print(f"\n[green]Restored {restored} WAD(s)[/green]")
         return
 
-    if not query:
-        err_console.print("[red]Query required (or use --purge-all to empty trash)[/red]")
+    # --purge mode
+    if purge:
+        query_str = " ".join(args) if args else None
+        if not query_str:
+            # Purge all trash
+            if dry_run:
+                count = len(db.search_wads(include_deleted=True))
+                console.print(f"\n[bold]Would permanently delete {count} WAD(s) from trash[/bold]")
+                console.print("\n[dim]No changes made (dry run)[/dim]")
+                return
+
+            if not yes:
+                trash_wads = db.search_wads(include_deleted=True)
+                if not trash_wads:
+                    console.print("[dim]Trash is empty[/dim]")
+                    return
+                console.print(f"[yellow]This will permanently delete {len(trash_wads)} WAD(s) from trash[/yellow]")
+                if not click.confirm("Proceed?"):
+                    console.print("[dim]Cancelled[/dim]")
+                    return
+
+            count = db.purge_all_deleted()
+            console.print(f"[green]Permanently deleted {count} WAD(s) from trash[/green]")
+        else:
+            # Purge matching
+            wads = resolve_wad_query(query_str, mode="multiple", yes=True)
+            if not wads:
+                return
+
+            if dry_run:
+                console.print(f"\n[bold]Would permanently delete {len(wads)} WAD(s):[/bold]\n")
+                for wad in wads[:10]:
+                    console.print(f"  [dim][{wad['id']}][/dim] {wad['title']}")
+                console.print("\n[dim]No changes made (dry run)[/dim]")
+                return
+
+            if not yes:
+                console.print(f"\n[bold]The following WADs will be permanently deleted:[/bold]\n")
+                for wad in wads[:10]:
+                    console.print(f"  [dim][{wad['id']}][/dim] {wad['title']}")
+                if len(wads) > 10:
+                    console.print(f"  [dim]... and {len(wads) - 10} more[/dim]")
+                console.print()
+                if not click.confirm("Proceed?"):
+                    console.print("[dim]Cancelled[/dim]")
+                    return
+
+            for wad in wads:
+                db.delete_wad(wad["id"], purge=True)
+            console.print(f"\n[green]Permanently deleted {len(wads)} WAD(s)[/green]")
+        return
+
+    # Default mode: soft-delete (move to trash)
+    query_str = " ".join(args) if args else None
+    if not query_str:
+        err_console.print("[red]Query required (or use --list, --purge, --restore)[/red]")
         sys.exit(1)
 
-    # For dry-run and preview, we want to resolve without the normal confirmation
-    # since we'll show our own detailed preview
-    wads = resolve_wad_query(query, mode="multiple", yes=True)
+    wads = resolve_wad_query(query_str, mode="multiple", yes=True)
     if not wads:
         return
 
-    # Gather stats for all WADs to be deleted
+    # Gather stats for preview
     total_sessions = 0
     total_playtime = 0
 
-    action = "permanently deleted" if purge else "moved to trash"
-    console.print(f"\n[bold]The following WADs will be {action}:[/bold]\n")
+    console.print(f"\n[bold]The following WADs will be moved to trash:[/bold]\n")
     for wad in wads:
         stats = db.get_wad_stats(wad["id"])
         total_sessions += stats["session_count"]
         total_playtime += stats["total_playtime"]
 
-        # Format WAD info
         author_year = []
         if wad.get("author"):
             author_year.append(wad["author"])
         if wad.get("year"):
             author_year.append(str(wad["year"]))
         info_str = f" ({', '.join(author_year)})" if author_year else ""
-
         console.print(f"  [dim][{wad['id']}][/dim] {wad['title']}{info_str}")
 
-    # Show associated data that will be deleted (only for purge)
-    if purge and total_sessions:
-        console.print(f"\n[dim]This will also delete:[/dim]")
-        playtime_str = format_duration(total_playtime) if total_playtime else "0s"
-        console.print(f"  \u2022 {total_sessions} play session(s) ({playtime_str})")
-
-    if not purge:
-        console.print(f"\n[dim]Use 'caco restore' to recover, or 'caco delete --purge' to permanently delete[/dim]")
+    console.print(f"\n[dim]Use 'caco trash --restore' to recover[/dim]")
 
     if dry_run:
         console.print("\n[dim]No changes made (dry run)[/dim]")
         return
 
-    # Ask for confirmation unless --yes
     if not yes:
         console.print()
-        if not click.confirm(f"Proceed?"):
+        if not click.confirm("Proceed?"):
             console.print("[dim]Cancelled[/dim]")
             return
 
-    # Perform deletion
     for wad in wads:
-        db.delete_wad(wad["id"], purge=purge)
+        db.delete_wad(wad["id"])
 
-    if purge:
-        console.print(f"\n[green]Permanently deleted {len(wads)} WAD(s)[/green]")
-    else:
-        console.print(f"\n[green]Moved {len(wads)} WAD(s) to trash[/green]")
+    console.print(f"\n[green]Moved {len(wads)} WAD(s) to trash[/green]")
 
 
-@cli.command()
-@click.argument("query")
-@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
-def restore(query: str, yes: bool):
-    """Restore deleted WAD(s) from trash.
-
-    QUERY: ID, ID range (3-6,9), or query (author:romero).
-    Use 'caco list --deleted' to see items in trash.
-    """
-    # Search only in deleted WADs
-    wads = db.search_wads(query=query, include_deleted=True)
-    if not wads:
-        err_console.print(f"[red]No deleted WADs matching '{query}'[/red]")
-        sys.exit(1)
-
-    # Preview
-    console.print(f"\n[bold]The following WADs will be restored:[/bold]\n")
-    for wad in wads:
-        console.print(f"  [dim][{wad['id']}][/dim] {wad['title']}")
-
-    if not yes and len(wads) > 1:
-        console.print()
-        if not click.confirm(f"Restore {len(wads)} WAD(s)?"):
-            console.print("[dim]Cancelled[/dim]")
-            return
-
-    # Restore
-    restored = 0
-    for wad in wads:
-        if db.restore_wad(wad["id"]):
-            restored += 1
-
-    console.print(f"\n[green]Restored {restored} WAD(s)[/green]")
-
-
-@cli.command()
-@click.argument("query")
-@click.argument("file_path", type=click.Path(exists=True))
-@click.option("--move", "-m", is_flag=True, help="Move file instead of copying")
-def link(query: str, file_path: str, move: bool):
-    """Link a local file to an existing library entry.
-
-    Use this to attach a downloaded WAD file to a Doomwiki import
-    or any other metadata-only entry.
-
-    The file is copied (or moved with --move) to the cache directory.
-
-    \b
-    Examples:
-        caco link 73 ~/Downloads/heartland.wad
-        caco link "Heartland" ~/Downloads/heartland.wad --move
-    """
-    # Resolve the WAD
-    wads = resolve_wad_query(query, mode="single")
-    if not wads:
-        return
-    wad = wads[0]
-
-    source_path = Path(file_path).resolve()
-    if not source_path.is_file():
-        err_console.print(f"[red]Error: {file_path} is not a regular file[/red]")
-        sys.exit(1)
-
-    cache_dir = get_cache_dir()
-    cache_dir.mkdir(parents=True, exist_ok=True)
-
-    # Generate cache filename: wad_id_original_filename
-    dest_filename = f"{wad['id']}_{source_path.name}"
-    dest_path = cache_dir / dest_filename
-
-    # Check if already linked
-    if wad.get("cached_path"):
-        existing = Path(wad["cached_path"])
-        if existing.exists():
-            console.print(f"[yellow]Already linked:[/yellow] {existing.name}")
-            if not click.confirm("Replace with new file?"):
-                console.print("[dim]Cancelled[/dim]")
-                return
-            # Remove old file
-            existing.unlink()
-
-    # Copy or move the file
-    try:
-        if move:
-            shutil.move(str(source_path), str(dest_path))
-            action = "Moved"
-        else:
-            shutil.copy2(str(source_path), str(dest_path))
-            action = "Copied"
-    except OSError as e:
-        err_console.print(f"[red]Failed to {('move' if move else 'copy')} file: {e}[/red]")
-        sys.exit(1)
-
-    # Update database
-    db.update_wad(
-        wad["id"],
-        cached_path=str(dest_path),
-        filename=source_path.name,
-    )
-
-    console.print(f"[green]{action}:[/green] {source_path.name}")
-    console.print(f"[green]Linked to:[/green] {wad['title']} (ID: {wad['id']})")
+def _delete_managed_files(paths: list[str], iwad_dir: Path) -> None:
+    """Delete files that live inside the managed IWAD directory."""
+    resolved_iwad_dir = iwad_dir.resolve()
+    for path_str in paths:
+        p = Path(path_str)
+        try:
+            resolved = p.resolve()
+            if p.exists() and resolved.is_relative_to(resolved_iwad_dir):
+                p.unlink()
+                if p.parent.resolve() != resolved_iwad_dir:
+                    try:
+                        p.parent.rmdir()
+                    except OSError:
+                        pass
+        except OSError:
+            pass
 
 
 @cli.command(name="random")

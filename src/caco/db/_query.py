@@ -218,6 +218,10 @@ def _build_term_sql(term: QueryTerm) -> tuple[str, list[Any]]:
             clause = "wads.id IN (SELECT wad_id FROM tags WHERE tag LIKE ? ESCAPE '\\')"
             params = [f"%{escaped_tag}%"]
 
+    elif term.field == "iwad":
+        clause = "wads.custom_iwad LIKE ?"
+        params = [f"%{term.value}%"]
+
     else:
         # Unknown field - treat as free text
         clause = "(wads.title LIKE ? OR wads.author LIKE ? OR wads.description LIKE ?)"
