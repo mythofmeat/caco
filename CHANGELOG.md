@@ -8,6 +8,23 @@ Development log for Caco.
 
 ## 2026-02-28
 
+Investigated binary compilation/distribution options.
+
+### Research
+
+- **Nuitka --onefile**: 245MB binary, ~50% slower startup than venv (235ms vs
+  162ms); extracts to temp dir each launch — same overhead as PyInstaller
+- **Nuitka --standalone**: directory mode avoids extraction but requires
+  distributing a folder
+- **PyInstaller**: similar tradeoffs to Nuitka for Python CLI tools
+- **Conclusion**: Python binary packaging isn't worth it for a CLI tool called in
+  quick succession; native language (Rust) would be the real solution
+- Added speculative TODO for Rust port (clap, ratatui, rusqlite, reqwest)
+
+---
+
+## 2026-02-28
+
 Strip version numbers and clean up git branches — project is pre-release alpha,
 not following semver.
 

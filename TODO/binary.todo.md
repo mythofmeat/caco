@@ -1,1 +1,10 @@
-- [ ] look into compilation/binaries
+- [x] look into compilation/binaries
+  - Tried Nuitka --onefile: 245MB binary, ~50% slower startup than venv (~235ms vs ~162ms)
+  - --onefile extracts to temp dir each launch, same problem as PyInstaller
+  - --standalone (directory mode) avoids extraction but requires distributing a folder
+  - For a CLI tool called in quick succession, Python venv is just faster
+  - Conclusion: not worth it for Python — native language would be the real solution
+- [ ] port to Rust (speculative)
+  - clap (CLI), ratatui (TUI), rusqlite (SQLite), reqwest (HTTP)
+  - Small static binary (~5-10MB), instant startup, trivial cross-compilation
+  - Could live alongside Python version until feature-complete
