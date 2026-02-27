@@ -28,7 +28,11 @@ def start_session(wad_id: int, sourceport: str | None = None) -> int:
         return session_id
 
 
-def end_session(session_id: int, notes: str | None = None) -> None:
+def end_session(
+    session_id: int,
+    notes: str | None = None,
+    exit_code: int | None = None,
+) -> None:
     """End a play session."""
     ended_at = datetime.now()
 
@@ -44,10 +48,11 @@ def end_session(session_id: int, notes: str | None = None) -> None:
 
             conn.execute(
                 """
-                UPDATE sessions SET ended_at = ?, duration_seconds = ?, notes = ?
+                UPDATE sessions
+                SET ended_at = ?, duration_seconds = ?, notes = ?, exit_code = ?
                 WHERE id = ?
                 """,
-                (ended_at.isoformat(), duration, notes, session_id),
+                (ended_at.isoformat(), duration, notes, exit_code, session_id),
             )
 
 
@@ -278,16 +283,31 @@ def add_wad_completion(
     wad_id: int,
     stats_snapshot: str | None = None,
     notes: str | None = None,
+    completed_at: str | None = None,
 ) -> int:
-    """Record a WAD completion. Returns completion ID."""
+    """Record a WAD completion. Returns completion ID.
+
+    Args:
+        completed_at: ISO timestamp to backdate the completion.
+            If None, uses DEFAULT CURRENT_TIMESTAMP.
+    """
     with get_connection() as conn:
-        cursor = conn.execute(
-            """
-            INSERT INTO wad_completions (wad_id, stats_snapshot, notes)
-            VALUES (?, ?, ?)
-            """,
-            (wad_id, stats_snapshot, notes),
-        )
+        if completed_at:
+            cursor = conn.execute(
+                """
+                INSERT INTO wad_completions (wad_id, completed_at, stats_snapshot, notes)
+                VALUES (?, ?, ?, ?)
+                """,
+                (wad_id, completed_at, stats_snapshot, notes),
+            )
+        else:
+            cursor = conn.execute(
+                """
+                INSERT INTO wad_completions (wad_id, stats_snapshot, notes)
+                VALUES (?, ?, ?)
+                """,
+                (wad_id, stats_snapshot, notes),
+            )
         completion_id = cursor.lastrowid
         if not completion_id or completion_id <= 0:
             raise RuntimeError(f"Failed to get valid completion ID after insert (got {completion_id})")
@@ -344,6 +364,33 @@ def delete_wad_completion(completion_id: int) -> bool:
             (completion_id,),
         )
         return cursor.rowcount > 0
+
+
+def delete_wad_completion_by_timestamp(wad_id: int, timestamp: str) -> bool:
+    """Delete a completion record by exact completed_at match. Returns True if deleted."""
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "DELETE FROM wad_completions WHERE wad_id = ? AND completed_at = ?",
+            (wad_id, timestamp),
+        )
+        return cursor.rowcount > 0
+
+
+def find_completion_by_timestamp(wad_id: int, timestamp: str) -> dict[str, Any] | None:
+    """Find a completion by timestamp prefix match.
+
+    E.g., '2024-06-15' matches '2024-06-15T18:30:00'.
+    """
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM wad_completions
+            WHERE wad_id = ? AND completed_at LIKE ? || '%'
+            ORDER BY completed_at DESC LIMIT 1
+            """,
+            (wad_id, timestamp),
+        ).fetchone()
+        return dict(row) if row else None
 
 
 def set_wad_completion_count(wad_id: int, count: int) -> None:

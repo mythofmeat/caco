@@ -195,21 +195,31 @@ class TestBuildTermSql:
     def test_complevel_field_numeric(self):
         term = QueryTerm(field="complevel", value="9")
         sql, params = _build_term_sql(term)
-        assert "custom_complevel = ?" in sql
-        assert params == ["9"]
+        assert "complevel = ?" in sql
+        # Checks both custom_complevel (str) and complevel (int) columns
+        assert "9" in params
+        assert 9 in params
 
     def test_complevel_field_shortcut(self):
         term = QueryTerm(field="complevel", value="boom")
         sql, params = _build_term_sql(term)
-        assert "custom_complevel = ?" in sql
-        assert params == ["9"]
+        assert "complevel = ?" in sql
+        assert "9" in params
+        assert 9 in params
 
     def test_complevel_field_mbf21(self):
         term = QueryTerm(field="complevel", value="mbf21")
         sql, params = _build_term_sql(term)
-        assert params == ["21"]
+        assert "21" in params
+        assert 21 in params
 
     def test_complevel_field_negated(self):
         term = QueryTerm(field="complevel", value="9", negated=True)
         sql, params = _build_term_sql(term)
         assert sql.startswith("NOT")
+
+    def test_complevel_field_invalid(self):
+        term = QueryTerm(field="complevel", value="invalid")
+        sql, params = _build_term_sql(term)
+        assert sql == ""
+        assert params == []

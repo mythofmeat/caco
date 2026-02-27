@@ -29,6 +29,34 @@ class TestSessions:
         sessions = db_mod.get_sessions(wad_id)
         assert len(sessions) == 2
 
+    def test_end_session_with_exit_code_zero(self, db_mod, make_wad):
+        wad_id = make_wad()
+        session_id = db_mod.start_session(wad_id, sourceport="dsda-doom")
+        db_mod.end_session(session_id, exit_code=0)
+        sessions = db_mod.get_sessions(wad_id)
+        assert sessions[0]["exit_code"] == 0
+
+    def test_end_session_with_exit_code_nonzero(self, db_mod, make_wad):
+        wad_id = make_wad()
+        session_id = db_mod.start_session(wad_id, sourceport="dsda-doom")
+        db_mod.end_session(session_id, exit_code=255)
+        sessions = db_mod.get_sessions(wad_id)
+        assert sessions[0]["exit_code"] == 255
+
+    def test_end_session_with_exit_code_negative(self, db_mod, make_wad):
+        wad_id = make_wad()
+        session_id = db_mod.start_session(wad_id, sourceport="dsda-doom")
+        db_mod.end_session(session_id, exit_code=-1)
+        sessions = db_mod.get_sessions(wad_id)
+        assert sessions[0]["exit_code"] == -1
+
+    def test_end_session_exit_code_none_by_default(self, db_mod, make_wad):
+        wad_id = make_wad()
+        session_id = db_mod.start_session(wad_id, sourceport="gzdoom")
+        db_mod.end_session(session_id)
+        sessions = db_mod.get_sessions(wad_id)
+        assert sessions[0]["exit_code"] is None
+
     def test_get_sessions_empty(self, db_mod, make_wad):
         wad_id = make_wad()
         sessions = db_mod.get_sessions(wad_id)
@@ -265,13 +293,12 @@ class TestMigrationVersioning:
     def test_schema_migrations_populated(self, db_mod, tmp_db):
         conn = db_mod.get_connection()
         rows = conn.execute("SELECT version, name FROM schema_migrations ORDER BY version").fetchall()
-        assert len(rows) == 18
+        assert len(rows) == 21
         assert rows[0]["version"] == 1
-        assert rows[17]["version"] == 18
         conn.close()
 
     def test_sessions_has_stats_columns(self, db_mod, tmp_db):
-        """Migration 15 adds stats_before and stats_after to sessions."""
+        """Migration adds stats_before and stats_after to sessions."""
         conn = db_mod.get_connection()
         cursor = conn.execute("PRAGMA table_info(sessions)")
         columns = {row[1] for row in cursor.fetchall()}
@@ -280,9 +307,17 @@ class TestMigrationVersioning:
         conn.close()
 
     def test_sessions_has_demo_file_column(self, db_mod, tmp_db):
-        """Migration 16 adds demo_file to sessions."""
+        """Migration adds demo_file to sessions."""
         conn = db_mod.get_connection()
         cursor = conn.execute("PRAGMA table_info(sessions)")
         columns = {row[1] for row in cursor.fetchall()}
         assert "demo_file" in columns
+        conn.close()
+
+    def test_sessions_has_exit_code_column(self, db_mod, tmp_db):
+        """Migration adds exit_code to sessions."""
+        conn = db_mod.get_connection()
+        cursor = conn.execute("PRAGMA table_info(sessions)")
+        columns = {row[1] for row in cursor.fetchall()}
+        assert "exit_code" in columns
         conn.close()

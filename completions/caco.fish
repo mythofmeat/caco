@@ -3,14 +3,21 @@
 # Disable file completions by default
 complete -c caco -f
 
-# Helper function to get WAD IDs and titles
+# Helper functions using caco _complete for fast, purpose-built data
 function __caco_wads
-    caco ls -o plain 2>/dev/null | tail -n +2 | awk -F'\t' '{print $1"\t"$2}'
+    caco _complete wads 2>/dev/null
 end
 
-# Helper function to get tags
 function __caco_tags
-    caco ls --tags -o plain 2>/dev/null | tail -n +2 | awk -F'\t' '{print $1}'
+    caco _complete tags 2>/dev/null
+end
+
+function __caco_iwads
+    caco _complete iwads 2>/dev/null
+end
+
+function __caco_sourceports
+    caco _complete sourceports 2>/dev/null
 end
 
 # Global options
@@ -29,8 +36,8 @@ complete -c caco -n __fish_use_subcommand -a random -d "Pick a random WAD (print
 complete -c caco -n __fish_use_subcommand -a completions -d "Generate shell completions"
 complete -c caco -n __fish_use_subcommand -a stats -d "Show library statistics"
 complete -c caco -n __fish_use_subcommand -a sessions -d "Show play session history"
-complete -c caco -n __fish_use_subcommand -a beaten -d "Manage WAD completion records"
 complete -c caco -n __fish_use_subcommand -a cache -d "Manage WAD file cache"
+complete -c caco -n __fish_use_subcommand -a profile -d "Manage sourceport config profiles"
 
 # =============================================================================
 # ls command
@@ -51,6 +58,7 @@ complete -c caco -n "__fish_seen_subcommand_from ls" -a "status:" -d "Filter by 
 complete -c caco -n "__fish_seen_subcommand_from ls" -a "source:" -d "Filter by source"
 complete -c caco -n "__fish_seen_subcommand_from ls" -a "iwad:" -d "Filter by IWAD"
 complete -c caco -n "__fish_seen_subcommand_from ls" -a "complevel:" -d "Filter by complevel"
+complete -c caco -n "__fish_seen_subcommand_from ls" -a "config:" -d "Filter by config profile"
 
 # ls inline sort completions
 complete -c caco -n "__fish_seen_subcommand_from ls" -a "id+ id- playtime+ playtime- rating+ rating- created+ created- title+ title- author+ author- last_played+ last_played- year+ year-" -d "Sort"
@@ -59,6 +67,10 @@ complete -c caco -n "__fish_seen_subcommand_from ls" -a "id+ id- playtime+ playt
 # info command
 # =============================================================================
 complete -c caco -n "__fish_seen_subcommand_from info" -s o -l output -d "Output format" -xa "json plain"
+complete -c caco -n "__fish_seen_subcommand_from info" -l levelstats -d "Show per-map statistics"
+complete -c caco -n "__fish_seen_subcommand_from info" -s b -d "Target completion by timestamp"
+complete -c caco -n "__fish_seen_subcommand_from info" -l live -d "Show only live stats"
+complete -c caco -n "__fish_seen_subcommand_from info" -l plain -d "TSV output for stats"
 complete -c caco -n "__fish_seen_subcommand_from info" -xa "(__caco_wads)"
 complete -c caco -n "__fish_seen_subcommand_from info" -a "id:" -d "Filter by ID"
 complete -c caco -n "__fish_seen_subcommand_from info" -a "title:" -d "Filter by title"
@@ -74,6 +86,10 @@ complete -c caco -n "__fish_seen_subcommand_from modify" -l dry-run -d "Preview 
 complete -c caco -n "__fish_seen_subcommand_from modify" -l link -d "Link a local file" -rF
 complete -c caco -n "__fish_seen_subcommand_from modify" -l add-file -d "Add companion file (DEH, music, etc.)" -rF
 complete -c caco -n "__fish_seen_subcommand_from modify" -l remove-file -d "Remove companion file" -x
+complete -c caco -n "__fish_seen_subcommand_from modify" -l notes -d "Notes for beaten+N"
+complete -c caco -n "__fish_seen_subcommand_from modify" -s s -l stats-file -d "Stats file for beaten+N or attach" -rF
+complete -c caco -n "__fish_seen_subcommand_from modify" -l date -d "Backdate completion (ISO)"
+complete -c caco -n "__fish_seen_subcommand_from modify" -s b -d "Target completion by timestamp"
 complete -c caco -n "__fish_seen_subcommand_from modify" -xa "(__caco_wads)"
 
 # modify field=value completions
@@ -87,8 +103,11 @@ complete -c caco -n "__fish_seen_subcommand_from modify" -a "tag=" -d "Add tag"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "iwad=" -d "Set custom IWAD"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "sourceport=" -d "Set custom sourceport"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "idgames-id=" -d "Set idgames ID"
+complete -c caco -n "__fish_seen_subcommand_from modify" -a "description=" -d "Set description"
+complete -c caco -n "__fish_seen_subcommand_from modify" -a "args=" -d "Set custom args"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "version=" -d "Set version"
-complete -c caco -n "__fish_seen_subcommand_from modify" -a "complevel=" -d "Set complevel (integer or vanilla/boom/mbf/mbf21)"
+complete -c caco -n "__fish_seen_subcommand_from modify" -a "complevel=" -d "Set complevel (int or alias)"
+complete -c caco -n "__fish_seen_subcommand_from modify" -a "config=" -d "Set config profile"
 
 # modify clear completions
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!author" -d "Clear author"
@@ -99,8 +118,14 @@ complete -c caco -n "__fish_seen_subcommand_from modify" -a "!rating" -d "Clear 
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!iwad" -d "Clear custom IWAD"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!sourceport" -d "Clear custom sourceport"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!complevel" -d "Clear complevel"
+complete -c caco -n "__fish_seen_subcommand_from modify" -a "!config" -d "Clear config profile"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!tag" -d "Remove all tags"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!tag:" -d "Remove tags matching pattern"
+
+# modify beaten completions
+complete -c caco -n "__fish_seen_subcommand_from modify" -a "beaten+" -d "Add completion(s)"
+complete -c caco -n "__fish_seen_subcommand_from modify" -a "beaten-" -d "Remove completion(s)"
+complete -c caco -n "__fish_seen_subcommand_from modify" -a "beaten=" -d "Set completion count"
 
 # modify query fields
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "id:" -d "Filter by ID"
@@ -115,7 +140,7 @@ complete -c caco -n "__fish_seen_subcommand_from modify" -a "status:" -d "Filter
 complete -c caco -n "__fish_seen_subcommand_from trash" -l list -d "Show trashed WADs"
 complete -c caco -n "__fish_seen_subcommand_from trash" -l purge -d "Permanently delete"
 complete -c caco -n "__fish_seen_subcommand_from trash" -l restore -d "Restore from trash"
-complete -c caco -n "__fish_seen_subcommand_from trash" -l iwad -d "Remove IWAD (FAMILY or FAMILY/VARIANT)"
+complete -c caco -n "__fish_seen_subcommand_from trash" -l iwad -d "Remove IWAD (FAMILY or FAMILY/VARIANT)" -xa "(__caco_iwads)"
 complete -c caco -n "__fish_seen_subcommand_from trash" -l id24 -d "Remove id24 WAD by name"
 complete -c caco -n "__fish_seen_subcommand_from trash" -s y -l yes -d "Skip confirmation"
 complete -c caco -n "__fish_seen_subcommand_from trash" -l dry-run -d "Preview changes"
@@ -128,10 +153,12 @@ complete -c caco -n "__fish_seen_subcommand_from trash" -a "status:" -d "Filter 
 # =============================================================================
 # play command
 # =============================================================================
-complete -c caco -n "__fish_seen_subcommand_from play" -s p -l sourceport -d "Sourceport to use" -rF
+complete -c caco -n "__fish_seen_subcommand_from play" -s p -l sourceport -d "Sourceport to use" -xa "(__caco_sourceports)"
 complete -c caco -n "__fish_seen_subcommand_from play" -s 1 -l first -d "Auto-select first match"
-complete -c caco -n "__fish_seen_subcommand_from play" -l iwad -d "Play IWAD directly (e.g., doom2)"
+complete -c caco -n "__fish_seen_subcommand_from play" -l iwad -d "Play IWAD directly (e.g., doom2)" -xa "(__caco_iwads)"
 complete -c caco -n "__fish_seen_subcommand_from play" -s r -l record -d "Record a demo (auto-name or specify name)"
+complete -c caco -n "__fish_seen_subcommand_from play" -s c -l complevel -d "Override complevel (int or alias)" -xa "vanilla boom mbf mbf21 2 9 11 21"
+complete -c caco -n "__fish_seen_subcommand_from play" -s C -l config -d "Sourceport config profile name"
 complete -c caco -n "__fish_seen_subcommand_from play" -xa "(__caco_wads)"
 complete -c caco -n "__fish_seen_subcommand_from play" -a "id:" -d "Filter by ID"
 complete -c caco -n "__fish_seen_subcommand_from play" -a "title:" -d "Filter by title"
@@ -183,9 +210,9 @@ complete -c caco -n "__fish_seen_subcommand_from random" -a "source:" -d "Filter
 # =============================================================================
 # stats command
 # =============================================================================
-complete -c caco -n "__fish_seen_subcommand_from stats; and not __fish_seen_subcommand_from list add remove set export" -s p -l period -d "Group by period" -xa "month year"
-complete -c caco -n "__fish_seen_subcommand_from stats; and not __fish_seen_subcommand_from list add remove set export" -s n -l limit -d "Number of periods"
-complete -c caco -n "__fish_seen_subcommand_from stats; and not __fish_seen_subcommand_from list add remove set export" -l plain -d "Key=value output"
+complete -c caco -n "__fish_seen_subcommand_from stats" -s p -l period -d "Group by period" -xa "month year"
+complete -c caco -n "__fish_seen_subcommand_from stats" -s n -l limit -d "Number of periods"
+complete -c caco -n "__fish_seen_subcommand_from stats" -l plain -d "Key=value output"
 
 # =============================================================================
 # sessions command
@@ -215,28 +242,23 @@ complete -c caco -n "__fish_seen_subcommand_from cache; and __fish_seen_subcomma
 complete -c caco -n "__fish_seen_subcommand_from cache; and __fish_seen_subcommand_from prune" -s y -l yes -d "Skip confirmation"
 
 # =============================================================================
-# beaten subcommands
+# profile subcommands
 # =============================================================================
-complete -c caco -n "__fish_seen_subcommand_from beaten; and not __fish_seen_subcommand_from list add attach remove set stats export" -a list -d "List completion records"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and not __fish_seen_subcommand_from list add attach remove set stats export" -a add -d "Add a completion record"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and not __fish_seen_subcommand_from list add attach remove set stats export" -a attach -d "Attach stats to existing completion"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and not __fish_seen_subcommand_from list add attach remove set stats export" -a remove -d "Remove a completion record"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and not __fish_seen_subcommand_from list add attach remove set stats export" -a set -d "Set completion count"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and not __fish_seen_subcommand_from list add attach remove set stats export" -a stats -d "Show per-map statistics"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and not __fish_seen_subcommand_from list add attach remove set stats export" -a export -d "Export stats to file"
+complete -c caco -n "__fish_seen_subcommand_from profile; and not __fish_seen_subcommand_from ls create edit cp rm path" -a ls -d "List config profiles"
+complete -c caco -n "__fish_seen_subcommand_from profile; and not __fish_seen_subcommand_from ls create edit cp rm path" -a create -d "Create a config profile"
+complete -c caco -n "__fish_seen_subcommand_from profile; and not __fish_seen_subcommand_from ls create edit cp rm path" -a edit -d "Edit a config profile"
+complete -c caco -n "__fish_seen_subcommand_from profile; and not __fish_seen_subcommand_from ls create edit cp rm path" -a cp -d "Copy a config profile"
+complete -c caco -n "__fish_seen_subcommand_from profile; and not __fish_seen_subcommand_from ls create edit cp rm path" -a rm -d "Delete a config profile"
+complete -c caco -n "__fish_seen_subcommand_from profile; and not __fish_seen_subcommand_from ls create edit cp rm path" -a path -d "Print profile path"
 
-complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from add" -s n -l notes -d "Notes for this completion"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from add" -s s -l stats-file -d "Import stats from file" -rF
-complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from add" -s y -l yes -d "Auto-select first match"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from attach" -s s -l stats-file -d "Stats file to attach" -rF
-complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from attach" -s y -l yes -d "Auto-select first match"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from list remove set stats export" -s y -l yes -d "Auto-select first match"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from stats" -l plain -d "TSV output for scripting"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from stats" -l live -d "Show only live stats"
-complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from export" -s o -l output -d "Write to file" -rF
-complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from export" -l live -d "Export live stats"
-
-complete -c caco -n "__fish_seen_subcommand_from beaten; and __fish_seen_subcommand_from list add attach remove set stats export" -xa "(__caco_wads)"
+complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from ls" -s p -l sourceport -d "Sourceport to list profiles for"
+complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from create" -s p -l sourceport -d "Sourceport (defaults to configured)"
+complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from create" -l from -d "Copy from existing profile"
+complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from edit" -s p -l sourceport -d "Sourceport (defaults to configured)"
+complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from cp" -s p -l sourceport -d "Sourceport (defaults to configured)"
+complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from rm" -s p -l sourceport -d "Sourceport (defaults to configured)"
+complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from rm" -s y -l yes -d "Skip confirmation"
+complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from path" -s p -l sourceport -d "Sourceport (defaults to configured)"
 
 # =============================================================================
 # saves subcommands

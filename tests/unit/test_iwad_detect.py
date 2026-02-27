@@ -345,6 +345,7 @@ def test_player_auto_detect_persists(tmp_db, tmp_path):
         patch("subprocess.Popen") as mock_popen,
     ):
         mock_popen.return_value.wait.return_value = 0
+        mock_popen.return_value.returncode = 0
 
         from caco.player import play
         play(wad_id)
@@ -382,6 +383,7 @@ def test_player_skips_when_already_set(tmp_db, tmp_path):
         patch("caco.iwad_detect.detect_iwad") as mock_detect,
     ):
         mock_popen.return_value.wait.return_value = 0
+        mock_popen.return_value.returncode = 0
 
         from caco.player import play
         play(wad_id)
@@ -425,6 +427,7 @@ def test_player_respects_config_disabled(tmp_db, tmp_path):
         patch("subprocess.Popen") as mock_popen,
     ):
         mock_popen.return_value.wait.return_value = 0
+        mock_popen.return_value.returncode = 0
 
         from caco.player import play
         play(wad_id)
@@ -556,6 +559,7 @@ def test_player_auto_detect_complevel(tmp_db, tmp_path):
         patch("subprocess.Popen") as mock_popen,
     ):
         mock_popen.return_value.wait.return_value = 0
+        mock_popen.return_value.returncode = 0
 
         from caco.player import play
         play(wad_id)
@@ -593,6 +597,7 @@ def test_player_skips_complevel_when_set(tmp_db, tmp_path):
         patch("subprocess.Popen") as mock_popen,
     ):
         mock_popen.return_value.wait.return_value = 0
+        mock_popen.return_value.returncode = 0
 
         from caco.player import play
         play(wad_id)

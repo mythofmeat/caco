@@ -215,6 +215,104 @@ class TestModifyCommand:
         assert wad["title"] == "Original"
 
 
+class TestModifyBeaten:
+    """Test 'caco modify' with beaten+/beaten-/beaten= syntax."""
+
+    def test_beaten_add_1(self, runner, make_wad, db_mod):
+        wad_id = make_wad()
+        result = runner.invoke(cli, ["modify", str(wad_id), "beaten+1"])
+        assert result.exit_code == 0
+        assert "Added 1 completion" in result.output
+        assert db_mod.get_times_beaten(wad_id) == 1
+
+    def test_beaten_add_3(self, runner, make_wad, db_mod):
+        wad_id = make_wad()
+        result = runner.invoke(cli, ["modify", str(wad_id), "beaten+3"])
+        assert result.exit_code == 0
+        assert "Added 3 completion" in result.output
+        assert db_mod.get_times_beaten(wad_id) == 3
+
+    def test_beaten_remove_1(self, runner, make_wad, db_mod):
+        wad_id = make_wad()
+        db_mod.add_wad_completion(wad_id)
+        db_mod.add_wad_completion(wad_id)
+        result = runner.invoke(cli, ["modify", str(wad_id), "beaten-1"])
+        assert result.exit_code == 0
+        assert "Removed 1 completion" in result.output
+        assert db_mod.get_times_beaten(wad_id) == 1
+
+    def test_beaten_set_5(self, runner, make_wad, db_mod):
+        wad_id = make_wad()
+        result = runner.invoke(cli, ["modify", str(wad_id), "beaten=5"])
+        assert result.exit_code == 0
+        assert "Set" in result.output
+        assert "5 completion" in result.output
+        assert db_mod.get_times_beaten(wad_id) == 5
+
+    def test_beaten_set_0(self, runner, make_wad, db_mod):
+        wad_id = make_wad()
+        db_mod.add_wad_completion(wad_id)
+        result = runner.invoke(cli, ["modify", str(wad_id), "beaten=0"])
+        assert result.exit_code == 0
+        assert db_mod.get_times_beaten(wad_id) == 0
+
+    def test_beaten_add_with_notes(self, runner, make_wad, db_mod):
+        wad_id = make_wad()
+        result = runner.invoke(cli, ["modify", str(wad_id), "beaten+1", "--notes", "UV max"])
+        assert result.exit_code == 0
+        completions = db_mod.get_wad_completions(wad_id)
+        assert completions[0]["notes"] == "UV max"
+
+    def test_beaten_add_with_date(self, runner, make_wad, db_mod):
+        wad_id = make_wad()
+        result = runner.invoke(cli, ["modify", str(wad_id), "beaten+1", "--date", "2024-06-15"])
+        assert result.exit_code == 0
+        completions = db_mod.get_wad_completions(wad_id)
+        assert "2024-06-15" in completions[0]["completed_at"]
+
+    def test_beaten_remove_by_timestamp(self, runner, make_wad, db_mod):
+        wad_id = make_wad()
+        db_mod.add_wad_completion(wad_id, completed_at="2024-06-15T18:30:00")
+        result = runner.invoke(cli, ["modify", str(wad_id), "beaten-2024-06-15T18:30:00"])
+        assert result.exit_code == 0
+        assert "Removed completion" in result.output
+        assert db_mod.get_times_beaten(wad_id) == 0
+
+    def test_beaten_with_status_change(self, runner, make_wad, db_mod):
+        """Beaten actions work alongside field=value actions."""
+        wad_id = make_wad()
+        result = runner.invoke(cli, ["modify", str(wad_id), "beaten+1", "status=finished"])
+        assert result.exit_code == 0
+        assert db_mod.get_times_beaten(wad_id) == 1
+        wad = db_mod.get_wad(wad_id)
+        assert wad["status"] == "finished"
+
+    def test_beaten_dry_run(self, runner, make_wad, db_mod):
+        wad_id = make_wad()
+        result = runner.invoke(cli, ["modify", str(wad_id), "beaten+1", "--dry-run"])
+        assert result.exit_code == 0
+        assert "dry run" in result.output.lower()
+        assert db_mod.get_times_beaten(wad_id) == 0
+
+    def test_standalone_stats_attach(self, runner, make_wad, db_mod, tmp_path):
+        """--stats-file without beaten action attaches to most recent completion."""
+        wad_id = make_wad()
+        db_mod.add_wad_completion(wad_id, notes="target")
+
+        # Create a minimal levelstat.txt format file
+        stats_file = tmp_path / "levelstat.txt"
+        stats_file.write_text(
+            "MAP01 - 1:40.00 (1:40.00)  K: 50/50  I: 10/10  S: 2/3\n"
+        )
+
+        result = runner.invoke(cli, ["modify", str(wad_id), "-s", str(stats_file)])
+        assert result.exit_code == 0
+        assert "Attached stats" in result.output
+
+        completions = db_mod.get_wad_completions(wad_id)
+        assert completions[0]["stats_snapshot"] is not None
+
+
 class TestTrashCommand:
     """Test unified 'caco trash' command."""
 

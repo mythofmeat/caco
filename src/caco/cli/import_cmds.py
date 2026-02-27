@@ -586,6 +586,7 @@ def _do_doomworld_import(url: str, tags: tuple[str, ...], title: str | None,
             author=final_author,
             year=year,
             version=final_version,
+            complevel=final_complevel,
         )
         console.print(f"[green]Imported:[/green] {thread.title} (ID: {wad_id})")
 

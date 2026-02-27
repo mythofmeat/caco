@@ -109,6 +109,15 @@ class WadInfoPanel(Vertical):
             tag_chips = " ".join(f"[on dark_blue] {t} [/]" for t in wad["tags"])
             details_lines.append(f"Tags: {tag_chips}")
 
+        # Complevel
+        if wad.get("complevel") is not None:
+            from caco.complevel import complevel_name
+            details_lines.append(f"CL: {wad['complevel']} ({complevel_name(wad['complevel'])})")
+
+        # Config profile
+        if wad.get("custom_config"):
+            details_lines.append(f"Config: {wad['custom_config']}")
+
         # Description snippet
         if wad.get("description"):
             details_lines.append(f"\n[dim]{truncate(wad['description'], 120)}[/dim]")

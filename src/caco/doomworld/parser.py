@@ -10,6 +10,8 @@ import json
 import re
 from typing import Any
 
+from caco.complevel import COMPLEVEL_NAMES, complevel_name  # noqa: F401
+
 
 # =============================================================================
 # Complevel Detection
@@ -34,24 +36,12 @@ COMPLEVEL_PATTERNS = {
     r'\bdsda[- ]?doom\b': lambda m: 21,  # Usually implies MBF21 support
 }
 
-# Named shortcut -> complevel value (for CLI modify and query)
+# Backward-compat alias — prefer caco.complevel.COMPLEVEL_ALIASES for new code
 COMPLEVEL_SHORTCUTS: dict[str, int] = {
     "vanilla": 2,
     "boom": 9,
     "mbf": 11,
     "mbf21": 21,
-}
-
-# Common complevel descriptions for display
-COMPLEVEL_NAMES = {
-    0: "Doom v1.2",
-    1: "Doom v1.666",
-    2: "Doom v1.9 / Vanilla",
-    3: "Ultimate Doom",
-    4: "Final Doom",
-    9: "Boom",
-    11: "MBF",
-    21: "MBF21",
 }
 
 
@@ -74,13 +64,6 @@ def extract_complevel(text: str) -> int | None:
             return extractor(match)
 
     return None
-
-
-def complevel_name(cl: int | None) -> str:
-    """Get human-readable name for a complevel."""
-    if cl is None:
-        return "Unknown"
-    return COMPLEVEL_NAMES.get(cl, f"Complevel {cl}")
 
 
 # =============================================================================

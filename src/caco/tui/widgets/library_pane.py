@@ -294,14 +294,20 @@ class LibraryPane(Widget):
             return
 
         error = None
+        result = None
         with self.app.suspend():
             try:
-                play(wad_id)
+                result = play(wad_id)
             except ValueError as e:
                 error = str(e)
 
         if error:
             self.notify(error, severity="error", timeout=10)
+        elif result and result.crashed:
+            self.notify(
+                f"Sourceport exited with code {result.exit_code}",
+                severity="warning",
+            )
         else:
             self.notify(f"Finished playing {wad['title']}")
 

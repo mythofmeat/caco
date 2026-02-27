@@ -168,9 +168,37 @@ Per-session map tracking: see which maps were completed in each play session.
 
 ---
 
+## [2.1.1] - 2026-02-27
+
+Final QA pass on CLI rework.
+
+### Fixed
+
+- **`player.py` stale error messages**: `caco link {id}` → `caco modify id:{id} --link`,
+  `caco iwad import` → `caco import`
+- **Config auto-update**: `manage_data_dirs`, `auto_stats`, `auto_detect_iwad`,
+  `auto_detect_complevel`, `cache_max_size_gb`, `cache_max_age_days`, and
+  `cache_auto_clean` are now included in `DEFAULT_CONFIG` so they appear in
+  the config file via `ensure_config_keys()` — previously they were only
+  defined as `.get()` defaults and not discoverable in the config file
+
+### Removed
+
+- **`TODO/cli-rework/`**: All items completed; removed folder
+
+---
+
 ## [2.1.0] - 2026-02-27
 
-Multi-file WAD support: companion files (DEH patches, music WADs, additional PWADs) stored and auto-loaded with WADs.
+Multi-file WAD support, beaten command merge into modify/info, sourceport config profile management, crash detection, and complevel auto-detection.
+
+### Fixed
+
+- **Fish stats completions**: Removed stale `beaten` subcommand guard
+  (`and not __fish_seen_subcommand_from list add remove set export`)
+- **`ls --iwad` help text**: Fixed stale `caco iwad import` reference → `caco import`
+- **`random` docstring**: Fixed stale `caco list` reference → `caco ls`
+- **Fish modify completions**: Added missing `description=` and `args=` field suggestions
 
 ### Added
 
@@ -191,10 +219,128 @@ Multi-file WAD support: companion files (DEH patches, music WADs, additional PWA
   in the Launch Config section
 - **Migration #14**: `companion_files` TEXT column (JSON array) on `wads`
   table
-- **Fish completions**: `--add-file` and `--remove-file` for modify command
+- **Beaten syntax in `modify`**: `beaten+N` adds N completions, `beaten-N`
+  removes N most recent, `beaten=N` sets exact count, `beaten-TIMESTAMP`
+  removes by date — all coexist with field=value actions in a single command
+- **`modify --notes`**: Annotate completions when adding (`beaten+1 --notes "UV max"`)
+- **`modify --stats-file`/`-s`**: Attach stats file to completion; standalone
+  use (without beaten action) attaches to most recent or `-b`-targeted completion
+- **`modify --date`**: Backdate completions with ISO timestamp
+- **`info --levelstats`**: Per-map statistics display (reuses stats helpers);
+  shows all entries (live + completions) by default
+- **`info --live`**: Show only live stats snapshot
+- **`info --plain`**: TSV output for levelstats
+- **`info -b TIMESTAMP`**: Target specific completion by timestamp prefix match
+- **Completions section in `info`**: Replaces simple "Times beaten: N" with
+  date/notes/stats listing; included in JSON and plain output formats
+- **DB functions**: `delete_wad_completion_by_timestamp()`,
+  `find_completion_by_timestamp()`, `completed_at` parameter on
+  `add_wad_completion()`
+- **`update_wad()` `record_completion` parameter**: Suppresses auto-completion
+  when beaten actions already handle it
+- **Crash detection**: `exit_code` INTEGER column on sessions table;
+  `PlayResult` dataclass in `player.py` with `crashed` property (non-zero
+  exit code); CLI/TUI/GUI warn on crash; session history views show
+  "Crash (N)" indicator
+- **Complevel auto-detection**: `complevel_detect.py` auto-detects from WAD
+  lumps (UMAPINFO→21, DEHACKED with MBF codepointers→11, ExMy-only→2);
+  `complevel.py` has shared names/aliases/parser; auto-detected on first play
+  and persisted; `-complevel N` auto-injected for dsda-family ports
+- **`play --complevel`/`-c`**: Override complevel for a session
+- **Config profile management**: Managed sourceport config files stored at
+  `~/.local/share/caco/sourceports/{exe}/{profile}.cfg` — caco owns the config
+  lifecycle so settings persist cleanly per-sourceport
+- **`caco profile` command group**: `ls`, `create`, `edit`, `cp`, `rm`, `path`
+  subcommands for managing config profiles
+- **`play --config`/`-C` option**: Override config profile for a play session
+  (e.g., `caco play --config controller id:1`)
+- **Per-WAD `custom_config`**: Store a profile override per WAD via
+  `caco modify id:1 config=controller` — automatically used on play
+- **`config:` query field**: Search WADs by config profile name
+  (e.g., `caco ls config:controller`)
+- **Auto-created default profile**: On first play with a dsda-family port, an
+  empty `default.cfg` is created and passed via `-config` — the sourceport
+  populates it with defaults on first launch
+- **Profile injection**: For dsda-family ports, `-config <path>` is always
+  injected; resolution order: CLI `--config` > WAD's `custom_config` > `"default"`
+- **Config helpers**: `get_sourceport_dir()`, `get_profile_path()`,
+  `list_profiles()` in `config.py`; `get_config_args()` in `sourceports.py`
+- **TUI/GUI support**: Config profile shown in info panel and editable in
+  WAD edit forms
+- **Fish completions**: `--add-file` and `--remove-file` for modify command;
+  `profile` subcommands, `play --config`, `modify config=`, `ls config:`
+  completions
+- **Migration #16**: `custom_config TEXT` column on wads table
 - **Tests**: 32 new tests covering DEH flag detection, DB migration,
   CLI add/remove/dedup/info output, and player command building with
   companion files
+
+### Removed
+
+- **`beaten` command group**: All 7 subcommands (`list`, `add`, `attach`,
+  `remove`, `set`, `stats`, `export`) removed — functionality merged into
+  `modify` and `info`
+
+### Changed
+
+- **Shell completions**: Removed beaten subcommand completions; added new
+  modify flags (`--notes`, `-s`, `--date`, `-b`, `beaten+`/`beaten-`/`beaten=`)
+  and info flags (`--levelstats`, `--live`, `--plain`, `-b`)
+- **Stats entry labels**: Use timestamp format ("Completion (2024-06-15 18:30)")
+  instead of ID-based ("Completion #42")
+
+---
+
+## [2.0.2] - 2026-02-27
+
+### Added
+
+- **Hand-crafted bash completions**: Full `_caco()` completion function with
+  subcommand detection, dynamic WAD/tag/IWAD/sourceport lookups via
+  `caco _complete`, nested `beaten`/`cache` subcommand handling, and file
+  fallback for `--link`/`--stats-file` paths
+- **Hand-crafted zsh completions**: `_arguments`-based structured completion
+  with `_describe` for ID:Title WAD pairs, `_files` for path options, nested
+  dispatch for `beaten`/`cache` groups, and combined completion actions
+- **Embedded completion scripts**: `src/caco/cli/_completion_scripts.py` module
+  stores all three shell scripts as string constants — works from installed
+  packages, not just editable installs
+- **Convenience copies**: `completions/caco.bash` and `completions/_caco` (zsh)
+  alongside the existing `completions/caco.fish`
+- **`caco _complete` hidden command**: Purpose-built completion data for shell
+  scripts — replaces slow `caco ls -o plain | awk` with direct SQL/registry
+  lookups; supports 8 contexts: `wads`, `tags`, `iwads`, `statuses`,
+  `sort-fields`, `sourceports`, `modify-fields`, `query-fields`
+- **Dynamic fish completions**: `--iwad` on play/trash completes from registered
+  IWADs, `--sourceport` on play completes from known sourceport executables,
+  `--tag` on import completes from existing tags
+- **Fish completion helpers**: `__caco_iwads` and `__caco_sourceports` functions
+
+### Changed
+
+- **Fish completions**: `__caco_wads` and `__caco_tags` now call
+  `caco _complete` instead of parsing `caco ls -o plain` output through `awk`
+
+- **`caco completions` command**: Now outputs hand-crafted scripts instead of
+  Click's generic completion mechanism; uses `click.echo()` to avoid Rich
+  mangling shell `[` brackets in output
+
+---
+
+## [2.0.1] - 2026-02-27
+
+Auto-enrich imports with Doom Wiki metadata.
+
+### Added
+
+- **Auto Doom Wiki enrichment**: After importing from idgames, Doomworld, URL,
+  or local sources, caco automatically searches Doom Wiki for a matching title
+  and backfills missing author/year, appends wiki description (with separator),
+  and auto-links IWAD — never overwrites existing fields
+- **`auto_doomwiki_enrich` config option**: Controls auto-enrichment (default:
+  `true`); failures are silently logged and never affect the import result
+- **Fuzzy title matching**: `_normalize_title()` / `_titles_match()` helpers
+  strip accents, punctuation, and whitespace for reliable title comparison
 
 ---
 

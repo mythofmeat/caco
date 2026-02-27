@@ -1,0 +1,61 @@
+"""Tests for the shared complevel module."""
+
+import pytest
+
+from caco.complevel import COMPLEVEL_ALIASES, COMPLEVEL_NAMES, complevel_name, parse_complevel
+
+
+class TestComplevelName:
+    """Test complevel_name() display function."""
+
+    def test_known_complevels(self):
+        assert complevel_name(2) == "Doom v1.9 / Vanilla"
+        assert complevel_name(9) == "Boom"
+        assert complevel_name(11) == "MBF"
+        assert complevel_name(21) == "MBF21"
+
+    def test_unknown_complevel(self):
+        assert complevel_name(99) == "Complevel 99"
+        assert complevel_name(17) == "Complevel 17"
+
+    def test_none_complevel(self):
+        assert complevel_name(None) == "Unknown"
+
+
+class TestParseComplevel:
+    """Test parse_complevel() string->int parsing."""
+
+    def test_integer_string(self):
+        assert parse_complevel("9") == 9
+        assert parse_complevel("2") == 2
+        assert parse_complevel("21") == 21
+        assert parse_complevel("0") == 0
+
+    def test_aliases(self):
+        assert parse_complevel("vanilla") == 2
+        assert parse_complevel("boom") == 9
+        assert parse_complevel("mbf") == 11
+        assert parse_complevel("mbf21") == 21
+
+    def test_case_insensitive(self):
+        assert parse_complevel("BOOM") == 9
+        assert parse_complevel("Vanilla") == 2
+        assert parse_complevel("MBF21") == 21
+
+    def test_invalid(self):
+        assert parse_complevel("invalid") is None
+        assert parse_complevel("") is None
+        assert parse_complevel("hello world") is None
+
+    def test_limit_removing_alias(self):
+        assert parse_complevel("limit-removing") == 2
+        assert parse_complevel("lr") == 2
+
+
+class TestComplevelAliases:
+    """Test that COMPLEVEL_ALIASES maps correctly."""
+
+    def test_all_aliases_resolve(self):
+        for alias, cl in COMPLEVEL_ALIASES.items():
+            assert isinstance(cl, int)
+            assert parse_complevel(alias) == cl

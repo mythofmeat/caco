@@ -47,8 +47,8 @@ class SessionsDialog(QDialog):
         layout.addWidget(count_label)
 
         # Table
-        table = QTableWidget(len(sessions), 4)
-        table.setHorizontalHeaderLabels(["Date", "Started", "Duration", "Sourceport"])
+        table = QTableWidget(len(sessions), 5)
+        table.setHorizontalHeaderLabels(["Date", "Started", "Duration", "Sourceport", "Status"])
         table.setAlternatingRowColors(True)
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -59,6 +59,9 @@ class SessionsDialog(QDialog):
         header_view.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         header_view.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         header_view.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        header_view.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+
+        from PySide6.QtGui import QColor
 
         for row, session in enumerate(sessions):
             started = session.get("started_at") or ""
@@ -78,6 +81,15 @@ class SessionsDialog(QDialog):
             table.setItem(row, 2, dur_item)
 
             table.setItem(row, 3, QTableWidgetItem(port))
+
+            # Exit status
+            exit_code = session.get("exit_code")
+            if exit_code is not None and exit_code != 0:
+                status_item = QTableWidgetItem(f"Crash ({exit_code})")
+                status_item.setForeground(QColor(DOOM_PALETTE["error"]))
+            else:
+                status_item = QTableWidgetItem("")
+            table.setItem(row, 4, status_item)
 
         layout.addWidget(table)
 

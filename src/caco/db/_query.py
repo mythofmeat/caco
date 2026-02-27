@@ -223,12 +223,17 @@ def _build_term_sql(term: QueryTerm) -> tuple[str, list[Any]]:
         params = [f"%{term.value}%"]
 
     elif term.field == "complevel":
-        from caco.doomworld.parser import COMPLEVEL_SHORTCUTS
-        cl_value = term.value.lower()
-        if cl_value in COMPLEVEL_SHORTCUTS:
-            cl_value = str(COMPLEVEL_SHORTCUTS[cl_value])
-        clause = "wads.custom_complevel = ?"
-        params = [cl_value]
+        from caco.complevel import parse_complevel
+        cl = parse_complevel(term.value)
+        if cl is not None:
+            clause = "(wads.custom_complevel = ? OR wads.complevel = ?)"
+            params = [str(cl), cl]
+        else:
+            return "", []
+
+    elif term.field == "config":
+        clause = "wads.custom_config LIKE ?"
+        params = [f"%{term.value}%"]
 
     else:
         # Unknown field - treat as free text

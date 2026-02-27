@@ -21,7 +21,8 @@ MODIFY_FIELDS = {
     "args": "custom_args",
     "idgames-id": "idgames_id",
     "version": "version",
-    "complevel": "custom_complevel",
+    "complevel": "complevel",
+    "config": "custom_config",
     "tag": "tag",  # special handling
 }
 
@@ -29,9 +30,11 @@ MODIFY_FIELDS = {
 @dataclass
 class ModifyAction:
     """A single modification action parsed from CLI args."""
-    field: str       # DB column name (or "tag" for tag operations)
+    field: str       # DB column name (or "tag" for tag operations, or "beaten" for completion ops)
     value: str | None
-    action: str      # "set", "clear", "add_tag", "remove_all_tags", "remove_tag"
+    # "set", "clear", "add_tag", "remove_all_tags", "remove_tag",
+    # "beaten_add", "beaten_remove", "beaten_remove_ts", "beaten_set"
+    action: str
     pattern: str | None = None  # glob pattern for remove_tag
 
 
@@ -122,6 +125,69 @@ def parse_modify_args(
                 sort_term = arg
                 continue
 
+        # Check for beaten actions: beaten+N, beaten-N/beaten-TIMESTAMP, beaten=N
+        if arg.startswith("beaten") and len(arg) > 6 and arg[6] in ("+", "-", "="):
+            op = arg[6]
+            suffix = arg[7:]
+
+            if op == "+":
+                # beaten+ (implicit 1) or beaten+N
+                if suffix == "":
+                    n = 1
+                else:
+                    try:
+                        n = int(suffix)
+                    except ValueError:
+                        raise click.UsageError(f"Invalid beaten count: '{suffix}' (must be a positive integer)")
+                    if n <= 0:
+                        raise click.UsageError(f"Beaten count must be positive, got: {n}")
+                actions.append(ModifyAction(
+                    field="beaten",
+                    value=str(n),
+                    action="beaten_add",
+                ))
+                continue
+
+            if op == "=":
+                try:
+                    n = int(suffix)
+                except ValueError:
+                    raise click.UsageError(f"Invalid beaten count: '{suffix}' (must be a non-negative integer)")
+                if n < 0:
+                    raise click.UsageError(f"Beaten count cannot be negative, got: {n}")
+                actions.append(ModifyAction(
+                    field="beaten",
+                    value=str(n),
+                    action="beaten_set",
+                ))
+                continue
+
+            if op == "-":
+                if suffix == "":
+                    raise click.UsageError("Bare 'beaten-' is ambiguous — use beaten-N (count) or beaten-TIMESTAMP")
+                # Try as integer first
+                try:
+                    n = int(suffix)
+                    if n <= 0:
+                        raise click.UsageError(f"Beaten remove count must be positive, got: {n}")
+                    actions.append(ModifyAction(
+                        field="beaten",
+                        value=str(n),
+                        action="beaten_remove",
+                    ))
+                    continue
+                except ValueError:
+                    pass
+                # If starts with 4 digits, treat as timestamp
+                if len(suffix) >= 4 and suffix[:4].isdigit():
+                    actions.append(ModifyAction(
+                        field="beaten",
+                        value=suffix,
+                        action="beaten_remove_ts",
+                    ))
+                    continue
+                raise click.UsageError(f"Invalid beaten- argument: '{suffix}' (expected count or timestamp)")
+
         # Check for clear/remove: !field or !tag:pattern
         if arg.startswith("!") and len(arg) > 1:
             rest = arg[1:]
@@ -198,18 +264,11 @@ def parse_modify_args(
                         raise click.UsageError(f"Year must be an integer, got: '{value}'")
 
                 if field_name == "complevel":
-                    from caco.doomworld.parser import COMPLEVEL_SHORTCUTS
-                    lower_val = value.lower()
-                    if lower_val in COMPLEVEL_SHORTCUTS:
-                        value = str(COMPLEVEL_SHORTCUTS[lower_val])
-                    else:
-                        try:
-                            int(value)
-                        except ValueError:
-                            shortcuts = ", ".join(COMPLEVEL_SHORTCUTS.keys())
-                            raise click.UsageError(
-                                f"Invalid complevel: '{value}' (use integer or: {shortcuts})"
-                            )
+                    from caco.complevel import parse_complevel
+                    cl = parse_complevel(value)
+                    if cl is None:
+                        raise click.UsageError(f"Invalid complevel: '{value}' (use integer or alias: vanilla, boom, mbf, mbf21)")
+                    value = str(cl)
 
                 if field_name == "args":
                     # Accept JSON array or space-separated

@@ -9,6 +9,7 @@ A personal Doom WAD library manager taking inspiration from beets. Track what yo
   - Doom Wiki (doomwiki.org)
   - Doomworld forums (with optional LLM-powered metadata extraction)
   - URLs / local files
+  - Auto-enrich imports with Doom Wiki metadata (author, year, description, IWAD)
 
 - **Lazy downloads**
   - WADs from idgames are downloaded and cached when you play
@@ -25,8 +26,15 @@ A personal Doom WAD library manager taking inspiration from beets. Track what yo
   - Auto-track per-map stats from sourceport output
   - Per-session map tracking (which maps were completed in each play session)
 
+- **Sourceport config profiles**
+  - Managed config files at `~/.local/share/caco/sourceports/{exe}/{profile}.cfg`
+  - Auto-created default profile on first play (dsda-family ports)
+  - Per-WAD config profile override
+  - `caco profile` command group for managing profiles
+
 - **Playtime tracking**
   - Automatically tracks how long you play each WAD
+  - Crash detection: warns on non-zero exit codes, records in session history
 
 - **IWAD management**
   - Register IWADs with family/variant model (e.g., doom2/v1.9, doom2/bfg)
@@ -302,7 +310,9 @@ caco ls tag:megawad                     # By tag (supports globs: tag:caco*)
 caco ls status:playing                  # By status (shortcuts: status:p)
 caco ls source:idgames                  # By source type (idgames, doomwiki, url, local)
 caco ls iwad:doom2                      # By IWAD (matches custom_iwad)
-caco ls complevel:boom                  # By complevel (shortcuts: vanilla, boom, mbf, mbf21)
+caco ls complevel:boom                  # By complevel (aliases: vanilla, boom, mbf, mbf21)
+caco ls complevel:9                     # By complevel (numeric)
+caco ls config:controller               # By config profile name
 caco ls author:alm title:scythe         # Combine filters (AND logic)
 
 # Combine query + sort
@@ -350,6 +360,10 @@ caco modify id:1 !tag                           # Remove all tags
 caco modify id:1 !tag:slaughter                 # Remove specific tag
 caco modify id:1 "!tag:caco*"                   # Remove tags matching glob
 
+# Set complevel (int or alias: vanilla, boom, mbf, mbf21)
+caco modify id:1 complevel=boom                 # Sets complevel to 9
+caco modify id:1 !complevel                     # Clear complevel
+
 # Link a local file to a metadata-only entry
 caco modify id:1 --link ~/Downloads/heartland.wad
 
@@ -390,16 +404,24 @@ caco play 1 -- -warp 15 -skill 4
 caco play 1 --record                   # Auto-named demo
 caco play 1 --record mydemo            # Custom name
 
+# Override complevel (dsda-family ports get -complevel flag automatically)
+caco play 1 --complevel boom             # -complevel 9
+caco play 1 -c 21                        # -complevel 21
+
 # Play an IWAD directly (no PWAD needed)
 caco play --iwad doom2
 caco play --iwad doom2 -- -warp 1
 caco play --iwad doom2 -p gzdoom
 caco play --iwad doom2/v1.9            # Exact variant
+
+# Use a specific config profile (dsda-family ports)
+caco play 1 --config controller        # Use "controller" profile
+caco play 1 -C fast                    # Short form
 ```
 
 ### Per-WAD Custom Config
 
-Set WAD-specific IWAD, sourceport, or extra arguments:
+Set WAD-specific IWAD, sourceport, complevel, or extra arguments:
 
 ```bash
 # Set custom IWAD for a WAD
@@ -408,15 +430,21 @@ caco modify id:1 iwad=tnt
 # Set custom sourceport
 caco modify id:1 sourceport=dsda-doom
 
+# Set complevel (auto-injected as -complevel N for dsda-family ports)
+caco modify id:1 complevel=boom          # Aliases: vanilla(2), boom(9), mbf(11), mbf21(21)
+
 # Set custom arguments
 caco modify id:1 args="-warp 1"
 
-# Set complevel (integer or shortcut: vanilla, boom, mbf, mbf21)
+# Set complevel (integer or alias: vanilla, boom, mbf, mbf21)
 caco modify id:1 complevel=boom          # Sets complevel 9
 caco modify id:1 complevel=21            # Sets complevel 21 (MBF21)
 
+# Set config profile (dsda-family ports)
+caco modify id:1 config=controller
+
 # Clear custom settings
-caco modify id:1 !iwad !sourceport !args !complevel
+caco modify id:1 !iwad !sourceport !args !complevel !config
 ```
 
 Priority: CLI arguments > Per-WAD config > Global config
@@ -462,49 +490,49 @@ caco play "Eviternity"
 caco modify Eviternity !idgames-id
 ```
 
-### Completion Count Tracking
+### Completion Tracking
 
-Track how many times you've beaten each WAD:
+Track how many times you've beaten each WAD, with optional notes, stats, and backdating:
 
 ```bash
-# View completion history for a specific WAD
-caco beaten list scythe              # Show dates and notes for each completion
-caco beaten list id:1                # By ID
+# Add completions (via modify with beaten+ syntax)
+caco modify id:1 beaten+1                              # Mark as beaten once
+caco modify id:1 beaten+3                              # Add 3 completions at once
+caco modify id:1 beaten+1 --notes "UV max"             # With notes
+caco modify id:1 beaten+1 --date 2024-06-15            # Backdate
+caco modify id:1 beaten+1 -s stats.txt                 # With stats file attached
+caco modify id:1 beaten+1 status=finished              # Combine with status change
 
-# Add a completion record
-caco beaten add 1                    # Mark as beaten
-caco beaten add 1 --notes "UV-max"   # With notes
+# Remove completions
+caco modify id:1 beaten-1                              # Remove most recent
+caco modify id:1 beaten-2024-06-15T18:30:00            # Remove by timestamp
 
-# Remove a completion record
-caco beaten remove 1                 # Remove most recent completion (with confirmation)
-caco beaten remove 1 42              # Remove specific completion by record ID
+# Set exact count
+caco modify id:1 beaten=5                              # Set to 5 completions
+caco modify id:1 beaten=0                              # Reset to 0
 
-# Set exact completion count
-caco beaten set 1 3                  # Set to 3 completions
+# View completion history (shown in info output)
+caco info id:1                                         # Shows completions section
+caco info id:1 -o json                                 # Includes completions array
 ```
 
 ### Per-Map Statistics
 
-Import and archive per-map statistics from sourceport stats files:
+Import and view per-map statistics from sourceport stats files:
 
 ```bash
 # Attach stats when adding a completion
-caco beaten add "Doom 2 In Retrospect" --stats-file ~/path/to/stats.txt
+caco modify id:1 beaten+1 -s ~/path/to/stats.txt
 
-# Attach stats to an existing completion record
-caco beaten attach "Doom 2 In Retrospect" --stats-file stats.txt
-caco beaten attach "Doom 2 In Retrospect" 42 -s stats.txt  # Specific completion ID
+# Attach stats to an existing completion (standalone --stats-file)
+caco modify id:1 -s stats.txt                          # Attach to most recent
+caco modify id:1 -s stats.txt -b 2024-06-15            # Attach to specific completion
 
-# View per-map statistics (shows all: live + completions)
-caco beaten stats "Doom 2 In Retrospect"
-caco beaten stats "Doom 2 In Retrospect" 42      # Specific completion ID
-caco beaten stats "Doom 2 In Retrospect" --live   # Live stats only
-caco beaten stats "Doom 2 In Retrospect" --plain  # TSV output for scripting
-
-# Export stats back to original format
-caco beaten export "Doom 2 In Retrospect"
-caco beaten export "Doom 2 In Retrospect" -o stats.txt  # Write to file
-caco beaten export "Doom 2 In Retrospect" --live         # Export live stats
+# View per-map statistics (via info --levelstats)
+caco info id:1 --levelstats                            # All entries (live + completions)
+caco info id:1 --levelstats --live                     # Live stats only
+caco info id:1 --levelstats -b 2024-06-15              # Specific completion
+caco info id:1 --levelstats --plain                    # TSV output for scripting
 ```
 
 **Supported formats:**
@@ -519,14 +547,14 @@ When per-WAD data directories are enabled (default), caco automatically reads st
 
 1. After the sourceport exits, caco searches the WAD's data directory for `stats.txt` or `levelstat.txt`
 2. The stats are parsed and stored as a live snapshot on the WAD record
-3. When you mark the WAD as beaten (`caco beaten add` or `caco update --status finished`), the snapshot is automatically archived to the completion record
+3. When you add a completion (`caco modify id:1 beaten+1` or `caco modify id:1 status=finished`), the snapshot is automatically archived to the completion record
 
 This means you don't need to manually run `--stats-file` — just play and mark as beaten.
 
 ```bash
 caco play 1                         # Stats auto-tracked after session
-caco beaten add 1                   # Auto-attaches stored stats to completion
-caco beaten stats 1                 # View the per-map stats
+caco modify id:1 beaten+1           # Auto-attaches stored stats to completion
+caco info 1 --levelstats            # View the per-map stats
 ```
 
 **Opt-out:** Set `auto_stats = false` in config to disable auto-tracking.
@@ -742,6 +770,20 @@ The detected IWAD is saved to `custom_iwad` so detection only runs once per WAD.
 
 **Opt-out:** Set `auto_detect_iwad = false` in config to disable auto-detection.
 
+### Complevel Auto-Detection
+
+On first play, caco also inspects the WAD to auto-detect the compatibility level (complevel):
+
+1. **UMAPINFO** lump present → MBF21 (complevel 21)
+2. **DEHACKED** with MBF21 codepointers → MBF21 (21)
+3. **DEHACKED** with MBF codepointers → MBF (11)
+4. **ExMy maps only**, no special lumps → Vanilla (2)
+5. Other cases → ambiguous, skipped
+
+The detected complevel is saved to the WAD record. For dsda-family sourceports, `-complevel N` is automatically added to the command line.
+
+**Opt-out:** Set `auto_detect_complevel = false` in config to disable auto-detection.
+
 ## Configuration
 
 Config file: `~/.config/caco/config.toml` (see `config.example.toml` for a template).
@@ -765,7 +807,8 @@ New config keys are automatically added with default values when you update caco
 | `data_dir` | Base directory for per-WAD data (default: `~/.local/share/caco/data/`) |
 | `auto_stats` | Auto-track per-map stats after play sessions (default: true) |
 | `auto_detect_iwad` | Auto-detect required IWAD from WAD file contents (default: true) |
-| `auto_detect_complevel` | Auto-detect complevel from WAD COMPLVL lump (default: true) |
+| `auto_detect_complevel` | Auto-detect complevel from WAD lumps on first play (default: true) |
+| `auto_doomwiki_enrich` | Auto-enrich non-Doomwiki imports with Doom Wiki metadata (default: true) |
 | `[list] format` | Columns to display (see config example) |
 | `[list] sort` | Default sort order |
 | `[list] default_status` | Default status filter (empty = all statuses) |
@@ -865,10 +908,18 @@ caco completions --install
 caco completions fish --install
 ```
 
-Manual installation (fish):
+Manual installation:
 
 ```bash
+# Fish
 cp completions/caco.fish ~/.config/fish/completions/
+
+# Bash — add to ~/.bashrc
+source ~/.local/share/bash-completion/completions/caco
+# Or: cp completions/caco.bash ~/.local/share/bash-completion/completions/caco
+
+# Zsh — add to ~/.zshrc: fpath=(~/.zfunc $fpath) && compinit
+cp completions/_caco ~/.zfunc/_caco
 ```
 
 ## Scripting
@@ -927,6 +978,42 @@ Unknown sourceports play normally without any injection.
 
 **Opt-out:** Set `manage_data_dirs = false` in config to disable data directory management.
 
+## Sourceport Config Profiles
+
+Caco manages sourceport config files (`.cfg`) for dsda-family ports, keeping settings isolated per-sourceport and per-profile. Profiles are stored at `~/.local/share/caco/sourceports/{exe}/{profile}.cfg`.
+
+```bash
+# List all profiles
+caco profile ls
+
+# List profiles for a specific sourceport
+caco profile ls -p dsda-doom
+
+# Create a new profile
+caco profile create controller
+caco profile create controller -p nyan-doom    # For a specific sourceport
+
+# Edit a profile in $EDITOR
+caco profile edit controller
+
+# Copy a profile
+caco profile cp default controller
+
+# Remove a profile (warns if WADs reference it)
+caco profile rm controller
+
+# Print path to a profile file
+caco profile path controller
+```
+
+**How it works:**
+- On first play with a dsda-family port, an empty `default.cfg` is auto-created and passed via `-config` — the sourceport populates it with defaults on first launch
+- Resolution order: CLI `--config` > WAD's `custom_config` > `"default"`
+- Only dsda-family ports (dsda-doom, nyan-doom, nugget-doom, prboom+, glboom+) support `-config` injection
+- Set a per-WAD profile: `caco modify id:1 config=controller`
+- Override for a session: `caco play --config controller id:1`
+- Search by profile: `caco ls config:controller`
+
 ## Data Storage
 
 *Default locations:*
@@ -938,6 +1025,7 @@ Unknown sourceports play normally without any injection.
 - **WAD cache**: `~/.local/share/caco/wads/`
 - **WAD data**: `~/.local/share/caco/data/` (per-WAD saves, stats, configs)
 - **WAD backups**: `~/.local/share/caco/backups/`
+- **Sourceport configs**: `~/.local/share/caco/sourceports/{exe}/{profile}.cfg`
 - **Thumbnail cache**: `~/.cache/caco/thumbnails/`
 
 ## Development
