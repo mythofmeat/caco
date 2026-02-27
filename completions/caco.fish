@@ -38,6 +38,7 @@ complete -c caco -n __fish_use_subcommand -a cache -d "Manage WAD file cache"
 complete -c caco -n "__fish_seen_subcommand_from ls" -s o -l output -d "Output format" -xa "json plain"
 complete -c caco -n "__fish_seen_subcommand_from ls" -l tags -d "List all tags with counts"
 complete -c caco -n "__fish_seen_subcommand_from ls" -l iwad -d "List registered IWADs"
+complete -c caco -n "__fish_seen_subcommand_from ls" -l id24 -d "List registered id24 WADs"
 
 # ls query field completions
 complete -c caco -n "__fish_seen_subcommand_from ls" -a "id:" -d "Filter by ID"
@@ -112,6 +113,7 @@ complete -c caco -n "__fish_seen_subcommand_from trash" -l list -d "Show trashed
 complete -c caco -n "__fish_seen_subcommand_from trash" -l purge -d "Permanently delete"
 complete -c caco -n "__fish_seen_subcommand_from trash" -l restore -d "Restore from trash"
 complete -c caco -n "__fish_seen_subcommand_from trash" -l iwad -d "Remove IWAD (FAMILY or FAMILY/VARIANT)"
+complete -c caco -n "__fish_seen_subcommand_from trash" -l id24 -d "Remove id24 WAD by name"
 complete -c caco -n "__fish_seen_subcommand_from trash" -s y -l yes -d "Skip confirmation"
 complete -c caco -n "__fish_seen_subcommand_from trash" -l dry-run -d "Preview changes"
 complete -c caco -n "__fish_seen_subcommand_from trash" -s o -l output -d "Output format (with --list)" -xa "json plain"

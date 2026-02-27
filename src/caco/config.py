@@ -12,6 +12,7 @@ DB_DIR = Path.home() / ".local" / "share" / "caco"
 DEFAULT_DB_PATH = DB_DIR / "library.db"
 CACHE_DIR = DB_DIR / "wads"
 IWAD_DIR = DB_DIR / "iwads"
+ID24_DIR = DB_DIR / "id24"
 DATA_DIR = DB_DIR / "data"
 BACKUP_DIR = DB_DIR / "backups"
 
@@ -204,6 +205,11 @@ def get_iwad_dir() -> Path:
     """Get the managed IWAD directory."""
     config = load_config()
     return Path(config.get("iwad_dir", str(IWAD_DIR))).expanduser()
+
+
+def get_id24_dir() -> Path:
+    """Get the managed id24 WAD directory."""
+    return ID24_DIR
 
 
 def set_cache_dir(path: str) -> None:

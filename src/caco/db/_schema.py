@@ -407,6 +407,25 @@ def _migrate_add_demo_file(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE sessions ADD COLUMN demo_file TEXT")
 
 
+def _migrate_add_id24_wads_table(conn: sqlite3.Connection) -> None:
+    """Create the id24_wads table for id24 content registry."""
+    cursor = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='id24_wads'"
+    )
+    if not cursor.fetchone():
+        conn.execute("""
+            CREATE TABLE id24_wads (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                version TEXT,
+                title TEXT,
+                path TEXT NOT NULL,
+                md5 TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+
 # Ordered migration registry — append new migrations here with incrementing version
 _MIGRATIONS: list[tuple[int, str, Any]] = [
     (1, "add_custom_play_config", _migrate_add_custom_play_config),
@@ -425,4 +444,5 @@ _MIGRATIONS: list[tuple[int, str, Any]] = [
     (14, "add_companion_files", _migrate_add_companion_files),
     (15, "add_session_stats", _migrate_add_session_stats),
     (16, "add_demo_file", _migrate_add_demo_file),
+    (17, "add_id24_wads_table", _migrate_add_id24_wads_table),
 ]

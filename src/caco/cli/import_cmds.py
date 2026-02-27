@@ -80,6 +80,49 @@ def _infer_title_from_url(url: str) -> str:
     return _infer_title_from_filename(filename)
 
 
+def _register_iwad(path, family: str, variant: str, title: str) -> None:
+    """Register an IWAD file: copy to managed dir and add to DB."""
+    import shutil
+    from caco.config import get_iwad_dir
+    from caco.db._iwads import _compute_md5, add_iwad, get_iwad_variant, managed_iwad_filename
+
+    existing = get_iwad_variant(family, variant)
+    if existing:
+        console.print(f"[yellow]Already registered:[/yellow] {title} ({family}/{variant})")
+        return
+
+    iwad_dir = get_iwad_dir()
+    managed_rel = managed_iwad_filename(family, variant)
+    dest = iwad_dir / managed_rel
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(str(path), str(dest))
+
+    md5 = _compute_md5(path)
+    add_iwad(family, variant, str(dest), title=title, md5=md5)
+    console.print(f"[green]Registered IWAD:[/green] {title} ({family}/{variant})")
+
+
+def _register_id24(path, name: str, version: str, title: str) -> None:
+    """Register an id24 WAD file: copy to managed dir and add to DB."""
+    import shutil
+    from caco.config import get_id24_dir
+    from caco.db._id24 import _compute_md5, add_id24, get_id24
+
+    existing = get_id24(name)
+    if existing:
+        console.print(f"[yellow]Already registered:[/yellow] {title} ({name})")
+        return
+
+    id24_dir = get_id24_dir()
+    id24_dir.mkdir(parents=True, exist_ok=True)
+    dest = id24_dir / f"{name}.wad"
+    shutil.copy2(str(path), str(dest))
+
+    md5 = _compute_md5(path)
+    add_id24(name, str(dest), version=version, title=title, md5=md5)
+    console.print(f"[green]Registered id24:[/green] {title} ({version})")
+
+
 def _complete_llm_backends(ctx, param, incomplete):
     """Shell completion for LLM backends."""
     backends = ["claude-code", "openrouter", "anthropic", "openai"]
@@ -154,6 +197,19 @@ def _do_auto_import(source: str, title: str | None, author: str | None,
 
     elif source_type == "local":
         p = Path(source).resolve()
+
+        # Check for IWAD
+        iwad_info = db.identify_iwad(p)
+        if iwad_info:
+            _register_iwad(p, *iwad_info)
+            return
+
+        # Check for id24
+        id24_info = db.identify_id24(p)
+        if id24_info:
+            _register_id24(p, *id24_info)
+            return
+
         inferred_title = title or _infer_title_from_filename(p.name)
 
         existing = db.find_duplicate(
@@ -614,6 +670,20 @@ def _do_local_import(paths: tuple[str, ...], title: str | None, author: str | No
         # Validate file existence (since we no longer use Click's Path(exists=True))
         if not p.exists():
             err_console.print(f"[red]File not found:[/red] {path}")
+            continue
+
+        # Check for IWAD
+        iwad_info = db.identify_iwad(p)
+        if iwad_info:
+            _register_iwad(p, *iwad_info)
+            imported += 1
+            continue
+
+        # Check for id24
+        id24_info = db.identify_id24(p)
+        if id24_info:
+            _register_id24(p, *id24_info)
+            imported += 1
             continue
 
         file_title = title if (title and len(paths) == 1) else _infer_title_from_filename(p.name)

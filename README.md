@@ -36,6 +36,11 @@ A personal Doom WAD library manager taking inspiration from beets. Track what yo
   - Freedoom fallback when primary IWAD is unavailable
   - Auto-link to registered IWADs on Doom Wiki import
 
+- **id24 WAD management**
+  - Register id24 content (Legacy of Rust, id24res, modder packs) with MD5-based identification
+  - Auto-detect on import — `caco import` recognizes id24 files from local paths
+  - Managed storage at `~/.local/share/caco/id24/`
+
 ## Installation
 
 Requires Python 3.10+.
@@ -695,6 +700,29 @@ Freedoom is used as a cross-family fallback (freedoom2 for doom2/plutonia/tnt, f
 
 Doom Wiki imports automatically set `custom_iwad` when the entry's IWAD field matches a registered IWAD.
 
+## id24 WAD Management
+
+id24 WADs are multi-file content from the 2024 Doom re-release (Legacy of Rust, resource WADs, modder packs). They're managed separately from both IWADs and regular PWADs.
+
+```bash
+# Import id24 files (auto-detected from local path)
+caco import /path/to/id1.wad
+caco import /path/to/id24/*.wad                    # Batch import
+
+# List registered id24 WADs
+caco ls --id24
+caco ls --id24 -o plain                            # TSV output
+caco ls --id24 -o json                             # JSON output
+
+# Remove a registered id24 WAD
+caco trash --id24 id1
+caco trash --id24 id24res
+```
+
+Known id24 files: `id1.wad` (Legacy of Rust), `id24res.wad`, `id1-res.wad`, `id1-tex.wad`, `id1-weap.wad`, `id1-mus.wad`, `iddm1.wad`. Version detection distinguishes initial release from update2.
+
+Managed storage: `~/.local/share/caco/id24/{name}.wad`
+
 ### Auto-Detection
 
 On first play, caco inspects the WAD file to auto-detect the required IWAD:
@@ -896,6 +924,7 @@ Unknown sourceports play normally without any injection.
 
 - **Database**: `~/.local/share/caco/library.db`
 - **Managed IWADs**: `~/.local/share/caco/iwads/{variant}/{family}.wad`
+- **Managed id24 WADs**: `~/.local/share/caco/id24/{name}.wad`
 - **Config**: `~/.config/caco/config.toml`
 - **WAD cache**: `~/.local/share/caco/wads/`
 - **WAD data**: `~/.local/share/caco/data/` (per-WAD saves, stats, configs)

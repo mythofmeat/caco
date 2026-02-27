@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.5.0] - 2026-02-27
+
+id24 WAD management: register, list, and remove id24 content files (Legacy of Rust, id24res, modder packs) from the 2024 Doom re-release.
+
+### Added
+
+- **id24 WAD registry** (`db/_id24.py`): Known MD5 hashes for all id24 WADs
+  (id1, id24res, id1-res, id1-tex, id1-weap, id1-mus, iddm1) with version
+  detection (initial vs update2); filename fallback for unrecognized MD5s
+- **Auto-detect on import**: `caco import` now auto-detects id24 files (and
+  IWADs) from local paths — copies to managed directory and registers in DB
+- **`caco ls --id24`**: List registered id24 WADs (name, version, title, path);
+  supports `-o plain` (TSV) and `-o json` output
+- **`caco trash --id24 NAME`**: Remove a registered id24 WAD from DB and
+  managed storage
+- **Managed id24 storage**: `~/.local/share/caco/id24/{name}.wad` — flat layout
+  (one copy of each file)
+- **`ID24_DIR`** and **`get_id24_dir()`** in `config.py`: Directory constant
+  and accessor for managed id24 WADs
+- **Database migration 17**: Creates `id24_wads` table (name, version, title,
+  path, md5)
+- **Fish completions**: `--id24` flag for `ls` and `trash` commands
+
+---
+
 ## [2.4.0] - 2026-02-27
 
 Demo recording and playback: record, list, play back, and clean demo files per-WAD.

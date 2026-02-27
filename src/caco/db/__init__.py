@@ -80,6 +80,19 @@ from caco.db._iwads import (  # noqa: F401
     resolve_iwad_from_db,
 )
 
+# -- id24 registry --
+from caco.db._id24 import (  # noqa: F401
+    KNOWN_ID24_FILENAMES,
+    KNOWN_ID24_WADS,
+    add_id24,
+    get_all_id24,
+    get_id24,
+    get_id24_by_path,
+    identify_id24,
+    remove_id24,
+    remove_id24_with_paths,
+)
+
 # -- Sessions, stats, completions, cache --
 from caco.db._sessions import (  # noqa: F401
     StatsSnapshot,
@@ -168,6 +181,16 @@ __all__ = [
     "remove_iwad",
     "remove_iwad_with_paths",
     "resolve_iwad_from_db",
+    # id24 registry
+    "KNOWN_ID24_FILENAMES",
+    "KNOWN_ID24_WADS",
+    "add_id24",
+    "get_all_id24",
+    "get_id24",
+    "get_id24_by_path",
+    "identify_id24",
+    "remove_id24",
+    "remove_id24_with_paths",
     # Sessions, stats, completions, cache
     "StatsSnapshot",
     "add_wad_completion",

@@ -20,6 +20,7 @@ Caco is a personal Doom WAD library manager inspired by `beets`. It tracks WADs 
 - Play IWADs directly (`caco play --iwad doom2`) without a PWAD in the library
 - Auto-detect installed sourceports with helpful error messages
 - Auto-update config file with missing keys on load
+- id24 WAD registry: managed storage, MD5-based identification, auto-detect on import
 
 ## Commands
 
@@ -77,7 +78,8 @@ src/caco/
 │   ├── _query.py       # Query parser, search_wads(), find_duplicate()
 │   ├── _wads.py        # WAD CRUD (add/get/update/delete), tag add/remove
 │   ├── _sessions.py    # Sessions, completions, batch stats, cache, StatsSnapshot
-│   └── _iwads.py       # IWAD registry: family/variant model, priority resolution, CRUD
+│   ├── _iwads.py       # IWAD registry: family/variant model, priority resolution, CRUD
+│   └── _id24.py        # id24 WAD registry: known hashes, identification, CRUD
 ├── config.py       # TOML config in ~/.config/caco/; IWAD_DIR, get_iwad_dir()
 ├── player.py       # Sourceport launcher + playtime tracking
 ├── idgames/        # idgames API client
@@ -176,6 +178,7 @@ src/caco/
 - Database: `~/.local/share/caco/library.db` (configurable via `db_path`)
 - Config: `~/.config/caco/config.toml`
 - Managed IWADs: `~/.local/share/caco/iwads/{variant}/{family}.wad`
+- Managed id24 WADs: `~/.local/share/caco/id24/{name}.wad`
 - WAD cache: `~/.local/share/caco/wads/`
 - WAD data: `~/.local/share/caco/data/` (per-WAD saves, stats, configs; configurable via `data_dir`)
 
@@ -222,6 +225,12 @@ src/caco/
 - `caco ls --iwad [-o plain]` — list registered IWADs (family, variant, title, path); preferred variant marked with `*`
 - `caco import <path>` — auto-detects IWAD via MD5 and registers; copies to managed dir
 - `caco trash --iwad FAMILY[/VARIANT]` — without variant removes all variants (with warning); with variant removes one; also deletes managed file if inside iwad_dir
+
+**id24 CLI commands:**
+- `caco ls --id24 [-o plain|-o json]` — list registered id24 WADs (name, version, title, path)
+- `caco import <path>` — auto-detects id24 via MD5 (or filename fallback) and registers; copies to managed dir
+- `caco trash --id24 NAME` — remove id24 WAD from DB and managed storage
+- id24 registry: `id24_wads` table with name/version/title/path/md5; `KNOWN_ID24_WADS` (MD5→(name, version, title)), `KNOWN_ID24_FILENAMES` (filename fallback); `identify_id24()` for detection; managed storage at `~/.local/share/caco/id24/{name}.wad`
 
 **Status shortcuts (complete list):**
 | Shortcut | Status |

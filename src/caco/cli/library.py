@@ -10,7 +10,7 @@ import click
 from rich.table import Table
 
 from caco import db
-from caco.config import get_cache_dir, get_iwad_dir, get_list_config
+from caco.config import get_cache_dir, get_id24_dir, get_iwad_dir, get_list_config
 from caco.player import format_duration
 from caco.utils import format_rating
 
@@ -40,7 +40,8 @@ from caco.cli.parsing import (
 @click.option("--deleted", is_flag=True, hidden=True, help="Show deleted WADs (use 'trash --list')")
 @click.option("--tags", is_flag=True, help="List all tags with counts")
 @click.option("--iwad", "iwad_flag", is_flag=True, help="List registered IWADs")
-def ls_cmd(args: tuple[str, ...], output: str | None, deleted: bool, tags: bool, iwad_flag: bool):
+@click.option("--id24", "id24_flag", is_flag=True, help="List registered id24 WADs")
+def ls_cmd(args: tuple[str, ...], output: str | None, deleted: bool, tags: bool, iwad_flag: bool, id24_flag: bool):
     """List WADs in your library.
 
     \b
@@ -62,14 +63,16 @@ def ls_cmd(args: tuple[str, ...], output: str | None, deleted: bool, tags: bool,
     Special modes:
       caco ls --tags                       # List all tags with counts
       caco ls --iwad                       # List registered IWADs
+      caco ls --id24                       # List registered id24 WADs
 
     \b
     Sort fields: id, playtime, rating, created, title, author, last_played, year
     Query fields: id:, title:, author:, year:, filename:, tag:, status:, source:, iwad:
     """
     # Mutually exclusive modes
-    if tags and iwad_flag:
-        err_console.print("[red]--tags and --iwad are mutually exclusive[/red]")
+    special_flags = sum([tags, iwad_flag, id24_flag])
+    if special_flags > 1:
+        err_console.print("[red]--tags, --iwad, and --id24 are mutually exclusive[/red]")
         sys.exit(1)
 
     # --tags mode: show tag counts
@@ -148,6 +151,47 @@ def ls_cmd(args: tuple[str, ...], output: str | None, deleted: bool, tags: bool,
                 iwad["family"],
                 variant_display,
                 iwad.get("title") or "-",
+                path_str,
+            )
+        console.print(table)
+        return
+
+    # --id24 mode: show registered id24 WADs
+    if id24_flag:
+        id24s = db.get_all_id24()
+
+        if output == "plain":
+            print("Name\tVersion\tTitle\tPath\tMD5")
+            for w in id24s:
+                print(
+                    f"{w['name']}\t{w.get('version') or ''}\t{w.get('title') or ''}"
+                    f"\t{w['path']}\t{w.get('md5') or ''}"
+                )
+            return
+
+        if output == "json":
+            print(json.dumps([dict(w) for w in id24s], indent=2))
+            return
+
+        if not id24s:
+            console.print("[dim]No id24 WADs registered[/dim]")
+            console.print("[dim]Use 'caco import <path>' to import id24 WAD files[/dim]")
+            return
+
+        table = Table(title=f"Registered id24 WADs ({len(id24s)})")
+        table.add_column("Name", style="cyan")
+        table.add_column("Version")
+        table.add_column("Title")
+        table.add_column("Path", style="dim")
+
+        for w in id24s:
+            path_str = w["path"]
+            if not Path(path_str).exists():
+                path_str = f"[red]{path_str} (missing)[/red]"
+            table.add_row(
+                w["name"],
+                w.get("version") or "-",
+                w.get("title") or "-",
                 path_str,
             )
         console.print(table)
@@ -529,6 +573,7 @@ def modify(args: tuple[str, ...], yes: bool, dry_run: bool, link_path: str | Non
 @click.option("--purge", is_flag=True, help="Permanently delete (no query = purge all trash)")
 @click.option("--restore", "restore_flag", is_flag=True, help="Restore from trash")
 @click.option("--iwad", "iwad_target", type=str, help="Remove IWAD (FAMILY or FAMILY/VARIANT)")
+@click.option("--id24", "id24_target", type=str, help="Remove id24 WAD by name")
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
 @click.option("--dry-run", is_flag=True, help="Show what would happen without making changes")
 @click.option("--output", "-o", type=click.Choice(["json", "plain"]), help="Output format (with --list)")
@@ -538,6 +583,7 @@ def trash(
     purge: bool,
     restore_flag: bool,
     iwad_target: str | None,
+    id24_target: str | None,
     yes: bool,
     dry_run: bool,
     output: str | None,
@@ -553,6 +599,7 @@ def trash(
       caco trash --restore <query>     # Restore from trash
       caco trash --iwad doom2          # Remove IWAD family
       caco trash --iwad doom2/bfg      # Remove IWAD variant
+      caco trash --id24 id1            # Remove id24 WAD
     """
     from caco.db._iwads import remove_iwad_with_paths
 
@@ -596,6 +643,21 @@ def trash(
             paths = remove_iwad_with_paths(family)
             _delete_managed_files(paths, iwad_dir)
             console.print(f"[green]Removed {len(paths)} variant(s) of {family}[/green]")
+        return
+
+    # --id24 mode: remove id24 WAD
+    if id24_target:
+        from caco.db._id24 import remove_id24_with_paths
+
+        id24_dir = get_id24_dir()
+        paths = remove_id24_with_paths(id24_target)
+        if paths:
+            if not dry_run:
+                _delete_managed_files(paths, id24_dir)
+            console.print(f"[green]Removed id24:[/green] {id24_target}")
+        else:
+            err_console.print(f"[red]id24 WAD '{id24_target}' not found[/red]")
+            sys.exit(1)
         return
 
     # --list mode: show trashed WADs
