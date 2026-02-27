@@ -3,14 +3,21 @@
 # Disable file completions by default
 complete -c caco -f
 
-# Helper function to get WAD IDs and titles
+# Helper functions using caco _complete for fast, purpose-built data
 function __caco_wads
-    caco ls -o plain 2>/dev/null | tail -n +2 | awk -F'\t' '{print $1"\t"$2}'
+    caco _complete wads 2>/dev/null
 end
 
-# Helper function to get tags
 function __caco_tags
-    caco ls --tags -o plain 2>/dev/null | tail -n +2 | awk -F'\t' '{print $1}'
+    caco _complete tags 2>/dev/null
+end
+
+function __caco_iwads
+    caco _complete iwads 2>/dev/null
+end
+
+function __caco_sourceports
+    caco _complete sourceports 2>/dev/null
 end
 
 # Global options
@@ -108,7 +115,7 @@ complete -c caco -n "__fish_seen_subcommand_from modify" -a "status:" -d "Filter
 complete -c caco -n "__fish_seen_subcommand_from trash" -l list -d "Show trashed WADs"
 complete -c caco -n "__fish_seen_subcommand_from trash" -l purge -d "Permanently delete"
 complete -c caco -n "__fish_seen_subcommand_from trash" -l restore -d "Restore from trash"
-complete -c caco -n "__fish_seen_subcommand_from trash" -l iwad -d "Remove IWAD (FAMILY or FAMILY/VARIANT)"
+complete -c caco -n "__fish_seen_subcommand_from trash" -l iwad -d "Remove IWAD (FAMILY or FAMILY/VARIANT)" -xa "(__caco_iwads)"
 complete -c caco -n "__fish_seen_subcommand_from trash" -s y -l yes -d "Skip confirmation"
 complete -c caco -n "__fish_seen_subcommand_from trash" -l dry-run -d "Preview changes"
 complete -c caco -n "__fish_seen_subcommand_from trash" -s o -l output -d "Output format (with --list)" -xa "json plain"
@@ -120,9 +127,9 @@ complete -c caco -n "__fish_seen_subcommand_from trash" -a "status:" -d "Filter 
 # =============================================================================
 # play command
 # =============================================================================
-complete -c caco -n "__fish_seen_subcommand_from play" -s p -l sourceport -d "Sourceport to use" -rF
+complete -c caco -n "__fish_seen_subcommand_from play" -s p -l sourceport -d "Sourceport to use" -xa "(__caco_sourceports)"
 complete -c caco -n "__fish_seen_subcommand_from play" -s 1 -l first -d "Auto-select first match"
-complete -c caco -n "__fish_seen_subcommand_from play" -l iwad -d "Play IWAD directly (e.g., doom2)"
+complete -c caco -n "__fish_seen_subcommand_from play" -l iwad -d "Play IWAD directly (e.g., doom2)" -xa "(__caco_iwads)"
 complete -c caco -n "__fish_seen_subcommand_from play" -xa "(__caco_wads)"
 complete -c caco -n "__fish_seen_subcommand_from play" -a "id:" -d "Filter by ID"
 complete -c caco -n "__fish_seen_subcommand_from play" -a "title:" -d "Filter by title"

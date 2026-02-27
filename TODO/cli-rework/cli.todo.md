@@ -35,10 +35,10 @@
 - [x] leave as-is
 
 # import
-- leave as-is (source auto-detection stays)
-- auto-detect IWAD files via MD5 — no `--iwad` flag needed
-- when an IWAD is detected, manage it separately (copy to managed iwad dir, register in DB)
-- document the auto-detection behavior
+- [x] leave as-is (source auto-detection stays)
+- [x] auto-detect IWAD files via MD5 — no `--iwad` flag needed
+- [x] when an IWAD is detected, manage it separately (copy to managed iwad dir, register in DB)
+- [x] document the auto-detection behavior
 
 # play
 - [x] rename `--yes` to `--first` / `-1` (auto-select first match for scripting)

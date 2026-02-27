@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.0.1] - 2026-02-27
+
+### Added
+
+- **`caco _complete` hidden command**: Purpose-built completion data for shell
+  scripts — replaces slow `caco ls -o plain | awk` with direct SQL/registry
+  lookups; supports 8 contexts: `wads`, `tags`, `iwads`, `statuses`,
+  `sort-fields`, `sourceports`, `modify-fields`, `query-fields`
+- **Dynamic fish completions**: `--iwad` on play/trash completes from registered
+  IWADs, `--sourceport` on play completes from known sourceport executables,
+  `--tag` on import completes from existing tags
+- **Fish completion helpers**: `__caco_iwads` and `__caco_sourceports` functions
+
+### Changed
+
+- **Fish completions**: `__caco_wads` and `__caco_tags` now call
+  `caco _complete` instead of parsing `caco ls -o plain` output through `awk`
+
+---
+
 ## [2.0.0] - 2026-02-27
 
 **Breaking**: CLI rework to follow beets conventions more closely.
