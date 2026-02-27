@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.0.1] - 2026-02-27
+
+Auto-enrich imports with Doom Wiki metadata.
+
+### Added
+
+- **Auto Doom Wiki enrichment**: After importing from idgames, Doomworld, URL,
+  or local sources, caco automatically searches Doom Wiki for a matching title
+  and backfills missing author/year, appends wiki description (with separator),
+  and auto-links IWAD — never overwrites existing fields
+- **`auto_doomwiki_enrich` config option**: Controls auto-enrichment (default:
+  `true`); failures are silently logged and never affect the import result
+- **Fuzzy title matching**: `_normalize_title()` / `_titles_match()` helpers
+  strip accents, punctuation, and whitespace for reliable title comparison
+
+---
+
 ## [2.0.0] - 2026-02-27
 
 **Breaking**: CLI rework to follow beets conventions more closely.
