@@ -145,12 +145,13 @@ def detect_iwad(wad_path: str | Path) -> str | None:
 
 
 def detect_complvl(wad_path: str | Path) -> int | None:
-    """Detect complevel from a WAD file's COMPLVL lump.
+    """Detect complevel from a WAD file's COMPLVL lump (id24 only).
 
-    The COMPLVL lump is an id24 signal — a single byte indicating the
-    compatibility level the WAD was designed for.
+    The id24 COMPLVL lump is exactly 1 byte — the byte value IS the
+    compatibility level. Text-based COMPLVL lumps (e.g. "mbf21") are
+    NOT id24 signals and are ignored here.
 
-    Returns the complevel as an integer, or None if no COMPLVL lump found.
+    Returns the complevel as an integer, or None if no id24 COMPLVL lump found.
     """
     wad_data = _load_wad_data(wad_path)
     if wad_data is None:
@@ -165,7 +166,7 @@ def detect_complvl(wad_path: str | Path) -> int | None:
         return None
 
     for name, offset, size in directory:
-        if name == "COMPLVL" and size >= 1:
+        if name == "COMPLVL" and size == 1:
             try:
                 return wad_data[offset]
             except IndexError:
