@@ -1,6 +1,7 @@
-"""Library management commands: ls, info, modify, trash, random."""
+"""Library management commands: ls, info, modify, trash, random, enrich."""
 
 import json
+import logging
 import shutil
 import sys
 from pathlib import Path
@@ -32,6 +33,8 @@ from caco.cli.parsing import (
     extract_sort_from_args,
     parse_modify_args,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @cli.command(name="ls")
@@ -1122,3 +1125,128 @@ def random_cmd(query: tuple[str, ...], info: bool):
         print(f"{wad['id']}\t{wad['title']}\t{wad['author'] or ''}")
     else:
         print(wad["id"])
+
+
+@cli.command()
+@click.argument("query", nargs=-1, shell_complete=_complete_query)
+@click.option("--complevel", is_flag=True, help="Only enrich WADs with missing complevel")
+@click.option("--dry-run", is_flag=True, help="Preview changes without applying them")
+def enrich(query: tuple[str, ...], complevel: bool, dry_run: bool):
+    """Re-run enrichment for existing WADs.
+
+    Detects complevel from cached WAD files and Doom Wiki port field.
+
+    \b
+    Examples:
+        caco enrich                    # Enrich all WADs
+        caco enrich --complevel        # Only WADs missing complevel
+        caco enrich --dry-run          # Preview what would change
+        caco enrich status:playing     # Enrich only playing WADs
+    """
+    from caco.complevel import complevel_name
+    from caco.complevel_detect import detect_complevel
+    from caco.services.import_service import ImportService
+
+    query_str = " ".join(query) if query else None
+    wads = db.search_wads(query=query_str)
+    if not wads:
+        err_console.print("[red]No WADs found[/red]")
+        sys.exit(1)
+
+    # Filter to WADs missing complevel if --complevel flag is set
+    if complevel:
+        wads = [w for w in wads if w.get("complevel") is None]
+        if not wads:
+            console.print("[dim]All matching WADs already have complevel set[/dim]")
+            return
+
+    console.print(f"[dim]Enriching {len(wads)} WAD(s)...[/dim]")
+
+    enriched: list[tuple[dict, int]] = []  # (wad, new_complevel)
+    wiki_lookups = 0
+
+    for wad in wads:
+        # Skip if complevel already set (unless not filtering by --complevel)
+        if wad.get("complevel") is not None:
+            continue
+
+        detected_cl: int | None = None
+
+        # 1. Try file-based detection if cached file exists
+        cached_path = wad.get("cached_path")
+        if cached_path and Path(cached_path).exists():
+            detected_cl = detect_complevel(cached_path)
+            if detected_cl is not None:
+                enriched.append((wad, detected_cl))
+                if not dry_run:
+                    db.update_wad(wad["id"], complevel=detected_cl)
+                continue
+
+        # 2. Try Doom Wiki lookup for port field
+        title = wad.get("title", "")
+        if title:
+            try:
+                from caco.doomwiki import DoomwikiClient
+
+                client = DoomwikiClient()
+                results = client.search_wads(title, limit=5)
+                wiki_lookups += 1
+
+                if results:
+                    from caco.services.import_service import _titles_match
+
+                    for r in results:
+                        if _titles_match(title, r.display_name):
+                            if r.port:
+                                ImportService._auto_link_complevel(wad["id"] if not dry_run else -1, r.port)
+                                # Re-check if it was set (only works when not dry_run)
+                                if not dry_run:
+                                    updated = db.get_wad(wad["id"])
+                                    if updated and updated.get("complevel") is not None:
+                                        enriched.append((wad, updated["complevel"]))
+                                else:
+                                    # For dry run, compute what would be set
+                                    detected_cl = _port_to_complevel(r.port)
+                                    if detected_cl is not None:
+                                        enriched.append((wad, detected_cl))
+                            break
+            except Exception:
+                logger.debug("Wiki lookup failed for %s", title, exc_info=True)
+
+    # Summary
+    if not enriched:
+        console.print("[dim]No new complevels detected[/dim]")
+        if wiki_lookups:
+            console.print(f"[dim]({wiki_lookups} Doom Wiki lookup(s) performed)[/dim]")
+        return
+
+    prefix = "[bold]Would set[/bold]" if dry_run else "[bold]Set[/bold]"
+
+    for wad, cl in enriched:
+        cl_name = complevel_name(cl)
+        console.print(f"  {prefix} [cyan]{wad['title']}[/cyan] -> {cl} ({cl_name})")
+
+    suffix = " [dim](dry run)[/dim]" if dry_run else ""
+    console.print(
+        f"\n[green]{len(enriched)}/{len(wads)} WAD(s) enriched[/green]"
+        f"{suffix}"
+    )
+    if wiki_lookups:
+        console.print(f"[dim]({wiki_lookups} Doom Wiki lookup(s) performed)[/dim]")
+
+
+def _port_to_complevel(port_text: str) -> int | None:
+    """Map Doom Wiki port field text to a complevel (same logic as ImportService)."""
+    mapping = {
+        "boom": 9,
+        "mbf21": 21,
+        "mbf": 11,
+        "vanilla": 2,
+        "limit-removing": 2,
+        "limit removing": 2,
+    }
+    text = port_text.lower().strip()
+    for key, cl in mapping.items():
+        if key in text:
+            return cl
+    return None
