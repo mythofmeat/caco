@@ -6,6 +6,36 @@ Development log for Caco.
 
 ---
 
+## 2026-02-28 (3)
+
+### Added
+
+- **`caco enrich` command**: Re-run enrichment for existing WADs — detects
+  complevel from cached WAD files (COMPLVL lump, UMAPINFO, DEHACKED, map names)
+  and Doom Wiki port field lookup. Supports `--complevel` (only WADs missing
+  complevel), `--dry-run`, and query filtering
+- **COMPLVL lump consolidated into `detect_complevel()`**: The function is now
+  self-contained — callers don't need to separately check for the COMPLVL lump
+
+### Fixed
+
+- **Text-based COMPLVL lump parsing**: Some WADs use text strings in the COMPLVL
+  lump (e.g., `"mbf21"`, `"vanilla"`) instead of the id24 single-byte format.
+  Previously the first byte was misread as a numeric complevel (e.g., ASCII `'m'`
+  = 109). Now correctly distinguishes 1-byte id24 format from text strings and
+  parses both
+- **id24 resource loading**: `detect_complvl()` now only matches 1-byte COMPLVL
+  lumps, preventing text-based lumps from falsely triggering id24 resource loading
+
+### Changed
+
+- **Simplified player.py auto-detect**: Replaced two-step COMPLVL-then-heuristic
+  logic with a single `detect_complevel()` call
+- **Removed duplicate `_read_wad_data()`**: `complevel_detect.py` now uses the
+  shared `_load_wad_data()` from `iwad_detect.py`
+
+---
+
 ## 2026-02-28 (2)
 
 ### Fixed
