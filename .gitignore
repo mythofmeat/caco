@@ -12,3 +12,28 @@ venv/
 coverage.json
 htmlcov/
 .claude
+
+# IDE / editor
+.idea
+.vscode
+
+# Sandbox / dotfile artifacts
+.bash_profile
+.bashrc
+.zshrc
+.zprofile
+.profile
+.gitconfig
+.gitmodules
+.mcp.json
+.ripgreprc
+
+# Bare git objects (sandbox artifacts)
+HEAD
+config
+hooks
+objects
+refs
+
+# pytest temp dirs
+pytest-of-*/
