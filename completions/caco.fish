@@ -37,6 +37,7 @@ complete -c caco -n __fish_use_subcommand -a completions -d "Generate shell comp
 complete -c caco -n __fish_use_subcommand -a stats -d "Show library statistics"
 complete -c caco -n __fish_use_subcommand -a sessions -d "Show play session history"
 complete -c caco -n __fish_use_subcommand -a cache -d "Manage WAD file cache"
+complete -c caco -n __fish_use_subcommand -a enrich -d "Re-run enrichment for existing WADs"
 complete -c caco -n __fish_use_subcommand -a profile -d "Manage sourceport config profiles"
 
 # =============================================================================
@@ -213,6 +214,18 @@ complete -c caco -n "__fish_seen_subcommand_from random" -a "source:" -d "Filter
 complete -c caco -n "__fish_seen_subcommand_from stats" -s p -l period -d "Group by period" -xa "month year"
 complete -c caco -n "__fish_seen_subcommand_from stats" -s n -l limit -d "Number of periods"
 complete -c caco -n "__fish_seen_subcommand_from stats" -l plain -d "Key=value output"
+
+# =============================================================================
+# enrich command
+# =============================================================================
+complete -c caco -n "__fish_seen_subcommand_from enrich" -l complevel -d "Only enrich WADs with missing complevel"
+complete -c caco -n "__fish_seen_subcommand_from enrich" -l dry-run -d "Preview changes"
+complete -c caco -n "__fish_seen_subcommand_from enrich" -xa "(__caco_wads)"
+complete -c caco -n "__fish_seen_subcommand_from enrich" -a "id:" -d "Filter by ID"
+complete -c caco -n "__fish_seen_subcommand_from enrich" -a "title:" -d "Filter by title"
+complete -c caco -n "__fish_seen_subcommand_from enrich" -a "author:" -d "Filter by author"
+complete -c caco -n "__fish_seen_subcommand_from enrich" -a "tag:" -d "Filter by tag"
+complete -c caco -n "__fish_seen_subcommand_from enrich" -a "status:" -d "Filter by status"
 
 # =============================================================================
 # sessions command

@@ -1,21 +1,23 @@
 """Auto-detect complevel (compatibility level) from WAD file contents.
 
 Conservative heuristics — returns None when ambiguous. Inspects lumps like
-UMAPINFO and DEHACKED to infer the minimum required complevel.
+COMPLVL, UMAPINFO and DEHACKED to infer the minimum required complevel.
 
 Detection hierarchy:
-1. UMAPINFO lump present -> MBF21 (21)
-2. DEHACKED with MBF codepointers -> MBF (11)
-3. DEHACKED without MBF features -> None (ambiguous — could be vanilla or Boom)
-4. ExMy maps only, no DEHACKED/UMAPINFO -> vanilla (2)
-5. MAPxx maps without special lumps -> None (could be vanilla doom2 or Boom)
+1. COMPLVL lump (id24 signal) -> byte value directly
+2. UMAPINFO lump present -> MBF21 (21)
+3. DEHACKED with MBF21 codepointers -> MBF21 (21)
+4. DEHACKED with MBF codepointers -> MBF (11)
+5. DEHACKED without MBF features -> None (ambiguous — could be vanilla or Boom)
+6. ExMy maps only, no DEHACKED/UMAPINFO -> vanilla (2)
+7. MAPxx maps without special lumps -> None (could be vanilla doom2 or Boom)
 """
 
 import logging
 import re
-import zipfile
 from pathlib import Path
 
+from caco.iwad_detect import _load_wad_data
 from caco.utils import parse_wad_directory
 
 logger = logging.getLogger(__name__)
@@ -75,18 +77,29 @@ def detect_complevel(wad_path: str | Path) -> int | None:
     """Detect complevel from WAD file contents.
 
     Returns complevel int if confidently detected, or None if ambiguous.
+    Checks COMPLVL lump first (id24 signal), then falls back to heuristics.
     """
     wad_path = Path(wad_path)
     if not wad_path.exists():
         return None
 
     try:
-        wad_data = _read_wad_data(wad_path)
+        wad_data = _load_wad_data(wad_path)
         if wad_data is None:
             return None
 
         directory = parse_wad_directory(wad_data)
         lump_names = {name for name, _off, _sz in directory}
+
+        # Check for COMPLVL lump (id24 signal) — single byte = complevel
+        for name, offset, size in directory:
+            if name == "COMPLVL" and size >= 1:
+                try:
+                    cl = wad_data[offset]
+                    logger.info("Detected COMPLVL lump -> complevel %d (id24)", cl)
+                    return cl
+                except IndexError:
+                    pass
 
         # Check for UMAPINFO -> MBF21
         if "UMAPINFO" in lump_names:
@@ -118,28 +131,6 @@ def detect_complevel(wad_path: str | Path) -> int | None:
     except Exception as e:
         logger.debug("Failed to detect complevel from %s: %s", wad_path, e)
         return None
-
-
-def _read_wad_data(wad_path: Path) -> bytes | None:
-    """Read WAD data, handling ZIP-wrapped WADs."""
-    if wad_path.suffix.lower() == ".zip":
-        try:
-            with zipfile.ZipFile(wad_path) as zf:
-                for name in zf.namelist():
-                    if name.lower().endswith(".wad"):
-                        return zf.read(name)
-        except (zipfile.BadZipFile, KeyError):
-            return None
-        return None
-
-    data = wad_path.read_bytes()
-    if len(data) < 12:
-        return None
-
-    magic = data[:4]
-    if magic in (b"IWAD", b"PWAD"):
-        return data
-    return None
 
 
 def _read_lump_text(

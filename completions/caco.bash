@@ -91,7 +91,7 @@ _caco() {
         if [[ "$cur" == -* ]]; then
             COMPREPLY=($(compgen -W "--tui --gui --help" -- "$cur"))
         else
-            COMPREPLY=($(compgen -W "ls info modify trash play import config random completions stats cache" -- "$cur"))
+            COMPREPLY=($(compgen -W "ls info modify trash play import config random completions stats cache enrich" -- "$cur"))
         fi
         return
     fi
@@ -200,6 +200,14 @@ _caco() {
                         COMPREPLY=($(compgen -W "--dry-run -y --yes --help" -- "$cur"))
                         ;;
                 esac
+            fi
+            ;;
+        enrich)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--complevel --dry-run --help" -- "$cur"))
+            else
+                _caco_wads
+                _caco_query_fields
             fi
             ;;
     esac

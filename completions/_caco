@@ -180,6 +180,14 @@ _caco_stats() {
         '--help[Show help]'
 }
 
+_caco_enrich() {
+    _arguments \
+        '--complevel[Only enrich WADs with missing complevel]' \
+        '--dry-run[Preview changes]' \
+        '--help[Show help]' \
+        '*:query:__caco_wads_or_query'
+}
+
 _caco_cache() {
     local -a subcmds
     subcmds=(
@@ -240,6 +248,7 @@ _caco() {
         'completions:Generate shell completions'
         'stats:Show library statistics'
         'cache:Manage WAD file cache'
+        'enrich:Re-run enrichment for existing WADs'
     )
 
     if (( CURRENT == 2 )); then
@@ -270,6 +279,7 @@ _caco() {
         random) _caco_random ;;
         stats) _caco_stats ;;
         cache) _caco_cache ;;
+        enrich) _caco_enrich ;;
     esac
 }
 

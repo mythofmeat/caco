@@ -365,23 +365,13 @@ def play(
 
     # Auto-detect complevel if not explicitly set
     if wad.get("complevel") is None and wad_path and get_auto_detect_complevel():
-        # Try COMPLVL lump first (id24 signal)
-        from caco.iwad_detect import detect_complvl
+        from caco.complevel_detect import detect_complevel
 
-        detected_cl = detect_complvl(wad_path)
+        detected_cl = detect_complevel(wad_path)
         if detected_cl is not None:
-            logger.info("Auto-detected complevel (COMPLVL lump): %d for WAD %d", detected_cl, wad_id)
+            logger.info("Auto-detected complevel: %d for WAD %d", detected_cl, wad_id)
             db.update_wad(wad_id, complevel=detected_cl)
             wad["complevel"] = detected_cl
-        else:
-            # Fall back to heuristic detection
-            from caco.complevel_detect import detect_complevel
-
-            detected_cl = detect_complevel(wad_path)
-            if detected_cl is not None:
-                logger.info("Auto-detected complevel (heuristic): %d for WAD %d", detected_cl, wad_id)
-                db.update_wad(wad_id, complevel=detected_cl)
-                wad["complevel"] = detected_cl
 
     # Add IWAD (CLI option would be in extra_args, so: WAD-specific > global config)
     iwad = wad.get("custom_iwad") or get_iwad()

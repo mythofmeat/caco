@@ -42,6 +42,7 @@ complete -c caco -n __fish_use_subcommand -a random -d "Pick a random WAD (print
 complete -c caco -n __fish_use_subcommand -a completions -d "Generate shell completions"
 complete -c caco -n __fish_use_subcommand -a stats -d "Show library statistics"
 complete -c caco -n __fish_use_subcommand -a cache -d "Manage WAD file cache"
+complete -c caco -n __fish_use_subcommand -a enrich -d "Re-run enrichment for existing WADs"
 
 # =============================================================================
 # ls command
@@ -220,6 +221,18 @@ complete -c caco -n "__fish_seen_subcommand_from cache; and __fish_seen_subcomma
 complete -c caco -n "__fish_seen_subcommand_from cache; and __fish_seen_subcommand_from prune" -l dry-run -d "Show what would be deleted"
 complete -c caco -n "__fish_seen_subcommand_from cache; and __fish_seen_subcommand_from prune" -s y -l yes -d "Skip confirmation"
 
+# =============================================================================
+# enrich command
+# =============================================================================
+complete -c caco -n "__fish_seen_subcommand_from enrich" -l complevel -d "Only enrich WADs with missing complevel"
+complete -c caco -n "__fish_seen_subcommand_from enrich" -l dry-run -d "Preview changes"
+complete -c caco -n "__fish_seen_subcommand_from enrich" -xa "(__caco_wads)"
+complete -c caco -n "__fish_seen_subcommand_from enrich" -a "id:" -d "Filter by ID"
+complete -c caco -n "__fish_seen_subcommand_from enrich" -a "title:" -d "Filter by title"
+complete -c caco -n "__fish_seen_subcommand_from enrich" -a "author:" -d "Filter by author"
+complete -c caco -n "__fish_seen_subcommand_from enrich" -a "tag:" -d "Filter by tag"
+complete -c caco -n "__fish_seen_subcommand_from enrich" -a "status:" -d "Filter by status"
+
 """
 
 BASH_SCRIPT = r"""# Bash completions for caco
@@ -315,7 +328,7 @@ _caco() {
         if [[ "$cur" == -* ]]; then
             COMPREPLY=($(compgen -W "--tui --gui --help" -- "$cur"))
         else
-            COMPREPLY=($(compgen -W "ls info modify trash play import config random completions stats cache" -- "$cur"))
+            COMPREPLY=($(compgen -W "ls info modify trash play import config random completions stats cache enrich" -- "$cur"))
         fi
         return
     fi
@@ -424,6 +437,14 @@ _caco() {
                         COMPREPLY=($(compgen -W "--dry-run -y --yes --help" -- "$cur"))
                         ;;
                 esac
+            fi
+            ;;
+        enrich)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--complevel --dry-run --help" -- "$cur"))
+            else
+                _caco_wads
+                _caco_query_fields
             fi
             ;;
     esac
@@ -654,6 +675,14 @@ _caco_cache() {
     esac
 }
 
+_caco_enrich() {
+    _arguments \
+        '--complevel[Only enrich WADs with missing complevel]' \
+        '--dry-run[Preview changes]' \
+        '--help[Show help]' \
+        '*:query:__caco_wads_or_query'
+}
+
 # ---------------------------------------------------------------------------
 # Main dispatcher
 # ---------------------------------------------------------------------------
@@ -674,6 +703,7 @@ _caco() {
         'completions:Generate shell completions'
         'stats:Show library statistics'
         'cache:Manage WAD file cache'
+        'enrich:Re-run enrichment for existing WADs'
     )
 
     if (( CURRENT == 2 )); then
@@ -704,6 +734,7 @@ _caco() {
         random) _caco_random ;;
         stats) _caco_stats ;;
         cache) _caco_cache ;;
+        enrich) _caco_enrich ;;
     esac
 }
 
