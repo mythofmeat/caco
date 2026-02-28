@@ -312,6 +312,8 @@ class DetailPanel(QScrollArea):
         if wad.get("complevel") is not None:
             from caco.complevel import complevel_name
             source_parts.append(f"Complevel: {wad['complevel']} ({complevel_name(wad['complevel'])})")
+        if wad.get("custom_iwad"):
+            source_parts.append(f"IWAD: {wad['custom_iwad']}")
         if wad.get("custom_config"):
             source_parts.append(f"Config: {wad['custom_config']}")
         self._source_label.setText("\n".join(source_parts))

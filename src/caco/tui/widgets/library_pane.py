@@ -64,6 +64,8 @@ class LibraryPane(Widget):
         Binding("S", "show_stats", "Stats", show=False, key_display="S"),
         # Cache
         Binding("C", "show_cache", "Cache", show=False, key_display="C"),
+        # Resources (IWAD/id24 management)
+        Binding("W", "show_resources", "Resources", show=False, key_display="W"),
         # Panel toggle
         Binding("P", "toggle_panel", "Panel", show=False, key_display="P"),
         # Escape
@@ -613,6 +615,15 @@ class LibraryPane(Widget):
         """Show cache management screen."""
         from caco.tui.screens.cache import CacheScreen
         self.app.push_screen(CacheScreen())
+
+    # -------------------------------------------------------------------------
+    # Resources Screen
+    # -------------------------------------------------------------------------
+
+    def action_show_resources(self) -> None:
+        """Show IWAD/id24 resource management screen."""
+        from caco.tui.screens.resources import ResourcesScreen
+        self.app.push_screen(ResourcesScreen())
 
     # -------------------------------------------------------------------------
     # Panel Toggle & Responsive Layout

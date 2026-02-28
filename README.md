@@ -114,9 +114,10 @@ caco --gui
 | Key | Action |
 |-----|--------|
 | `Ctrl+F` | Focus filter input |
-| `F5` | Refresh library |
+| `Ctrl+R` | Resources (IWAD/id24 management) |
 | `Ctrl+S` | Library statistics |
 | `Ctrl+K` | Cache management |
+| `F5` | Refresh library |
 | `Alt+1-9` | Switch tabs |
 | `Escape` | Clear filter |
 
@@ -187,6 +188,7 @@ Use `Tab` key to switch between tabs.
 | `u` | Restore WAD from trash (in trash view) |
 | `S` | Open library stats screen |
 | `C` | Open cache management screen |
+| `W` | Open resources screen (IWAD/id24 management) |
 | `P` | Toggle info panel visibility |
 | `q` | Quit/go back |
 

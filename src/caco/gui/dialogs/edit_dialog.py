@@ -126,9 +126,28 @@ class EditDialog(QDialog):
         launch_group = QGroupBox("Launch Config")
         launch_form = QFormLayout(launch_group)
 
-        self._iwad_input = QLineEdit(self._wad.get("custom_iwad") or "")
-        self._iwad_input.setPlaceholderText("Override global IWAD")
-        launch_form.addRow("Custom IWAD:", self._iwad_input)
+        self._iwad_combo = QComboBox()
+        self._iwad_combo.setEditable(True)
+        self._iwad_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self._iwad_combo.addItem("(none)", "")
+        # Populate with registered IWAD families
+        all_iwads = db.get_all_iwads()
+        seen_families: set[str] = set()
+        for row in all_iwads:
+            family = row["family"]
+            if family not in seen_families:
+                seen_families.add(family)
+                self._iwad_combo.addItem(family, family)
+        # Set current value
+        current_iwad = self._wad.get("custom_iwad") or ""
+        idx = self._iwad_combo.findData(current_iwad)
+        if idx >= 0:
+            self._iwad_combo.setCurrentIndex(idx)
+        elif current_iwad:
+            self._iwad_combo.setCurrentText(current_iwad)
+        else:
+            self._iwad_combo.setCurrentIndex(0)
+        launch_form.addRow("Custom IWAD:", self._iwad_combo)
 
         self._sourceport_input = QLineEdit(self._wad.get("custom_sourceport") or "")
         self._sourceport_input.setPlaceholderText("Override global sourceport")
@@ -214,6 +233,10 @@ class EditDialog(QDialog):
                 )
                 return
 
+        # Parse custom IWAD from combo
+        iwad_text = self._iwad_combo.currentText().strip()
+        custom_iwad = iwad_text if iwad_text and iwad_text != "(none)" else None
+
         # Build update fields
         fields = {
             "title": title,
@@ -223,7 +246,7 @@ class EditDialog(QDialog):
             "rating": self._rating_combo.currentData(),
             "notes": self._notes_input.toPlainText().strip() or None,
             "description": self._desc_input.toPlainText().strip() or None,
-            "custom_iwad": self._iwad_input.text().strip() or None,
+            "custom_iwad": custom_iwad,
             "custom_sourceport": self._sourceport_input.text().strip() or None,
             "complevel": complevel,
             "custom_config": self._config_input.text().strip() or None,

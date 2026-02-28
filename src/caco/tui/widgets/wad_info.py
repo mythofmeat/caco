@@ -114,6 +114,10 @@ class WadInfoPanel(Vertical):
             from caco.complevel import complevel_name
             details_lines.append(f"CL: {wad['complevel']} ({complevel_name(wad['complevel'])})")
 
+        # Custom IWAD
+        if wad.get("custom_iwad"):
+            details_lines.append(f"IWAD: {wad['custom_iwad']}")
+
         # Config profile
         if wad.get("custom_config"):
             details_lines.append(f"Config: {wad['custom_config']}")

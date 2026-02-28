@@ -120,6 +120,9 @@ class MainWindow(QMainWindow):
         self._download_bar.hide()
         self._status_bar.addPermanentWidget(self._download_bar)
 
+        # -- Menu bar --
+        self._setup_menu_bar()
+
         # -- Keyboard shortcuts --
         self._setup_shortcuts()
 
@@ -166,13 +169,32 @@ class MainWindow(QMainWindow):
         # Restore saved geometry
         self._restore_geometry()
 
+    def _setup_menu_bar(self):
+        """Set up the application menu bar."""
+        menu_bar = self.menuBar()
+
+        # Tools menu
+        tools_menu = menu_bar.addMenu("&Tools")
+
+        resources_action = tools_menu.addAction("&Resources...")
+        resources_action.setShortcut(QKeySequence("Ctrl+R"))
+        resources_action.triggered.connect(self._on_resources)
+
+        tools_menu.addSeparator()
+
+        stats_action = tools_menu.addAction("Library &Statistics...")
+        stats_action.setShortcut(QKeySequence("Ctrl+S"))
+        stats_action.triggered.connect(self._on_stats)
+
+        cache_action = tools_menu.addAction("Cache &Management...")
+        cache_action.setShortcut(QKeySequence("Ctrl+K"))
+        cache_action.triggered.connect(self._on_cache)
+
     def _setup_shortcuts(self):
         """Global keyboard shortcuts."""
         QShortcut(QKeySequence("Ctrl+F"), self, self._focus_filter)
         QShortcut(QKeySequence("Escape"), self, self._on_escape)
         QShortcut(QKeySequence("F5"), self, self._library_tab.refresh)
-        QShortcut(QKeySequence("Ctrl+S"), self, self._on_stats)
-        QShortcut(QKeySequence("Ctrl+K"), self, self._on_cache)
         for i in range(min(9, self._tab_bar.count())):
             QShortcut(
                 QKeySequence(f"Alt+{i + 1}"),
@@ -491,6 +513,13 @@ class MainWindow(QMainWindow):
         """Called when a WAD is imported from any source."""
         self._library_tab.refresh()
         self._status_bar.showMessage(f"WAD imported (ID: {wad_id})", 5000)
+
+    def _on_resources(self):
+        """Open the IWAD/id24 resource management dialog."""
+        from caco.gui.dialogs.resources_dialog import ResourcesDialog
+
+        dialog = ResourcesDialog(parent=self)
+        dialog.exec()
 
     def _on_stats(self):
         """Open the library statistics dialog."""

@@ -113,7 +113,8 @@ src/caco/
 │   │   ├── confirm_delete.py # Delete confirmation modal
 │   │   ├── stats.py       # Library statistics screen
 │   │   ├── wad_stats.py   # Per-map stats screen (stats.txt/levelstat.txt)
-│   │   └── cache.py       # Cache management screen
+│   │   ├── cache.py       # Cache management screen
+│   │   └── resources.py   # Combined IWAD/id24 management screen (tabbed)
 │   └── widgets/    # Widget classes
 │       ├── base_search_pane.py # Abstract base for search panes
 │       ├── wad_table.py   # DataTable for WAD list (with vim bindings, batch stats)
@@ -157,7 +158,8 @@ src/caco/
 │   │   ├── sessions_dialog.py # Session history table
 │   │   ├── stats_dialog.py   # Library statistics overview
 │   │   ├── wad_stats_dialog.py # Per-map stats table with import/export
-│   │   └── cache_dialog.py   # Cache management
+│   │   ├── cache_dialog.py     # Cache management
+│   │   └── resources_dialog.py # Combined IWAD/id24 management (tabbed)
 │   ├── workers/
 │   │   ├── play_worker.py      # QThread for sourceport launch
 │   │   ├── search_worker.py    # QRunnable for API searches
@@ -170,7 +172,8 @@ src/caco/
 │       └── loader.py     # Async QThreadPool-based thumbnail loader
 ├── services/
 │   ├── __init__.py
-│   └── import_service.py  # Centralized duplicate-check-and-import for all 5 source types
+│   ├── import_service.py  # Centralized duplicate-check-and-import for all 5 source types
+│   └── resource_service.py  # Shared IWAD/id24 registration (identify + copy + DB insert)
 ├── sources/
 │   ├── base.py     # BaseSource mixin (shared context-manager lifecycle)
 │   ├── idgames.py  # idgames archive adapter (extends BaseSource)

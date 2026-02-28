@@ -82,47 +82,24 @@ def _infer_title_from_url(url: str) -> str:
 
 def _register_iwad(path, family: str, variant: str, title: str) -> None:
     """Register an IWAD file: copy to managed dir and add to DB."""
-    import shutil
-    from caco.config import get_iwad_dir
-    from caco.utils import compute_md5
-    from caco.db._iwads import add_iwad, get_iwad_variant, managed_iwad_filename
+    from caco.services.resource_service import register_iwad
 
-    existing = get_iwad_variant(family, variant)
-    if existing:
+    result = register_iwad(path)
+    if result is None:
         console.print(f"[yellow]Already registered:[/yellow] {title} ({family}/{variant})")
-        return
-
-    iwad_dir = get_iwad_dir()
-    managed_rel = managed_iwad_filename(family, variant)
-    dest = iwad_dir / managed_rel
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(str(path), str(dest))
-
-    md5 = compute_md5(path)
-    add_iwad(family, variant, str(dest), title=title, md5=md5)
-    console.print(f"[green]Registered IWAD:[/green] {title} ({family}/{variant})")
+    else:
+        console.print(f"[green]Registered IWAD:[/green] {result[2]} ({result[0]}/{result[1]})")
 
 
 def _register_id24(path, name: str, version: str, title: str) -> None:
     """Register an id24 WAD file: copy to managed dir and add to DB."""
-    import shutil
-    from caco.config import get_id24_dir
-    from caco.utils import compute_md5
-    from caco.db._id24 import add_id24, get_id24
+    from caco.services.resource_service import register_id24
 
-    existing = get_id24(name)
-    if existing:
+    result = register_id24(path)
+    if result is None:
         console.print(f"[yellow]Already registered:[/yellow] {title} ({name})")
-        return
-
-    id24_dir = get_id24_dir()
-    id24_dir.mkdir(parents=True, exist_ok=True)
-    dest = id24_dir / f"{name}.wad"
-    shutil.copy2(str(path), str(dest))
-
-    md5 = compute_md5(path)
-    add_id24(name, str(dest), version=version, title=title, md5=md5)
-    console.print(f"[green]Registered id24:[/green] {title} ({version})")
+    else:
+        console.print(f"[green]Registered id24:[/green] {result[2]} ({result[1]})")
 
 
 def _complete_llm_backends(ctx, param, incomplete):

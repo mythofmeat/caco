@@ -8,6 +8,40 @@ Development log for Caco.
 
 ## 2026-02-28
 
+IWAD/id24 resource management screens for TUI and GUI, edit form upgrades, and
+GUI menu bar.
+
+### Added
+
+- **TUI Resources Screen** (`W` key): Combined tabbed screen for managing IWAD
+  and id24 WAD registries — list, import from file path, remove
+- **GUI Resources Dialog** (`Ctrl+R`): Combined tabbed dialog for IWAD/id24
+  management with browse/import and remove
+- **GUI menu bar**: Tools menu with Resources (`Ctrl+R`), Library Statistics
+  (`Ctrl+S`), and Cache Management (`Ctrl+K`)
+- **TUI IWAD dropdown**: Edit form IWAD field upgraded from text input to Select
+  dropdown populated with registered families, with "Other..." fallback for
+  custom values
+- **TUI companion files**: TextArea added to edit form for managing companion
+  files (one path per line)
+- **GUI IWAD combo**: Edit dialog IWAD field upgraded from QLineEdit to editable
+  QComboBox populated with registered families
+- **IWAD display**: `custom_iwad` now shown in both TUI info panel and GUI
+  detail panel
+- **Shared resource service**: `register_iwad()` / `register_id24()` extracted
+  into `services/resource_service.py` — used by CLI, TUI, and GUI
+
+### Changed
+
+- **CLI import refactor**: `_register_iwad()` and `_register_id24()` in
+  `import_cmds.py` now delegate to shared `resource_service` helpers
+- **GUI shortcuts**: `Ctrl+S` and `Ctrl+K` moved from `_setup_shortcuts()` to
+  menu bar actions (avoids double-trigger)
+
+---
+
+## 2026-02-28
+
 Investigated binary compilation/distribution options.
 
 ### Research
