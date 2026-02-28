@@ -194,6 +194,10 @@ class ImportService:
             if entry.iwad:
                 self._auto_link_iwad(wad_id, entry.iwad)
 
+            # Auto-set complevel from port requirement field
+            if entry.port:
+                self._auto_link_complevel(wad_id, entry.port)
+
         except Exception:
             logger.debug("Auto-enrich from Doom Wiki failed for WAD %d (%s)", wad_id, title, exc_info=True)
 
