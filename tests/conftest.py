@@ -11,10 +11,19 @@ def tmp_db(tmp_path):
     """Provide an in-memory-like SQLite database for testing.
 
     Patches get_db_path() to return a temporary file so init_db() and all
-    db functions use the test database.
+    db functions use the test database.  Also patches CONFIG_DIR and
+    CONFIG_FILE so migrations that call load_config() / ensure_config_keys()
+    don't touch the real user config (which may be read-only in CI/sandbox).
     """
     db_path = tmp_path / "test.db"
-    with patch("caco.config.get_db_path", return_value=db_path):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    config_file = config_dir / "config.toml"
+    with (
+        patch("caco.config.get_db_path", return_value=db_path),
+        patch("caco.config.CONFIG_DIR", config_dir),
+        patch("caco.config.CONFIG_FILE", config_file),
+    ):
         from caco import db
         # Clear config cache between tests
         from caco import config
@@ -100,7 +109,7 @@ def tmp_config(tmp_path):
     Patches CONFIG_DIR and CONFIG_FILE so tests don't touch real config.
     """
     config_dir = tmp_path / "config"
-    config_dir.mkdir()
+    config_dir.mkdir(exist_ok=True)
     config_file = config_dir / "config.toml"
 
     with (

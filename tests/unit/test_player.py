@@ -123,12 +123,14 @@ class TestPlayIwad:
         mock_proc = MagicMock()
         mock_proc.wait.return_value = 0
         mock_proc.returncode = 0
+        profile = tmp_path / "gzdoom" / "default.cfg"
 
         with (
             patch("caco.player.resolve_iwad", return_value=str(wad)),
             patch("caco.player.resolve_sourceport", return_value="/usr/bin/gzdoom"),
             patch("caco.player.shutil.which", return_value="/usr/bin/gzdoom"),
             patch("caco.player.get_sourceport_args", return_value=[]),
+            patch("caco.player.get_profile_path", return_value=profile),
             patch("subprocess.Popen", return_value=mock_proc) as mock_popen,
         ):
             result = play_iwad("doom2", sourceport="gzdoom", extra_args=["-warp", "1"])
@@ -150,12 +152,14 @@ class TestPlayIwad:
         mock_proc = MagicMock()
         mock_proc.wait.return_value = 0
         mock_proc.returncode = 0
+        profile = tmp_path / "gzdoom" / "default.cfg"
 
         with (
             patch("caco.player.resolve_iwad", return_value=str(wad)),
             patch("caco.player.resolve_sourceport", return_value="/usr/bin/gzdoom"),
             patch("caco.player.shutil.which", return_value="/usr/bin/gzdoom"),
             patch("caco.player.get_sourceport_args", return_value=["-nomusic"]),
+            patch("caco.player.get_profile_path", return_value=profile),
             patch("subprocess.Popen", return_value=mock_proc) as mock_popen,
         ):
             play_iwad("doom2", sourceport="gzdoom")
