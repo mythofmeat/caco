@@ -6,6 +6,22 @@ Development log for Caco.
 
 ---
 
+## 2026-02-28 (2)
+
+### Fixed
+
+- **Complevel auto-detection on import**: `_auto_enrich_doomwiki()` now sets
+  complevel from the Doom Wiki `port` field (e.g., "Boom-compatible" → 9) for
+  idgames, Doomworld, URL, and local imports — previously only direct Doomwiki
+  imports got complevel auto-linked
+
+### Changed
+
+- **Switched to uv**: Project uses `uv sync` / `uv run` instead of manual venv
+  activation and pip install
+
+---
+
 ## 2026-02-28
 
 IWAD/id24 resource management screens for TUI and GUI, edit form upgrades, and
