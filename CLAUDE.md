@@ -55,7 +55,7 @@ src/caco/
 ├── cli/            # Click-based CLI (split into submodules)
 │   ├── __init__.py     # cli group, shared helpers, command aliases, JSON/plain renderers
 │   ├── parsing.py      # Argument classification: sort extraction, modify parsing, ModifyAction
-│   ├── library.py      # ls, info, modify, trash, random
+│   ├── library.py      # ls, info, modify, trash, random, enrich
 │   ├── import_cmds.py  # unified import command with source flags
 │   ├── play_cmd.py     # play command (--first, --iwad)
 │   ├── cache.py        # cache list/clear/prune
@@ -67,7 +67,7 @@ src/caco/
 │   ├── profile_cmd.py  # profile command group (ls, create, edit, cp, rm, path)
 │   └── _completion_scripts.py  # Embedded fish/bash/zsh completion scripts
 ├── complevel.py    # Shared complevel names, aliases, parse_complevel()
-├── complevel_detect.py # Auto-detect complevel from WAD lumps (UMAPINFO, DEHACKED)
+├── complevel_detect.py # Auto-detect complevel from WAD lumps (COMPLVL, UMAPINFO, DEHACKED)
 ├── iwad_detect.py  # Auto-detect IWAD family from WAD file PNAMES/map lumps
 ├── saves.py        # Save game management: find, backup, restore, clean save files
 ├── demos.py        # Demo file management: find, clean, generate names
@@ -226,8 +226,8 @@ src/caco/
 - Config profiles: `SOURCEPORT_DIR = DB_DIR / "sourceports"`; `get_sourceport_dir()` / `get_profile_path(sourceport, profile)` / `list_profiles()` in `config.py`; auto-created `default.cfg` on first play for dsda-family ports; resolution: CLI `--config` > WAD `custom_config` > `"default"`; `caco profile` command group (ls, create, edit, cp, rm, path); `config:` query field searches `custom_config` column
 - Per-WAD data dirs: `player.py` injects data dir args when `manage_data_dirs=True` (default); `get_wad_data_dir(id, title)` returns `{data_dir}/{id}_{sanitized_title}/`; `find_wad_data_dir(id)` finds existing dir by ID prefix (handles title renames); `_sanitize_dirname()` lowercases, replaces non-alnum with hyphens, truncates to 64 chars
 - IWAD auto-detection: `iwad_detect.py` inspects PWAD file PNAMES lump for TNT-only (197) / Plutonia-only (78) patches, then falls back to map lump names (ExMy→doom, MAPxx→doom2); self-contained WADs (patches provided as lumps) don't trigger detection; result persisted to `custom_iwad` on first play; `auto_detect_iwad` config (default: true); `parse_wad_directory()` shared between `iwad_detect.py` and `gui/thumbnails/extractor.py` via `utils.py`
-- Complevel: single `complevel INTEGER` column; `complevel.py` has shared names/aliases/parser; `complevel_detect.py` auto-detects from WAD lumps (UMAPINFO→21, DEHACKED with MBF codepointers→11, ExMy-only→2); `detect_complvl()` in `iwad_detect.py` reads COMPLVL lump (single byte = id24 signal); `sourceports.py` `get_complevel_args()` injects `-complevel N` for dsda and woof families; `player.py` auto-detects on first play (COMPLVL lump first, then heuristic) and stores to `complevel` column; CLI `play --complevel`/`-c` overrides; `complevel:` query field supports ints and aliases (vanilla/boom/mbf/mbf21); `modify complevel=boom` sets; `auto_detect_complevel` config (default: true); `_load_wad_data()` shared helper handles ZIP-wrapped WADs; Doomworld imports store extracted complevel; Doomwiki imports auto-link from `port` field
-- id24 resource auto-loading: `_get_id24_resource_args()` in `player.py` checks for COMPLVL lump directly (via `detect_complvl()`) and injects `id24res.wad` for id24 WADs; also loads id1-specific resources (id1-res, id1-tex, id1-weap, id1-mus) when playing id1.wad
+- Complevel: single `complevel INTEGER` column; `complevel.py` has shared names/aliases/parser; `complevel_detect.py` auto-detects from WAD lumps — self-contained detection hierarchy: COMPLVL lump (id24 single byte or text string like "mbf21"), UMAPINFO→21, DEHACKED with MBF codepointers→11, ExMy-only→2; `sourceports.py` `get_complevel_args()` injects `-complevel N` for dsda and woof families; `player.py` auto-detects on first play via single `detect_complevel()` call and stores to `complevel` column; CLI `play --complevel`/`-c` overrides; `complevel:` query field supports ints and aliases (vanilla/boom/mbf/mbf21); `modify complevel=boom` sets; `auto_detect_complevel` config (default: true); `_load_wad_data()` shared helper handles ZIP-wrapped WADs; Doomworld imports store extracted complevel; Doomwiki imports auto-link from `port` field; `caco enrich --complevel` backfills existing WADs
+- id24 resource auto-loading: `_get_id24_resource_args()` in `player.py` checks for COMPLVL lump directly (via `detect_complvl()` — matches only 1-byte id24 lumps, not text-based) and injects `id24res.wad` for id24 WADs; also loads id1-specific resources (id1-res, id1-tex, id1-weap, id1-mus) when playing id1.wad
 - Direct IWAD play: `caco play --iwad doom2` launches an IWAD directly via `play_iwad()` in `player.py`; no session tracking, no WAD record — just a clean sourceport launch; supports `-p`/`--sourceport` and extra args
 - Sourceport detection: `detect_sourceports()` in `sourceports.py` uses `shutil.which()` to find installed sourceports from `SOURCEPORT_FAMILIES`; play command error message lists detected ports when no sourceport is configured
 - Config auto-update: `ensure_config_keys()` in `config.py` runs on `load_config()` — compares existing config file against `DEFAULT_CONFIG` and section defaults (`[tui]`, `[gui]`, `[list]`); adds missing keys with default values; only runs if config file exists; only writes if changes are made; recursion-guarded
@@ -253,6 +253,12 @@ src/caco/
 | `f`, `fin`, `done` | finished |
 | `a`, `drop`, `dropped` | abandoned |
 | `w`, `au`, `await`, `waiting`, `wip` | awaiting-update |
+
+**Enrich command:**
+- `caco enrich [query]` — re-run enrichment for existing WADs (file-based detection + Doom Wiki lookup)
+- `caco enrich --complevel` — only target WADs with NULL complevel
+- `caco enrich --dry-run` — preview what would change without applying
+- `caco enrich status:playing` — enrich only matching WADs
 
 **Sessions command:**
 - `caco sessions <query> [--plain] [--yes]` — show play session history with per-session map tracking; displays date, time, duration, sourceport, and maps played per session; sessions without stats data show `--` in maps column

@@ -774,15 +774,18 @@ The detected IWAD is saved to `custom_iwad` so detection only runs once per WAD.
 
 ### Complevel Auto-Detection
 
-On first play, caco also inspects the WAD to auto-detect the compatibility level (complevel):
+On first play, caco inspects the WAD to auto-detect the compatibility level (complevel):
 
-1. **UMAPINFO** lump present → MBF21 (complevel 21)
-2. **DEHACKED** with MBF21 codepointers → MBF21 (21)
-3. **DEHACKED** with MBF codepointers → MBF (11)
-4. **ExMy maps only**, no special lumps → Vanilla (2)
-5. Other cases → ambiguous, skipped
+1. **COMPLVL lump** — id24 single-byte format (byte value = complevel) or text format (e.g., `"mbf21"`, `"vanilla"`)
+2. **UMAPINFO** lump present → MBF21 (complevel 21)
+3. **DEHACKED** with MBF21 codepointers → MBF21 (21)
+4. **DEHACKED** with MBF codepointers → MBF (11)
+5. **ExMy maps only**, no special lumps → Vanilla (2)
+6. Other cases → ambiguous, skipped
 
 The detected complevel is saved to the WAD record. For dsda-family sourceports, `-complevel N` is automatically added to the command line.
+
+**Backfill existing WADs:** Run `caco enrich --complevel` to detect and set complevel for WADs already in your library (uses cached files + Doom Wiki lookups).
 
 **Opt-out:** Set `auto_detect_complevel = false` in config to disable auto-detection.
 

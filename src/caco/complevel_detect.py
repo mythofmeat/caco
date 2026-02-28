@@ -91,15 +91,14 @@ def detect_complevel(wad_path: str | Path) -> int | None:
         directory = parse_wad_directory(wad_data)
         lump_names = {name for name, _off, _sz in directory}
 
-        # Check for COMPLVL lump (id24 signal) — single byte = complevel
+        # Check for COMPLVL lump — id24 uses a single byte, but some WADs
+        # use a text string (e.g. "mbf21", "vanilla")
         for name, offset, size in directory:
             if name == "COMPLVL" and size >= 1:
-                try:
-                    cl = wad_data[offset]
-                    logger.info("Detected COMPLVL lump -> complevel %d (id24)", cl)
+                cl = _parse_complvl_lump(wad_data, offset, size)
+                if cl is not None:
+                    logger.info("Detected COMPLVL lump -> complevel %d", cl)
                     return cl
-                except IndexError:
-                    pass
 
         # Check for UMAPINFO -> MBF21
         if "UMAPINFO" in lump_names:
@@ -131,6 +130,34 @@ def detect_complevel(wad_path: str | Path) -> int | None:
     except Exception as e:
         logger.debug("Failed to detect complevel from %s: %s", wad_path, e)
         return None
+
+
+def _parse_complvl_lump(wad_data: bytes, offset: int, size: int) -> int | None:
+    """Parse a COMPLVL lump, handling both id24 (1-byte) and text formats.
+
+    id24 spec: single byte where the byte value IS the complevel.
+    Some WADs use a text string instead (e.g. "mbf21", "vanilla").
+    """
+    try:
+        raw = wad_data[offset:offset + size]
+    except IndexError:
+        return None
+
+    if size == 1:
+        # id24 format: single byte = complevel number
+        return raw[0]
+
+    # Text format: try to decode as a complevel name/number
+    try:
+        text = raw.rstrip(b"\x00").decode("ascii", errors="replace").strip()
+    except Exception:
+        return None
+
+    if not text:
+        return None
+
+    from caco.complevel import parse_complevel
+    return parse_complevel(text)
 
 
 def _read_lump_text(
