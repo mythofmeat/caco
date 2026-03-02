@@ -1,7 +1,7 @@
 [Desktop Entry]
 Categories=Game
 Comment=
-Exec=caco --gui
+Exec=caco play
 Icon=/home/eshen/.repos/caco/src/desktop/icon.png
 Keywords=doom;caco
 MimeType=application/x-doom-wad;
@@ -11,3 +11,8 @@ PrefersNonDefaultGPU=false
 StartupNotify=false
 Terminal=false
 Type=Application
+Actions=gui;
+
+[Desktop Action gui]
+Name=Open GUI
+Exec=caco --gui
