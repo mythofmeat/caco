@@ -448,8 +448,9 @@ def play(
         demo_path = str(demos_dir / demo_name)
         cmd.extend(["-record", demo_path])
 
-    # Build -file list: id24 resources + companion WADs + main WAD
+    # Build -file list: id24 resources + main WAD + companion WADs
     file_args = _get_id24_resource_args(wad, wad_path)
+    companion_file_args = []
     deh_args = []
     companions = db.get_wad_companions(wad["id"], enabled_only=True)
     if companions:
@@ -464,16 +465,16 @@ def play(
                 if uses_deh_flag(port):
                     deh_args.extend(["-deh", comp_path])
                 else:
-                    file_args.append(comp_path)
+                    companion_file_args.append(comp_path)
             else:
-                file_args.append(comp_path)
+                companion_file_args.append(comp_path)
 
     # Add DEH args before -file
     if deh_args:
         cmd.extend(deh_args)
 
-    # Add the WAD file (plus any companion WADs on the same -file)
-    cmd.extend(["-file"] + file_args + [str(wad_path)])
+    # Add the WAD file before any companion WADs on the same -file.
+    cmd.extend(["-file"] + file_args + [str(wad_path)] + companion_file_args)
 
     # Add extra args from command line (highest priority, can override anything)
     if extra_args:

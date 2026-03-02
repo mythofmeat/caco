@@ -297,7 +297,7 @@ class TestPlayerCompanionFiles:
         assert cmd[file_idx + 1].endswith("test.wad")
 
     def test_companion_wad(self, tmp_path):
-        """Companion .wad file should appear in -file list before main WAD."""
+        """Companion .wad file should appear in -file list after main WAD."""
         wad = {
             "id": 1, "title": "Test", "source_type": "idgames",
             "status": "backlog", "custom_args": None,
@@ -312,10 +312,10 @@ class TestPlayerCompanionFiles:
         # Should have companion + main WAD
         assert "/path/to/music.wad" in file_args
         assert any(a.endswith("test.wad") for a in file_args)
-        # Companion should come before main WAD
+        # Companion should come after main WAD
         companion_idx = file_args.index("/path/to/music.wad")
         main_idx = next(i for i, a in enumerate(file_args) if a.endswith("test.wad"))
-        assert companion_idx < main_idx
+        assert companion_idx > main_idx
 
     def test_deh_with_dsda(self, tmp_path):
         """DEH files use -deh flag with dsda-family ports."""
@@ -380,4 +380,7 @@ class TestPlayerCompanionFiles:
         # WAD companion should be in -file list
         file_idx = cmd.index("-file")
         file_args = cmd[file_idx + 1:]
+        main_idx = next(i for i, a in enumerate(file_args) if a.endswith("test.wad"))
+        companion_idx = file_args.index("/path/to/music.wad")
         assert "/path/to/music.wad" in file_args
+        assert companion_idx > main_idx
