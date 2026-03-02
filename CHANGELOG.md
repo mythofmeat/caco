@@ -6,6 +6,61 @@ Development log for Caco.
 
 ---
 
+## 2026-03-02
+
+### Added
+
+- **Companion files redesign**: Moved from a JSON array column to a proper
+  relational model with managed storage, MD5-based deduplication, and per-WAD
+  enable/disable toggles
+  - New `companion_files_registry` table (id, md5, filename, path, size) for
+    deduplicated managed files
+  - New `wad_companions` junction table (wad_id, companion_id, enabled,
+    load_order) for per-WAD linking
+  - Managed storage at `~/.local/share/caco/companions/` with filename format
+    `{md5[:12]}_{original_filename}`
+  - `companion_orphan_cleanup` config option: `"delete"`, `"keep"`, or `"ask"`
+    (default: `"ask"`) controls behavior when a companion is unlinked from its
+    last WAD
+- **`caco companion` command group**: Dedicated CLI for managing companion files
+  - `caco companion add <query> <file>` — register and link
+  - `caco companion rm <query> <filename> [-y]` — unlink with orphan policy
+  - `caco companion enable/disable <query> <filename>` — toggle without removing
+  - `caco companion ls [query] [--plain]` — list per-WAD or all companions
+- **Migration #23**: Automatically migrates existing `companion_files` JSON data
+  to the new relational tables, copying files to managed storage
+- **Shell completions**: Fish, bash, and zsh completions for all companion
+  subcommands
+
+### Changed
+
+- **Player companion loading**: Uses `db.get_wad_companions()` instead of JSON
+  parsing; respects enabled/disabled state and load order
+- **GUI edit dialog**: Companion files shown as checkable list with Add File
+  picker and Remove button (deferred registration — only persists on Save)
+- **TUI edit screen**: Companion files shown with `[enabled]`/`[disabled]`
+  status in TextArea
+- **TUI detail screen**: Companion files loaded from junction table instead of
+  stale JSON column; shows `(off)` for disabled companions
+- **`modify --add-file/--remove-file`**: Delegates to companion service instead
+  of direct JSON manipulation; warns when `--remove-file` doesn't match
+- **Info display**: CLI, GUI, and TUI all read from `get_wad_companions()`
+
+### Fixed
+
+- **N+1 query in `companion ls`**: Global listing uses single query with
+  `COUNT` join instead of per-companion `get_companion_wads()` calls
+- **Fragile orphan check**: `companion rm` uses read-only `would_be_orphan()`
+  instead of destructive unlink-check-relink pattern
+- **GUI cancel discards changes**: Add File in edit dialog no longer immediately
+  registers companions — deferred to Save, so Cancel is side-effect-free
+- **Redundant imports**: Removed unnecessary `from caco import db as _db` in
+  TUI files that already had `db` imported at module level
+- **Stale data in TUI detail view**: `wad_detail.py` was reading the old
+  `companion_files` JSON column (no longer maintained); now uses junction table
+
+---
+
 ## 2026-02-28 (3)
 
 ### Added

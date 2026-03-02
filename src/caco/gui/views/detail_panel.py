@@ -287,19 +287,16 @@ class DetailPanel(QScrollArea):
         self._description.setText(truncate(wad.get("description") or "No description", 500))
 
         # Companion files
-        if wad.get("companion_files"):
-            import json
-            from pathlib import Path
-            try:
-                files = json.loads(wad["companion_files"])
-                if files:
-                    names = ", ".join(Path(f).name for f in files)
-                    self._companion_label.setText(f"Companion files: {names}")
-                    self._companion_label.setVisible(True)
-                else:
-                    self._companion_label.setVisible(False)
-            except json.JSONDecodeError:
-                self._companion_label.setVisible(False)
+        companions = db.get_wad_companions(wad["id"])
+        if companions:
+            parts = []
+            for c in companions:
+                name = c["filename"]
+                if not c["enabled"]:
+                    name += " (off)"
+                parts.append(name)
+            self._companion_label.setText(f"Companion files: {', '.join(parts)}")
+            self._companion_label.setVisible(True)
         else:
             self._companion_label.setVisible(False)
 

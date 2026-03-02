@@ -451,23 +451,22 @@ def play(
     # Build -file list: id24 resources + companion WADs + main WAD
     file_args = _get_id24_resource_args(wad, wad_path)
     deh_args = []
-    if wad.get("companion_files"):
-        try:
-            companions = json.loads(wad["companion_files"])
-            if isinstance(companions, list):
-                from caco.sourceports import uses_deh_flag
+    companions = db.get_wad_companions(wad["id"], enabled_only=True)
+    if companions:
+        from caco.sourceports import uses_deh_flag
 
-                deh_extensions = {".deh", ".bex"}
-                for comp in companions:
-                    if Path(comp).suffix.lower() in deh_extensions:
-                        if uses_deh_flag(port):
-                            deh_args.extend(["-deh", comp])
-                        else:
-                            file_args.append(comp)
-                    else:
-                        file_args.append(comp)
-        except json.JSONDecodeError:
-            pass
+        deh_extensions = {".deh", ".bex"}
+        for comp in companions:
+            comp_path = comp.get("path")
+            if not comp_path:
+                continue
+            if Path(comp["filename"]).suffix.lower() in deh_extensions:
+                if uses_deh_flag(port):
+                    deh_args.extend(["-deh", comp_path])
+                else:
+                    file_args.append(comp_path)
+            else:
+                file_args.append(comp_path)
 
     # Add DEH args before -file
     if deh_args:

@@ -80,6 +80,27 @@ from caco.db._iwads import (  # noqa: F401
     resolve_iwad_from_db,
 )
 
+# -- Companion file registry --
+from caco.db._companions import (  # noqa: F401
+    add_companion,
+    get_all_companions,
+    get_all_companions_with_counts,
+    get_companion,
+    get_companion_by_md5,
+    get_companion_wads,
+    get_next_load_order,
+    get_wad_companion_by_filename,
+    get_wad_companions,
+    is_orphan,
+    link_companion,
+    remove_companion,
+    remove_companion_with_path,
+    set_companion_enabled,
+    set_companion_load_order,
+    unlink_companion,
+    would_be_orphan,
+)
+
 # -- id24 registry --
 from caco.db._id24 import (  # noqa: F401
     KNOWN_ID24_FILENAMES,
@@ -183,6 +204,24 @@ __all__ = [
     "remove_iwad",
     "remove_iwad_with_paths",
     "resolve_iwad_from_db",
+    # Companion file registry
+    "add_companion",
+    "get_all_companions",
+    "get_all_companions_with_counts",
+    "get_companion",
+    "get_companion_by_md5",
+    "get_companion_wads",
+    "get_next_load_order",
+    "get_wad_companion_by_filename",
+    "get_wad_companions",
+    "is_orphan",
+    "link_companion",
+    "remove_companion",
+    "remove_companion_with_path",
+    "set_companion_enabled",
+    "set_companion_load_order",
+    "unlink_companion",
+    "would_be_orphan",
     # id24 registry
     "KNOWN_ID24_FILENAMES",
     "KNOWN_ID24_WADS",

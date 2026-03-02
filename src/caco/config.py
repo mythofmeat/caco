@@ -14,6 +14,7 @@ CACHE_DIR = DB_DIR / "wads"
 IWAD_DIR = DB_DIR / "iwads"
 ID24_DIR = DB_DIR / "id24"
 DATA_DIR = DB_DIR / "data"
+COMPANION_DIR = DB_DIR / "companions"
 BACKUP_DIR = DB_DIR / "backups"
 SOURCEPORT_DIR = DB_DIR / "sourceports"
 
@@ -33,6 +34,7 @@ DEFAULT_CONFIG = {
     "cache_max_size_gb": 0,
     "cache_max_age_days": 0,
     "cache_auto_clean": False,
+    "companion_orphan_cleanup": "ask",
 }
 
 # Default list configuration
@@ -218,6 +220,18 @@ def get_iwad_dir() -> Path:
 def get_id24_dir() -> Path:
     """Get the managed id24 WAD directory."""
     return ID24_DIR
+
+
+def get_companion_dir() -> Path:
+    """Get the managed companion files directory."""
+    return COMPANION_DIR
+
+
+def get_companion_orphan_cleanup() -> str:
+    """Get orphan cleanup policy: 'delete', 'keep', or 'ask'."""
+    config = load_config()
+    value = config.get("companion_orphan_cleanup", "ask")
+    return value if value in ("delete", "keep", "ask") else "ask"
 
 
 def set_cache_dir(path: str) -> None:

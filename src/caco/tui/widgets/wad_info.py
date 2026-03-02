@@ -127,15 +127,11 @@ class WadInfoPanel(Vertical):
             details_lines.append(f"\n[dim]{truncate(wad['description'], 120)}[/dim]")
 
         # Companion files
-        if wad.get("companion_files"):
-            import json as _json
-            try:
-                files = _json.loads(wad["companion_files"])
-                if files:
-                    names = ", ".join(Path(f).name for f in files)
-                    details_lines.append(f"Files: {names}")
-            except _json.JSONDecodeError:
-                pass
+        companions = db.get_wad_companions(wad["id"])
+        if companions:
+            names = ", ".join(c["filename"] for c in companions if c["enabled"])
+            if names:
+                details_lines.append(f"Files: {names}")
 
         # Source
         details_lines.append(f"[dim]Source: {wad['source_type']}[/dim]")

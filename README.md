@@ -453,29 +453,38 @@ Priority: CLI arguments > Per-WAD config > Global config
 
 ### Companion Files
 
-Many WADs ship with companion files — DEH patches, music WADs, additional PWADs — that need to be loaded together. Caco manages these automatically:
+Many WADs ship with companion files — DEH patches, music WADs, additional PWADs — that need to be loaded together. Caco manages these with dedicated storage, MD5-based deduplication, and per-WAD enable/disable toggles:
 
 ```bash
-# Add companion files to a WAD
-caco modify id:1 --add-file /path/to/music.wad
-caco modify id:1 --add-file /path/to/patch.deh
+# Add companion files via the companion command group
+caco companion add id:1 /path/to/music.wad
+caco companion add id:1 /path/to/patch.deh
 
-# Add multiple at once
+# Or via modify (quick shorthand)
 caco modify id:1 --add-file /path/to/music.wad --add-file /path/to/patch.deh
 
-# Remove by basename or full path
-caco modify id:1 --remove-file music.wad
-caco modify id:1 --remove-file /path/to/patch.deh
+# List companion files for a WAD
+caco companion ls id:1
 
-# View companion files
+# Enable/disable without removing
+caco companion disable id:1 music.wad
+caco companion enable id:1 music.wad
+
+# Remove a companion file
+caco companion rm id:1 music.wad
+caco modify id:1 --remove-file patch.deh
+
+# View companion files in WAD info
 caco info 1
 ```
+
+Files are copied to managed storage (`~/.local/share/caco/companions/`) and deduplicated by MD5 hash — the same file linked to multiple WADs is stored only once. The `companion_orphan_cleanup` config option controls what happens when a companion is unlinked from its last WAD (`"delete"`, `"keep"`, or `"ask"`).
 
 **DEH/BEX handling**: `.deh` and `.bex` files are automatically loaded with the correct flag:
 - **dsda, chocolate, woof, eternity families**: Uses `-deh` flag
 - **zdoom family** (GZDoom, etc.): Uses `-file` flag (zdoom loads DEH via `-file`)
 
-Companion files are also editable in the GUI edit dialog (one path per line) and displayed in the TUI detail view.
+Companion files are also editable in the GUI edit dialog (checkboxes for enable/disable, file picker for adding) and the TUI edit screen.
 
 ### Cross-Source Downloading
 

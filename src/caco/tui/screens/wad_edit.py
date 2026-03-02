@@ -236,7 +236,7 @@ class WadEditScreen(Screen):
                         id="textarea-companions",
                     )
                     yield Static(
-                        "[dim]One file path per line (DEH, music WADs, etc.)[/dim]",
+                        "[dim]One file per line: filename [enabled/disabled][/dim]",
                     )
 
                 # Buttons
@@ -327,16 +327,16 @@ class WadEditScreen(Screen):
         self.query_one("#input-config", Input).value = wad.get("custom_config") or ""
         self.query_one("#input-args", Input).value = wad.get("custom_args") or ""
 
-        # Companion files
-        import json as _json
+        # Companion files (show filename with enabled/disabled status)
         companions_ta = self.query_one("#textarea-companions", TextArea)
-        if wad.get("companion_files"):
-            try:
-                files = _json.loads(wad["companion_files"])
-                if isinstance(files, list):
-                    companions_ta.text = "\n".join(files)
-            except _json.JSONDecodeError:
-                pass
+        companions = db.get_wad_companions(wad["id"])
+        if companions:
+            lines = []
+            for c in companions:
+                status = "enabled" if c["enabled"] else "disabled"
+                lines.append(f"{c['filename']} [{status}]")
+            companions_ta.text = "\n".join(lines)
+        self._original_companions = companions
 
     def on_select_changed(self, event: Select.Changed) -> None:
         """Handle IWAD select changes to show/hide custom input."""
@@ -426,14 +426,21 @@ class WadEditScreen(Screen):
         if tags_str:
             new_tags = [t.strip().lower() for t in tags_str.split(",") if t.strip()]
 
-        # Parse companion files
-        import json as _json
+        # Parse companion files — toggle enabled/disabled from text
         companions_text = self.query_one("#textarea-companions", TextArea).text.strip()
-        if companions_text:
-            companion_list = [line.strip() for line in companions_text.splitlines() if line.strip()]
-            companion_files = _json.dumps(companion_list) if companion_list else None
-        else:
-            companion_files = None
+        if companions_text and hasattr(self, "_original_companions"):
+            for line in companions_text.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                # Parse "filename [enabled]" or "filename [disabled]"
+                new_enabled = "[disabled]" not in line
+                # Match by filename prefix
+                for comp in self._original_companions:
+                    if line.startswith(comp["filename"]):
+                        if new_enabled != bool(comp["enabled"]):
+                            db.set_companion_enabled(self.wad_id, comp["id"], new_enabled)
+                        break
 
         # Update WAD
         db.update_wad(
@@ -450,7 +457,6 @@ class WadEditScreen(Screen):
             complevel=complevel,
             custom_config=custom_config,
             custom_args=custom_args,
-            companion_files=companion_files,
         )
 
         # Update tags (sync: remove old, add new)

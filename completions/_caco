@@ -228,6 +228,54 @@ _caco_cache() {
     esac
 }
 
+_caco_companion() {
+    local -a subcmds
+    subcmds=(
+        'add:Add a companion file'
+        'rm:Remove a companion file'
+        'enable:Enable a companion file'
+        'disable:Disable a companion file'
+        'ls:List companion files'
+    )
+
+    if (( CURRENT == 2 )); then
+        _describe 'companion command' subcmds
+        return
+    fi
+
+    local subcmd="${words[2]}"
+    (( CURRENT-- ))
+    shift words
+
+    case "$subcmd" in
+        add)
+            _arguments \
+                '--help[Show help]' \
+                '1:query:__caco_wads_or_query' \
+                '2:file:_files'
+            ;;
+        rm)
+            _arguments \
+                '(-y --yes)'{-y,--yes}'[Skip confirmation]' \
+                '--help[Show help]' \
+                '1:query:__caco_wads_or_query' \
+                '2:filename:'
+            ;;
+        enable|disable)
+            _arguments \
+                '--help[Show help]' \
+                '1:query:__caco_wads_or_query' \
+                '2:filename:'
+            ;;
+        ls)
+            _arguments \
+                '--plain[Plain TSV output]' \
+                '--help[Show help]' \
+                '*:query:__caco_wads_or_query'
+            ;;
+    esac
+}
+
 # ---------------------------------------------------------------------------
 # Main dispatcher
 # ---------------------------------------------------------------------------
@@ -249,6 +297,7 @@ _caco() {
         'stats:Show library statistics'
         'cache:Manage WAD file cache'
         'enrich:Re-run enrichment for existing WADs'
+        'companion:Manage companion files'
     )
 
     if (( CURRENT == 2 )); then
@@ -280,6 +329,7 @@ _caco() {
         stats) _caco_stats ;;
         cache) _caco_cache ;;
         enrich) _caco_enrich ;;
+        companion) _caco_companion ;;
     esac
 }
 

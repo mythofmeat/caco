@@ -65,6 +65,7 @@ src/caco/
 │   ├── demos_cmd.py   # demos list/play/clean
 │   ├── complete.py     # hidden _complete command for shell completions
 │   ├── profile_cmd.py  # profile command group (ls, create, edit, cp, rm, path)
+│   ├── companion_cmd.py # companion command group (add, rm, enable, disable, ls)
 │   └── _completion_scripts.py  # Embedded fish/bash/zsh completion scripts
 ├── complevel.py    # Shared complevel names, aliases, parse_complevel()
 ├── complevel_detect.py # Auto-detect complevel from WAD lumps (COMPLVL, UMAPINFO, DEHACKED)
@@ -83,7 +84,8 @@ src/caco/
 │   ├── _wads.py        # WAD CRUD (add/get/update/delete), tag add/remove
 │   ├── _sessions.py    # Sessions, completions, batch stats, cache, StatsSnapshot
 │   ├── _iwads.py       # IWAD registry: family/variant model, priority resolution, CRUD
-│   └── _id24.py        # id24 WAD registry: known hashes, identification, CRUD
+│   ├── _id24.py        # id24 WAD registry: known hashes, identification, CRUD
+│   └── _companions.py  # Companion file registry: managed storage, MD5 dedup, junction table CRUD
 ├── config.py       # TOML config in ~/.config/caco/; IWAD_DIR, get_iwad_dir(), SOURCEPORT_DIR, get_sourceport_dir(), get_profile_path(), list_profiles()
 ├── player.py       # Sourceport launcher + playtime tracking
 ├── idgames/        # idgames API client
@@ -170,7 +172,8 @@ src/caco/
 ├── services/
 │   ├── __init__.py
 │   ├── import_service.py  # Centralized duplicate-check-and-import for all 5 source types
-│   └── resource_service.py  # Shared IWAD/id24 registration (identify + copy + DB insert)
+│   ├── resource_service.py  # Shared IWAD/id24 registration (identify + copy + DB insert)
+│   └── companion_service.py  # Companion file register/unregister with MD5 dedup + managed storage
 ├── sources/
 │   ├── base.py     # BaseSource mixin (shared context-manager lifecycle)
 │   ├── idgames.py  # idgames archive adapter (extends BaseSource)
@@ -188,6 +191,7 @@ src/caco/
 - Managed id24 WADs: `~/.local/share/caco/id24/{name}.wad`
 - WAD cache: `~/.local/share/caco/wads/`
 - WAD data: `~/.local/share/caco/data/` (per-WAD saves, stats, configs; configurable via `data_dir`)
+- Companion files: `~/.local/share/caco/companions/{md5[:12]}_{filename}` (managed, deduplicated)
 - Sourceport configs: `~/.local/share/caco/sourceports/{exe}/{profile}.cfg` (configurable via `sourceport_dir`)
 
 **Key patterns:**
@@ -209,8 +213,8 @@ src/caco/
   - Glob patterns: `tag:caco*` (matches cacoward, etc.)
   - Free text searches title, author, and description
   - Multiple terms are joined with implicit AND
-- Per-WAD config: `custom_iwad`, `custom_sourceport`, `custom_args` (JSON array), `complevel` (INTEGER), `custom_config` (TEXT), `companion_files` (JSON array of absolute paths) columns in wads table
-- Companion files: `companion_files` TEXT column stores JSON array of absolute file paths; DEH/BEX files auto-detected by extension and loaded with `-deh` (non-zdoom) or `-file` (zdoom); managed via `caco modify --add-file`/`--remove-file`; `uses_deh_flag()` in `sourceports.py` determines correct flag per family
+- Per-WAD config: `custom_iwad`, `custom_sourceport`, `custom_args` (JSON array), `complevel` (INTEGER), `custom_config` (TEXT) columns in wads table; companion files managed via junction table (see below)
+- Companion files: `companion_files_registry` table (id, md5 UNIQUE, filename, path, size) + `wad_companions` junction table (wad_id, companion_id, enabled, load_order); managed storage at `~/.local/share/caco/companions/` with MD5-based deduplication; filename format: `{md5[:12]}_{original_filename}`; DEH/BEX files auto-detected by extension and loaded with `-deh` (non-zdoom) or `-file` (zdoom); managed via `caco companion add/rm/enable/disable/ls` or `caco modify --add-file`/`--remove-file`; `uses_deh_flag()` in `sourceports.py` determines correct flag per family; `companion_orphan_cleanup` config controls behavior when last WAD unlinks a companion ("delete", "keep", "ask"); `db/_companions.py` has CRUD functions; `services/companion_service.py` handles register/unregister with dedup + managed storage; old `companion_files` JSON column migrated to new tables in migration #23
 - Crash detection: `exit_code` INTEGER column on sessions table; `PlayResult` dataclass in `player.py` with `crashed` property (non-zero exit code); CLI/TUI/GUI warn on crash; session history views show "Crash (N)" indicator
 - Auto stats tracking: `stats_snapshot` TEXT column on `wads` table stores live per-map stats JSON; auto-read from data dir after play sessions; auto-archived to completion on `modify beaten+N` or `modify status=finished`; `auto_stats` config (default: true); live stats shown as "Current (live)" entry in Map Stats dialog (GUI) and screen (TUI)
 - Per-session map tracking: `stats_before`/`stats_after` TEXT columns on `sessions` table store stats snapshots captured before/after each play session; `compute_stats_delta()` in `wad_stats.py` diffs these to determine which maps were played; `_read_stats_snapshot()` in `player.py` reads stats file to JSON; `caco sessions` command displays session history with maps played per session
@@ -243,6 +247,14 @@ src/caco/
 - `caco import <path>` — auto-detects id24 via MD5 (or filename fallback) and registers; copies to managed dir
 - `caco trash --id24 NAME` — remove id24 WAD from DB and managed storage
 - id24 registry: `id24_wads` table with name/version/title/path/md5; `KNOWN_ID24_WADS` (MD5→(name, version, title)), `KNOWN_ID24_FILENAMES` (filename fallback); `identify_id24()` for detection; managed storage at `~/.local/share/caco/id24/{name}.wad`
+
+**Companion command group:**
+- `caco companion add <query> <file>` — register companion file (MD5 dedup, copy to managed dir) and link to WAD
+- `caco companion rm <query> <filename> [-y]` — unlink companion from WAD; orphan policy per config
+- `caco companion enable <query> <filename>` — enable a companion file for a WAD
+- `caco companion disable <query> <filename>` — disable without removing
+- `caco companion ls [query] [--plain]` — list companions per-WAD or all; shows enabled/disabled status
+- Also available: `caco modify --add-file PATH` / `--remove-file FILENAME` for quick add/remove
 
 **Status shortcuts (complete list):**
 | Shortcut | Status |

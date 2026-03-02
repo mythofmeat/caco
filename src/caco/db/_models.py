@@ -128,7 +128,7 @@ OR_SEPARATOR = " , "
 ALLOWED_UPDATE_FIELDS = frozenset({
     "title", "author", "year", "description", "status", "rating", "notes",
     "source_url", "filename", "cached_path", "custom_iwad",
-    "custom_sourceport", "custom_args", "companion_files",
+    "custom_sourceport", "custom_args",
     "custom_config", "version", "complevel", "idgames_id",
     "deleted_at", "stats_snapshot",
 })

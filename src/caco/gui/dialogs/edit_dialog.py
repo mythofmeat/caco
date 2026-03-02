@@ -13,7 +13,11 @@ from PySide6.QtWidgets import (
     QComboBox,
     QTextEdit,
     QDialogButtonBox,
+    QFileDialog,
+    QListWidget,
+    QListWidgetItem,
     QMessageBox,
+    QPushButton,
 )
 
 from caco import db
@@ -177,20 +181,29 @@ class EditDialog(QDialog):
         self._args_input.setPlaceholderText("Extra sourceport arguments")
         launch_form.addRow("Extra Args:", self._args_input)
 
-        # Parse existing companion_files JSON into newline-separated string
-        companion_str = ""
-        if self._wad.get("companion_files"):
-            try:
-                companion_list = json.loads(self._wad["companion_files"])
-                if isinstance(companion_list, list):
-                    companion_str = "\n".join(companion_list)
-            except json.JSONDecodeError:
-                pass
-        self._companion_input = QTextEdit()
-        self._companion_input.setPlainText(companion_str)
-        self._companion_input.setPlaceholderText("One file path per line (DEH, music WADs, etc.)")
-        self._companion_input.setMaximumHeight(80)
-        launch_form.addRow("Companion Files:", self._companion_input)
+        # Companion files list with checkboxes
+        companion_container = QVBoxLayout()
+        self._companion_list = QListWidget()
+        self._companion_list.setMaximumHeight(100)
+        self._original_companions = db.get_wad_companions(self._wad_id)
+        for comp in self._original_companions:
+            item = QListWidgetItem(comp["filename"])
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked if comp["enabled"] else Qt.CheckState.Unchecked)
+            item.setData(Qt.ItemDataRole.UserRole, comp["id"])
+            self._companion_list.addItem(item)
+        companion_container.addWidget(self._companion_list)
+
+        companion_buttons = QHBoxLayout()
+        add_file_btn = QPushButton("Add File...")
+        add_file_btn.clicked.connect(self._add_companion_file)
+        remove_file_btn = QPushButton("Remove")
+        remove_file_btn.clicked.connect(self._remove_companion_file)
+        companion_buttons.addWidget(add_file_btn)
+        companion_buttons.addWidget(remove_file_btn)
+        companion_buttons.addStretch()
+        companion_container.addLayout(companion_buttons)
+        launch_form.addRow("Companion Files:", companion_container)
 
         layout.addWidget(launch_group)
 
@@ -259,16 +272,11 @@ class EditDialog(QDialog):
         else:
             fields["custom_args"] = None
 
-        # Parse companion files (one per line)
-        companion_text = self._companion_input.toPlainText().strip()
-        if companion_text:
-            companion_list = [line.strip() for line in companion_text.splitlines() if line.strip()]
-            fields["companion_files"] = json.dumps(companion_list) if companion_list else None
-        else:
-            fields["companion_files"] = None
-
         # Update WAD in database
         db.update_wad(self._wad_id, **fields)
+
+        # Sync companion files: handle new files, removals, and enable/disable toggles
+        self._save_companions()
 
         # Sync tags: remove old, add new
         old_tags = set(self._wad.get("tags", []))
@@ -280,3 +288,62 @@ class EditDialog(QDialog):
             db.add_tag(self._wad_id, tag)
 
         self.accept()
+
+    def _add_companion_file(self):
+        """Open file picker to stage a companion file (registered on save)."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Add Companion File", "",
+            "WAD/DEH Files (*.wad *.deh *.bex *.pk3 *.lmp);;All Files (*)",
+        )
+        if not path:
+            return
+
+        from pathlib import Path
+        filename = Path(path).name
+        # Store file path (str) in UserRole — registered on save, not now
+        item = QListWidgetItem(filename)
+        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+        item.setCheckState(Qt.CheckState.Checked)
+        item.setData(Qt.ItemDataRole.UserRole, path)
+        self._companion_list.addItem(item)
+
+    def _remove_companion_file(self):
+        """Remove the selected companion file from the list."""
+        current = self._companion_list.currentItem()
+        if not current:
+            return
+        self._companion_list.takeItem(self._companion_list.row(current))
+
+    def _save_companions(self):
+        """Sync companion files: register new, remove deleted, toggle enabled."""
+        from caco.services.companion_service import register_companion, unregister_companion
+
+        # Partition list widget items into existing (int ID) and pending (str path)
+        existing_ids: dict[int, bool] = {}
+        pending_paths: list[str] = []
+        for i in range(self._companion_list.count()):
+            item = self._companion_list.item(i)
+            data = item.data(Qt.ItemDataRole.UserRole)
+            enabled = item.checkState() == Qt.CheckState.Checked
+            if isinstance(data, int):
+                existing_ids[data] = enabled
+            else:
+                # Pending file path — register now on save
+                pending_paths.append(data)
+
+        # Register pending companion files
+        for path in pending_paths:
+            register_companion(path, self._wad_id)
+
+        # Remove companions that were in the original list but not in current
+        original_ids = {c["id"] for c in self._original_companions}
+        for comp_id in original_ids - set(existing_ids.keys()):
+            unregister_companion(self._wad_id, comp_id, orphan_policy="keep")
+
+        # Update enabled/disabled state for remaining companions
+        for comp in self._original_companions:
+            comp_id = comp["id"]
+            if comp_id in existing_ids:
+                new_enabled = existing_ids[comp_id]
+                if new_enabled != bool(comp["enabled"]):
+                    db.set_companion_enabled(self._wad_id, comp_id, new_enabled)

@@ -39,6 +39,24 @@ complete -c caco -n __fish_use_subcommand -a sessions -d "Show play session hist
 complete -c caco -n __fish_use_subcommand -a cache -d "Manage WAD file cache"
 complete -c caco -n __fish_use_subcommand -a enrich -d "Re-run enrichment for existing WADs"
 complete -c caco -n __fish_use_subcommand -a profile -d "Manage sourceport config profiles"
+complete -c caco -n __fish_use_subcommand -a companion -d "Manage companion files"
+
+# =============================================================================
+# companion subcommands
+# =============================================================================
+complete -c caco -n "__fish_seen_subcommand_from companion; and not __fish_seen_subcommand_from add rm enable disable ls" -a add -d "Add a companion file"
+complete -c caco -n "__fish_seen_subcommand_from companion; and not __fish_seen_subcommand_from add rm enable disable ls" -a rm -d "Remove a companion file"
+complete -c caco -n "__fish_seen_subcommand_from companion; and not __fish_seen_subcommand_from add rm enable disable ls" -a enable -d "Enable a companion file"
+complete -c caco -n "__fish_seen_subcommand_from companion; and not __fish_seen_subcommand_from add rm enable disable ls" -a disable -d "Disable a companion file"
+complete -c caco -n "__fish_seen_subcommand_from companion; and not __fish_seen_subcommand_from add rm enable disable ls" -a ls -d "List companion files"
+
+complete -c caco -n "__fish_seen_subcommand_from companion; and __fish_seen_subcommand_from add" -xa "(__caco_wads)"
+complete -c caco -n "__fish_seen_subcommand_from companion; and __fish_seen_subcommand_from rm" -xa "(__caco_wads)"
+complete -c caco -n "__fish_seen_subcommand_from companion; and __fish_seen_subcommand_from rm" -s y -l yes -d "Skip confirmation"
+complete -c caco -n "__fish_seen_subcommand_from companion; and __fish_seen_subcommand_from enable" -xa "(__caco_wads)"
+complete -c caco -n "__fish_seen_subcommand_from companion; and __fish_seen_subcommand_from disable" -xa "(__caco_wads)"
+complete -c caco -n "__fish_seen_subcommand_from companion; and __fish_seen_subcommand_from ls" -xa "(__caco_wads)"
+complete -c caco -n "__fish_seen_subcommand_from companion; and __fish_seen_subcommand_from ls" -l plain -d "Plain TSV output"
 
 # =============================================================================
 # ls command

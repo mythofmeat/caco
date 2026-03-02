@@ -477,6 +477,120 @@ def _migrate_add_custom_config_column(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE wads ADD COLUMN custom_config TEXT")
 
 
+def _migrate_companion_files_tables(conn: sqlite3.Connection) -> None:
+    """Create companion_files and wad_companions tables, migrate existing JSON data.
+
+    Moves from the old companion_files TEXT column (JSON array of absolute paths)
+    to a deduplicated registry with a junction table.
+    """
+    import json
+
+    # Create companion_files registry table
+    cursor = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='companion_files_registry'"
+    )
+    if not cursor.fetchone():
+        conn.execute("""
+            CREATE TABLE companion_files_registry (
+                id INTEGER PRIMARY KEY,
+                md5 TEXT UNIQUE,
+                filename TEXT NOT NULL,
+                path TEXT,
+                size INTEGER,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+    # Create wad_companions junction table
+    cursor = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='wad_companions'"
+    )
+    if not cursor.fetchone():
+        conn.execute("""
+            CREATE TABLE wad_companions (
+                wad_id INTEGER NOT NULL REFERENCES wads(id) ON DELETE CASCADE,
+                companion_id INTEGER NOT NULL REFERENCES companion_files_registry(id) ON DELETE CASCADE,
+                enabled INTEGER DEFAULT 1,
+                load_order INTEGER DEFAULT 0,
+                PRIMARY KEY (wad_id, companion_id)
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_wad_companions_wad_id ON wad_companions(wad_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_wad_companions_companion_id ON wad_companions(companion_id)")
+
+    # Migrate existing companion_files JSON data
+    cursor = conn.execute("PRAGMA table_info(wads)")
+    columns = {row[1] for row in cursor.fetchall()}
+    if "companion_files" not in columns:
+        return
+
+    rows = conn.execute(
+        "SELECT id, companion_files FROM wads WHERE companion_files IS NOT NULL"
+    ).fetchall()
+
+    if not rows:
+        return
+
+    from caco.config import get_companion_dir
+    from caco.utils import compute_md5
+
+    companion_dir = get_companion_dir()
+    companion_dir.mkdir(parents=True, exist_ok=True)
+
+    for row in rows:
+        wad_id = row[0]
+        try:
+            files = json.loads(row[1])
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(files, list):
+            continue
+
+        for load_order, file_path in enumerate(files):
+            file_path_obj = Path(file_path)
+            filename = file_path_obj.name
+
+            if file_path_obj.exists():
+                md5 = compute_md5(file_path_obj)
+                size = file_path_obj.stat().st_size
+
+                # Check if already registered (dedup)
+                existing = conn.execute(
+                    "SELECT id FROM companion_files_registry WHERE md5 = ?", (md5,)
+                ).fetchone()
+
+                if existing:
+                    companion_id = existing[0]
+                else:
+                    # Copy to managed dir
+                    managed_name = f"{md5[:12]}_{filename}"
+                    managed_path = companion_dir / managed_name
+                    if not managed_path.exists():
+                        shutil.copy2(file_path, str(managed_path))
+
+                    cursor = conn.execute(
+                        "INSERT INTO companion_files_registry (md5, filename, path, size) "
+                        "VALUES (?, ?, ?, ?)",
+                        (md5, filename, str(managed_path), size),
+                    )
+                    companion_id = cursor.lastrowid
+            else:
+                # File missing — register with NULL md5/path
+                cursor = conn.execute(
+                    "INSERT INTO companion_files_registry (md5, filename, path, size) "
+                    "VALUES (NULL, ?, NULL, NULL)",
+                    (filename,),
+                )
+                companion_id = cursor.lastrowid
+
+            # Link to WAD
+            conn.execute(
+                "INSERT OR IGNORE INTO wad_companions (wad_id, companion_id, enabled, load_order) "
+                "VALUES (?, ?, 1, ?)",
+                (wad_id, companion_id, load_order),
+            )
+
+
 # Ordered migration registry — append new migrations here with incrementing version
 _MIGRATIONS: list[tuple[int, str, Any]] = [
     (1, "add_custom_play_config", _migrate_add_custom_play_config),
@@ -501,4 +615,5 @@ _MIGRATIONS: list[tuple[int, str, Any]] = [
     (20, "add_session_exit_code", _migrate_add_session_exit_code),
     (21, "add_custom_config", _migrate_add_custom_config_column),
     (22, "merge_custom_complevel_to_complevel", _migrate_merge_custom_complevel),
+    (23, "companion_files_tables", _migrate_companion_files_tables),
 ]

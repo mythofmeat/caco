@@ -462,7 +462,13 @@ def info(
                 parts.append(c_stats)
                 console.print("".join(parts))
 
-        if wad.get("custom_iwad") or wad.get("custom_sourceport") or wad.get("custom_args") or wad.get("complevel") is not None or wad.get("custom_config") or wad.get("companion_files"):
+        companions = db.get_wad_companions(wad["id"])
+        has_play_config = (
+            wad.get("custom_iwad") or wad.get("custom_sourceport")
+            or wad.get("custom_args") or wad.get("complevel") is not None
+            or wad.get("custom_config") or companions
+        )
+        if has_play_config:
             console.print()
             console.print("[bold]Custom play config:[/bold]")
             if wad.get("custom_iwad"):
@@ -480,14 +486,11 @@ def info(
                     console.print(f"  Args: {' '.join(parsed_args)}")
                 except json.JSONDecodeError:
                     console.print(f"  Args: {wad['custom_args']}")
-            if wad.get("companion_files"):
-                try:
-                    files = json.loads(wad["companion_files"])
-                    console.print(f"  Companion files:")
-                    for f in files:
-                        console.print(f"    {f}")
-                except json.JSONDecodeError:
-                    pass
+            if companions:
+                console.print("  Companion files:")
+                for comp in companions:
+                    status = "" if comp["enabled"] else " [dim](disabled)[/dim]"
+                    console.print(f"    {comp['filename']}{status}")
 
 
 @cli.command()
@@ -811,29 +814,22 @@ def modify(
 
     # Handle --add-file / --remove-file
     if add_files or remove_files:
+        from caco.services.companion_service import register_companion, unregister_companion
+
         for wad in wads:
-            existing_raw = wad.get("companion_files")
-            try:
-                existing: list[str] = json.loads(existing_raw) if existing_raw else []
-            except json.JSONDecodeError:
-                existing = []
-
-            # Add files (resolve to absolute, deduplicate)
             for af in add_files:
-                abs_path = str(Path(af).resolve())
-                if abs_path not in existing:
-                    existing.append(abs_path)
+                register_companion(af, wad["id"])
 
-            # Remove files (match by basename or full path)
             for rf in remove_files:
                 rf_basename = Path(rf).name
-                existing = [
-                    p for p in existing
-                    if p != rf and Path(p).name != rf_basename
-                ]
-
-            companion_json = json.dumps(existing) if existing else None
-            db.update_wad(wad["id"], companion_files=companion_json)
+                comp = db.get_wad_companion_by_filename(wad["id"], rf_basename)
+                if not comp:
+                    # Try exact filename match
+                    comp = db.get_wad_companion_by_filename(wad["id"], rf)
+                if comp:
+                    unregister_companion(wad["id"], comp["id"], orphan_policy="keep")
+                else:
+                    err_console.print(f"[yellow]Warning: no companion '{rf}' found for {wad['title']}[/yellow]")
 
     # Print generic "Modified" for non-beaten actions
     non_beaten_actions = [a for a in actions if not a.action.startswith("beaten_")]

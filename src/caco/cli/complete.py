@@ -17,6 +17,7 @@ CONTEXTS = [
     "sourceports",
     "modify-fields",
     "query-fields",
+    "companions",
 ]
 
 
@@ -77,3 +78,7 @@ def complete_cmd(context: str) -> None:
         from caco.cli import QUERY_FIELDS
         for field in QUERY_FIELDS:
             print(field)
+
+    elif context == "companions":
+        for comp in db.get_all_companions():
+            print(comp["filename"])

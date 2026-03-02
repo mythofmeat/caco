@@ -91,7 +91,7 @@ _caco() {
         if [[ "$cur" == -* ]]; then
             COMPREPLY=($(compgen -W "--tui --gui --help" -- "$cur"))
         else
-            COMPREPLY=($(compgen -W "ls info modify trash play import config random completions stats cache enrich" -- "$cur"))
+            COMPREPLY=($(compgen -W "ls info modify trash play import config random completions stats cache enrich companion" -- "$cur"))
         fi
         return
     fi
@@ -208,6 +208,35 @@ _caco() {
             else
                 _caco_wads
                 _caco_query_fields
+            fi
+            ;;
+        companion)
+            if [[ -z "$subcmd" ]]; then
+                COMPREPLY=($(compgen -W "add rm enable disable ls" -- "$cur"))
+            else
+                case "$subcmd" in
+                    add)
+                        _caco_wads
+                        _caco_filedir
+                        ;;
+                    rm)
+                        if [[ "$cur" == -* ]]; then
+                            COMPREPLY=($(compgen -W "-y --yes --help" -- "$cur"))
+                        else
+                            _caco_wads
+                        fi
+                        ;;
+                    enable|disable)
+                        _caco_wads
+                        ;;
+                    ls)
+                        if [[ "$cur" == -* ]]; then
+                            COMPREPLY=($(compgen -W "--plain --help" -- "$cur"))
+                        else
+                            _caco_wads
+                        fi
+                        ;;
+                esac
             fi
             ;;
     esac

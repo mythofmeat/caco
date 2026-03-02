@@ -496,7 +496,10 @@ def _render_wad_info_json(wad: dict) -> None:
         "custom_iwad": wad.get("custom_iwad"),
         "custom_sourceport": wad.get("custom_sourceport"),
         "custom_args": wad.get("custom_args"),
-        "companion_files": json.loads(wad["companion_files"]) if wad.get("companion_files") else [],
+        "companion_files": [
+            {"filename": c["filename"], "enabled": bool(c["enabled"]), "path": c.get("path")}
+            for c in db.get_wad_companions(wad["id"])
+        ],
         "custom_config": wad.get("custom_config"),
         "complevel": wad.get("complevel"),
         "playtime_seconds": playtime,
@@ -575,8 +578,10 @@ def _render_wad_info_plain(wad: dict) -> None:
         print(f"custom_config={wad['custom_config']}")
     if wad.get("custom_args"):
         print(f"custom_args={wad['custom_args']}")
-    if wad.get("companion_files"):
-        print(f"companion_files={wad['companion_files']}")
+    companions = db.get_wad_companions(wad["id"])
+    if companions:
+        names = ",".join(c["filename"] for c in companions)
+        print(f"companion_files={names}")
 
 
 def _render_wad_list(wads: list[dict], title: str | None = None, list_config: dict | None = None) -> None:
@@ -718,6 +723,7 @@ from caco.cli import saves_cmd  # noqa: E402, F401
 from caco.cli import demos_cmd  # noqa: E402, F401
 from caco.cli import complete  # noqa: E402, F401
 from caco.cli import profile_cmd as profile_mod  # noqa: E402, F401
+from caco.cli import companion_cmd  # noqa: E402, F401
 
 
 # =============================================================================
