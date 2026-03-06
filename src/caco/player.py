@@ -202,17 +202,20 @@ def auto_clean_cache() -> int:
     return deleted
 
 
+_STATS_FILENAMES = frozenset(("stats.txt", "levelstat.txt"))
+
+
 def _find_stats_files(directory: Path) -> list[Path]:
     """Search for all stats files in a WAD data directory.
 
     nyan-doom nests stats as {iwad}/{wad}/stats.txt, so search recursively.
     Multiple files can exist when IWAD or sourceport changes create different
-    nested directories. Prefers stats.txt over levelstat.txt.
+    nested directories.
     """
-    result: list[Path] = []
-    for name in ("stats.txt", "levelstat.txt"):
-        result.extend(directory.rglob(name))
-    return result
+    return sorted(
+        p for p in directory.rglob("*")
+        if p.is_file() and p.name in _STATS_FILENAMES
+    )
 
 
 def _read_stats_snapshot(wad_id: int) -> str | None:
@@ -245,6 +248,11 @@ def _read_stats_snapshot(wad_id: int) -> str | None:
             except (OSError, ValueError):
                 logger.debug("Skipping unparseable stats file: %s", path)
         if not parsed:
+            if stats_paths:
+                logger.warning(
+                    "Found %d stats file(s) for WAD %d but none parseable",
+                    len(stats_paths), wad_id,
+                )
             return None
 
         wad_stats = merge_stats(parsed)

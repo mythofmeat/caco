@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, asdict, replace
 from pathlib import Path
 from typing import Any
 
@@ -440,52 +440,40 @@ def merge_stats(stats_list: list[WadStats]) -> WadStats:
     for stats in stats_list:
         for m in stats.maps:
             if m.lump not in merged:
-                merged[m.lump] = MapStats(
-                    lump=m.lump,
-                    episode=m.episode,
-                    map_num=m.map_num,
-                    best_skill=m.best_skill,
-                    best_time=m.best_time,
-                    best_max_time=m.best_max_time,
-                    best_nm_time=m.best_nm_time,
-                    total_exits=m.total_exits,
-                    cumulative_kills=m.cumulative_kills,
-                    kills=m.kills,
-                    total_kills=m.total_kills,
-                    items=m.items,
-                    total_items=m.total_items,
-                    secrets=m.secrets,
-                    total_secrets=m.total_secrets,
-                    time_secs=m.time_secs,
-                    total_time_secs=m.total_time_secs,
-                )
+                merged[m.lump] = replace(m)
             else:
-                e = merged[m.lump]
+                existing = merged[m.lump]
                 # Positional info
-                if m.episode:
-                    e.episode = m.episode
-                if m.map_num:
-                    e.map_num = m.map_num
+                if m.episode > 0:
+                    existing.episode = m.episode
+                if m.map_num > 0:
+                    existing.map_num = m.map_num
                 # Best = highest
-                e.best_skill = max(e.best_skill, m.best_skill)
-                e.total_exits = max(e.total_exits, m.total_exits)
-                e.cumulative_kills = max(e.cumulative_kills, m.cumulative_kills)
+                existing.best_skill = max(existing.best_skill, m.best_skill)
+                existing.total_exits = max(existing.total_exits, m.total_exits)
+                existing.cumulative_kills = max(
+                    existing.cumulative_kills, m.cumulative_kills
+                )
                 # Best time = lowest positive (fastest)
-                e.best_time = _merge_time_tics(e.best_time, m.best_time)
-                e.best_max_time = _merge_time_tics(e.best_max_time, m.best_max_time)
-                e.best_nm_time = _merge_time_tics(e.best_nm_time, m.best_nm_time)
-                e.time_secs = _merge_time_secs(e.time_secs, m.time_secs)
-                e.total_time_secs = _merge_time_secs(
-                    e.total_time_secs, m.total_time_secs
+                existing.best_time = _min_positive(existing.best_time, m.best_time)
+                existing.best_max_time = _min_positive(
+                    existing.best_max_time, m.best_max_time
+                )
+                existing.best_nm_time = _min_positive(
+                    existing.best_nm_time, m.best_nm_time
+                )
+                existing.time_secs = _min_positive(existing.time_secs, m.time_secs)
+                existing.total_time_secs = _min_positive(
+                    existing.total_time_secs, m.total_time_secs
                 )
                 # Achieved counts = highest
-                e.kills = max(e.kills, m.kills)
-                e.items = max(e.items, m.items)
-                e.secrets = max(e.secrets, m.secrets)
+                existing.kills = max(existing.kills, m.kills)
+                existing.items = max(existing.items, m.items)
+                existing.secrets = max(existing.secrets, m.secrets)
                 # Map totals = highest
-                e.total_kills = max(e.total_kills, m.total_kills)
-                e.total_items = max(e.total_items, m.total_items)
-                e.total_secrets = max(e.total_secrets, m.total_secrets)
+                existing.total_kills = max(existing.total_kills, m.total_kills)
+                existing.total_items = max(existing.total_items, m.total_items)
+                existing.total_secrets = max(existing.total_secrets, m.total_secrets)
 
     # Take highest header values
     version = max(s.version for s in stats_list)
@@ -493,23 +481,14 @@ def merge_stats(stats_list: list[WadStats]) -> WadStats:
 
     return WadStats(
         format=fmt,
-        maps=list(merged.values()),
+        maps=sorted(merged.values(), key=lambda m: m.lump),
         version=version,
         header_total_kills=header_total_kills,
     )
 
 
-def _merge_time_tics(a: int, b: int) -> int:
-    """Merge two tic-based times: lowest positive value wins, -1 = unset."""
-    if a < 0:
-        return b
-    if b < 0:
-        return a
-    return min(a, b)
-
-
-def _merge_time_secs(a: float, b: float) -> float:
-    """Merge two second-based times: lowest positive value wins, -1 = unset."""
+def _min_positive(a: int | float, b: int | float) -> int | float:
+    """Return the lowest positive value. Negative values mean unset."""
     if a < 0:
         return b
     if b < 0:
