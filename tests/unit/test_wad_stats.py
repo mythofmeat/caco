@@ -9,6 +9,7 @@ from caco.wad_stats import (
     format_stats,
     format_time_secs,
     format_time_tics,
+    merge_stats,
     parse_stats_text,
     skill_name,
     stats_from_json,
@@ -245,6 +246,91 @@ class TestSkillName:
 
     def test_unknown_skill(self):
         assert skill_name(99) == "99"
+
+
+class TestMergeStats:
+    """Test merging multiple WadStats objects."""
+
+    def test_single_stats(self):
+        """Single stats passed through unchanged."""
+        stats = parse_stats_text(SAMPLE_STATS_TXT)
+        merged = merge_stats([stats])
+        assert merged is stats
+
+    def test_empty_raises(self):
+        with pytest.raises(ValueError, match="No stats"):
+            merge_stats([])
+
+    def test_merge_disjoint_maps(self):
+        """Maps from different files are combined."""
+        s1 = WadStats(format="stats_txt", maps=[
+            MapStats(lump="MAP01", best_skill=4, best_time=1000, total_exits=1,
+                     kills=50, total_kills=50, items=10, total_items=10,
+                     secrets=2, total_secrets=3),
+        ])
+        s2 = WadStats(format="stats_txt", maps=[
+            MapStats(lump="MAP02", best_skill=3, best_time=2000, total_exits=1,
+                     kills=40, total_kills=50, items=8, total_items=10,
+                     secrets=1, total_secrets=3),
+        ])
+        merged = merge_stats([s1, s2])
+        assert len(merged.maps) == 2
+        lumps = {m.lump for m in merged.maps}
+        assert lumps == {"MAP01", "MAP02"}
+
+    def test_merge_overlapping_keeps_best(self):
+        """Overlapping maps keep the best values."""
+        s1 = WadStats(format="stats_txt", maps=[
+            MapStats(lump="MAP01", best_skill=3, best_time=2000, total_exits=1,
+                     kills=40, total_kills=50, items=8, total_items=10,
+                     secrets=1, total_secrets=3, cumulative_kills=100),
+        ])
+        s2 = WadStats(format="stats_txt", maps=[
+            MapStats(lump="MAP01", best_skill=4, best_time=1500, total_exits=3,
+                     kills=50, total_kills=50, items=10, total_items=10,
+                     secrets=3, total_secrets=3, cumulative_kills=200),
+        ])
+        merged = merge_stats([s1, s2])
+        assert len(merged.maps) == 1
+        m = merged.maps[0]
+        assert m.best_skill == 4  # highest
+        assert m.best_time == 1500  # fastest
+        assert m.total_exits == 3  # highest
+        assert m.kills == 50  # highest
+        assert m.secrets == 3  # highest
+        assert m.cumulative_kills == 200  # highest
+
+    def test_merge_unset_time_ignored(self):
+        """Unset times (-1) don't override real times."""
+        s1 = WadStats(format="stats_txt", maps=[
+            MapStats(lump="MAP01", best_time=1000, best_max_time=-1),
+        ])
+        s2 = WadStats(format="stats_txt", maps=[
+            MapStats(lump="MAP01", best_time=-1, best_max_time=500),
+        ])
+        merged = merge_stats([s1, s2])
+        m = merged.maps[0]
+        assert m.best_time == 1000  # from s1
+        assert m.best_max_time == 500  # from s2
+
+    def test_merge_prefers_stats_txt_format(self):
+        """Output format is stats_txt when any input has it."""
+        s1 = WadStats(format="stats_txt", maps=[
+            MapStats(lump="MAP01", best_skill=3, best_time=1000),
+        ])
+        s2 = WadStats(format="levelstat_txt", maps=[
+            MapStats(lump="MAP02", time_secs=30.0, best_skill=4),
+        ])
+        merged = merge_stats([s1, s2])
+        assert merged.format == "stats_txt"
+
+    def test_merge_header_values(self):
+        """Header values take the highest."""
+        s1 = WadStats(format="stats_txt", version=1, header_total_kills=100, maps=[])
+        s2 = WadStats(format="stats_txt", version=2, header_total_kills=200, maps=[])
+        merged = merge_stats([s1, s2])
+        assert merged.version == 2
+        assert merged.header_total_kills == 200
 
 
 class TestComputeStatsDelta:

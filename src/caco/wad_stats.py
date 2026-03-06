@@ -414,6 +414,109 @@ def compute_stats_delta(
     return {"maps_played": maps_played, "deltas": deltas}
 
 
+def merge_stats(stats_list: list[WadStats]) -> WadStats:
+    """Merge multiple WadStats into one, keeping the best data per map.
+
+    For each map lump present in any stats file:
+    - best_time/best_max_time/best_nm_time: lowest positive value (fastest)
+    - best_skill, total_exits, cumulative_kills: highest value
+    - kills, items, secrets: highest value
+    - total_kills, total_items, total_secrets: highest value
+    - time_secs, total_time_secs: lowest positive value (fastest)
+
+    Prefers stats_txt format over levelstat_txt when both exist.
+    """
+    if not stats_list:
+        raise ValueError("No stats to merge")
+    if len(stats_list) == 1:
+        return stats_list[0]
+
+    # Prefer stats_txt format
+    has_stats_txt = any(s.format == "stats_txt" for s in stats_list)
+    fmt = "stats_txt" if has_stats_txt else stats_list[0].format
+
+    # Collect all maps by lump name
+    merged: dict[str, MapStats] = {}
+    for stats in stats_list:
+        for m in stats.maps:
+            if m.lump not in merged:
+                merged[m.lump] = MapStats(
+                    lump=m.lump,
+                    episode=m.episode,
+                    map_num=m.map_num,
+                    best_skill=m.best_skill,
+                    best_time=m.best_time,
+                    best_max_time=m.best_max_time,
+                    best_nm_time=m.best_nm_time,
+                    total_exits=m.total_exits,
+                    cumulative_kills=m.cumulative_kills,
+                    kills=m.kills,
+                    total_kills=m.total_kills,
+                    items=m.items,
+                    total_items=m.total_items,
+                    secrets=m.secrets,
+                    total_secrets=m.total_secrets,
+                    time_secs=m.time_secs,
+                    total_time_secs=m.total_time_secs,
+                )
+            else:
+                e = merged[m.lump]
+                # Positional info
+                if m.episode:
+                    e.episode = m.episode
+                if m.map_num:
+                    e.map_num = m.map_num
+                # Best = highest
+                e.best_skill = max(e.best_skill, m.best_skill)
+                e.total_exits = max(e.total_exits, m.total_exits)
+                e.cumulative_kills = max(e.cumulative_kills, m.cumulative_kills)
+                # Best time = lowest positive (fastest)
+                e.best_time = _merge_time_tics(e.best_time, m.best_time)
+                e.best_max_time = _merge_time_tics(e.best_max_time, m.best_max_time)
+                e.best_nm_time = _merge_time_tics(e.best_nm_time, m.best_nm_time)
+                e.time_secs = _merge_time_secs(e.time_secs, m.time_secs)
+                e.total_time_secs = _merge_time_secs(
+                    e.total_time_secs, m.total_time_secs
+                )
+                # Achieved counts = highest
+                e.kills = max(e.kills, m.kills)
+                e.items = max(e.items, m.items)
+                e.secrets = max(e.secrets, m.secrets)
+                # Map totals = highest
+                e.total_kills = max(e.total_kills, m.total_kills)
+                e.total_items = max(e.total_items, m.total_items)
+                e.total_secrets = max(e.total_secrets, m.total_secrets)
+
+    # Take highest header values
+    version = max(s.version for s in stats_list)
+    header_total_kills = max(s.header_total_kills for s in stats_list)
+
+    return WadStats(
+        format=fmt,
+        maps=list(merged.values()),
+        version=version,
+        header_total_kills=header_total_kills,
+    )
+
+
+def _merge_time_tics(a: int, b: int) -> int:
+    """Merge two tic-based times: lowest positive value wins, -1 = unset."""
+    if a < 0:
+        return b
+    if b < 0:
+        return a
+    return min(a, b)
+
+
+def _merge_time_secs(a: float, b: float) -> float:
+    """Merge two second-based times: lowest positive value wins, -1 = unset."""
+    if a < 0:
+        return b
+    if b < 0:
+        return a
+    return min(a, b)
+
+
 def stats_from_json(json_str: str) -> WadStats:
     """Deserialize WadStats from JSON."""
     data = json.loads(json_str)

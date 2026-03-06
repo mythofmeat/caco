@@ -5,7 +5,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from caco.player import format_duration, _find_stats_file, _auto_track_stats, _read_stats_snapshot, play_iwad, PlayResult
+from caco.player import format_duration, _find_stats_files, _auto_track_stats, _read_stats_snapshot, play_iwad, PlayResult
 
 
 SAMPLE_STATS_TXT = """\
@@ -60,42 +60,54 @@ class TestFormatDuration:
         assert format_duration(seconds) == expected
 
 
-class TestFindStatsFile:
+class TestFindStatsFiles:
     def test_top_level(self, tmp_path):
         """Finds stats.txt at root of data dir."""
         (tmp_path / "stats.txt").write_text(SAMPLE_STATS_TXT)
-        result = _find_stats_file(tmp_path)
-        assert result is not None
-        assert result.name == "stats.txt"
+        result = _find_stats_files(tmp_path)
+        assert len(result) == 1
+        assert result[0].name == "stats.txt"
 
     def test_nested(self, tmp_path):
         """Finds stats.txt nested in subdirectory (nyan-doom layout)."""
         nested = tmp_path / "doom2" / "mywad"
         nested.mkdir(parents=True)
         (nested / "stats.txt").write_text(SAMPLE_STATS_TXT)
-        result = _find_stats_file(tmp_path)
-        assert result is not None
-        assert result.name == "stats.txt"
+        result = _find_stats_files(tmp_path)
+        assert len(result) == 1
+        assert result[0].name == "stats.txt"
 
     def test_levelstat_fallback(self, tmp_path):
-        """Falls back to levelstat.txt when no stats.txt exists."""
+        """Finds levelstat.txt when no stats.txt exists."""
         (tmp_path / "levelstat.txt").write_text(SAMPLE_LEVELSTAT_TXT)
-        result = _find_stats_file(tmp_path)
-        assert result is not None
-        assert result.name == "levelstat.txt"
+        result = _find_stats_files(tmp_path)
+        assert len(result) == 1
+        assert result[0].name == "levelstat.txt"
 
-    def test_prefers_stats_txt(self, tmp_path):
-        """Prefers stats.txt over levelstat.txt when both exist."""
+    def test_finds_both(self, tmp_path):
+        """Finds both stats.txt and levelstat.txt."""
         (tmp_path / "stats.txt").write_text(SAMPLE_STATS_TXT)
         (tmp_path / "levelstat.txt").write_text(SAMPLE_LEVELSTAT_TXT)
-        result = _find_stats_file(tmp_path)
-        assert result is not None
-        assert result.name == "stats.txt"
+        result = _find_stats_files(tmp_path)
+        assert len(result) == 2
+        names = {p.name for p in result}
+        assert names == {"stats.txt", "levelstat.txt"}
+
+    def test_multiple_nested(self, tmp_path):
+        """Finds stats.txt in multiple nested dirs (IWAD/port change)."""
+        doom = tmp_path / "dsda_doom_data" / "doom" / "mywad"
+        doom.mkdir(parents=True)
+        (doom / "stats.txt").write_text(SAMPLE_STATS_TXT)
+        doom2 = tmp_path / "dsda_doom_data" / "doom2" / "mywad"
+        doom2.mkdir(parents=True)
+        (doom2 / "stats.txt").write_text(SAMPLE_STATS_TXT)
+        result = _find_stats_files(tmp_path)
+        assert len(result) == 2
 
     def test_missing(self, tmp_path):
-        """Returns None when no stats file exists."""
-        result = _find_stats_file(tmp_path)
-        assert result is None
+        """Returns empty list when no stats file exists."""
+        result = _find_stats_files(tmp_path)
+        assert result == []
 
 
 class TestPlayIwad:

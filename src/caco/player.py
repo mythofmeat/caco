@@ -202,21 +202,24 @@ def auto_clean_cache() -> int:
     return deleted
 
 
-def _find_stats_file(directory: Path) -> Path | None:
-    """Search for a stats file in a WAD data directory.
+def _find_stats_files(directory: Path) -> list[Path]:
+    """Search for all stats files in a WAD data directory.
 
     nyan-doom nests stats as {iwad}/{wad}/stats.txt, so search recursively.
-    Prefers stats.txt over levelstat.txt.
+    Multiple files can exist when IWAD or sourceport changes create different
+    nested directories. Prefers stats.txt over levelstat.txt.
     """
+    result: list[Path] = []
     for name in ("stats.txt", "levelstat.txt"):
-        matches = list(directory.rglob(name))
-        if matches:
-            return matches[0]
-    return None
+        result.extend(directory.rglob(name))
+    return result
 
 
 def _read_stats_snapshot(wad_id: int) -> str | None:
     """Read and parse stats from the WAD's data dir, returning JSON string or None.
+
+    When multiple stats files exist (e.g., from IWAD/sourceport changes),
+    merges them keeping the best data per map.
 
     Silently returns None if data dirs are disabled, no data dir exists,
     no stats file is found, or parsing fails.
@@ -229,13 +232,22 @@ def _read_stats_snapshot(wad_id: int) -> str | None:
         if not data_dir or not data_dir.is_dir():
             return None
 
-        stats_path = _find_stats_file(data_dir)
-        if not stats_path:
+        stats_paths = _find_stats_files(data_dir)
+        if not stats_paths:
             return None
 
-        from caco.wad_stats import parse_stats_file, stats_to_json
+        from caco.wad_stats import parse_stats_file, merge_stats, stats_to_json
 
-        wad_stats = parse_stats_file(stats_path)
+        parsed = []
+        for path in stats_paths:
+            try:
+                parsed.append(parse_stats_file(path))
+            except (OSError, ValueError):
+                logger.debug("Skipping unparseable stats file: %s", path)
+        if not parsed:
+            return None
+
+        wad_stats = merge_stats(parsed)
         return stats_to_json(wad_stats)
     except (OSError, ValueError, KeyError):
         logger.warning("Failed to read stats for WAD %d", wad_id, exc_info=True)

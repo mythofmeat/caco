@@ -1,1 +1,1 @@
-- [ ] there are situations where a single wad dir can end up with multiple stats.txt files. there should be some way to detect this and merge them, only overriding empty entries.
+- [x] there are situations where a single wad dir can end up with multiple stats.txt files. there should be some way to detect this and merge them, only overriding empty entries.
