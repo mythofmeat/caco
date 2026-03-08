@@ -1,0 +1,6 @@
+- [ ] Woof/Nugget
+  - [ ] save dir and data dir flags
+  - [ ] stats.txt / levelstats info and syncing
+  - [ ] config management
+  - [ ] complevel injection (-complevel N, MBF21-compatible)
+  - [x] crash detection (generic exit code check)
