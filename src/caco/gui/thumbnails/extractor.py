@@ -24,9 +24,6 @@ from caco.utils import parse_wad_directory
 
 logger = logging.getLogger(__name__)
 
-# Maximum size for a WAD inside a ZIP (256 MB) — protects against decompression bombs
-_MAX_ZIP_ENTRY_SIZE = 256 * 1024 * 1024
-
 try:
     from PIL import Image
 except ImportError:
@@ -134,8 +131,6 @@ def extract_titlepic(wad_path: str | Path) -> Image.Image | None:
             with zipfile.ZipFile(path) as zf:
                 for info in zf.infolist():
                     if info.filename.lower().endswith(".wad"):
-                        if info.file_size > _MAX_ZIP_ENTRY_SIZE:
-                            break  # Skip oversized entries
                         wad_data = zf.read(info)
                         break
         except (zipfile.BadZipFile, KeyError):

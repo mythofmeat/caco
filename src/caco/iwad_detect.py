@@ -20,9 +20,6 @@ from caco.utils import parse_wad_directory
 
 logger = logging.getLogger(__name__)
 
-# Maximum size for a WAD inside a ZIP (256 MB)
-_MAX_ZIP_ENTRY_SIZE = 256 * 1024 * 1024
-
 # Map lump name patterns
 _DOOM1_MAP_RE = re.compile(r"^E[1-9]M[0-9]$")
 _DOOM2_MAP_RE = re.compile(r"^MAP[0-9][0-9]$")
@@ -97,8 +94,6 @@ def _load_wad_data(wad_path: str | Path) -> bytes | None:
             with zipfile.ZipFile(path) as zf:
                 for info in zf.infolist():
                     if info.filename.lower().endswith(".wad"):
-                        if info.file_size > _MAX_ZIP_ENTRY_SIZE:
-                            break
                         wad_data = zf.read(info)
                         break
         except (zipfile.BadZipFile, KeyError):
