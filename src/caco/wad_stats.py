@@ -506,3 +506,105 @@ def stats_from_json(json_str: str) -> WadStats:
         version=data.get("version", 1),
         header_total_kills=data.get("header_total_kills", 0),
     )
+
+
+# --- Map progress ---
+
+_DOOM1_MAP_RE = re.compile(r"^E(\d+)M(\d+)$", re.IGNORECASE)
+_DOOM2_MAP_RE = re.compile(r"^MAP(\d+)$", re.IGNORECASE)
+
+
+def is_secret_map(lump: str) -> bool:
+    """Classify a map lump as secret by naming convention.
+
+    Secret maps: E*M9 (Doom 1), MAP31/MAP32 (Doom 2).
+    """
+    m = _DOOM1_MAP_RE.match(lump)
+    if m:
+        return int(m.group(2)) == 9
+    m = _DOOM2_MAP_RE.match(lump)
+    if m:
+        return int(m.group(1)) in (31, 32)
+    return False
+
+
+@dataclass
+class MapProgress:
+    """Summary of map completion progress."""
+
+    played: int
+    total: int | None  # None for levelstat (no total known)
+    secret_played: int
+    secret_total: int | None  # None for levelstat
+
+
+def compute_map_progress(stats: WadStats) -> MapProgress:
+    """Compute map completion progress from WAD stats."""
+    if stats.format == "levelstat_txt":
+        secret_played = sum(1 for m in stats.maps if is_secret_map(m.lump))
+        return MapProgress(
+            played=len(stats.maps),
+            total=None,
+            secret_played=secret_played,
+            secret_total=None,
+        )
+
+    # stats_txt: total = all maps, played = maps with best_skill > 0
+    total = len(stats.maps)
+    played = len(stats.played_maps)
+    secret_total = sum(1 for m in stats.maps if is_secret_map(m.lump))
+    secret_played = sum(
+        1 for m in stats.played_maps if is_secret_map(m.lump)
+    )
+    return MapProgress(
+        played=played,
+        total=total,
+        secret_played=secret_played,
+        secret_total=secret_total,
+    )
+
+
+def format_map_progress(progress: MapProgress) -> str:
+    """Format map progress for display.
+
+    Returns empty string if no maps (caller should skip display).
+    """
+    if progress.total is not None:
+        if progress.total == 0:
+            return ""
+        base = f"{progress.played}/{progress.total} maps"
+        if progress.secret_total and progress.secret_total > 0:
+            return f"{base} ({progress.secret_played}/{progress.secret_total} secret)"
+        return base
+    # levelstat_txt: no total known
+    if progress.played == 0:
+        return ""
+    return f"{progress.played} maps played"
+
+
+def get_map_progress(stats_json: str | None) -> MapProgress | None:
+    """Parse JSON stats and compute map progress.
+
+    Returns None on missing/invalid input or empty progress.
+    """
+    if not stats_json:
+        return None
+    try:
+        stats = stats_from_json(stats_json)
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return None
+    progress = compute_map_progress(stats)
+    if progress.total == 0 or (progress.total is None and progress.played == 0):
+        return None
+    return progress
+
+
+def get_map_progress_str(stats_json: str | None) -> str | None:
+    """Convenience: parse JSON → compute → format map progress.
+
+    Returns None on missing/invalid input or empty progress.
+    """
+    progress = get_map_progress(stats_json)
+    if progress is None:
+        return None
+    return format_map_progress(progress) or None

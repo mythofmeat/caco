@@ -21,6 +21,7 @@ from caco.gui.theme import (
     get_status_color,
     get_status_display,
 )
+from caco.wad_stats import get_map_progress_str
 
 
 class DetailPanel(QScrollArea):
@@ -96,6 +97,10 @@ class DetailPanel(QScrollArea):
 
         self._sessions_label = QLabel()
         self._layout.addWidget(self._sessions_label)
+
+        self._progress_label = QLabel()
+        self._progress_label.setVisible(False)
+        self._layout.addWidget(self._progress_label)
 
         beaten_row = QHBoxLayout()
         beaten_row.setSpacing(8)
@@ -190,6 +195,8 @@ class DetailPanel(QScrollArea):
         self._rating.setText("")
         self._playtime_label.setText("")
         self._sessions_label.setText("")
+        self._progress_label.setText("")
+        self._progress_label.setVisible(False)
         self._beaten_label.setText("")
         self._stats_btn.setVisible(False)
         self._last_played_label.setText("")
@@ -261,6 +268,15 @@ class DetailPanel(QScrollArea):
             f"Playtime: {format_duration(playtime)}" if playtime else "Playtime: -"
         )
         self._sessions_label.setText(f"Sessions: {session_count}")
+
+        progress_str = get_map_progress_str(wad.get("stats_snapshot"))
+        if progress_str:
+            self._progress_label.setText(f"Progress: {progress_str}")
+            self._progress_label.setVisible(True)
+        else:
+            self._progress_label.setText("")
+            self._progress_label.setVisible(False)
+
         self._beaten_label.setText(f"Beaten: {times_beaten}")
 
         # Always show stats button so users can import stats

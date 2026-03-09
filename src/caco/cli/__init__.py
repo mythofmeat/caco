@@ -26,6 +26,7 @@ from caco.config import (
 from caco.db import STATUS_SHORTCUTS
 from caco.player import format_duration
 from caco.utils import format_rating
+from caco.wad_stats import format_map_progress, get_map_progress, get_map_progress_str
 
 console = Console()
 err_console = Console(stderr=True)
@@ -509,15 +510,28 @@ def _render_wad_info_json(wad: dict) -> None:
         "last_played": last_played,
         "created_at": wad.get("created_at"),
         "updated_at": wad.get("updated_at"),
-        "completions": [
-            {
-                "completed_at": c["completed_at"],
-                "notes": c.get("notes"),
-                "has_stats": bool(c.get("stats_snapshot")),
-            }
-            for c in completions
-        ],
     }
+
+    progress = get_map_progress(wad.get("stats_snapshot"))
+    if progress:
+        result["map_progress"] = {
+            "display": format_map_progress(progress),
+            "played": progress.played,
+            "total": progress.total,
+            "secret_played": progress.secret_played,
+            "secret_total": progress.secret_total,
+        }
+    else:
+        result["map_progress"] = None
+
+    result["completions"] = [
+        {
+            "completed_at": c["completed_at"],
+            "notes": c.get("notes"),
+            "has_stats": bool(c.get("stats_snapshot")),
+        }
+        for c in completions
+    ]
 
     print(json.dumps(result, indent=2))
 
@@ -563,6 +577,8 @@ def _render_wad_info_plain(wad: dict) -> None:
     print(f"sessions={len(sessions)}")
     print(f"last_played={last_played[:10] if last_played else ''}")
     print(f"times_beaten={times_beaten}")
+    progress_str = get_map_progress_str(wad.get("stats_snapshot"))
+    print(f"map_progress={progress_str or ''}")
     completions = db.get_wad_completions(wad["id"])
     for ci, c in enumerate(completions):
         print(f"completion_{ci}_date={c['completed_at'] or ''}")

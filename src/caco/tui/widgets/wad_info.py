@@ -10,6 +10,7 @@ from caco import db
 from caco.player import format_duration
 from caco.tui.theme import get_status_display, get_status_css_class
 from caco.utils import format_author_year, format_rating, truncate
+from caco.wad_stats import get_map_progress_str
 
 
 class WadInfoPanel(Vertical):
@@ -95,6 +96,11 @@ class WadInfoPanel(Vertical):
 
         # Sessions
         details_lines.append(f"Sessions: {session_count}")
+
+        # Map progress
+        progress_str = get_map_progress_str(wad.get("stats_snapshot"))
+        if progress_str:
+            details_lines.append(f"Progress: {progress_str}")
 
         # Times beaten
         if times_beaten:

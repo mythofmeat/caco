@@ -3,12 +3,18 @@
 import pytest
 
 from caco.wad_stats import (
+    MapProgress,
     MapStats,
     WadStats,
+    compute_map_progress,
     compute_stats_delta,
+    format_map_progress,
     format_stats,
     format_time_secs,
     format_time_tics,
+    get_map_progress,
+    get_map_progress_str,
+    is_secret_map,
     merge_stats,
     parse_stats_text,
     skill_name,
@@ -447,3 +453,101 @@ class TestComputeStatsDelta:
         ])
         delta = compute_stats_delta(before, after)
         assert delta["maps_played"] == ["MAP01", "MAP02"]
+
+
+class TestMapProgress:
+    """Test map completion progress display."""
+
+    class TestIsSecretMap:
+        def test_doom1_secret(self):
+            assert is_secret_map("E1M9") is True
+            assert is_secret_map("E3M9") is True
+
+        def test_doom1_normal(self):
+            assert is_secret_map("E1M1") is False
+            assert is_secret_map("E2M5") is False
+
+        def test_doom2_secret(self):
+            assert is_secret_map("MAP31") is True
+            assert is_secret_map("MAP32") is True
+
+        def test_doom2_normal(self):
+            assert is_secret_map("MAP01") is False
+            assert is_secret_map("MAP30") is False
+
+        def test_non_standard(self):
+            assert is_secret_map("INTRO") is False
+            assert is_secret_map("TITLEMAP") is False
+
+    class TestComputeMapProgress:
+        def test_stats_txt_with_secrets(self):
+            stats = parse_stats_text(SAMPLE_STATS_TXT)
+            # MAP01 played, MAP02 played, MAP31 unplayed (secret), MAP35 played
+            progress = compute_map_progress(stats)
+            assert progress.total == 4
+            assert progress.played == 3  # MAP01, MAP02, MAP35
+            assert progress.secret_total == 1  # MAP31
+            assert progress.secret_played == 0  # MAP31 is unplayed
+
+        def test_stats_txt_no_secrets(self):
+            stats = WadStats(format="stats_txt", maps=[
+                MapStats(lump="MAP01", best_skill=4, best_time=1000, total_exits=1),
+                MapStats(lump="MAP02", best_skill=3, best_time=2000, total_exits=1),
+                MapStats(lump="MAP03", best_skill=0, best_time=-1, total_exits=0),
+            ])
+            progress = compute_map_progress(stats)
+            assert progress.total == 3
+            assert progress.played == 2
+            assert progress.secret_total == 0
+            assert progress.secret_played == 0
+
+        def test_levelstat(self):
+            stats = parse_stats_text(SAMPLE_LEVELSTAT_TXT)
+            progress = compute_map_progress(stats)
+            assert progress.total is None
+            assert progress.played == 3
+            assert progress.secret_total is None
+
+    class TestFormatMapProgress:
+        def test_with_secrets(self):
+            p = MapProgress(played=9, total=30, secret_played=0, secret_total=2)
+            assert format_map_progress(p) == "9/30 maps (0/2 secret)"
+
+        def test_no_secrets(self):
+            p = MapProgress(played=5, total=10, secret_played=0, secret_total=0)
+            assert format_map_progress(p) == "5/10 maps"
+
+        def test_levelstat(self):
+            p = MapProgress(played=9, total=None, secret_played=1, secret_total=None)
+            assert format_map_progress(p) == "9 maps played"
+
+        def test_empty(self):
+            p = MapProgress(played=0, total=0, secret_played=0, secret_total=0)
+            assert format_map_progress(p) == ""
+
+        def test_levelstat_empty(self):
+            p = MapProgress(played=0, total=None, secret_played=0, secret_total=None)
+            assert format_map_progress(p) == ""
+
+    class TestGetMapProgressStr:
+        def test_none_input(self):
+            assert get_map_progress_str(None) is None
+
+        def test_empty_string(self):
+            assert get_map_progress_str("") is None
+
+        def test_invalid_json(self):
+            assert get_map_progress_str("not json") is None
+
+        def test_valid_stats(self):
+            stats = parse_stats_text(SAMPLE_STATS_TXT)
+            json_str = stats_to_json(stats)
+            result = get_map_progress_str(json_str)
+            assert result is not None
+            assert "3/4 maps" in result
+
+        def test_valid_levelstat(self):
+            stats = parse_stats_text(SAMPLE_LEVELSTAT_TXT)
+            json_str = stats_to_json(stats)
+            result = get_map_progress_str(json_str)
+            assert result == "3 maps played"
