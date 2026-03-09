@@ -72,6 +72,10 @@ class HelionWatcher(StatsWatcher):
         self._accumulated: list[WadStats] = []
         self._poll_interval: float = 1.0
 
+    def extra_args(self) -> list[str]:
+        """Helion requires -levelstat to write levelstat.txt."""
+        return ["-levelstat"]
+
     def start(self) -> None:
         """Poll levelstat.txt mtime every ~1 second until stopped."""
         if self._levelstat_path.exists():

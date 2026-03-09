@@ -27,6 +27,10 @@ class StatsWatcher(ABC):
     def collect(self) -> str | None:
         """After stop()+join(), return levelstat.txt-format string, or None."""
 
+    def extra_args(self) -> list[str]:
+        """CLI args to inject before launch (e.g. -levelstat). Default: none."""
+        return []
+
 
 # Registry: family name -> factory callable(wad_data_dir) -> StatsWatcher
 _WATCHER_FACTORIES: dict[str, type[StatsWatcher]] = {}

@@ -135,6 +135,15 @@ class TestHelionWatcher:
         watcher = HelionWatcher(data_dir, helion_config_dir=config_dir)
         assert watcher.collect() is None
 
+    def test_extra_args(self, tmp_path):
+        """extra_args() returns -levelstat to enable stats output."""
+        config_dir = tmp_path / "helion_config"
+        config_dir.mkdir()
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        watcher = HelionWatcher(data_dir, helion_config_dir=config_dir)
+        assert watcher.extra_args() == ["-levelstat"]
+
     def test_output_roundtrips(self, tmp_path):
         """Output matches _LEVELSTAT_MAP_RE format."""
         config_dir = tmp_path / "helion_config"

@@ -388,7 +388,7 @@ class TestWatcherIntegration:
             patch("caco.player.get_wad_data_dir", return_value=wad_data_dir),
             patch("caco.player.get_profile_path", return_value=profile),
             patch("shutil.which", return_value="/usr/bin/Helion"),
-            patch("subprocess.Popen", return_value=mock_proc),
+            patch("subprocess.Popen", return_value=mock_proc) as mock_popen,
             patch(
                 "caco.watchers.helion._get_helion_config_dir",
                 return_value=helion_config_dir,
@@ -396,6 +396,10 @@ class TestWatcherIntegration:
         ):
             from caco.player import play
             result = play(wad_id)
+
+        # Verify -levelstat was injected into the command
+        cmd = mock_popen.call_args[0][0]
+        assert "-levelstat" in cmd, f"-levelstat not in command: {cmd}"
 
         # Verify the watcher wrote levelstat.txt to the data dir
         output_file = wad_data_dir / "levelstat.txt"

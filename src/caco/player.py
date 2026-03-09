@@ -497,6 +497,15 @@ def play(
     # Add the WAD file before any companion WADs on the same -file.
     cmd.extend(["-file"] + file_args + [str(wad_path)] + companion_file_args)
 
+    # Create stats watcher before launch so we can inject its required args
+    watcher = watcher_thread = None
+    if wad_data_dir and get_auto_stats():
+        from caco.stats_watcher import get_watcher
+
+        watcher = get_watcher(port, wad_data_dir)
+        if watcher:
+            cmd.extend(watcher.extra_args())
+
     # Add extra args from command line (highest priority, can override anything)
     if extra_args:
         cmd.extend(extra_args)
@@ -520,14 +529,11 @@ def play(
     if process_ref is not None:
         process_ref.append(proc)
 
-    # Start stats watcher if available for this sourceport
-    watcher = watcher_thread = None
-    if wad_data_dir and get_auto_stats():
-        from caco.stats_watcher import get_watcher, run_watcher_thread
+    # Start stats watcher thread now that the sourceport is running
+    if watcher:
+        from caco.stats_watcher import run_watcher_thread
 
-        watcher = get_watcher(port, wad_data_dir)
-        if watcher:
-            watcher_thread = run_watcher_thread(watcher)
+        watcher_thread = run_watcher_thread(watcher)
 
     # Capture stats snapshot before play for per-session map tracking
     stats_before = _read_stats_snapshot(wad_id)
