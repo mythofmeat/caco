@@ -14,7 +14,7 @@ from caco import db
 from caco.config import get_cache_dir, get_id24_dir, get_iwad_dir, get_list_config
 from caco.player import format_duration
 from caco.utils import format_rating
-from caco.wad_stats import get_map_progress_str
+from caco.wad_stats import get_progress_display
 
 from caco.cli import (
     cli,
@@ -443,9 +443,9 @@ def info(
             if last_played:
                 console.print(f"[bold]Last played:[/bold] {last_played[:16].replace('T', ' ')}")
 
-        progress_str = get_map_progress_str(wad.get("stats_snapshot"))
-        if progress_str:
-            console.print(f"[bold]Progress:[/bold] {progress_str}")
+        progress_display = get_progress_display(wad.get("stats_snapshot"))
+        if progress_display:
+            console.print(f"[bold]Progress:[/bold] [green]{progress_display}[/green]")
 
         if wad["notes"]:
             console.print()

@@ -14,6 +14,8 @@ from caco.wad_stats import (
     format_time_tics,
     get_map_progress,
     get_map_progress_str,
+    format_progress_bar,
+    get_progress_display,
     is_secret_map,
     merge_stats,
     parse_stats_text,
@@ -582,4 +584,50 @@ class TestMapProgress:
             stats = parse_stats_text(SAMPLE_LEVELSTAT_TXT)
             json_str = stats_to_json(stats)
             result = get_map_progress_str(json_str)
+            assert result == "3 maps played"
+
+    class TestFormatProgressBar:
+        def test_half_complete(self):
+            p = MapProgress(played=5, total=10, secret_played=0, secret_total=0)
+            bar = format_progress_bar(p, width=10)
+            assert bar == "▓▓▓▓▓░░░░░ 5/10"
+
+        def test_full_complete(self):
+            p = MapProgress(played=30, total=30, secret_played=0, secret_total=0)
+            bar = format_progress_bar(p, width=10)
+            assert bar == "▓▓▓▓▓▓▓▓▓▓ 30/30"
+
+        def test_none_when_no_total(self):
+            p = MapProgress(played=5, total=None, secret_played=0, secret_total=None)
+            assert format_progress_bar(p) is None
+
+        def test_none_when_zero_total(self):
+            p = MapProgress(played=0, total=0, secret_played=0, secret_total=0)
+            assert format_progress_bar(p) is None
+
+        def test_default_width(self):
+            p = MapProgress(played=10, total=20, secret_played=0, secret_total=0)
+            bar = format_progress_bar(p)
+            assert bar == "▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░ 10/20"
+
+        def test_with_secrets(self):
+            p = MapProgress(played=9, total=30, secret_played=1, secret_total=2)
+            bar = format_progress_bar(p, width=10)
+            assert bar == "▓▓▓░░░░░░░ 9/30 | 1/2 secret"
+
+    class TestGetProgressDisplay:
+        def test_none_input(self):
+            assert get_progress_display(None) is None
+
+        def test_stats_txt_returns_bar(self):
+            stats = parse_stats_text(SAMPLE_STATS_TXT)
+            json_str = stats_to_json(stats)
+            result = get_progress_display(json_str)
+            assert result is not None
+            assert "▓" in result
+
+        def test_levelstat_returns_text(self):
+            stats = parse_stats_text(SAMPLE_LEVELSTAT_TXT)
+            json_str = stats_to_json(stats)
+            result = get_progress_display(json_str)
             assert result == "3 maps played"

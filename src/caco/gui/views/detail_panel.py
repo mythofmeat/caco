@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QLabel,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -21,7 +22,7 @@ from caco.gui.theme import (
     get_status_color,
     get_status_display,
 )
-from caco.wad_stats import get_map_progress_str
+from caco.wad_stats import format_map_progress, get_map_progress
 
 
 class DetailPanel(QScrollArea):
@@ -101,6 +102,12 @@ class DetailPanel(QScrollArea):
         self._progress_label = QLabel()
         self._progress_label.setVisible(False)
         self._layout.addWidget(self._progress_label)
+
+        self._progress_bar = QProgressBar()
+        self._progress_bar.setTextVisible(True)
+        self._progress_bar.setFixedHeight(16)
+        self._progress_bar.setVisible(False)
+        self._layout.addWidget(self._progress_bar)
 
         beaten_row = QHBoxLayout()
         beaten_row.setSpacing(8)
@@ -197,6 +204,7 @@ class DetailPanel(QScrollArea):
         self._sessions_label.setText("")
         self._progress_label.setText("")
         self._progress_label.setVisible(False)
+        self._progress_bar.setVisible(False)
         self._beaten_label.setText("")
         self._stats_btn.setVisible(False)
         self._last_played_label.setText("")
@@ -269,13 +277,21 @@ class DetailPanel(QScrollArea):
         )
         self._sessions_label.setText(f"Sessions: {session_count}")
 
-        progress_str = get_map_progress_str(wad.get("stats_snapshot"))
-        if progress_str:
-            self._progress_label.setText(f"Progress: {progress_str}")
+        progress = get_map_progress(wad.get("stats_snapshot"))
+        if progress:
+            display = format_map_progress(progress)
+            self._progress_label.setText(f"Progress: {display}")
             self._progress_label.setVisible(True)
+            if progress.total is not None and progress.total > 0:
+                self._progress_bar.setMaximum(progress.total)
+                self._progress_bar.setValue(progress.played)
+                self._progress_bar.setVisible(True)
+            else:
+                self._progress_bar.setVisible(False)
         else:
             self._progress_label.setText("")
             self._progress_label.setVisible(False)
+            self._progress_bar.setVisible(False)
 
         self._beaten_label.setText(f"Beaten: {times_beaten}")
 

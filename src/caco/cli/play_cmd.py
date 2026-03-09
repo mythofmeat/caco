@@ -10,7 +10,7 @@ from typing import Any
 from caco import db
 from caco.config import get_default_sourceport
 from caco.player import play, play_iwad, format_duration, PlayResult
-from caco.wad_stats import get_map_progress_str
+from caco.wad_stats import get_progress_display
 
 from caco.cli import (
     cli,
@@ -140,9 +140,9 @@ def play_cmd(query: str | None, sourceport: str | None, first: bool, iwad_name: 
         # Show map progress after play
         refreshed = db.get_wad(wad_id)
         if refreshed:
-            progress_str = get_map_progress_str(refreshed.get("stats_snapshot"))
-            if progress_str:
-                console.print(f"[bold]Progress:[/bold] {progress_str}")
+            progress_display = get_progress_display(refreshed.get("stats_snapshot"))
+            if progress_display:
+                console.print(f"[bold]Progress:[/bold] [green]{progress_display}[/green]")
     except Exception as e:
         err_console.print(f"[red]Error: {e}[/red]")
         sys.exit(1)

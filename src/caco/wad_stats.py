@@ -582,7 +582,7 @@ def format_map_progress(progress: MapProgress) -> str:
         if progress.total == 0 and (not progress.secret_total or progress.secret_total == 0):
             return ""
         base = f"{progress.played}/{progress.total} maps"
-        if progress.secret_total and progress.secret_total > 0:
+        if progress.secret_total:
             return f"{base} | {progress.secret_played}/{progress.secret_total} secret"
         return base
     # levelstat_txt: no total known
@@ -622,3 +622,31 @@ def get_map_progress_str(stats_json: str | None) -> str | None:
     if progress is None:
         return None
     return format_map_progress(progress) or None
+
+
+def format_progress_bar(progress: MapProgress, width: int = 20) -> str | None:
+    """Render a text progress bar for map completion.
+
+    Returns None when total is unknown (levelstat format) or no maps exist.
+    Example: "▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░ 9/30 | 1/2 secret"
+    """
+    if progress.total is None or progress.total == 0:
+        return None
+    filled = round(progress.played / progress.total * width)
+    bar = "▓" * filled + "░" * (width - filled)
+    result = f"{bar} {progress.played}/{progress.total}"
+    if progress.secret_total:
+        result += f" | {progress.secret_played}/{progress.secret_total} secret"
+    return result
+
+
+def get_progress_display(stats_json: str | None, width: int = 20) -> str | None:
+    """Get the best progress display string for stats JSON.
+
+    Returns a progress bar when total is known, otherwise a text summary.
+    Returns None on missing/invalid input or empty progress.
+    """
+    progress = get_map_progress(stats_json)
+    if progress is None:
+        return None
+    return format_progress_bar(progress, width=width) or format_map_progress(progress)
