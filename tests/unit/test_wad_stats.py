@@ -484,7 +484,7 @@ class TestMapProgress:
             stats = parse_stats_text(SAMPLE_STATS_TXT)
             # MAP01 played, MAP02 played, MAP31 unplayed (secret), MAP35 played
             progress = compute_map_progress(stats)
-            assert progress.total == 4
+            assert progress.total == 3  # excludes MAP31 (secret)
             assert progress.played == 3  # MAP01, MAP02, MAP35
             assert progress.secret_total == 1  # MAP31
             assert progress.secret_played == 0  # MAP31 is unplayed
@@ -505,13 +505,14 @@ class TestMapProgress:
             stats = parse_stats_text(SAMPLE_LEVELSTAT_TXT)
             progress = compute_map_progress(stats)
             assert progress.total is None
-            assert progress.played == 3
+            assert progress.played == 3  # all normal maps
+            assert progress.secret_played == 0
             assert progress.secret_total is None
 
     class TestFormatMapProgress:
         def test_with_secrets(self):
             p = MapProgress(played=9, total=30, secret_played=0, secret_total=2)
-            assert format_map_progress(p) == "9/30 maps (0/2 secret)"
+            assert format_map_progress(p) == "9/30 maps | 0/2 secret"
 
         def test_no_secrets(self):
             p = MapProgress(played=5, total=10, secret_played=0, secret_total=0)
@@ -519,7 +520,11 @@ class TestMapProgress:
 
         def test_levelstat(self):
             p = MapProgress(played=9, total=None, secret_played=1, secret_total=None)
-            assert format_map_progress(p) == "9 maps played"
+            assert format_map_progress(p) == "9 maps | 1 secret played"
+
+        def test_levelstat_no_secrets(self):
+            p = MapProgress(played=5, total=None, secret_played=0, secret_total=None)
+            assert format_map_progress(p) == "5 maps played"
 
         def test_empty(self):
             p = MapProgress(played=0, total=0, secret_played=0, secret_total=0)
@@ -544,7 +549,8 @@ class TestMapProgress:
             json_str = stats_to_json(stats)
             result = get_map_progress_str(json_str)
             assert result is not None
-            assert "3/4 maps" in result
+            assert "3/3 maps" in result
+            assert "0/1 secret" in result
 
         def test_valid_levelstat(self):
             stats = parse_stats_text(SAMPLE_LEVELSTAT_TXT)

@@ -549,6 +549,7 @@ caco info id:1 --levelstats --plain                    # TSV output for scriptin
 **Supported formats:**
 - **nyan-doom/dsda-doom `stats.txt`**: Persistent per-map tracking with kills, items, secrets, time, skill level, exit count, and best-of stats
 - **dsda-doom `levelstat.txt`**: Human-readable output from the `-levelstat` flag with per-map time, kills, items, and secrets
+- **Helion `levelstat.txt`**: Automatically captured via background stats watcher during play (polls `~/.config/Helion/levelstat.txt`); skill level enriched from save files
 
 Format is auto-detected. Exported files are lossless round-trips of the original.
 
@@ -557,6 +558,7 @@ Format is auto-detected. Exported files are lossless round-trips of the original
 When per-WAD data directories are enabled (default), caco automatically reads stats after each play session:
 
 1. After the sourceport exits, caco searches the WAD's data directory for `stats.txt` or `levelstat.txt`
+   - For Helion: a background watcher captures stats during play and writes them to the data directory
 2. The stats are parsed and stored as a live snapshot on the WAD record
 3. When you add a completion (`caco modify id:1 beaten+1` or `caco modify id:1 status=finished`), the snapshot is automatically archived to the completion record
 
@@ -792,7 +794,7 @@ On first play, caco inspects the WAD to auto-detect the compatibility level (com
 5. **ExMy maps only**, no special lumps → Vanilla (2)
 6. Other cases → ambiguous, skipped
 
-The detected complevel is saved to the WAD record. For dsda-family sourceports, `-complevel N` is automatically added to the command line.
+The detected complevel is saved to the WAD record. For dsda/woof-family sourceports, `-complevel N` is automatically added to the command line. For Helion, `+complevel NAME` is used (e.g., `+complevel boom`).
 
 **Backfill existing WADs:** Run `caco enrich --complevel` to detect and set complevel for WADs already in your library (uses cached files + Doom Wiki lookups).
 
@@ -987,6 +989,7 @@ When playing a WAD, caco automatically creates an isolated data directory for ea
 | chocolate | chocolate-doom, crispy-doom | `-savedir` |
 | woof | woof | `-data`, `-save` |
 | eternity | eternity | `-savedir` |
+| helion | Helion | `-savedir` |
 
 Unknown sourceports play normally without any injection.
 

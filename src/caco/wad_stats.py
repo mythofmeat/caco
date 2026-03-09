@@ -539,26 +539,28 @@ class MapProgress:
 
 
 def compute_map_progress(stats: WadStats) -> MapProgress:
-    """Compute map completion progress from WAD stats."""
+    """Compute map completion progress from WAD stats.
+
+    Normal and secret maps are counted separately — secret maps are excluded
+    from the base played/total counts.
+    """
     if stats.format == "levelstat_txt":
         secret_played = sum(1 for m in stats.maps if is_secret_map(m.lump))
         return MapProgress(
-            played=len(stats.maps),
+            played=len(stats.maps) - secret_played,
             total=None,
             secret_played=secret_played,
             secret_total=None,
         )
 
     # stats_txt: total = all maps, played = maps with best_skill > 0
-    total = len(stats.maps)
-    played = len(stats.played_maps)
     secret_total = sum(1 for m in stats.maps if is_secret_map(m.lump))
     secret_played = sum(
         1 for m in stats.played_maps if is_secret_map(m.lump)
     )
     return MapProgress(
-        played=played,
-        total=total,
+        played=len(stats.played_maps) - secret_played,
+        total=len(stats.maps) - secret_total,
         secret_played=secret_played,
         secret_total=secret_total,
     )
@@ -570,16 +572,21 @@ def format_map_progress(progress: MapProgress) -> str:
     Returns empty string if no maps (caller should skip display).
     """
     if progress.total is not None:
-        if progress.total == 0:
+        if progress.total == 0 and (not progress.secret_total or progress.secret_total == 0):
             return ""
         base = f"{progress.played}/{progress.total} maps"
         if progress.secret_total and progress.secret_total > 0:
-            return f"{base} ({progress.secret_played}/{progress.secret_total} secret)"
+            return f"{base} | {progress.secret_played}/{progress.secret_total} secret"
         return base
     # levelstat_txt: no total known
-    if progress.played == 0:
+    if progress.played == 0 and progress.secret_played == 0:
         return ""
-    return f"{progress.played} maps played"
+    parts = []
+    if progress.played > 0:
+        parts.append(f"{progress.played} maps")
+    if progress.secret_played > 0:
+        parts.append(f"{progress.secret_played} secret")
+    return " | ".join(parts) + " played"
 
 
 def get_map_progress(stats_json: str | None) -> MapProgress | None:
@@ -594,7 +601,7 @@ def get_map_progress(stats_json: str | None) -> MapProgress | None:
     except (json.JSONDecodeError, KeyError, TypeError):
         return None
     progress = compute_map_progress(stats)
-    if progress.total == 0 or (progress.total is None and progress.played == 0):
+    if not format_map_progress(progress):
         return None
     return progress
 

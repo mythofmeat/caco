@@ -405,12 +405,12 @@ def play(
 
     # Inject complevel flag if set and not already present in args
     if wad.get("complevel") is not None:
-        all_args = cmd + (extra_args or [])
-        if "-complevel" not in all_args:
-            from caco.sourceports import get_complevel_args
+        from caco.sourceports import get_complevel_args
 
-            cl_args = get_complevel_args(port, wad["complevel"])
-            if cl_args:
+        cl_args = get_complevel_args(port, wad["complevel"])
+        if cl_args:
+            all_args = cmd + (extra_args or [])
+            if cl_args[0] not in all_args:
                 cmd.extend(cl_args)
 
     # Add per-WAD custom args
@@ -436,6 +436,7 @@ def play(
         cmd.extend(config_args)
 
     # Inject per-WAD data directory args (if enabled and sourceport is recognized)
+    wad_data_dir = None
     if get_manage_data_dirs():
         from caco.sourceports import get_data_dir_args
 
@@ -519,6 +520,15 @@ def play(
     if process_ref is not None:
         process_ref.append(proc)
 
+    # Start stats watcher if available for this sourceport
+    watcher = watcher_thread = None
+    if wad_data_dir and get_auto_stats():
+        from caco.stats_watcher import get_watcher, run_watcher_thread
+
+        watcher = get_watcher(port, wad_data_dir)
+        if watcher:
+            watcher_thread = run_watcher_thread(watcher)
+
     # Capture stats snapshot before play for per-session map tracking
     stats_before = _read_stats_snapshot(wad_id)
 
@@ -530,6 +540,14 @@ def play(
     finally:
         # End session and calculate duration; always record exit code
         db.end_session(session_id, exit_code=proc.returncode)
+
+    # Stop watcher and write collected stats to data dir
+    if watcher and watcher_thread:
+        watcher.stop()
+        watcher_thread.join(timeout=5.0)
+        collected = watcher.collect()
+        if collected and wad_data_dir:
+            (wad_data_dir / "levelstat.txt").write_text(collected)
 
     # Auto-track stats from data directory
     stats_after = _auto_track_stats(wad_id, wad)

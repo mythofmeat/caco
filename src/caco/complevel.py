@@ -34,6 +34,20 @@ def complevel_name(cl: int | None) -> str:
     return COMPLEVEL_NAMES.get(cl, f"Complevel {cl}")
 
 
+# Helion uses string names for complevels via +complevel
+HELION_COMPLEVEL_NAMES: dict[int, str] = {
+    2: "vanilla",
+    9: "boom",
+    11: "mbf",
+    21: "mbf21",
+}
+
+
+def complevel_to_helion_name(complevel: int) -> str | None:
+    """Map a numeric complevel to Helion's +complevel string."""
+    return HELION_COMPLEVEL_NAMES.get(complevel)
+
+
 def parse_complevel(value: str) -> int | None:
     """Parse a complevel from a string — accepts integer or alias name.
 

@@ -2,7 +2,7 @@
 
 import pytest
 
-from caco.complevel import COMPLEVEL_ALIASES, COMPLEVEL_NAMES, complevel_name, parse_complevel
+from caco.complevel import COMPLEVEL_ALIASES, COMPLEVEL_NAMES, HELION_COMPLEVEL_NAMES, complevel_name, complevel_to_helion_name, parse_complevel
 
 
 class TestComplevelName:
@@ -59,3 +59,29 @@ class TestComplevelAliases:
         for alias, cl in COMPLEVEL_ALIASES.items():
             assert isinstance(cl, int)
             assert parse_complevel(alias) == cl
+
+
+class TestComplevelToHelionName:
+    """Test complevel_to_helion_name() mapping."""
+
+    def test_vanilla(self):
+        assert complevel_to_helion_name(2) == "vanilla"
+
+    def test_boom(self):
+        assert complevel_to_helion_name(9) == "boom"
+
+    def test_mbf(self):
+        assert complevel_to_helion_name(11) == "mbf"
+
+    def test_mbf21(self):
+        assert complevel_to_helion_name(21) == "mbf21"
+
+    def test_unsupported_returns_none(self):
+        assert complevel_to_helion_name(4) is None
+        assert complevel_to_helion_name(0) is None
+        assert complevel_to_helion_name(99) is None
+
+    def test_all_entries_are_strings(self):
+        for cl, name in HELION_COMPLEVEL_NAMES.items():
+            assert isinstance(name, str)
+            assert isinstance(cl, int)

@@ -1,5 +1,8 @@
 """Tests for caco.player module."""
 
+import json
+import os
+import threading
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -324,3 +327,122 @@ class TestAutoTrackStats:
             result = _auto_track_stats(1, wad)
             mock_db.update_wad.assert_not_called()
             assert result is None
+
+
+class TestWatcherIntegration:
+    """Test that play() starts/stops the stats watcher for Helion."""
+
+    def test_helion_watcher_writes_stats_to_data_dir(self, tmp_db, tmp_path):
+        """play() with Helion sourceport: watcher collects stats and writes levelstat.txt."""
+        from caco import db
+
+        # Create a WAD in the DB with a cached file
+        wad_path = tmp_path / "test.wad"
+        wad_path.write_bytes(b"PWAD")
+        wad_id = db.add_wad(
+            title="Watcher Test",
+            source_type=db.SourceType.LOCAL,
+            source_url=str(wad_path),
+        )
+        db.update_wad(wad_id, cached_path=str(wad_path), custom_iwad="doom2")
+
+        # Set up fake Helion config dir with a levelstat.txt that will appear
+        helion_config_dir = tmp_path / "helion_config"
+        helion_config_dir.mkdir()
+        levelstat_path = helion_config_dir / "levelstat.txt"
+
+        # Data dir where caco manages WAD data
+        wad_data_dir = tmp_path / "data" / f"{wad_id}_watcher-test"
+        wad_data_dir.mkdir(parents=True)
+
+        def mock_wait():
+            """Simulate sourceport: write levelstat.txt, give watcher time to poll."""
+            levelstat_path.write_text(
+                "MAP01 - 0:32.97 (0:32.97)  K: 100/100  I: 50/50  S: 5/5\n"
+            )
+            # Ensure mtime advances so watcher detects the change
+            new_mtime = levelstat_path.stat().st_mtime + 2
+            os.utime(levelstat_path, (new_mtime, new_mtime))
+            # Give watcher thread time to poll and detect the change
+            import time
+            time.sleep(0.15)
+            return 0
+
+        mock_proc = MagicMock()
+        mock_proc.wait.side_effect = mock_wait
+        mock_proc.returncode = 0
+
+        profile = tmp_path / "Helion" / "default.cfg"
+
+        with (
+            patch("caco.player.get_default_sourceport", return_value="Helion"),
+            patch("caco.player.resolve_sourceport", return_value="Helion"),
+            patch("caco.player.get_sourceport_args", return_value=[]),
+            patch("caco.player.get_manage_data_dirs", return_value=True),
+            patch("caco.player.get_auto_stats", return_value=True),
+            patch("caco.player.get_auto_detect_iwad", return_value=False),
+            patch("caco.player.get_auto_detect_complevel", return_value=False),
+            patch("caco.player.get_cache_auto_clean", return_value=False),
+            patch("caco.player.resolve_iwad", return_value="/path/to/doom2.wad"),
+            patch("caco.player.find_wad_data_dir", return_value=wad_data_dir),
+            patch("caco.player.get_wad_data_dir", return_value=wad_data_dir),
+            patch("caco.player.get_profile_path", return_value=profile),
+            patch("shutil.which", return_value="/usr/bin/Helion"),
+            patch("subprocess.Popen", return_value=mock_proc),
+            patch(
+                "caco.watchers.helion._get_helion_config_dir",
+                return_value=helion_config_dir,
+            ),
+        ):
+            from caco.player import play
+            result = play(wad_id)
+
+        # Verify the watcher wrote levelstat.txt to the data dir
+        output_file = wad_data_dir / "levelstat.txt"
+        assert output_file.exists(), "Watcher should have written levelstat.txt to data dir"
+        content = output_file.read_text()
+        assert "MAP01" in content
+        assert result.exit_code == 0
+
+    def test_dsda_no_watcher(self, tmp_db, tmp_path):
+        """play() with dsda-doom: no watcher started, no extra files written."""
+        from caco import db
+
+        wad_path = tmp_path / "test.wad"
+        wad_path.write_bytes(b"PWAD")
+        wad_id = db.add_wad(
+            title="No Watcher Test",
+            source_type=db.SourceType.LOCAL,
+            source_url=str(wad_path),
+        )
+        db.update_wad(wad_id, cached_path=str(wad_path), custom_iwad="doom2")
+
+        wad_data_dir = tmp_path / "data" / f"{wad_id}_no-watcher-test"
+        wad_data_dir.mkdir(parents=True)
+
+        mock_proc = MagicMock()
+        mock_proc.wait.return_value = 0
+        mock_proc.returncode = 0
+        profile = tmp_path / "dsda-doom" / "default.cfg"
+
+        with (
+            patch("caco.player.get_default_sourceport", return_value="dsda-doom"),
+            patch("caco.player.resolve_sourceport", return_value="dsda-doom"),
+            patch("caco.player.get_sourceport_args", return_value=[]),
+            patch("caco.player.get_manage_data_dirs", return_value=True),
+            patch("caco.player.get_auto_stats", return_value=True),
+            patch("caco.player.get_auto_detect_iwad", return_value=False),
+            patch("caco.player.get_auto_detect_complevel", return_value=False),
+            patch("caco.player.get_cache_auto_clean", return_value=False),
+            patch("caco.player.resolve_iwad", return_value="/path/to/doom2.wad"),
+            patch("caco.player.find_wad_data_dir", return_value=wad_data_dir),
+            patch("caco.player.get_wad_data_dir", return_value=wad_data_dir),
+            patch("caco.player.get_profile_path", return_value=profile),
+            patch("shutil.which", return_value="/usr/bin/dsda-doom"),
+            patch("subprocess.Popen", return_value=mock_proc),
+        ):
+            from caco.player import play
+            play(wad_id)
+
+        # No levelstat.txt should be written by a watcher
+        assert not (wad_data_dir / "levelstat.txt").exists()

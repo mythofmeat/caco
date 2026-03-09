@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from caco.sourceports import get_complevel_args, get_data_dir_args, get_dsda_save_dir, identify_sourceport_family, detect_sourceports
+from caco.sourceports import get_complevel_args, get_config_args, get_data_dir_args, get_dsda_save_dir, get_family_name, identify_sourceport_family, detect_sourceports
 
 
 class TestIdentifySourceportFamily:
@@ -22,6 +22,8 @@ class TestIdentifySourceportFamily:
         ("crispy-doom", "-savedir"),
         ("woof", "-save"),
         ("eternity", "-savedir"),
+        ("Helion", "-savedir"),
+        ("helion", "-savedir"),
     ])
     def test_identify_known_sourceport(self, exe, expected_save):
         family = identify_sourceport_family(exe)
@@ -208,3 +210,61 @@ class TestGetComplevelArgs:
 
     def test_with_full_path(self):
         assert get_complevel_args("/usr/bin/dsda-doom", 21) == ["-complevel", "21"]
+
+    def test_helion_boom(self):
+        assert get_complevel_args("Helion", 9) == ["+complevel", "boom"]
+
+    def test_helion_vanilla(self):
+        assert get_complevel_args("Helion", 2) == ["+complevel", "vanilla"]
+
+    def test_helion_mbf(self):
+        assert get_complevel_args("Helion", 11) == ["+complevel", "mbf"]
+
+    def test_helion_mbf21(self):
+        assert get_complevel_args("Helion", 21) == ["+complevel", "mbf21"]
+
+    def test_helion_unsupported_complevel(self):
+        """Complevel 4 (Final Doom) has no Helion name — returns []."""
+        assert get_complevel_args("Helion", 4) == []
+
+    def test_helion_with_full_path(self):
+        assert get_complevel_args("/usr/bin/Helion", 9) == ["+complevel", "boom"]
+
+
+class TestHelionFamily:
+    """Helion-specific sourceport integration tests."""
+
+    def test_identify_helion(self):
+        family = identify_sourceport_family("Helion")
+        assert family is not None
+        assert family["save_arg"] == "-savedir"
+
+    def test_identify_helion_lowercase(self):
+        family = identify_sourceport_family("helion")
+        assert family is not None
+
+    def test_helion_no_data_arg(self):
+        """Helion has no data_arg — only -savedir."""
+        family = identify_sourceport_family("Helion")
+        assert "data_arg" not in family
+
+    def test_data_dir_args_savedir_only(self):
+        args = get_data_dir_args("Helion", "/tmp/data")
+        assert args == ["-savedir", "/tmp/data"]
+
+    def test_config_args_empty(self):
+        """Helion doesn't support -config."""
+        assert get_config_args("Helion", "/tmp/config.cfg") == []
+
+    def test_get_family_name(self):
+        assert get_family_name("Helion") == "helion"
+        assert get_family_name("helion") == "helion"
+
+    def test_get_family_name_unknown(self):
+        assert get_family_name("unknown-port") is None
+
+    def test_get_family_name_dsda(self):
+        assert get_family_name("dsda-doom") == "dsda"
+
+    def test_get_family_name_with_path(self):
+        assert get_family_name("/usr/bin/Helion") == "helion"

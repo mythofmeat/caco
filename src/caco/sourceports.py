@@ -9,6 +9,7 @@ SAVE_EXTENSIONS: dict[str, set[str]] = {
     "chocolate": {".dsg"},
     "woof": {".dsg"},
     "eternity": {".dsg"},
+    "helion": {".hsg"},
 }
 ALL_SAVE_EXTENSIONS: frozenset[str] = frozenset(
     ext for exts in SAVE_EXTENSIONS.values() for ext in exts
@@ -46,6 +47,11 @@ SOURCEPORT_FAMILIES: dict[str, dict] = {
     "eternity": {
         "executables": ["eternity"],
         "save_arg": "-savedir",
+    },
+    "helion": {
+        "executables": ["Helion", "helion"],
+        "save_arg": "-savedir",
+        "complevel_arg": "+complevel",
     },
 }
 
@@ -87,6 +93,15 @@ def identify_sourceport_family(executable: str) -> dict | None:
     return _EXECUTABLE_MAP.get(basename)
 
 
+def get_family_name(executable: str) -> str | None:
+    """Get the family name string for a sourceport executable.
+
+    Returns e.g. "dsda", "helion", or None if unrecognized.
+    """
+    basename = Path(executable).stem
+    return _EXECUTABLE_FAMILY_NAME.get(basename)
+
+
 def get_dsda_save_dir(executable: str, data_dir: str, iwad: str, wad_path: str) -> str:
     """Compute the nested save directory for dsda-family sourceports.
 
@@ -109,24 +124,31 @@ def uses_deh_flag(executable: str) -> bool:
     ZDoom-family ports load DEH via -file; all others use -deh.
     Returns True (use -deh) for unknown sourceports as the safe default.
     """
-    basename = Path(executable).stem
-    family_name = _EXECUTABLE_FAMILY_NAME.get(basename)
-    return family_name != "zdoom"
+    return get_family_name(executable) != "zdoom"
 
 
 def get_complevel_args(executable: str, complevel: int) -> list[str]:
     """Return CLI args to set the compatibility level for a sourceport.
 
-    Only dsda and woof families support -complevel.
-    Returns e.g. ["-complevel", "9"] or [] for unsupported sourceports.
+    Returns e.g. ["-complevel", "9"] for dsda/woof, ["+complevel", "boom"]
+    for Helion, or [] for unsupported sourceports.
     """
     family = identify_sourceport_family(executable)
     if not family:
         return []
     arg = family.get("complevel_arg")
-    if arg:
-        return [arg, str(complevel)]
-    return []
+    if not arg:
+        return []
+
+    if get_family_name(executable) == "helion":
+        from caco.complevel import complevel_to_helion_name
+
+        name = complevel_to_helion_name(complevel)
+        if name is None:
+            return []
+        return [arg, name]
+
+    return [arg, str(complevel)]
 
 
 def get_config_args(executable: str, config_path: str) -> list[str]:
@@ -134,9 +156,7 @@ def get_config_args(executable: str, config_path: str) -> list[str]:
 
     Only dsda-family ports support -config. Returns [] for others.
     """
-    basename = Path(executable).stem
-    family_name = _EXECUTABLE_FAMILY_NAME.get(basename)
-    if family_name == "dsda":
+    if get_family_name(executable) == "dsda":
         return ["-config", config_path]
     return []
 
@@ -165,9 +185,7 @@ def get_data_dir_args(
         args.extend([family["data_arg"], data_dir])
     if "save_arg" in family:
         # For dsda family, use nested save dir if we have enough info
-        basename = Path(executable).stem
-        family_name = _EXECUTABLE_FAMILY_NAME.get(basename)
-        if family_name == "dsda" and iwad and wad_path:
+        if get_family_name(executable) == "dsda" and iwad and wad_path:
             save_dir = get_dsda_save_dir(executable, data_dir, iwad, wad_path)
         else:
             save_dir = data_dir
