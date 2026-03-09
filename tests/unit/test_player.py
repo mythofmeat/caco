@@ -372,7 +372,7 @@ class TestWatcherIntegration:
         mock_proc.wait.side_effect = mock_wait
         mock_proc.returncode = 0
 
-        profile = tmp_path / "Helion" / "default.cfg"
+        profile = tmp_path / "Helion" / "default.ini"
 
         with (
             patch("caco.player.get_default_sourceport", return_value="Helion"),

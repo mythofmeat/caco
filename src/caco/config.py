@@ -305,10 +305,14 @@ def get_sourceport_dir() -> Path:
 def get_profile_path(sourceport: str, profile: str) -> Path:
     """Return the path to a sourceport config profile file.
 
-    Path: {sourceport_dir}/{basename}/{profile}.cfg
+    Path: {sourceport_dir}/{basename}/{profile}.{ext}
+    Extension is .ini for Helion, .cfg for all others.
     """
+    from caco.sourceports import get_profile_ext
+
     basename = Path(sourceport).stem
-    return get_sourceport_dir() / basename / f"{profile}.cfg"
+    ext = get_profile_ext(sourceport)
+    return get_sourceport_dir() / basename / f"{profile}{ext}"
 
 
 def list_profiles(sourceport: str | None = None) -> dict[str, list[str]]:
@@ -327,17 +331,19 @@ def list_profiles(sourceport: str | None = None) -> dict[str, list[str]]:
 
     result: dict[str, list[str]] = {}
 
+    config_globs = ("*.cfg", "*.ini")
+
     if sourceport:
         basename = Path(sourceport).stem
         port_dir = sp_dir / basename
         if port_dir.is_dir():
-            profiles = sorted(p.stem for p in port_dir.glob("*.cfg"))
+            profiles = sorted({p.stem for g in config_globs for p in port_dir.glob(g)})
             if profiles:
                 result[basename] = profiles
     else:
         for entry in sorted(sp_dir.iterdir()):
             if entry.is_dir():
-                profiles = sorted(p.stem for p in entry.glob("*.cfg"))
+                profiles = sorted({p.stem for g in config_globs for p in entry.glob(g)})
                 if profiles:
                     result[entry.name] = profiles
 

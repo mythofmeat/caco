@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from caco.sourceports import get_complevel_args, get_config_args, get_data_dir_args, get_dsda_save_dir, get_family_name, identify_sourceport_family, detect_sourceports
+from caco.sourceports import get_complevel_args, get_config_args, get_data_dir_args, get_dsda_save_dir, get_family_name, get_profile_ext, identify_sourceport_family, detect_sourceports
 
 
 class TestIdentifySourceportFamily:
@@ -252,9 +252,14 @@ class TestHelionFamily:
         args = get_data_dir_args("Helion", "/tmp/data")
         assert args == ["-savedir", "/tmp/data"]
 
-    def test_config_args_empty(self):
-        """Helion doesn't support -config."""
-        assert get_config_args("Helion", "/tmp/config.cfg") == []
+    def test_config_args(self):
+        """Helion supports -config with .ini files."""
+        assert get_config_args("Helion", "/tmp/config.ini") == ["-config", "/tmp/config.ini"]
+
+    def test_profile_ext(self):
+        """Helion uses .ini extension for config profiles."""
+        assert get_profile_ext("Helion") == ".ini"
+        assert get_profile_ext("helion") == ".ini"
 
     def test_get_family_name(self):
         assert get_family_name("Helion") == "helion"

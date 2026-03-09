@@ -64,7 +64,7 @@ def profile_ls(sourceport: str | None):
 
     for port_name, profile_names in profiles.items():
         for pname in profile_names:
-            path = get_sourceport_dir() / port_name / f"{pname}.cfg"
+            path = get_profile_path(port_name, pname)
             table.add_row(port_name, pname, str(path))
 
     console.print(table)

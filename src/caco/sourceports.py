@@ -151,12 +151,23 @@ def get_complevel_args(executable: str, complevel: int) -> list[str]:
     return [arg, str(complevel)]
 
 
+def get_profile_ext(executable: str) -> str:
+    """Return the config file extension for a sourceport.
+
+    Helion uses .ini; all others use .cfg.
+    """
+    if get_family_name(executable) == "helion":
+        return ".ini"
+    return ".cfg"
+
+
 def get_config_args(executable: str, config_path: str) -> list[str]:
     """Return CLI args to set the config file for the sourceport.
 
-    Only dsda-family ports support -config. Returns [] for others.
+    dsda-family and helion support -config. Returns [] for others.
     """
-    if get_family_name(executable) == "dsda":
+    family = get_family_name(executable)
+    if family in ("dsda", "helion"):
         return ["-config", config_path]
     return []
 
