@@ -475,6 +475,13 @@ def merge_stats(stats_list: list[WadStats]) -> WadStats:
                 existing.total_items = max(existing.total_items, m.total_items)
                 existing.total_secrets = max(existing.total_secrets, m.total_secrets)
 
+    # Cross-populate time fields between formats so data isn't lost
+    for m in merged.values():
+        if m.best_time < 0 and m.time_secs >= 0:
+            m.best_time = round(m.time_secs * TICS_PER_SECOND)
+        if m.time_secs < 0 and m.best_time >= 0:
+            m.time_secs = m.best_time / TICS_PER_SECOND
+
     # Take highest header values
     version = max(s.version for s in stats_list)
     header_total_kills = max(s.header_total_kills for s in stats_list)

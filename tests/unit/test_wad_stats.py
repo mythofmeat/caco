@@ -330,6 +330,32 @@ class TestMergeStats:
         merged = merge_stats([s1, s2])
         assert merged.format == "stats_txt"
 
+    def test_merge_cross_populates_time(self):
+        """Merging levelstat time_secs into stats_txt populates best_time."""
+        s1 = WadStats(format="stats_txt", maps=[
+            MapStats(lump="MAP01", best_skill=0, best_time=-1),
+        ])
+        s2 = WadStats(format="levelstat_txt", maps=[
+            MapStats(lump="MAP01", time_secs=8.228, best_skill=4),
+        ])
+        merged = merge_stats([s1, s2])
+        m = merged.maps[0]
+        assert m.best_time == round(8.228 * 35)  # time_secs -> tics
+        assert m.time_secs == pytest.approx(8.228)  # preserved
+
+    def test_merge_cross_populates_time_reverse(self):
+        """Merging stats_txt best_time into levelstat populates time_secs."""
+        s1 = WadStats(format="stats_txt", maps=[
+            MapStats(lump="MAP01", best_time=1050),
+        ])
+        s2 = WadStats(format="levelstat_txt", maps=[
+            MapStats(lump="MAP01", time_secs=-1.0),
+        ])
+        merged = merge_stats([s1, s2])
+        m = merged.maps[0]
+        assert m.best_time == 1050
+        assert m.time_secs == pytest.approx(1050 / 35)
+
     def test_merge_header_values(self):
         """Header values take the highest."""
         s1 = WadStats(format="stats_txt", version=1, header_total_kills=100, maps=[])
