@@ -2,23 +2,37 @@
 
 import re
 import shutil
-import sys
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 import click
 from rich.table import Table
 
 from caco import db
-from caco.config import (
-    find_wad_data_dir,
-    get_backup_dir,
-    get_cache_dir,
-    get_data_dir,
-)
+from caco.config import get_backup_dir, get_data_dir
+from caco.db._connection import get_connection, _SQLITE_MAX_VARS
+from caco.demos import DEMO_EXTENSION
 from caco.saves import list_all_backups
+from caco.sourceports import ALL_SAVE_EXTENSIONS
 from caco.utils import format_size as _format_size
 
 from caco.cli import cli, console, err_console
+
+
+# =============================================================================
+# Options dataclass
+# =============================================================================
+
+
+@dataclass(frozen=True, slots=True)
+class GcOptions:
+    """Cleanup flags threaded through the GC pipeline."""
+
+    keep_data: bool = False
+    keep_cache: bool = False
+    keep_saves: bool = False
+    keep_demos: bool = False
 
 
 # =============================================================================
@@ -33,79 +47,131 @@ def _dir_size(path: Path) -> int:
     return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
 
 
+def _get_existing_wad_ids(candidate_ids: set[int]) -> set[int]:
+    """Batch-check which WAD IDs exist in the database (including soft-deleted)."""
+    if not candidate_ids:
+        return set()
+
+    existing: set[int] = set()
+    ids_list = list(candidate_ids)
+    with get_connection() as conn:
+        for i in range(0, len(ids_list), _SQLITE_MAX_VARS):
+            chunk = ids_list[i : i + _SQLITE_MAX_VARS]
+            placeholders = ",".join("?" * len(chunk))
+            rows = conn.execute(
+                f"SELECT id FROM wads WHERE id IN ({placeholders})", chunk
+            ).fetchall()
+            existing.update(row[0] for row in rows)
+    return existing
+
+
+def _parse_wad_id_prefix(name: str) -> int | None:
+    """Extract WAD ID from a '{id}_...' filename/dirname. Returns None if no match."""
+    match = re.match(r"^(\d+)_", name)
+    return int(match.group(1)) if match else None
+
+
 def _find_orphaned_data_dirs() -> list[tuple[Path, int]]:
     """Find data dirs whose WAD ID no longer exists in the database."""
     data_dir = get_data_dir()
     if not data_dir.is_dir():
         return []
 
-    orphans = []
+    # Collect all candidate IDs in one pass
+    candidates: dict[int, Path] = {}
     for entry in data_dir.iterdir():
         if not entry.is_dir():
             continue
-        match = re.match(r"^(\d+)_", entry.name)
-        if not match:
-            continue
-        wad_id = int(match.group(1))
-        # Check if WAD exists (including deleted — soft-deleted WADs still own their data)
-        wad = db.get_wad(wad_id, include_deleted=True)
-        if not wad:
-            size = _dir_size(entry)
-            orphans.append((entry, size))
+        wad_id = _parse_wad_id_prefix(entry.name)
+        if wad_id is not None:
+            candidates[wad_id] = entry
+
+    if not candidates:
+        return []
+
+    existing_ids = _get_existing_wad_ids(set(candidates.keys()))
+
+    orphans = []
+    for wad_id, path in candidates.items():
+        if wad_id not in existing_ids:
+            orphans.append((path, _dir_size(path)))
 
     return orphans
 
 
 def _find_orphaned_backups() -> list[tuple[Path, int]]:
     """Find backup zips whose WAD ID no longer exists in the database."""
-    backup_dir = get_backup_dir()
-    if not backup_dir.is_dir():
+    all_backups = list_all_backups()
+    if not all_backups:
         return []
 
-    orphans = []
-    for path in backup_dir.iterdir():
-        if not path.is_file() or path.suffix != ".zip":
-            continue
-        match = re.match(r"^(\d+)_", path.name)
-        if not match:
-            continue
-        wad_id = int(match.group(1))
-        wad = db.get_wad(wad_id, include_deleted=True)
-        if not wad:
-            size = path.stat().st_size
-            orphans.append((path, size))
+    wad_ids = {b["wad_id"] for b in all_backups}
+    existing_ids = _get_existing_wad_ids(wad_ids)
 
-    return orphans
+    return [
+        (b["path"], b["size"])
+        for b in all_backups
+        if b["wad_id"] not in existing_ids
+    ]
 
 
 def _get_gc_candidates() -> list[dict]:
     """Find finished/abandoned WADs eligible for GC (not gc_ignored)."""
-    finished = db.search_wads(query="status:finished")
-    abandoned = db.search_wads(query="status:abandoned")
-    all_wads = finished + abandoned
-
-    # Dedupe by ID and filter out gc_ignored
-    seen = set()
-    candidates = []
-    for wad in all_wads:
-        if wad["id"] not in seen and not wad.get("gc_ignore"):
-            seen.add(wad["id"])
-            candidates.append(wad)
-
-    return candidates
+    wads = db.search_wads(query="status:finished , status:abandoned")
+    return [w for w in wads if not w.get("gc_ignore")]
 
 
-def _wad_has_data(wad: dict) -> tuple[Path | None, int, Path | None, int]:
+def _build_data_dir_map() -> dict[int, Path]:
+    """Scan the data directory once and return a {wad_id: path} mapping."""
+    data_dir = get_data_dir()
+    if not data_dir.is_dir():
+        return {}
+
+    result: dict[int, Path] = {}
+    for entry in data_dir.iterdir():
+        if entry.is_dir():
+            wad_id = _parse_wad_id_prefix(entry.name)
+            if wad_id is not None:
+                result[wad_id] = entry
+    return result
+
+
+def _compute_data_size(data_dir: Path | None, opts: GcOptions) -> int:
+    """Compute cleanable data size, respecting keep_saves/keep_demos."""
+    if not data_dir or not data_dir.is_dir():
+        return 0
+    if not opts.keep_saves and not opts.keep_demos:
+        return _dir_size(data_dir)
+
+    # Selective: sum only files that would be deleted
+    total = 0
+    for f in data_dir.rglob("*"):
+        if not f.is_file():
+            continue
+        suffix = f.suffix.lower()
+        if opts.keep_saves and suffix in ALL_SAVE_EXTENSIONS:
+            continue
+        if opts.keep_demos and suffix == DEMO_EXTENSION:
+            continue
+        total += f.stat().st_size
+    return total
+
+
+def _wad_has_data(
+    wad: dict,
+    data_dir_map: dict[int, Path],
+    opts: GcOptions,
+) -> tuple[Path | None, int, Path | None, int]:
     """Check what cleanable data exists for a WAD.
 
     Returns (data_dir, data_size, cache_path, cache_size).
     """
-    data_dir = find_wad_data_dir(wad["id"])
-    data_size = _dir_size(data_dir) if data_dir else 0
+    data_dir = data_dir_map.get(wad["id"])
+    data_size = _compute_data_size(data_dir, opts) if not opts.keep_data else 0
 
     cache_path = None
     cache_size = 0
-    if wad.get("cached_path"):
+    if not opts.keep_cache and wad.get("cached_path"):
         p = Path(wad["cached_path"])
         if p.is_file():
             cache_path = p
@@ -118,26 +184,21 @@ def _clean_wad_data(
     wad: dict,
     data_dir: Path | None,
     cache_path: Path | None,
-    *,
-    keep_data: bool = False,
-    keep_cache: bool = False,
-    keep_saves: bool = False,
-    keep_demos: bool = False,
+    opts: GcOptions,
 ) -> int:
     """Delete data/cache for a WAD. Returns bytes freed."""
     freed = 0
 
-    if data_dir and data_dir.is_dir() and not keep_data:
-        if keep_saves or keep_demos:
+    if data_dir and data_dir.is_dir() and not opts.keep_data:
+        if opts.keep_saves or opts.keep_demos:
             # Selective cleanup within data dir
-            from caco.sourceports import ALL_SAVE_EXTENSIONS
-
             for f in list(data_dir.rglob("*")):
                 if not f.is_file():
                     continue
-                if keep_saves and f.suffix.lower() in ALL_SAVE_EXTENSIONS:
+                suffix = f.suffix.lower()
+                if opts.keep_saves and suffix in ALL_SAVE_EXTENSIONS:
                     continue
-                if keep_demos and f.suffix.lower() == ".lmp":
+                if opts.keep_demos and suffix == DEMO_EXTENSION:
                     continue
                 freed += f.stat().st_size
                 f.unlink()
@@ -159,15 +220,52 @@ def _clean_wad_data(
             freed += _dir_size(data_dir)
             shutil.rmtree(data_dir)
 
-    if cache_path and cache_path.is_file() and not keep_cache:
+    if cache_path and cache_path.is_file() and not opts.keep_cache:
         freed += cache_path.stat().st_size
         cache_path.unlink()
         db.clear_cached_path(wad["id"])
 
     # Clear live stats snapshot (data is archived in completions)
-    if not keep_data:
+    if not opts.keep_data:
         db.update_wad(wad["id"], record_completion=False, stats_snapshot=None)
 
+    return freed
+
+
+def _gc_orphans(
+    orphans: list[tuple[Path, int]],
+    *,
+    label: str,
+    delete_fn: Callable[[Path], None],
+    dry_run: bool,
+    yes: bool,
+) -> int:
+    """Clean orphaned files or directories with confirmation."""
+    total_size = sum(size for _, size in orphans)
+
+    console.print(f"\n[bold]Orphaned {label} ({len(orphans)}):[/bold]\n")
+    for path, size in orphans:
+        console.print(f"  {path.name} ({_format_size(size)})")
+
+    console.print(f"\n[bold]Subtotal:[/bold] {_format_size(total_size)}")
+
+    if dry_run:
+        return total_size
+
+    if not yes:
+        if not click.confirm(f"\nDelete orphaned {label}?"):
+            console.print("[dim]Skipped[/dim]")
+            return 0
+
+    freed = 0
+    for path, size in orphans:
+        try:
+            delete_fn(path)
+            freed += size
+        except OSError as e:
+            err_console.print(f"[red]Failed to delete {path}: {e}[/red]")
+
+    console.print(f"[green]Deleted {len(orphans)} orphaned {label}, freed {_format_size(freed)}[/green]")
     return freed
 
 
@@ -221,30 +319,42 @@ def gc_cmd(
         _handle_ignore(unignore_query, ignore=False)
         return
 
+    opts = GcOptions(
+        keep_data=keep_data,
+        keep_cache=keep_cache,
+        keep_saves=keep_saves,
+        keep_demos=keep_demos,
+    )
+
     console.print("[bold]Scanning for garbage...[/bold]\n")
 
     total_freed = 0
 
     # Phase 1: Finished/abandoned WADs
     if not orphans_only:
-        total_freed += _gc_finished_wads(
-            dry_run=dry_run,
-            yes=yes,
-            keep_data=keep_data,
-            keep_cache=keep_cache,
-            keep_saves=keep_saves,
-            keep_demos=keep_demos,
-        )
+        total_freed += _gc_finished_wads(dry_run=dry_run, yes=yes, opts=opts)
 
     # Phase 2: Orphaned data dirs
     orphan_dirs = _find_orphaned_data_dirs()
     if orphan_dirs:
-        total_freed += _gc_orphaned_dirs(orphan_dirs, dry_run=dry_run, yes=yes)
+        total_freed += _gc_orphans(
+            orphan_dirs,
+            label="data dirs",
+            delete_fn=shutil.rmtree,
+            dry_run=dry_run,
+            yes=yes,
+        )
 
     # Phase 3: Orphaned backups
     orphan_backups = _find_orphaned_backups()
     if orphan_backups:
-        total_freed += _gc_orphaned_backups(orphan_backups, dry_run=dry_run, yes=yes)
+        total_freed += _gc_orphans(
+            orphan_backups,
+            label="backups",
+            delete_fn=lambda p: p.unlink(),
+            dry_run=dry_run,
+            yes=yes,
+        )
 
     # Summary
     if total_freed > 0:
@@ -265,7 +375,6 @@ def _handle_ignore(query: str, *, ignore: bool) -> None:
     if not wads:
         return
 
-    action = "ignored" if ignore else "un-ignored"
     for wad in wads:
         db.update_wad(wad["id"], record_completion=False, gc_ignore=1 if ignore else 0)
 
@@ -276,31 +385,22 @@ def _handle_ignore(query: str, *, ignore: bool) -> None:
         console.print(f"[green]Removed GC-ignore from {count} WAD(s)[/green]")
 
 
-def _gc_finished_wads(
-    *,
-    dry_run: bool,
-    yes: bool,
-    keep_data: bool,
-    keep_cache: bool,
-    keep_saves: bool,
-    keep_demos: bool,
-) -> int:
+def _gc_finished_wads(*, dry_run: bool, yes: bool, opts: GcOptions) -> int:
     """Clean data for finished/abandoned WADs. Returns bytes freed."""
     candidates = _get_gc_candidates()
     if not candidates:
         return 0
+
+    # Single scan of data directory for all candidates
+    data_dir_map = _build_data_dir_map()
 
     # Categorize and measure
     auto_clean = []  # idgames WADs (re-downloadable)
     interactive = []  # non-idgames WADs (need individual confirmation)
 
     for wad in candidates:
-        data_dir, data_size, cache_path, cache_size = _wad_has_data(wad)
-        total_size = 0
-        if not keep_data:
-            total_size += data_size
-        if not keep_cache:
-            total_size += cache_size
+        data_dir, data_size, cache_path, cache_size = _wad_has_data(wad, data_dir_map, opts)
+        total_size = data_size + cache_size
 
         if total_size == 0:
             continue  # Nothing to clean
@@ -326,26 +426,11 @@ def _gc_finished_wads(
 
     # Auto-clean section (idgames WADs)
     if auto_clean:
-        total_freed += _gc_auto_clean(
-            auto_clean,
-            dry_run=dry_run,
-            yes=yes,
-            keep_data=keep_data,
-            keep_cache=keep_cache,
-            keep_saves=keep_saves,
-            keep_demos=keep_demos,
-        )
+        total_freed += _gc_auto_clean(auto_clean, dry_run=dry_run, yes=yes, opts=opts)
 
     # Interactive section (non-idgames WADs)
     if interactive:
-        total_freed += _gc_interactive(
-            interactive,
-            dry_run=dry_run,
-            keep_data=keep_data,
-            keep_cache=keep_cache,
-            keep_saves=keep_saves,
-            keep_demos=keep_demos,
-        )
+        total_freed += _gc_interactive(interactive, dry_run=dry_run, opts=opts)
 
     return total_freed
 
@@ -355,10 +440,7 @@ def _gc_auto_clean(
     *,
     dry_run: bool,
     yes: bool,
-    keep_data: bool,
-    keep_cache: bool,
-    keep_saves: bool,
-    keep_demos: bool,
+    opts: GcOptions,
 ) -> int:
     """Clean idgames WADs with a single batch confirmation."""
     total_size = sum(e["total_size"] for e in entries)
@@ -372,8 +454,8 @@ def _gc_auto_clean(
 
     for entry in entries:
         wad = entry["wad"]
-        data_str = _format_size(entry["data_size"]) if entry["data_size"] and not keep_data else "-"
-        cache_str = _format_size(entry["cache_size"]) if entry["cache_size"] and not keep_cache else "-"
+        data_str = _format_size(entry["data_size"]) if entry["data_size"] else "-"
+        cache_str = _format_size(entry["cache_size"]) if entry["cache_size"] else "-"
         table.add_row(
             str(wad["id"]),
             wad["title"],
@@ -395,15 +477,7 @@ def _gc_auto_clean(
 
     freed = 0
     for entry in entries:
-        freed += _clean_wad_data(
-            entry["wad"],
-            entry["data_dir"],
-            entry["cache_path"],
-            keep_data=keep_data,
-            keep_cache=keep_cache,
-            keep_saves=keep_saves,
-            keep_demos=keep_demos,
-        )
+        freed += _clean_wad_data(entry["wad"], entry["data_dir"], entry["cache_path"], opts)
 
     console.print(f"[green]Cleaned {len(entries)} WAD(s), freed {_format_size(freed)}[/green]\n")
     return freed
@@ -413,10 +487,7 @@ def _gc_interactive(
     entries: list[dict],
     *,
     dry_run: bool,
-    keep_data: bool,
-    keep_cache: bool,
-    keep_saves: bool,
-    keep_demos: bool,
+    opts: GcOptions,
 ) -> int:
     """Prompt individually for non-idgames WADs. Returns bytes freed."""
     console.print(f"\n[bold]Non-re-downloadable WADs ({len(entries)}):[/bold]")
@@ -425,8 +496,8 @@ def _gc_interactive(
     freed = 0
     for entry in entries:
         wad = entry["wad"]
-        data_str = _format_size(entry["data_size"]) if entry["data_size"] and not keep_data else ""
-        cache_str = _format_size(entry["cache_size"]) if entry["cache_size"] and not keep_cache else ""
+        data_str = _format_size(entry["data_size"]) if entry["data_size"] else ""
+        cache_str = _format_size(entry["cache_size"]) if entry["cache_size"] else ""
         size_parts = [s for s in (data_str, cache_str) if s]
         size_display = " + ".join(size_parts) if size_parts else "0 B"
 
@@ -442,15 +513,7 @@ def _gc_interactive(
         choice = click.prompt("  Clean?", type=click.Choice(["y", "n", "i"]), default="n")
 
         if choice == "y":
-            freed += _clean_wad_data(
-                wad,
-                entry["data_dir"],
-                entry["cache_path"],
-                keep_data=keep_data,
-                keep_cache=keep_cache,
-                keep_saves=keep_saves,
-                keep_demos=keep_demos,
-            )
+            freed += _clean_wad_data(wad, entry["data_dir"], entry["cache_path"], opts)
         elif choice == "i":
             db.update_wad(wad["id"], record_completion=False, gc_ignore=1)
             console.print("  [dim]Permanently ignored[/dim]")
@@ -458,74 +521,4 @@ def _gc_interactive(
     if freed > 0:
         console.print(f"\n[green]Freed {_format_size(freed)} from non-re-downloadable WADs[/green]")
 
-    return freed
-
-
-def _gc_orphaned_dirs(
-    orphans: list[tuple[Path, int]],
-    *,
-    dry_run: bool,
-    yes: bool,
-) -> int:
-    """Clean orphaned data directories."""
-    total_size = sum(size for _, size in orphans)
-
-    console.print(f"\n[bold]Orphaned data dirs ({len(orphans)}):[/bold]\n")
-    for path, size in orphans:
-        console.print(f"  {path.name} ({_format_size(size)})")
-
-    console.print(f"\n[bold]Subtotal:[/bold] {_format_size(total_size)}")
-
-    if dry_run:
-        return total_size
-
-    if not yes:
-        if not click.confirm("\nDelete orphaned data dirs?"):
-            console.print("[dim]Skipped[/dim]")
-            return 0
-
-    freed = 0
-    for path, size in orphans:
-        try:
-            shutil.rmtree(path)
-            freed += size
-        except OSError as e:
-            err_console.print(f"[red]Failed to delete {path}: {e}[/red]")
-
-    console.print(f"[green]Deleted {len(orphans)} orphaned dir(s), freed {_format_size(freed)}[/green]")
-    return freed
-
-
-def _gc_orphaned_backups(
-    orphans: list[tuple[Path, int]],
-    *,
-    dry_run: bool,
-    yes: bool,
-) -> int:
-    """Clean orphaned backup files."""
-    total_size = sum(size for _, size in orphans)
-
-    console.print(f"\n[bold]Orphaned backups ({len(orphans)}):[/bold]\n")
-    for path, size in orphans:
-        console.print(f"  {path.name} ({_format_size(size)})")
-
-    console.print(f"\n[bold]Subtotal:[/bold] {_format_size(total_size)}")
-
-    if dry_run:
-        return total_size
-
-    if not yes:
-        if not click.confirm("\nDelete orphaned backups?"):
-            console.print("[dim]Skipped[/dim]")
-            return 0
-
-    freed = 0
-    for path, size in orphans:
-        try:
-            path.unlink()
-            freed += size
-        except OSError as e:
-            err_console.print(f"[red]Failed to delete {path}: {e}[/red]")
-
-    console.print(f"[green]Deleted {len(orphans)} orphaned backup(s), freed {_format_size(freed)}[/green]")
     return freed
