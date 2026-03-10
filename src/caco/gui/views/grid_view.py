@@ -7,7 +7,6 @@ from PySide6.QtWidgets import (
     QStyledItemDelegate,
     QAbstractItemView,
     QStyle,
-    QMenu,
 )
 
 from caco.gui.theme import DOOM_PALETTE, get_status_color, get_status_display
@@ -210,7 +209,10 @@ class WadGridView(QListView):
     selection_cleared = Signal()
 
     play_requested = Signal(int)
-    edit_requested = Signal(int)
+    edit_metadata_requested = Signal(int)
+    edit_notes_requested = Signal(int)
+    edit_sourceport_requested = Signal(int)
+    edit_companions_requested = Signal(int)
     delete_requested = Signal(int)
     sessions_requested = Signal(int)
     wad_stats_requested = Signal(int)
@@ -282,32 +284,6 @@ class WadGridView(QListView):
         wad_id = self._wad_id_at(idx)
         if wad_id is None:
             return
-
-        from PySide6.QtGui import QAction
-        menu = QMenu(self)
-
-        play_action = QAction("Play", self)
-        play_action.triggered.connect(lambda: self.play_requested.emit(wad_id))
-        menu.addAction(play_action)
-
-        menu.addSeparator()
-
-        sessions_action = QAction("Sessions...", self)
-        sessions_action.triggered.connect(lambda: self.sessions_requested.emit(wad_id))
-        menu.addAction(sessions_action)
-
-        stats_action = QAction("Map Stats...", self)
-        stats_action.triggered.connect(lambda: self.wad_stats_requested.emit(wad_id))
-        menu.addAction(stats_action)
-
-        edit_action = QAction("Edit...", self)
-        edit_action.triggered.connect(lambda: self.edit_requested.emit(wad_id))
-        menu.addAction(edit_action)
-
-        menu.addSeparator()
-
-        delete_action = QAction("Delete", self)
-        delete_action.triggered.connect(lambda: self.delete_requested.emit(wad_id))
-        menu.addAction(delete_action)
-
+        from caco.gui.views import build_wad_context_menu
+        menu = build_wad_context_menu(self, wad_id)
         menu.exec(self.viewport().mapToGlobal(pos))

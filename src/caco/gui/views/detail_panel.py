@@ -29,7 +29,7 @@ class DetailPanel(QScrollArea):
     """Right-side panel showing details of the selected WAD."""
 
     play_requested = Signal(int)
-    edit_requested = Signal(int)
+    edit_metadata_requested = Signal(int)
     delete_requested = Signal(int)
 
     def __init__(self, parent=None):
@@ -375,7 +375,7 @@ class DetailPanel(QScrollArea):
 
     def _on_edit(self):
         if self._wad_id is not None:
-            self.edit_requested.emit(self._wad_id)
+            self.edit_metadata_requested.emit(self._wad_id)
 
     def _on_delete(self):
         if self._wad_id is not None:

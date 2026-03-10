@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QTableView, QHeaderView, QAbstractItemView, QMenu
 
 from caco.gui.constants import DEFAULT_COLUMNS, ALL_COLUMNS, Column
 from caco.gui.models.wad_model import WadTableModel
+from caco.gui.views import build_wad_context_menu
 
 
 class WadListView(QTableView):
@@ -20,7 +21,10 @@ class WadListView(QTableView):
 
     # Action signals for context menu
     play_requested = Signal(int)
-    edit_requested = Signal(int)
+    edit_metadata_requested = Signal(int)
+    edit_notes_requested = Signal(int)
+    edit_sourceport_requested = Signal(int)
+    edit_companions_requested = Signal(int)
     delete_requested = Signal(int)
     sessions_requested = Signal(int)
     wad_stats_requested = Signal(int)
@@ -155,33 +159,7 @@ class WadListView(QTableView):
         wad_id = self._wad_id_at(idx)
         if wad_id is None:
             return
-
-        menu = QMenu(self)
-
-        play_action = QAction("Play", self)
-        play_action.triggered.connect(lambda: self.play_requested.emit(wad_id))
-        menu.addAction(play_action)
-
-        menu.addSeparator()
-
-        sessions_action = QAction("Sessions...", self)
-        sessions_action.triggered.connect(lambda: self.sessions_requested.emit(wad_id))
-        menu.addAction(sessions_action)
-
-        stats_action = QAction("Map Stats...", self)
-        stats_action.triggered.connect(lambda: self.wad_stats_requested.emit(wad_id))
-        menu.addAction(stats_action)
-
-        edit_action = QAction("Edit...", self)
-        edit_action.triggered.connect(lambda: self.edit_requested.emit(wad_id))
-        menu.addAction(edit_action)
-
-        menu.addSeparator()
-
-        delete_action = QAction("Delete", self)
-        delete_action.triggered.connect(lambda: self.delete_requested.emit(wad_id))
-        menu.addAction(delete_action)
-
+        menu = build_wad_context_menu(self, wad_id)
         menu.exec(self.viewport().mapToGlobal(pos))
 
     def select_wad(self, wad_id: int) -> bool:

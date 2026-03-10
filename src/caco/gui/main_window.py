@@ -19,7 +19,12 @@ from caco import db
 from caco.gui.constants import STATUS_TABS, Column, ALL_COLUMNS, DEFAULT_COLUMNS
 from caco.gui.tabs.library_tab import LibraryTab
 from caco.gui.tabs.import_tab import ImportTab
-from caco.gui.dialogs.edit_dialog import EditDialog
+from caco.gui.dialogs.edit_dialog import (
+    EditMetadataDialog,
+    EditNotesDialog,
+    EditSourceportDialog,
+    EditCompanionsDialog,
+)
 from caco.gui.dialogs.delete_dialog import DeleteDialog
 from caco.gui.dialogs.sessions_dialog import SessionsDialog
 from caco.gui.dialogs.stats_dialog import StatsDialog
@@ -95,7 +100,10 @@ class MainWindow(QMainWindow):
         # Library tab (shared across all status filter tabs)
         self._library_tab = LibraryTab()
         self._library_tab.play_requested.connect(self._on_play)
-        self._library_tab.edit_requested.connect(self._on_edit)
+        self._library_tab.edit_metadata_requested.connect(self._on_edit_metadata)
+        self._library_tab.edit_notes_requested.connect(self._on_edit_notes)
+        self._library_tab.edit_sourceport_requested.connect(self._on_edit_sourceport)
+        self._library_tab.edit_companions_requested.connect(self._on_edit_companions)
         self._library_tab.delete_requested.connect(self._on_delete)
         self._library_tab.sessions_requested.connect(self._on_sessions)
         self._library_tab.wad_stats_requested.connect(self._on_wad_stats)
@@ -480,12 +488,29 @@ class MainWindow(QMainWindow):
         QMessageBox.warning(self, "Cannot Play", error_msg)
         self._status_bar.clearMessage()
 
-    def _on_edit(self, wad_id: int):
-        """Open the edit dialog for a WAD."""
-        dialog = EditDialog(wad_id, parent=self)
+    def _exec_edit_dialog(self, wad_id: int, dialog: QDialog):
+        """Execute an edit dialog and refresh the library on accept."""
+        if not getattr(dialog, "_wad", None):
+            return
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self._library_tab.refresh()
             self._library_tab.select_wad(wad_id)
+
+    def _on_edit_metadata(self, wad_id: int):
+        """Open the metadata editing dialog."""
+        self._exec_edit_dialog(wad_id, EditMetadataDialog(wad_id, parent=self))
+
+    def _on_edit_notes(self, wad_id: int):
+        """Open the notes editing dialog."""
+        self._exec_edit_dialog(wad_id, EditNotesDialog(wad_id, parent=self))
+
+    def _on_edit_sourceport(self, wad_id: int):
+        """Open the sourceport settings dialog."""
+        self._exec_edit_dialog(wad_id, EditSourceportDialog(wad_id, parent=self))
+
+    def _on_edit_companions(self, wad_id: int):
+        """Open the companion files dialog."""
+        self._exec_edit_dialog(wad_id, EditCompanionsDialog(wad_id, parent=self))
 
     def _on_delete(self, wad_id: int):
         """Open the delete confirmation dialog."""
