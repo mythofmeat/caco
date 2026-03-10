@@ -1,6 +1,0 @@
-- [ ] uzdoom (deferred) (should be compatible with gzdoom, absolutely no gzdoom specific support is planned at this time. if it doesn't work in uzdoom it doesn't work. this is an ideological thing.)
-  - [x] save dir and data dir flags (-savedir)
-  - [x] stats.txt / levelstats info and syncing (ZScript mod injection + log polling)
-  - [x] config management (-config flag + .ini extension)
-  - [x] complevel injection (-compatmode, strict/relaxed via uzdoom_strict_compat config)
-  - [x] crash detection (generic exit code check)
