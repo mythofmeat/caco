@@ -253,8 +253,9 @@ idgames WADs are cleaned automatically (re-downloadable). Non-idgames WADs promp
 | `~/.local/share/caco/backups/` | Save backups |
 
 ## Supported Sourceports
+dsda-doom / nyan-doom, Helion, uzdoom.
 
-dsda-doom, nyan-doom, nugget-doom, prboom+, glboom+, gzdoom, lzdoom, vkdoom, chocolate-doom, crispy-doom, woof, eternity, Helion, uzdoom. Unknown sourceports work too — they just don't get data directory isolation or config injection.
+Other sourceports work too — they just don't get data directory isolation, config injection or stat tracking.
 
 ## Development
 
