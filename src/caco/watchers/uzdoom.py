@@ -21,9 +21,10 @@ logger = logging.getLogger(__name__)
 # Doom runs at 35 tics per second
 _TICS_PER_SECOND = 35
 
-# ZScript mod that reports stats via Console.Printf with a unique prefix.
+# ZScript mod that reports stats via Console.PrintfEx with a unique prefix.
 # Uses CacoStatsReporter to avoid name conflicts with other mods.
 # AddEventHandlers in MAPINFO is additive (won't replace existing handlers).
+# PRINT_LOG suppresses on-screen notifications while still writing to +logfile.
 _ZSCRIPT_SOURCE = """\
 version "4.0"
 
@@ -48,10 +49,8 @@ class CacoStatsReporter : EventHandler
 
     void ReportStats()
     {
-        int sk = -1;
-        let skill = CVar.FindCVar('gameskill');
-        if (skill) sk = skill.GetInt();
-        Console.Printf("CACOSTATS|%s|%d|%d|%d/%d|%d/%d|%d/%d",
+        int sk = G_SkillPropertyInt(SKILLP_ACSReturn);
+        Console.PrintfEx(PRINT_LOG, "CACOSTATS|%s|%d|%d|%d/%d|%d/%d|%d/%d",
             level.MapName,
             sk,
             level.maptime,
@@ -85,29 +84,26 @@ def _get_mod_dir() -> Path:
 
 
 def _ensure_pk3(mod_dir: Path | None = None) -> Path:
-    """Create the stats reporter .pk3 mod if it doesn't exist."""
+    """Create or update the stats reporter .pk3 mod."""
     if mod_dir is None:
         mod_dir = _get_mod_dir()
     mod_dir.mkdir(parents=True, exist_ok=True)
     pk3_path = mod_dir / "caco_stats_reporter.pk3"
 
-    if pk3_path.exists():
-        return pk3_path
-
     with zipfile.ZipFile(pk3_path, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("zscript.zs", _ZSCRIPT_SOURCE)
         zf.writestr("MAPINFO", _MAPINFO_SOURCE)
 
-    logger.info("Created stats reporter mod: %s", pk3_path)
     return pk3_path
 
 
 class UZDoomWatcher(StatsWatcher):
     """Watches UZDoom's console log for stats from injected ZScript mod.
 
-    Injects a small .pk3 mod that outputs CACOSTATS lines via Console.Printf,
-    and redirects console output to a log file via +logfile. The watcher polls
-    the log file for new CACOSTATS lines and accumulates per-map stats.
+    Injects a small .pk3 mod that outputs CACOSTATS lines via Console.PrintfEx
+    (PRINT_LOG level — log-only, no on-screen notifications), and redirects
+    console output to a log file via +logfile. The watcher polls the log file
+    for new CACOSTATS lines and accumulates per-map stats.
     """
 
     def __init__(self, wad_data_dir: Path, mod_dir: Path | None = None):
