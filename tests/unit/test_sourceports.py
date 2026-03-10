@@ -273,3 +273,57 @@ class TestHelionFamily:
 
     def test_get_family_name_with_path(self):
         assert get_family_name("/usr/bin/Helion") == "helion"
+
+
+class TestUZDoom:
+    def test_identify_family(self):
+        family = identify_sourceport_family("uzdoom")
+        assert family is not None
+        assert family["save_arg"] == "-savedir"
+
+    def test_get_family_name(self):
+        assert get_family_name("uzdoom") == "uzdoom"
+
+    def test_data_dir_args_savedir_only(self):
+        args = get_data_dir_args("uzdoom", "/tmp/data")
+        assert args == ["-savedir", "/tmp/data"]
+
+    def test_config_args(self):
+        """UZDoom supports -config with .ini files."""
+        assert get_config_args("uzdoom", "/tmp/config.ini") == ["-config", "/tmp/config.ini"]
+
+    def test_profile_ext(self):
+        """UZDoom uses .ini extension for config profiles."""
+        assert get_profile_ext("uzdoom") == ".ini"
+
+    def test_complevel_vanilla_strict(self, monkeypatch):
+        monkeypatch.setattr("caco.config.load_config", lambda: {"uzdoom_strict_compat": True})
+        assert get_complevel_args("uzdoom", 2) == ["-compatmode", "2"]
+
+    def test_complevel_boom_strict(self, monkeypatch):
+        monkeypatch.setattr("caco.config.load_config", lambda: {"uzdoom_strict_compat": True})
+        assert get_complevel_args("uzdoom", 9) == ["-compatmode", "6"]
+
+    def test_complevel_mbf_strict(self, monkeypatch):
+        monkeypatch.setattr("caco.config.load_config", lambda: {"uzdoom_strict_compat": True})
+        assert get_complevel_args("uzdoom", 11) == ["-compatmode", "7"]
+
+    def test_complevel_mbf21_strict(self, monkeypatch):
+        monkeypatch.setattr("caco.config.load_config", lambda: {"uzdoom_strict_compat": True})
+        assert get_complevel_args("uzdoom", 21) == ["-compatmode", "9"]
+
+    def test_complevel_relaxed(self, monkeypatch):
+        monkeypatch.setattr("caco.config.load_config", lambda: {"uzdoom_strict_compat": False})
+        assert get_complevel_args("uzdoom", 9) == ["-compatmode", "3"]
+        assert get_complevel_args("uzdoom", 2) == ["-compatmode", "1"]
+        assert get_complevel_args("uzdoom", 11) == ["-compatmode", "5"]
+        assert get_complevel_args("uzdoom", 21) == ["-compatmode", "8"]
+
+    def test_complevel_unsupported(self, monkeypatch):
+        monkeypatch.setattr("caco.config.load_config", lambda: {"uzdoom_strict_compat": True})
+        assert get_complevel_args("uzdoom", 17) == []
+
+    def test_complevel_default_strict(self, monkeypatch):
+        """Config missing the key defaults to strict."""
+        monkeypatch.setattr("caco.config.load_config", lambda: {})
+        assert get_complevel_args("uzdoom", 9) == ["-compatmode", "6"]

@@ -35,6 +35,7 @@ DEFAULT_CONFIG = {
     "cache_max_age_days": 0,
     "cache_auto_clean": False,
     "companion_orphan_cleanup": "ask",
+    "uzdoom_strict_compat": True,
 }
 
 # Default list configuration

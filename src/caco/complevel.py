@@ -48,6 +48,34 @@ def complevel_to_helion_name(complevel: int) -> str | None:
     return HELION_COMPLEVEL_NAMES.get(complevel)
 
 
+# UZDoom/GZDoom uses -compatmode N with its own numbering scheme.
+# Strict variants preserve authentic bugs (infinite height, wallrun, bugged hitscans).
+# Relaxed variants fix the most obviously broken behaviors while keeping compatibility.
+UZDOOM_COMPATMODE_STRICT: dict[int, int] = {
+    2: 2,   # Vanilla -> Doom (strict)
+    3: 2,   # Ultimate Doom -> Doom (strict)
+    4: 2,   # Final Doom -> Doom (strict)
+    9: 6,   # Boom -> Boom (strict)
+    11: 7,  # MBF -> MBF (strict)
+    21: 9,  # MBF21 -> MBF21 (strict)
+}
+
+UZDOOM_COMPATMODE_RELAXED: dict[int, int] = {
+    2: 1,   # Vanilla -> Doom (relaxed)
+    3: 1,   # Ultimate Doom -> Doom (relaxed)
+    4: 1,   # Final Doom -> Doom (relaxed)
+    9: 3,   # Boom -> Boom (relaxed)
+    11: 5,  # MBF -> MBF (relaxed)
+    21: 8,  # MBF21 -> MBF21 (relaxed)
+}
+
+
+def complevel_to_uzdoom_compatmode(complevel: int, *, strict: bool = True) -> int | None:
+    """Map a numeric complevel to UZDoom's -compatmode integer."""
+    table = UZDOOM_COMPATMODE_STRICT if strict else UZDOOM_COMPATMODE_RELAXED
+    return table.get(complevel)
+
+
 def parse_complevel(value: str) -> int | None:
     """Parse a complevel from a string — accepts integer or alias name.
 

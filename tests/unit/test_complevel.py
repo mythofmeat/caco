@@ -2,7 +2,7 @@
 
 import pytest
 
-from caco.complevel import COMPLEVEL_ALIASES, COMPLEVEL_NAMES, HELION_COMPLEVEL_NAMES, complevel_name, complevel_to_helion_name, parse_complevel
+from caco.complevel import COMPLEVEL_ALIASES, COMPLEVEL_NAMES, HELION_COMPLEVEL_NAMES, UZDOOM_COMPATMODE_STRICT, UZDOOM_COMPATMODE_RELAXED, complevel_name, complevel_to_helion_name, complevel_to_uzdoom_compatmode, parse_complevel
 
 
 class TestComplevelName:
@@ -85,3 +85,46 @@ class TestComplevelToHelionName:
         for cl, name in HELION_COMPLEVEL_NAMES.items():
             assert isinstance(name, str)
             assert isinstance(cl, int)
+
+
+class TestComplevelToUZDoomCompatmode:
+    """Test complevel_to_uzdoom_compatmode() mapping."""
+
+    def test_vanilla_strict(self):
+        assert complevel_to_uzdoom_compatmode(2, strict=True) == 2
+
+    def test_boom_strict(self):
+        assert complevel_to_uzdoom_compatmode(9, strict=True) == 6
+
+    def test_mbf_strict(self):
+        assert complevel_to_uzdoom_compatmode(11, strict=True) == 7
+
+    def test_mbf21_strict(self):
+        assert complevel_to_uzdoom_compatmode(21, strict=True) == 9
+
+    def test_vanilla_relaxed(self):
+        assert complevel_to_uzdoom_compatmode(2, strict=False) == 1
+
+    def test_boom_relaxed(self):
+        assert complevel_to_uzdoom_compatmode(9, strict=False) == 3
+
+    def test_mbf_relaxed(self):
+        assert complevel_to_uzdoom_compatmode(11, strict=False) == 5
+
+    def test_mbf21_relaxed(self):
+        assert complevel_to_uzdoom_compatmode(21, strict=False) == 8
+
+    def test_ultimate_doom_maps_to_vanilla(self):
+        assert complevel_to_uzdoom_compatmode(3, strict=True) == 2
+        assert complevel_to_uzdoom_compatmode(4, strict=True) == 2
+
+    def test_unsupported_returns_none(self):
+        assert complevel_to_uzdoom_compatmode(0) is None
+        assert complevel_to_uzdoom_compatmode(17) is None
+        assert complevel_to_uzdoom_compatmode(99) is None
+
+    def test_default_is_strict(self):
+        assert complevel_to_uzdoom_compatmode(9) == 6
+
+    def test_strict_and_relaxed_tables_have_same_keys(self):
+        assert set(UZDOOM_COMPATMODE_STRICT.keys()) == set(UZDOOM_COMPATMODE_RELAXED.keys())

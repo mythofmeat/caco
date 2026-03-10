@@ -57,6 +57,7 @@ SOURCEPORT_FAMILIES: dict[str, dict] = {
     "uzdoom": {
         "executables": ["uzdoom"],
         "save_arg": "-savedir",
+        "complevel_arg": "-compatmode",
     },
 }
 
@@ -145,13 +146,25 @@ def get_complevel_args(executable: str, complevel: int) -> list[str]:
     if not arg:
         return []
 
-    if get_family_name(executable) == "helion":
+    family_name = get_family_name(executable)
+
+    if family_name == "helion":
         from caco.complevel import complevel_to_helion_name
 
         name = complevel_to_helion_name(complevel)
         if name is None:
             return []
         return [arg, name]
+
+    if family_name == "uzdoom":
+        from caco.complevel import complevel_to_uzdoom_compatmode
+        from caco.config import load_config
+
+        strict = bool(load_config().get("uzdoom_strict_compat", True))
+        mode = complevel_to_uzdoom_compatmode(complevel, strict=strict)
+        if mode is None:
+            return []
+        return [arg, str(mode)]
 
     return [arg, str(complevel)]
 
@@ -161,7 +174,7 @@ def get_profile_ext(executable: str) -> str:
 
     Helion uses .ini; all others use .cfg.
     """
-    if get_family_name(executable) == "helion":
+    if get_family_name(executable) in ("helion", "uzdoom"):
         return ".ini"
     return ".cfg"
 
@@ -172,7 +185,7 @@ def get_config_args(executable: str, config_path: str) -> list[str]:
     dsda-family and helion support -config. Returns [] for others.
     """
     family = get_family_name(executable)
-    if family in ("dsda", "helion"):
+    if family in ("dsda", "helion", "uzdoom"):
         return ["-config", config_path]
     return []
 
