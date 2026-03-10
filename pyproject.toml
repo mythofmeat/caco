@@ -53,3 +53,8 @@ disallow_untyped_defs = false
 no_implicit_optional = true
 warn_redundant_casts = true
 warn_unused_ignores = true
+
+[dependency-groups]
+dev = [
+    "pyinstaller>=6.19.0",
+]
