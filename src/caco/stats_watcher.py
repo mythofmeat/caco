@@ -54,6 +54,10 @@ def _ensure_watchers_registered() -> None:
         import caco.watchers.helion  # noqa: F401
     except ImportError:
         logger.debug("Helion watcher module not available")
+    try:
+        import caco.watchers.uzdoom  # noqa: F401
+    except ImportError:
+        logger.debug("UZDoom watcher module not available")
 
 
 def get_watcher(executable: str, wad_data_dir: Path) -> StatsWatcher | None:

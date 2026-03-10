@@ -35,6 +35,12 @@ class TestRegistry:
         watcher = get_watcher("helion", tmp_path)
         assert isinstance(watcher, HelionWatcher)
 
+    def test_get_watcher_returns_uzdoom_watcher(self, tmp_path):
+        from caco.watchers.uzdoom import UZDoomWatcher
+
+        watcher = get_watcher("uzdoom", tmp_path)
+        assert isinstance(watcher, UZDoomWatcher)
+
     def test_register_and_retrieve(self, tmp_path):
         """Custom watcher can be registered and retrieved."""
 

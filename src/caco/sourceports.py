@@ -10,6 +10,7 @@ SAVE_EXTENSIONS: dict[str, set[str]] = {
     "woof": {".dsg"},
     "eternity": {".dsg"},
     "helion": {".hsg"},
+    "uzdoom": {".zds"},
 }
 ALL_SAVE_EXTENSIONS: frozenset[str] = frozenset(
     ext for exts in SAVE_EXTENSIONS.values() for ext in exts
@@ -52,6 +53,10 @@ SOURCEPORT_FAMILIES: dict[str, dict] = {
         "executables": ["Helion", "helion"],
         "save_arg": "-savedir",
         "complevel_arg": "+complevel",
+    },
+    "uzdoom": {
+        "executables": ["uzdoom"],
+        "save_arg": "-savedir",
     },
 }
 

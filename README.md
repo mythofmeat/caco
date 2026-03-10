@@ -550,6 +550,7 @@ caco info id:1 --levelstats --plain                    # TSV output for scriptin
 - **nyan-doom/dsda-doom `stats.txt`**: Persistent per-map tracking with kills, items, secrets, time, skill level, exit count, and best-of stats
 - **dsda-doom `levelstat.txt`**: Human-readable output from the `-levelstat` flag with per-map time, kills, items, and secrets
 - **Helion `levelstat.txt`**: Automatically captured via background stats watcher during play (polls `~/.config/Helion/levelstat.txt`); skill level enriched from save files
+- **UZDoom live stats**: Automatically captured via injected ZScript mod during play; a `.pk3` EventHandler reports kills, items, secrets, time, and skill to a log file
 
 Format is auto-detected. Exported files are lossless round-trips of the original.
 
@@ -559,6 +560,7 @@ When per-WAD data directories are enabled (default), caco automatically reads st
 
 1. After the sourceport exits, caco searches the WAD's data directory for `stats.txt` or `levelstat.txt`
    - For Helion: a background watcher captures stats during play and writes them to the data directory
+   - For UZDoom: a ZScript mod is auto-injected to report stats via console log; captured by background watcher
 2. The stats are parsed and stored as a live snapshot on the WAD record
 3. When you add a completion (`caco modify id:1 beaten+1` or `caco modify id:1 status=finished`), the snapshot is automatically archived to the completion record
 
@@ -990,6 +992,7 @@ When playing a WAD, caco automatically creates an isolated data directory for ea
 | woof | woof | `-data`, `-save` |
 | eternity | eternity | `-savedir` |
 | helion | Helion | `-savedir` |
+| uzdoom | uzdoom | `-savedir` |
 
 Unknown sourceports play normally without any injection.
 
