@@ -44,6 +44,7 @@ complete -c caco -n __fish_use_subcommand -a stats -d "Show library statistics"
 complete -c caco -n __fish_use_subcommand -a cache -d "Manage WAD file cache"
 complete -c caco -n __fish_use_subcommand -a enrich -d "Re-run enrichment for existing WADs"
 complete -c caco -n __fish_use_subcommand -a companion -d "Manage companion files"
+complete -c caco -n __fish_use_subcommand -a gc -d "Garbage collect finished/abandoned WAD data"
 
 # =============================================================================
 # companion subcommands
@@ -251,6 +252,19 @@ complete -c caco -n "__fish_seen_subcommand_from enrich" -a "author:" -d "Filter
 complete -c caco -n "__fish_seen_subcommand_from enrich" -a "tag:" -d "Filter by tag"
 complete -c caco -n "__fish_seen_subcommand_from enrich" -a "status:" -d "Filter by status"
 
+# =============================================================================
+# gc command
+# =============================================================================
+complete -c caco -n "__fish_seen_subcommand_from gc" -l dry-run -d "Preview what would be cleaned"
+complete -c caco -n "__fish_seen_subcommand_from gc" -s y -l yes -d "Skip confirmation prompts"
+complete -c caco -n "__fish_seen_subcommand_from gc" -l keep-data -d "Don't delete data directories"
+complete -c caco -n "__fish_seen_subcommand_from gc" -l keep-cache -d "Don't delete cached WAD files"
+complete -c caco -n "__fish_seen_subcommand_from gc" -l keep-saves -d "Preserve save files in data dirs"
+complete -c caco -n "__fish_seen_subcommand_from gc" -l keep-demos -d "Preserve demo files in data dirs"
+complete -c caco -n "__fish_seen_subcommand_from gc" -l orphans-only -d "Only clean orphaned dirs/backups"
+complete -c caco -n "__fish_seen_subcommand_from gc" -l ignore -d "Mark WAD(s) as GC-ignored" -xa "(__caco_wads)"
+complete -c caco -n "__fish_seen_subcommand_from gc" -l unignore -d "Remove GC-ignore from WAD(s)" -xa "(__caco_wads)"
+
 """
 
 BASH_SCRIPT = r"""# Bash completions for caco
@@ -346,7 +360,7 @@ _caco() {
         if [[ "$cur" == -* ]]; then
             COMPREPLY=($(compgen -W "--tui --gui --help" -- "$cur"))
         else
-            COMPREPLY=($(compgen -W "ls info modify trash play import config random completions stats cache enrich companion" -- "$cur"))
+            COMPREPLY=($(compgen -W "ls info modify trash play import config random completions stats cache enrich companion gc" -- "$cur"))
         fi
         return
     fi
@@ -492,6 +506,14 @@ _caco() {
                         fi
                         ;;
                 esac
+            fi
+            ;;
+        gc)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--dry-run -y --yes --keep-data --keep-cache --keep-saves --keep-demos --orphans-only --ignore --unignore --help" -- "$cur"))
+            elif [[ "$prev" == --ignore || "$prev" == --unignore ]]; then
+                _caco_wads
+                _caco_query_fields
             fi
             ;;
     esac
@@ -730,6 +752,20 @@ _caco_enrich() {
         '*:query:__caco_wads_or_query'
 }
 
+_caco_gc() {
+    _arguments \
+        '--dry-run[Preview what would be cleaned]' \
+        '(-y --yes)'{-y,--yes}'[Skip confirmation prompts]' \
+        '--keep-data[Do not delete data directories]' \
+        '--keep-cache[Do not delete cached WAD files]' \
+        '--keep-saves[Preserve save files in data dirs]' \
+        '--keep-demos[Preserve demo files in data dirs]' \
+        '--orphans-only[Only clean orphaned dirs/backups]' \
+        '--ignore[Mark WADs as GC-ignored]:query:__caco_wads_or_query' \
+        '--unignore[Remove GC-ignore from WADs]:query:__caco_wads_or_query' \
+        '--help[Show help]'
+}
+
 _caco_companion() {
     local -a subcmds
     subcmds=(
@@ -797,6 +833,7 @@ _caco() {
         'cache:Manage WAD file cache'
         'enrich:Re-run enrichment for existing WADs'
         'companion:Manage companion files'
+        'gc:Garbage collect finished/abandoned WAD data'
     )
 
     if (( CURRENT == 2 )); then
@@ -829,6 +866,7 @@ _caco() {
         cache) _caco_cache ;;
         enrich) _caco_enrich ;;
         companion) _caco_companion ;;
+        gc) _caco_gc ;;
     esac
 }
 

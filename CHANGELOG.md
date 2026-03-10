@@ -6,6 +6,30 @@ Development log for Caco.
 
 ---
 
+## 2026-03-10
+
+### Added
+
+- **`caco gc` garbage collection command**: Unified cleanup for finished/abandoned
+  WAD data, orphaned data directories, and orphaned backups
+  - Finished and abandoned WADs have their data dirs and cached WAD files cleaned
+  - idgames WADs (re-downloadable) auto-clean with a single batch confirmation
+  - Non-idgames WADs prompt individually with `y` (clean), `n` (skip), or `i`
+    (permanently ignore from future GC)
+  - Orphaned data dirs (WAD purged but `data/{id}_*/` persists) are detected and
+    cleaned
+  - Orphaned backups (backup zips for purged WADs) are detected and cleaned
+  - `--dry-run` previews reclaimable space without deleting
+  - Granular cleanup flags: `--keep-data`, `--keep-cache`, `--keep-saves`,
+    `--keep-demos`
+  - `--orphans-only` skips finished/abandoned WAD cleanup
+  - `--ignore <query>` / `--unignore <query>` for permanent per-WAD GC exclusion
+- **Migration #24**: Adds `gc_ignore` column to wads table
+- **Shell completions**: Fish, bash, and zsh completions for `caco gc` with all
+  options
+
+---
+
 ## 2026-03-02
 
 ### Added

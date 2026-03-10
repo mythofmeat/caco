@@ -180,14 +180,6 @@ _caco_stats() {
         '--help[Show help]'
 }
 
-_caco_enrich() {
-    _arguments \
-        '--complevel[Only enrich WADs with missing complevel]' \
-        '--dry-run[Preview changes]' \
-        '--help[Show help]' \
-        '*:query:__caco_wads_or_query'
-}
-
 _caco_cache() {
     local -a subcmds
     subcmds=(
@@ -228,6 +220,28 @@ _caco_cache() {
     esac
 }
 
+_caco_enrich() {
+    _arguments \
+        '--complevel[Only enrich WADs with missing complevel]' \
+        '--dry-run[Preview changes]' \
+        '--help[Show help]' \
+        '*:query:__caco_wads_or_query'
+}
+
+_caco_gc() {
+    _arguments \
+        '--dry-run[Preview what would be cleaned]' \
+        '(-y --yes)'{-y,--yes}'[Skip confirmation prompts]' \
+        '--keep-data[Do not delete data directories]' \
+        '--keep-cache[Do not delete cached WAD files]' \
+        '--keep-saves[Preserve save files in data dirs]' \
+        '--keep-demos[Preserve demo files in data dirs]' \
+        '--orphans-only[Only clean orphaned dirs/backups]' \
+        '--ignore[Mark WADs as GC-ignored]:query:__caco_wads_or_query' \
+        '--unignore[Remove GC-ignore from WADs]:query:__caco_wads_or_query' \
+        '--help[Show help]'
+}
+
 _caco_companion() {
     local -a subcmds
     subcmds=(
@@ -250,27 +264,24 @@ _caco_companion() {
     case "$subcmd" in
         add)
             _arguments \
-                '--help[Show help]' \
                 '1:query:__caco_wads_or_query' \
                 '2:file:_files'
             ;;
         rm)
             _arguments \
-                '(-y --yes)'{-y,--yes}'[Skip confirmation]' \
-                '--help[Show help]' \
+                '-y[Skip confirmation]' \
+                '--yes[Skip confirmation]' \
                 '1:query:__caco_wads_or_query' \
                 '2:filename:'
             ;;
         enable|disable)
             _arguments \
-                '--help[Show help]' \
                 '1:query:__caco_wads_or_query' \
                 '2:filename:'
             ;;
         ls)
             _arguments \
                 '--plain[Plain TSV output]' \
-                '--help[Show help]' \
                 '*:query:__caco_wads_or_query'
             ;;
     esac
@@ -298,6 +309,7 @@ _caco() {
         'cache:Manage WAD file cache'
         'enrich:Re-run enrichment for existing WADs'
         'companion:Manage companion files'
+        'gc:Garbage collect finished/abandoned WAD data'
     )
 
     if (( CURRENT == 2 )); then
@@ -330,6 +342,7 @@ _caco() {
         cache) _caco_cache ;;
         enrich) _caco_enrich ;;
         companion) _caco_companion ;;
+        gc) _caco_gc ;;
     esac
 }
 

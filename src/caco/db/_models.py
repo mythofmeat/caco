@@ -54,6 +54,7 @@ class WadRecord(TypedDict, total=False):
     version: str | None
     complevel: int | None
     stats_snapshot: str | None
+    gc_ignore: int | None
     deleted_at: str | None
     created_at: str
     updated_at: str
@@ -130,5 +131,5 @@ ALLOWED_UPDATE_FIELDS = frozenset({
     "source_url", "filename", "cached_path", "custom_iwad",
     "custom_sourceport", "custom_args",
     "custom_config", "version", "complevel", "idgames_id",
-    "deleted_at", "stats_snapshot",
+    "deleted_at", "stats_snapshot", "gc_ignore",
 })

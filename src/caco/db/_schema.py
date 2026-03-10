@@ -591,6 +591,14 @@ def _migrate_companion_files_tables(conn: sqlite3.Connection) -> None:
             )
 
 
+def _migrate_add_gc_ignore(conn: sqlite3.Connection) -> None:
+    """Add gc_ignore column to wads for garbage collection exclusion."""
+    cursor = conn.execute("PRAGMA table_info(wads)")
+    columns = {row[1] for row in cursor.fetchall()}
+    if "gc_ignore" not in columns:
+        conn.execute("ALTER TABLE wads ADD COLUMN gc_ignore INTEGER DEFAULT 0")
+
+
 # Ordered migration registry — append new migrations here with incrementing version
 _MIGRATIONS: list[tuple[int, str, Any]] = [
     (1, "add_custom_play_config", _migrate_add_custom_play_config),
@@ -616,4 +624,5 @@ _MIGRATIONS: list[tuple[int, str, Any]] = [
     (21, "add_custom_config", _migrate_add_custom_config_column),
     (22, "merge_custom_complevel_to_complevel", _migrate_merge_custom_complevel),
     (23, "companion_files_tables", _migrate_companion_files_tables),
+    (24, "add_gc_ignore", _migrate_add_gc_ignore),
 ]

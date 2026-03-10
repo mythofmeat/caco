@@ -740,6 +740,7 @@ from caco.cli import demos_cmd  # noqa: E402, F401
 from caco.cli import complete  # noqa: E402, F401
 from caco.cli import profile_cmd as profile_mod  # noqa: E402, F401
 from caco.cli import companion_cmd  # noqa: E402, F401
+from caco.cli import gc_cmd  # noqa: E402, F401
 
 
 # =============================================================================

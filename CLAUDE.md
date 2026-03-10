@@ -66,6 +66,7 @@ src/caco/
 │   ├── complete.py     # hidden _complete command for shell completions
 │   ├── profile_cmd.py  # profile command group (ls, create, edit, cp, rm, path)
 │   ├── companion_cmd.py # companion command group (add, rm, enable, disable, ls)
+│   ├── gc_cmd.py        # garbage collection command (finished/abandoned WADs, orphans)
 │   └── _completion_scripts.py  # Embedded fish/bash/zsh completion scripts
 ├── complevel.py    # Shared complevel names, aliases, parse_complevel()
 ├── complevel_detect.py # Auto-detect complevel from WAD lumps (COMPLVL, UMAPINFO, DEHACKED)
@@ -263,6 +264,21 @@ src/caco/
 - `caco companion disable <query> <filename>` — disable without removing
 - `caco companion ls [query] [--plain]` — list companions per-WAD or all; shows enabled/disabled status
 - Also available: `caco modify --add-file PATH` / `--remove-file FILENAME` for quick add/remove
+
+**GC (garbage collection) command:**
+- `caco gc` — scan and clean finished/abandoned WAD data with prompts
+- `caco gc --dry-run` — preview what would be cleaned without deleting
+- `caco gc --keep-saves` — clean but preserve save files in data dirs
+- `caco gc --keep-demos` — clean but preserve demo files in data dirs
+- `caco gc --keep-data` — skip data dir cleanup (only clean cache files)
+- `caco gc --keep-cache` — skip cache file cleanup (only clean data dirs)
+- `caco gc --orphans-only` — only clean orphaned data dirs and backups
+- `caco gc --ignore <query>` — permanently mark WAD(s) as GC-ignored
+- `caco gc --unignore <query>` — remove GC-ignore from WAD(s)
+- `caco gc -y` — skip confirmation prompts
+- Finished/abandoned WADs from idgames auto-clean (re-downloadable), non-idgames prompt individually with y/n/i (ignore)
+- Orphaned data dirs (WAD purged but dir remains) and orphaned backups are cleaned
+- `gc_ignore INTEGER DEFAULT 0` column on wads table; `gc_ignore:` not a query field (use `--ignore`/`--unignore`)
 
 **Status shortcuts (complete list):**
 | Shortcut | Status |

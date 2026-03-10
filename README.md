@@ -229,6 +229,18 @@ caco random status:to-play         # Random WAD ID
 caco play $(caco random)           # Play a random WAD
 ```
 
+## Garbage Collection
+
+```bash
+caco gc                            # Clean finished/abandoned WAD data
+caco gc --dry-run                  # Preview reclaimable space
+caco gc --keep-saves               # Clean but keep save files
+caco gc --orphans-only             # Only clean orphaned dirs/backups
+caco gc --ignore id:5              # Permanently exclude from GC
+```
+
+idgames WADs are cleaned automatically (re-downloadable). Non-idgames WADs prompt individually with the option to permanently ignore.
+
 ## Data Storage
 
 | Location | Contents |

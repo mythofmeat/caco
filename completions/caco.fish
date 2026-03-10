@@ -35,11 +35,10 @@ complete -c caco -n __fish_use_subcommand -a config -d "View or edit configurati
 complete -c caco -n __fish_use_subcommand -a random -d "Pick a random WAD (prints ID)"
 complete -c caco -n __fish_use_subcommand -a completions -d "Generate shell completions"
 complete -c caco -n __fish_use_subcommand -a stats -d "Show library statistics"
-complete -c caco -n __fish_use_subcommand -a sessions -d "Show play session history"
 complete -c caco -n __fish_use_subcommand -a cache -d "Manage WAD file cache"
 complete -c caco -n __fish_use_subcommand -a enrich -d "Re-run enrichment for existing WADs"
-complete -c caco -n __fish_use_subcommand -a profile -d "Manage sourceport config profiles"
 complete -c caco -n __fish_use_subcommand -a companion -d "Manage companion files"
+complete -c caco -n __fish_use_subcommand -a gc -d "Garbage collect finished/abandoned WAD data"
 
 # =============================================================================
 # companion subcommands
@@ -64,7 +63,6 @@ complete -c caco -n "__fish_seen_subcommand_from companion; and __fish_seen_subc
 complete -c caco -n "__fish_seen_subcommand_from ls" -s o -l output -d "Output format" -xa "json plain"
 complete -c caco -n "__fish_seen_subcommand_from ls" -l tags -d "List all tags with counts"
 complete -c caco -n "__fish_seen_subcommand_from ls" -l iwad -d "List registered IWADs"
-complete -c caco -n "__fish_seen_subcommand_from ls" -l id24 -d "List registered id24 WADs"
 
 # ls query field completions
 complete -c caco -n "__fish_seen_subcommand_from ls" -a "id:" -d "Filter by ID"
@@ -76,8 +74,6 @@ complete -c caco -n "__fish_seen_subcommand_from ls" -a "tag:" -d "Filter by tag
 complete -c caco -n "__fish_seen_subcommand_from ls" -a "status:" -d "Filter by status"
 complete -c caco -n "__fish_seen_subcommand_from ls" -a "source:" -d "Filter by source"
 complete -c caco -n "__fish_seen_subcommand_from ls" -a "iwad:" -d "Filter by IWAD"
-complete -c caco -n "__fish_seen_subcommand_from ls" -a "complevel:" -d "Filter by complevel"
-complete -c caco -n "__fish_seen_subcommand_from ls" -a "config:" -d "Filter by config profile"
 
 # ls inline sort completions
 complete -c caco -n "__fish_seen_subcommand_from ls" -a "id+ id- playtime+ playtime- rating+ rating- created+ created- title+ title- author+ author- last_played+ last_played- year+ year-" -d "Sort"
@@ -103,8 +99,6 @@ complete -c caco -n "__fish_seen_subcommand_from info" -a "status:" -d "Filter b
 complete -c caco -n "__fish_seen_subcommand_from modify" -s y -l yes -d "Skip confirmation"
 complete -c caco -n "__fish_seen_subcommand_from modify" -l dry-run -d "Preview changes"
 complete -c caco -n "__fish_seen_subcommand_from modify" -l link -d "Link a local file" -rF
-complete -c caco -n "__fish_seen_subcommand_from modify" -l add-file -d "Add companion file (DEH, music, etc.)" -rF
-complete -c caco -n "__fish_seen_subcommand_from modify" -l remove-file -d "Remove companion file" -x
 complete -c caco -n "__fish_seen_subcommand_from modify" -l notes -d "Notes for beaten+N"
 complete -c caco -n "__fish_seen_subcommand_from modify" -s s -l stats-file -d "Stats file for beaten+N or attach" -rF
 complete -c caco -n "__fish_seen_subcommand_from modify" -l date -d "Backdate completion (ISO)"
@@ -125,8 +119,6 @@ complete -c caco -n "__fish_seen_subcommand_from modify" -a "idgames-id=" -d "Se
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "description=" -d "Set description"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "args=" -d "Set custom args"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "version=" -d "Set version"
-complete -c caco -n "__fish_seen_subcommand_from modify" -a "complevel=" -d "Set complevel (int or alias)"
-complete -c caco -n "__fish_seen_subcommand_from modify" -a "config=" -d "Set config profile"
 
 # modify clear completions
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!author" -d "Clear author"
@@ -136,8 +128,6 @@ complete -c caco -n "__fish_seen_subcommand_from modify" -a "!notes" -d "Clear n
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!rating" -d "Clear rating"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!iwad" -d "Clear custom IWAD"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!sourceport" -d "Clear custom sourceport"
-complete -c caco -n "__fish_seen_subcommand_from modify" -a "!complevel" -d "Clear complevel"
-complete -c caco -n "__fish_seen_subcommand_from modify" -a "!config" -d "Clear config profile"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!tag" -d "Remove all tags"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "!tag:" -d "Remove tags matching pattern"
 
@@ -160,7 +150,6 @@ complete -c caco -n "__fish_seen_subcommand_from trash" -l list -d "Show trashed
 complete -c caco -n "__fish_seen_subcommand_from trash" -l purge -d "Permanently delete"
 complete -c caco -n "__fish_seen_subcommand_from trash" -l restore -d "Restore from trash"
 complete -c caco -n "__fish_seen_subcommand_from trash" -l iwad -d "Remove IWAD (FAMILY or FAMILY/VARIANT)" -xa "(__caco_iwads)"
-complete -c caco -n "__fish_seen_subcommand_from trash" -l id24 -d "Remove id24 WAD by name"
 complete -c caco -n "__fish_seen_subcommand_from trash" -s y -l yes -d "Skip confirmation"
 complete -c caco -n "__fish_seen_subcommand_from trash" -l dry-run -d "Preview changes"
 complete -c caco -n "__fish_seen_subcommand_from trash" -s o -l output -d "Output format (with --list)" -xa "json plain"
@@ -175,9 +164,6 @@ complete -c caco -n "__fish_seen_subcommand_from trash" -a "status:" -d "Filter 
 complete -c caco -n "__fish_seen_subcommand_from play" -s p -l sourceport -d "Sourceport to use" -xa "(__caco_sourceports)"
 complete -c caco -n "__fish_seen_subcommand_from play" -s 1 -l first -d "Auto-select first match"
 complete -c caco -n "__fish_seen_subcommand_from play" -l iwad -d "Play IWAD directly (e.g., doom2)" -xa "(__caco_iwads)"
-complete -c caco -n "__fish_seen_subcommand_from play" -s r -l record -d "Record a demo (auto-name or specify name)"
-complete -c caco -n "__fish_seen_subcommand_from play" -s c -l complevel -d "Override complevel (int or alias)" -xa "vanilla boom mbf mbf21 2 9 11 21"
-complete -c caco -n "__fish_seen_subcommand_from play" -s C -l config -d "Sourceport config profile name"
 complete -c caco -n "__fish_seen_subcommand_from play" -xa "(__caco_wads)"
 complete -c caco -n "__fish_seen_subcommand_from play" -a "id:" -d "Filter by ID"
 complete -c caco -n "__fish_seen_subcommand_from play" -a "title:" -d "Filter by title"
@@ -234,30 +220,6 @@ complete -c caco -n "__fish_seen_subcommand_from stats" -s n -l limit -d "Number
 complete -c caco -n "__fish_seen_subcommand_from stats" -l plain -d "Key=value output"
 
 # =============================================================================
-# enrich command
-# =============================================================================
-complete -c caco -n "__fish_seen_subcommand_from enrich" -l complevel -d "Only enrich WADs with missing complevel"
-complete -c caco -n "__fish_seen_subcommand_from enrich" -l dry-run -d "Preview changes"
-complete -c caco -n "__fish_seen_subcommand_from enrich" -xa "(__caco_wads)"
-complete -c caco -n "__fish_seen_subcommand_from enrich" -a "id:" -d "Filter by ID"
-complete -c caco -n "__fish_seen_subcommand_from enrich" -a "title:" -d "Filter by title"
-complete -c caco -n "__fish_seen_subcommand_from enrich" -a "author:" -d "Filter by author"
-complete -c caco -n "__fish_seen_subcommand_from enrich" -a "tag:" -d "Filter by tag"
-complete -c caco -n "__fish_seen_subcommand_from enrich" -a "status:" -d "Filter by status"
-
-# =============================================================================
-# sessions command
-# =============================================================================
-complete -c caco -n "__fish_seen_subcommand_from sessions" -l plain -d "TSV output for scripting"
-complete -c caco -n "__fish_seen_subcommand_from sessions" -s y -l yes -d "Auto-select first match"
-complete -c caco -n "__fish_seen_subcommand_from sessions" -xa "(__caco_wads)"
-complete -c caco -n "__fish_seen_subcommand_from sessions" -a "id:" -d "Filter by ID"
-complete -c caco -n "__fish_seen_subcommand_from sessions" -a "title:" -d "Filter by title"
-complete -c caco -n "__fish_seen_subcommand_from sessions" -a "author:" -d "Filter by author"
-complete -c caco -n "__fish_seen_subcommand_from sessions" -a "tag:" -d "Filter by tag"
-complete -c caco -n "__fish_seen_subcommand_from sessions" -a "status:" -d "Filter by status"
-
-# =============================================================================
 # cache subcommands
 # =============================================================================
 complete -c caco -n "__fish_seen_subcommand_from cache; and not __fish_seen_subcommand_from list clear prune" -a list -d "List cached files"
@@ -273,60 +235,27 @@ complete -c caco -n "__fish_seen_subcommand_from cache; and __fish_seen_subcomma
 complete -c caco -n "__fish_seen_subcommand_from cache; and __fish_seen_subcommand_from prune" -s y -l yes -d "Skip confirmation"
 
 # =============================================================================
-# profile subcommands
+# enrich command
 # =============================================================================
-complete -c caco -n "__fish_seen_subcommand_from profile; and not __fish_seen_subcommand_from ls create edit cp rm path" -a ls -d "List config profiles"
-complete -c caco -n "__fish_seen_subcommand_from profile; and not __fish_seen_subcommand_from ls create edit cp rm path" -a create -d "Create a config profile"
-complete -c caco -n "__fish_seen_subcommand_from profile; and not __fish_seen_subcommand_from ls create edit cp rm path" -a edit -d "Edit a config profile"
-complete -c caco -n "__fish_seen_subcommand_from profile; and not __fish_seen_subcommand_from ls create edit cp rm path" -a cp -d "Copy a config profile"
-complete -c caco -n "__fish_seen_subcommand_from profile; and not __fish_seen_subcommand_from ls create edit cp rm path" -a rm -d "Delete a config profile"
-complete -c caco -n "__fish_seen_subcommand_from profile; and not __fish_seen_subcommand_from ls create edit cp rm path" -a path -d "Print profile path"
-
-complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from ls" -s p -l sourceport -d "Sourceport to list profiles for"
-complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from create" -s p -l sourceport -d "Sourceport (defaults to configured)"
-complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from create" -l from -d "Copy from existing profile"
-complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from edit" -s p -l sourceport -d "Sourceport (defaults to configured)"
-complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from cp" -s p -l sourceport -d "Sourceport (defaults to configured)"
-complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from rm" -s p -l sourceport -d "Sourceport (defaults to configured)"
-complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from rm" -s y -l yes -d "Skip confirmation"
-complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from path" -s p -l sourceport -d "Sourceport (defaults to configured)"
+complete -c caco -n "__fish_seen_subcommand_from enrich" -l complevel -d "Only enrich WADs with missing complevel"
+complete -c caco -n "__fish_seen_subcommand_from enrich" -l dry-run -d "Preview changes"
+complete -c caco -n "__fish_seen_subcommand_from enrich" -xa "(__caco_wads)"
+complete -c caco -n "__fish_seen_subcommand_from enrich" -a "id:" -d "Filter by ID"
+complete -c caco -n "__fish_seen_subcommand_from enrich" -a "title:" -d "Filter by title"
+complete -c caco -n "__fish_seen_subcommand_from enrich" -a "author:" -d "Filter by author"
+complete -c caco -n "__fish_seen_subcommand_from enrich" -a "tag:" -d "Filter by tag"
+complete -c caco -n "__fish_seen_subcommand_from enrich" -a "status:" -d "Filter by status"
 
 # =============================================================================
-# saves subcommands
+# gc command
 # =============================================================================
-complete -c caco -n __fish_use_subcommand -a saves -d "Manage WAD save files and backups"
+complete -c caco -n "__fish_seen_subcommand_from gc" -l dry-run -d "Preview what would be cleaned"
+complete -c caco -n "__fish_seen_subcommand_from gc" -s y -l yes -d "Skip confirmation prompts"
+complete -c caco -n "__fish_seen_subcommand_from gc" -l keep-data -d "Don't delete data directories"
+complete -c caco -n "__fish_seen_subcommand_from gc" -l keep-cache -d "Don't delete cached WAD files"
+complete -c caco -n "__fish_seen_subcommand_from gc" -l keep-saves -d "Preserve save files in data dirs"
+complete -c caco -n "__fish_seen_subcommand_from gc" -l keep-demos -d "Preserve demo files in data dirs"
+complete -c caco -n "__fish_seen_subcommand_from gc" -l orphans-only -d "Only clean orphaned dirs/backups"
+complete -c caco -n "__fish_seen_subcommand_from gc" -l ignore -d "Mark WAD(s) as GC-ignored" -xa "(__caco_wads)"
+complete -c caco -n "__fish_seen_subcommand_from gc" -l unignore -d "Remove GC-ignore from WAD(s)" -xa "(__caco_wads)"
 
-complete -c caco -n "__fish_seen_subcommand_from saves; and not __fish_seen_subcommand_from list backup restore clean backups" -a list -d "List save files for a WAD"
-complete -c caco -n "__fish_seen_subcommand_from saves; and not __fish_seen_subcommand_from list backup restore clean backups" -a backup -d "Backup a WAD's data directory"
-complete -c caco -n "__fish_seen_subcommand_from saves; and not __fish_seen_subcommand_from list backup restore clean backups" -a restore -d "Restore from a backup"
-complete -c caco -n "__fish_seen_subcommand_from saves; and not __fish_seen_subcommand_from list backup restore clean backups" -a clean -d "Delete save files (keep stats)"
-complete -c caco -n "__fish_seen_subcommand_from saves; and not __fish_seen_subcommand_from list backup restore clean backups" -a backups -d "List backup files"
-
-complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcommand_from list" -l plain -d "Output as TSV"
-complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcommand_from list" -s y -l yes -d "Auto-select first match"
-complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcommand_from backup" -s y -l yes -d "Auto-select first match"
-complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcommand_from restore" -s y -l yes -d "Skip confirmation"
-complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcommand_from clean" -l dry-run -d "Show what would be deleted"
-complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcommand_from clean" -s y -l yes -d "Skip confirmation"
-complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcommand_from backups" -l plain -d "Output as TSV"
-complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcommand_from backups" -s y -l yes -d "Auto-select first match"
-
-complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcommand_from list backup restore clean backups" -xa "(__caco_wads)"
-
-# =============================================================================
-# demos subcommands
-# =============================================================================
-complete -c caco -n __fish_use_subcommand -a demos -d "Manage WAD demo recordings"
-
-complete -c caco -n "__fish_seen_subcommand_from demos; and not __fish_seen_subcommand_from list play clean" -a list -d "List demo files for a WAD"
-complete -c caco -n "__fish_seen_subcommand_from demos; and not __fish_seen_subcommand_from list play clean" -a play -d "Play back a recorded demo"
-complete -c caco -n "__fish_seen_subcommand_from demos; and not __fish_seen_subcommand_from list play clean" -a clean -d "Delete demo files"
-
-complete -c caco -n "__fish_seen_subcommand_from demos; and __fish_seen_subcommand_from list" -l plain -d "Output as TSV"
-complete -c caco -n "__fish_seen_subcommand_from demos; and __fish_seen_subcommand_from list" -s y -l yes -d "Auto-select first match"
-complete -c caco -n "__fish_seen_subcommand_from demos; and __fish_seen_subcommand_from play" -s p -l sourceport -d "Sourceport to use" -rF
-complete -c caco -n "__fish_seen_subcommand_from demos; and __fish_seen_subcommand_from play" -s y -l yes -d "Auto-select first match"
-complete -c caco -n "__fish_seen_subcommand_from demos; and __fish_seen_subcommand_from clean" -l dry-run -d "Show what would be deleted"
-complete -c caco -n "__fish_seen_subcommand_from demos; and __fish_seen_subcommand_from clean" -s y -l yes -d "Skip confirmation"
-
-complete -c caco -n "__fish_seen_subcommand_from demos; and __fish_seen_subcommand_from list play clean" -xa "(__caco_wads)"
