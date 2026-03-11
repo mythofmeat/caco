@@ -272,12 +272,14 @@ src/caco/
 - `caco gc --keep-demos` — clean but preserve demo files in data dirs
 - `caco gc --keep-data` — skip data dir cleanup (only clean cache files)
 - `caco gc --keep-cache` — skip cache file cleanup (only clean data dirs)
+- `caco gc --keep-companions` — skip companion file cleanup
 - `caco gc --orphans-only` — only clean orphaned data dirs and backups
 - `caco gc --ignore <query>` — permanently mark WAD(s) as GC-ignored
 - `caco gc --unignore <query>` — remove GC-ignore from WAD(s)
 - `caco gc -y` — skip confirmation prompts
 - Finished/abandoned WADs from idgames auto-clean (re-downloadable), non-idgames prompt individually with y/n/i (ignore)
-- Orphaned data dirs (WAD purged but dir remains) and orphaned backups are cleaned
+- Companion files linked to cleaned WADs are unlinked; orphaned companions (no remaining WAD links) are deleted from managed storage
+- Orphaned data dirs (WAD purged but dir remains), orphaned companion files, and orphaned backups are cleaned
 - `gc_ignore INTEGER DEFAULT 0` column on wads table; `gc_ignore:` not a query field (use `--ignore`/`--unignore`)
 
 **Status shortcuts (complete list):**

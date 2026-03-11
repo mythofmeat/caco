@@ -236,6 +236,7 @@ _caco_gc() {
         '--keep-cache[Do not delete cached WAD files]' \
         '--keep-saves[Preserve save files in data dirs]' \
         '--keep-demos[Preserve demo files in data dirs]' \
+        '--keep-companions[Do not delete companion files]' \
         '--orphans-only[Only clean orphaned dirs/backups]' \
         '--ignore[Mark WADs as GC-ignored]:query:__caco_wads_or_query' \
         '--unignore[Remove GC-ignore from WADs]:query:__caco_wads_or_query' \

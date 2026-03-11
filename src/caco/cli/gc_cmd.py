@@ -33,6 +33,7 @@ class GcOptions:
     keep_cache: bool = False
     keep_saves: bool = False
     keep_demos: bool = False
+    keep_companions: bool = False
 
 
 # =============================================================================
@@ -99,6 +100,26 @@ def _find_orphaned_data_dirs() -> list[tuple[Path, int]]:
     return orphans
 
 
+def _find_orphaned_companions() -> list[tuple[Path, int]]:
+    """Find companion files with no WAD links."""
+    all_companions = db.get_all_companions_with_counts()
+    orphans = []
+    for comp in all_companions:
+        if comp["wad_count"] == 0:
+            p = Path(comp["path"])
+            size = p.stat().st_size if p.is_file() else comp.get("size", 0)
+            orphans.append((p, size))
+    return orphans
+
+
+def _remove_orphaned_companion_records() -> None:
+    """Remove DB records for all orphaned companion files."""
+    all_companions = db.get_all_companions_with_counts()
+    for comp in all_companions:
+        if comp["wad_count"] == 0:
+            db.remove_companion(comp["id"])
+
+
 def _find_orphaned_backups() -> list[tuple[Path, int]]:
     """Find backup zips whose WAD ID no longer exists in the database."""
     all_backups = list_all_backups()
@@ -157,14 +178,29 @@ def _compute_data_size(data_dir: Path | None, opts: GcOptions) -> int:
     return total
 
 
+def _get_wad_companion_info(wad_id: int) -> list[dict]:
+    """Get companion files linked to a WAD with orphan-on-removal info."""
+    companions = db.get_wad_companions(wad_id)
+    result = []
+    for comp in companions:
+        p = Path(comp["path"])
+        file_size = p.stat().st_size if p.is_file() else comp.get("size", 0)
+        result.append({
+            **comp,
+            "file_size": file_size,
+            "would_orphan": db.would_be_orphan(comp["id"], wad_id),
+        })
+    return result
+
+
 def _wad_has_data(
     wad: dict,
     data_dir_map: dict[int, Path],
     opts: GcOptions,
-) -> tuple[Path | None, int, Path | None, int]:
+) -> tuple[Path | None, int, Path | None, int, list[dict], int]:
     """Check what cleanable data exists for a WAD.
 
-    Returns (data_dir, data_size, cache_path, cache_size).
+    Returns (data_dir, data_size, cache_path, cache_size, companions, companion_size).
     """
     data_dir = data_dir_map.get(wad["id"])
     data_size = _compute_data_size(data_dir, opts) if not opts.keep_data else 0
@@ -177,16 +213,24 @@ def _wad_has_data(
             cache_path = p
             cache_size = p.stat().st_size
 
-    return data_dir, data_size, cache_path, cache_size
+    companions: list[dict] = []
+    companion_size = 0
+    if not opts.keep_companions:
+        companions = _get_wad_companion_info(wad["id"])
+        # Only count size for companions that would become orphaned (actually freeing disk)
+        companion_size = sum(c["file_size"] for c in companions if c["would_orphan"])
+
+    return data_dir, data_size, cache_path, cache_size, companions, companion_size
 
 
 def _clean_wad_data(
     wad: dict,
     data_dir: Path | None,
     cache_path: Path | None,
+    companions: list[dict],
     opts: GcOptions,
 ) -> int:
-    """Delete data/cache for a WAD. Returns bytes freed."""
+    """Delete data/cache/companions for a WAD. Returns bytes freed."""
     freed = 0
 
     if data_dir and data_dir.is_dir() and not opts.keep_data:
@@ -225,6 +269,18 @@ def _clean_wad_data(
         cache_path.unlink()
         db.clear_cached_path(wad["id"])
 
+    # Clean companion files
+    if companions and not opts.keep_companions:
+        for comp in companions:
+            db.unlink_companion(wad["id"], comp["id"])
+            if db.is_orphan(comp["id"]):
+                managed_path = db.remove_companion_with_path(comp["id"])
+                if managed_path:
+                    p = Path(managed_path)
+                    if p.is_file():
+                        freed += p.stat().st_size
+                        p.unlink()
+
     # Clear live stats snapshot (data is archived in completions)
     if not opts.keep_data:
         db.update_wad(wad["id"], record_completion=False, stats_snapshot=None)
@@ -239,6 +295,7 @@ def _gc_orphans(
     delete_fn: Callable[[Path], None],
     dry_run: bool,
     yes: bool,
+    post_delete_fn: Callable[[], None] | None = None,
 ) -> int:
     """Clean orphaned files or directories with confirmation."""
     total_size = sum(size for _, size in orphans)
@@ -265,6 +322,9 @@ def _gc_orphans(
         except OSError as e:
             err_console.print(f"[red]Failed to delete {path}: {e}[/red]")
 
+    if post_delete_fn:
+        post_delete_fn()
+
     console.print(f"[green]Deleted {len(orphans)} orphaned {label}, freed {_format_size(freed)}[/green]")
     return freed
 
@@ -282,6 +342,7 @@ def _gc_orphans(
 @click.option("--keep-saves", is_flag=True, help="Preserve save files in data dirs")
 @click.option("--keep-demos", is_flag=True, help="Preserve demo files in data dirs")
 @click.option("--orphans-only", is_flag=True, help="Only clean orphaned dirs/backups")
+@click.option("--keep-companions", is_flag=True, help="Don't delete companion files")
 @click.option("--ignore", "ignore_query", help="Mark WAD(s) as permanently ignored by GC")
 @click.option("--unignore", "unignore_query", help="Remove GC ignore from WAD(s)")
 def gc_cmd(
@@ -292,6 +353,7 @@ def gc_cmd(
     keep_saves: bool,
     keep_demos: bool,
     orphans_only: bool,
+    keep_companions: bool,
     ignore_query: str | None,
     unignore_query: str | None,
 ):
@@ -324,6 +386,7 @@ def gc_cmd(
         keep_cache=keep_cache,
         keep_saves=keep_saves,
         keep_demos=keep_demos,
+        keep_companions=keep_companions,
     )
 
     console.print("[bold]Scanning for garbage...[/bold]\n")
@@ -345,7 +408,20 @@ def gc_cmd(
             yes=yes,
         )
 
-    # Phase 3: Orphaned backups
+    # Phase 3: Orphaned companion files
+    if not opts.keep_companions:
+        orphan_companions = _find_orphaned_companions()
+        if orphan_companions:
+            total_freed += _gc_orphans(
+                orphan_companions,
+                label="companion files",
+                delete_fn=lambda p: p.unlink(),
+                dry_run=dry_run,
+                yes=yes,
+                post_delete_fn=_remove_orphaned_companion_records,
+            )
+
+    # Phase 4: Orphaned backups
     orphan_backups = _find_orphaned_backups()
     if orphan_backups:
         total_freed += _gc_orphans(
@@ -399,8 +475,8 @@ def _gc_finished_wads(*, dry_run: bool, yes: bool, opts: GcOptions) -> int:
     interactive = []  # non-idgames WADs (need individual confirmation)
 
     for wad in candidates:
-        data_dir, data_size, cache_path, cache_size = _wad_has_data(wad, data_dir_map, opts)
-        total_size = data_size + cache_size
+        data_dir, data_size, cache_path, cache_size, companions, companion_size = _wad_has_data(wad, data_dir_map, opts)
+        total_size = data_size + cache_size + companion_size
 
         if total_size == 0:
             continue  # Nothing to clean
@@ -411,6 +487,8 @@ def _gc_finished_wads(*, dry_run: bool, yes: bool, opts: GcOptions) -> int:
             "data_size": data_size,
             "cache_path": cache_path,
             "cache_size": cache_size,
+            "companions": companions,
+            "companion_size": companion_size,
             "total_size": total_size,
         }
 
@@ -451,17 +529,20 @@ def _gc_auto_clean(
     table.add_column("Status", style="dim")
     table.add_column("Data", justify="right")
     table.add_column("Cache", justify="right")
+    table.add_column("Companions", justify="right")
 
     for entry in entries:
         wad = entry["wad"]
         data_str = _format_size(entry["data_size"]) if entry["data_size"] else "-"
         cache_str = _format_size(entry["cache_size"]) if entry["cache_size"] else "-"
+        comp_str = _format_size(entry["companion_size"]) if entry["companion_size"] else "-"
         table.add_row(
             str(wad["id"]),
             wad["title"],
             wad["status"],
             data_str,
             cache_str,
+            comp_str,
         )
 
     console.print(table)
@@ -477,7 +558,7 @@ def _gc_auto_clean(
 
     freed = 0
     for entry in entries:
-        freed += _clean_wad_data(entry["wad"], entry["data_dir"], entry["cache_path"], opts)
+        freed += _clean_wad_data(entry["wad"], entry["data_dir"], entry["cache_path"], entry["companions"], opts)
 
     console.print(f"[green]Cleaned {len(entries)} WAD(s), freed {_format_size(freed)}[/green]\n")
     return freed
@@ -498,7 +579,8 @@ def _gc_interactive(
         wad = entry["wad"]
         data_str = _format_size(entry["data_size"]) if entry["data_size"] else ""
         cache_str = _format_size(entry["cache_size"]) if entry["cache_size"] else ""
-        size_parts = [s for s in (data_str, cache_str) if s]
+        comp_str = _format_size(entry["companion_size"]) if entry["companion_size"] else ""
+        size_parts = [s for s in (data_str, cache_str, comp_str) if s]
         size_display = " + ".join(size_parts) if size_parts else "0 B"
 
         console.print(
@@ -513,7 +595,7 @@ def _gc_interactive(
         choice = click.prompt("  Clean?", type=click.Choice(["y", "n", "i"]), default="n")
 
         if choice == "y":
-            freed += _clean_wad_data(wad, entry["data_dir"], entry["cache_path"], opts)
+            freed += _clean_wad_data(wad, entry["data_dir"], entry["cache_path"], entry["companions"], opts)
         elif choice == "i":
             db.update_wad(wad["id"], record_completion=False, gc_ignore=1)
             console.print("  [dim]Permanently ignored[/dim]")

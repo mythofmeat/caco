@@ -241,7 +241,7 @@ _caco() {
             ;;
         gc)
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--dry-run -y --yes --keep-data --keep-cache --keep-saves --keep-demos --orphans-only --ignore --unignore --help" -- "$cur"))
+                COMPREPLY=($(compgen -W "--dry-run -y --yes --keep-data --keep-cache --keep-saves --keep-demos --keep-companions --orphans-only --ignore --unignore --help" -- "$cur"))
             elif [[ "$prev" == --ignore || "$prev" == --unignore ]]; then
                 _caco_wads
                 _caco_query_fields

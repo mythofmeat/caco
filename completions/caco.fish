@@ -255,6 +255,7 @@ complete -c caco -n "__fish_seen_subcommand_from gc" -l keep-data -d "Don't dele
 complete -c caco -n "__fish_seen_subcommand_from gc" -l keep-cache -d "Don't delete cached WAD files"
 complete -c caco -n "__fish_seen_subcommand_from gc" -l keep-saves -d "Preserve save files in data dirs"
 complete -c caco -n "__fish_seen_subcommand_from gc" -l keep-demos -d "Preserve demo files in data dirs"
+complete -c caco -n "__fish_seen_subcommand_from gc" -l keep-companions -d "Don't delete companion files"
 complete -c caco -n "__fish_seen_subcommand_from gc" -l orphans-only -d "Only clean orphaned dirs/backups"
 complete -c caco -n "__fish_seen_subcommand_from gc" -l ignore -d "Mark WAD(s) as GC-ignored" -xa "(__caco_wads)"
 complete -c caco -n "__fish_seen_subcommand_from gc" -l unignore -d "Remove GC-ignore from WAD(s)" -xa "(__caco_wads)"
