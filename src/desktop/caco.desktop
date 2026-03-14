@@ -2,7 +2,7 @@
 Categories=Game
 Comment=
 Exec=caco play
-Icon=/home/eshen/.repos/caco/src/desktop/icon.png
+Icon=/home/eshen/.local/opt/caco/src/desktop/icon.png
 Keywords=doom;caco
 MimeType=application/x-doom-wad;
 Name=Caco
