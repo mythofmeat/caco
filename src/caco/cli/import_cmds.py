@@ -123,6 +123,7 @@ def _do_auto_import(source: str, title: str | None, author: str | None,
 
     if source_type == "doomwiki_url":
         from caco.sources.doomwiki import DoomwikiSource
+        from caco.doomwiki.client import DoomwikiError
         from urllib.parse import urlparse, unquote
 
         parsed = urlparse(source)
@@ -133,7 +134,11 @@ def _do_auto_import(source: str, title: str | None, author: str | None,
             page_title = path.split("/")[-1].replace("_", " ")
 
         with DoomwikiSource() as wiki:
-            wiki_entry = wiki.get(page_title)
+            try:
+                wiki_entry = wiki.get(page_title)
+            except DoomwikiError as e:
+                err_console.print(f"[red]Error:[/red] {e}")
+                return
             if not wiki_entry:
                 err_console.print(f"[red]Page not found:[/red] {page_title}")
                 return
@@ -403,7 +408,11 @@ def _do_doomwiki_import(query_or_title: str, tags: tuple[str, ...], force: bool,
 
     with DoomwikiSource() as source:
         # Try exact page title match first
-        entry = source.get(query_or_title)
+        try:
+            entry = source.get(query_or_title)
+        except Exception as e:
+            err_console.print(f"[red]Error:[/red] {e}")
+            return
         if entry:
             wad_id = _wiki_check_import(source, entry, list(tags) if tags else None)
             if wad_id:
@@ -411,7 +420,11 @@ def _do_doomwiki_import(query_or_title: str, tags: tuple[str, ...], force: bool,
             return
 
         # Fall back to search
-        results = source.search(query_or_title)
+        try:
+            results = source.search(query_or_title)
+        except Exception as e:
+            err_console.print(f"[red]Error:[/red] {e}")
+            return
         if not results:
             console.print("[dim]No WAD pages found (only pages with {{Wad}} infobox are shown)[/dim]")
             return

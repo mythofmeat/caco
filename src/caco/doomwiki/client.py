@@ -35,6 +35,17 @@ class DoomwikiClient(BaseHttpClient):
         response = self._client.get(self.API_URL, params=params)
         response.raise_for_status()
 
+        if not response.content:
+            waf_action = response.headers.get("x-amzn-waf-action", "")
+            if waf_action == "challenge":
+                raise DoomwikiError(
+                    "Doom Wiki blocked the request (AWS WAF challenge). "
+                    "Try again later or import manually."
+                )
+            raise DoomwikiError(
+                f"Doom Wiki returned empty response (HTTP {response.status_code})"
+            )
+
         data = response.json()
 
         if "error" in data:
