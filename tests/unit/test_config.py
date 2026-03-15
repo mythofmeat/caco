@@ -257,7 +257,7 @@ class TestResolveIwad:
         result = config.resolve_iwad(str(wad))
         assert result == str(wad)
 
-    def test_search_iwad_dirs(self, tmp_path, tmp_config):
+    def test_search_iwad_dirs(self, tmp_path, tmp_config, monkeypatch):
         """Short name resolves against iwad_dirs."""
         iwad_dir = tmp_path / "iwads"
         iwad_dir.mkdir()
@@ -269,6 +269,12 @@ class TestResolveIwad:
         cfg["iwad_dirs"] = [str(iwad_dir)]
         config.save_config(cfg)
         config._config_cache = None
+
+        # Mock DB lookup so a real IWAD registry doesn't short-circuit
+        monkeypatch.setattr(
+            "caco.db._iwads.resolve_iwad_from_db",
+            lambda name: None,
+        )
 
         result = config.resolve_iwad("doom2")
         assert result == str(iwad_dir / "doom2.wad")
