@@ -1,1 +1,0 @@
-- [ ] when a WAD's doomwiki page has no images, it can grab the cacoward tophy image instead (https://doomwiki.org/w/images/a/a9/Cacoward-2018.png) --- we should prevent this and remove the image as the thumbnail for all WADs currently in the library, as it does not get updated with the TITLEPIC when the WAD is played
