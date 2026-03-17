@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QMessageBox,
+    QFileDialog,
 )
 
 from caco.gui.theme import DOOM_PALETTE
@@ -123,7 +124,46 @@ class DoomwikiPane(QWidget):
 
     def _on_search_error(self, error_msg):
         self._search_btn.setEnabled(True)
+
+        # Offer JSON fallback when API is blocked by WAF
+        if "Cloudflare challenge" in error_msg or "WAF challenge" in error_msg:
+            from caco.services.json_import import doomwiki_api_url
+            query = self._search_input.text().strip()
+            url = doomwiki_api_url(query)
+            reply = QMessageBox.question(
+                self,
+                "API Blocked",
+                f"Doom Wiki API is blocked by WAF.\n\n"
+                f"You can open this URL in your browser, save the JSON response, "
+                f"and load it here:\n\n{url}",
+                QMessageBox.Open | QMessageBox.Cancel,
+            )
+            if reply == QMessageBox.Open:
+                self._load_from_json()
+                return
+
         self._status.setText(f"Error: {error_msg}")
+
+    def _load_from_json(self):
+        """Load search results from a saved Doom Wiki API JSON file."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load Doom Wiki JSON", "", "JSON files (*.json)"
+        )
+        if not path:
+            return
+
+        try:
+            from caco.services.json_import import parse_doomwiki_json
+            entries = parse_doomwiki_json(path)
+        except Exception as e:
+            self._status.setText(f"Error reading JSON: {e}")
+            return
+
+        if not entries:
+            self._status.setText("No WAD pages found in JSON")
+            return
+
+        self._on_search_done(entries)
 
     def _on_selection_changed(self, row, col, prev_row, prev_col):
         if 0 <= row < len(self._results):

@@ -117,109 +117,14 @@ def _complete_llm_backends(ctx, param, incomplete):
 # JSON file import helpers (offline fallback for blocked APIs)
 # =============================================================================
 
-
-def _idgames_api_url(query_or_id: str) -> str:
-    """Build the idgames API URL the user should visit in their browser."""
-    base = "https://www.doomworld.com/idgames/api/api.php"
-    try:
-        file_id = int(query_or_id)
-        return f"{base}?action=get&id={file_id}&out=json"
-    except ValueError:
-        from urllib.parse import quote
-        return f"{base}?action=search&query={quote(query_or_id)}&type=title&out=json"
-
-
-def _doomwiki_api_url(query_or_title: str) -> str:
-    """Build the Doom Wiki API URL the user should visit in their browser."""
-    from urllib.parse import quote
-    base = "https://doomwiki.org/w/api.php"
-    return f"{base}?action=query&titles={quote(query_or_title)}&prop=revisions&rvprop=content&format=json"
-
-
-def _parse_idgames_json(path: str) -> list:
-    """Parse a saved idgames API JSON response into FileEntry objects."""
-    import json
-    from pathlib import Path
-    from caco.idgames.models import FileEntry, Review
-
-    data = json.loads(Path(path).read_text())
-
-    content = data.get("content", {})
-    if not content:
-        return []
-
-    files = content.get("file", [])
-    if isinstance(files, dict):
-        files = [files]
-
-    entries = []
-    for f in files:
-        # Parse reviews if present (same as IdgamesClient.get)
-        reviews = []
-        if "reviews" in f and f["reviews"]:
-            review_data = f["reviews"].get("review") if isinstance(f["reviews"], dict) else None
-            if review_data:
-                if isinstance(review_data, dict):
-                    review_data = [review_data]
-                reviews = [Review(**r) for r in review_data]
-        f["reviews"] = reviews
-        entries.append(FileEntry(**f))
-
-    return entries
-
-
-def _parse_doomwiki_json(path: str) -> list:
-    """Parse a saved Doom Wiki API JSON response into WikiEntry objects."""
-    import json
-    from pathlib import Path
-    from caco.doomwiki.parser import WikitextParser
-    from caco.doomwiki.models import WikiEntry
-
-    data = json.loads(Path(path).read_text())
-    parser = WikitextParser()
-
-    pages = data.get("query", {}).get("pages", {})
-    entries = []
-    for page_id_str, page_data in pages.items():
-        if page_id_str == "-1" or "missing" in page_data:
-            continue
-        revisions = page_data.get("revisions", [])
-        if not revisions:
-            continue
-        wikitext = revisions[0].get("*", "")
-        title = page_data.get("title", "")
-        if not parser.has_wad_template(wikitext):
-            continue
-        parsed = parser.parse(wikitext, title, int(page_id_str))
-        entries.append(WikiEntry(**parsed))
-
-    return entries
-
-
-def _detect_json_source(path: str) -> str | None:
-    """Detect whether a JSON file is an idgames or doomwiki API response.
-
-    Returns 'idgames', 'doomwiki', or None if unrecognized.
-    """
-    import json
-    from pathlib import Path
-
-    try:
-        data = json.loads(Path(path).read_text())
-    except (json.JSONDecodeError, OSError):
-        return None
-
-    if "content" in data and isinstance(data["content"], dict):
-        content = data["content"]
-        if "file" in content or "status" in content:
-            return "idgames"
-
-    if "query" in data and isinstance(data["query"], dict):
-        query = data["query"]
-        if "pages" in query:
-            return "doomwiki"
-
-    return None
+# Shared parsing lives in services/json_import.py; thin wrappers here for CLI use.
+from caco.services.json_import import (
+    parse_idgames_json as _parse_idgames_json,
+    parse_doomwiki_json as _parse_doomwiki_json,
+    detect_json_source as _detect_json_source,
+    idgames_api_url as _idgames_api_url,
+    doomwiki_api_url as _doomwiki_api_url,
+)
 
 
 def _do_json_import(path: str, tags: tuple[str, ...], force: bool, multi: bool,
