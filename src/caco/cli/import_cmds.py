@@ -25,7 +25,8 @@ from caco.cli import (
 def _detect_source_type(source: str) -> str:
     """Detect the type of import source.
 
-    Returns: 'doomwiki_url', 'doomworld_url', 'url', 'local', 'idgames_id', or 'idgames_search'
+    Returns: 'doomwiki_url', 'doomworld_url', 'url', 'local', 'json_file',
+             'idgames_id', or 'idgames_search'
     """
     from pathlib import Path
 
@@ -37,6 +38,10 @@ def _detect_source_type(source: str) -> str:
         if "doomworld.com/forum/topic/" in source or "doomworld.com/vb/thread/" in source:
             return "doomworld_url"
         return "url"
+
+    # JSON file detection (saved API response)
+    if source.endswith(".json") and Path(source).exists():
+        return "json_file"
 
     # Local file detection (check if path exists)
     if Path(source).exists():
@@ -109,6 +114,290 @@ def _complete_llm_backends(ctx, param, incomplete):
 
 
 # =============================================================================
+# JSON file import helpers (offline fallback for blocked APIs)
+# =============================================================================
+
+
+def _idgames_api_url(query_or_id: str) -> str:
+    """Build the idgames API URL the user should visit in their browser."""
+    base = "https://www.doomworld.com/idgames/api/api.php"
+    try:
+        file_id = int(query_or_id)
+        return f"{base}?action=get&id={file_id}&out=json"
+    except ValueError:
+        from urllib.parse import quote
+        return f"{base}?action=search&query={quote(query_or_id)}&type=title&out=json"
+
+
+def _doomwiki_api_url(query_or_title: str) -> str:
+    """Build the Doom Wiki API URL the user should visit in their browser."""
+    from urllib.parse import quote
+    base = "https://doomwiki.org/w/api.php"
+    return f"{base}?action=query&titles={quote(query_or_title)}&prop=revisions&rvprop=content&format=json"
+
+
+def _parse_idgames_json(path: str) -> list:
+    """Parse a saved idgames API JSON response into FileEntry objects."""
+    import json
+    from pathlib import Path
+    from caco.idgames.models import FileEntry, Review
+
+    data = json.loads(Path(path).read_text())
+
+    content = data.get("content", {})
+    if not content:
+        return []
+
+    files = content.get("file", [])
+    if isinstance(files, dict):
+        files = [files]
+
+    entries = []
+    for f in files:
+        # Parse reviews if present (same as IdgamesClient.get)
+        reviews = []
+        if "reviews" in f and f["reviews"]:
+            review_data = f["reviews"].get("review") if isinstance(f["reviews"], dict) else None
+            if review_data:
+                if isinstance(review_data, dict):
+                    review_data = [review_data]
+                reviews = [Review(**r) for r in review_data]
+        f["reviews"] = reviews
+        entries.append(FileEntry(**f))
+
+    return entries
+
+
+def _parse_doomwiki_json(path: str) -> list:
+    """Parse a saved Doom Wiki API JSON response into WikiEntry objects."""
+    import json
+    from pathlib import Path
+    from caco.doomwiki.parser import WikitextParser
+    from caco.doomwiki.models import WikiEntry
+
+    data = json.loads(Path(path).read_text())
+    parser = WikitextParser()
+
+    pages = data.get("query", {}).get("pages", {})
+    entries = []
+    for page_id_str, page_data in pages.items():
+        if page_id_str == "-1" or "missing" in page_data:
+            continue
+        revisions = page_data.get("revisions", [])
+        if not revisions:
+            continue
+        wikitext = revisions[0].get("*", "")
+        title = page_data.get("title", "")
+        if not parser.has_wad_template(wikitext):
+            continue
+        parsed = parser.parse(wikitext, title, int(page_id_str))
+        entries.append(WikiEntry(**parsed))
+
+    return entries
+
+
+def _detect_json_source(path: str) -> str | None:
+    """Detect whether a JSON file is an idgames or doomwiki API response.
+
+    Returns 'idgames', 'doomwiki', or None if unrecognized.
+    """
+    import json
+    from pathlib import Path
+
+    try:
+        data = json.loads(Path(path).read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+
+    if "content" in data and isinstance(data["content"], dict):
+        content = data["content"]
+        if "file" in content or "status" in content:
+            return "idgames"
+
+    if "query" in data and isinstance(data["query"], dict):
+        query = data["query"]
+        if "pages" in query:
+            return "doomwiki"
+
+    return None
+
+
+def _do_json_import(path: str, tags: tuple[str, ...], force: bool, multi: bool,
+                    source_hint: str | None = None):
+    """Import from a saved API JSON response file.
+
+    Args:
+        source_hint: Force 'idgames' or 'doomwiki' interpretation.
+                     If None, auto-detects from JSON structure.
+    """
+    source_type = source_hint or _detect_json_source(path)
+
+    if source_type == "idgames":
+        entries = _parse_idgames_json(path)
+        if not entries:
+            err_console.print("[red]No file entries found in JSON[/red]")
+            return
+
+        from caco.sources.idgames import IdgamesSource
+        with IdgamesSource() as source:
+            if len(entries) == 1:
+                entry = entries[0]
+                wad_id = _check_and_import_entry(
+                    source, entry, db.SourceType.IDGAMES,
+                    list(tags) if tags else None, force,
+                    source_id=str(entry.id), filename=entry.filename, author=entry.author,
+                )
+                if wad_id:
+                    console.print(f"[green]Imported:[/green] {entry.title} (ID: {wad_id})")
+            else:
+                # Multiple results — use fzf or numbered list (same as search)
+                if _fzf_available():
+                    fzf_items = []
+                    for entry in entries[:50]:
+                        entry_year = entry.date[:4] if entry.date else "????"
+                        fzf_items.append(f"{entry.title} by {entry.author or 'Unknown'} ({entry_year})")
+
+                    selected = _fzf_select(
+                        fzf_items,
+                        prompt="Select WAD(s)" if multi else "Select WAD",
+                        multi=multi,
+                    )
+                    if selected is None:
+                        return
+
+                    tags_list = list(tags) if tags else None
+                    imported = 0
+                    for idx in selected:
+                        entry = entries[idx]
+                        wad_id = _check_and_import_entry(
+                            source, entry, db.SourceType.IDGAMES, tags_list, force,
+                            source_id=str(entry.id), filename=entry.filename, author=entry.author,
+                        )
+                        if wad_id:
+                            console.print(f"[green]Imported:[/green] {entry.title} (ID: {wad_id})")
+                            imported += 1
+                    if multi and imported > 1:
+                        console.print(f"[green]Imported {imported} WAD(s)[/green]")
+                else:
+                    from rich.table import Table
+                    table = Table(title="Entries in JSON")
+                    table.add_column("#", style="dim")
+                    table.add_column("ID", style="dim")
+                    table.add_column("Title", style="cyan")
+                    table.add_column("Author")
+                    table.add_column("Date")
+
+                    for i, entry in enumerate(entries[:20], 1):
+                        table.add_row(str(i), str(entry.id), entry.title, entry.author, entry.date or "-")
+                    console.print(table)
+
+                    choice = click.prompt("Enter number to import (or 0 to cancel)", type=int, default=0)
+                    if choice == 0 or choice > len(entries):
+                        return
+
+                    entry = entries[choice - 1]
+                    wad_id = _check_and_import_entry(
+                        source, entry, db.SourceType.IDGAMES,
+                        list(tags) if tags else None, force,
+                        source_id=str(entry.id), filename=entry.filename, author=entry.author,
+                    )
+                    if wad_id:
+                        console.print(f"[green]Imported:[/green] {entry.title} (ID: {wad_id})")
+
+    elif source_type == "doomwiki":
+        entries = _parse_doomwiki_json(path)
+        if not entries:
+            err_console.print("[red]No WAD pages found in JSON (only pages with {{Wad}} infobox)[/red]")
+            return
+
+        from caco.sources.doomwiki import DoomwikiSource
+        with DoomwikiSource() as source:
+            if len(entries) == 1:
+                entry = entries[0]
+                wad_id = _check_and_import_entry(
+                    source, entry, db.SourceType.DOOMWIKI,
+                    list(tags) if tags else None, force,
+                    source_id=str(entry.page_id),
+                )
+                if wad_id:
+                    console.print(f"[green]Imported:[/green] {entry.display_name} (ID: {wad_id})")
+            else:
+                if _fzf_available():
+                    fzf_items = []
+                    for entry in entries[:50]:
+                        year = str(entry.year) if entry.year else "????"
+                        fzf_items.append(f"{entry.display_name} by {entry.author or 'Unknown'} ({year})")
+
+                    selected = _fzf_select(
+                        fzf_items,
+                        prompt="Select WAD(s)" if multi else "Select WAD",
+                        multi=multi,
+                    )
+                    if selected is None:
+                        return
+
+                    tags_list = list(tags) if tags else None
+                    imported = 0
+                    for idx in selected:
+                        entry = entries[idx]
+                        wad_id = _check_and_import_entry(
+                            source, entry, db.SourceType.DOOMWIKI, tags_list, force,
+                            source_id=str(entry.page_id),
+                        )
+                        if wad_id:
+                            console.print(f"[green]Imported:[/green] {entry.display_name} (ID: {wad_id})")
+                            imported += 1
+                    if multi and imported > 1:
+                        console.print(f"[green]Imported {imported} WAD(s)[/green]")
+                else:
+                    from rich.table import Table
+                    table = Table(title="WAD pages in JSON")
+                    table.add_column("#", style="dim")
+                    table.add_column("Title", style="cyan")
+                    table.add_column("Author")
+                    table.add_column("Year")
+
+                    for i, entry in enumerate(entries[:20], 1):
+                        year = str(entry.year) if entry.year else "-"
+                        table.add_row(str(i), entry.display_name, entry.author or "-", year)
+                    console.print(table)
+
+                    choice = click.prompt("Enter number to import (or 0 to cancel)", type=int, default=0)
+                    if choice == 0 or choice > len(entries):
+                        return
+
+                    entry = entries[choice - 1]
+                    wad_id = _check_and_import_entry(
+                        source, entry, db.SourceType.DOOMWIKI,
+                        list(tags) if tags else None, force,
+                        source_id=str(entry.page_id),
+                    )
+                    if wad_id:
+                        console.print(f"[green]Imported:[/green] {entry.display_name} (ID: {wad_id})")
+    else:
+        err_console.print("[red]Unrecognized JSON format[/red]")
+        err_console.print("[dim]Expected idgames API or Doom Wiki API response[/dim]")
+
+
+def _print_api_hint(source_type: str, query: str) -> None:
+    """Print a hint about downloading JSON manually when an API is blocked."""
+    if source_type == "idgames":
+        url = _idgames_api_url(query)
+        err_console.print()
+        err_console.print("[bold]Workaround:[/bold] open this URL in your browser and save the JSON:")
+        err_console.print(f"  [blue]{url}[/blue]")
+        err_console.print("Then import from the saved file:")
+        err_console.print("  [dim]caco import saved.json --idgames[/dim]")
+    elif source_type == "doomwiki":
+        url = _doomwiki_api_url(query)
+        err_console.print()
+        err_console.print("[bold]Workaround:[/bold] open this URL in your browser and save the JSON:")
+        err_console.print(f"  [blue]{url}[/blue]")
+        err_console.print("Then import from the saved file:")
+        err_console.print("  [dim]caco import saved.json --doomwiki[/dim]")
+
+
+# =============================================================================
 # Source-specific import helpers
 # =============================================================================
 
@@ -138,6 +427,7 @@ def _do_auto_import(source: str, title: str | None, author: str | None,
                 wiki_entry = wiki.get(page_title)
             except DoomwikiError as e:
                 err_console.print(f"[red]Error:[/red] {e}")
+                _print_api_hint("doomwiki", page_title)
                 return
             if not wiki_entry:
                 err_console.print(f"[red]Page not found:[/red] {page_title}")
@@ -268,12 +558,20 @@ def _do_auto_import(source: str, title: str | None, author: str | None,
                 if thread.download_links:
                     console.print(f"  [dim]Downloads:[/dim] {len(thread.download_links)} link(s)")
 
+    elif source_type == "json_file":
+        _do_json_import(source, tags, force, multi)
+
     elif source_type == "idgames_id":
         from caco.sources.idgames import IdgamesSource
+        from caco.idgames.client import IdgamesError
 
         with IdgamesSource() as idgames:
             try:
                 ig_entry = idgames.get(int(source))
+            except IdgamesError as e:
+                err_console.print(f"[red]Error:[/red] {e}")
+                _print_api_hint("idgames", source)
+                return
             except Exception as e:
                 err_console.print(f"[red]Failed to fetch idgames ID {source}: {e}[/red]")
                 return
@@ -295,7 +593,15 @@ def _do_auto_import(source: str, title: str | None, author: str | None,
 
 def _do_idgames_import(query_or_id: str, tags: tuple[str, ...], force: bool, multi: bool):
     """Import from idgames archive (forced source)."""
+    from pathlib import Path
+
+    # JSON file: parse offline
+    if query_or_id.endswith(".json") and Path(query_or_id).exists():
+        _do_json_import(query_or_id, tags, force, multi, source_hint="idgames")
+        return
+
     from caco.sources.idgames import IdgamesSource
+    from caco.idgames.client import IdgamesError
 
     def _idgames_check_import(src, entry, tags_list):
         return _check_and_import_entry(
@@ -307,7 +613,12 @@ def _do_idgames_import(query_or_id: str, tags: tuple[str, ...], force: bool, mul
         # Try as ID first
         try:
             file_id = int(query_or_id)
-            entry = source.get(file_id)
+            try:
+                entry = source.get(file_id)
+            except IdgamesError as e:
+                err_console.print(f"[red]Error:[/red] {e}")
+                _print_api_hint("idgames", query_or_id)
+                return
             wad_id = _idgames_check_import(source, entry, list(tags) if tags else None)
             if wad_id:
                 console.print(f"[green]Imported:[/green] {entry.title} (ID: {wad_id})")
@@ -323,9 +634,16 @@ def _do_idgames_search(query: str, tags: tuple[str, ...], force: bool, multi: bo
                         source_override=None):
     """Search idgames and import selected result(s)."""
     from caco.sources.idgames import IdgamesSource
+    from caco.idgames.client import IdgamesError
 
     def _run_search(source):
-        results = source.search(query)
+        try:
+            results = source.search(query)
+        except IdgamesError as e:
+            err_console.print(f"[red]Error:[/red] {e}")
+            _print_api_hint("idgames", query)
+            return
+
         if not results:
             console.print("[dim]No results found[/dim]")
             return
@@ -398,7 +716,15 @@ def _do_idgames_search(query: str, tags: tuple[str, ...], force: bool, multi: bo
 
 def _do_doomwiki_import(query_or_title: str, tags: tuple[str, ...], force: bool, multi: bool):
     """Import from Doom Wiki (forced source)."""
+    from pathlib import Path
+
+    # JSON file: parse offline
+    if query_or_title.endswith(".json") and Path(query_or_title).exists():
+        _do_json_import(query_or_title, tags, force, multi, source_hint="doomwiki")
+        return
+
     from caco.sources.doomwiki import DoomwikiSource
+    from caco.doomwiki.client import DoomwikiError
 
     def _wiki_check_import(src, entry, tags_list):
         return _check_and_import_entry(
@@ -410,6 +736,10 @@ def _do_doomwiki_import(query_or_title: str, tags: tuple[str, ...], force: bool,
         # Try exact page title match first
         try:
             entry = source.get(query_or_title)
+        except DoomwikiError as e:
+            err_console.print(f"[red]Error:[/red] {e}")
+            _print_api_hint("doomwiki", query_or_title)
+            return
         except Exception as e:
             err_console.print(f"[red]Error:[/red] {e}")
             return
@@ -422,6 +752,10 @@ def _do_doomwiki_import(query_or_title: str, tags: tuple[str, ...], force: bool,
         # Fall back to search
         try:
             results = source.search(query_or_title)
+        except DoomwikiError as e:
+            err_console.print(f"[red]Error:[/red] {e}")
+            _print_api_hint("doomwiki", query_or_title)
+            return
         except Exception as e:
             err_console.print(f"[red]Error:[/red] {e}")
             return
@@ -781,6 +1115,12 @@ def import_cmd(ctx, source: tuple[str, ...], idgames: bool, doomwiki: bool,
         caco import URL --doomworld                # Force Doomworld forum
         caco import *.wad --local                  # Force local file(s)
         caco import "My WAD" --url https://...     # Manual URL import
+
+    \b
+    Offline JSON import (when APIs are blocked):
+        caco import saved.json --idgames           # Saved idgames API response
+        caco import saved.json --doomwiki          # Saved Doom Wiki API response
+        caco import saved.json                     # Auto-detect source from JSON
 
     \b
     Options:

@@ -20,6 +20,22 @@ _TIMEOUT = 15.0
 # Must match the pattern used by caco's existing doomwiki client.
 _HEADERS = {"User-Agent": "Caco/1.0 (Doom WAD library manager)"}
 
+# Image names containing these substrings are skipped during fallback selection.
+# Prevents grabbing award trophies, wiki icons, etc. instead of actual WAD art.
+_BLOCKED_IMAGE_SUBSTRINGS = (
+    "cacoward",
+    "award",
+    "trophy",
+    "icon",
+    "logo",
+    "banner",
+    "ribbon",
+    "badge",
+    "button",
+    "navbox",
+    "ambox",
+)
+
 # Shared httpx client (thread-safe for reads) — avoids creating a new client per thumbnail
 _shared_client: httpx.Client | None = None
 
@@ -136,11 +152,13 @@ def _fetch_image_for_page(page_title: str, client: httpx.Client | None = None) -
             if any(k in name for k in ("titlepic", "title screen", "title.png", "title.jpg")):
                 title_images.append(img["title"])
 
-        # Fallback: try the first .png/.jpg image
+        # Fallback: try the first .png/.jpg image (skip known non-WAD images)
         if not title_images:
             for img in images:
                 name = img["title"].lower()
                 if name.endswith((".png", ".jpg", ".jpeg", ".gif")):
+                    if any(b in name for b in _BLOCKED_IMAGE_SUBSTRINGS):
+                        continue
                     title_images.append(img["title"])
                     break
 

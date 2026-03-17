@@ -34,6 +34,16 @@ class IdgamesClient(BaseHttpClient):
         params["out"] = "json"
 
         response = self._client.get(self.BASE_URL, params=params)
+
+        # Detect Cloudflare JS challenge (returns 403 with "Just a moment" page)
+        if response.status_code == 403:
+            cf_mitigated = response.headers.get("cf-mitigated", "")
+            if cf_mitigated == "challenge":
+                raise IdgamesError(
+                    "idgames API blocked by Cloudflare challenge. "
+                    "This is usually temporary — try again later."
+                )
+
         response.raise_for_status()
 
         data = response.json()

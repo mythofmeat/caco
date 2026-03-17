@@ -121,7 +121,12 @@ class BaseHttpClient:
     and implement API-specific methods.
     """
 
+    DEFAULT_USER_AGENT = "Caco/1.0 (Doom WAD library manager; +https://github.com/eshen/caco)"
+
     def __init__(self, timeout: float = 30.0, **client_kwargs):
+        # Inject default User-Agent if no headers provided (prevents 403 from WAFs)
+        if "headers" not in client_kwargs:
+            client_kwargs["headers"] = {"User-Agent": self.DEFAULT_USER_AGENT}
         self._client = httpx.Client(timeout=timeout, **client_kwargs)
 
     def close(self) -> None:
