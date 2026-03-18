@@ -283,7 +283,7 @@ def _clean_wad_data(
 
     # Clear live stats snapshot (data is archived in completions)
     if not opts.keep_data:
-        db.update_wad(wad["id"], record_completion=False, stats_snapshot=None)
+        db.update_wad(wad["id"], stats_snapshot=None)
 
     return freed
 
@@ -452,7 +452,7 @@ def _handle_ignore(query: str, *, ignore: bool) -> None:
         return
 
     for wad in wads:
-        db.update_wad(wad["id"], record_completion=False, gc_ignore=1 if ignore else 0)
+        db.update_wad(wad["id"], gc_ignore=1 if ignore else 0)
 
     count = len(wads)
     if ignore:
@@ -597,7 +597,7 @@ def _gc_interactive(
         if choice == "y":
             freed += _clean_wad_data(wad, entry["data_dir"], entry["cache_path"], entry["companions"], opts)
         elif choice == "i":
-            db.update_wad(wad["id"], record_completion=False, gc_ignore=1)
+            db.update_wad(wad["id"], gc_ignore=1)
             console.print("  [dim]Permanently ignored[/dim]")
 
     if freed > 0:

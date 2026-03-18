@@ -1,10 +1,10 @@
-"""WAD editing dialogs — split into focused sections.
+"""Unified WAD editing dialog with tabbed sections.
 
-Each dialog handles a subset of WAD fields:
-- EditMetadataDialog: title, author, year, status, rating, tags, description
-- EditNotesDialog: notes
-- EditSourceportDialog: sourceport, config profile, IWAD, complevel, extra args
-- EditCompanionsDialog: companion file management
+Single dialog with tabs for:
+- Metadata: title, author, year, status, rating, beaten, tags, description
+- Notes: free-form notes
+- Sourceport: sourceport, config profile, IWAD, complevel, extra args
+- Companions: companion file management
 """
 
 import json
@@ -24,6 +24,9 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QPushButton,
+    QSpinBox,
+    QTabWidget,
+    QWidget,
 )
 
 from caco import db
@@ -50,8 +53,8 @@ _RATING_OPTIONS = [
 ]
 
 
-class EditMetadataDialog(QDialog):
-    """Edit WAD metadata: title, author, year, status, rating, tags, description."""
+class EditWadDialog(QDialog):
+    """Unified WAD editing dialog with tabbed sections."""
 
     def __init__(self, wad_id: int, parent=None):
         super().__init__(parent)
@@ -60,13 +63,32 @@ class EditMetadataDialog(QDialog):
         if not self._wad:
             return
 
-        self.setWindowTitle(f"Edit Metadata: {self._wad['title']}")
-        self.setMinimumWidth(450)
+        self.setWindowTitle(f"Edit: {self._wad['title']}")
+        self.setMinimumWidth(500)
+        self.setMinimumHeight(400)
 
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
 
-        form = QFormLayout()
+        self._tabs = QTabWidget()
+        self._tabs.addTab(self._build_metadata_tab(), "Metadata")
+        self._tabs.addTab(self._build_notes_tab(), "Notes")
+        self._tabs.addTab(self._build_sourceport_tab(), "Sourceport")
+        self._tabs.addTab(self._build_companions_tab(), "Companions")
+        layout.addWidget(self._tabs)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self._save)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    # ── Tab builders ──────────────────────────────────────────────
+
+    def _build_metadata_tab(self) -> QWidget:
+        widget = QWidget()
+        form = QFormLayout(widget)
 
         self._title_input = QLineEdit(self._wad["title"])
         form.addRow("Title:", self._title_input)
@@ -104,6 +126,18 @@ class EditMetadataDialog(QDialog):
         status_rating.addWidget(self._rating_combo, 1)
         form.addRow("Status | Rating:", status_rating)
 
+        # Beaten (completions)
+        beaten_row = QHBoxLayout()
+        times_beaten = db.get_times_beaten(self._wad_id)
+        self._beaten_spin = QSpinBox()
+        self._beaten_spin.setMinimum(0)
+        self._beaten_spin.setMaximum(9999)
+        self._beaten_spin.setValue(times_beaten)
+        self._initial_beaten = times_beaten
+        beaten_row.addWidget(self._beaten_spin)
+        beaten_row.addStretch()
+        form.addRow("Beaten:", beaten_row)
+
         self._tags_input = QLineEdit(", ".join(self._wad.get("tags", [])))
         self._tags_input.setPlaceholderText("Comma-separated tags")
         form.addRow("Tags:", self._tags_input)
@@ -113,102 +147,20 @@ class EditMetadataDialog(QDialog):
         self._desc_input.setMaximumHeight(120)
         form.addRow("Description:", self._desc_input)
 
-        layout.addLayout(form)
+        return widget
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self._save)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
-
-    def _save(self):
-        title = self._title_input.text().strip()
-        if not title:
-            QMessageBox.warning(self, "Validation Error", "Title is required.")
-            return
-
-        year = None
-        year_text = self._year_input.text().strip()
-        if year_text:
-            try:
-                year = int(year_text)
-                if year < 1993 or year > 2100:
-                    QMessageBox.warning(self, "Validation Error", "Year must be between 1993 and 2100.")
-                    return
-            except ValueError:
-                QMessageBox.warning(self, "Validation Error", "Year must be a number.")
-                return
-
-        fields = {
-            "title": title,
-            "author": self._author_input.text().strip() or None,
-            "year": year,
-            "status": self._status_combo.currentData(),
-            "rating": self._rating_combo.currentData(),
-            "description": self._desc_input.toPlainText().strip() or None,
-        }
-
-        db.update_wad(self._wad_id, **fields)
-
-        # Sync tags
-        old_tags = set(self._wad.get("tags", []))
-        new_tags = {t.strip().lower() for t in self._tags_input.text().split(",") if t.strip()}
-        for tag in old_tags - new_tags:
-            db.remove_tag(self._wad_id, tag)
-        for tag in new_tags - old_tags:
-            db.add_tag(self._wad_id, tag)
-
-        self.accept()
-
-
-class EditNotesDialog(QDialog):
-    """Edit WAD notes."""
-
-    def __init__(self, wad_id: int, parent=None):
-        super().__init__(parent)
-        self._wad_id = wad_id
-        self._wad = db.get_wad(wad_id)
-        if not self._wad:
-            return
-
-        self.setWindowTitle(f"Edit Notes: {self._wad['title']}")
-        self.setMinimumWidth(450)
-        self.setMinimumHeight(300)
-
-        layout = QVBoxLayout(self)
-        layout.setSpacing(10)
-
+    def _build_notes_tab(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
         self._notes_input = QTextEdit()
         self._notes_input.setPlainText(self._wad.get("notes") or "")
         self._notes_input.setPlaceholderText("Your notes about this WAD...")
         layout.addWidget(self._notes_input)
+        return widget
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self._save)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
-
-    def _save(self):
-        db.update_wad(self._wad_id, notes=self._notes_input.toPlainText().strip() or None)
-        self.accept()
-
-
-class EditSourceportDialog(QDialog):
-    """Edit sourceport settings: sourceport, config profile, IWAD, complevel, extra args."""
-
-    def __init__(self, wad_id: int, parent=None):
-        super().__init__(parent)
-        self._wad_id = wad_id
-        self._wad = db.get_wad(wad_id)
-        if not self._wad:
-            return
-
-        self.setWindowTitle(f"Sourceport Settings: {self._wad['title']}")
-        self.setMinimumWidth(450)
-
-        layout = QVBoxLayout(self)
-        layout.setSpacing(10)
-
-        form = QFormLayout()
+    def _build_sourceport_tab(self) -> QWidget:
+        widget = QWidget()
+        form = QFormLayout(widget)
 
         # Sourceport | Config profile row
         sp_config = QHBoxLayout()
@@ -265,59 +217,11 @@ class EditSourceportDialog(QDialog):
         self._args_input.setPlaceholderText("Extra sourceport arguments")
         form.addRow("Extra Args:", self._args_input)
 
-        layout.addLayout(form)
+        return widget
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self._save)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
-
-    def _save(self):
-        # Validate complevel
-        complevel = None
-        complevel_text = self._complevel_input.text().strip()
-        if complevel_text:
-            from caco.complevel import parse_complevel
-            complevel = parse_complevel(complevel_text)
-            if complevel is None:
-                QMessageBox.warning(
-                    self, "Validation Error",
-                    "Invalid complevel. Use integer or alias (vanilla, boom, mbf, mbf21)."
-                )
-                return
-
-        iwad_text = self._iwad_combo.currentText().strip()
-        custom_iwad = iwad_text if iwad_text and iwad_text != "(none)" else None
-
-        fields: dict = {
-            "custom_iwad": custom_iwad,
-            "custom_sourceport": self._sourceport_input.text().strip() or None,
-            "complevel": complevel,
-            "custom_config": self._config_input.text().strip() or None,
-        }
-
-        args_text = self._args_input.text().strip()
-        fields["custom_args"] = json.dumps(args_text.split()) if args_text else None
-
-        db.update_wad(self._wad_id, **fields)
-        self.accept()
-
-
-class EditCompanionsDialog(QDialog):
-    """Manage companion files for a WAD."""
-
-    def __init__(self, wad_id: int, parent=None):
-        super().__init__(parent)
-        self._wad_id = wad_id
-        self._wad = db.get_wad(wad_id)
-        if not self._wad:
-            return
-
-        self.setWindowTitle(f"Companion Files: {self._wad['title']}")
-        self.setMinimumWidth(400)
-
-        layout = QVBoxLayout(self)
-        layout.setSpacing(10)
+    def _build_companions_tab(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
 
         self._companion_list = QListWidget()
         self._original_companions = db.get_wad_companions(self._wad_id)
@@ -331,20 +235,19 @@ class EditCompanionsDialog(QDialog):
 
         btn_row = QHBoxLayout()
         add_btn = QPushButton("Add File...")
-        add_btn.clicked.connect(self._add_file)
+        add_btn.clicked.connect(self._add_companion)
         remove_btn = QPushButton("Remove")
-        remove_btn.clicked.connect(self._remove_file)
+        remove_btn.clicked.connect(self._remove_companion)
         btn_row.addWidget(add_btn)
         btn_row.addWidget(remove_btn)
         btn_row.addStretch()
         layout.addLayout(btn_row)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self._save)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        return widget
 
-    def _add_file(self):
+    # ── Companion helpers ─────────────────────────────────────────
+
+    def _add_companion(self):
         path, _ = QFileDialog.getOpenFileName(
             self, "Add Companion File", "",
             "WAD/DEH Files (*.wad *.deh *.bex *.pk3 *.lmp);;All Files (*)",
@@ -359,12 +262,92 @@ class EditCompanionsDialog(QDialog):
         item.setData(Qt.ItemDataRole.UserRole, path)
         self._companion_list.addItem(item)
 
-    def _remove_file(self):
+    def _remove_companion(self):
         current = self._companion_list.currentItem()
         if current:
             self._companion_list.takeItem(self._companion_list.row(current))
 
+    # ── Save ──────────────────────────────────────────────────────
+
     def _save(self):
+        # -- Validate metadata --
+        title = self._title_input.text().strip()
+        if not title:
+            self._tabs.setCurrentIndex(0)
+            QMessageBox.warning(self, "Validation Error", "Title is required.")
+            return
+
+        year = None
+        year_text = self._year_input.text().strip()
+        if year_text:
+            try:
+                year = int(year_text)
+                if year < 1993 or year > 2100:
+                    self._tabs.setCurrentIndex(0)
+                    QMessageBox.warning(self, "Validation Error", "Year must be between 1993 and 2100.")
+                    return
+            except ValueError:
+                self._tabs.setCurrentIndex(0)
+                QMessageBox.warning(self, "Validation Error", "Year must be a number.")
+                return
+
+        # -- Validate sourceport --
+        complevel = None
+        complevel_text = self._complevel_input.text().strip()
+        if complevel_text:
+            from caco.complevel import parse_complevel
+            complevel = parse_complevel(complevel_text)
+            if complevel is None:
+                self._tabs.setCurrentIndex(2)
+                QMessageBox.warning(
+                    self, "Validation Error",
+                    "Invalid complevel. Use integer or alias (vanilla, boom, mbf, mbf21)."
+                )
+                return
+
+        iwad_text = self._iwad_combo.currentText().strip()
+        custom_iwad = iwad_text if iwad_text and iwad_text != "(none)" else None
+
+        args_text = self._args_input.text().strip()
+        custom_args = json.dumps(args_text.split()) if args_text else None
+
+        # -- Apply all fields --
+        fields = {
+            "title": title,
+            "author": self._author_input.text().strip() or None,
+            "year": year,
+            "status": self._status_combo.currentData(),
+            "rating": self._rating_combo.currentData(),
+            "description": self._desc_input.toPlainText().strip() or None,
+            "notes": self._notes_input.toPlainText().strip() or None,
+            "custom_iwad": custom_iwad,
+            "custom_sourceport": self._sourceport_input.text().strip() or None,
+            "complevel": complevel,
+            "custom_config": self._config_input.text().strip() or None,
+            "custom_args": custom_args,
+        }
+
+        db.update_wad(self._wad_id, **fields)
+
+        # -- Sync tags --
+        old_tags = set(self._wad.get("tags", []))
+        new_tags = {t.strip().lower() for t in self._tags_input.text().split(",") if t.strip()}
+        for tag in old_tags - new_tags:
+            db.remove_tag(self._wad_id, tag)
+        for tag in new_tags - old_tags:
+            db.add_tag(self._wad_id, tag)
+
+        # -- Sync beaten count --
+        new_beaten = self._beaten_spin.value()
+        if new_beaten != self._initial_beaten:
+            db.set_wad_completion_count(self._wad_id, new_beaten)
+
+        # -- Sync companions --
+        self._save_companions()
+
+        self.accept()
+
+    def _save_companions(self):
         from caco.services.companion_service import register_companion, unregister_companion
 
         existing_ids: dict[int, bool] = {}
@@ -391,5 +374,3 @@ class EditCompanionsDialog(QDialog):
                 new_enabled = existing_ids[comp_id]
                 if new_enabled != bool(comp["enabled"]):
                     db.set_companion_enabled(self._wad_id, comp_id, new_enabled)
-
-        self.accept()

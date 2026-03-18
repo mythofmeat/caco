@@ -9,7 +9,7 @@ def build_wad_context_menu(owner: QWidget, wad_id: int) -> QMenu:
 
     Expects ``owner`` to have the standard action signals:
     play_requested, sessions_requested, wad_stats_requested,
-    edit_{metadata,notes,sourceport,companions}_requested, delete_requested.
+    edit_requested, delete_requested.
     """
     menu = QMenu(owner)
 
@@ -27,16 +27,9 @@ def build_wad_context_menu(owner: QWidget, wad_id: int) -> QMenu:
     stats_action.triggered.connect(lambda: owner.wad_stats_requested.emit(wad_id))
     menu.addAction(stats_action)
 
-    edit_menu = menu.addMenu("Edit")
-    for label, signal_name in [
-        ("Metadata...", "edit_metadata_requested"),
-        ("Notes...", "edit_notes_requested"),
-        ("Sourceport Settings...", "edit_sourceport_requested"),
-        ("Companion Files...", "edit_companions_requested"),
-    ]:
-        action = QAction(label, owner)
-        action.triggered.connect(lambda _, s=signal_name: getattr(owner, s).emit(wad_id))
-        edit_menu.addAction(action)
+    edit_action = QAction("Edit...", owner)
+    edit_action.triggered.connect(lambda: owner.edit_requested.emit(wad_id))
+    menu.addAction(edit_action)
 
     menu.addSeparator()
 

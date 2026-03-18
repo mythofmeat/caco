@@ -231,6 +231,17 @@ def _build_term_sql(term: QueryTerm) -> tuple[str, list[Any]]:
         else:
             return "", []
 
+    elif term.field == "rating":
+        try:
+            val = int(term.value)
+        except ValueError:
+            return "", []
+        if val == 0:
+            clause = "wads.rating IS NULL"
+        else:
+            clause = "wads.rating = ?"
+            params = [val]
+
     elif term.field == "config":
         clause = "wads.custom_config LIKE ?"
         params = [f"%{term.value}%"]

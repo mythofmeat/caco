@@ -88,14 +88,9 @@ class TestUpdateWadEdgeCases:
         result = db_mod.update_wad(999999, title="Ghost")
         assert result is False
 
-    def test_update_status_to_finished_records_completion(self, db_mod, make_wad):
+    def test_update_status_to_finished_no_auto_completion(self, db_mod, make_wad):
         wad_id = make_wad()
         db_mod.update_wad(wad_id, status=Status.FINISHED)
-        assert db_mod.get_times_beaten(wad_id) == 1
-
-    def test_update_status_to_finished_record_completion_false(self, db_mod, make_wad):
-        wad_id = make_wad()
-        db_mod.update_wad(wad_id, status=Status.FINISHED, record_completion=False)
         assert db_mod.get_times_beaten(wad_id) == 0
 
     def test_update_status_to_playing_no_completion(self, db_mod, make_wad):

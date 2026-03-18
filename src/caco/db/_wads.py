@@ -69,12 +69,12 @@ def get_wad(wad_id: int, include_deleted: bool = False) -> dict[str, Any] | None
         return None
 
 
-def update_wad(wad_id: int, record_completion: bool = True, **fields) -> bool:
+def update_wad(wad_id: int, **fields) -> bool:
     """Update a WAD's fields. Returns True if updated.
 
-    If status is set to 'finished', automatically records a completion
-    (unless record_completion=False).
     Only fields in ALLOWED_UPDATE_FIELDS may be updated.
+    Completions are never auto-recorded — use beaten+ via modify or
+    record_completion() explicitly.
     """
     if not fields:
         return False
@@ -83,16 +83,6 @@ def update_wad(wad_id: int, record_completion: bool = True, **fields) -> bool:
     invalid = set(fields.keys()) - ALLOWED_UPDATE_FIELDS
     if invalid:
         raise ValueError(f"Cannot update field(s): {', '.join(sorted(invalid))}")
-
-    # Check if setting status to finished (before enum conversion)
-    recording_completion = False
-    if record_completion:
-        status_value = fields.get("status")
-        if status_value:
-            if isinstance(status_value, Status):
-                recording_completion = status_value == Status.FINISHED
-            else:
-                recording_completion = status_value == Status.FINISHED.value
 
     # Build clean copy with enums converted to values
     clean_fields = {}
@@ -108,18 +98,6 @@ def update_wad(wad_id: int, record_completion: bool = True, **fields) -> bool:
             list(clean_fields.values()) + [wad_id],
         )
         updated = cursor.rowcount > 0
-
-        # Record completion atomically if status was set to 'finished'
-        if updated and recording_completion:
-            # Fetch current stats snapshot to archive with completion
-            row = conn.execute(
-                "SELECT stats_snapshot FROM wads WHERE id = ?", (wad_id,)
-            ).fetchone()
-            snapshot = row["stats_snapshot"] if row else None
-            conn.execute(
-                "INSERT INTO wad_completions (wad_id, stats_snapshot) VALUES (?, ?)",
-                (wad_id, snapshot),
-            )
 
     return updated
 

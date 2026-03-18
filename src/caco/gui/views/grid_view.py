@@ -209,10 +209,7 @@ class WadGridView(QListView):
     selection_cleared = Signal()
 
     play_requested = Signal(int)
-    edit_metadata_requested = Signal(int)
-    edit_notes_requested = Signal(int)
-    edit_sourceport_requested = Signal(int)
-    edit_companions_requested = Signal(int)
+    edit_requested = Signal(int)
     delete_requested = Signal(int)
     sessions_requested = Signal(int)
     wad_stats_requested = Signal(int)

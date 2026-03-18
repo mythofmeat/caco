@@ -759,9 +759,7 @@ def modify(
                 console.print(f"[green]Set {wad['title']} to {n} completion(s)[/green]")
 
         if updates:
-            # Skip auto-completion when beaten actions already handle it
-            skip_auto = bool(beaten_actions)
-            db.update_wad(wad["id"], record_completion=not skip_auto, **updates)
+            db.update_wad(wad["id"], **updates)
 
         # Standalone --stats-file attach
         if standalone_attach and snapshot_json:
