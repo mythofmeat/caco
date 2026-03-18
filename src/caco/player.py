@@ -73,12 +73,23 @@ def get_wad_path(
 
     if idgames_id:
         from caco.sources.idgames import IdgamesSource
+        from caco.idgames.client import IdgamesError
 
         cache_dir = get_cache_dir()
         cache_dir.mkdir(parents=True, exist_ok=True)
 
         with IdgamesSource() as source:
-            entry = source.get(int(idgames_id))
+            try:
+                entry = source.get(int(idgames_id))
+            except (IdgamesError, Exception) as api_err:
+                # API blocked (e.g. Cloudflare) — try direct mirror download
+                # using stored source_url and filename
+                dest = _download_idgames_direct(wad, source, cache_dir, progress_callback)
+                if dest:
+                    db.update_wad(wad["id"], cached_path=str(dest))
+                    return dest
+                raise api_err
+
             dest: Path = source.download(
                 entry, cache_dir,
                 progress_callback=progress_callback,
@@ -96,6 +107,67 @@ def get_wad_path(
 
     # Other sources not yet implemented
     return None
+
+
+def _download_idgames_direct(
+    wad: dict,
+    source,
+    cache_dir: Path,
+    progress_callback: ProgressCallback | None = None,
+) -> Path | None:
+    """Download from idgames mirrors directly, bypassing the API.
+
+    When the idgames API is blocked (e.g. Cloudflare challenge), we can still
+    download from mirrors using the source_url and filename stored in the DB.
+    The source_url has the idgames path (e.g. "https://...doomworld.com/idgames/levels/doom2/...")
+    and filename has the zip name.
+    """
+    from caco.config import get_download_mirror
+    from caco.idgames.client import MIRRORS
+
+    source_url = wad.get("source_url", "")
+    filename = wad.get("filename", "")
+
+    if not filename or "/idgames/" not in source_url:
+        return None
+
+    # Extract the directory path from source_url.
+    # source_url format: "https://www.doomworld.com/idgames/levels/doom2/Ports/megawads/1x1"
+    # The last segment is the WAD slug; the parent is the actual mirror directory.
+    # Mirror format: MIRROR_BASE + "levels/doom2/Ports/megawads/" + "1x1.zip"
+    idgames_path = source_url.split("/idgames/", 1)[1].rstrip("/")
+    parts = idgames_path.rsplit("/", 1)
+    dir_path = parts[0] + "/" if len(parts) > 1 else ""
+    download_path = dir_path + filename
+
+    mirror_idx = get_download_mirror()
+    mirror_base = MIRRORS[mirror_idx % len(MIRRORS)]
+    url = mirror_base + download_path
+
+    logger.info("API blocked — downloading directly from mirror: %s", url)
+
+    dest = cache_dir / filename
+    partial = dest.with_suffix(dest.suffix + ".partial")
+
+    try:
+        with source.client._client.stream("GET", url) as response:
+            response.raise_for_status()
+            total = int(response.headers.get("content-length", 0))
+            downloaded = 0
+
+            with open(partial, "wb") as f:
+                for chunk in response.iter_bytes(chunk_size=262144):
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if progress_callback:
+                        progress_callback(downloaded, total, filename)
+
+        partial.rename(dest)
+        return dest
+    except Exception:
+        if partial.exists():
+            partial.unlink()
+        return None
 
 
 # =============================================================================
