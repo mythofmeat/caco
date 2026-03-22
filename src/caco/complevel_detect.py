@@ -1,16 +1,17 @@
 """Auto-detect complevel (compatibility level) from WAD file contents.
 
-Conservative heuristics — returns None when ambiguous. Inspects lumps like
-COMPLVL, UMAPINFO and DEHACKED to infer the minimum required complevel.
+Inspects lumps like COMPLVL, UMAPINFO, DEHACKED, ANIMATED/SWITCHES, and
+LINEDEFS to infer the minimum required complevel.
 
 Detection hierarchy:
 1. COMPLVL lump (id24 signal) -> byte value directly
 2. UMAPINFO lump present -> MBF21 (21)
-3. DEHACKED with MBF21 codepointers -> MBF21 (21)
+3. DEHACKED with MBF21 features -> MBF21 (21)
 4. DEHACKED with MBF codepointers -> MBF (11)
-5. DEHACKED without MBF features -> None (ambiguous — could be vanilla or Boom)
-6. ExMy maps only, no DEHACKED/UMAPINFO -> vanilla (2)
-7. MAPxx maps without special lumps -> None (could be vanilla doom2 or Boom)
+5. ANIMATED or SWITCHES lumps -> Boom (9)
+6. Boom-range linedef types (> 141) in LINEDEFS -> Boom (9)
+7. Has map lumps (ExMy or MAPxx) without advanced features -> vanilla (2)
+8. No map lumps -> None (resource WAD, can't determine)
 """
 
 import logging
@@ -22,7 +23,10 @@ from caco.utils import parse_wad_directory
 
 logger = logging.getLogger(__name__)
 
-# MBF-specific DeHackEd codepointers (indicate MBF or higher)
+# Highest vanilla Doom linedef type
+_MAX_VANILLA_LINEDEF_TYPE = 141
+
+# MBF-specific DeHackEd codepointers (indicate MBF, complevel 11)
 MBF_CODEPOINTERS = frozenset({
     "A_MUSHROOM",
     "A_SPAWN",
@@ -36,21 +40,26 @@ MBF_CODEPOINTERS = frozenset({
     "A_DETONATE",
     "A_HEALCHASE",
     "A_SEEKERMISSILE",
+    "A_SEEKTRACER",
     "A_FINDTRACER",
     "A_CLEARTARGET",
-    "A_JUMPIFHEALTHBELOW",
-    "A_JUMPIFFLAGSSET",
-    "A_ADDFLAGS",
-    "A_REMOVEFLAGS",
+    "A_CLEARTRACER",
 })
 
-# MBF21 codepointers
+# MBF21-exclusive codepointers (not in original MBF)
 MBF21_CODEPOINTERS = frozenset({
-    "A_SEEKERMISSILE",
-    "A_FINDTRACER",
-    "A_CLEARTARGET",
+    "A_SPAWNOBJECT",
+    "A_MONSTERPROJECTILE",
+    "A_MONSTERMELEEATTACK",
+    "A_MONSTERBULLETATTACK",
+    "A_RADIUSDAMAGE",
+    "A_NOISEALERT",
     "A_JUMPIFHEALTHBELOW",
     "A_JUMPIFFLAGSSET",
+    "A_JUMPIFTARGETINLOS",
+    "A_JUMPIFTARGETCLOSER",
+    "A_JUMPIFTRACERINLOS",
+    "A_JUMPIFTRACERCLOSER",
     "A_ADDFLAGS",
     "A_REMOVEFLAGS",
     "A_WEAPONPROJECTILE",
@@ -58,25 +67,18 @@ MBF21_CODEPOINTERS = frozenset({
     "A_WEAPONMELEEATTACK",
     "A_WEAPONSOUND",
     "A_WEAPONJUMP",
+    "A_WEAPONALERT",
     "A_CONSUMEAMMO",
     "A_CHECKAMMO",
     "A_REFIRETO",
     "A_GUNFLASHTO",
-    "A_WEAPONALERT",
-    "A_NOISEALERT",
-    "A_HEALCHASE",
-    "A_SPAWNOBJECT",
-    "A_MONSTERPROJECTILE",
-    "A_MONSTERMELEEATTACK",
-    "A_MONSTERBULLETATTACK",
-    "A_RADIUSDAMAGE",
 })
 
 
 def detect_complevel(wad_path: str | Path) -> int | None:
     """Detect complevel from WAD file contents.
 
-    Returns complevel int if confidently detected, or None if ambiguous.
+    Returns complevel int if confidently detected, or None if no map lumps.
     Checks COMPLVL lump first (id24 signal), then falls back to heuristics.
     """
     wad_path = Path(wad_path)
@@ -105,26 +107,36 @@ def detect_complevel(wad_path: str | Path) -> int | None:
             logger.info("Detected UMAPINFO lump -> complevel 21 (MBF21)")
             return 21
 
-        # Check DEHACKED lump for MBF codepointers
+        # Check DEHACKED lump for MBF/MBF21 features
         if "DEHACKED" in lump_names:
             deh_text = _read_lump_text(wad_data, directory, "DEHACKED")
             if deh_text is not None:
                 cl = _detect_from_dehacked(deh_text)
                 if cl is not None:
                     return cl
-                # DEHACKED present but no MBF pointers — ambiguous
-                return None
+                # DEHACKED present but no MBF features — fall through to
+                # Boom checks (vanilla DEHACKED is compatible with all levels)
 
-        # No DEHACKED, no UMAPINFO — check map lump names
+        # Check for Boom-specific lumps
+        if lump_names & {"ANIMATED", "SWITCHES"}:
+            logger.info("Detected Boom lump (ANIMATED/SWITCHES) -> complevel 9")
+            return 9
+
+        # Check LINEDEFS for Boom-range linedef types (> 141)
+        if _has_boom_linedefs(wad_data, directory):
+            logger.info("Detected Boom linedef types -> complevel 9")
+            return 9
+
+        # Check for map lumps
         has_exmy = any(re.match(r"^E\dM\d$", name) for name in lump_names)
         has_mapxx = any(re.match(r"^MAP\d\d$", name) for name in lump_names)
 
-        if has_exmy and not has_mapxx:
-            # ExMy-only maps without special lumps -> vanilla Doom
-            logger.info("ExMy maps only, no DEHACKED/UMAPINFO -> complevel 2 (Vanilla)")
+        if has_exmy or has_mapxx:
+            # Maps present, no advanced features -> vanilla
+            logger.info("No advanced features detected -> complevel 2 (Vanilla)")
             return 2
 
-        # MAPxx or mixed — ambiguous (could be vanilla doom2 or boom)
+        # No map lumps — resource WAD, can't determine complevel
         return None
 
     except Exception as e:
@@ -178,12 +190,25 @@ def _read_lump_text(
 def _detect_from_dehacked(deh_text: str) -> int | None:
     """Detect complevel from DEHACKED lump contents.
 
-    Checks for MBF21 codepointers first, then MBF codepointers.
-    Returns None if no MBF features found (ambiguous).
+    Checks Doom version header, MBF21 fields/codepointers, then MBF
+    codepointers. Returns None if no MBF features found (vanilla DEHACKED).
     """
     upper = deh_text.upper()
 
-    # Check for MBF21 codepointers
+    # Check Doom version field — 2021 is the definitive MBF21 signal
+    version_match = re.search(r"DOOM\s+VERSION\s*=\s*(\d+)", upper)
+    if version_match:
+        version = int(version_match.group(1))
+        if version == 2021:
+            logger.info("DEHACKED Doom version 2021 -> complevel 21 (MBF21)")
+            return 21
+
+    # Check for MBF21-specific DEHACKED fields (thing/weapon/frame flags)
+    if re.search(r"MBF21\s+BITS", upper):
+        logger.info("Detected MBF21 Bits field -> complevel 21")
+        return 21
+
+    # Check for MBF21-exclusive codepointers
     for cp in MBF21_CODEPOINTERS:
         if cp in upper:
             logger.info("Detected MBF21 codepointer %s -> complevel 21", cp)
@@ -195,5 +220,32 @@ def _detect_from_dehacked(deh_text: str) -> int | None:
             logger.info("Detected MBF codepointer %s -> complevel 11", cp)
             return 11
 
-    # DEHACKED present but no MBF-specific features — ambiguous
+    # DEHACKED present but no MBF-specific features — vanilla-compatible
     return None
+
+
+def _has_boom_linedefs(
+    wad_data: bytes,
+    directory: list[tuple[str, int, int]],
+) -> bool:
+    """Check LINEDEFS lumps for Boom-range linedef types (> 141).
+
+    Scans each LINEDEFS lump (14 bytes per entry in Doom format) and checks
+    the special/type field for values above the vanilla Doom maximum.
+    """
+    for name, offset, size in directory:
+        if name != "LINEDEFS" or size == 0:
+            continue
+        # Doom format: 14 bytes per linedef; skip if size doesn't align
+        if size % 14 != 0:
+            continue
+        num_linedefs = size // 14
+        for i in range(num_linedefs):
+            # special field is at offset 6 within each 14-byte entry
+            ld_offset = offset + i * 14 + 6
+            special = int.from_bytes(
+                wad_data[ld_offset:ld_offset + 2], "little"
+            )
+            if special > _MAX_VANILLA_LINEDEF_TYPE:
+                return True
+    return False
