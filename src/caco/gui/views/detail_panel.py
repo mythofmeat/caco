@@ -63,11 +63,19 @@ class DetailPanel(QScrollArea):
         )
         self._layout.addWidget(self._thumbnail)
 
-        # Title
+        # ID + Title row
+        title_row = QHBoxLayout()
+        title_row.setSpacing(6)
+        self._id_label = QLabel()
+        self._id_label.setStyleSheet(
+            f"color: {DOOM_PALETTE['text_secondary']}; font-size: 11px; font-weight: bold;"
+        )
+        title_row.addWidget(self._id_label, 0, Qt.AlignTop)
         self._title = QLabel()
         self._title.setObjectName("detail_title")
         self._title.setWordWrap(True)
-        self._layout.addWidget(self._title)
+        title_row.addWidget(self._title, 1)
+        self._layout.addLayout(title_row)
 
         # Author + year
         self._author = QLabel()
@@ -196,6 +204,7 @@ class DetailPanel(QScrollArea):
     def clear(self):
         """Show empty state."""
         self._wad_id = None
+        self._id_label.setText("")
         self._title.setText("No WAD selected")
         self._author.setText("")
         self._status.setText("")
@@ -237,7 +246,8 @@ class DetailPanel(QScrollArea):
         self._thumbnail.setPixmap(QPixmap())
         self._thumbnail.setText("Loading...")
 
-        # Title
+        # ID + Title
+        self._id_label.setText(f"#{wad_id}")
         self._title.setText(wad["title"])
 
         # Author + year
@@ -334,6 +344,10 @@ class DetailPanel(QScrollArea):
 
         # Source info
         source_parts = [f"Source: {wad.get('source_type', 'unknown')}"]
+        if wad.get("source_url"):
+            source_parts.append(f"URL: {wad['source_url']}")
+        if wad.get("idgames_id"):
+            source_parts.append(f"idgames ID: {wad['idgames_id']}")
         if wad.get("filename"):
             source_parts.append(f"File: {wad['filename']}")
         if wad.get("version"):

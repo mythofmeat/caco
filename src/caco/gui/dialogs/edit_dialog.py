@@ -74,6 +74,7 @@ class EditWadDialog(QDialog):
         self._tabs.addTab(self._build_metadata_tab(), "Metadata")
         self._tabs.addTab(self._build_notes_tab(), "Notes")
         self._tabs.addTab(self._build_sourceport_tab(), "Sourceport")
+        self._tabs.addTab(self._build_sources_tab(), "Sources")
         self._tabs.addTab(self._build_companions_tab(), "Companions")
         layout.addWidget(self._tabs)
 
@@ -219,6 +220,24 @@ class EditWadDialog(QDialog):
 
         return widget
 
+    def _build_sources_tab(self) -> QWidget:
+        widget = QWidget()
+        form = QFormLayout(widget)
+
+        self._idgames_id_input = QLineEdit(self._wad.get("idgames_id") or "")
+        self._idgames_id_input.setPlaceholderText("e.g., 12345 (enables idgames downloading)")
+        form.addRow("idgames ID:", self._idgames_id_input)
+
+        self._source_url_input = QLineEdit(self._wad.get("source_url") or "")
+        self._source_url_input.setPlaceholderText("Download URL or source page")
+        form.addRow("Source URL:", self._source_url_input)
+
+        self._version_input = QLineEdit(self._wad.get("version") or "")
+        self._version_input.setPlaceholderText("e.g., 1.2.3")
+        form.addRow("Version:", self._version_input)
+
+        return widget
+
     def _build_companions_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
@@ -325,6 +344,9 @@ class EditWadDialog(QDialog):
             "complevel": complevel,
             "custom_config": self._config_input.text().strip() or None,
             "custom_args": custom_args,
+            "idgames_id": self._idgames_id_input.text().strip() or None,
+            "source_url": self._source_url_input.text().strip() or None,
+            "version": self._version_input.text().strip() or None,
         }
 
         db.update_wad(self._wad_id, **fields)
