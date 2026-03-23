@@ -60,18 +60,18 @@ TNT_ONLY_PATCHES: frozenset[str] = frozenset({
     "TYWFALL4", "TYWHEEL1", "YELLITE1", "YELLITE2", "YELLITE3", "YELTNT",
 })
 
-# 78 patch names present in Plutonia but not in DOOM2.WAD or TNT.WAD
+# 72 patch names present in Plutonia but not in DOOM.WAD, DOOM2.WAD, or TNT.WAD
 PLUTONIA_ONLY_PATCHES: frozenset[str] = frozenset({
     "AROCK2", "AROCK3", "AROCK4", "AROCK5", "BOSFA0", "BRBRICK",
     "BRBRICK2", "BRICK", "BRICK1", "BRICK2", "BROCK2", "BROWN1", "BROWN2",
     "BROWN3", "BROWN5", "CAMO1", "CAMO4", "CAMO5", "CONCRETE", "DARKROCK",
-    "DIRBRI1", "DIRBRI2", "FIREBLU1", "FIREBLU2", "GRATE", "HELL6_1",
-    "HELL8_3", "MARBLE1", "MC1", "MC10", "MC11", "MC12", "MC13", "MC14",
+    "DIRBRI1", "DIRBRI2", "FIREBLU1", "FIREBLU2", "GRATE",
+    "MARBLE1", "MC1", "MC10", "MC11", "MC12", "MC13", "MC14",
     "MC15", "MC16", "MC17", "MC18", "MC19", "MC2", "MC20", "MC3", "MC4",
     "MC5", "MC6", "MC7", "MC8", "MOSROK2", "MOSSBRIK", "MOSSROCK", "MOULD",
     "MUD", "MYWOOD", "NATROCK", "POISON", "RAILING", "REDROCK", "ROCK",
-    "SKY1", "SKY2A", "SKY2B", "SKY2C", "SKY2D", "SKY3A", "SKY3B",
-    "SW1SKULL", "SW2SKULL", "TILE", "VINES1", "W109_1", "W109_2", "W110_1",
+    "SKY2A", "SKY2B", "SKY2C", "SKY2D", "SKY3A", "SKY3B",
+    "SW1SKULL", "SW2SKULL", "TILE", "VINES1",
     "WFALL1", "WFALL2", "WFALL3", "WFALL4", "WOOD", "YELLOW",
 })
 # fmt: on
@@ -88,14 +88,33 @@ def _load_wad_data(wad_path: str | Path) -> bytes | None:
 
     wad_data: bytes | None = None
 
-    # Handle ZIP-wrapped WADs
+    # Handle ZIP-wrapped WADs — find the WAD that contains map lumps
     if path.suffix.lower() == ".zip" or path.suffix.lower() not in (".wad", ".pk3", ".pk7"):
         try:
             with zipfile.ZipFile(path) as zf:
-                for info in zf.infolist():
-                    if info.filename.lower().endswith(".wad"):
-                        wad_data = zf.read(info)
-                        break
+                wad_entries = [
+                    info for info in zf.infolist()
+                    if info.filename.lower().endswith(".wad")
+                ]
+                if len(wad_entries) == 1:
+                    wad_data = zf.read(wad_entries[0])
+                elif wad_entries:
+                    # Multiple WADs: pick the one with map lumps
+                    for info in wad_entries:
+                        candidate = zf.read(info)
+                        try:
+                            directory = parse_wad_directory(candidate)
+                            if any(
+                                _DOOM1_MAP_RE.match(n) or _DOOM2_MAP_RE.match(n)
+                                for n, _, _ in directory
+                            ):
+                                wad_data = candidate
+                                break
+                        except Exception:
+                            continue
+                    # Fallback: first WAD if none had maps
+                    if wad_data is None:
+                        wad_data = zf.read(wad_entries[0])
         except (zipfile.BadZipFile, KeyError):
             pass
 

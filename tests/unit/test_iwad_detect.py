@@ -71,7 +71,7 @@ def test_patch_sets_disjoint():
 def test_patch_set_sizes():
     """Verify expected patch set sizes."""
     assert len(TNT_ONLY_PATCHES) == 197
-    assert len(PLUTONIA_ONLY_PATCHES) == 78
+    assert len(PLUTONIA_ONLY_PATCHES) == 72
 
 
 # ─── Map Name Detection ─────────────────────────────────────────────────
@@ -179,6 +179,30 @@ def test_pnames_no_unique_patches(tmp_path):
     path = tmp_path / "common.wad"
     path.write_bytes(wad)
     # No unique patches, falls through to map detection -> doom
+    assert detect_iwad(path) == "doom"
+
+
+def test_doom1_pnames_not_false_plutonia(tmp_path):
+    """Doom 1 WAD with shared Doom1/Plutonia patches should detect as doom, not plutonia.
+
+    Patches like HELL6_1, W109_1 exist in both DOOM.WAD and PLUTONIA.WAD but
+    not in DOOM2.WAD — they must NOT be in PLUTONIA_ONLY_PATCHES.
+    """
+    # These patches are in DOOM.WAD and were previously false positives
+    doom1_shared = ["HELL6_1", "HELL8_3", "W109_1", "W109_2", "W110_1", "SKY1"]
+    for patch_name in doom1_shared:
+        assert patch_name not in PLUTONIA_ONLY_PATCHES, (
+            f"{patch_name} should not be in PLUTONIA_ONLY_PATCHES (also in DOOM.WAD)"
+        )
+
+    pnames_data = _build_pnames(doom1_shared + ["WALL00", "DOOR2_1"])
+    wad = _build_wad([
+        ("PNAMES", pnames_data),
+        ("E1M1", b""),
+        ("E1M2", b""),
+    ])
+    path = tmp_path / "doom1_wad.wad"
+    path.write_bytes(wad)
     assert detect_iwad(path) == "doom"
 
 
@@ -519,6 +543,19 @@ def test_load_wad_data_zip(tmp_path):
         zf.writestr("inner.wad", wad)
     data = _load_wad_data(zip_path)
     assert data == wad
+
+
+def test_load_wad_data_zip_multi_wad(tmp_path):
+    """_load_wad_data picks the WAD with map lumps from a multi-WAD ZIP."""
+    music_wad = _build_wad([("D_RUNNIN", b"\x00" * 1000)])
+    map_wad = _build_wad([("MAP01", b""), ("MAP02", b"")])
+    zip_path = tmp_path / "multi.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        # Music WAD listed first (and larger) — should NOT be picked
+        zf.writestr("MUSIC.wad", music_wad)
+        zf.writestr("MAPS.wad", map_wad)
+    data = _load_wad_data(zip_path)
+    assert data == map_wad
 
 
 def test_load_wad_data_nonexistent():
