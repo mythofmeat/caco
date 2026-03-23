@@ -171,6 +171,9 @@ class DetailPanel(QScrollArea):
         # Source info
         self._source_label = QLabel()
         self._source_label.setStyleSheet(f"color: {DOOM_PALETTE['text_secondary']}; font-size: 11px;")
+        self._source_label.setTextFormat(Qt.RichText)
+        self._source_label.setOpenExternalLinks(True)
+        self._source_label.setWordWrap(True)
         self._layout.addWidget(self._source_label)
 
         # Action buttons
@@ -342,12 +345,20 @@ class DetailPanel(QScrollArea):
         else:
             self._companion_label.setVisible(False)
 
-        # Source info
+        # Source info (HTML for clickable links)
         source_parts = [f"Source: {wad.get('source_type', 'unknown')}"]
         if wad.get("source_url"):
-            source_parts.append(f"URL: {wad['source_url']}")
+            url = wad["source_url"]
+            if url.startswith(("http://", "https://")):
+                source_parts.append(self._format_source_link(url, wad.get("source_type")))
+            else:
+                source_parts.append(f"URL: {url}")
         if wad.get("idgames_id"):
-            source_parts.append(f"idgames ID: {wad['idgames_id']}")
+            idg_id = wad["idgames_id"]
+            idg_url = f"https://www.doomworld.com/idgames/?id={idg_id}"
+            source_parts.append(
+                f'idgames: <a href="{idg_url}">{idg_id}</a>'
+            )
         if wad.get("filename"):
             source_parts.append(f"File: {wad['filename']}")
         if wad.get("version"):
@@ -359,7 +370,7 @@ class DetailPanel(QScrollArea):
             source_parts.append(f"IWAD: {wad['custom_iwad']}")
         if wad.get("custom_config"):
             source_parts.append(f"Config: {wad['custom_config']}")
-        self._source_label.setText("\n".join(source_parts))
+        self._source_label.setText("<br>".join(source_parts))
 
         # Enable buttons
         self._play_btn.setEnabled(True)
@@ -394,6 +405,19 @@ class DetailPanel(QScrollArea):
     def _on_delete(self):
         if self._wad_id is not None:
             self.delete_requested.emit(self._wad_id)
+
+    @staticmethod
+    def _format_source_link(url: str, source_type: str | None = None) -> str:
+        """Format a source URL as a clickable HTML link with a short label."""
+        if source_type == "doomwiki" or "doomwiki.org" in url:
+            label = "Doom Wiki"
+        elif source_type == "doomworld" or "doomworld.com/forum" in url:
+            label = "Doomworld"
+        elif source_type == "idgames" or "doomworld.com/idgames" in url:
+            label = "idgames"
+        else:
+            label = "Link"
+        return f'{label}: <a href="{url}">{url}</a>'
 
     def _on_view_stats(self):
         if self._wad_id is None:
