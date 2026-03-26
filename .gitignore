@@ -15,6 +15,7 @@ htmlcov/
 
 # Rust
 target/
+*.pdb
 
 # IDE / editor
 .idea/
@@ -27,6 +28,10 @@ target/
 .DS_Store
 Thumbs.db
 
+# Environment / secrets
+.env
+.env.*
+
 # Claude Code
 .claude/
 
@@ -34,7 +39,8 @@ Thumbs.db
 .ralph-tui/
 tasks/
 
-# pytest temp dirs
+# pytest
+.pytest_cache/
 pytest-of-*/
 
 # Sandbox / dotfile artifacts
