@@ -5,6 +5,7 @@ use rusqlite::Connection;
 use crate::dialogs::cache::{CacheDialogState, CacheResult};
 use crate::dialogs::delete::{DeleteDialogState, DeleteResult};
 use crate::dialogs::edit::{EditDialogState, EditResult};
+use crate::dialogs::link::{LinkDialogState, LinkResult};
 use crate::dialogs::resources::{ResourcesDialogState, ResourcesResult};
 use crate::dialogs::sessions::{SessionsDialogState, SessionsResult};
 use crate::dialogs::stats::{StatsDialogState, StatsResult};
@@ -148,14 +149,27 @@ impl eframe::App for CacoApp {
                 AppMessage::Notify(notif) => {
                     self.state.notification = Some(notif);
                 }
-                AppMessage::PlayFinished { wad_id: _, outcome } => {
+                AppMessage::PlayFinished { wad_id, outcome } => {
                     self.state.play_state = PlayState::Idle;
                     self.state.needs_reload = true;
 
                     match outcome {
                         Err(err) => {
-                            self.state.notification =
-                                Some(Notification::error(format!("Play failed: {err}")));
+                            // Show link dialog for missing WAD files
+                            if err.starts_with("file not found:") {
+                                if let Some(dialog) =
+                                    LinkDialogState::new(&self.conn, wad_id)
+                                {
+                                    self.state.active_dialog =
+                                        Some(ActiveDialog::Link(dialog));
+                                } else {
+                                    self.state.notification =
+                                        Some(Notification::error(format!("Play failed: {err}")));
+                                }
+                            } else {
+                                self.state.notification =
+                                    Some(Notification::error(format!("Play failed: {err}")));
+                            }
                         }
                         Ok(pr) => {
                             if pr.crashed() {
@@ -314,6 +328,20 @@ impl eframe::App for CacoApp {
                             self.state.needs_reload = true;
                         }
                         WadStatsResult::Open => {}
+                    }
+                }
+                ActiveDialog::Link(link_state) => {
+                    match link_state.render(ctx, &self.conn) {
+                        LinkResult::Linked => {
+                            close_dialog = true;
+                            self.state.needs_reload = true;
+                            self.state.notification =
+                                Some(Notification::info("WAD file linked".to_string()));
+                        }
+                        LinkResult::Cancelled => {
+                            close_dialog = true;
+                        }
+                        LinkResult::Open => {}
                     }
                 }
                 ActiveDialog::Help => {

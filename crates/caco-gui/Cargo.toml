@@ -21,3 +21,4 @@ serde.workspace = true
 serde_json.workspace = true
 rfd.workspace = true
 dirs.workspace = true
+open.workspace = true

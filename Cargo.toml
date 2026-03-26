@@ -61,6 +61,7 @@ eframe = "0.31"
 egui = "0.31"
 egui_extras = { version = "0.31", features = ["syntect"] }
 rfd = "0.15"
+open = "5"
 
 # TUI
 ratatui = "0.29"

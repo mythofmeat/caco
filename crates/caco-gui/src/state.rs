@@ -9,6 +9,7 @@ use rusqlite::Connection;
 use crate::dialogs::cache::CacheDialogState;
 use crate::dialogs::delete::DeleteDialogState;
 use crate::dialogs::edit::EditDialogState;
+use crate::dialogs::link::LinkDialogState;
 use crate::dialogs::resources::ResourcesDialogState;
 use crate::dialogs::sessions::SessionsDialogState;
 use crate::dialogs::stats::StatsDialogState;
@@ -65,6 +66,7 @@ pub enum ActiveDialog {
     Cache(CacheDialogState),
     Resources(ResourcesDialogState),
     WadStats(WadStatsDialogState),
+    Link(LinkDialogState),
     Help,
     About,
 }
