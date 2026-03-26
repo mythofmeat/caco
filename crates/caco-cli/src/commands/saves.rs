@@ -13,7 +13,6 @@ pub enum SavesCommand {
     /// List save files for a WAD
     List {
         /// WAD query
-        #[arg(trailing_var_arg = true)]
         query: Vec<String>,
         /// Plain TSV output
         #[arg(long)]
@@ -25,7 +24,6 @@ pub enum SavesCommand {
     /// Backup WAD data directory
     Backup {
         /// WAD query
-        #[arg(trailing_var_arg = true)]
         query: Vec<String>,
         /// Auto-select first match
         #[arg(short = 'y', long)]
@@ -34,7 +32,6 @@ pub enum SavesCommand {
     /// Restore from backup
     Restore {
         /// WAD query
-        #[arg(trailing_var_arg = true)]
         query: Vec<String>,
         /// Specific backup filename (latest if omitted)
         #[arg(long)]
@@ -46,7 +43,6 @@ pub enum SavesCommand {
     /// Delete save files only
     Clean {
         /// WAD query
-        #[arg(trailing_var_arg = true)]
         query: Vec<String>,
         /// Preview changes
         #[arg(long)]
@@ -58,7 +54,6 @@ pub enum SavesCommand {
     /// List existing backups
     Backups {
         /// WAD query (optional)
-        #[arg(trailing_var_arg = true)]
         query: Vec<String>,
         /// Plain TSV output
         #[arg(long)]

@@ -12,7 +12,6 @@ use crate::parsing;
 #[derive(Args)]
 pub struct LsArgs {
     /// Query terms + optional inline sort (e.g., "status:playing playtime-")
-    #[arg(trailing_var_arg = true)]
     query: Vec<String>,
 
     /// Output format

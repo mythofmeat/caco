@@ -14,7 +14,6 @@ use crate::resolve::{self, ResolveMode};
 #[derive(Args)]
 pub struct ModifyArgs {
     /// Query + field=value actions
-    #[arg(trailing_var_arg = true)]
     args: Vec<String>,
 
     /// Completion notes

@@ -8,7 +8,6 @@ use caco_core::db;
 #[derive(Args)]
 pub struct RandomArgs {
     /// Query to filter candidates
-    #[arg(trailing_var_arg = true)]
     query: Vec<String>,
 
     /// Print ID, title, author (TSV)

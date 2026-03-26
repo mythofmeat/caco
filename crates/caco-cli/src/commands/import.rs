@@ -18,7 +18,6 @@ use crate::picker;
 #[derive(Args)]
 pub struct ImportArgs {
     /// Source query, ID, URL, or path
-    #[arg(trailing_var_arg = true)]
     source: Vec<String>,
 
     /// Force idgames search/ID

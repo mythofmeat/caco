@@ -13,7 +13,6 @@ pub enum DemosCommand {
     /// List demo files for a WAD
     List {
         /// WAD query
-        #[arg(trailing_var_arg = true)]
         query: Vec<String>,
         /// Plain TSV output
         #[arg(long)]
@@ -25,7 +24,6 @@ pub enum DemosCommand {
     /// Play back a demo
     Play {
         /// WAD query
-        #[arg(trailing_var_arg = true)]
         query: Vec<String>,
         /// Specific demo filename (most recent if omitted)
         #[arg(long)]
@@ -40,7 +38,6 @@ pub enum DemosCommand {
     /// Delete demo files
     Clean {
         /// WAD query
-        #[arg(trailing_var_arg = true)]
         query: Vec<String>,
         /// Preview changes
         #[arg(long)]

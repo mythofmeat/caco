@@ -21,7 +21,6 @@ pub enum CacheCommand {
     /// Remove cached WAD files
     Clear {
         /// WAD query
-        #[arg(trailing_var_arg = true)]
         query: Vec<String>,
         /// Clear all cached files
         #[arg(long)]

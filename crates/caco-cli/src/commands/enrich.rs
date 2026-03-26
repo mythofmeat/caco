@@ -13,7 +13,6 @@ use caco_sources::import_service::{port_to_complevel, titles_match};
 #[derive(Args)]
 pub struct EnrichArgs {
     /// WAD query (all WADs if omitted)
-    #[arg(trailing_var_arg = true)]
     query: Vec<String>,
 
     /// Only enrich WADs with missing complevel

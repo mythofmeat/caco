@@ -12,7 +12,6 @@ use crate::resolve::{self, ResolveMode};
 #[derive(Args)]
 pub struct TrashArgs {
     /// Query terms
-    #[arg(trailing_var_arg = true)]
     query: Vec<String>,
 
     /// Output format

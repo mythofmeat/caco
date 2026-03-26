@@ -32,7 +32,6 @@ pub fn run_stats(conn: &Connection, args: &StatsArgs) -> Result<(), String> {
 #[derive(Args)]
 pub struct SessionsArgs {
     /// WAD query or ID
-    #[arg(trailing_var_arg = true)]
     query: Vec<String>,
 
     /// Plain TSV output

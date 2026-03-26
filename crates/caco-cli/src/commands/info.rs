@@ -11,7 +11,6 @@ use crate::resolve;
 #[derive(Args)]
 pub struct InfoArgs {
     /// WAD query or ID
-    #[arg(trailing_var_arg = true)]
     query: Vec<String>,
 
     /// Output format
