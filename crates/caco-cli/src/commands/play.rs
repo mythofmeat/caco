@@ -10,6 +10,7 @@ use caco_core::config;
 use caco_core::db;
 use caco_core::db::models::WadRecord;
 use caco_core::player::{self, PlayOptions, RecordOption, format_duration};
+use caco_core::wad_stats;
 use caco_sources::idgames::IdgamesClient;
 use crate::resolve;
 
@@ -103,6 +104,13 @@ pub fn run(conn: &Connection, args: &PlayArgs) -> Result<(), String> {
         );
     }
 
+    // Show map progress after play
+    if let Ok(Some(refreshed)) = db::get_wad(conn, wad.id, false)
+        && let Some(display) = wad_stats::get_progress_display(refreshed.stats_snapshot.as_deref())
+    {
+        eprintln!("Progress: {display}");
+    }
+
     Ok(())
 }
 
@@ -163,48 +171,95 @@ fn ensure_wad_path(conn: &Connection, wad: &WadRecord) -> Result<(), String> {
     };
 
     let client = IdgamesClient::new();
-    let entry = client
-        .get(Some(idgames_id), None)
-        .map_err(|e| format!("Failed to fetch idgames entry: {e}"))?;
-
     let cache_dir = config::get_cache_dir();
     std::fs::create_dir_all(&cache_dir)
         .map_err(|e| format!("Failed to create cache directory: {e}"))?;
-
     let cfg = config::load_config();
     let mirror = cfg.download_mirror as usize;
 
-    // Create progress bar
-    let pb = ProgressBar::new(0);
-    pb.set_style(
-        ProgressStyle::with_template(
-            "Downloading {msg} [{bar:30}] {bytes}/{total_bytes} ({bytes_per_sec})",
-        )
-        .unwrap()
-        .progress_chars("=> "),
-    );
-    pb.set_message(entry.filename.clone());
-
-    let progress_cb = |downloaded: u64, total: u64| {
-        if pb.length() != Some(total) {
-            pb.set_length(total);
+    // Try API first, fall back to direct mirror on WAF block
+    let entry = match client.get(Some(idgames_id), None) {
+        Ok(e) => Some(e),
+        Err(caco_sources::SourceError::WafBlocked { .. }) => {
+            eprintln!("API blocked — trying direct mirror download...");
+            None
         }
-        pb.set_position(downloaded);
+        Err(e) => return Err(format!("Failed to fetch idgames entry: {e}")),
     };
 
-    let dest = client
-        .download(&entry, Some(&cache_dir), mirror, Some(&progress_cb))
-        .map_err(|e| format!("Download failed: {e}"))?;
+    if let Some(entry) = entry {
+        // Normal API-based download
+        let pb = ProgressBar::new(0);
+        pb.set_style(
+            ProgressStyle::with_template(
+                "Downloading {msg} [{bar:30}] {bytes}/{total_bytes} ({bytes_per_sec})",
+            )
+            .unwrap()
+            .progress_chars("=> "),
+        );
+        pb.set_message(entry.filename.clone());
 
-    pb.finish_and_clear();
-    eprintln!("Downloaded: {}", entry.filename);
+        let progress_cb = |downloaded: u64, total: u64| {
+            if pb.length() != Some(total) {
+                pb.set_length(total);
+            }
+            pb.set_position(downloaded);
+        };
 
-    // Update cached_path in DB
-    let update = db::WadUpdate::new()
-        .set_text("cached_path", Some(dest.to_string_lossy().to_string()))
-        .map_err(|e| format!("Failed to update cached_path: {e}"))?;
-    db::update_wad(conn, wad.id, &update)
-        .map_err(|e| format!("Failed to update WAD record: {e}"))?;
+        let dest = client
+            .download(&entry, Some(&cache_dir), mirror, Some(&progress_cb))
+            .map_err(|e| format!("Download failed: {e}"))?;
+
+        pb.finish_and_clear();
+        eprintln!("Downloaded: {}", entry.filename);
+
+        let update = db::WadUpdate::new()
+            .set_text("cached_path", Some(dest.to_string_lossy().to_string()))
+            .map_err(|e| format!("Failed to update cached_path: {e}"))?;
+        db::update_wad(conn, wad.id, &update)
+            .map_err(|e| format!("Failed to update WAD record: {e}"))?;
+    } else {
+        // Direct mirror fallback using stored source_url + filename
+        let source_url = wad.source_url.as_deref().unwrap_or("");
+        let filename = wad.filename.as_deref().unwrap_or("");
+
+        if filename.is_empty() || !source_url.contains("/idgames/") {
+            return Err(format!(
+                "API blocked and no stored idgames path for '{}'. Download manually and link with: caco modify id:{} --link /path/to/wad",
+                wad.title, wad.id
+            ));
+        }
+
+        let pb = ProgressBar::new(0);
+        pb.set_style(
+            ProgressStyle::with_template(
+                "Downloading {msg} [{bar:30}] {bytes}/{total_bytes} ({bytes_per_sec})",
+            )
+            .unwrap()
+            .progress_chars("=> "),
+        );
+        pb.set_message(filename.to_string());
+
+        let progress_cb = |downloaded: u64, total: u64| {
+            if pb.length() != Some(total) {
+                pb.set_length(total);
+            }
+            pb.set_position(downloaded);
+        };
+
+        let dest = client
+            .download_direct(source_url, filename, &cache_dir, mirror, Some(&progress_cb))
+            .map_err(|e| format!("Direct download failed: {e}"))?;
+
+        pb.finish_and_clear();
+        eprintln!("Downloaded (via mirror): {filename}");
+
+        let update = db::WadUpdate::new()
+            .set_text("cached_path", Some(dest.to_string_lossy().to_string()))
+            .map_err(|e| format!("Failed to update cached_path: {e}"))?;
+        db::update_wad(conn, wad.id, &update)
+            .map_err(|e| format!("Failed to update WAD record: {e}"))?;
+    }
 
     Ok(())
 }

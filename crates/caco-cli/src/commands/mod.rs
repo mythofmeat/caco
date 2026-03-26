@@ -1,7 +1,10 @@
 pub mod cache;
+pub mod companion;
 pub mod completions;
 pub mod config;
 pub mod demos;
+pub mod enrich;
+pub mod gc;
 pub mod import;
 pub mod info;
 pub mod ls;
@@ -53,11 +56,20 @@ pub enum Commands {
         #[command(subcommand)]
         command: demos::DemosCommand,
     },
+    /// Manage companion files
+    Companion {
+        #[command(subcommand)]
+        command: companion::CompanionCommand,
+    },
     /// Manage sourceport config profiles
     Profile {
         #[command(subcommand)]
         command: profile::ProfileCommand,
     },
+    /// Re-run enrichment for existing WADs
+    Enrich(enrich::EnrichArgs),
+    /// Garbage collect finished/abandoned WAD data
+    Gc(gc::GcArgs),
     /// View or edit config
     Config(config::ConfigArgs),
     /// Output shell completions

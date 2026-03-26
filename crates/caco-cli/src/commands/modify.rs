@@ -240,58 +240,37 @@ fn apply_modifications(
         any_change = true;
     }
 
-    // Handle --add-file
+    // Handle --add-file (via companion service)
     if !args.add_files.is_empty() {
-        let mut files: Vec<String> = wad
-            .companion_files
-            .as_deref()
-            .and_then(|j| serde_json::from_str::<Vec<String>>(j).ok())
-            .unwrap_or_default();
-
         for f in &args.add_files {
-            let path = Path::new(f);
-            let resolved = path
-                .canonicalize()
-                .map_err(|e| format!("Cannot resolve companion file '{f}': {e}"))?;
-            let s = resolved.to_string_lossy().to_string();
-            if !files.contains(&s) {
-                files.push(s);
-            }
+            let file_path = Path::new(f);
+            let (_id, filename) =
+                caco_core::companion_service::register_companion(conn, wad.id, file_path)
+                    .map_err(|e| format!("Failed to add companion '{f}': {e}"))?;
+            eprintln!("  Added companion '{filename}'.");
         }
-
-        let json = serde_json::to_string(&files).map_err(|e| e.to_string())?;
-        update = update
-            .set_text("companion_files", Some(json))
-            .map_err(|e| e.to_string())?;
         any_change = true;
     }
 
-    // Handle --remove-file
+    // Handle --remove-file (via companion service)
     if !args.remove_files.is_empty() {
-        let mut files: Vec<String> = wad
-            .companion_files
-            .as_deref()
-            .and_then(|j| serde_json::from_str::<Vec<String>>(j).ok())
-            .unwrap_or_default();
+        let companions =
+            db::get_companions_for_wad(conn, wad.id).map_err(|e| e.to_string())?;
 
         for name in &args.remove_files {
-            files.retain(|f| {
-                let fname = Path::new(f)
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or(f);
-                fname != name && f != name
-            });
+            if let Some(comp) = companions.iter().find(|c| c.filename == *name) {
+                caco_core::companion_service::unregister_companion(
+                    conn,
+                    wad.id,
+                    comp.companion_id,
+                    Some("delete"),
+                )
+                .map_err(|e| format!("Failed to remove companion '{name}': {e}"))?;
+                eprintln!("  Removed companion '{name}'.");
+            } else {
+                eprintln!("  Warning: companion '{name}' not found for '{}'.", wad.title);
+            }
         }
-
-        let json = if files.is_empty() {
-            None
-        } else {
-            Some(serde_json::to_string(&files).map_err(|e| e.to_string())?)
-        };
-        update = update
-            .set_text("companion_files", json)
-            .map_err(|e| e.to_string())?;
         any_change = true;
     }
 

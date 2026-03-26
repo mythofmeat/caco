@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use comfy_table::{presets, Table, ContentArrangement, Cell, CellAlignment};
 
 use caco_core::db::{
-    IwadRecord, Id24Record, WadRecord, WadStats, SessionRecord, CompletionRecord,
-    StatsSnapshot, Status,
+    IwadRecord, Id24Record, WadRecord, WadCompanionRecord, WadStats, SessionRecord,
+    CompletionRecord, StatsSnapshot, Status,
 };
 use caco_core::player::format_duration;
 
@@ -160,10 +160,11 @@ pub fn render_wad_info(
     wad: &WadRecord,
     stats: &WadStats,
     completions: &[CompletionRecord],
+    companions: &[WadCompanionRecord],
     format: OutputFormat,
 ) {
     match format {
-        OutputFormat::Table => render_wad_info_table(wad, stats, completions),
+        OutputFormat::Table => render_wad_info_table(wad, stats, completions, companions),
         OutputFormat::Plain => render_wad_info_plain(wad, stats),
         OutputFormat::Json => render_wad_info_json(wad, stats),
     }
@@ -173,6 +174,7 @@ fn render_wad_info_table(
     wad: &WadRecord,
     stats: &WadStats,
     completions: &[CompletionRecord],
+    companions: &[WadCompanionRecord],
 ) {
     println!("{} (ID: {})", wad.title, wad.id);
     println!();
@@ -258,7 +260,7 @@ fn render_wad_info_table(
         || wad.complevel.is_some()
         || wad.custom_config.is_some()
         || wad.custom_args.is_some()
-        || wad.companion_files.is_some();
+        || !companions.is_empty();
 
     if has_custom {
         println!();
@@ -283,12 +285,9 @@ fn render_wad_info_table(
         if let Some(args) = &wad.custom_args {
             println!("    Args:       {args}");
         }
-        if let Some(companions) = &wad.companion_files
-            && let Ok(files) = serde_json::from_str::<Vec<String>>(companions)
-        {
-            for f in &files {
-                println!("    File:       {f}");
-            }
+        for c in companions {
+            let status = if c.enabled { "" } else { " (disabled)" };
+            println!("    File:       {}{status}", c.filename);
         }
     }
 }

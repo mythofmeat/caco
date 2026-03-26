@@ -52,7 +52,8 @@ pub fn run(conn: &Connection, args: &InfoArgs) -> Result<(), String> {
         } else {
             let stats = single_wad_stats(conn, wad.id)?;
             let completions = db::get_wad_completions(conn, wad.id).map_err(|e| e.to_string())?;
-            output::render_wad_info(wad, &stats, &completions, format);
+            let companions = db::get_companions_for_wad(conn, wad.id).map_err(|e| e.to_string())?;
+            output::render_wad_info(wad, &stats, &completions, &companions, format);
         }
 
         if wads.len() > 1 {

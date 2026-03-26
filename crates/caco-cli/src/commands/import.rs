@@ -12,6 +12,7 @@ use caco_sources::doomwiki::DoomwikiClient;
 use caco_sources::doomworld::DoomworldClient;
 use caco_sources::doomworld::llm;
 use caco_sources::import_service::ImportService;
+use caco_sources::json_import::{self, JsonSource};
 use crate::picker;
 
 #[derive(Args)]
@@ -106,6 +107,7 @@ pub fn run(conn: &Connection, args: &ImportArgs) -> Result<(), String> {
         SourceKind::Doomworld(url) => import_doomworld(conn, &url, tags, args),
         SourceKind::Url(url) => import_url(conn, &url, &source_str, tags, args),
         SourceKind::Local(path) => import_local(conn, &path, tags, args),
+        SourceKind::JsonFile(path, hint) => import_json(conn, &path, hint, tags, args),
     }
 }
 
@@ -116,17 +118,28 @@ enum SourceKind {
     Doomworld(String),
     Url(String),
     Local(String),
+    /// JSON file import with optional source hint (idgames/doomwiki).
+    JsonFile(String, Option<JsonSource>),
 }
 
 fn detect_source(args: &ImportArgs, source_str: &str) -> Result<SourceKind, String> {
-    // Explicit flags
+    let is_json_file = source_str.ends_with(".json") && Path::new(source_str).exists();
+
+    // Explicit flags — if a .json file is given with --idgames or --doomwiki,
+    // route to JSON import with the appropriate source hint.
     if args.idgames {
+        if is_json_file {
+            return Ok(SourceKind::JsonFile(source_str.to_string(), Some(JsonSource::Idgames)));
+        }
         if let Ok(id) = source_str.parse::<i64>() {
             return Ok(SourceKind::IdgamesId(id));
         }
         return Ok(SourceKind::IdgamesSearch(source_str.to_string()));
     }
     if args.doomwiki {
+        if is_json_file {
+            return Ok(SourceKind::JsonFile(source_str.to_string(), Some(JsonSource::Doomwiki)));
+        }
         return Ok(SourceKind::Doomwiki(source_str.to_string()));
     }
     if args.doomworld {
@@ -143,7 +156,11 @@ fn detect_source(args: &ImportArgs, source_str: &str) -> Result<SourceKind, Stri
         return Err("No source specified.".to_string());
     }
 
-    // Auto-detect
+    // Auto-detect: .json files get routed to JSON import (auto-detect source)
+    if is_json_file {
+        return Ok(SourceKind::JsonFile(source_str.to_string(), None));
+    }
+
     if source_str.contains("doomwiki.org") {
         return Ok(SourceKind::Doomwiki(source_str.to_string()));
     }
@@ -171,7 +188,14 @@ fn import_idgames_search(
     args: &ImportArgs,
 ) -> Result<(), String> {
     let client = IdgamesClient::new();
-    let results = client.search(query, None, None, None).map_err(|e| e.to_string())?;
+    let results = match client.search(query, None, None, None) {
+        Ok(r) => r,
+        Err(caco_sources::SourceError::WafBlocked { .. }) => {
+            print_api_hint("idgames", query);
+            return Err("idgames API blocked by Cloudflare challenge.".to_string());
+        }
+        Err(e) => return Err(e.to_string()),
+    };
 
     if results.is_empty() {
         return Err(format!("No idgames results for '{query}'."));
@@ -204,6 +228,7 @@ fn import_idgames_search(
             version: None,
             complevel: None,
             stats_snapshot: None,
+            gc_ignore: false,
             deleted_at: None,
             created_at: String::new(),
             updated_at: String::new(),
@@ -248,7 +273,14 @@ fn import_idgames_id(
     force: bool,
 ) -> Result<(), String> {
     let client = IdgamesClient::new();
-    let entry = client.get(Some(id), None).map_err(|e| e.to_string())?;
+    let entry = match client.get(Some(id), None) {
+        Ok(e) => e,
+        Err(caco_sources::SourceError::WafBlocked { .. }) => {
+            print_api_hint("idgames", &id.to_string());
+            return Err("idgames API blocked by Cloudflare challenge.".to_string());
+        }
+        Err(e) => return Err(e.to_string()),
+    };
 
     let svc = ImportService;
     let result = svc.import_idgames(conn, &entry, tags, force);
@@ -274,7 +306,14 @@ fn import_doomwiki_search(
     args: &ImportArgs,
 ) -> Result<(), String> {
     let client = DoomwikiClient::new();
-    let results = client.search_wads(query, 20).map_err(|e| e.to_string())?;
+    let results = match client.search_wads(query, 20) {
+        Ok(r) => r,
+        Err(caco_sources::SourceError::WafBlocked { .. }) => {
+            print_api_hint("doomwiki", query);
+            return Err("Doom Wiki blocked the request (WAF challenge).".to_string());
+        }
+        Err(e) => return Err(e.to_string()),
+    };
 
     if results.is_empty() {
         return Err(format!("No Doom Wiki results for '{query}'."));
@@ -307,6 +346,7 @@ fn import_doomwiki_search(
             version: None,
             complevel: None,
             stats_snapshot: None,
+            gc_ignore: false,
             deleted_at: None,
             created_at: String::new(),
             updated_at: String::new(),
@@ -516,6 +556,180 @@ fn resolve_llm_metadata(
     }
 }
 
+fn import_json(
+    conn: &Connection,
+    path_str: &str,
+    source_hint: Option<JsonSource>,
+    tags: Option<Vec<String>>,
+    args: &ImportArgs,
+) -> Result<(), String> {
+    let path = Path::new(path_str);
+
+    // Determine source type: explicit hint > auto-detect
+    let source = match source_hint {
+        Some(s) => s,
+        None => json_import::detect_json_source(path)
+            .ok_or("Unrecognized JSON format. Expected idgames or Doom Wiki API response.\nHint: use --idgames or --doomwiki to specify the source.")?,
+    };
+
+    match source {
+        JsonSource::Idgames => import_json_idgames(conn, path, tags, args),
+        JsonSource::Doomwiki => import_json_doomwiki(conn, path, tags, args),
+    }
+}
+
+fn import_json_idgames(
+    conn: &Connection,
+    path: &Path,
+    tags: Option<Vec<String>>,
+    args: &ImportArgs,
+) -> Result<(), String> {
+    let entries = json_import::parse_idgames_json(path).map_err(|e| e.to_string())?;
+    if entries.is_empty() {
+        return Err("No file entries found in JSON.".to_string());
+    }
+
+    // Convert to WadRecords for picker display
+    let wad_records: Vec<db::WadRecord> = entries
+        .iter()
+        .enumerate()
+        .map(|(i, entry)| db::WadRecord {
+            id: i as i64 + 1,
+            title: entry.title.clone(),
+            author: Some(entry.author.clone()),
+            year: caco_core::utils::extract_year(&entry.date),
+            status: "backlog".to_string(),
+            source_type: "idgames".to_string(),
+            description: if entry.description.is_empty() { None } else { Some(entry.description.clone()) },
+            rating: None,
+            notes: None,
+            source_id: Some(entry.id.to_string()),
+            source_url: None,
+            idgames_id: None,
+            filename: Some(entry.filename.clone()),
+            cached_path: None,
+            custom_iwad: None,
+            custom_sourceport: None,
+            custom_args: None,
+            companion_files: None,
+            custom_config: None,
+            version: None,
+            complevel: None,
+            stats_snapshot: None,
+            gc_ignore: false,
+            deleted_at: None,
+            created_at: String::new(),
+            updated_at: String::new(),
+            tags: Vec::new(),
+        })
+        .collect();
+
+    let selected = picker::pick_wads(&wad_records, args.multi);
+    if selected.is_empty() {
+        return Err("No selection made.".to_string());
+    }
+
+    let svc = ImportService;
+    let mut imported = 0;
+    for idx in &selected {
+        let entry = &entries[*idx];
+        let result = svc.import_idgames(conn, entry, tags.clone(), args.force);
+        if result.is_duplicate {
+            eprintln!(
+                "Duplicate: '{}' already exists as ID {}.",
+                result.duplicate_title.as_deref().unwrap_or("?"),
+                result.duplicate_id.unwrap_or(0),
+            );
+        } else if let Some(wad_id) = result.wad_id {
+            println!("Imported '{}' (ID: {wad_id}) [from JSON]", entry.title);
+            imported += 1;
+        } else if let Some(ref err) = result.error {
+            eprintln!("Error importing '{}': {err}", entry.title);
+        }
+    }
+
+    if imported > 0 && selected.len() > 1 {
+        println!("Imported {imported} WAD(s).");
+    }
+    Ok(())
+}
+
+fn import_json_doomwiki(
+    conn: &Connection,
+    path: &Path,
+    tags: Option<Vec<String>>,
+    args: &ImportArgs,
+) -> Result<(), String> {
+    let entries = json_import::parse_doomwiki_json(path).map_err(|e| e.to_string())?;
+    if entries.is_empty() {
+        return Err("No WAD pages found in JSON (only pages with {{Wad}} infobox are imported).".to_string());
+    }
+
+    // Convert to WadRecords for picker
+    let wad_records: Vec<db::WadRecord> = entries
+        .iter()
+        .enumerate()
+        .map(|(i, entry)| db::WadRecord {
+            id: i as i64 + 1,
+            title: entry.display_name().to_string(),
+            author: if entry.author.is_empty() { None } else { Some(entry.author.clone()) },
+            year: entry.year,
+            status: "backlog".to_string(),
+            source_type: "doomwiki".to_string(),
+            description: if entry.description.is_empty() { None } else { Some(entry.description.clone()) },
+            rating: None,
+            notes: None,
+            source_id: Some(entry.page_id.to_string()),
+            source_url: Some(entry.wiki_url.clone()),
+            idgames_id: None,
+            filename: None,
+            cached_path: None,
+            custom_iwad: None,
+            custom_sourceport: None,
+            custom_args: None,
+            companion_files: None,
+            custom_config: None,
+            version: None,
+            complevel: None,
+            stats_snapshot: None,
+            gc_ignore: false,
+            deleted_at: None,
+            created_at: String::new(),
+            updated_at: String::new(),
+            tags: Vec::new(),
+        })
+        .collect();
+
+    let selected = picker::pick_wads(&wad_records, args.multi);
+    if selected.is_empty() {
+        return Err("No selection made.".to_string());
+    }
+
+    let svc = ImportService;
+    let mut imported = 0;
+    for idx in &selected {
+        let entry = &entries[*idx];
+        let result = svc.import_doomwiki(conn, entry, tags.clone(), args.force);
+        if result.is_duplicate {
+            eprintln!(
+                "Duplicate: '{}' already exists as ID {}.",
+                result.duplicate_title.as_deref().unwrap_or("?"),
+                result.duplicate_id.unwrap_or(0),
+            );
+        } else if let Some(wad_id) = result.wad_id {
+            println!("Imported '{}' (ID: {wad_id}) [from JSON]", entry.display_name());
+            imported += 1;
+        } else if let Some(ref err) = result.error {
+            eprintln!("Error importing '{}': {err}", entry.display_name());
+        }
+    }
+
+    if imported > 0 && selected.len() > 1 {
+        println!("Imported {imported} WAD(s).");
+    }
+    Ok(())
+}
+
 fn import_local(
     conn: &Connection,
     path_str: &str,
@@ -574,6 +788,29 @@ fn import_local(
         return Err(format!("Import error: {err}"));
     }
     Ok(())
+}
+
+/// Print a hint about downloading JSON manually when an API is blocked.
+fn print_api_hint(source_type: &str, query: &str) {
+    match source_type {
+        "idgames" => {
+            let url = json_import::idgames_api_url(query);
+            eprintln!();
+            eprintln!("Workaround: open this URL in your browser and save the JSON:");
+            eprintln!("  {url}");
+            eprintln!("Then import from the saved file:");
+            eprintln!("  caco import saved.json --idgames");
+        }
+        "doomwiki" => {
+            let url = json_import::doomwiki_api_url(query);
+            eprintln!();
+            eprintln!("Workaround: open this URL in your browser and save the JSON:");
+            eprintln!("  {url}");
+            eprintln!("Then import from the saved file:");
+            eprintln!("  caco import saved.json --doomwiki");
+        }
+        _ => {}
+    }
 }
 
 fn try_register_iwad(
