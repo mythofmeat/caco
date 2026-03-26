@@ -11,8 +11,28 @@ use clap::Parser;
 use commands::Commands;
 
 #[derive(Parser)]
-#[command(name = "caco", about = "Doom WAD library manager", version)]
+#[command(
+    name = "caco",
+    about = "Doom WAD library manager",
+    version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("CACO_GIT_HASH"), ")")
+)]
 struct Cli {
+    /// Override the database file path
+    #[arg(long = "db", global = true, env = "CACO_DB_PATH")]
+    db_path: Option<String>,
+
+    /// Override the WAD cache directory
+    #[arg(long = "cache-dir", global = true, env = "CACO_CACHE_DIR")]
+    cache_dir: Option<String>,
+
+    /// Override the per-WAD data directory
+    #[arg(long = "data-dir", global = true, env = "CACO_DATA_DIR")]
+    data_dir: Option<String>,
+
+    /// Override the base data directory (~/.local/share/caco)
+    #[arg(long = "home", global = true, env = "CACO_HOME")]
+    home: Option<String>,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -20,21 +40,30 @@ struct Cli {
 fn main() {
     let cli = Cli::parse();
 
-    // Load config and determine DB path
-    let config = caco_core::config::load_config();
-    let db_path = config.db_path.clone();
-    let db_path = if db_path.is_empty() {
-        caco_core::config::default_db_path()
-    } else {
-        let p = std::path::PathBuf::from(&db_path);
-        if db_path.starts_with('~') {
-            dirs::home_dir()
-                .map(|h| h.join(db_path.trim_start_matches("~/")))
-                .unwrap_or(p)
-        } else {
-            p
+    // Apply CLI overrides as env vars before any config access.
+    // This ensures all path resolution in caco-core picks them up,
+    // and clap's `env` attribute means env vars work too.
+    //
+    // SAFETY: This runs at the start of main(), before any threads are spawned.
+    unsafe {
+        if let Some(ref p) = cli.home {
+            std::env::set_var("CACO_HOME", p);
         }
-    };
+        if let Some(ref p) = cli.db_path {
+            std::env::set_var("CACO_DB_PATH", p);
+        }
+        if let Some(ref p) = cli.cache_dir {
+            std::env::set_var("CACO_CACHE_DIR", p);
+        }
+        if let Some(ref p) = cli.data_dir {
+            std::env::set_var("CACO_DATA_DIR", p);
+        }
+    }
+
+    // Load config (triggers ensure_config_keys) and determine DB path.
+    // get_db_path() respects CACO_DB_PATH env var > config > default.
+    let _ = caco_core::config::load_config();
+    let db_path = caco_core::config::get_db_path();
 
     // Ensure parent directory exists
     if let Some(parent) = db_path.parent()

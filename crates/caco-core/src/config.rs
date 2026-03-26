@@ -8,7 +8,13 @@ use serde::{Deserialize, Serialize};
 use crate::utils::sanitize_dirname;
 
 // ---------------------------------------------------------------------------
-// XDG-style paths
+// XDG-style paths (with env var overrides for testing)
+//
+// CACO_HOME       — override the base data directory (~/.local/share/caco)
+// CACO_DB_PATH    — override the database file path
+// CACO_CACHE_DIR  — override the WAD cache directory
+// CACO_DATA_DIR   — override the per-WAD data directory
+// CACO_CONFIG     — override the config file path
 // ---------------------------------------------------------------------------
 
 fn home_dir() -> PathBuf {
@@ -20,18 +26,31 @@ pub fn config_dir() -> PathBuf {
 }
 
 pub fn config_file() -> PathBuf {
+    if let Ok(p) = std::env::var("CACO_CONFIG") {
+        return PathBuf::from(p);
+    }
     config_dir().join("config.toml")
 }
 
+/// Base data directory. Overridden by `CACO_HOME` env var.
 pub fn default_data_dir() -> PathBuf {
+    if let Ok(p) = std::env::var("CACO_HOME") {
+        return PathBuf::from(p);
+    }
     home_dir().join(".local/share/caco")
 }
 
 pub fn default_db_path() -> PathBuf {
+    if let Ok(p) = std::env::var("CACO_DB_PATH") {
+        return PathBuf::from(p);
+    }
     default_data_dir().join("library.db")
 }
 
 pub fn default_cache_dir() -> PathBuf {
+    if let Ok(p) = std::env::var("CACO_CACHE_DIR") {
+        return PathBuf::from(p);
+    }
     default_data_dir().join("wads")
 }
 
@@ -50,6 +69,9 @@ pub fn thumbnail_cache_dir() -> PathBuf {
 }
 
 pub fn default_data_subdir() -> PathBuf {
+    if let Ok(p) = std::env::var("CACO_DATA_DIR") {
+        return PathBuf::from(p);
+    }
     default_data_dir().join("data")
 }
 
@@ -329,8 +351,11 @@ pub fn save_config(config: &Config) -> crate::Result<()> {
 // Derived path helpers
 // ---------------------------------------------------------------------------
 
-/// Get the database file path from config.
+/// Get the database file path. Env var `CACO_DB_PATH` takes precedence over config.
 pub fn get_db_path() -> PathBuf {
+    if let Ok(p) = std::env::var("CACO_DB_PATH") {
+        return PathBuf::from(p);
+    }
     let cfg = load_config();
     let p = &cfg.db_path;
     if p.is_empty() {
@@ -340,8 +365,11 @@ pub fn get_db_path() -> PathBuf {
     }
 }
 
-/// Get the WAD cache directory from config.
+/// Get the WAD cache directory. Env var `CACO_CACHE_DIR` takes precedence over config.
 pub fn get_cache_dir() -> PathBuf {
+    if let Ok(p) = std::env::var("CACO_CACHE_DIR") {
+        return PathBuf::from(p);
+    }
     let cfg = load_config();
     let p = &cfg.cache_dir;
     if p.is_empty() {
@@ -378,7 +406,11 @@ pub fn get_iwad_dirs() -> Vec<PathBuf> {
 }
 
 /// Get the base directory for per-WAD data directories.
+/// Env var `CACO_DATA_DIR` takes precedence over config.
 pub fn get_data_dir() -> PathBuf {
+    if let Ok(p) = std::env::var("CACO_DATA_DIR") {
+        return PathBuf::from(p);
+    }
     let cfg = load_config();
     let p = &cfg.data_dir;
     if p.is_empty() {
