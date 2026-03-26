@@ -12,6 +12,7 @@ optdepends=(
     'xdg-desktop-portal: native file dialogs in caco-gui'
 )
 makedepends=('cargo' 'gcc')
+options=(!lto)
 source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
 sha256sums=('SKIP')
 
@@ -25,10 +26,6 @@ build() {
     cd "$pkgname"
     export RUSTUP_TOOLCHAIN=stable
     export CARGO_TARGET_DIR=target
-    # Strip GCC LTO from CFLAGS — bundled sqlite3.c compiled with -flto=auto
-    # produces GIMPLE objects that rust-lld cannot link
-    CFLAGS="${CFLAGS/ -flto=auto/}"
-    CXXFLAGS="${CXXFLAGS/ -flto=auto/}"
     unset RUSTFLAGS LDFLAGS
     cargo build --frozen --release --workspace
 }
