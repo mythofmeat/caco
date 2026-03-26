@@ -299,6 +299,16 @@ impl eframe::App for CacoApp {
                         ResourcesResult::Open => {}
                     }
                 }
+                ActiveDialog::Help => {
+                    if render_help_dialog(ctx) {
+                        close_dialog = true;
+                    }
+                }
+                ActiveDialog::About => {
+                    if render_about_dialog(ctx) {
+                        close_dialog = true;
+                    }
+                }
             }
         }
         if close_dialog {
@@ -314,10 +324,105 @@ impl eframe::App for CacoApp {
             self.state.active_dialog = None;
         }
 
-        // 5. Render layout
+        // 5. Handle keyboard accelerators
+        let mut quit = false;
+        if !self.state.has_dialog() {
+            if ctx.input(|i| i.key_pressed(egui::Key::F5)) {
+                self.state.needs_reload = true;
+            }
+            if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Q)) {
+                quit = true;
+            }
+        }
+        if quit {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+
+        // 6. Render layout
         let mut actions: Vec<ActionRequest> = Vec::new();
 
-        // Top panel: tab bar
+        // Top panel: menu bar
+        egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
+            egui::menu::bar(ui, |ui| {
+                ui.menu_button("File", |ui| {
+                    if ui.button("Import").clicked() {
+                        self.state.view_mode = ViewMode::Import;
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui.button("Cache Management").clicked() {
+                        actions.push(ActionRequest::Cache);
+                        ui.close_menu();
+                    }
+                    if ui.button("Resources").clicked() {
+                        actions.push(ActionRequest::Resources);
+                        ui.close_menu();
+                    }
+                    if ui.button("Library Stats").clicked() {
+                        actions.push(ActionRequest::Stats);
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui.button("Quit                       Ctrl+Q").clicked() {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                });
+
+                ui.menu_button("View", |ui| {
+                    let list_label = if self.state.view_layout == ViewLayout::List {
+                        "\u{2713} List View"
+                    } else {
+                        "  List View"
+                    };
+                    if ui.button(list_label).clicked() {
+                        self.state.view_layout = ViewLayout::List;
+                        ui.close_menu();
+                    }
+
+                    let grid_label = if self.state.view_layout == ViewLayout::Grid {
+                        "\u{2713} Grid View"
+                    } else {
+                        "  Grid View"
+                    };
+                    if ui.button(grid_label).clicked() {
+                        self.state.view_layout = ViewLayout::Grid;
+                        ui.close_menu();
+                    }
+
+                    ui.separator();
+
+                    let detail_label = if self.state.show_detail_panel {
+                        "Hide Detail Panel"
+                    } else {
+                        "Show Detail Panel"
+                    };
+                    if ui.button(detail_label).clicked() {
+                        self.state.show_detail_panel = !self.state.show_detail_panel;
+                        ui.close_menu();
+                    }
+
+                    ui.separator();
+
+                    if ui.button("Refresh Library          F5").clicked() {
+                        self.state.needs_reload = true;
+                        ui.close_menu();
+                    }
+                });
+
+                ui.menu_button("Help", |ui| {
+                    if ui.button("Keyboard Shortcuts").clicked() {
+                        self.state.active_dialog = Some(ActiveDialog::Help);
+                        ui.close_menu();
+                    }
+                    if ui.button("About").clicked() {
+                        self.state.active_dialog = Some(ActiveDialog::About);
+                        ui.close_menu();
+                    }
+                });
+            });
+        });
+
+        // Tab bar
         egui::TopBottomPanel::top("tab_bar").show(ctx, |ui| {
             ui.add_space(4.0);
             panels::library::render_tab_bar(ui, &mut self.state);
@@ -380,7 +485,7 @@ impl eframe::App for CacoApp {
             }
         });
 
-        // 6. Request thumbnails for visible WADs in grid mode
+        // 7. Request thumbnails for visible WADs in grid mode
         if self.state.view_mode == ViewMode::Library
             && self.state.view_layout == ViewLayout::Grid
             && self.state.wads.iter().any(|w| self.thumbnails.needs_request(w.id))
@@ -399,7 +504,7 @@ impl eframe::App for CacoApp {
             }
         }
 
-        // 7. Dispatch action requests (only first one — avoid double-triggering)
+        // 8. Dispatch action requests (only first one — avoid double-triggering)
         if let Some(action) = actions.into_iter().next() {
             self.dispatch_action(action);
         }
@@ -437,4 +542,59 @@ fn render_status_bar(ui: &mut egui::Ui, state: &mut AppState) {
             ui.colored_label(theme::TEXT_SECONDARY, hints);
         });
     });
+}
+
+/// Render the keyboard shortcuts help dialog. Returns true when closed.
+fn render_help_dialog(ctx: &egui::Context) -> bool {
+    let mut closed = false;
+    egui::Window::new("Keyboard Shortcuts")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            egui::Grid::new("shortcuts_grid")
+                .num_columns(2)
+                .spacing([40.0, 4.0])
+                .show(ui, |ui| {
+                    let shortcuts = [
+                        ("j / k", "Navigate up/down"),
+                        ("Enter", "Play selected WAD"),
+                        ("e", "Edit selected WAD"),
+                        ("d", "Delete selected WAD"),
+                        ("s", "View sessions"),
+                        ("F5", "Refresh library"),
+                        ("Ctrl+Q", "Quit"),
+                    ];
+                    for (key, desc) in shortcuts {
+                        ui.strong(key);
+                        ui.label(desc);
+                        ui.end_row();
+                    }
+                });
+            ui.add_space(8.0);
+            if ui.button("Close").clicked() || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+                closed = true;
+            }
+        });
+    closed
+}
+
+/// Render the About dialog. Returns true when closed.
+fn render_about_dialog(ctx: &egui::Context) -> bool {
+    let mut closed = false;
+    egui::Window::new("About Caco")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            ui.heading("Caco");
+            ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
+            ui.add_space(4.0);
+            ui.label("A Doom WAD library manager");
+            ui.add_space(8.0);
+            if ui.button("Close").clicked() || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+                closed = true;
+            }
+        });
+    closed
 }

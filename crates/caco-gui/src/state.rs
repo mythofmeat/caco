@@ -63,6 +63,8 @@ pub enum ActiveDialog {
     Stats(StatsDialogState),
     Cache(CacheDialogState),
     Resources(ResourcesDialogState),
+    Help,
+    About,
 }
 
 pub enum PlayState {
