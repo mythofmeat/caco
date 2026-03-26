@@ -97,7 +97,7 @@ fn normalize_title(title: &str) -> String {
 }
 
 /// Check if two titles match after normalization.
-fn titles_match(a: &str, b: &str) -> bool {
+pub fn titles_match(a: &str, b: &str) -> bool {
     normalize_title(a) == normalize_title(b)
 }
 
@@ -506,10 +506,13 @@ impl ImportService {
     }
 }
 
-/// Auto-set complevel based on Doom Wiki "port" field heuristic.
-fn auto_link_complevel(conn: &Connection, wad_id: i64, port_text: &str) {
+/// Map a Doom Wiki "port" field string to a complevel integer.
+///
+/// Uses substring matching against known port requirement keywords.
+/// Returns `None` if the port text doesn't match any known pattern.
+pub fn port_to_complevel(port_text: &str) -> Option<i32> {
     let mapping = [
-        ("boom", 9i64),
+        ("boom", 9),
         ("mbf21", 21),
         ("mbf", 11),
         ("vanilla", 2),
@@ -520,15 +523,22 @@ fn auto_link_complevel(conn: &Connection, wad_id: i64, port_text: &str) {
     let text = port_text.to_lowercase();
     for (key, cl) in &mapping {
         if text.contains(key) {
-            if let Ok(Some(wad)) = db::get_wad(conn, wad_id, false)
-                && wad.complevel.is_none() {
-                    let update = WadUpdate::new()
-                        .set_int("complevel", Some(*cl))
-                        .unwrap();
-                    let _ = db::update_wad(conn, wad_id, &update);
-                }
-            return;
+            return Some(*cl);
         }
+    }
+    None
+}
+
+/// Auto-set complevel based on Doom Wiki "port" field heuristic.
+fn auto_link_complevel(conn: &Connection, wad_id: i64, port_text: &str) {
+    if let Some(cl) = port_to_complevel(port_text)
+        && let Ok(Some(wad)) = db::get_wad(conn, wad_id, false)
+        && wad.complevel.is_none()
+    {
+        let update = WadUpdate::new()
+            .set_int("complevel", Some(cl as i64))
+            .unwrap();
+        let _ = db::update_wad(conn, wad_id, &update);
     }
 }
 

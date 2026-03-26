@@ -18,6 +18,16 @@ pub enum SourceError {
 
     #[error("import error: {0}")]
     Import(String),
+
+    /// API blocked by WAF challenge (Cloudflare, AWS WAF, etc.).
+    ///
+    /// `api_name` identifies the API ("idgames" or "doomwiki")
+    /// and `message` has user-facing details.
+    #[error("{message}")]
+    WafBlocked {
+        api_name: String,
+        message: String,
+    },
 }
 
 /// Convenience alias used throughout caco-sources.

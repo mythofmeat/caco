@@ -12,6 +12,7 @@ reqwest.workspace = true
 regex.workspace = true
 html-escape.workspace = true
 unicode-normalization.workspace = true
+urlencoding.workspace = true
 rusqlite.workspace = true
 
 [dev-dependencies]

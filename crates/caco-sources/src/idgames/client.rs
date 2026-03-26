@@ -44,6 +44,22 @@ impl IdgamesClient {
         query.push(("out", "json"));
 
         let response = self.client.get(BASE_URL).query(&query).send()?;
+
+        // Detect Cloudflare WAF challenge
+        if response.status() == reqwest::StatusCode::FORBIDDEN {
+            let cf_mitigated = response
+                .headers()
+                .get("cf-mitigated")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("");
+            if cf_mitigated == "challenge" {
+                return Err(SourceError::WafBlocked {
+                    api_name: "idgames".to_string(),
+                    message: "idgames API blocked by Cloudflare challenge. This is usually temporary — try again later.".to_string(),
+                });
+            }
+        }
+
         response.error_for_status_ref()?;
 
         let data: serde_json::Value = response.json()?;
@@ -234,6 +250,82 @@ impl IdgamesClient {
             let total = response
                 .content_length()
                 .unwrap_or(0);
+
+            if let Some(parent) = partial.parent() {
+                fs::create_dir_all(parent)?;
+            }
+
+            let mut file = fs::File::create(&partial)?;
+            let bytes = response.bytes()?;
+            file.write_all(&bytes)?;
+            let downloaded = bytes.len() as u64;
+
+            if let Some(cb) = progress {
+                cb(downloaded, total);
+            }
+
+            drop(file);
+            fs::rename(&partial, &dest_path)?;
+            Ok(dest_path.clone())
+        })();
+
+        if result.is_err() && partial.exists() {
+            let _ = fs::remove_file(&partial);
+        }
+
+        result
+    }
+
+    /// Download directly from a mirror, bypassing the API.
+    ///
+    /// Used as a fallback when the idgames API is blocked (e.g. Cloudflare).
+    /// Constructs the mirror URL from a WAD's stored `source_url` and `filename`.
+    ///
+    /// `source_url` format: `https://www.doomworld.com/idgames/levels/doom2/Ports/megawads/sunlust`
+    /// The last segment is the WAD slug; the parent is the actual mirror directory.
+    pub fn download_direct(
+        &self,
+        source_url: &str,
+        filename: &str,
+        dest_dir: &Path,
+        mirror: usize,
+        progress: Option<&dyn Fn(u64, u64)>,
+    ) -> Result<PathBuf> {
+        if filename.is_empty() || !source_url.contains("/idgames/") {
+            return Err(SourceError::Api(
+                "Cannot construct direct download URL: missing idgames path or filename".to_string(),
+            ));
+        }
+
+        // Extract the directory path from source_url
+        let idgames_path = source_url
+            .split("/idgames/")
+            .nth(1)
+            .unwrap_or("")
+            .trim_end_matches('/');
+        let dir_path = match idgames_path.rsplit_once('/') {
+            Some((dir, _slug)) => format!("{dir}/"),
+            None => String::new(),
+        };
+        let download_path = format!("{dir_path}{filename}");
+
+        let mirror_base = MIRRORS[mirror % MIRRORS.len()];
+        let url = format!("{mirror_base}{download_path}");
+
+        let dest_path = dest_dir.join(filename);
+        let partial = dest_path.with_extension(format!(
+            "{}.partial",
+            dest_path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+        ));
+
+        let result = (|| -> Result<PathBuf> {
+            let response = self.client.get(&url).send()?;
+            response.error_for_status_ref()?;
+
+            let total = response.content_length().unwrap_or(0);
 
             if let Some(parent) = partial.parent() {
                 fs::create_dir_all(parent)?;
