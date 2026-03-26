@@ -504,7 +504,7 @@ impl eframe::App for CacoApp {
                             .max_width(500.0)
                             .resizable(true)
                             .show_inside(ui, |ui| {
-                                detail_action = panels::detail::render(ui, &self.state);
+                                detail_action = panels::detail::render(ui, &self.state, &self.conn);
                             });
                         if let Some(a) = detail_action {
                             actions.push(a);

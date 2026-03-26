@@ -1,9 +1,13 @@
 use crate::relative_time;
 use crate::state::{ActionRequest, AppState};
 use crate::theme;
+use rusqlite::Connection;
+
+/// Type alias to disambiguate from caco_core::db::sessions::WadStats.
+type StatsData = caco_core::wad_stats::WadStats;
 
 /// Render the WAD detail sidebar panel. Returns an action request if a button was clicked.
-pub fn render(ui: &mut egui::Ui, state: &AppState) -> Option<ActionRequest> {
+pub fn render(ui: &mut egui::Ui, state: &AppState, conn: &Connection) -> Option<ActionRequest> {
     let Some(wad) = state.selected_wad() else {
         ui.centered_and_justified(|ui| {
             ui.colored_label(theme::TEXT_SECONDARY, "No WAD selected");
@@ -12,6 +16,13 @@ pub fn render(ui: &mut egui::Ui, state: &AppState) -> Option<ActionRequest> {
     };
     let stats = state.selected_stats();
     let wad_id = wad.id;
+
+    // Pre-extract data needed inside closures to avoid borrow issues
+    let source_url = wad.source_url.clone();
+    let idgames_id = wad.idgames_id.clone();
+    let stats_snapshot = wad.stats_snapshot.clone();
+    let companions =
+        caco_core::db::companions::get_companions_for_wad(conn, wad_id).unwrap_or_default();
 
     let mut action = None;
 
@@ -69,6 +80,31 @@ pub fn render(ui: &mut egui::Ui, state: &AppState) -> Option<ActionRequest> {
             ui.colored_label(theme::TEXT_SECONDARY, "No play history");
         }
 
+        // Map progress from stats_snapshot
+        if let Some(ref snapshot_json) = stats_snapshot
+            && let Ok(wad_stats) = serde_json::from_str::<StatsData>(snapshot_json)
+            && !wad_stats.maps.is_empty()
+        {
+            let played = wad_stats.played_maps().len();
+            let total = wad_stats.maps.len();
+            let pct = if total > 0 {
+                (played as f32) / (total as f32)
+            } else {
+                0.0
+            };
+            let pct_display = (pct * 100.0) as u32;
+
+            ui.add_space(2.0);
+            ui.colored_label(
+                theme::TEXT_SECONDARY,
+                format!("Progress: {played}/{total} maps ({pct_display}%)"),
+            );
+            ui.add(
+                egui::ProgressBar::new(pct)
+                    .desired_width(ui.available_width()),
+            );
+        }
+
         ui.separator();
 
         // Action buttons
@@ -117,8 +153,18 @@ pub fn render(ui: &mut egui::Ui, state: &AppState) -> Option<ActionRequest> {
         // Source info
         ui.separator();
         detail_row(ui, "Source", &wad.source_type);
-        if let Some(url) = &wad.source_url {
-            detail_row(ui, "URL", url);
+        if let Some(ref url) = source_url {
+            ui.horizontal(|ui| {
+                ui.colored_label(theme::TEXT_SECONDARY, "URL:");
+                ui.hyperlink_to(url, url);
+            });
+        }
+        if let Some(ref ig_id) = idgames_id {
+            let idgames_url = format!("https://www.doomworld.com/idgames/?id={ig_id}");
+            ui.horizontal(|ui| {
+                ui.colored_label(theme::TEXT_SECONDARY, "idgames:");
+                ui.hyperlink_to(ig_id, &idgames_url);
+            });
         }
         if let Some(filename) = &wad.filename {
             detail_row(ui, "File", filename);
@@ -128,6 +174,20 @@ pub fn render(ui: &mut egui::Ui, state: &AppState) -> Option<ActionRequest> {
         }
         if let Some(cl) = wad.complevel {
             detail_row(ui, "Complevel", caco_core::complevel::complevel_name(Some(cl)));
+        }
+
+        // Companion files section
+        if !companions.is_empty() {
+            ui.separator();
+            ui.colored_label(theme::TEXT_SECONDARY, "Companion Files:");
+            for comp in &companions {
+                let label = if comp.enabled {
+                    comp.filename.clone()
+                } else {
+                    format!("{} (off)", comp.filename)
+                };
+                ui.colored_label(theme::TEXT_PRIMARY, &label);
+            }
         }
     });
 
