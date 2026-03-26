@@ -1,1 +1,0 @@
-"""GUI tab widgets."""
