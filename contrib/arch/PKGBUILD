@@ -1,0 +1,50 @@
+# Maintainer: eshen
+pkgname=caco
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Doom WAD library manager"
+arch=('x86_64')
+url="http://localhost:3000/eshen/caco"
+license=('custom')
+depends=('openssl' 'gcc-libs' 'glibc')
+optdepends=(
+    'vulkan-driver: GPU-accelerated rendering for caco-gui'
+    'xdg-desktop-portal: native file dialogs in caco-gui'
+)
+makedepends=('cargo')
+source=("$pkgname-$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+prepare() {
+    cd "$pkgname-$pkgver"
+    export RUSTUP_TOOLCHAIN=stable
+    cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+    cd "$pkgname-$pkgver"
+    export RUSTUP_TOOLCHAIN=stable
+    export CARGO_TARGET_DIR=target
+    cargo build --frozen --release --workspace
+}
+
+check() {
+    cd "$pkgname-$pkgver"
+    export RUSTUP_TOOLCHAIN=stable
+    export CARGO_TARGET_DIR=target
+    cargo test --frozen --workspace
+}
+
+package() {
+    cd "$pkgname-$pkgver"
+
+    # Binaries
+    install -Dm755 target/release/caco     "$pkgdir/usr/bin/caco"
+    install -Dm755 target/release/caco-gui "$pkgdir/usr/bin/caco-gui"
+    install -Dm755 target/release/caco-tui "$pkgdir/usr/bin/caco-tui"
+
+    # Shell completions
+    install -Dm644 completions/caco.fish "$pkgdir/usr/share/fish/vendor_completions.d/caco.fish"
+    install -Dm644 completions/caco.bash "$pkgdir/usr/share/bash-completion/completions/caco"
+    install -Dm644 completions/_caco     "$pkgdir/usr/share/zsh/site-functions/_caco"
+}
