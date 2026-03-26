@@ -1,3 +1,4 @@
+use crate::relative_time;
 use crate::state::{ActionRequest, AppState};
 use crate::theme;
 
@@ -59,8 +60,10 @@ pub fn render(ui: &mut egui::Ui, state: &AppState) -> Option<ActionRequest> {
                 detail_row(ui, "Beaten", &format!("{}\u{00d7}", s.times_beaten));
             }
             if let Some(lp) = &s.last_played {
-                let date = lp.get(..10).unwrap_or(lp);
-                detail_row(ui, "Last Played", date);
+                let display = relative_time::parse_timestamp(lp)
+                    .map(|dt| relative_time::relative_time_full(&dt))
+                    .unwrap_or_else(|| lp.get(..10).unwrap_or(lp).to_string());
+                detail_row(ui, "Last Played", &display);
             }
         } else {
             ui.colored_label(theme::TEXT_SECONDARY, "No play history");
@@ -103,14 +106,12 @@ pub fn render(ui: &mut egui::Ui, state: &AppState) -> Option<ActionRequest> {
         // Description
         if let Some(desc) = &wad.description {
             ui.separator();
-            // Truncate long descriptions
-            let display = if desc.len() > 500 {
-                let boundary = desc.floor_char_boundary(500);
-                format!("{}...", &desc[..boundary])
-            } else {
-                desc.clone()
-            };
-            ui.colored_label(theme::TEXT_SECONDARY, display);
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(desc.as_str()).color(theme::TEXT_SECONDARY),
+                )
+                .wrap(),
+            );
         }
 
         // Source info

@@ -1,5 +1,6 @@
 use egui_extras::{Column, TableBuilder};
 
+use crate::relative_time;
 use crate::state::{ActionRequest, AppState};
 use crate::theme;
 
@@ -147,8 +148,9 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<ActionRequest> 
                 row.col(|ui| {
                     let last_played = stats
                         .and_then(|s| s.last_played.as_deref())
-                        .and_then(|ts| ts.get(..10))
-                        .unwrap_or("");
+                        .and_then(relative_time::parse_timestamp)
+                        .map(|dt| relative_time::relative_time(&dt))
+                        .unwrap_or_default();
                     let r = ui.colored_label(theme::TEXT_SECONDARY, last_played);
                     cell_interact!(r);
                 });
