@@ -1,0 +1,698 @@
+//! Output formatting: table, plain (TSV), and JSON rendering.
+
+use std::collections::HashMap;
+
+use comfy_table::{presets, Table, ContentArrangement, Cell, CellAlignment};
+
+use caco_core::db::{
+    IwadRecord, Id24Record, WadRecord, WadStats, SessionRecord, CompletionRecord,
+    StatsSnapshot, Status,
+};
+use caco_core::player::format_duration;
+
+/// Output format for CLI commands.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum OutputFormat {
+    #[default]
+    Table,
+    Plain,
+    Json,
+}
+
+impl std::str::FromStr for OutputFormat {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "table" => Ok(OutputFormat::Table),
+            "plain" => Ok(OutputFormat::Plain),
+            "json" => Ok(OutputFormat::Json),
+            other => Err(format!("unknown output format: {other}")),
+        }
+    }
+}
+
+impl std::fmt::Display for OutputFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OutputFormat::Table => write!(f, "table"),
+            OutputFormat::Plain => write!(f, "plain"),
+            OutputFormat::Json => write!(f, "json"),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// WAD list rendering
+// ---------------------------------------------------------------------------
+
+pub fn render_wad_list(
+    wads: &[WadRecord],
+    stats: &HashMap<i64, WadStats>,
+    format: OutputFormat,
+) {
+    match format {
+        OutputFormat::Table => render_wad_list_table(wads, stats),
+        OutputFormat::Plain => render_wad_list_plain(wads, stats),
+        OutputFormat::Json => render_wad_list_json(wads, stats),
+    }
+}
+
+fn render_wad_list_table(wads: &[WadRecord], stats: &HashMap<i64, WadStats>) {
+    if wads.is_empty() {
+        println!("No WADs found.");
+        return;
+    }
+
+    let mut table = Table::new();
+    table
+        .load_preset(presets::UTF8_FULL_CONDENSED)
+        .set_content_arrangement(ContentArrangement::Dynamic)
+        .set_header(vec!["ID", "Title", "Author", "Status", "Beaten", "Playtime", "Last Played"]);
+
+    for wad in wads {
+        let ws = stats.get(&wad.id);
+        let beaten = ws.map_or(0, |s| s.times_beaten);
+        let playtime = ws.map_or(0, |s| s.playtime);
+        let last = ws
+            .and_then(|s| s.last_played.as_deref())
+            .map(format_timestamp)
+            .unwrap_or_default();
+
+        let status_display = Status::parse(&wad.status)
+            .map(|s| s.display_name().to_string())
+            .unwrap_or_else(|| wad.status.clone());
+
+        table.add_row(vec![
+            Cell::new(wad.id).set_alignment(CellAlignment::Right),
+            Cell::new(&wad.title),
+            Cell::new(wad.author.as_deref().unwrap_or("")),
+            Cell::new(&status_display),
+            Cell::new(beaten).set_alignment(CellAlignment::Right),
+            Cell::new(if playtime > 0 { format_duration(playtime) } else { String::new() }).set_alignment(CellAlignment::Right),
+            Cell::new(&last),
+        ]);
+    }
+
+    println!("{table}");
+    println!("{} WAD(s)", wads.len());
+}
+
+fn render_wad_list_plain(wads: &[WadRecord], stats: &HashMap<i64, WadStats>) {
+    println!("ID\tTitle\tAuthor\tStatus\tBeaten\tPlaytime\tLastPlayed");
+    for wad in wads {
+        let ws = stats.get(&wad.id);
+        let beaten = ws.map_or(0, |s| s.times_beaten);
+        let playtime = ws.map_or(0, |s| s.playtime);
+        let last = ws
+            .and_then(|s| s.last_played.as_deref())
+            .map(format_timestamp)
+            .unwrap_or_default();
+
+        println!(
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            wad.id,
+            wad.title,
+            wad.author.as_deref().unwrap_or(""),
+            wad.status,
+            beaten,
+            if playtime > 0 { format_duration(playtime) } else { String::new() },
+            last,
+        );
+    }
+}
+
+fn render_wad_list_json(wads: &[WadRecord], stats: &HashMap<i64, WadStats>) {
+    let items: Vec<serde_json::Value> = wads
+        .iter()
+        .map(|wad| {
+            let ws = stats.get(&wad.id);
+            let mut val = serde_json::to_value(wad).unwrap_or(serde_json::Value::Null);
+            if let serde_json::Value::Object(ref mut map) = val {
+                map.insert(
+                    "playtime".to_string(),
+                    serde_json::json!(ws.map_or(0, |s| s.playtime)),
+                );
+                map.insert(
+                    "times_beaten".to_string(),
+                    serde_json::json!(ws.map_or(0, |s| s.times_beaten)),
+                );
+                map.insert(
+                    "session_count".to_string(),
+                    serde_json::json!(ws.map_or(0, |s| s.session_count)),
+                );
+                map.insert(
+                    "last_played".to_string(),
+                    serde_json::json!(ws.and_then(|s| s.last_played.as_deref())),
+                );
+            }
+            val
+        })
+        .collect();
+    println!("{}", serde_json::to_string_pretty(&items).unwrap_or_default());
+}
+
+// ---------------------------------------------------------------------------
+// WAD detail rendering
+// ---------------------------------------------------------------------------
+
+pub fn render_wad_info(
+    wad: &WadRecord,
+    stats: &WadStats,
+    completions: &[CompletionRecord],
+    format: OutputFormat,
+) {
+    match format {
+        OutputFormat::Table => render_wad_info_table(wad, stats, completions),
+        OutputFormat::Plain => render_wad_info_plain(wad, stats),
+        OutputFormat::Json => render_wad_info_json(wad, stats),
+    }
+}
+
+fn render_wad_info_table(
+    wad: &WadRecord,
+    stats: &WadStats,
+    completions: &[CompletionRecord],
+) {
+    println!("{} (ID: {})", wad.title, wad.id);
+    println!();
+
+    if let Some(author) = &wad.author {
+        println!("  Author:      {author}");
+    }
+    if let Some(year) = wad.year {
+        println!("  Year:        {year}");
+    }
+
+    let status_display = Status::parse(&wad.status)
+        .map(|s| s.display_name().to_string())
+        .unwrap_or_else(|| wad.status.clone());
+    println!("  Status:      {status_display}");
+
+    if let Some(version) = &wad.version {
+        println!("  Version:     {version}");
+    }
+    if let Some(rating) = wad.rating {
+        println!("  Rating:      {rating}/5");
+    }
+    if !wad.tags.is_empty() {
+        println!("  Tags:        {}", wad.tags.join(", "));
+    }
+
+    println!("  Source:      {}", wad.source_type);
+    if let Some(url) = &wad.source_url {
+        println!("  URL:         {url}");
+    }
+    if let Some(idgames_id) = &wad.idgames_id {
+        println!("  idgames ID:  {idgames_id}");
+    }
+
+    if let Some(desc) = &wad.description {
+        println!();
+        // Truncate long descriptions
+        let lines: Vec<&str> = desc.lines().collect();
+        if lines.len() > 10 {
+            for line in &lines[..10] {
+                println!("  {line}");
+            }
+            println!("  ... ({} more lines)", lines.len() - 10);
+        } else {
+            for line in &lines {
+                println!("  {line}");
+            }
+        }
+    }
+
+    if stats.session_count > 0 {
+        println!();
+        println!("  Playtime:    {}", format_duration(stats.playtime));
+        println!("  Sessions:    {}", stats.session_count);
+        if let Some(last) = &stats.last_played {
+            println!("  Last played: {}", format_timestamp(last));
+        }
+    }
+
+    if let Some(notes) = &wad.notes {
+        println!();
+        println!("  Notes:       {notes}");
+    }
+
+    if !completions.is_empty() {
+        println!();
+        println!("  Completions ({}):", completions.len());
+        for comp in completions {
+            let ts = format_timestamp(&comp.completed_at);
+            let has_stats = if comp.stats_snapshot.is_some() { " *" } else { "" };
+            let notes = comp
+                .notes
+                .as_deref()
+                .map(|n| format!(" - {n}"))
+                .unwrap_or_default();
+            println!("    {ts}{has_stats}{notes}");
+        }
+    }
+
+    // Custom play config
+    let has_custom = wad.custom_iwad.is_some()
+        || wad.custom_sourceport.is_some()
+        || wad.complevel.is_some()
+        || wad.custom_config.is_some()
+        || wad.custom_args.is_some()
+        || wad.companion_files.is_some();
+
+    if has_custom {
+        println!();
+        println!("  Play config:");
+        if let Some(iwad) = &wad.custom_iwad {
+            println!("    IWAD:       {iwad}");
+        }
+        if let Some(port) = &wad.custom_sourceport {
+            println!("    Sourceport: {port}");
+        }
+        if let Some(cl) = wad.complevel {
+            let label = caco_core::complevel::complevel_name(Some(cl));
+            if label == "Unknown" {
+                println!("    Complevel:  {cl}");
+            } else {
+                println!("    Complevel:  {cl} ({label})");
+            }
+        }
+        if let Some(cfg) = &wad.custom_config {
+            println!("    Config:     {cfg}");
+        }
+        if let Some(args) = &wad.custom_args {
+            println!("    Args:       {args}");
+        }
+        if let Some(companions) = &wad.companion_files
+            && let Ok(files) = serde_json::from_str::<Vec<String>>(companions)
+        {
+            for f in &files {
+                println!("    File:       {f}");
+            }
+        }
+    }
+}
+
+fn render_wad_info_plain(wad: &WadRecord, stats: &WadStats) {
+    println!("id={}", wad.id);
+    println!("title={}", wad.title);
+    if let Some(a) = &wad.author { println!("author={a}"); }
+    if let Some(y) = wad.year { println!("year={y}"); }
+    println!("status={}", wad.status);
+    if let Some(r) = wad.rating { println!("rating={r}"); }
+    if !wad.tags.is_empty() { println!("tags={}", wad.tags.join(",")); }
+    println!("source_type={}", wad.source_type);
+    if let Some(u) = &wad.source_url { println!("source_url={u}"); }
+    println!("playtime={}", stats.playtime);
+    println!("sessions={}", stats.session_count);
+    println!("times_beaten={}", stats.times_beaten);
+    if let Some(lp) = &stats.last_played { println!("last_played={lp}"); }
+    if let Some(d) = &wad.description { println!("description={d}"); }
+    if let Some(n) = &wad.notes { println!("notes={n}"); }
+}
+
+fn render_wad_info_json(wad: &WadRecord, stats: &WadStats) {
+    let mut val = serde_json::to_value(wad).unwrap_or(serde_json::Value::Null);
+    if let serde_json::Value::Object(ref mut map) = val {
+        map.insert("playtime".to_string(), serde_json::json!(stats.playtime));
+        map.insert("times_beaten".to_string(), serde_json::json!(stats.times_beaten));
+        map.insert("session_count".to_string(), serde_json::json!(stats.session_count));
+        map.insert("last_played".to_string(), serde_json::json!(stats.last_played));
+    }
+    println!("{}", serde_json::to_string_pretty(&val).unwrap_or_default());
+}
+
+// ---------------------------------------------------------------------------
+// Tag list rendering
+// ---------------------------------------------------------------------------
+
+pub fn render_tag_list(tags: &[(String, i64)], format: OutputFormat) {
+    match format {
+        OutputFormat::Table => {
+            if tags.is_empty() {
+                println!("No tags found.");
+                return;
+            }
+            let mut table = Table::new();
+            table
+                .load_preset(presets::UTF8_FULL_CONDENSED)
+                .set_header(vec!["Tag", "Count"]);
+            for (tag, count) in tags {
+                table.add_row(vec![
+                    Cell::new(tag),
+                    Cell::new(count).set_alignment(CellAlignment::Right),
+                ]);
+            }
+            println!("{table}");
+        }
+        OutputFormat::Plain => {
+            println!("Tag\tCount");
+            for (tag, count) in tags {
+                println!("{tag}\t{count}");
+            }
+        }
+        OutputFormat::Json => {
+            let items: Vec<serde_json::Value> = tags
+                .iter()
+                .map(|(tag, count)| serde_json::json!({"tag": tag, "count": count}))
+                .collect();
+            println!("{}", serde_json::to_string_pretty(&items).unwrap_or_default());
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// IWAD list rendering
+// ---------------------------------------------------------------------------
+
+pub fn render_iwad_list(iwads: &[IwadRecord], preferred: &HashMap<String, String>, format: OutputFormat) {
+    match format {
+        OutputFormat::Table => {
+            if iwads.is_empty() {
+                println!("No IWADs registered.");
+                return;
+            }
+            let mut table = Table::new();
+            table
+                .load_preset(presets::UTF8_FULL_CONDENSED)
+                .set_header(vec!["Family", "Variant", "Title", "Path"]);
+            for iwad in iwads {
+                let is_preferred = preferred
+                    .get(&iwad.family)
+                    .is_some_and(|v| v == &iwad.variant);
+                let marker = if is_preferred { " *" } else { "" };
+                table.add_row(vec![
+                    Cell::new(&iwad.family),
+                    Cell::new(format!("{}{marker}", iwad.variant)),
+                    Cell::new(iwad.title.as_deref().unwrap_or("")),
+                    Cell::new(&iwad.path),
+                ]);
+            }
+            println!("{table}");
+        }
+        OutputFormat::Plain => {
+            println!("Family\tVariant\tTitle\tPath");
+            for iwad in iwads {
+                let is_preferred = preferred
+                    .get(&iwad.family)
+                    .is_some_and(|v| v == &iwad.variant);
+                let marker = if is_preferred { " *" } else { "" };
+                println!(
+                    "{}\t{}{marker}\t{}\t{}",
+                    iwad.family,
+                    iwad.variant,
+                    iwad.title.as_deref().unwrap_or(""),
+                    iwad.path,
+                );
+            }
+        }
+        OutputFormat::Json => {
+            let items: Vec<serde_json::Value> = iwads
+                .iter()
+                .map(|iwad| {
+                    serde_json::json!({
+                        "family": iwad.family,
+                        "variant": iwad.variant,
+                        "title": iwad.title,
+                        "path": iwad.path,
+                    })
+                })
+                .collect();
+            println!("{}", serde_json::to_string_pretty(&items).unwrap_or_default());
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// id24 list rendering
+// ---------------------------------------------------------------------------
+
+pub fn render_id24_list(id24s: &[Id24Record], format: OutputFormat) {
+    match format {
+        OutputFormat::Table => {
+            if id24s.is_empty() {
+                println!("No id24 WADs registered.");
+                return;
+            }
+            let mut table = Table::new();
+            table
+                .load_preset(presets::UTF8_FULL_CONDENSED)
+                .set_header(vec!["Name", "Version", "Title", "Path"]);
+            for entry in id24s {
+                table.add_row(vec![
+                    Cell::new(&entry.name),
+                    Cell::new(entry.version.as_deref().unwrap_or("")),
+                    Cell::new(entry.title.as_deref().unwrap_or("")),
+                    Cell::new(&entry.path),
+                ]);
+            }
+            println!("{table}");
+        }
+        OutputFormat::Plain => {
+            println!("Name\tVersion\tTitle\tPath");
+            for entry in id24s {
+                println!(
+                    "{}\t{}\t{}\t{}",
+                    entry.name,
+                    entry.version.as_deref().unwrap_or(""),
+                    entry.title.as_deref().unwrap_or(""),
+                    entry.path,
+                );
+            }
+        }
+        OutputFormat::Json => {
+            let items: Vec<serde_json::Value> = id24s
+                .iter()
+                .map(|entry| {
+                    serde_json::json!({
+                        "name": entry.name,
+                        "version": entry.version,
+                        "title": entry.title,
+                        "path": entry.path,
+                    })
+                })
+                .collect();
+            println!("{}", serde_json::to_string_pretty(&items).unwrap_or_default());
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Session list rendering
+// ---------------------------------------------------------------------------
+
+pub fn render_session_list(
+    sessions: &[SessionRecord],
+    wad_title: &str,
+    deltas: &[Option<Vec<String>>],
+    format: OutputFormat,
+) {
+    match format {
+        OutputFormat::Table | OutputFormat::Json => {
+            if sessions.is_empty() {
+                println!("No sessions for '{wad_title}'.");
+                return;
+            }
+            let mut table = Table::new();
+            table
+                .load_preset(presets::UTF8_FULL_CONDENSED)
+                .set_header(vec!["Date", "Started", "Duration", "Sourceport", "Maps"]);
+
+            for (i, session) in sessions.iter().enumerate() {
+                let date = format_timestamp(&session.started_at);
+                let time = format_time(&session.started_at);
+                let duration = session
+                    .duration_seconds
+                    .map(format_duration)
+                    .unwrap_or_else(|| "--".to_string());
+                let port = session.sourceport.as_deref().unwrap_or("--");
+                let maps = deltas.get(i)
+                    .and_then(|d| d.as_ref())
+                    .map(|maps| maps.join(", "))
+                    .unwrap_or_else(|| "--".to_string());
+
+                let crashed = session.exit_code.is_some_and(|c| c != 0);
+                let crash_indicator = if crashed {
+                    format!(" [Crash ({})]", session.exit_code.unwrap())
+                } else {
+                    String::new()
+                };
+
+                table.add_row(vec![
+                    Cell::new(&date),
+                    Cell::new(&time),
+                    Cell::new(format!("{duration}{crash_indicator}")),
+                    Cell::new(port),
+                    Cell::new(&maps),
+                ]);
+            }
+            println!("{table}");
+        }
+        OutputFormat::Plain => {
+            println!("Date\tStarted\tDuration\tSourceport\tMaps");
+            for (i, session) in sessions.iter().enumerate() {
+                let date = format_timestamp(&session.started_at);
+                let time = format_time(&session.started_at);
+                let duration = session
+                    .duration_seconds
+                    .map(format_duration)
+                    .unwrap_or_else(|| "--".to_string());
+                let port = session.sourceport.as_deref().unwrap_or("--");
+                let maps = deltas.get(i)
+                    .and_then(|d| d.as_ref())
+                    .map(|maps| maps.join(","))
+                    .unwrap_or_else(|| "--".to_string());
+                println!("{date}\t{time}\t{duration}\t{port}\t{maps}");
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Stats rendering
+// ---------------------------------------------------------------------------
+
+pub fn render_stats(snapshot: &StatsSnapshot, limit: usize, plain: bool) {
+    if plain {
+        render_stats_plain(snapshot, limit);
+    } else {
+        render_stats_table(snapshot, limit);
+    }
+}
+
+fn render_stats_table(snapshot: &StatsSnapshot, limit: usize) {
+    println!("Library Statistics");
+    println!("==================");
+    println!();
+    println!("  Total WADs:     {}", snapshot.total_wads);
+    println!("  Total playtime: {}", format_duration(snapshot.total_playtime));
+    println!("  Total sessions: {}", snapshot.total_sessions);
+    println!("  WADs played:    {}", snapshot.wads_with_sessions);
+    println!();
+    println!("  Finished:       {} / {} played ({:.0}%)",
+        snapshot.finished_wads,
+        snapshot.played_wads,
+        snapshot.completion_rate * 100.0,
+    );
+    println!("  Total completions: {}", snapshot.total_completions);
+    println!();
+
+    // Status breakdown
+    println!("  Status breakdown:");
+    let status_order = ["to-play", "backlog", "playing", "finished", "abandoned", "awaiting-update"];
+    for status in &status_order {
+        let count = snapshot.wads_by_status.get(*status).copied().unwrap_or(0);
+        if count > 0 {
+            let display = Status::parse(status)
+                .map(|s| s.display_name().to_string())
+                .unwrap_or_else(|| (*status).to_string());
+            println!("    {display:<18} {count}");
+        }
+    }
+
+    // Activity
+    if !snapshot.activity.is_empty() {
+        println!();
+        let mut table = Table::new();
+        table
+            .load_preset(presets::UTF8_FULL_CONDENSED)
+            .set_header(vec!["Period", "WADs", "Sessions", "Playtime"]);
+
+        for period in snapshot.activity.iter().take(limit) {
+            table.add_row(vec![
+                Cell::new(&period.period),
+                Cell::new(period.wad_count).set_alignment(CellAlignment::Right),
+                Cell::new(period.session_count).set_alignment(CellAlignment::Right),
+                Cell::new(format_duration(period.total_playtime)).set_alignment(CellAlignment::Right),
+            ]);
+        }
+        println!("{table}");
+    }
+}
+
+fn render_stats_plain(snapshot: &StatsSnapshot, limit: usize) {
+    println!("total_wads={}", snapshot.total_wads);
+    println!("total_playtime={}", snapshot.total_playtime);
+    println!("total_sessions={}", snapshot.total_sessions);
+    println!("wads_played={}", snapshot.wads_with_sessions);
+    println!("finished_wads={}", snapshot.finished_wads);
+    println!("played_wads={}", snapshot.played_wads);
+    println!("completion_rate={:.2}", snapshot.completion_rate);
+    println!("total_completions={}", snapshot.total_completions);
+
+    let status_order = ["to-play", "backlog", "playing", "finished", "abandoned", "awaiting-update"];
+    for status in &status_order {
+        let count = snapshot.wads_by_status.get(*status).copied().unwrap_or(0);
+        println!("status_{status}={count}");
+    }
+
+    for period in snapshot.activity.iter().take(limit) {
+        println!(
+            "activity\t{}\t{}\t{}\t{}",
+            period.period, period.wad_count, period.session_count, period.total_playtime,
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Format an RFC3339/ISO timestamp to a human-readable date (YYYY-MM-DD).
+pub fn format_timestamp(ts: &str) -> String {
+    // Try parsing as RFC3339 first
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(ts) {
+        return dt.format("%Y-%m-%d").to_string();
+    }
+    // Fallback: take first 10 chars if it looks like a date
+    if ts.len() >= 10 {
+        ts[..10].to_string()
+    } else {
+        ts.to_string()
+    }
+}
+
+/// Format an RFC3339/ISO timestamp to time (HH:MM).
+pub fn format_time(ts: &str) -> String {
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(ts) {
+        return dt.format("%H:%M").to_string();
+    }
+    if ts.len() >= 16 {
+        ts[11..16].to_string()
+    } else {
+        String::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_timestamp_rfc3339() {
+        assert_eq!(format_timestamp("2024-06-15T18:30:00+00:00"), "2024-06-15");
+    }
+
+    #[test]
+    fn test_format_timestamp_iso_prefix() {
+        assert_eq!(format_timestamp("2024-06-15T18:30:00"), "2024-06-15");
+    }
+
+    #[test]
+    fn test_format_timestamp_short() {
+        assert_eq!(format_timestamp("2024"), "2024");
+    }
+
+    #[test]
+    fn test_format_time_rfc3339() {
+        assert_eq!(format_time("2024-06-15T18:30:00+00:00"), "18:30");
+    }
+
+    #[test]
+    fn test_output_format_parse() {
+        assert_eq!("table".parse::<OutputFormat>().unwrap(), OutputFormat::Table);
+        assert_eq!("plain".parse::<OutputFormat>().unwrap(), OutputFormat::Plain);
+        assert_eq!("json".parse::<OutputFormat>().unwrap(), OutputFormat::Json);
+        assert!("invalid".parse::<OutputFormat>().is_err());
+    }
+}

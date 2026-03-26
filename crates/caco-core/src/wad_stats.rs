@@ -1,0 +1,711 @@
+//! Parser and formatter for sourceport per-map statistics files.
+//!
+//! Supports two formats:
+//! - nyan-doom/dsda-doom stats.txt (binary-ish, 15 fields per map)
+//! - dsda-doom levelstat.txt (human-readable, from -levelstat flag)
+//!
+//! Stats are stored as JSON in the wad_completions.stats_snapshot column.
+
+use std::collections::HashMap;
+use std::path::Path;
+use std::sync::LazyLock;
+
+use regex::Regex;
+use serde::{Deserialize, Serialize};
+
+/// Doom runs at 35 tics per second.
+pub const TICS_PER_SECOND: f64 = 35.0;
+
+/// Human-readable names for skill levels.
+pub static SKILL_NAMES: LazyLock<HashMap<i32, &'static str>> = LazyLock::new(|| {
+    HashMap::from([(0, "-"), (1, "ITYTD"), (2, "HNTR"), (3, "HMP"), (4, "UV"), (5, "NM")])
+});
+
+/// Per-map statistics entry (superset of both formats).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MapStats {
+    pub lump: String,
+
+    // Common to both formats
+    #[serde(default)]
+    pub kills: i32,
+    #[serde(default = "neg_one_i32")]
+    pub total_kills: i32,
+    #[serde(default)]
+    pub items: i32,
+    #[serde(default = "neg_one_i32")]
+    pub total_items: i32,
+    #[serde(default)]
+    pub secrets: i32,
+    #[serde(default = "neg_one_i32")]
+    pub total_secrets: i32,
+
+    // stats.txt specific
+    #[serde(default)]
+    pub episode: i32,
+    #[serde(default)]
+    pub map_num: i32,
+    #[serde(default)]
+    pub best_skill: i32,
+    #[serde(default = "neg_one_i32")]
+    pub best_time: i32,
+    #[serde(default = "neg_one_i32")]
+    pub best_max_time: i32,
+    #[serde(default = "neg_one_i32")]
+    pub best_nm_time: i32,
+    #[serde(default)]
+    pub total_exits: i32,
+    #[serde(default)]
+    pub cumulative_kills: i32,
+
+    // levelstat.txt specific
+    #[serde(default = "neg_one_f64")]
+    pub time_secs: f64,
+    #[serde(default = "neg_one_f64")]
+    pub total_time_secs: f64,
+}
+
+fn neg_one_i32() -> i32 {
+    -1
+}
+fn neg_one_f64() -> f64 {
+    -1.0
+}
+
+impl MapStats {
+    /// Whether this map was actually played.
+    pub fn played(&self) -> bool {
+        self.best_skill > 0 || self.time_secs >= 0.0
+    }
+}
+
+/// Complete WAD statistics from a stats file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WadStats {
+    pub format: String,
+    #[serde(default)]
+    pub maps: Vec<MapStats>,
+
+    // stats.txt header fields
+    #[serde(default = "default_version")]
+    pub version: i32,
+    #[serde(default)]
+    pub header_total_kills: i32,
+}
+
+fn default_version() -> i32 {
+    1
+}
+
+impl WadStats {
+    /// Return only maps that were actually played.
+    pub fn played_maps(&self) -> Vec<&MapStats> {
+        self.maps.iter().filter(|m| m.played()).collect()
+    }
+
+    /// Human-readable total time across all played maps.
+    pub fn total_time_display(&self) -> String {
+        if self.format == "stats_txt" {
+            let total_tics: i32 = self
+                .maps
+                .iter()
+                .filter(|m| m.best_time > 0)
+                .map(|m| m.best_time)
+                .sum();
+            if total_tics > 0 {
+                format_time_tics(total_tics)
+            } else {
+                "-".to_string()
+            }
+        } else {
+            let played = self.played_maps();
+            if let Some(last) = played.last()
+                && last.total_time_secs >= 0.0 {
+                    return format_time_secs(last.total_time_secs);
+                }
+            "-".to_string()
+        }
+    }
+}
+
+/// Convert tics (35/sec) to human-readable M:SS or H:MM:SS.
+pub fn format_time_tics(tics: i32) -> String {
+    if tics < 0 {
+        return "-".to_string();
+    }
+    let total_secs = tics as f64 / TICS_PER_SECOND;
+    format_seconds(total_secs)
+}
+
+/// Convert seconds to human-readable M:SS.CC.
+pub fn format_time_secs(secs: f64) -> String {
+    if secs < 0.0 {
+        return "-".to_string();
+    }
+    let mins = secs as i64 / 60;
+    let remaining = secs - (mins as f64 * 60.0);
+    if mins >= 60 {
+        let hours = mins / 60;
+        let mins = mins % 60;
+        format!("{hours}:{mins:02}:{remaining:05.2}")
+    } else {
+        format!("{mins}:{remaining:05.2}")
+    }
+}
+
+/// Format seconds as M:SS or H:MM:SS (integer seconds).
+fn format_seconds(secs: f64) -> String {
+    let total = secs as i64;
+    let mins = total / 60;
+    let s = total % 60;
+    if mins >= 60 {
+        let hours = mins / 60;
+        let mins = mins % 60;
+        format!("{hours}:{mins:02}:{s:02}")
+    } else {
+        format!("{mins}:{s:02}")
+    }
+}
+
+/// Get display name for a skill level.
+pub fn skill_name(skill: i32) -> &'static str {
+    SKILL_NAMES.get(&skill).copied().unwrap_or("-")
+}
+
+// --- Parsing ---
+
+// stats.txt: "MAP01 1 1 3 23193 -1 -1 1 198 127 5 1 150 7 3"
+static STATS_TXT_MAP_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"^(\S+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)$",
+    )
+    .unwrap()
+});
+
+// levelstat.txt: "MAP01 - 0:32.97 (0:32.97)  K: 100/100  I: 50/50  S: 5/5"
+static LEVELSTAT_MAP_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"^(\S+)\s+-\s+(\d+):(\d+(?:\.\d+)?)\s+\((\d+):(\d+(?:\.\d+)?)\)\s+K:\s*(\d+)/(\d+)\s+I:\s*(\d+)/(\d+)\s+S:\s*(\d+)/(\d+)",
+    )
+    .unwrap()
+});
+
+/// Parse a stats file from disk, auto-detecting format.
+pub fn parse_stats_file(path: &Path) -> crate::Result<WadStats> {
+    let text = std::fs::read_to_string(path)?;
+    parse_stats_text(&text)
+}
+
+/// Parse stats from text, auto-detecting format.
+pub fn parse_stats_text(text: &str) -> crate::Result<WadStats> {
+    let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    if lines.is_empty() {
+        return Err(crate::Error::InvalidWadFormat("Empty stats file".to_string()));
+    }
+
+    if is_stats_txt(&lines) {
+        Ok(parse_stats_txt(&lines))
+    } else if is_levelstat_txt(&lines) {
+        Ok(parse_levelstat_txt(&lines))
+    } else {
+        Err(crate::Error::InvalidWadFormat(
+            "Unrecognized stats file format".to_string(),
+        ))
+    }
+}
+
+fn is_stats_txt(lines: &[&str]) -> bool {
+    if lines.len() < 3 {
+        return false;
+    }
+    // First two lines should be integers (version, total_kills)
+    if lines[0].trim().parse::<i32>().is_err() || lines[1].trim().parse::<i32>().is_err() {
+        return false;
+    }
+    // Third line should match the 15-field map format
+    STATS_TXT_MAP_RE.is_match(lines[2].trim())
+}
+
+fn is_levelstat_txt(lines: &[&str]) -> bool {
+    LEVELSTAT_MAP_RE.is_match(lines[0].trim())
+}
+
+fn parse_stats_txt(lines: &[&str]) -> WadStats {
+    let version = lines[0].trim().parse::<i32>().unwrap_or(1);
+    let total_kills = lines[1].trim().parse::<i32>().unwrap_or(0);
+
+    let mut maps = Vec::new();
+    for line in &lines[2..] {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(caps) = STATS_TXT_MAP_RE.captures(line) {
+            maps.push(MapStats {
+                lump: caps[1].to_string(),
+                episode: caps[2].parse().unwrap_or(0),
+                map_num: caps[3].parse().unwrap_or(0),
+                best_skill: caps[4].parse().unwrap_or(0),
+                best_time: caps[5].parse().unwrap_or(-1),
+                best_max_time: caps[6].parse().unwrap_or(-1),
+                best_nm_time: caps[7].parse().unwrap_or(-1),
+                total_exits: caps[8].parse().unwrap_or(0),
+                cumulative_kills: caps[9].parse().unwrap_or(0),
+                kills: caps[10].parse().unwrap_or(0),
+                items: caps[11].parse().unwrap_or(0),
+                secrets: caps[12].parse().unwrap_or(0),
+                total_kills: caps[13].parse().unwrap_or(-1),
+                total_items: caps[14].parse().unwrap_or(-1),
+                total_secrets: caps[15].parse().unwrap_or(-1),
+                time_secs: -1.0,
+                total_time_secs: -1.0,
+            });
+        }
+    }
+
+    WadStats {
+        format: "stats_txt".to_string(),
+        maps,
+        version,
+        header_total_kills: total_kills,
+    }
+}
+
+fn parse_levelstat_txt(lines: &[&str]) -> WadStats {
+    let mut maps = Vec::new();
+    for line in lines {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(caps) = LEVELSTAT_MAP_RE.captures(line) {
+            let time_mins: f64 = caps[2].parse().unwrap_or(0.0);
+            let time_sec: f64 = caps[3].parse().unwrap_or(0.0);
+            let total_mins: f64 = caps[4].parse().unwrap_or(0.0);
+            let total_sec: f64 = caps[5].parse().unwrap_or(0.0);
+
+            maps.push(MapStats {
+                lump: caps[1].to_string(),
+                time_secs: time_mins * 60.0 + time_sec,
+                total_time_secs: total_mins * 60.0 + total_sec,
+                kills: caps[6].parse().unwrap_or(0),
+                total_kills: caps[7].parse().unwrap_or(-1),
+                items: caps[8].parse().unwrap_or(0),
+                total_items: caps[9].parse().unwrap_or(-1),
+                secrets: caps[10].parse().unwrap_or(0),
+                total_secrets: caps[11].parse().unwrap_or(-1),
+                best_skill: 4, // levelstat doesn't record skill; mark as played
+                episode: 0,
+                map_num: 0,
+                best_time: -1,
+                best_max_time: -1,
+                best_nm_time: -1,
+                total_exits: 0,
+                cumulative_kills: 0,
+            });
+        }
+    }
+
+    WadStats {
+        format: "levelstat_txt".to_string(),
+        maps,
+        version: 1,
+        header_total_kills: 0,
+    }
+}
+
+// --- Formatting / Export ---
+
+/// Export WadStats back to original text format.
+pub fn format_stats(stats: &WadStats) -> String {
+    if stats.format == "stats_txt" {
+        format_stats_txt(stats)
+    } else {
+        format_levelstat_txt(stats)
+    }
+}
+
+fn format_stats_txt(stats: &WadStats) -> String {
+    let mut lines = vec![stats.version.to_string(), stats.header_total_kills.to_string()];
+    for m in &stats.maps {
+        lines.push(format!(
+            "{} {} {} {} {} {} {} {} {} {} {} {} {} {} {}",
+            m.lump,
+            m.episode,
+            m.map_num,
+            m.best_skill,
+            m.best_time,
+            m.best_max_time,
+            m.best_nm_time,
+            m.total_exits,
+            m.cumulative_kills,
+            m.kills,
+            m.items,
+            m.secrets,
+            m.total_kills,
+            m.total_items,
+            m.total_secrets,
+        ));
+    }
+    lines.join("\n") + "\n"
+}
+
+fn format_levelstat_txt(stats: &WadStats) -> String {
+    let mut lines = Vec::new();
+    for m in &stats.maps {
+        let time_str = secs_to_levelstat(m.time_secs);
+        let total_str = secs_to_levelstat(m.total_time_secs);
+        lines.push(format!(
+            "{} - {} ({})  K: {}/{}  I: {}/{}  S: {}/{}",
+            m.lump,
+            time_str,
+            total_str,
+            m.kills,
+            m.total_kills,
+            m.items,
+            m.total_items,
+            m.secrets,
+            m.total_secrets,
+        ));
+    }
+    lines.join("\n") + "\n"
+}
+
+fn secs_to_levelstat(secs: f64) -> String {
+    if secs < 0.0 {
+        return "0:00.00".to_string();
+    }
+    let mins = secs as i64 / 60;
+    let remaining = secs - (mins as f64 * 60.0);
+    format!("{mins}:{remaining:05.2}")
+}
+
+// --- JSON serialization ---
+
+/// Serialize WadStats to compact JSON for DB storage.
+pub fn stats_to_json(stats: &WadStats) -> crate::Result<String> {
+    Ok(serde_json::to_string(stats)?)
+}
+
+/// Deserialize WadStats from JSON.
+pub fn stats_from_json(json_str: &str) -> crate::Result<WadStats> {
+    Ok(serde_json::from_str(json_str)?)
+}
+
+// --- Delta computation ---
+
+/// Per-map delta information from a play session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MapDelta {
+    pub lump: String,
+    pub new_map: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exits_delta: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kills_delta: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub items_delta: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub secrets_delta: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub best_time_before: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub best_time_after: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time_improved: Option<bool>,
+    // levelstat.txt fields
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time_secs: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kills: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_kills: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub items: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_items: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub secrets: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_secrets: Option<i32>,
+}
+
+/// Result of computing a stats delta between before/after snapshots.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StatsDelta {
+    pub maps_played: Vec<String>,
+    pub deltas: Vec<MapDelta>,
+}
+
+/// Compute which maps were played in a session by diffing before/after snapshots.
+///
+/// For stats.txt (persistent/cumulative): a map is "played" if total_exits
+/// increased or the map is new. For levelstat.txt (rewritten each run): all
+/// maps in `after` are this session's maps.
+pub fn compute_stats_delta(before: Option<&WadStats>, after: &WadStats) -> StatsDelta {
+    if after.format == "levelstat_txt" {
+        // levelstat.txt is rewritten each run — all maps are this session's
+        let maps_played: Vec<String> = after.maps.iter().map(|m| m.lump.clone()).collect();
+        let deltas: Vec<MapDelta> = after
+            .maps
+            .iter()
+            .map(|m| MapDelta {
+                lump: m.lump.clone(),
+                new_map: true,
+                time_secs: Some(m.time_secs),
+                kills: Some(m.kills),
+                total_kills: Some(m.total_kills),
+                items: Some(m.items),
+                total_items: Some(m.total_items),
+                secrets: Some(m.secrets),
+                total_secrets: Some(m.total_secrets),
+                exits_delta: None,
+                kills_delta: None,
+                items_delta: None,
+                secrets_delta: None,
+                best_time_before: None,
+                best_time_after: None,
+                time_improved: None,
+            })
+            .collect();
+        return StatsDelta {
+            maps_played,
+            deltas,
+        };
+    }
+
+    // stats.txt: diff field-by-field
+    let before_map: HashMap<&str, &MapStats> = before
+        .map(|b| b.maps.iter().map(|m| (m.lump.as_str(), m)).collect())
+        .unwrap_or_default();
+
+    let mut maps_played = Vec::new();
+    let mut deltas = Vec::new();
+
+    for m in &after.maps {
+        match before_map.get(m.lump.as_str()) {
+            None => {
+                if m.played() {
+                    maps_played.push(m.lump.clone());
+                    deltas.push(MapDelta {
+                        lump: m.lump.clone(),
+                        new_map: true,
+                        exits_delta: Some(m.total_exits),
+                        kills_delta: Some(m.kills),
+                        items_delta: Some(m.items),
+                        secrets_delta: Some(m.secrets),
+                        best_time_before: Some(-1),
+                        best_time_after: Some(m.best_time),
+                        time_improved: Some(m.best_time > 0),
+                        time_secs: None,
+                        kills: None,
+                        total_kills: None,
+                        items: None,
+                        total_items: None,
+                        secrets: None,
+                        total_secrets: None,
+                    });
+                }
+            }
+            Some(prev) => {
+                let exits_delta = m.total_exits - prev.total_exits;
+                if exits_delta > 0 {
+                    maps_played.push(m.lump.clone());
+                    deltas.push(MapDelta {
+                        lump: m.lump.clone(),
+                        new_map: false,
+                        exits_delta: Some(exits_delta),
+                        kills_delta: Some(m.kills - prev.kills),
+                        items_delta: Some(m.items - prev.items),
+                        secrets_delta: Some(m.secrets - prev.secrets),
+                        best_time_before: Some(prev.best_time),
+                        best_time_after: Some(m.best_time),
+                        time_improved: Some(
+                            m.best_time > 0
+                                && (prev.best_time < 0 || m.best_time < prev.best_time),
+                        ),
+                        time_secs: None,
+                        kills: None,
+                        total_kills: None,
+                        items: None,
+                        total_items: None,
+                        secrets: None,
+                        total_secrets: None,
+                    });
+                }
+            }
+        }
+    }
+
+    StatsDelta {
+        maps_played,
+        deltas,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_time_tics() {
+        assert_eq!(format_time_tics(-1), "-");
+        assert_eq!(format_time_tics(0), "0:00");
+        assert_eq!(format_time_tics(35 * 65), "1:05"); // 65 seconds
+        assert_eq!(format_time_tics(35 * 3661), "1:01:01"); // 1h 1m 1s
+    }
+
+    #[test]
+    fn test_format_time_secs() {
+        assert_eq!(format_time_secs(-1.0), "-");
+        assert_eq!(format_time_secs(32.97), "0:32.97");
+        assert_eq!(format_time_secs(125.50), "2:05.50");
+        assert_eq!(format_time_secs(3725.00), "1:02:05.00");
+    }
+
+    #[test]
+    fn test_skill_name() {
+        assert_eq!(skill_name(0), "-");
+        assert_eq!(skill_name(4), "UV");
+        assert_eq!(skill_name(5), "NM");
+        assert_eq!(skill_name(99), "-");
+    }
+
+    #[test]
+    fn test_parse_stats_txt() {
+        let text = "1\n150\nMAP01 1 1 3 23193 -1 -1 1 198 127 5 1 150 7 3\nMAP02 1 2 4 5000 3000 -1 2 300 200 10 3 200 12 5\n";
+        let stats = parse_stats_text(text).unwrap();
+        assert_eq!(stats.format, "stats_txt");
+        assert_eq!(stats.version, 1);
+        assert_eq!(stats.header_total_kills, 150);
+        assert_eq!(stats.maps.len(), 2);
+        assert_eq!(stats.maps[0].lump, "MAP01");
+        assert_eq!(stats.maps[0].best_skill, 3);
+        assert_eq!(stats.maps[0].best_time, 23193);
+        assert_eq!(stats.maps[0].kills, 127);
+        assert_eq!(stats.maps[1].lump, "MAP02");
+        assert_eq!(stats.maps[1].total_exits, 2);
+    }
+
+    #[test]
+    fn test_parse_levelstat_txt() {
+        let text = "MAP01 - 0:32.97 (0:32.97)  K: 100/100  I: 50/50  S: 5/5\nMAP02 - 1:15.50 (1:48.47)  K: 80/120  I: 30/45  S: 2/3\n";
+        let stats = parse_stats_text(text).unwrap();
+        assert_eq!(stats.format, "levelstat_txt");
+        assert_eq!(stats.maps.len(), 2);
+        assert_eq!(stats.maps[0].lump, "MAP01");
+        assert!((stats.maps[0].time_secs - 32.97).abs() < 0.01);
+        assert_eq!(stats.maps[0].kills, 100);
+        assert_eq!(stats.maps[0].total_kills, 100);
+        assert_eq!(stats.maps[1].lump, "MAP02");
+        assert_eq!(stats.maps[1].items, 30);
+    }
+
+    #[test]
+    fn test_parse_empty() {
+        assert!(parse_stats_text("").is_err());
+    }
+
+    #[test]
+    fn test_parse_unrecognized() {
+        assert!(parse_stats_text("garbage data here").is_err());
+    }
+
+    #[test]
+    fn test_stats_json_roundtrip() {
+        let text = "1\n0\nMAP01 1 1 4 1000 -1 -1 1 100 50 3 2 100 5 3\n";
+        let stats = parse_stats_text(text).unwrap();
+        let json = stats_to_json(&stats).unwrap();
+        let restored = stats_from_json(&json).unwrap();
+        assert_eq!(restored.format, "stats_txt");
+        assert_eq!(restored.maps.len(), 1);
+        assert_eq!(restored.maps[0].lump, "MAP01");
+        assert_eq!(restored.maps[0].best_skill, 4);
+    }
+
+    #[test]
+    fn test_format_stats_txt_roundtrip() {
+        let text = "1\n150\nMAP01 1 1 3 23193 -1 -1 1 198 127 5 1 150 7 3\n";
+        let stats = parse_stats_text(text).unwrap();
+        let output = format_stats(&stats);
+        let reparsed = parse_stats_text(&output).unwrap();
+        assert_eq!(reparsed.maps.len(), 1);
+        assert_eq!(reparsed.maps[0].best_time, 23193);
+    }
+
+    #[test]
+    fn test_compute_delta_levelstat() {
+        let after_text = "MAP01 - 0:32.97 (0:32.97)  K: 100/100  I: 50/50  S: 5/5\n";
+        let after = parse_stats_text(after_text).unwrap();
+        let delta = compute_stats_delta(None, &after);
+        assert_eq!(delta.maps_played, vec!["MAP01"]);
+        assert_eq!(delta.deltas.len(), 1);
+        assert!(delta.deltas[0].new_map);
+    }
+
+    #[test]
+    fn test_compute_delta_stats_txt_new_map() {
+        let after_text = "1\n0\nMAP01 1 1 4 1000 -1 -1 1 100 50 3 2 100 5 3\n";
+        let after = parse_stats_text(after_text).unwrap();
+        let delta = compute_stats_delta(None, &after);
+        assert_eq!(delta.maps_played, vec!["MAP01"]);
+        assert!(delta.deltas[0].new_map);
+    }
+
+    #[test]
+    fn test_compute_delta_stats_txt_exits_increased() {
+        let before_text = "1\n0\nMAP01 1 1 4 1000 -1 -1 1 100 50 3 2 100 5 3\n";
+        let after_text = "1\n0\nMAP01 1 1 4 900 -1 -1 2 150 60 4 3 100 5 3\n";
+        let before = parse_stats_text(before_text).unwrap();
+        let after = parse_stats_text(after_text).unwrap();
+        let delta = compute_stats_delta(Some(&before), &after);
+        assert_eq!(delta.maps_played, vec!["MAP01"]);
+        assert!(!delta.deltas[0].new_map);
+        assert_eq!(delta.deltas[0].exits_delta, Some(1));
+    }
+
+    #[test]
+    fn test_compute_delta_no_change() {
+        let text = "1\n0\nMAP01 1 1 4 1000 -1 -1 1 100 50 3 2 100 5 3\n";
+        let stats = parse_stats_text(text).unwrap();
+        let delta = compute_stats_delta(Some(&stats), &stats);
+        assert!(delta.maps_played.is_empty());
+        assert!(delta.deltas.is_empty());
+    }
+
+    #[test]
+    fn test_map_played() {
+        let played = MapStats {
+            lump: "MAP01".to_string(),
+            best_skill: 4,
+            ..MapStats {
+                lump: String::new(),
+                kills: 0,
+                total_kills: -1,
+                items: 0,
+                total_items: -1,
+                secrets: 0,
+                total_secrets: -1,
+                episode: 0,
+                map_num: 0,
+                best_skill: 0,
+                best_time: -1,
+                best_max_time: -1,
+                best_nm_time: -1,
+                total_exits: 0,
+                cumulative_kills: 0,
+                time_secs: -1.0,
+                total_time_secs: -1.0,
+            }
+        };
+        assert!(played.played());
+
+        let unplayed = MapStats {
+            lump: "MAP01".to_string(),
+            best_skill: 0,
+            time_secs: -1.0,
+            ..played.clone()
+        };
+        assert!(!unplayed.played());
+    }
+}
