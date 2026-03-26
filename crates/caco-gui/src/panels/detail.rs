@@ -83,9 +83,27 @@ pub fn render(
         if let Some(s) = stats {
             detail_row(ui, "Playtime", &caco_core::player::format_duration(s.playtime));
             detail_row(ui, "Sessions", &s.session_count.to_string());
-            if s.times_beaten > 0 {
-                detail_row(ui, "Beaten", &format!("{}\u{00d7}", s.times_beaten));
-            }
+            ui.horizontal(|ui| {
+                ui.allocate_ui(egui::vec2(80.0, ui.spacing().interact_size.y), |ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.colored_label(theme::TEXT_SECONDARY, "Beaten");
+                    });
+                });
+                ui.colored_label(theme::TEXT_PRIMARY, format!("{}\u{00d7}", s.times_beaten));
+                let small = egui::vec2(20.0, 18.0);
+                if ui.add_sized(small, egui::Button::new("+")).clicked() {
+                    action = Some(ActionRequest::BeatenAdd(wad_id));
+                }
+                if ui
+                    .add_enabled_ui(s.times_beaten > 0, |ui| {
+                        ui.add_sized(small, egui::Button::new("\u{2212}"))
+                    })
+                    .inner
+                    .clicked()
+                {
+                    action = Some(ActionRequest::BeatenRemove(wad_id));
+                }
+            });
             if let Some(lp) = &s.last_played {
                 let display = relative_time::parse_timestamp(lp)
                     .map(|dt| relative_time::relative_time_full(&dt))

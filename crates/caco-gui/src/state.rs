@@ -50,6 +50,8 @@ pub enum ActionRequest {
     Delete(i64),
     Sessions(i64),
     MapStats(i64),
+    BeatenAdd(i64),
+    BeatenRemove(i64),
     Stats,
     Cache,
     Resources,
