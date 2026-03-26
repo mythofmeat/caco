@@ -54,5 +54,8 @@ pub fn handle_action_keys(ui: &egui::Ui, selected_wad_id: Option<i64>) -> Option
     if ui.input(|i| i.key_pressed(egui::Key::S)) {
         return Some(ActionRequest::Sessions(wad_id));
     }
+    if ui.input(|i| i.key_pressed(egui::Key::M)) {
+        return Some(ActionRequest::MapStats(wad_id));
+    }
     None
 }
