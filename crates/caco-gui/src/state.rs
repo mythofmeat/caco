@@ -12,6 +12,7 @@ use crate::dialogs::edit::EditDialogState;
 use crate::dialogs::resources::ResourcesDialogState;
 use crate::dialogs::sessions::SessionsDialogState;
 use crate::dialogs::stats::StatsDialogState;
+use crate::dialogs::wad_stats::WadStatsDialogState;
 use crate::import::state::ImportState;
 use crate::message::Notification;
 
@@ -63,6 +64,7 @@ pub enum ActiveDialog {
     Stats(StatsDialogState),
     Cache(CacheDialogState),
     Resources(ResourcesDialogState),
+    WadStats(WadStatsDialogState),
     Help,
     About,
 }

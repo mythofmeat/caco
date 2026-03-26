@@ -83,6 +83,9 @@ pub fn render(ui: &mut egui::Ui, state: &AppState) -> Option<ActionRequest> {
             if ui.button("Sessions").clicked() {
                 action = Some(ActionRequest::Sessions(wad_id));
             }
+            if ui.button("Map Stats").clicked() {
+                action = Some(ActionRequest::MapStats(wad_id));
+            }
         });
 
         ui.separator();

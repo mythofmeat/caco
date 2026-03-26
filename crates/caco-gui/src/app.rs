@@ -8,6 +8,7 @@ use crate::dialogs::edit::{EditDialogState, EditResult};
 use crate::dialogs::resources::{ResourcesDialogState, ResourcesResult};
 use crate::dialogs::sessions::{SessionsDialogState, SessionsResult};
 use crate::dialogs::stats::{StatsDialogState, StatsResult};
+use crate::dialogs::wad_stats::{WadStatsDialogState, WadStatsResult};
 use crate::import;
 use crate::import::state::SearchSource;
 use crate::message::{AppMessage, Notification};
@@ -93,10 +94,10 @@ impl CacoApp {
                 let dialog = ResourcesDialogState::new(&self.conn);
                 self.state.active_dialog = Some(ActiveDialog::Resources(dialog));
             }
-            ActionRequest::MapStats(_wad_id) => {
-                self.state.notification = Some(Notification::info(
-                    "Map Stats dialog not yet implemented".to_string(),
-                ));
+            ActionRequest::MapStats(wad_id) => {
+                if let Some(dialog) = WadStatsDialogState::new(&self.conn, wad_id) {
+                    self.state.active_dialog = Some(ActiveDialog::WadStats(dialog));
+                }
             }
             ActionRequest::Play(wad_id) => {
                 if self.state.is_playing() {
@@ -297,6 +298,18 @@ impl eframe::App for CacoApp {
                             close_dialog = true;
                         }
                         ResourcesResult::Open => {}
+                    }
+                }
+                ActiveDialog::WadStats(wad_stats_state) => {
+                    match wad_stats_state.render(ctx, &self.conn) {
+                        WadStatsResult::Closed => {
+                            close_dialog = true;
+                        }
+                        WadStatsResult::Modified => {
+                            close_dialog = true;
+                            self.state.needs_reload = true;
+                        }
+                        WadStatsResult::Open => {}
                     }
                 }
                 ActiveDialog::Help => {

@@ -4,3 +4,4 @@ pub mod edit;
 pub mod resources;
 pub mod sessions;
 pub mod stats;
+pub mod wad_stats;
