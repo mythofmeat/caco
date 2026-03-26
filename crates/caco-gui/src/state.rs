@@ -58,7 +58,7 @@ pub enum ActionRequest {
 // ---------------------------------------------------------------------------
 
 pub enum ActiveDialog {
-    Edit(EditDialogState),
+    Edit(Box<EditDialogState>),
     Delete(DeleteDialogState),
     Sessions(SessionsDialogState),
     Stats(StatsDialogState),

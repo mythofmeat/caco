@@ -69,7 +69,7 @@ impl CacoApp {
         match action {
             ActionRequest::Edit(wad_id) => {
                 if let Some(dialog) = EditDialogState::new(&self.conn, wad_id) {
-                    self.state.active_dialog = Some(ActiveDialog::Edit(dialog));
+                    self.state.active_dialog = Some(ActiveDialog::Edit(Box::new(dialog)));
                 }
             }
             ActionRequest::Delete(wad_id) => {
@@ -251,6 +251,10 @@ impl eframe::App for CacoApp {
                     }
                     EditResult::Cancelled => {
                         close_dialog = true;
+                    }
+                    EditResult::Modified => {
+                        close_dialog = true;
+                        self.state.needs_reload = true;
                     }
                     EditResult::Open => {}
                 },
