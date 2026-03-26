@@ -213,30 +213,31 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
         demo_path = Some(path);
     }
 
-    // Build -file list: id24 resources + companion WADs + main WAD
+    // Build -file list: id24 resources + companion files + main WAD
     let mut file_args: Vec<String> = get_id24_resource_args(conn, Some(&wad_path));
     let mut deh_args: Vec<String> = Vec::new();
 
-    if let Some(ref companions) = wad.companion_files
-        && let Ok(files) = serde_json::from_str::<Vec<String>>(companions) {
-            let deh_extensions = [".deh", ".bex"];
-            for comp in files {
-                let ext = Path::new(&comp)
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .map(|e| format!(".{}", e.to_lowercase()))
-                    .unwrap_or_default();
-                if deh_extensions.contains(&ext.as_str()) {
-                    if sourceports::uses_deh_flag(&port) {
-                        deh_args.extend(["-deh".to_string(), comp]);
-                    } else {
-                        file_args.push(comp);
-                    }
+    // Load enabled companions from DB
+    if let Ok(companions) = db::get_companions_for_wad(conn, wad_id) {
+        for comp in companions {
+            if !comp.enabled {
+                continue;
+            }
+            let comp_path = Path::new(&comp.path);
+            if !comp_path.exists() {
+                continue;
+            }
+            if crate::companion_service::is_deh_bex(comp_path) {
+                if sourceports::uses_deh_flag(&port) {
+                    deh_args.extend(["-deh".to_string(), comp.path]);
                 } else {
-                    file_args.push(comp);
+                    file_args.push(comp.path);
                 }
+            } else {
+                file_args.push(comp.path);
             }
         }
+    }
 
     // Add DEH args before -file
     if !deh_args.is_empty() {

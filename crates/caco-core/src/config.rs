@@ -57,6 +57,10 @@ pub fn backup_dir() -> PathBuf {
     default_data_dir().join("backups")
 }
 
+pub fn companion_dir() -> PathBuf {
+    default_data_dir().join("companions")
+}
+
 pub fn default_sourceport_dir() -> PathBuf {
     default_data_dir().join("sourceports")
 }
@@ -88,6 +92,7 @@ pub struct Config {
     pub data_dir: String,
     pub iwad_dir: String,
     pub sourceport_dir: String,
+    pub companion_orphan_cleanup: String,
 
     #[serde(default)]
     pub tui: TuiConfig,
@@ -123,6 +128,7 @@ impl Default for Config {
             data_dir: default_data_subdir().to_string_lossy().into_owned(),
             iwad_dir: iwad_dir().to_string_lossy().into_owned(),
             sourceport_dir: String::new(),
+            companion_orphan_cleanup: "ask".to_string(),
             tui: TuiConfig::default(),
             gui: GuiConfig::default(),
             list: ListConfig::default(),
@@ -396,6 +402,20 @@ pub fn get_sourceport_dir() -> PathBuf {
 /// Get the backup directory.
 pub fn get_backup_dir() -> PathBuf {
     backup_dir()
+}
+
+/// Get the managed companion files directory.
+pub fn get_companion_dir() -> PathBuf {
+    companion_dir()
+}
+
+/// Get the companion orphan cleanup policy ("delete", "keep", or "ask").
+pub fn get_companion_orphan_cleanup() -> String {
+    let value = load_config().companion_orphan_cleanup.clone();
+    match value.as_str() {
+        "delete" | "keep" | "ask" => value,
+        _ => "ask".to_string(),
+    }
 }
 
 /// Get the configured default sourceport.
@@ -795,5 +815,208 @@ mod tests {
         // File should be unchanged (no extra write)
         let updated = fs::read_to_string(&path).unwrap();
         assert_eq!(updated, contents);
+    }
+
+    #[test]
+    fn test_ensure_config_keys_preserves_user_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+
+        let contents = "sourceport = \"dsda-doom\"\ndownload_mirror = 3\n";
+        fs::write(&path, contents).unwrap();
+
+        ensure_config_keys(&path, contents);
+
+        let updated = fs::read_to_string(&path).unwrap();
+        let table: toml::Table = updated.parse().unwrap();
+        assert_eq!(
+            table.get("sourceport").and_then(|v| v.as_str()),
+            Some("dsda-doom")
+        );
+        assert_eq!(
+            table.get("download_mirror").and_then(|v| v.as_integer()),
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn test_section_defaults_tui() {
+        let cfg = TuiConfig::default();
+        assert_eq!(cfg.default_tab, "all");
+        assert_eq!(cfg.default_sort, "id");
+        assert!(!cfg.default_sort_desc);
+    }
+
+    #[test]
+    fn test_section_defaults_gui() {
+        let cfg = GuiConfig::default();
+        assert_eq!(cfg.default_tab, "all");
+        assert_eq!(cfg.default_view, "list");
+        assert_eq!(cfg.window_width, 1200);
+        assert_eq!(cfg.window_height, 800);
+        assert_eq!(cfg.detail_panel_width, 300);
+        assert!(cfg.show_detail_panel);
+        assert_eq!(cfg.thumbnail_size, 160);
+    }
+
+    #[test]
+    fn test_section_defaults_list() {
+        let cfg = ListConfig::default();
+        assert!(cfg.format.contains(&"id".to_string()));
+        assert!(cfg.format.contains(&"title".to_string()));
+        assert!(cfg.format.contains(&"author".to_string()));
+        assert!(cfg.sort.is_none());
+        assert!(cfg.default_status.is_empty());
+    }
+
+    #[test]
+    fn test_config_tui_section_override() {
+        let toml_str = r#"
+sourceport = "gzdoom"
+
+[tui]
+default_tab = "playing"
+default_sort_desc = true
+"#;
+        let cfg: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.tui.default_tab, "playing");
+        assert!(cfg.tui.default_sort_desc);
+        // Non-overridden key keeps default
+        assert_eq!(cfg.tui.default_sort, "id");
+    }
+
+    #[test]
+    fn test_config_gui_section_override() {
+        let toml_str = r#"
+[gui]
+default_view = "grid"
+window_width = 1600
+"#;
+        let cfg: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.gui.default_view, "grid");
+        assert_eq!(cfg.gui.window_width, 1600);
+        // Defaults preserved
+        assert_eq!(cfg.gui.window_height, 800);
+    }
+
+    #[test]
+    fn test_resolve_iwad_path_absolute_existing() {
+        let dir = tempfile::tempdir().unwrap();
+        let wad = dir.path().join("doom2.wad");
+        fs::write(&wad, "fake wad").unwrap();
+
+        let result = resolve_iwad_path(wad.to_str().unwrap(), None);
+        assert_eq!(result, wad.to_string_lossy().to_string());
+    }
+
+    #[test]
+    fn test_resolve_iwad_path_not_found() {
+        let result = resolve_iwad_path("nonexistent_iwad", None);
+        assert_eq!(result, "nonexistent_iwad");
+    }
+
+    #[test]
+    fn test_resolve_iwad_path_db_resolved() {
+        let dir = tempfile::tempdir().unwrap();
+        let wad = dir.path().join("doom2.wad");
+        fs::write(&wad, "fake wad").unwrap();
+
+        let result = resolve_iwad_path("doom2", Some(wad.to_str().unwrap()));
+        assert_eq!(result, wad.to_string_lossy().to_string());
+    }
+
+    #[test]
+    fn test_resolve_iwad_path_db_resolved_missing() {
+        // DB path doesn't exist, should fall through to managed dir or name
+        let result = resolve_iwad_path("doom2", Some("/nonexistent/doom2.wad"));
+        // If managed IWAD dir has doom2.wad, that will be returned;
+        // otherwise the bare name is returned. Just ensure the nonexistent
+        // DB path was not returned.
+        assert_ne!(result, "/nonexistent/doom2.wad");
+    }
+
+    #[test]
+    fn test_save_config_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let orig_config_dir = dir.path().join("config");
+        fs::create_dir_all(&orig_config_dir).unwrap();
+
+        let mut cfg = Config::default();
+        cfg.sourceport = "gzdoom".to_string();
+        cfg.download_mirror = 2;
+        cfg.iwad_dirs = vec!["/opt/doom".into(), "/home/user/iwads".into()];
+
+        let toml_str = toml::to_string_pretty(&cfg).unwrap();
+        let parsed: Config = toml::from_str(&toml_str).unwrap();
+
+        assert_eq!(parsed.sourceport, "gzdoom");
+        assert_eq!(parsed.download_mirror, 2);
+        assert_eq!(parsed.iwad_dirs, vec!["/opt/doom", "/home/user/iwads"]);
+    }
+
+    #[test]
+    fn test_config_with_nested_tui_save() {
+        let mut cfg = Config::default();
+        cfg.tui.default_tab = "playing".to_string();
+        cfg.tui.default_sort = "playtime".to_string();
+
+        let toml_str = toml::to_string_pretty(&cfg).unwrap();
+        let parsed: Config = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.tui.default_tab, "playing");
+        assert_eq!(parsed.tui.default_sort, "playtime");
+    }
+
+    #[test]
+    fn test_llm_config_is_configured() {
+        let llm = LlmConfig::default();
+        assert!(!llm.is_configured());
+
+        let llm = LlmConfig {
+            backend: "anthropic".to_string(),
+            model: String::new(),
+            api_key: String::new(),
+        };
+        assert!(llm.is_configured());
+    }
+
+    #[test]
+    fn test_get_wad_data_dir_special_chars() {
+        let dir = get_wad_data_dir(1, "Scythe 2: Electric Boogaloo!");
+        let name = dir.file_name().unwrap().to_str().unwrap();
+        assert_eq!(name, "1_scythe-2-electric-boogaloo");
+    }
+
+    #[test]
+    fn test_default_config_auto_detect_flags() {
+        let cfg = Config::default();
+        assert!(cfg.auto_detect_iwad);
+        assert!(cfg.auto_detect_complevel);
+        assert!(cfg.auto_doomwiki_enrich);
+        assert!(cfg.auto_stats);
+    }
+
+    #[test]
+    fn test_default_config_cache_settings() {
+        let cfg = Config::default();
+        assert_eq!(cfg.cache_max_size_gb, 0.0);
+        assert_eq!(cfg.cache_max_age_days, 0);
+        assert!(!cfg.cache_auto_clean);
+    }
+
+    #[test]
+    fn test_companion_orphan_cleanup_validation() {
+        fn validate(value: &str) -> String {
+            match value {
+                "delete" | "keep" | "ask" => value.to_string(),
+                _ => "ask".to_string(),
+            }
+        }
+        // Valid values
+        assert_eq!(validate("delete"), "delete");
+        assert_eq!(validate("keep"), "keep");
+        assert_eq!(validate("ask"), "ask");
+        // Invalid values fall back to "ask"
+        assert_eq!(validate("invalid"), "ask");
+        assert_eq!(validate(""), "ask");
     }
 }

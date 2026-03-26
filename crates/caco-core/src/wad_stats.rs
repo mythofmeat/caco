@@ -543,6 +543,127 @@ pub fn compute_stats_delta(before: Option<&WadStats>, after: &WadStats) -> Stats
     }
 }
 
+// --- Map progress ---
+
+/// Whether a map lump name is a secret map by convention.
+///
+/// Secret maps: E*M9 (Doom 1), MAP31/MAP32 (Doom 2).
+fn is_secret_map(lump: &str) -> bool {
+    let lump = lump.to_ascii_uppercase();
+    // Doom 1: ExM9
+    if lump.len() == 4
+        && lump.starts_with('E')
+        && lump.as_bytes()[2] == b'M'
+        && lump.as_bytes()[1].is_ascii_digit()
+        && lump.as_bytes()[3] == b'9'
+    {
+        return true;
+    }
+    // Doom 2: MAP31, MAP32
+    if let Some(num) = lump.strip_prefix("MAP").and_then(|s| s.parse::<i32>().ok()) {
+        return num == 31 || num == 32;
+    }
+    false
+}
+
+/// Summary of map completion progress.
+#[derive(Debug, Clone)]
+pub struct MapProgress {
+    pub played: usize,
+    /// Total map count (None for levelstat format where total is unknown).
+    pub total: Option<usize>,
+    pub secret_played: usize,
+    pub secret_total: Option<usize>,
+}
+
+/// Compute map progress from WAD stats.
+///
+/// Secret maps are counted separately from normal maps.
+pub fn compute_map_progress(stats: &WadStats) -> MapProgress {
+    if stats.format == "levelstat_txt" {
+        let secret_played = stats.maps.iter().filter(|m| is_secret_map(&m.lump)).count();
+        MapProgress {
+            played: stats.maps.len() - secret_played,
+            total: None,
+            secret_played,
+            secret_total: None,
+        }
+    } else {
+        let secret_total = stats.maps.iter().filter(|m| is_secret_map(&m.lump)).count();
+        let played_maps = stats.played_maps();
+        let secret_played = played_maps.iter().filter(|m| is_secret_map(&m.lump)).count();
+        MapProgress {
+            played: played_maps.len() - secret_played,
+            total: Some(stats.maps.len() - secret_total),
+            secret_played,
+            secret_total: Some(secret_total),
+        }
+    }
+}
+
+/// Render a text progress bar for map completion.
+///
+/// Returns `None` when total is unknown (levelstat format) or no maps exist.
+/// Example: `"▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░ 9/30 | 1/2 secret"`
+fn format_progress_bar(progress: &MapProgress, width: usize) -> Option<String> {
+    let total = progress.total?;
+    if total == 0 {
+        return None;
+    }
+    let filled = (progress.played as f64 / total as f64 * width as f64).round() as usize;
+    let filled = filled.min(width);
+    let bar: String = "▓".repeat(filled) + &"░".repeat(width - filled);
+    let mut result = format!("{bar} {}/{total}", progress.played);
+    if let Some(secret_total) = progress.secret_total
+        && secret_total > 0
+    {
+        result.push_str(&format!(" | {}/{secret_total} secret", progress.secret_played));
+    }
+    Some(result)
+}
+
+/// Format map progress as plain text.
+///
+/// Returns `None` if no maps were played.
+fn format_map_progress(progress: &MapProgress) -> Option<String> {
+    if let Some(total) = progress.total {
+        if total == 0 && progress.secret_total.is_none_or(|s| s == 0) {
+            return None;
+        }
+        let base = format!("{}/{total} maps", progress.played);
+        if let Some(secret_total) = progress.secret_total
+            && secret_total > 0
+        {
+            return Some(format!("{base} | {}/{secret_total} secret", progress.secret_played));
+        }
+        return Some(base);
+    }
+    // levelstat: no total known
+    if progress.played == 0 && progress.secret_played == 0 {
+        return None;
+    }
+    let mut parts = Vec::new();
+    if progress.played > 0 {
+        parts.push(format!("{} maps", progress.played));
+    }
+    if progress.secret_played > 0 {
+        parts.push(format!("{} secret", progress.secret_played));
+    }
+    Some(format!("{} played", parts.join(" | ")))
+}
+
+/// Get the best progress display string for a stats JSON snapshot.
+///
+/// Returns a progress bar when total is known (stats.txt), otherwise a text
+/// summary (levelstat.txt). Returns `None` on missing/invalid input or empty
+/// progress.
+pub fn get_progress_display(stats_json: Option<&str>) -> Option<String> {
+    let json_str = stats_json?;
+    let stats = stats_from_json(json_str).ok()?;
+    let progress = compute_map_progress(&stats);
+    format_progress_bar(&progress, 20).or_else(|| format_map_progress(&progress))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -707,5 +828,384 @@ mod tests {
             ..played.clone()
         };
         assert!(!unplayed.played());
+    }
+
+    #[test]
+    fn test_is_secret_map() {
+        assert!(is_secret_map("E1M9"));
+        assert!(is_secret_map("E2M9"));
+        assert!(is_secret_map("MAP31"));
+        assert!(is_secret_map("MAP32"));
+        assert!(!is_secret_map("E1M1"));
+        assert!(!is_secret_map("MAP01"));
+        assert!(!is_secret_map("MAP30"));
+        assert!(!is_secret_map("MAP33"));
+    }
+
+    #[test]
+    fn test_compute_map_progress_stats_txt() {
+        // 3 maps total (MAP01 played, MAP02 played, MAP31 secret+played)
+        let text = concat!(
+            "1\n0\n",
+            "MAP01 1 1 4 1000 -1 -1 1 100 50 3 2 100 5 3\n",
+            "MAP02 1 2 0 -1 -1 -1 0 0 0 0 0 0 0 0\n",
+            "MAP31 1 31 3 2000 -1 -1 1 50 20 1 0 50 2 1\n",
+        );
+        let stats = parse_stats_text(text).unwrap();
+        let progress = compute_map_progress(&stats);
+        assert_eq!(progress.played, 1); // MAP01 played (MAP02 unplayed)
+        assert_eq!(progress.total, Some(2)); // 3 total - 1 secret = 2
+        assert_eq!(progress.secret_played, 1); // MAP31
+        assert_eq!(progress.secret_total, Some(1));
+    }
+
+    #[test]
+    fn test_compute_map_progress_levelstat() {
+        let text = "MAP01 - 0:32.97 (0:32.97)  K: 100/100  I: 50/50  S: 5/5\nMAP02 - 1:15.50 (1:48.47)  K: 80/120  I: 30/45  S: 2/3\n";
+        let stats = parse_stats_text(text).unwrap();
+        let progress = compute_map_progress(&stats);
+        assert_eq!(progress.played, 2);
+        assert!(progress.total.is_none());
+        assert_eq!(progress.secret_played, 0);
+    }
+
+    #[test]
+    fn test_format_progress_bar() {
+        let progress = MapProgress {
+            played: 9,
+            total: Some(30),
+            secret_played: 1,
+            secret_total: Some(2),
+        };
+        let bar = format_progress_bar(&progress, 20).unwrap();
+        assert!(bar.contains("9/30"));
+        assert!(bar.contains("1/2 secret"));
+        // Should have 6 filled (9/30 * 20 = 6)
+        assert!(bar.starts_with("▓▓▓▓▓▓░"));
+    }
+
+    #[test]
+    fn test_format_progress_bar_no_total() {
+        let progress = MapProgress {
+            played: 5,
+            total: None,
+            secret_played: 0,
+            secret_total: None,
+        };
+        assert!(format_progress_bar(&progress, 20).is_none());
+    }
+
+    #[test]
+    fn test_get_progress_display_none() {
+        assert!(get_progress_display(None).is_none());
+        assert!(get_progress_display(Some("invalid json")).is_none());
+    }
+
+    #[test]
+    fn test_get_progress_display_stats_txt() {
+        let text = "1\n0\nMAP01 1 1 4 1000 -1 -1 1 100 50 3 2 100 5 3\nMAP02 1 2 0 -1 -1 -1 0 0 0 0 0 0 0 0\n";
+        let stats = parse_stats_text(text).unwrap();
+        let json = stats_to_json(&stats).unwrap();
+        let display = get_progress_display(Some(&json)).unwrap();
+        assert!(display.contains("1/2")); // 1 played out of 2 total
+    }
+
+    #[test]
+    fn test_get_progress_display_levelstat() {
+        let text = "MAP01 - 0:32.97 (0:32.97)  K: 100/100  I: 50/50  S: 5/5\n";
+        let stats = parse_stats_text(text).unwrap();
+        let json = stats_to_json(&stats).unwrap();
+        let display = get_progress_display(Some(&json)).unwrap();
+        assert!(display.contains("1 maps played"));
+    }
+
+    // --- Detailed parsing tests ---
+
+    #[test]
+    fn test_parse_stats_txt_unplayed_map() {
+        let text = "1\n0\nMAP01 1 1 0 -1 -1 -1 0 0 0 0 0 -1 -1 -1\n";
+        let stats = parse_stats_text(text).unwrap();
+        let m = &stats.maps[0];
+        assert_eq!(m.lump, "MAP01");
+        assert_eq!(m.best_skill, 0);
+        assert_eq!(m.best_time, -1);
+        assert_eq!(m.total_exits, 0);
+        assert!(!m.played());
+    }
+
+    #[test]
+    fn test_played_maps_filter() {
+        let text = concat!(
+            "1\n0\n",
+            "MAP01 1 1 3 23193 -1 -1 1 198 127 5 1 150 7 3\n",
+            "MAP02 1 2 4 5000 -1 -1 2 300 200 10 3 200 12 5\n",
+            "MAP31 1 31 0 -1 -1 -1 0 0 0 0 0 -1 -1 -1\n",
+        );
+        let stats = parse_stats_text(text).unwrap();
+        let played = stats.played_maps();
+        assert_eq!(played.len(), 2); // MAP01, MAP02 (MAP31 unplayed)
+        assert!(played.iter().all(|m| m.played()));
+    }
+
+    #[test]
+    fn test_stats_txt_total_time_display() {
+        let text = "1\n0\nMAP01 1 1 3 1050 -1 -1 1 0 0 0 0 0 0 0\nMAP02 1 2 4 2100 -1 -1 1 0 0 0 0 0 0 0\n";
+        let stats = parse_stats_text(text).unwrap();
+        let display = stats.total_time_display();
+        assert_ne!(display, "-");
+        // 1050 + 2100 = 3150 tics / 35 = 90 seconds = 1:30
+        assert_eq!(display, "1:30");
+    }
+
+    #[test]
+    fn test_levelstat_time_accumulation() {
+        let text = "MAP01 - 0:32.97 (0:32.97)  K: 100/100  I: 50/50  S: 5/5\nMAP02 - 1:23.45 (1:56.42)  K: 80/100  I: 40/50  S: 3/5\n";
+        let stats = parse_stats_text(text).unwrap();
+        let m2 = &stats.maps[1];
+        assert!((m2.time_secs - 83.45).abs() < 0.01);
+        assert!((m2.total_time_secs - 116.42).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_levelstat_total_time_display() {
+        let text = "MAP01 - 0:32.97 (0:32.97)  K: 100/100  I: 50/50  S: 5/5\nMAP02 - 1:23.45 (1:56.42)  K: 80/100  I: 40/50  S: 3/5\nMAP03 - 2:10.00 (4:06.42)  K: 60/60  I: 20/20  S: 2/2\n";
+        let stats = parse_stats_text(text).unwrap();
+        assert_eq!(stats.total_time_display(), "4:06.42");
+    }
+
+    #[test]
+    fn test_format_levelstat_roundtrip() {
+        let text = "MAP01 - 0:32.97 (0:32.97)  K: 100/100  I: 50/50  S: 5/5\nMAP02 - 1:15.50 (1:48.47)  K: 80/120  I: 30/45  S: 2/3\n";
+        let stats = parse_stats_text(text).unwrap();
+        let output = format_stats(&stats);
+        let reparsed = parse_stats_text(&output).unwrap();
+        assert_eq!(reparsed.maps.len(), 2);
+        assert!((reparsed.maps[0].time_secs - 32.97).abs() < 0.01);
+        assert_eq!(reparsed.maps[0].kills, 100);
+        assert_eq!(reparsed.maps[1].lump, "MAP02");
+    }
+
+    #[test]
+    fn test_json_roundtrip_levelstat() {
+        let text = "MAP01 - 0:32.97 (0:32.97)  K: 100/100  I: 50/50  S: 5/5\n";
+        let stats = parse_stats_text(text).unwrap();
+        let json = stats_to_json(&stats).unwrap();
+        let restored = stats_from_json(&json).unwrap();
+        assert_eq!(restored.format, "levelstat_txt");
+        assert_eq!(restored.maps.len(), 1);
+        assert!((restored.maps[0].time_secs - 32.97).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_json_full_roundtrip_to_text() {
+        let text = "1\n150\nMAP01 1 1 3 23193 -1 -1 1 198 127 5 1 150 7 3\n";
+        let stats = parse_stats_text(text).unwrap();
+        let json = stats_to_json(&stats).unwrap();
+        let restored = stats_from_json(&json).unwrap();
+        let text1 = format_stats(&stats);
+        let text2 = format_stats(&restored);
+        assert_eq!(text1, text2);
+    }
+
+    // --- Format map progress tests ---
+
+    #[test]
+    fn test_format_map_progress_with_secrets() {
+        let p = MapProgress {
+            played: 9,
+            total: Some(30),
+            secret_played: 0,
+            secret_total: Some(2),
+        };
+        let result = format_map_progress(&p).unwrap();
+        assert_eq!(result, "9/30 maps | 0/2 secret");
+    }
+
+    #[test]
+    fn test_format_map_progress_no_secrets() {
+        let p = MapProgress {
+            played: 5,
+            total: Some(10),
+            secret_played: 0,
+            secret_total: Some(0),
+        };
+        let result = format_map_progress(&p).unwrap();
+        assert_eq!(result, "5/10 maps");
+    }
+
+    #[test]
+    fn test_format_map_progress_levelstat() {
+        let p = MapProgress {
+            played: 9,
+            total: None,
+            secret_played: 1,
+            secret_total: None,
+        };
+        let result = format_map_progress(&p).unwrap();
+        assert_eq!(result, "9 maps | 1 secret played");
+    }
+
+    #[test]
+    fn test_format_map_progress_levelstat_no_secrets() {
+        let p = MapProgress {
+            played: 5,
+            total: None,
+            secret_played: 0,
+            secret_total: None,
+        };
+        let result = format_map_progress(&p).unwrap();
+        assert_eq!(result, "5 maps played");
+    }
+
+    #[test]
+    fn test_format_map_progress_empty() {
+        let p = MapProgress {
+            played: 0,
+            total: Some(0),
+            secret_played: 0,
+            secret_total: Some(0),
+        };
+        assert!(format_map_progress(&p).is_none());
+    }
+
+    #[test]
+    fn test_format_map_progress_levelstat_empty() {
+        let p = MapProgress {
+            played: 0,
+            total: None,
+            secret_played: 0,
+            secret_total: None,
+        };
+        assert!(format_map_progress(&p).is_none());
+    }
+
+    // --- Progress bar tests ---
+
+    #[test]
+    fn test_format_progress_bar_half() {
+        let p = MapProgress {
+            played: 5,
+            total: Some(10),
+            secret_played: 0,
+            secret_total: Some(0),
+        };
+        let bar = format_progress_bar(&p, 10).unwrap();
+        assert_eq!(bar, "▓▓▓▓▓░░░░░ 5/10");
+    }
+
+    #[test]
+    fn test_format_progress_bar_full() {
+        let p = MapProgress {
+            played: 30,
+            total: Some(30),
+            secret_played: 0,
+            secret_total: Some(0),
+        };
+        let bar = format_progress_bar(&p, 10).unwrap();
+        assert_eq!(bar, "▓▓▓▓▓▓▓▓▓▓ 30/30");
+    }
+
+    #[test]
+    fn test_format_progress_bar_zero_total() {
+        let p = MapProgress {
+            played: 0,
+            total: Some(0),
+            secret_played: 0,
+            secret_total: Some(0),
+        };
+        assert!(format_progress_bar(&p, 10).is_none());
+    }
+
+    // --- Time formatting edge cases ---
+
+    #[test]
+    fn test_format_time_tics_zero() {
+        assert_eq!(format_time_tics(0), "0:00");
+    }
+
+    #[test]
+    fn test_format_time_secs_zero() {
+        assert_eq!(format_time_secs(0.0), "0:00.00");
+    }
+
+    #[test]
+    fn test_skill_name_all_known() {
+        assert_eq!(skill_name(1), "ITYTD");
+        assert_eq!(skill_name(2), "HNTR");
+        assert_eq!(skill_name(3), "HMP");
+    }
+
+    // --- Delta computation: before_none (first play) ---
+
+    #[test]
+    fn test_compute_delta_first_play_unplayed_maps() {
+        // First play with mix of played and unplayed maps
+        let text = "1\n0\nMAP01 1 1 4 1000 -1 -1 1 100 50 3 2 100 5 3\nMAP02 1 2 0 -1 -1 -1 0 0 0 0 0 -1 -1 -1\n";
+        let after = parse_stats_text(text).unwrap();
+        let delta = compute_stats_delta(None, &after);
+        // Only MAP01 was played (MAP02 unplayed)
+        assert_eq!(delta.maps_played, vec!["MAP01"]);
+        assert_eq!(delta.deltas.len(), 1);
+        assert!(delta.deltas[0].new_map);
+    }
+
+    #[test]
+    fn test_compute_delta_levelstat_all_maps() {
+        let text = "MAP01 - 0:32.97 (0:32.97)  K: 100/100  I: 50/50  S: 5/5\nMAP02 - 1:23.45 (1:56.42)  K: 80/100  I: 40/50  S: 3/5\n";
+        let after = parse_stats_text(text).unwrap();
+        let delta = compute_stats_delta(None, &after);
+        assert_eq!(delta.maps_played, vec!["MAP01", "MAP02"]);
+        assert_eq!(delta.deltas.len(), 2);
+        assert!((delta.deltas[0].time_secs.unwrap() - 32.97).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_compute_delta_levelstat_ignores_before() {
+        // levelstat before is irrelevant — all after maps are this session's
+        let before_text = "MAP01 - 0:10.00 (0:10.00)  K: 50/100  I: 25/50  S: 2/5\n";
+        let after_text = "MAP01 - 0:32.97 (0:32.97)  K: 100/100  I: 50/50  S: 5/5\nMAP02 - 1:23.45 (1:56.42)  K: 80/100  I: 40/50  S: 3/5\n";
+        let before = parse_stats_text(before_text).unwrap();
+        let after = parse_stats_text(after_text).unwrap();
+        let delta = compute_stats_delta(Some(&before), &after);
+        assert_eq!(delta.maps_played, vec!["MAP01", "MAP02"]);
+    }
+
+    #[test]
+    fn test_compute_delta_time_improved() {
+        let before_text = "1\n0\nMAP01 1 1 4 2000 -1 -1 1 100 50 3 2 100 5 3\n";
+        let after_text = "1\n0\nMAP01 1 1 4 1500 -1 -1 2 150 60 4 3 100 5 3\n";
+        let before = parse_stats_text(before_text).unwrap();
+        let after = parse_stats_text(after_text).unwrap();
+        let delta = compute_stats_delta(Some(&before), &after);
+        assert_eq!(delta.deltas[0].time_improved, Some(true));
+        assert_eq!(delta.deltas[0].best_time_before, Some(2000));
+        assert_eq!(delta.deltas[0].best_time_after, Some(1500));
+    }
+
+    // --- Compute map progress from real data ---
+
+    #[test]
+    fn test_compute_map_progress_sample_stats_txt() {
+        let text = concat!(
+            "1\n34663\n",
+            "MAP01 1 1 3 23193 -1 -1 1 198 127 5 1 150 7 3\n",
+            "MAP02 1 2 3 26043 -1 -1 1 91 83 71 2 83 137 5\n",
+            "MAP31 1 31 0 -1 -1 -1 0 0 0 0 0 -1 -1 -1\n",
+            "MAP35 1 35 4 294 294 -1 1 0 0 0 0 0 0 0\n",
+        );
+        let stats = parse_stats_text(text).unwrap();
+        let progress = compute_map_progress(&stats);
+        // MAP01 played, MAP02 played, MAP31 secret+unplayed, MAP35 played
+        assert_eq!(progress.total, Some(3)); // 4 total - 1 secret = 3
+        assert_eq!(progress.played, 3);      // MAP01, MAP02, MAP35
+        assert_eq!(progress.secret_total, Some(1)); // MAP31
+        assert_eq!(progress.secret_played, 0);      // MAP31 unplayed
+    }
+
+    #[test]
+    fn test_is_secret_map_non_standard() {
+        assert!(!is_secret_map("INTRO"));
+        assert!(!is_secret_map("TITLEMAP"));
+        assert!(!is_secret_map("MAP33"));
     }
 }

@@ -1,3 +1,4 @@
+pub mod companions;
 pub mod connection;
 pub mod id24;
 pub mod iwads;
@@ -8,6 +9,12 @@ pub mod sessions;
 pub mod wads;
 
 // Re-export commonly used items
+pub use companions::{
+    add_companion, find_companion_by_md5, get_all_companions, get_companions_batch,
+    get_companions_for_wad, get_orphaned_companions, is_orphan, link_companion_to_wad,
+    remove_companion, remove_companion_with_path, set_companion_enabled,
+    unlink_companion_from_wad, would_be_orphan, CompanionRecord, WadCompanionRecord,
+};
 pub use connection::{
     attach_tags, batch_query_i64, batch_query_string, fetch_tags, fetch_tags_batch,
     open_connection, open_memory, SQLITE_MAX_VARS,

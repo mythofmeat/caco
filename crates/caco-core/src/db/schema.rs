@@ -118,6 +118,7 @@ static MIGRATIONS: &[Migration] = &[
     (20, "add_session_exit_code", migrate_add_session_exit_code),
     (21, "add_custom_config", migrate_add_custom_config),
     (22, "merge_custom_complevel_to_complevel", migrate_merge_custom_complevel),
+    (23, "add_companion_tables_and_gc_ignore", migrate_add_companion_tables_and_gc_ignore),
 ];
 
 // ---------------------------------------------------------------------------
@@ -373,6 +374,41 @@ fn migrate_merge_custom_complevel(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+fn migrate_add_companion_tables_and_gc_ignore(conn: &Connection) -> Result<()> {
+    // Companion files registry (MD5-deduplicated storage)
+    if !table_exists(conn, "companion_files_registry")? {
+        conn.execute_batch(
+            "CREATE TABLE companion_files_registry (
+                id INTEGER PRIMARY KEY,
+                md5 TEXT NOT NULL UNIQUE,
+                filename TEXT NOT NULL,
+                path TEXT NOT NULL,
+                size INTEGER NOT NULL DEFAULT 0
+            )",
+        )?;
+    }
+
+    // WAD ↔ companion junction table
+    if !table_exists(conn, "wad_companions")? {
+        conn.execute_batch(
+            "CREATE TABLE wad_companions (
+                wad_id INTEGER NOT NULL REFERENCES wads(id) ON DELETE CASCADE,
+                companion_id INTEGER NOT NULL REFERENCES companion_files_registry(id) ON DELETE CASCADE,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                load_order INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (wad_id, companion_id)
+            );
+            CREATE INDEX idx_wad_companions_wad_id ON wad_companions(wad_id);
+            CREATE INDEX idx_wad_companions_companion_id ON wad_companions(companion_id);",
+        )?;
+    }
+
+    // gc_ignore column on wads table
+    add_column_if_missing(conn, "wads", "gc_ignore", "INTEGER DEFAULT 0")?;
+
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -395,6 +431,8 @@ mod tests {
         assert!(table_exists(&conn, "schema_migrations").unwrap());
         assert!(table_exists(&conn, "iwads").unwrap());
         assert!(table_exists(&conn, "id24_wads").unwrap());
+        assert!(table_exists(&conn, "companion_files_registry").unwrap());
+        assert!(table_exists(&conn, "wad_companions").unwrap());
     }
 
     #[test]
@@ -423,7 +461,7 @@ mod tests {
             "filename", "cached_path", "custom_iwad", "custom_sourceport",
             "custom_args", "created_at", "updated_at", "deleted_at", "version",
             "stats_snapshot", "companion_files", "custom_complevel", "complevel",
-            "custom_config",
+            "custom_config", "gc_ignore",
         ];
         for col in &expected_columns {
             assert!(
@@ -473,5 +511,28 @@ mod tests {
         assert!(has_column(&conn, "id24_wads", "title").unwrap());
         assert!(has_column(&conn, "id24_wads", "path").unwrap());
         assert!(has_column(&conn, "id24_wads", "md5").unwrap());
+    }
+
+    #[test]
+    fn test_companion_files_registry_schema() {
+        let conn = open_memory().unwrap();
+        init_db(&conn).unwrap();
+
+        assert!(has_column(&conn, "companion_files_registry", "id").unwrap());
+        assert!(has_column(&conn, "companion_files_registry", "md5").unwrap());
+        assert!(has_column(&conn, "companion_files_registry", "filename").unwrap());
+        assert!(has_column(&conn, "companion_files_registry", "path").unwrap());
+        assert!(has_column(&conn, "companion_files_registry", "size").unwrap());
+    }
+
+    #[test]
+    fn test_wad_companions_schema() {
+        let conn = open_memory().unwrap();
+        init_db(&conn).unwrap();
+
+        assert!(has_column(&conn, "wad_companions", "wad_id").unwrap());
+        assert!(has_column(&conn, "wad_companions", "companion_id").unwrap());
+        assert!(has_column(&conn, "wad_companions", "enabled").unwrap());
+        assert!(has_column(&conn, "wad_companions", "load_order").unwrap());
     }
 }

@@ -164,6 +164,7 @@ pub struct WadRecord {
     pub version: Option<String>,
     pub complevel: Option<i32>,
     pub stats_snapshot: Option<String>,
+    pub gc_ignore: bool,
     pub deleted_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -199,6 +200,7 @@ impl WadRecord {
             version: row.get("version")?,
             complevel: row.get("complevel")?,
             stats_snapshot: row.get("stats_snapshot")?,
+            gc_ignore: row.get::<_, i64>("gc_ignore").unwrap_or(0) != 0,
             deleted_at: row.get("deleted_at")?,
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
@@ -305,6 +307,7 @@ pub static ALLOWED_UPDATE_FIELDS: LazyLock<std::collections::HashSet<&'static st
             "idgames_id",
             "deleted_at",
             "stats_snapshot",
+            "gc_ignore",
         ]
         .into_iter()
         .collect()

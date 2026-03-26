@@ -1,3 +1,4 @@
+pub mod companion_service;
 pub mod complevel;
 pub mod complevel_detect;
 pub mod config;

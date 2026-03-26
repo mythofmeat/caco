@@ -318,4 +318,201 @@ mod tests {
         assert_eq!(family_name("gzdoom"), Some("zdoom"));
         assert_eq!(family_name("unknown"), None);
     }
+
+    #[test]
+    fn test_identify_all_dsda_executables() {
+        for exe in &["dsda-doom", "nyan-doom", "nugget-doom", "prboom+", "prboom-plus", "glboom+", "glboom-plus"] {
+            let family = identify_family(exe);
+            assert!(family.is_some(), "should identify {}", exe);
+            assert_eq!(family.unwrap().name, "dsda");
+        }
+    }
+
+    #[test]
+    fn test_identify_all_zdoom_executables() {
+        for exe in &["gzdoom", "lzdoom", "vkdoom", "qzdoom", "zdoom"] {
+            let family = identify_family(exe);
+            assert!(family.is_some(), "should identify {}", exe);
+            assert_eq!(family.unwrap().name, "zdoom");
+        }
+    }
+
+    #[test]
+    fn test_identify_all_chocolate_executables() {
+        for exe in &["chocolate-doom", "crispy-doom"] {
+            let family = identify_family(exe);
+            assert!(family.is_some(), "should identify {}", exe);
+            assert_eq!(family.unwrap().name, "chocolate");
+        }
+    }
+
+    #[test]
+    fn test_identify_empty_string() {
+        assert!(identify_family("").is_none());
+    }
+
+    #[test]
+    fn test_identify_with_deep_path() {
+        assert_eq!(
+            identify_family("/opt/doom/ports/gzdoom").unwrap().name,
+            "zdoom"
+        );
+    }
+
+    #[test]
+    fn test_get_data_dir_args_nyan_doom() {
+        let args = get_data_dir_args("nyan-doom", "/data", None, None);
+        assert_eq!(args, vec!["-data", "/data", "-save", "/data"]);
+    }
+
+    #[test]
+    fn test_get_data_dir_args_chocolate() {
+        let args = get_data_dir_args("crispy-doom", "/data", None, None);
+        assert_eq!(args, vec!["-savedir", "/data"]);
+    }
+
+    #[test]
+    fn test_get_data_dir_args_woof() {
+        let args = get_data_dir_args("woof", "/data", None, None);
+        assert_eq!(args, vec!["-data", "/data", "-save", "/data"]);
+    }
+
+    #[test]
+    fn test_get_data_dir_args_eternity() {
+        let args = get_data_dir_args("eternity", "/data", None, None);
+        assert_eq!(args, vec!["-savedir", "/data"]);
+    }
+
+    #[test]
+    fn test_get_data_dir_args_with_full_path() {
+        let args = get_data_dir_args("/usr/bin/nyan-doom", "/data", None, None);
+        assert_eq!(args, vec!["-data", "/data", "-save", "/data"]);
+    }
+
+    #[test]
+    fn test_get_data_dir_args_dsda_without_iwad() {
+        // Without iwad, dsda falls back to same dir for -save
+        let args = get_data_dir_args("dsda-doom", "/data", None, Some("/wads/test.wad"));
+        assert_eq!(args, vec!["-data", "/data", "-save", "/data"]);
+    }
+
+    #[test]
+    fn test_get_data_dir_args_dsda_without_wad_path() {
+        // Without wad_path, dsda falls back to same dir for -save
+        let args = get_data_dir_args("dsda-doom", "/data", Some("doom2"), None);
+        assert_eq!(args, vec!["-data", "/data", "-save", "/data"]);
+    }
+
+    #[test]
+    fn test_get_data_dir_args_woof_ignores_iwad_wad_path() {
+        // Woof has -data/-save but does NOT use nested save dir
+        let args = get_data_dir_args("woof", "/data", Some("doom2"), Some("/wads/test.wad"));
+        assert_eq!(args, vec!["-data", "/data", "-save", "/data"]);
+    }
+
+    #[test]
+    fn test_get_data_dir_args_zdoom_ignores_iwad_wad_path() {
+        let args = get_data_dir_args("gzdoom", "/data", Some("doom2"), Some("/wads/test.wad"));
+        assert_eq!(args, vec!["-savedir", "/data"]);
+    }
+
+    #[test]
+    fn test_get_complevel_args_nyan_doom() {
+        assert_eq!(
+            get_complevel_args("nyan-doom", 21),
+            vec!["-complevel", "21"]
+        );
+    }
+
+    #[test]
+    fn test_get_complevel_args_chocolate_unsupported() {
+        assert!(get_complevel_args("chocolate-doom", 2).is_empty());
+    }
+
+    #[test]
+    fn test_get_complevel_args_eternity_unsupported() {
+        assert!(get_complevel_args("eternity", 11).is_empty());
+    }
+
+    #[test]
+    fn test_get_complevel_args_with_full_path() {
+        assert_eq!(
+            get_complevel_args("/usr/bin/dsda-doom", 21),
+            vec!["-complevel", "21"]
+        );
+    }
+
+    #[test]
+    fn test_get_config_args_nyan_doom() {
+        // nyan-doom is dsda family, should support -config
+        assert_eq!(
+            get_config_args("nyan-doom", "/path/to/config.cfg"),
+            vec!["-config", "/path/to/config.cfg"]
+        );
+    }
+
+    #[test]
+    fn test_get_config_args_woof() {
+        // woof is not dsda family, should not support -config
+        assert!(get_config_args("woof", "/path/to/config.cfg").is_empty());
+    }
+
+    #[test]
+    fn test_get_config_args_eternity() {
+        assert!(get_config_args("eternity", "/path/to/config.cfg").is_empty());
+    }
+
+    #[test]
+    fn test_get_config_args_unknown() {
+        assert!(get_config_args("unknown-port", "/path/to/config.cfg").is_empty());
+    }
+
+    #[test]
+    fn test_get_dsda_save_dir_nyan() {
+        let dir = get_dsda_save_dir("nyan-doom", "/data", "tnt", "/wads/test.wad");
+        assert!(dir.contains("nyan_doom_data"));
+        assert!(dir.contains("tnt"));
+        assert!(dir.contains("test"));
+    }
+
+    #[test]
+    fn test_get_dsda_save_dir_full_path() {
+        let dir = get_dsda_save_dir("/usr/bin/nyan-doom", "/data", "doom2", "/wads/test.wad");
+        assert!(dir.contains("nyan_doom_data"));
+        assert!(dir.contains("doom2"));
+    }
+
+    #[test]
+    fn test_get_dsda_save_dir_wad_stem_lowercase() {
+        let dir = get_dsda_save_dir("dsda-doom", "/data", "doom2", "/wads/MyWad.wad");
+        assert!(dir.contains("mywad"));
+    }
+
+    #[test]
+    fn test_uses_deh_flag_all_families() {
+        // dsda family: uses -deh
+        assert!(uses_deh_flag("dsda-doom"));
+        assert!(uses_deh_flag("nyan-doom"));
+        // zdoom family: uses -file instead
+        assert!(!uses_deh_flag("gzdoom"));
+        assert!(!uses_deh_flag("lzdoom"));
+        assert!(!uses_deh_flag("vkdoom"));
+        // Other families: uses -deh
+        assert!(uses_deh_flag("chocolate-doom"));
+        assert!(uses_deh_flag("woof"));
+        assert!(uses_deh_flag("eternity"));
+    }
+
+    #[test]
+    fn test_save_extensions() {
+        assert_eq!(SAVE_EXTENSIONS.get("dsda").unwrap(), &[".dsg"]);
+        assert_eq!(SAVE_EXTENSIONS.get("zdoom").unwrap(), &[".zds"]);
+        assert_eq!(SAVE_EXTENSIONS.get("woof").unwrap(), &[".dsg"]);
+    }
+
+    #[test]
+    fn test_all_save_extensions() {
+        assert!(ALL_SAVE_EXTENSIONS.contains(&".dsg"));
+        assert!(ALL_SAVE_EXTENSIONS.contains(&".zds"));
+    }
 }

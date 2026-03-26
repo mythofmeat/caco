@@ -58,19 +58,19 @@ static TNT_ONLY_PATCHES: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     ])
 });
 
-// 78 patch names present in Plutonia but not in DOOM2.WAD or TNT.WAD
+// 72 patch names present in Plutonia but not in DOOM.WAD, DOOM2.WAD, or TNT.WAD
 static PLUTONIA_ONLY_PATCHES: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     HashSet::from([
         "AROCK2", "AROCK3", "AROCK4", "AROCK5", "BOSFA0", "BRBRICK",
         "BRBRICK2", "BRICK", "BRICK1", "BRICK2", "BROCK2", "BROWN1", "BROWN2",
         "BROWN3", "BROWN5", "CAMO1", "CAMO4", "CAMO5", "CONCRETE", "DARKROCK",
-        "DIRBRI1", "DIRBRI2", "FIREBLU1", "FIREBLU2", "GRATE", "HELL6_1",
-        "HELL8_3", "MARBLE1", "MC1", "MC10", "MC11", "MC12", "MC13", "MC14",
+        "DIRBRI1", "DIRBRI2", "FIREBLU1", "FIREBLU2", "GRATE",
+        "MARBLE1", "MC1", "MC10", "MC11", "MC12", "MC13", "MC14",
         "MC15", "MC16", "MC17", "MC18", "MC19", "MC2", "MC20", "MC3", "MC4",
         "MC5", "MC6", "MC7", "MC8", "MOSROK2", "MOSSBRIK", "MOSSROCK", "MOULD",
         "MUD", "MYWOOD", "NATROCK", "POISON", "RAILING", "REDROCK", "ROCK",
-        "SKY1", "SKY2A", "SKY2B", "SKY2C", "SKY2D", "SKY3A", "SKY3B",
-        "SW1SKULL", "SW2SKULL", "TILE", "VINES1", "W109_1", "W109_2", "W110_1",
+        "SKY2A", "SKY2B", "SKY2C", "SKY2D", "SKY3A", "SKY3B",
+        "SW1SKULL", "SW2SKULL", "TILE", "VINES1",
         "WFALL1", "WFALL2", "WFALL3", "WFALL4", "WOOD", "YELLOW",
     ])
 });
@@ -385,5 +385,207 @@ mod tests {
         zip.finish().unwrap();
 
         assert_eq!(detect_iwad(&zip_path), Some("doom2"));
+    }
+
+    #[test]
+    fn test_plutonia_patches_exclude_doom_wad() {
+        // HELL6_1, HELL8_3, SKY1, W109_1, W109_2, W110_1 are in DOOM.WAD
+        // and must NOT be in the Plutonia-only set (would cause false positives)
+        let doom_patches = ["HELL6_1", "HELL8_3", "SKY1", "W109_1", "W109_2", "W110_1"];
+        for patch in &doom_patches {
+            assert!(
+                !PLUTONIA_ONLY_PATCHES.contains(patch),
+                "{patch} is in DOOM.WAD and should not be in PLUTONIA_ONLY_PATCHES"
+            );
+        }
+    }
+
+    #[test]
+    fn test_detect_from_pnames_no_false_plutonia_with_doom_patches() {
+        // A WAD referencing HELL6_1 (in DOOM.WAD) should NOT detect as Plutonia
+        let mut pnames = HashSet::new();
+        pnames.insert("HELL6_1".to_string());
+        pnames.insert("SKY1".to_string());
+        let lump_names: HashSet<&str> = HashSet::from(["MAP01"]);
+        assert_eq!(detect_from_pnames(&pnames, &lump_names), None);
+    }
+
+    #[test]
+    fn test_detect_from_pnames_self_contained_plutonia() {
+        // WAD provides its own Plutonia patches as lumps → not detected
+        let mut pnames = HashSet::new();
+        pnames.insert("AROCK2".to_string());
+        pnames.insert("BRBRICK".to_string());
+        let lump_names: HashSet<&str> = HashSet::from(["AROCK2", "BRBRICK", "MAP01"]);
+        assert_eq!(detect_from_pnames(&pnames, &lump_names), None);
+    }
+
+    #[test]
+    fn test_detect_iwad_multi_wad_zip() {
+        // ZIP with multiple WADs: a resource WAD (no maps) and a maps WAD
+        let dir = tempfile::tempdir().unwrap();
+        let zip_path = dir.path().join("multi.zip");
+
+        let resource_wad = build_wad(&[("THINGS", &[1, 2, 3]), ("LINEDEFS", &[4, 5])]);
+        let maps_wad = build_wad(&[("MAP01", &[]), ("MAP02", &[]), ("THINGS", &[])]);
+
+        let file = std::fs::File::create(&zip_path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        // Resource WAD listed first — old code would pick this one
+        zip.start_file("resources.wad", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(&resource_wad).unwrap();
+        zip.start_file("maps.wad", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(&maps_wad).unwrap();
+        zip.finish().unwrap();
+
+        // Should detect from the WAD with maps, not the resource WAD
+        assert_eq!(detect_iwad(&zip_path), Some("doom2"));
+    }
+
+    #[test]
+    fn test_detect_iwad_multi_wad_zip_fallback() {
+        // ZIP with multiple WADs, none containing maps — should fall back to first
+        let dir = tempfile::tempdir().unwrap();
+        let zip_path = dir.path().join("nomaps.zip");
+
+        let wad1 = build_wad(&[("THINGS", &[1, 2])]);
+        let wad2 = build_wad(&[("LINEDEFS", &[3, 4])]);
+
+        let file = std::fs::File::create(&zip_path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        zip.start_file("a.wad", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(&wad1).unwrap();
+        zip.start_file("b.wad", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(&wad2).unwrap();
+        zip.finish().unwrap();
+
+        // No maps in either WAD, so detection returns None (falls back to first WAD,
+        // but map detection finds nothing)
+        assert_eq!(detect_iwad(&zip_path), None);
+    }
+
+    #[test]
+    fn test_patch_sets_disjoint() {
+        // TNT and Plutonia patch sets must have zero overlap
+        let overlap: Vec<&&str> = TNT_ONLY_PATCHES
+            .iter()
+            .filter(|p| PLUTONIA_ONLY_PATCHES.contains(*p))
+            .collect();
+        assert!(
+            overlap.is_empty(),
+            "TNT and Plutonia sets overlap: {:?}",
+            overlap
+        );
+    }
+
+    #[test]
+    fn test_patch_set_sizes() {
+        assert_eq!(TNT_ONLY_PATCHES.len(), 197);
+        assert_eq!(PLUTONIA_ONLY_PATCHES.len(), 72);
+    }
+
+    #[test]
+    fn test_parse_pnames_empty() {
+        // PNAMES lump with count=0
+        let mut pnames_data = Vec::new();
+        pnames_data.extend_from_slice(&0_i32.to_le_bytes()); // count = 0
+
+        let wad = build_wad(&[("PNAMES", &pnames_data)]);
+        let directory = parse_wad_directory(&wad);
+        let result = parse_pnames(&wad, &directory).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_detect_from_pnames_no_signal() {
+        // PNAMES with only generic patches (not in TNT or Plutonia sets)
+        let mut pnames = HashSet::new();
+        pnames.insert("STARTAN1".to_string());
+        pnames.insert("DOOR1".to_string());
+        pnames.insert("FLAT10".to_string());
+        let lump_names: HashSet<&str> = HashSet::from(["MAP01"]);
+        assert_eq!(detect_from_pnames(&pnames, &lump_names), None);
+    }
+
+    #[test]
+    fn test_detect_iwad_empty_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let wad_path = dir.path().join("empty.wad");
+        std::fs::write(&wad_path, b"").unwrap();
+        assert_eq!(detect_iwad(&wad_path), None);
+    }
+
+    #[test]
+    fn test_detect_iwad_too_small() {
+        let dir = tempfile::tempdir().unwrap();
+        let wad_path = dir.path().join("small.wad");
+        std::fs::write(&wad_path, b"PWAD").unwrap(); // Only 4 bytes, need 12
+        assert_eq!(detect_iwad(&wad_path), None);
+    }
+
+    #[test]
+    fn test_detect_iwad_bad_magic() {
+        let dir = tempfile::tempdir().unwrap();
+        let wad_path = dir.path().join("bad.wad");
+        std::fs::write(&wad_path, b"NOTAWADFILE!").unwrap();
+        assert_eq!(detect_iwad(&wad_path), None);
+    }
+
+    #[test]
+    fn test_detect_iwad_with_tnt_pnames() {
+        let dir = tempfile::tempdir().unwrap();
+        let wad_path = dir.path().join("tnt_wad.wad");
+
+        // Build PNAMES lump with TNT-only patches
+        let mut pnames_data = Vec::new();
+        pnames_data.extend_from_slice(&2_i32.to_le_bytes());
+        pnames_data.extend_from_slice(b"ALTAQUA\0");
+        pnames_data.extend_from_slice(b"BIGMURAL");
+
+        let wad = build_wad(&[
+            ("MAP01", &[]),
+            ("PNAMES", &pnames_data),
+        ]);
+        std::fs::write(&wad_path, &wad).unwrap();
+
+        assert_eq!(detect_iwad(&wad_path), Some("tnt"));
+    }
+
+    #[test]
+    fn test_detect_iwad_pnames_priority_over_maps() {
+        // PNAMES detection should take priority over map lump detection
+        let dir = tempfile::tempdir().unwrap();
+        let wad_path = dir.path().join("priority.wad");
+
+        let mut pnames_data = Vec::new();
+        pnames_data.extend_from_slice(&1_i32.to_le_bytes());
+        pnames_data.extend_from_slice(b"AROCK2\0\0");
+
+        let wad = build_wad(&[
+            ("MAP01", &[]),
+            ("PNAMES", &pnames_data),
+        ]);
+        std::fs::write(&wad_path, &wad).unwrap();
+
+        // Should detect plutonia from PNAMES, not doom2 from MAPxx
+        assert_eq!(detect_iwad(&wad_path), Some("plutonia"));
+    }
+
+    #[test]
+    fn test_detect_complvl_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        let wad_path = dir.path().join("test.wad");
+        let wad = build_wad(&[("COMPLVL", &[0])]);
+        std::fs::write(&wad_path, &wad).unwrap();
+        assert_eq!(detect_complvl(&wad_path), Some(0));
+    }
+
+    #[test]
+    fn test_detect_complvl_nonexistent() {
+        assert_eq!(detect_complvl(Path::new("/nonexistent/test.wad")), None);
     }
 }
