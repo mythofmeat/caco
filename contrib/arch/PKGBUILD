@@ -16,27 +16,27 @@ source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
 sha256sums=('SKIP')
 
 prepare() {
-    cd "$pkgname-v$pkgver"
+    cd "$pkgname"
     export RUSTUP_TOOLCHAIN=stable
     cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
 }
 
 build() {
-    cd "$pkgname-v$pkgver"
+    cd "$pkgname"
     export RUSTUP_TOOLCHAIN=stable
     export CARGO_TARGET_DIR=target
     cargo build --frozen --release --workspace
 }
 
 check() {
-    cd "$pkgname-v$pkgver"
+    cd "$pkgname"
     export RUSTUP_TOOLCHAIN=stable
     export CARGO_TARGET_DIR=target
     cargo test --frozen --workspace
 }
 
 package() {
-    cd "$pkgname-v$pkgver"
+    cd "$pkgname"
 
     # Binaries
     install -Dm755 target/release/caco     "$pkgdir/usr/bin/caco"
