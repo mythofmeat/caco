@@ -8,23 +8,36 @@ A personal Doom WAD library manager inspired by [beets](https://beets.io). Impor
 - **Smart queries** — beets-style filters (`status:playing`, `tag:megawad`, `author:"erik alm"`) with OR, negation, and glob support.
 - **Play tracking** — automatic playtime, session history, per-map stats (kills/items/secrets/time), and completion counts.
 - **IWAD management** — register your IWADs once, and caco auto-detects which one each WAD needs.
+- **Companion files** — manage DEH patches, music WADs, and other companion files with automatic deduplication.
 - **Per-WAD isolation** — saves, stats, and configs are separated per WAD so nothing gets mixed up.
 - **On-demand downloads** — idgames WADs are cached when you play, with configurable auto-cleanup.
-- **Three interfaces** — CLI, TUI (vim-style navigation), and GUI (Qt6 with thumbnails and grid/list views).
+- **Garbage collection** — reclaim disk space from finished/abandoned WADs with smart cleanup.
+- **Three interfaces** — CLI, TUI (ratatui), and GUI (egui with thumbnails and grid/list views).
 
 ## Installation
+
+### From source (Rust)
+
+```bash
+git clone https://github.com/evansheen/caco && cd caco
+
+# Build all binaries
+cargo build --release
+
+# Install CLI
+cargo install --path crates/caco-cli
+
+# Install GUI
+cargo install --path crates/caco-gui
+```
+
+### From source (Python — legacy)
 
 Requires Python 3.10+.
 
 ```bash
-pip install caco
-
-# Or from source
-git clone https://github.com/evansheen/caco && cd caco
 pip install -e .
-
-# Optional: GUI support (requires Qt6)
-pip install -e '.[gui]'
+pip install -e '.[gui]'  # Optional: Qt6 GUI
 ```
 
 ## Quick Start
@@ -68,7 +81,7 @@ caco stats                         # Library statistics
 Terminal interface with vim-style navigation, tabbed filtering, and live search.
 
 ```bash
-caco --tui
+caco-tui
 ```
 
 Key bindings: `j/k` navigate, `Enter` plays, `/` filters, `e` edits, `s` sets status, `r` cycles rating, `+/-` adjusts beaten count. Press `?` or `q` to quit.
@@ -78,8 +91,7 @@ Key bindings: `j/k` navigate, `Enter` plays, `/` filters, `e` edits, `s` sets st
 Desktop application with a dark Doom-inspired theme, WAD thumbnails, and grid/list views.
 
 ```bash
-pip install -e '.[gui]'
-caco --gui
+caco-gui
 ```
 
 ## Importing
@@ -93,6 +105,7 @@ caco import https://doomwiki.org/wiki/Eviternity
 caco import https://www.doomworld.com/forum/topic/134292-myhousewad/
 caco import ~/Downloads/mymap.wad  # Local file
 caco import ~/iwads/doom2.wad      # Auto-detected as IWAD
+caco import saved_search.json      # Offline JSON fallback
 ```
 
 Non-Doomwiki imports are auto-enriched with Doom Wiki metadata (author, year, description, IWAD). Duplicate detection warns before re-importing.
@@ -199,10 +212,6 @@ to-play = "blue"
 playing = "green"
 finished = "dim"
 
-[tui]
-default_tab = "all"
-default_sort = "id"
-
 [gui]
 default_view = "list"
 thumbnail_size = 128
@@ -250,9 +259,11 @@ idgames WADs are cleaned automatically (re-downloadable). Non-idgames WADs promp
 | `~/.local/share/caco/wads/` | Cached WAD files |
 | `~/.local/share/caco/data/` | Per-WAD saves, stats, configs |
 | `~/.local/share/caco/iwads/` | Managed IWADs |
+| `~/.local/share/caco/companions/` | Managed companion files |
 | `~/.local/share/caco/backups/` | Save backups |
 
 ## Supported Sourceports
+
 dsda-doom / nyan-doom, Helion, uzdoom.
 
 Other sourceports work too — they just don't get data directory isolation, config injection or stat tracking.
@@ -260,6 +271,11 @@ Other sourceports work too — they just don't get data directory isolation, con
 ## Development
 
 ```bash
+# Rust (primary)
+cargo test --workspace
+cargo clippy --workspace -- -D warnings
+
+# Python (legacy)
 pip install -e '.[test]'
 pytest tests/ -v
 ```

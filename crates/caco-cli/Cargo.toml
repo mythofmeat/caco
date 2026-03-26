@@ -1,0 +1,23 @@
+[package]
+name = "caco-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "caco"
+path = "src/main.rs"
+
+[dependencies]
+caco-core.workspace = true
+caco-sources.workspace = true
+clap.workspace = true
+comfy-table.workspace = true
+indicatif.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+rusqlite.workspace = true
+toml.workspace = true
+dirs.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -1,3 +1,4 @@
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -11,11 +12,36 @@ venv/
 .coverage
 coverage.json
 htmlcov/
-.claude
+
+# Rust
+target/
+*.pdb
 
 # IDE / editor
-.idea
-.vscode
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment / secrets
+.env
+.env.*
+
+# Claude Code
+.claude/
+
+# Task orchestration
+.ralph-tui/
+tasks/
+
+# pytest
+.pytest_cache/
+pytest-of-*/
 
 # Sandbox / dotfile artifacts
 .bash_profile
@@ -34,6 +60,3 @@ config
 hooks
 objects
 refs
-
-# pytest temp dirs
-pytest-of-*/
