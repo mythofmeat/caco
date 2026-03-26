@@ -156,11 +156,21 @@ impl ResourcesDialogState {
                     ui.label("Import path:");
                     let response = ui.add(
                         egui::TextEdit::singleline(&mut self.import_path)
-                            .desired_width(ui.available_width() - 50.0)
+                            .desired_width(ui.available_width() - 120.0)
                             .hint_text("Path to IWAD or id24 WAD file..."),
                     );
                     let enter_pressed = response.lost_focus()
                         && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    if ui.button("Browse…").clicked() {
+                        let mut dialog = rfd::FileDialog::new()
+                            .add_filter("WAD files", &["wad"]);
+                        if let Some(dir) = dirs::home_dir() {
+                            dialog = dialog.set_directory(dir);
+                        }
+                        if let Some(path) = dialog.pick_file() {
+                            self.import_path = path.display().to_string();
+                        }
+                    }
                     if ui.button("Add").clicked() || enter_pressed {
                         self.do_import(conn);
                     }

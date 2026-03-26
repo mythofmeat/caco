@@ -1,4 +1,4 @@
-use crate::import::state::FormState;
+use crate::import::state::{FormKind, FormState};
 use crate::theme;
 
 // ---------------------------------------------------------------------------
@@ -15,20 +15,33 @@ pub enum FormPanelAction {
 
 pub fn render(ui: &mut egui::Ui, state: &mut FormState) -> Option<FormPanelAction> {
     let mut action = None;
+    let is_local = state.kind == FormKind::Local;
 
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = 8.0;
 
         for field in &mut state.fields {
+            let is_path_field = is_local && field.name == "path";
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new(&field.display_label)
                         .color(theme::TEXT_SECONDARY)
                         .monospace(),
                 );
+                let text_width = if is_path_field { 330.0 } else { 400.0 };
                 ui.add(
-                    egui::TextEdit::singleline(&mut field.value).desired_width(400.0),
+                    egui::TextEdit::singleline(&mut field.value).desired_width(text_width),
                 );
+                if is_path_field && ui.button("Browse…").clicked() {
+                    let mut dialog = rfd::FileDialog::new()
+                        .add_filter("WAD/ZIP files", &["wad", "zip"]);
+                    if let Some(dir) = dirs::home_dir() {
+                        dialog = dialog.set_directory(dir);
+                    }
+                    if let Some(path) = dialog.pick_file() {
+                        field.value = path.display().to_string();
+                    }
+                }
             });
         }
 
