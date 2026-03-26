@@ -229,10 +229,7 @@ impl IdgamesClient {
         progress: Option<&dyn Fn(u64, u64)>,
     ) -> Result<PathBuf> {
         let url = self.get_download_url(entry, mirror);
-        let dest_path = match dest {
-            Some(p) => p.to_path_buf(),
-            None => PathBuf::from(&entry.filename),
-        };
+        let dest_path = resolve_download_dest(dest, &entry.filename);
         let partial = dest_path.with_extension(
             format!(
                 "{}.partial",
@@ -356,6 +353,19 @@ impl IdgamesClient {
 impl Default for IdgamesClient {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Resolve the destination file path for a download.
+///
+/// If `dest` is a directory, the filename is joined to it.
+/// If `dest` is a specific file path, it's used as-is.
+/// If `dest` is `None`, the filename alone is returned (relative to CWD).
+fn resolve_download_dest(dest: Option<&Path>, filename: &str) -> PathBuf {
+    match dest {
+        Some(p) if p.is_dir() => p.join(filename),
+        Some(p) => p.to_path_buf(),
+        None => PathBuf::from(filename),
     }
 }
 
@@ -614,5 +624,28 @@ mod tests {
         assert_eq!(entry.votes, 19);
         assert_eq!(entry.reviews.len(), 1);
         assert_eq!(entry.reviews[0].text, "Amazing!");
+    }
+
+    #[test]
+    fn test_resolve_download_dest_directory() {
+        // When dest is an existing directory, filename should be joined
+        let dir = std::env::temp_dir();
+        let result = resolve_download_dest(Some(dir.as_path()), "sunlust.zip");
+        assert_eq!(result, dir.join("sunlust.zip"));
+    }
+
+    #[test]
+    fn test_resolve_download_dest_file_path() {
+        // When dest is a specific file path (not an existing dir), use as-is
+        let path = PathBuf::from("/tmp/custom_name.zip");
+        let result = resolve_download_dest(Some(path.as_path()), "sunlust.zip");
+        assert_eq!(result, path);
+    }
+
+    #[test]
+    fn test_resolve_download_dest_none() {
+        // When dest is None, return just the filename (relative to CWD)
+        let result = resolve_download_dest(None, "sunlust.zip");
+        assert_eq!(result, PathBuf::from("sunlust.zip"));
     }
 }
