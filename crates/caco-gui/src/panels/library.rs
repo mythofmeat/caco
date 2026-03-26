@@ -61,8 +61,13 @@ pub fn render_toolbar(ui: &mut egui::Ui, state: &mut AppState) -> Option<ActionR
 
         // Right-aligned buttons
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let detail_tooltip = if state.show_detail_panel {
+                "Hide detail panel"
+            } else {
+                "Show detail panel"
+            };
             let label = if state.show_detail_panel { "Hide Detail" } else { "Show Detail" };
-            if ui.button(label).clicked() {
+            if ui.button(label).on_hover_text(detail_tooltip).clicked() {
                 state.show_detail_panel = !state.show_detail_panel;
             }
 
@@ -78,13 +83,13 @@ pub fn render_toolbar(ui: &mut egui::Ui, state: &mut AppState) -> Option<ActionR
                 };
             }
 
-            if ui.button("Cache").clicked() {
+            if ui.button("Cache").on_hover_text("Cache management").clicked() {
                 action = Some(ActionRequest::Cache);
             }
-            if ui.button("Resources").clicked() {
+            if ui.button("Resources").on_hover_text("IWAD and id24 resources").clicked() {
                 action = Some(ActionRequest::Resources);
             }
-            if ui.button("Stats").clicked() {
+            if ui.button("Stats").on_hover_text("Library statistics").clicked() {
                 action = Some(ActionRequest::Stats);
             }
         });

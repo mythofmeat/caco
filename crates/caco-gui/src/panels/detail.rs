@@ -1,13 +1,19 @@
 use crate::relative_time;
 use crate::state::{ActionRequest, AppState};
 use crate::theme;
+use crate::thumbnails::ThumbnailManager;
 use rusqlite::Connection;
 
 /// Type alias to disambiguate from caco_core::db::sessions::WadStats.
 type StatsData = caco_core::wad_stats::WadStats;
 
 /// Render the WAD detail sidebar panel. Returns an action request if a button was clicked.
-pub fn render(ui: &mut egui::Ui, state: &AppState, conn: &Connection) -> Option<ActionRequest> {
+pub fn render(
+    ui: &mut egui::Ui,
+    state: &AppState,
+    conn: &Connection,
+    thumbnails: Option<&ThumbnailManager>,
+) -> Option<ActionRequest> {
     let Some(wad) = state.selected_wad() else {
         ui.centered_and_justified(|ui| {
             ui.colored_label(theme::TEXT_SECONDARY, "No WAD selected");
@@ -28,6 +34,18 @@ pub fn render(ui: &mut egui::Ui, state: &AppState, conn: &Connection) -> Option<
 
     egui::ScrollArea::vertical().show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = 4.0;
+
+        // Thumbnail
+        if let Some(tm) = thumbnails
+            && let Some(tex) = tm.get(wad_id)
+        {
+            let tex_size = tex.size_vec2();
+            let available = ui.available_width();
+            let scale = (available / tex_size.x).min(1.0);
+            let display_size = egui::vec2(tex_size.x * scale, tex_size.y * scale);
+            ui.image(egui::load::SizedTexture::new(tex.id(), display_size));
+            ui.add_space(4.0);
+        }
 
         // Title
         ui.colored_label(

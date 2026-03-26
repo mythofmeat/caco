@@ -504,7 +504,7 @@ impl eframe::App for CacoApp {
                             .max_width(500.0)
                             .resizable(true)
                             .show_inside(ui, |ui| {
-                                detail_action = panels::detail::render(ui, &self.state, &self.conn);
+                                detail_action = panels::detail::render(ui, &self.state, &self.conn, Some(&self.thumbnails));
                             });
                         if let Some(a) = detail_action {
                             actions.push(a);
@@ -534,21 +534,38 @@ impl eframe::App for CacoApp {
             }
         });
 
-        // 7. Request thumbnails for visible WADs in grid mode
-        if self.state.view_mode == ViewMode::Library
-            && self.state.view_layout == ViewLayout::Grid
-            && self.state.wads.iter().any(|w| self.thumbnails.needs_request(w.id))
-        {
+        // 7. Request thumbnails for visible WADs (grid mode) and selected WAD (detail panel)
+        if self.state.view_mode == ViewMode::Library {
             let sender = self.bg.sender();
-            for wad in &self.state.wads {
-                if self.thumbnails.needs_request(wad.id) {
-                    let path = wad.cached_path.as_deref().map(std::path::Path::new);
-                    let hint = ThumbnailHint {
-                        source_type: wad.source_type.clone(),
-                        source_url: wad.source_url.clone(),
-                        title: wad.title.clone(),
-                    };
-                    self.thumbnails.request(wad.id, path, &hint, &sender);
+
+            // Request thumbnail for selected WAD when detail panel is visible
+            if self.state.show_detail_panel
+                && let Some(wad) = self.state.selected_wad()
+                && self.thumbnails.needs_request(wad.id)
+            {
+                let path = wad.cached_path.as_deref().map(std::path::Path::new);
+                let hint = ThumbnailHint {
+                    source_type: wad.source_type.clone(),
+                    source_url: wad.source_url.clone(),
+                    title: wad.title.clone(),
+                };
+                self.thumbnails.request(wad.id, path, &hint, &sender);
+            }
+
+            // Request thumbnails for all visible WADs in grid mode
+            if self.state.view_layout == ViewLayout::Grid
+                && self.state.wads.iter().any(|w| self.thumbnails.needs_request(w.id))
+            {
+                for wad in &self.state.wads {
+                    if self.thumbnails.needs_request(wad.id) {
+                        let path = wad.cached_path.as_deref().map(std::path::Path::new);
+                        let hint = ThumbnailHint {
+                            source_type: wad.source_type.clone(),
+                            source_url: wad.source_url.clone(),
+                            title: wad.title.clone(),
+                        };
+                        self.thumbnails.request(wad.id, path, &hint, &sender);
+                    }
                 }
             }
         }

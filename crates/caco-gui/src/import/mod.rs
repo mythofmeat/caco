@@ -28,7 +28,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut ImportState) -> Option<ImportAction
     ui.horizontal(|ui| {
         for (i, label) in IMPORT_SOURCES.iter().enumerate() {
             let is_active = state.active_source == i;
-            let text = egui::RichText::new(format!("{} {label}", i + 1));
+            let text = egui::RichText::new(format!("{}. {label}", i + 1));
             let text = if is_active {
                 text.strong().color(theme::TEXT_ACCENT)
             } else {

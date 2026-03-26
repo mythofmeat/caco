@@ -4,11 +4,22 @@ use crate::state::{ActionRequest, AppState};
 use crate::theme;
 
 /// Card dimensions.
-const CARD_WIDTH: f32 = 200.0;
+const CARD_MIN_WIDTH: f32 = 160.0;
+const CARD_MAX_WIDTH: f32 = 240.0;
 const CARD_SPACING: f32 = 8.0;
 const CARD_PADDING: f32 = 8.0;
 const CARD_ROUNDING: u8 = 6;
 const THUMB_ASPECT: f32 = 0.6; // height = width * aspect
+
+/// Calculate responsive card width: fit as many cards as possible at min width,
+/// then expand each card up to max width to fill available space.
+fn card_width(available_width: f32) -> f32 {
+    let columns = ((available_width + CARD_SPACING) / (CARD_MIN_WIDTH + CARD_SPACING))
+        .floor()
+        .max(1.0);
+    let width = (available_width - (columns - 1.0) * CARD_SPACING) / columns;
+    width.clamp(CARD_MIN_WIDTH, CARD_MAX_WIDTH)
+}
 
 /// Placeholder colors cycled by WAD id.
 const PLACEHOLDER_COLORS: &[Color32] = &[
@@ -28,7 +39,8 @@ pub fn render(
     thumbnails: Option<&crate::thumbnails::ThumbnailManager>,
 ) -> Option<ActionRequest> {
     let available_width = ui.available_width();
-    let columns = ((available_width + CARD_SPACING) / (CARD_WIDTH + CARD_SPACING))
+    let card_w = card_width(available_width);
+    let columns = ((available_width + CARD_SPACING) / (card_w + CARD_SPACING))
         .floor()
         .max(1.0) as usize;
 
@@ -65,10 +77,11 @@ pub fn render(
         action = super::handle_action_keys(ui, state.selected_wad_id);
     }
 
-    let thumb_width = CARD_WIDTH - CARD_PADDING * 2.0;
+    let thumb_width = card_w - CARD_PADDING * 2.0;
     let thumb_height = thumb_width * THUMB_ASPECT;
     let text_height = ui.text_style_height(&egui::TextStyle::Body);
-    let card_height = CARD_PADDING + thumb_height + 4.0 + text_height * 3.0 + CARD_PADDING;
+    // 4 text lines: title, author, rating stars, status+playtime
+    let card_height = CARD_PADDING + thumb_height + 4.0 + text_height * 4.0 + CARD_PADDING;
 
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
@@ -91,7 +104,7 @@ pub fn render(
 
                         // Allocate card space
                         let (rect, response) = ui.allocate_exact_size(
-                            Vec2::new(CARD_WIDTH, card_height),
+                            Vec2::new(card_w, card_height),
                             egui::Sense::click(),
                         );
 
@@ -203,8 +216,21 @@ pub fn render(
                             theme::TEXT_SECONDARY,
                         );
 
+                        // Rating stars
+                        let stars_pos = author_pos + Vec2::new(0.0, text_height);
+                        let stars = theme::rating_stars(wad.rating);
+                        if !stars.is_empty() {
+                            painter.text(
+                                stars_pos,
+                                egui::Align2::LEFT_TOP,
+                                &stars,
+                                egui::FontId::proportional(11.0),
+                                theme::TEXT_ACCENT,
+                            );
+                        }
+
                         // Status badge + playtime
-                        let badge_y = author_pos.y + text_height;
+                        let badge_y = stars_pos.y + text_height;
                         let status_label = theme::status_display(&wad.status);
                         let status_color = theme::status_color(&wad.status);
                         painter.text(
