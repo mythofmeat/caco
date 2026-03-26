@@ -35,17 +35,31 @@ pub fn render(
     // Handle keyboard shortcuts
     let mut action = None;
     if !state.has_dialog() && !ui.ctx().wants_keyboard_input() {
-        if ui.input(|i| i.key_pressed(egui::Key::J)) {
+        if ui.input(|i| i.key_pressed(egui::Key::J) || i.key_pressed(egui::Key::ArrowDown)) {
             state.select_down_grid(columns);
         }
-        if ui.input(|i| i.key_pressed(egui::Key::K)) {
+        if ui.input(|i| i.key_pressed(egui::Key::K) || i.key_pressed(egui::Key::ArrowUp)) {
             state.select_up_grid(columns);
         }
-        if ui.input(|i| i.key_pressed(egui::Key::H)) {
+        if ui.input(|i| i.key_pressed(egui::Key::H) || i.key_pressed(egui::Key::ArrowLeft)) {
             state.select_left(columns);
         }
-        if ui.input(|i| i.key_pressed(egui::Key::L)) {
+        if ui.input(|i| i.key_pressed(egui::Key::L) || i.key_pressed(egui::Key::ArrowRight)) {
             state.select_right(columns);
+        }
+        if ui.input(|i| i.key_pressed(egui::Key::Home)) {
+            state.select_first();
+        }
+        if ui.input(|i| i.key_pressed(egui::Key::End)) {
+            state.select_last();
+        }
+        if ui.input(|i| i.modifiers.shift && i.key_pressed(egui::Key::G)) {
+            state.select_last();
+        } else if ui.input(|i| !i.modifiers.shift && i.key_pressed(egui::Key::G)) {
+            state.handle_g_press();
+        }
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            state.selected_wad_id = None;
         }
 
         action = super::handle_action_keys(ui, state.selected_wad_id);

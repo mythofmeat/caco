@@ -378,6 +378,10 @@ impl eframe::App for CacoApp {
             if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Q)) {
                 quit = true;
             }
+            if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::F)) {
+                let id = egui::Id::new(panels::filter_bar::FILTER_ID_SOURCE);
+                ctx.memory_mut(|m| m.request_focus(id));
+            }
         }
         if quit {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -582,7 +586,7 @@ fn render_status_bar(ui: &mut egui::Ui, state: &mut AppState) {
             let hints = if state.view_mode == ViewMode::Import {
                 "1-5: switch source"
             } else {
-                "j/k: nav  e: edit  d: delete  s: sessions  Enter: play"
+                "\u{2191}\u{2193}/jk: nav  Enter: play  e: edit  d: del  s: sess  Ctrl+F: find  Esc: clear"
             };
             ui.colored_label(theme::TEXT_SECONDARY, hints);
         });
@@ -602,11 +606,16 @@ fn render_help_dialog(ctx: &egui::Context) -> bool {
                 .spacing([40.0, 4.0])
                 .show(ui, |ui| {
                     let shortcuts = [
-                        ("j / k", "Navigate up/down"),
-                        ("Enter", "Play selected WAD"),
+                        ("\u{2191}\u{2193} / j k", "Navigate up/down"),
+                        ("\u{2190}\u{2192} / h l", "Navigate left/right (grid)"),
+                        ("Home / g g", "Jump to first WAD"),
+                        ("End / Shift+G", "Jump to last WAD"),
+                        ("Enter / p", "Play selected WAD"),
                         ("e", "Edit selected WAD"),
                         ("d", "Delete selected WAD"),
                         ("s", "View sessions"),
+                        ("Ctrl+F", "Focus search/filter"),
+                        ("Escape", "Clear filter or deselect"),
                         ("F5", "Refresh library"),
                         ("Ctrl+Q", "Quit"),
                     ];

@@ -147,6 +147,9 @@ pub struct AppState {
     pub play_state: PlayState,
     pub db_path: PathBuf,
 
+    // Keyboard state (for gg detection)
+    pub last_g_press: Option<Instant>,
+
     // Import
     pub import: ImportState,
 }
@@ -173,6 +176,7 @@ impl AppState {
             play_state: PlayState::Idle,
             db_path,
             import: ImportState::default(),
+            last_g_press: None,
         }
     }
 
@@ -287,6 +291,38 @@ impl AppState {
         if !self.wads.is_empty() && self.selected_row + 1 < self.wads.len() {
             self.selected_row += 1;
             self.selected_wad_id = Some(self.wads[self.selected_row].id);
+        }
+    }
+
+    /// Jump selection to the first WAD.
+    pub fn select_first(&mut self) {
+        if !self.wads.is_empty() {
+            self.selected_row = 0;
+            self.selected_wad_id = Some(self.wads[0].id);
+        }
+    }
+
+    /// Jump selection to the last WAD.
+    pub fn select_last(&mut self) {
+        if !self.wads.is_empty() {
+            self.selected_row = self.wads.len() - 1;
+            self.selected_wad_id = Some(self.wads[self.selected_row].id);
+        }
+    }
+
+    /// Handle a 'g' keypress for vim-style gg (jump to top).
+    /// Returns true if gg was triggered.
+    pub fn handle_g_press(&mut self) -> bool {
+        if self
+            .last_g_press
+            .is_some_and(|t| t.elapsed().as_millis() < 500)
+        {
+            self.select_first();
+            self.last_g_press = None;
+            true
+        } else {
+            self.last_g_press = Some(Instant::now());
+            false
         }
     }
 

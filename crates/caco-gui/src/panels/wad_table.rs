@@ -10,11 +10,25 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<ActionRequest> 
 
     // Handle keyboard shortcuts when no dialog is open and no text input is focused
     if !state.has_dialog() && !ui.ctx().wants_keyboard_input() {
-        if ui.input(|i| i.key_pressed(egui::Key::J)) {
+        if ui.input(|i| i.key_pressed(egui::Key::J) || i.key_pressed(egui::Key::ArrowDown)) {
             state.select_next();
         }
-        if ui.input(|i| i.key_pressed(egui::Key::K)) {
+        if ui.input(|i| i.key_pressed(egui::Key::K) || i.key_pressed(egui::Key::ArrowUp)) {
             state.select_prev();
+        }
+        if ui.input(|i| i.key_pressed(egui::Key::Home)) {
+            state.select_first();
+        }
+        if ui.input(|i| i.key_pressed(egui::Key::End)) {
+            state.select_last();
+        }
+        if ui.input(|i| i.modifiers.shift && i.key_pressed(egui::Key::G)) {
+            state.select_last();
+        } else if ui.input(|i| !i.modifiers.shift && i.key_pressed(egui::Key::G)) {
+            state.handle_g_press();
+        }
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            state.selected_wad_id = None;
         }
 
         action = super::handle_action_keys(ui, state.selected_wad_id);
