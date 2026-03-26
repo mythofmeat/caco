@@ -93,6 +93,11 @@ impl CacoApp {
                 let dialog = ResourcesDialogState::new(&self.conn);
                 self.state.active_dialog = Some(ActiveDialog::Resources(dialog));
             }
+            ActionRequest::MapStats(_wad_id) => {
+                self.state.notification = Some(Notification::info(
+                    "Map Stats dialog not yet implemented".to_string(),
+                ));
+            }
             ActionRequest::Play(wad_id) => {
                 if self.state.is_playing() {
                     return;

@@ -56,67 +56,65 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<ActionRequest> 
                 row.set_selected(is_selected);
 
                 let wad = &state.wads[idx];
-                let stats = state.stats_map.get(&wad.id);
+                let wad_id = wad.id;
+                let stats = state.stats_map.get(&wad_id);
+
+                // Macro to handle click selection + context menu on each cell response
+                macro_rules! cell_interact {
+                    ($r:expr) => {
+                        if $r.clicked() || $r.secondary_clicked() {
+                            state.selected_row = idx;
+                            state.selected_wad_id = Some(wad_id);
+                        }
+                        if let Some(a) = super::wad_context_menu(&$r, wad_id) {
+                            action = Some(a);
+                        }
+                    };
+                }
 
                 // ID
                 row.col(|ui| {
-                    if ui
-                        .selectable_label(is_selected, wad.id.to_string())
-                        .clicked()
-                    {
-                        state.selected_row = idx;
-                        state.selected_wad_id = Some(wad.id);
-                    }
+                    let r = ui.selectable_label(is_selected, wad_id.to_string());
+                    cell_interact!(r);
                 });
 
                 // Title
                 row.col(|ui| {
-                    if ui
-                        .selectable_label(is_selected, &wad.title)
-                        .clicked()
-                    {
-                        state.selected_row = idx;
-                        state.selected_wad_id = Some(wad.id);
-                    }
+                    let r = ui.selectable_label(is_selected, &wad.title);
+                    cell_interact!(r);
                 });
 
                 // Author
                 row.col(|ui| {
                     let author = wad.author.as_deref().unwrap_or("");
-                    if ui
-                        .selectable_label(is_selected, author)
-                        .clicked()
-                    {
-                        state.selected_row = idx;
-                        state.selected_wad_id = Some(wad.id);
-                    }
+                    let r = ui.selectable_label(is_selected, author);
+                    cell_interact!(r);
                 });
 
                 // Status (colored)
                 row.col(|ui| {
                     let label = theme::status_display(&wad.status);
                     let color = theme::status_color(&wad.status);
-                    let response = ui.selectable_label(is_selected, "");
-                    let rect = response.rect;
+                    let r = ui.selectable_label(is_selected, "");
                     ui.painter().text(
-                        rect.left_center() + egui::vec2(4.0, 0.0),
+                        r.rect.left_center() + egui::vec2(4.0, 0.0),
                         egui::Align2::LEFT_CENTER,
                         label,
                         egui::FontId::default(),
                         color,
                     );
-                    if response.clicked() {
-                        state.selected_row = idx;
-                        state.selected_wad_id = Some(wad.id);
-                    }
+                    cell_interact!(r);
                 });
 
                 // Rating
                 row.col(|ui| {
                     let stars = theme::rating_stars(wad.rating);
-                    if !stars.is_empty() {
-                        ui.colored_label(theme::TEXT_ACCENT, stars);
-                    }
+                    let r = if !stars.is_empty() {
+                        ui.colored_label(theme::TEXT_ACCENT, stars)
+                    } else {
+                        ui.selectable_label(is_selected, "")
+                    };
+                    cell_interact!(r);
                 });
 
                 // Playtime
@@ -127,7 +125,8 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<ActionRequest> 
                         }
                         _ => String::new(),
                     };
-                    ui.label(playtime_str);
+                    let r = ui.label(playtime_str);
+                    cell_interact!(r);
                 });
 
                 // Last Played
@@ -136,7 +135,8 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<ActionRequest> 
                         .and_then(|s| s.last_played.as_deref())
                         .and_then(|ts| ts.get(..10))
                         .unwrap_or("");
-                    ui.colored_label(theme::TEXT_SECONDARY, last_played);
+                    let r = ui.colored_label(theme::TEXT_SECONDARY, last_played);
+                    cell_interact!(r);
                 });
             });
         });

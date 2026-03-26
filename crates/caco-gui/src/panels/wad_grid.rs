@@ -81,13 +81,18 @@ pub fn render(
                             egui::Sense::click(),
                         );
 
-                        // Handle clicks
-                        if response.clicked() {
+                        // Handle clicks (left-click and right-click both select)
+                        if response.clicked() || response.secondary_clicked() {
                             state.selected_row = idx;
                             state.selected_wad_id = Some(wad_id);
                         }
                         if response.double_clicked() {
                             action = Some(ActionRequest::Play(wad_id));
+                        }
+
+                        // Context menu on right-click
+                        if let Some(a) = super::wad_context_menu(&response, wad_id) {
+                            action = Some(a);
                         }
 
                         let painter = ui.painter_at(rect);
