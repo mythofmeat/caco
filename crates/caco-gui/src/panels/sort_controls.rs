@@ -18,12 +18,12 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
             }
         });
 
-    let (arrow, tooltip) = if state.sort_desc {
-        ("\u{25bc}", "Sort descending")
+    let (label, tooltip) = if state.sort_desc {
+        ("Desc", "Sort descending")
     } else {
-        ("\u{25b2}", "Sort ascending")
+        ("Asc", "Sort ascending")
     };
-    if ui.button(arrow).on_hover_text(tooltip).clicked() {
+    if ui.button(label).on_hover_text(tooltip).clicked() {
         state.sort_desc = !state.sort_desc;
         state.needs_reload = true;
     }

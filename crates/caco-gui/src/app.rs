@@ -14,6 +14,7 @@ use crate::import;
 use crate::import::state::SearchSource;
 use crate::message::{AppMessage, Notification};
 use crate::panels;
+use crate::persist;
 use crate::state::{ActionRequest, ActiveDialog, AppState, PlayState, ViewLayout, ViewMode};
 use crate::theme;
 use crate::thumbnails::{ThumbnailHint, ThumbnailManager};
@@ -142,6 +143,10 @@ impl CacoApp {
 }
 
 impl eframe::App for CacoApp {
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        persist::save(&self.state.to_persisted());
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // 1. Drain background messages
         for msg in self.bg.drain() {
@@ -399,19 +404,6 @@ impl eframe::App for CacoApp {
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.button("Cache Management").clicked() {
-                        actions.push(ActionRequest::Cache);
-                        ui.close_menu();
-                    }
-                    if ui.button("Resources").clicked() {
-                        actions.push(ActionRequest::Resources);
-                        ui.close_menu();
-                    }
-                    if ui.button("Library Stats").clicked() {
-                        actions.push(ActionRequest::Stats);
-                        ui.close_menu();
-                    }
-                    ui.separator();
                     if ui.button("Quit                       Ctrl+Q").clicked() {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     }
@@ -441,12 +433,27 @@ impl eframe::App for CacoApp {
                     ui.separator();
 
                     let detail_label = if self.state.show_detail_panel {
-                        "Hide Detail Panel"
+                        "\u{2713} Detail Panel"
                     } else {
-                        "Show Detail Panel"
+                        "  Detail Panel"
                     };
                     if ui.button(detail_label).clicked() {
                         self.state.show_detail_panel = !self.state.show_detail_panel;
+                        ui.close_menu();
+                    }
+
+                    ui.separator();
+
+                    if ui.button("Library Stats").clicked() {
+                        actions.push(ActionRequest::Stats);
+                        ui.close_menu();
+                    }
+                    if ui.button("Resources").clicked() {
+                        actions.push(ActionRequest::Resources);
+                        ui.close_menu();
+                    }
+                    if ui.button("Cache Management").clicked() {
+                        actions.push(ActionRequest::Cache);
                         ui.close_menu();
                     }
 
@@ -485,31 +492,31 @@ impl eframe::App for CacoApp {
             ui.add_space(2.0);
         });
 
+        // Detail panel as a top-level SidePanel (must come before CentralPanel
+        // so egui properly partitions the space).
+        if self.state.show_detail_panel && self.state.view_mode == ViewMode::Library {
+            let mut detail_action = None;
+            egui::SidePanel::right("detail_panel")
+                .default_width(300.0)
+                .min_width(200.0)
+                .max_width(500.0)
+                .resizable(true)
+                .show(ctx, |ui| {
+                    detail_action =
+                        panels::detail::render(ui, &self.state, &self.conn, Some(&self.thumbnails));
+                });
+            if let Some(a) = detail_action {
+                actions.push(a);
+            }
+        }
+
         // Central panel: Library view or Import view based on ViewMode
         egui::CentralPanel::default().show(ctx, |ui| {
             match self.state.view_mode {
                 ViewMode::Library => {
                     // Toolbar row
-                    if let Some(a) = panels::library::render_toolbar(ui, &mut self.state) {
-                        actions.push(a);
-                    }
+                    panels::library::render_toolbar(ui, &mut self.state);
                     ui.separator();
-
-                    // Detail panel (right sidebar) + WAD table
-                    if self.state.show_detail_panel {
-                        let mut detail_action = None;
-                        egui::SidePanel::right("detail_panel")
-                            .default_width(300.0)
-                            .min_width(200.0)
-                            .max_width(500.0)
-                            .resizable(true)
-                            .show_inside(ui, |ui| {
-                                detail_action = panels::detail::render(ui, &self.state, &self.conn, Some(&self.thumbnails));
-                            });
-                        if let Some(a) = detail_action {
-                            actions.push(a);
-                        }
-                    }
 
                     // WAD table or grid fills remaining space
                     let view_action = match self.state.view_layout {

@@ -8,7 +8,7 @@ const CARD_MIN_WIDTH: f32 = 160.0;
 const CARD_MAX_WIDTH: f32 = 240.0;
 const CARD_SPACING: f32 = 8.0;
 const CARD_PADDING: f32 = 8.0;
-const CARD_ROUNDING: u8 = 6;
+const CARD_ROUNDING: u8 = 8;
 const THUMB_ASPECT: f32 = 0.6; // height = width * aspect
 
 /// Calculate responsive card width: fit as many cards as possible at min width,
@@ -135,12 +135,19 @@ pub fn render(
                         };
                         painter.rect_filled(rect, rounding, bg);
 
-                        // Border for selected card
+                        // Border for selected or hovered card
                         if is_selected {
                             painter.rect_stroke(
                                 rect,
                                 rounding,
                                 egui::Stroke::new(1.5, theme::TEXT_ACCENT),
+                                StrokeKind::Outside,
+                            );
+                        } else if response.hovered() {
+                            painter.rect_stroke(
+                                rect,
+                                rounding,
+                                egui::Stroke::new(1.0, theme::BORDER),
                                 StrokeKind::Outside,
                             );
                         }

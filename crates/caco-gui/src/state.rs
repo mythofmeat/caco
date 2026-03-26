@@ -16,6 +16,7 @@ use crate::dialogs::stats::StatsDialogState;
 use crate::dialogs::wad_stats::WadStatsDialogState;
 use crate::import::state::ImportState;
 use crate::message::Notification;
+use crate::persist::{self, SavedSearch};
 
 // ---------------------------------------------------------------------------
 // View mode (Library vs Import)
@@ -152,24 +153,45 @@ pub struct AppState {
 
     // Import
     pub import: ImportState,
+
+    // Saved searches
+    pub saved_searches: Vec<SavedSearch>,
+    pub save_search_pending: bool,
+    pub save_search_name: String,
 }
 
 impl AppState {
     pub fn new(db_path: PathBuf) -> Self {
+        let persisted = persist::load();
+        let view_layout = match persisted.view_layout.as_str() {
+            "grid" => ViewLayout::Grid,
+            _ => ViewLayout::List,
+        };
+        let active_tab = if persisted.active_tab < TABS.len() {
+            persisted.active_tab
+        } else {
+            0
+        };
+        let sort_field_index = if persisted.sort_field_index < SORT_FIELDS.len() {
+            persisted.sort_field_index
+        } else {
+            0
+        };
+
         Self {
             view_mode: ViewMode::default(),
-            view_layout: ViewLayout::default(),
-            active_tab: 0,
+            view_layout,
+            active_tab,
             filter_text: String::new(),
             filter_changed_at: None,
             applied_filter: String::new(),
-            sort_field_index: 0,
-            sort_desc: true,
+            sort_field_index,
+            sort_desc: persisted.sort_desc,
             wads: Vec::new(),
             stats_map: HashMap::new(),
             selected_wad_id: None,
             selected_row: 0,
-            show_detail_panel: true,
+            show_detail_panel: persisted.show_detail_panel,
             notification: None,
             needs_reload: true,
             active_dialog: None,
@@ -177,6 +199,9 @@ impl AppState {
             db_path,
             import: ImportState::default(),
             last_g_press: None,
+            saved_searches: persisted.saved_searches,
+            save_search_pending: false,
+            save_search_name: String::new(),
         }
     }
 
@@ -383,5 +408,20 @@ impl AppState {
     pub fn selected_stats(&self) -> Option<&WadStats> {
         self.selected_wad_id
             .and_then(|id| self.stats_map.get(&id))
+    }
+
+    /// Produce a snapshot of persistent GUI state for saving.
+    pub fn to_persisted(&self) -> persist::GuiState {
+        persist::GuiState {
+            view_layout: match self.view_layout {
+                ViewLayout::List => "list".to_string(),
+                ViewLayout::Grid => "grid".to_string(),
+            },
+            show_detail_panel: self.show_detail_panel,
+            sort_field_index: self.sort_field_index,
+            sort_desc: self.sort_desc,
+            active_tab: self.active_tab,
+            saved_searches: self.saved_searches.clone(),
+        }
     }
 }

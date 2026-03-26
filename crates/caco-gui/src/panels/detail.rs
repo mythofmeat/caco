@@ -33,7 +33,7 @@ pub fn render(
     let mut action = None;
 
     egui::ScrollArea::vertical().show(ui, |ui| {
-        ui.spacing_mut().item_spacing.y = 4.0;
+        ui.spacing_mut().item_spacing.y = 6.0;
 
         // Thumbnail
         if let Some(tm) = thumbnails
@@ -68,20 +68,18 @@ pub fn render(
             ui.colored_label(theme::TEXT_SECONDARY, &subtitle);
         }
 
-        // Status
-        let status_label = theme::status_display(&wad.status);
-        let status_color = theme::status_color(&wad.status);
-        ui.colored_label(status_color, status_label);
+        // Status pill + rating on same line
+        ui.horizontal(|ui| {
+            theme::status_pill(ui, &wad.status);
+            let stars = theme::rating_stars(wad.rating);
+            if !stars.is_empty() {
+                ui.colored_label(theme::TEXT_ACCENT, &stars);
+            }
+        });
 
-        // Rating
-        let stars = theme::rating_stars(wad.rating);
-        if !stars.is_empty() {
-            ui.colored_label(theme::TEXT_ACCENT, &stars);
-        }
+        // ── Play Stats ──
+        theme::section_label(ui, "Play Stats");
 
-        ui.separator();
-
-        // Stats section
         if let Some(s) = stats {
             detail_row(ui, "Playtime", &caco_core::player::format_duration(s.playtime));
             detail_row(ui, "Sessions", &s.session_count.to_string());
@@ -117,49 +115,75 @@ pub fn render(
                 theme::TEXT_SECONDARY,
                 format!("Progress: {played}/{total} maps ({pct_display}%)"),
             );
-            ui.add(
-                egui::ProgressBar::new(pct)
-                    .desired_width(ui.available_width()),
+            // Custom progress bar with outlined track
+            let bar_height = 14.0;
+            let (rect, _) = ui.allocate_exact_size(
+                egui::vec2(ui.available_width(), bar_height),
+                egui::Sense::hover(),
+            );
+            let rounding = 4.0;
+            let painter = ui.painter();
+            painter.rect_filled(rect, rounding, theme::BG_MEDIUM);
+            if pct > 0.0 {
+                let fill_rect = egui::Rect::from_min_size(
+                    rect.min,
+                    egui::vec2(rect.width() * pct, rect.height()),
+                );
+                painter.rect_filled(fill_rect, rounding, theme::TEXT_ACCENT);
+            }
+            painter.rect_stroke(
+                rect,
+                rounding,
+                egui::Stroke::new(1.0, theme::BORDER),
+                egui::StrokeKind::Outside,
             );
         }
 
-        ui.separator();
-
-        // Action buttons
-        ui.horizontal(|ui| {
-            let play_enabled = !state.is_playing();
-            if ui.add_enabled(play_enabled, egui::Button::new("Play")).clicked() {
+        // ── Actions ──
+        ui.add_space(4.0);
+        let play_enabled = !state.is_playing();
+        ui.columns(3, |cols| {
+            if cols[0]
+                .add_enabled(play_enabled, egui::Button::new("Play"))
+                .clicked()
+            {
                 action = Some(ActionRequest::Play(wad_id));
             }
-            if ui.button("Edit").clicked() {
+            if cols[1].button("Edit").clicked() {
                 action = Some(ActionRequest::Edit(wad_id));
             }
-            if ui.button("Delete").clicked() {
-                action = Some(ActionRequest::Delete(wad_id));
-            }
-            if ui.button("Sessions").clicked() {
+            if cols[2].button("Sessions").clicked() {
                 action = Some(ActionRequest::Sessions(wad_id));
             }
-            if ui.button("Map Stats").clicked() {
+        });
+        ui.columns(2, |cols| {
+            if cols[0].button("Map Stats").clicked() {
                 action = Some(ActionRequest::MapStats(wad_id));
+            }
+            if cols[1]
+                .add(egui::Button::new(
+                    egui::RichText::new("Delete").color(theme::COLOR_ERROR),
+                ))
+                .clicked()
+            {
+                action = Some(ActionRequest::Delete(wad_id));
             }
         });
 
-        ui.separator();
-
-        // Tags
+        // ── Tags ──
         if !wad.tags.is_empty() {
+            theme::section_label(ui, "Tags");
             ui.horizontal_wrapped(|ui| {
-                ui.colored_label(theme::TEXT_SECONDARY, "Tags:");
+                ui.spacing_mut().item_spacing.x = 4.0;
                 for tag in &wad.tags {
-                    ui.colored_label(theme::TEXT_ACCENT, tag);
+                    theme::tag_pill(ui, tag);
                 }
             });
         }
 
-        // Description
+        // ── Description ──
         if let Some(desc) = &wad.description {
-            ui.separator();
+            theme::section_label(ui, "Description");
             ui.add(
                 egui::Label::new(
                     egui::RichText::new(desc.as_str()).color(theme::TEXT_SECONDARY),
@@ -168,12 +192,12 @@ pub fn render(
             );
         }
 
-        // Source info
-        ui.separator();
+        // ── Source ──
+        theme::section_label(ui, "Source");
         detail_row(ui, "Source", &wad.source_type);
         if let Some(ref url) = source_url {
             ui.horizontal(|ui| {
-                ui.colored_label(theme::TEXT_SECONDARY, "URL:");
+                ui.add_space(4.0);
                 ui.hyperlink_to(url, url);
             });
         }
@@ -194,10 +218,9 @@ pub fn render(
             detail_row(ui, "Complevel", caco_core::complevel::complevel_name(Some(cl)));
         }
 
-        // Companion files section
+        // ── Companion Files ──
         if !companions.is_empty() {
-            ui.separator();
-            ui.colored_label(theme::TEXT_SECONDARY, "Companion Files:");
+            theme::section_label(ui, "Companions");
             for comp in &companions {
                 let label = if comp.enabled {
                     comp.filename.clone()
@@ -214,7 +237,12 @@ pub fn render(
 
 fn detail_row(ui: &mut egui::Ui, label: &str, value: &str) {
     ui.horizontal(|ui| {
-        ui.colored_label(theme::TEXT_SECONDARY, format!("{label}:"));
+        // Fixed-width right-aligned label for clean alignment
+        ui.allocate_ui(egui::vec2(80.0, ui.spacing().interact_size.y), |ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.colored_label(theme::TEXT_SECONDARY, label);
+            });
+        });
         ui.colored_label(theme::TEXT_PRIMARY, value);
     });
 }

@@ -39,25 +39,47 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<ActionRequest> 
     let text_height = ui.text_style_height(&egui::TextStyle::Body);
     let row_height = text_height + 6.0;
 
-    let table = TableBuilder::new(ui)
+    // When the detail panel is open, show fewer columns since stats are
+    // already visible in the sidebar.  This prevents column overflow.
+    let compact = state.show_detail_panel;
+
+    // Proportional column widths based on available space.
+    let base = (available.x - 50.0).max(0.0); // subtract fixed ID column
+
+    let mut table = TableBuilder::new(ui)
         .striped(true)
         .resizable(true)
+        .sense(egui::Sense::click())
         .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
         .min_scrolled_height(available.y)
         .column(Column::exact(50.0)) // ID
-        .column(Column::remainder().at_least(150.0)) // Title
-        .column(Column::initial(150.0).at_least(80.0)) // Author
-        .column(Column::initial(100.0).at_least(70.0)) // Status
-        .column(Column::initial(80.0).at_least(60.0)) // Rating
-        .column(Column::initial(90.0).at_least(60.0)) // Playtime
-        .column(Column::initial(110.0).at_least(80.0)); // Last Played
+        .column(Column::remainder().at_least(150.0)); // Title
+
+    if compact {
+        table = table
+            .column(Column::initial(base * 0.25).at_least(80.0)) // Author
+            .column(Column::initial(base * 0.15).at_least(60.0)); // Status
+    } else {
+        table = table
+            .column(Column::initial(base * 0.18).at_least(80.0)) // Author
+            .column(Column::initial(base * 0.12).at_least(70.0)) // Status
+            .column(Column::initial(base * 0.10).at_least(60.0)) // Rating
+            .column(Column::initial(base * 0.10).at_least(60.0)) // Playtime
+            .column(Column::initial(base * 0.12).at_least(80.0)); // Last Played
+    }
 
     table
         .header(row_height + 2.0, |mut header| {
-            let headers = ["ID", "Title", "Author", "Status", "Rating", "Playtime", "Last Played"];
+            let mut headers: Vec<&str> = vec!["ID", "Title", "Author", "Status"];
+            if !compact {
+                headers.extend(["Rating", "Playtime", "Last Played"]);
+            }
             for label in headers {
                 header.col(|ui| {
-                    ui.strong(label);
+                    ui.colored_label(
+                        theme::TEXT_ACCENT,
+                        egui::RichText::new(label).strong(),
+                    );
                 });
             }
         })
@@ -74,86 +96,66 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<ActionRequest> 
                 let wad_id = wad.id;
                 let stats = state.stats_map.get(&wad_id);
 
-                // Macro to handle click selection + context menu on each cell response
-                macro_rules! cell_interact {
-                    ($r:expr) => {
-                        if $r.clicked() || $r.secondary_clicked() {
-                            state.selected_row = idx;
-                            state.selected_wad_id = Some(wad_id);
-                        }
-                        if let Some(a) = super::wad_context_menu(&$r, wad_id) {
-                            action = Some(a);
-                        }
-                    };
-                }
-
                 // ID
                 row.col(|ui| {
-                    let r = ui.selectable_label(is_selected, wad_id.to_string());
-                    cell_interact!(r);
+                    ui.label(wad_id.to_string());
                 });
 
                 // Title
                 row.col(|ui| {
-                    let r = ui.selectable_label(is_selected, &wad.title);
-                    cell_interact!(r);
+                    ui.label(&wad.title);
                 });
 
                 // Author
                 row.col(|ui| {
-                    let author = wad.author.as_deref().unwrap_or("");
-                    let r = ui.selectable_label(is_selected, author);
-                    cell_interact!(r);
+                    ui.label(wad.author.as_deref().unwrap_or(""));
                 });
 
                 // Status (colored)
                 row.col(|ui| {
-                    let label = theme::status_display(&wad.status);
-                    let color = theme::status_color(&wad.status);
-                    let r = ui.selectable_label(is_selected, "");
-                    ui.painter().text(
-                        r.rect.left_center() + egui::vec2(4.0, 0.0),
-                        egui::Align2::LEFT_CENTER,
-                        label,
-                        egui::FontId::default(),
-                        color,
-                    );
-                    cell_interact!(r);
+                    ui.colored_label(theme::status_color(&wad.status), theme::status_display(&wad.status));
                 });
 
-                // Rating
-                row.col(|ui| {
-                    let stars = theme::rating_stars(wad.rating);
-                    let r = if !stars.is_empty() {
-                        ui.colored_label(theme::TEXT_ACCENT, stars)
-                    } else {
-                        ui.selectable_label(is_selected, "")
-                    };
-                    cell_interact!(r);
-                });
-
-                // Playtime
-                row.col(|ui| {
-                    let playtime_str = match stats {
-                        Some(s) if s.playtime > 0 => {
-                            caco_core::player::format_duration(s.playtime)
+                if !compact {
+                    // Rating
+                    row.col(|ui| {
+                        let stars = theme::rating_stars(wad.rating);
+                        if !stars.is_empty() {
+                            ui.colored_label(theme::TEXT_ACCENT, stars);
                         }
-                        _ => String::new(),
-                    };
-                    let r = ui.label(playtime_str);
-                    cell_interact!(r);
-                });
+                    });
 
-                // Last Played
-                row.col(|ui| {
-                    let last_played = stats
-                        .and_then(|s| s.last_played.as_deref())
-                        .and_then(relative_time::parse_timestamp)
-                        .map(|dt| relative_time::relative_time(&dt))
-                        .unwrap_or_default();
-                    let r = ui.colored_label(theme::TEXT_SECONDARY, last_played);
-                    cell_interact!(r);
-                });
+                    // Playtime
+                    row.col(|ui| {
+                        let playtime_str = match stats {
+                            Some(s) if s.playtime > 0 => {
+                                caco_core::player::format_duration(s.playtime)
+                            }
+                            _ => String::new(),
+                        };
+                        ui.label(playtime_str);
+                    });
+
+                    // Last Played
+                    row.col(|ui| {
+                        let last_played = stats
+                            .and_then(|s| s.last_played.as_deref())
+                            .and_then(relative_time::parse_timestamp)
+                            .map(|dt| relative_time::relative_time(&dt))
+                            .unwrap_or_default();
+                        ui.colored_label(theme::TEXT_SECONDARY, last_played);
+                    });
+                }
+
+                // Row-level click selection + context menu
+                let response = row.response();
+                if response.clicked() || response.secondary_clicked() {
+                    state.selected_row = idx;
+                    state.selected_wad_id = Some(wad_id);
+                }
+                if let Some(a) = super::wad_context_menu(&response, wad_id) {
+                    action = Some(a);
+                }
             });
         });
 
