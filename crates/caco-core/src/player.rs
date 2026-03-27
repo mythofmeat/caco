@@ -446,39 +446,41 @@ fn get_id24_resource_args(conn: &Connection, wad_path: Option<&Path>) -> Vec<Str
     file_args
 }
 
-/// Search for a stats file in a WAD data directory.
-fn find_stats_file(directory: &Path) -> Option<PathBuf> {
-    for name in &["stats.txt", "levelstat.txt"] {
-        if let Some(found) = find_file_recursive(directory, name) {
-            return Some(found);
-        }
-    }
-    None
+/// Find all stats files (stats.txt / levelstat.txt) in a WAD data directory.
+///
+/// dsda-family sourceports can create multiple nested directories under
+/// `-data` (e.g. when the IWAD or sourceport changes), so multiple stats
+/// files may coexist.  Returns all of them sorted by path.
+fn find_all_stats_files(directory: &Path) -> Vec<PathBuf> {
+    let mut results = Vec::new();
+    collect_stats_files_recursive(directory, &mut results);
+    results.sort();
+    results
 }
 
-/// Recursively search for a file by name.
-fn find_file_recursive(dir: &Path, target: &str) -> Option<PathBuf> {
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_file()
-                && path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .is_some_and(|n| n == target)
+fn collect_stats_files_recursive(dir: &Path, results: &mut Vec<PathBuf>) {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file() {
+            if let Some(name) = path.file_name().and_then(|n| n.to_str())
+                && (name == "stats.txt" || name == "levelstat.txt")
             {
-                return Some(path);
+                results.push(path);
             }
-            if path.is_dir()
-                && let Some(found) = find_file_recursive(&path, target) {
-                    return Some(found);
-                }
+        } else if path.is_dir() {
+            collect_stats_files_recursive(&path, results);
         }
     }
-    None
 }
 
 /// Read stats from the WAD's data dir, returning JSON string or None.
+///
+/// When multiple stats files exist (e.g. from IWAD/sourceport changes),
+/// merges them keeping the best data per map.
 fn read_stats_snapshot(wad_id: i64) -> Option<String> {
     if !config::get_auto_stats() || !config::get_manage_data_dirs() {
         return None;
@@ -489,9 +491,22 @@ fn read_stats_snapshot(wad_id: i64) -> Option<String> {
         return None;
     }
 
-    let stats_path = find_stats_file(&data_dir)?;
-    let stats = wad_stats::parse_stats_file(&stats_path).ok()?;
-    wad_stats::stats_to_json(&stats).ok()
+    let stats_files = find_all_stats_files(&data_dir);
+    if stats_files.is_empty() {
+        return None;
+    }
+
+    let parsed: Vec<wad_stats::WadStats> = stats_files
+        .iter()
+        .filter_map(|p| wad_stats::parse_stats_file(p).ok())
+        .collect();
+
+    if parsed.is_empty() {
+        return None;
+    }
+
+    let merged = wad_stats::merge_stats(&parsed);
+    wad_stats::stats_to_json(&merged).ok()
 }
 
 /// Read stats and store on the WAD record.
@@ -535,26 +550,42 @@ mod tests {
     }
 
     #[test]
-    fn test_find_stats_file() {
+    fn test_find_all_stats_files_empty() {
         let dir = tempfile::tempdir().unwrap();
-
-        // No stats file
-        assert!(find_stats_file(dir.path()).is_none());
-
-        // Create stats.txt
-        std::fs::write(dir.path().join("stats.txt"), "1\n0\n").unwrap();
-        let found = find_stats_file(dir.path()).unwrap();
-        assert!(found.to_string_lossy().contains("stats.txt"));
+        assert!(find_all_stats_files(dir.path()).is_empty());
     }
 
     #[test]
-    fn test_find_stats_file_nested() {
+    fn test_find_all_stats_files_single() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("stats.txt"), "1\n0\n").unwrap();
+        let found = find_all_stats_files(dir.path());
+        assert_eq!(found.len(), 1);
+        assert!(found[0].to_string_lossy().contains("stats.txt"));
+    }
+
+    #[test]
+    fn test_find_all_stats_files_nested() {
         let dir = tempfile::tempdir().unwrap();
         let nested = dir.path().join("nyan_doom_data").join("doom2").join("test");
         std::fs::create_dir_all(&nested).unwrap();
         std::fs::write(nested.join("stats.txt"), "1\n0\n").unwrap();
 
-        let found = find_stats_file(dir.path()).unwrap();
-        assert!(found.to_string_lossy().contains("stats.txt"));
+        let found = find_all_stats_files(dir.path());
+        assert_eq!(found.len(), 1);
+    }
+
+    #[test]
+    fn test_find_all_stats_files_multiple() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir_a = dir.path().join("nyan_doom_data").join("tnt").join("100_tnt2").join("tnt2bmus");
+        let dir_b = dir.path().join("nyan_doom_data").join("tnt").join("tnt2_1_2").join("tnt2bmus");
+        std::fs::create_dir_all(&dir_a).unwrap();
+        std::fs::create_dir_all(&dir_b).unwrap();
+        std::fs::write(dir_a.join("stats.txt"), "1\n0\n").unwrap();
+        std::fs::write(dir_b.join("stats.txt"), "1\n0\n").unwrap();
+
+        let found = find_all_stats_files(dir.path());
+        assert_eq!(found.len(), 2);
     }
 }

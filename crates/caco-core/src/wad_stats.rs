@@ -392,6 +392,84 @@ pub fn stats_from_json(json_str: &str) -> crate::Result<WadStats> {
     Ok(serde_json::from_str(json_str)?)
 }
 
+// --- Merging ---
+
+/// Return the lesser of two values, treating negatives as unset.
+fn min_positive_i32(a: i32, b: i32) -> i32 {
+    if a < 0 { b } else if b < 0 { a } else { a.min(b) }
+}
+
+fn min_positive_f64(a: f64, b: f64) -> f64 {
+    if a < 0.0 { b } else if b < 0.0 { a } else { a.min(b) }
+}
+
+/// Merge multiple WadStats into one, keeping the best data per map.
+///
+/// When IWAD or sourceport changes create different nested directories under
+/// `-data`, several stats files can coexist.  Merging keeps the most useful
+/// value for every field (highest skill, fastest time, highest counts).
+/// Prefers `stats_txt` format when both formats are present.
+pub fn merge_stats(stats_list: &[WadStats]) -> WadStats {
+    assert!(!stats_list.is_empty(), "No stats to merge");
+    if stats_list.len() == 1 {
+        return stats_list[0].clone();
+    }
+
+    let has_stats_txt = stats_list.iter().any(|s| s.format == "stats_txt");
+    let fmt = if has_stats_txt { "stats_txt" } else { &stats_list[0].format };
+
+    let mut merged: std::collections::HashMap<String, MapStats> =
+        std::collections::HashMap::new();
+
+    for stats in stats_list {
+        for m in &stats.maps {
+            if let Some(existing) = merged.get_mut(&m.lump) {
+                if m.episode > 0 { existing.episode = m.episode; }
+                if m.map_num > 0 { existing.map_num = m.map_num; }
+                existing.best_skill = existing.best_skill.max(m.best_skill);
+                existing.total_exits = existing.total_exits.max(m.total_exits);
+                existing.cumulative_kills = existing.cumulative_kills.max(m.cumulative_kills);
+                existing.best_time = min_positive_i32(existing.best_time, m.best_time);
+                existing.best_max_time = min_positive_i32(existing.best_max_time, m.best_max_time);
+                existing.best_nm_time = min_positive_i32(existing.best_nm_time, m.best_nm_time);
+                existing.time_secs = min_positive_f64(existing.time_secs, m.time_secs);
+                existing.total_time_secs = min_positive_f64(existing.total_time_secs, m.total_time_secs);
+                existing.kills = existing.kills.max(m.kills);
+                existing.items = existing.items.max(m.items);
+                existing.secrets = existing.secrets.max(m.secrets);
+                existing.total_kills = existing.total_kills.max(m.total_kills);
+                existing.total_items = existing.total_items.max(m.total_items);
+                existing.total_secrets = existing.total_secrets.max(m.total_secrets);
+            } else {
+                merged.insert(m.lump.clone(), m.clone());
+            }
+        }
+    }
+
+    // Cross-populate time fields between formats
+    for m in merged.values_mut() {
+        if m.best_time < 0 && m.time_secs >= 0.0 {
+            m.best_time = (m.time_secs * TICS_PER_SECOND).round() as i32;
+        }
+        if m.time_secs < 0.0 && m.best_time >= 0 {
+            m.time_secs = m.best_time as f64 / TICS_PER_SECOND;
+        }
+    }
+
+    let mut maps: Vec<MapStats> = merged.into_values().collect();
+    maps.sort_by(|a, b| a.lump.cmp(&b.lump));
+
+    let version = stats_list.iter().map(|s| s.version).max().unwrap_or(1);
+    let header_total_kills = stats_list.iter().map(|s| s.header_total_kills).max().unwrap_or(0);
+
+    WadStats {
+        format: fmt.to_string(),
+        maps,
+        version,
+        header_total_kills,
+    }
+}
+
 // --- Delta computation ---
 
 /// Per-map delta information from a play session.
@@ -1207,5 +1285,43 @@ mod tests {
         assert!(!is_secret_map("INTRO"));
         assert!(!is_secret_map("TITLEMAP"));
         assert!(!is_secret_map("MAP33"));
+    }
+
+    #[test]
+    fn test_merge_stats_single() {
+        let stats = parse_stats_text("1\n0\nMAP01 1 1 4 9734 -1 -1 1 128 102 1 0 113 9 1").unwrap();
+        let merged = merge_stats(&[stats.clone()]);
+        assert_eq!(merged.maps.len(), stats.maps.len());
+        assert_eq!(merged.maps[0].best_skill, 4);
+    }
+
+    #[test]
+    fn test_merge_stats_zeros_with_real_data() {
+        // Simulates the WAD 100 bug: one stats file with zeros, one with real data
+        let zeros = parse_stats_text(
+            "1\n0\nMAP01 1 1 0 -1 -1 -1 0 0 0 0 0 -1 -1 -1\nMAP02 1 2 0 -1 -1 -1 0 0 0 0 0 -1 -1 -1",
+        ).unwrap();
+        let real = parse_stats_text(
+            "1\n200\nMAP01 1 1 4 9734 -1 -1 1 128 102 1 0 113 9 1\nMAP02 1 2 4 11748 -1 -1 1 77 70 8 2 72 18 3",
+        ).unwrap();
+
+        let merged = merge_stats(&[zeros, real]);
+        assert_eq!(merged.maps.len(), 2);
+        // Should keep the real data, not the zeros
+        let map01 = &merged.maps[0];
+        assert_eq!(map01.best_skill, 4);
+        assert_eq!(map01.best_time, 9734);
+        assert_eq!(map01.kills, 102);
+        assert_eq!(map01.total_kills, 113);
+        assert_eq!(merged.header_total_kills, 200);
+    }
+
+    #[test]
+    fn test_merge_stats_best_time_wins() {
+        let fast = parse_stats_text("1\n0\nMAP01 1 1 4 5000 -1 -1 1 50 50 3 1 50 3 1").unwrap();
+        let slow = parse_stats_text("1\n0\nMAP01 1 1 4 9000 -1 -1 2 50 50 3 1 50 3 1").unwrap();
+        let merged = merge_stats(&[fast, slow]);
+        assert_eq!(merged.maps[0].best_time, 5000); // fastest
+        assert_eq!(merged.maps[0].total_exits, 2);  // highest
     }
 }
