@@ -20,6 +20,20 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
         state.filter_changed_at = Some(Instant::now());
     }
 
+    // Clear button (only shown when there's text)
+    if !state.filter_text.is_empty() {
+        let clear = ui.add(
+            egui::Button::new(
+                egui::RichText::new("\u{00d7}").color(theme::TEXT_SECONDARY),
+            )
+            .frame(false),
+        );
+        if clear.on_hover_text("Clear filter").clicked() {
+            state.filter_text.clear();
+            state.filter_changed_at = Some(Instant::now());
+        }
+    }
+
     // Escape while focused: clear filter text
     if response.lost_focus()
         && ui.input(|i| i.key_pressed(egui::Key::Escape))

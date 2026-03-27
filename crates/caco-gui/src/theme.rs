@@ -110,6 +110,22 @@ pub fn section_label(ui: &mut egui::Ui, text: &str) {
 
 /// Apply the Doom-inspired dark theme to the egui context.
 pub fn apply_doom_theme(ctx: &egui::Context) {
+    // Add Noto Sans Symbols as a fallback font for arrows, checkmarks, etc.
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert(
+        "symbols".to_owned(),
+        std::sync::Arc::new(egui::FontData::from_static(include_bytes!(
+            "../../../assets/fonts/NotoSansSymbols-Regular.ttf"
+        ))),
+    );
+    if let Some(family) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+        family.push("symbols".to_owned());
+    }
+    if let Some(family) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
+        family.push("symbols".to_owned());
+    }
+    ctx.set_fonts(fonts);
+
     let mut visuals = Visuals::dark();
 
     // Panel / window backgrounds

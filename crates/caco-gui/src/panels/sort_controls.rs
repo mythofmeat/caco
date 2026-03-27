@@ -19,9 +19,9 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
         });
 
     let (label, tooltip) = if state.sort_desc {
-        ("Desc", "Sort descending")
+        ("\u{2193}", "Sort descending")
     } else {
-        ("Asc", "Sort ascending")
+        ("\u{2191}", "Sort ascending")
     };
     if ui.button(label).on_hover_text(tooltip).clicked() {
         state.sort_desc = !state.sort_desc;

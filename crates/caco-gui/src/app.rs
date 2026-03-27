@@ -165,6 +165,82 @@ impl CacoApp {
                     let outcome = (|| -> Result<caco_core::player::PlayResult, String> {
                         let conn = caco_core::db::open_connection(&db_path)
                             .map_err(|e| format!("DB open failed: {e}"))?;
+
+                        // Auto-download from idgames if no cached file is available
+                        let wad = caco_core::db::get_wad(&conn, wad_id, false)
+                            .map_err(|e| format!("DB error: {e}"))?
+                            .ok_or_else(|| format!("WAD #{wad_id} not found"))?;
+                        let needs_download = wad
+                            .cached_path
+                            .as_deref()
+                            .map(|p| !std::path::Path::new(p).exists())
+                            .unwrap_or(true);
+                        if needs_download {
+                            let idgames_id = wad
+                                .idgames_id
+                                .as_deref()
+                                .and_then(|id| id.parse::<i64>().ok());
+                            if let Some(ig_id) = idgames_id {
+                                sender.send(AppMessage::Notify(Notification::info(format!(
+                                    "Downloading {}...",
+                                    wad.title
+                                ))));
+                                let client = caco_sources::idgames::IdgamesClient::new();
+                                let cache_dir = caco_core::config::get_cache_dir();
+                                std::fs::create_dir_all(&cache_dir)
+                                    .map_err(|e| format!("Failed to create cache dir: {e}"))?;
+                                let mirror =
+                                    caco_core::config::load_config().download_mirror as usize;
+                                let dest = match client.get(Some(ig_id), None) {
+                                    Ok(entry) => client
+                                        .download(&entry, Some(&cache_dir), mirror, None)
+                                        .map_err(|e| format!("Download failed: {e}"))?,
+                                    Err(caco_sources::SourceError::WafBlocked { .. }) => {
+                                        let source_url =
+                                            wad.source_url.as_deref().unwrap_or("");
+                                        let filename = wad.filename.as_deref().unwrap_or("");
+                                        if filename.is_empty()
+                                            || !source_url.contains("/idgames/")
+                                        {
+                                            return Err(format!(
+                                                "file not found: API blocked and no stored path for '{}'",
+                                                wad.title
+                                            ));
+                                        }
+                                        client
+                                            .download_direct(
+                                                source_url,
+                                                filename,
+                                                &cache_dir,
+                                                mirror,
+                                                None,
+                                            )
+                                            .map_err(|e| {
+                                                format!("Direct download failed: {e}")
+                                            })?
+                                    }
+                                    Err(e) => {
+                                        return Err(format!(
+                                            "Failed to fetch idgames entry: {e}"
+                                        ));
+                                    }
+                                };
+                                let update = caco_core::db::WadUpdate::new()
+                                    .set_text(
+                                        "cached_path",
+                                        Some(dest.to_string_lossy().to_string()),
+                                    )
+                                    .map_err(|e| format!("Failed to build update: {e}"))?;
+                                caco_core::db::update_wad(&conn, wad_id, &update)
+                                    .map_err(|e| format!("Failed to update WAD record: {e}"))?;
+                            } else {
+                                return Err(format!(
+                                    "file not found: No WAD file available for '{}'. Link a file with: caco modify id:{} --link /path/to/wad",
+                                    wad.title, wad_id
+                                ));
+                            }
+                        }
+
                         caco_core::player::play(
                             &conn,
                             wad_id,
@@ -643,15 +719,6 @@ fn render_status_bar(ui: &mut egui::Ui, state: &mut AppState) {
             }
         }
 
-        // Right-aligned hints
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let hints = if state.view_mode == ViewMode::Import {
-                "1-5: switch source"
-            } else {
-                "\u{2191}\u{2193}/jk: nav  Enter: play  e: edit  d: del  s: sess  Ctrl+F: find  Esc: clear"
-            };
-            ui.colored_label(theme::TEXT_SECONDARY, hints);
-        });
     });
 }
 
