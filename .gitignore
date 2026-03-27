@@ -1,17 +1,8 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.egg-info/
-dist/
-build/
-.eggs/
-*.egg
-.venv/
-venv/
-.coverage
-coverage.json
-htmlcov/
+# Build
+contrib/arch/pkg/
+contrib/arch/src/
+contrib/arch/caco-*.pkg.tar.zst
+contrib/arch/caco-*.tar.gz
 
 # Rust
 target/
