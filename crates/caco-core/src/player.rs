@@ -175,6 +175,18 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
             .unwrap_or_else(|| config::get_wad_data_dir(wad_id, &wad.title));
         let _ = std::fs::create_dir_all(&data_dir);
         let iwad_for_data = iwad_name.as_deref();
+        // For dsda-family ports, ensure the nested save directory exists
+        if let (Some(iw), Some(family)) = (iwad_for_data, sourceports::identify_family(&port))
+            && family.name == "dsda"
+        {
+            let save_dir = sourceports::get_dsda_save_dir(
+                &port,
+                &data_dir.to_string_lossy(),
+                iw,
+                &wad_path.to_string_lossy(),
+            );
+            let _ = std::fs::create_dir_all(&save_dir);
+        }
         let data_args = sourceports::get_data_dir_args(
             &port,
             &data_dir.to_string_lossy(),
