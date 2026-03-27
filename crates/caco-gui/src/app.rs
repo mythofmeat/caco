@@ -15,7 +15,7 @@ use crate::import::state::SearchSource;
 use crate::message::{AppMessage, Notification};
 use crate::panels;
 use crate::persist;
-use crate::state::{ActionRequest, ActiveDialog, AppState, PlayState, ViewLayout, ViewMode};
+use crate::state::{ActionRequest, ActiveDialog, AppState, PlayState, ViewLayout, ViewMode, TABS};
 use crate::theme;
 use crate::thumbnails::{ThumbnailHint, ThumbnailManager};
 use crate::workers::BackgroundChannel;
@@ -476,7 +476,7 @@ impl eframe::App for CacoApp {
             }
         }
         if close_dialog {
-            // Check if dialog was modified → trigger reload
+            // Check if dialog was modified -> trigger reload
             let was_modified = match &self.state.active_dialog {
                 Some(ActiveDialog::Cache(s)) => s.modified,
                 Some(ActiveDialog::Resources(s)) => s.modified,
@@ -509,173 +509,92 @@ impl eframe::App for CacoApp {
         // 6. Render layout
         let mut actions: Vec<ActionRequest> = Vec::new();
 
-        // Top panel: menu bar
-        egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
-            egui::menu::bar(ui, |ui| {
-                ui.menu_button("File", |ui| {
-                    if ui.button("Import").clicked() {
-                        self.state.view_mode = ViewMode::Import;
-                        ui.close_menu();
-                    }
-                    ui.separator();
-                    if ui.button("Quit                       Ctrl+Q").clicked() {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                    }
-                });
-
-                ui.menu_button("View", |ui| {
-                    let list_label = if self.state.view_layout == ViewLayout::List {
-                        "\u{2713} List View"
-                    } else {
-                        "  List View"
-                    };
-                    if ui.button(list_label).clicked() {
-                        self.state.view_layout = ViewLayout::List;
-                        ui.close_menu();
-                    }
-
-                    let grid_label = if self.state.view_layout == ViewLayout::Grid {
-                        "\u{2713} Grid View"
-                    } else {
-                        "  Grid View"
-                    };
-                    if ui.button(grid_label).clicked() {
-                        self.state.view_layout = ViewLayout::Grid;
-                        ui.close_menu();
-                    }
-
-                    ui.separator();
-
-                    let detail_label = if self.state.show_detail_panel {
-                        "\u{2713} Detail Panel"
-                    } else {
-                        "  Detail Panel"
-                    };
-                    if ui.button(detail_label).clicked() {
-                        self.state.show_detail_panel = !self.state.show_detail_panel;
-                        ui.close_menu();
-                    }
-
-                    ui.separator();
-
-                    if ui.button("Library Stats").clicked() {
-                        actions.push(ActionRequest::Stats);
-                        ui.close_menu();
-                    }
-                    if ui.button("Resources").clicked() {
-                        actions.push(ActionRequest::Resources);
-                        ui.close_menu();
-                    }
-                    if ui.button("Cache Management").clicked() {
-                        actions.push(ActionRequest::Cache);
-                        ui.close_menu();
-                    }
-
-                    ui.separator();
-
-                    if ui.button("Refresh Library          F5").clicked() {
-                        self.state.needs_reload = true;
-                        ui.close_menu();
-                    }
-                });
-
-                ui.menu_button("Help", |ui| {
-                    if ui.button("Keyboard Shortcuts").clicked() {
-                        self.state.active_dialog = Some(ActiveDialog::Help);
-                        ui.close_menu();
-                    }
-                    if ui.button("About").clicked() {
-                        self.state.active_dialog = Some(ActiveDialog::About);
-                        ui.close_menu();
-                    }
-                });
+        // ── Left sidebar ──
+        egui::SidePanel::left("sidebar_nav")
+            .exact_width(200.0)
+            .resizable(false)
+            .frame(egui::Frame::new().fill(theme::BG_SIDEBAR).inner_margin(0.0))
+            .show(ctx, |ui| {
+                render_sidebar(ui, &mut self.state, &mut actions);
             });
-        });
 
-        // Tab bar
-        egui::TopBottomPanel::top("tab_bar").show(ctx, |ui| {
-            ui.add_space(4.0);
-            panels::library::render_tab_bar(ui, &mut self.state);
-            ui.add_space(2.0);
-        });
+        // ── Top bar (breadcrumbs + search + sort) ──
+        egui::TopBottomPanel::top("topbar")
+            .frame(
+                egui::Frame::new()
+                    .fill(Color32::from_rgb(0x1a, 0x14, 0x10))
+                    .inner_margin(egui::Margin::symmetric(16, 8))
+                    .stroke(egui::Stroke::new(1.0, theme::BORDER)),
+            )
+            .show(ctx, |ui| {
+                render_topbar(ui, &mut self.state, &mut actions);
+            });
 
-        // Bottom panel: status bar
-        egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
-            ui.add_space(2.0);
-            render_status_bar(ui, &mut self.state);
-            ui.add_space(2.0);
-        });
+        // ── Bottom status bar ──
+        egui::TopBottomPanel::bottom("status_bar")
+            .frame(
+                egui::Frame::new()
+                    .fill(theme::BG_DARK)
+                    .inner_margin(egui::Margin::symmetric(16, 4))
+                    .stroke(egui::Stroke::new(1.0, theme::BORDER)),
+            )
+            .show(ctx, |ui| {
+                render_status_bar(ui, &mut self.state);
+            });
 
-        // Detail panel as a top-level SidePanel (must come before CentralPanel
-        // so egui properly partitions the space).
-        if self.state.show_detail_panel && self.state.view_mode == ViewMode::Library {
-            let mut detail_action = None;
-            egui::SidePanel::right("detail_panel")
-                .default_width(300.0)
-                .min_width(200.0)
-                .max_width(500.0)
-                .resizable(true)
-                .show(ctx, |ui| {
-                    detail_action =
-                        panels::detail::render(ui, &self.state, &self.conn, Some(&self.thumbnails));
-                });
-            if let Some(a) = detail_action {
-                actions.push(a);
-            }
-        }
+        // ── Central panel (main content) ──
+        egui::CentralPanel::default()
+            .frame(egui::Frame::new().fill(theme::BG_DARK).inner_margin(0.0))
+            .show(ctx, |ui| {
+                match self.state.view_mode {
+                    ViewMode::Library => {
+                        egui::ScrollArea::vertical()
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                ui.set_min_width(ui.available_width());
 
-        // Central panel: Library view or Import view based on ViewMode
-        egui::CentralPanel::default().show(ctx, |ui| {
-            match self.state.view_mode {
-                ViewMode::Library => {
-                    // Toolbar row
-                    panels::library::render_toolbar(ui, &mut self.state);
-                    ui.separator();
+                                // Now-playing hero
+                                if let Some(a) = render_now_playing_hero(ui, &self.state, &self.thumbnails) {
+                                    actions.push(a);
+                                }
 
-                    // WAD table or grid fills remaining space
-                    let view_action = match self.state.view_layout {
-                        ViewLayout::List => panels::wad_table::render(ui, &mut self.state),
-                        ViewLayout::Grid => panels::wad_grid::render(
-                            ui,
-                            &mut self.state,
-                            Some(&self.thumbnails),
-                        ),
-                    };
-                    if let Some(a) = view_action {
-                        actions.push(a);
+                                // Section header with view toggle
+                                ui.add_space(4.0);
+                                render_section_header(ui, &mut self.state);
+                                ui.add_space(8.0);
+
+                                // WAD grid or table
+                                let view_action = match self.state.view_layout {
+                                    ViewLayout::List => {
+                                        panels::wad_table::render(ui, &mut self.state)
+                                    }
+                                    ViewLayout::Grid => panels::wad_grid::render(
+                                        ui,
+                                        &mut self.state,
+                                        Some(&self.thumbnails),
+                                    ),
+                                };
+                                if let Some(a) = view_action {
+                                    actions.push(a);
+                                }
+                            });
+                    }
+                    ViewMode::Import => {
+                        if let Some(import_action) =
+                            import::render(ui, &mut self.state.import)
+                        {
+                            self.dispatch_import_action(import_action);
+                        }
                     }
                 }
-                ViewMode::Import => {
-                    if let Some(import_action) =
-                        import::render(ui, &mut self.state.import)
-                    {
-                        self.dispatch_import_action(import_action);
-                    }
-                }
-            }
-        });
+            });
 
-        // 7. Request thumbnails for visible WADs (grid mode) and selected WAD (detail panel)
+        // 7. Request thumbnails for visible WADs
         if self.state.view_mode == ViewMode::Library {
             let sender = self.bg.sender();
 
-            // Request thumbnail for selected WAD when detail panel is visible
-            if self.state.show_detail_panel
-                && let Some(wad) = self.state.selected_wad()
-                && self.thumbnails.needs_request(wad.id)
-            {
-                let path = wad.cached_path.as_deref().map(std::path::Path::new);
-                let hint = ThumbnailHint {
-                    source_type: wad.source_type.clone(),
-                    source_url: wad.source_url.clone(),
-                    title: wad.title.clone(),
-                };
-                self.thumbnails.request(wad.id, path, &hint, &sender);
-            }
-
-            // Request thumbnails for all visible WADs in grid mode
-            if self.state.view_layout == ViewLayout::Grid
-                && self.state.wads.iter().any(|w| self.thumbnails.needs_request(w.id))
+            // Request thumbnails for all visible WADs
+            if self.state.wads.iter().any(|w| self.thumbnails.needs_request(w.id))
             {
                 for wad in &self.state.wads {
                     if self.thumbnails.needs_request(wad.id) {
@@ -691,14 +610,657 @@ impl eframe::App for CacoApp {
             }
         }
 
-        // 8. Dispatch action requests (only first one — avoid double-triggering)
+        // 8. Dispatch action requests (only first one)
         if let Some(action) = actions.into_iter().next() {
             self.dispatch_action(action);
         }
     }
 }
 
-/// Render the status bar (enhanced with play state).
+use egui::Color32;
+
+// ---------------------------------------------------------------------------
+// Sidebar
+// ---------------------------------------------------------------------------
+
+fn render_sidebar(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<ActionRequest>) {
+    ui.add_space(16.0);
+
+    // Logo
+    ui.horizontal(|ui| {
+        ui.add_space(20.0);
+        ui.colored_label(
+            theme::TEXT_ACCENT,
+            egui::RichText::new("caco").size(22.0).strong(),
+        );
+    });
+
+    ui.add_space(24.0);
+
+    // Navigation items
+    if theme::sidebar_nav_item(ui, "Library", state.view_mode == ViewMode::Library) {
+        state.view_mode = ViewMode::Library;
+        if state.needs_reload || state.wads.is_empty() {
+            state.needs_reload = true;
+        }
+    }
+    if theme::sidebar_nav_item(ui, "Import", state.view_mode == ViewMode::Import) {
+        state.view_mode = ViewMode::Import;
+    }
+
+    // Divider
+    ui.add_space(12.0);
+    let rect = ui.available_rect_before_wrap();
+    ui.painter().line_segment(
+        [
+            egui::pos2(rect.min.x + 20.0, rect.min.y),
+            egui::pos2(rect.max.x - 20.0, rect.min.y),
+        ],
+        egui::Stroke::new(1.0, theme::BORDER),
+    );
+    ui.add_space(16.0);
+
+    // Status filters
+    let has_hidden = !state.hidden_tabs.is_empty();
+    let section_resp = ui.horizontal(|ui| {
+        ui.add_space(20.0);
+        ui.colored_label(
+            theme::TEXT_MUTED,
+            egui::RichText::new("FILTER BY STATUS")
+                .size(11.0)
+                .strong(),
+        );
+    }).response;
+
+    // Right-click on section header to show all hidden filters
+    if has_hidden {
+        let mut show_all = false;
+        section_resp.context_menu(|ui| {
+            if ui.button("Show all hidden filters").clicked() {
+                show_all = true;
+                ui.close_menu();
+            }
+        });
+        if show_all {
+            state.hidden_tabs.clear();
+        }
+    }
+    ui.add_space(8.0);
+
+    let mut hide_tab: Option<usize> = None;
+    for (i, tab) in TABS.iter().enumerate() {
+        // Skip hidden tabs (but never hide "All")
+        if i != 0 && state.hidden_tabs.contains(&i) {
+            continue;
+        }
+
+        let is_active = state.view_mode == ViewMode::Library && state.active_tab == i;
+        let count = state.status_count(tab.status_filter);
+        let status_key = tab
+            .status_filter
+            .and_then(|s| s.first().copied());
+
+        let resp = theme::sidebar_status_item(ui, tab.label, count, status_key, is_active);
+
+        // Right-click to hide (not on "All")
+        if i != 0 {
+            resp.context_menu(|ui| {
+                if ui.button(format!("Hide \"{}\"", tab.label)).clicked() {
+                    hide_tab = Some(i);
+                    ui.close_menu();
+                }
+            });
+        }
+
+        if resp.clicked() {
+            state.view_mode = ViewMode::Library;
+            if state.active_tab != i {
+                state.active_tab = i;
+                state.needs_reload = true;
+            }
+        }
+    }
+    if let Some(idx) = hide_tab {
+        state.hidden_tabs.insert(idx);
+        // If the hidden tab was active, switch to All
+        if state.active_tab == idx {
+            state.active_tab = 0;
+            state.needs_reload = true;
+        }
+    }
+
+    // ── Saved searches section ──
+    if !state.saved_searches.is_empty() || !state.filter_text.trim().is_empty() {
+        ui.add_space(12.0);
+        let rect = ui.available_rect_before_wrap();
+        ui.painter().line_segment(
+            [
+                egui::pos2(rect.min.x + 20.0, rect.min.y),
+                egui::pos2(rect.max.x - 20.0, rect.min.y),
+            ],
+            egui::Stroke::new(1.0, theme::BORDER),
+        );
+        ui.add_space(12.0);
+
+        ui.horizontal(|ui| {
+            ui.add_space(20.0);
+            ui.colored_label(
+                theme::TEXT_MUTED,
+                egui::RichText::new("SAVED SEARCHES")
+                    .size(11.0)
+                    .strong(),
+            );
+        });
+        ui.add_space(6.0);
+
+        let mut load_query: Option<String> = None;
+        let mut delete_idx: Option<usize> = None;
+
+        for (i, search) in state.saved_searches.iter().enumerate() {
+            let is_active = state.view_mode == ViewMode::Library
+                && state.applied_filter == search.query
+                && !search.query.is_empty();
+
+            let resp = theme::sidebar_search_item(ui, &search.name, is_active);
+
+            // Right-click to delete
+            resp.context_menu(|ui| {
+                if ui.button(format!("Delete \"{}\"", search.name)).clicked() {
+                    delete_idx = Some(i);
+                    ui.close_menu();
+                }
+            });
+
+            if resp.clicked() {
+                load_query = Some(search.query.clone());
+            }
+        }
+
+        if let Some(query) = load_query {
+            state.view_mode = ViewMode::Library;
+            state.filter_text = query;
+            state.filter_changed_at = Some(std::time::Instant::now());
+        }
+        if let Some(idx) = delete_idx {
+            state.saved_searches.remove(idx);
+        }
+
+        // "Save current filter" button (only when there's an active filter)
+        if !state.filter_text.trim().is_empty() {
+            ui.add_space(4.0);
+            let save_resp = ui.horizontal(|ui| {
+                ui.add_space(16.0);
+                ui.add(
+                    egui::Button::new(
+                        egui::RichText::new("Save current filter...")
+                            .size(12.0)
+                            .color(theme::TEXT_MUTED),
+                    )
+                    .frame(false),
+                )
+            }).inner;
+            if save_resp.clicked() {
+                state.save_search_pending = true;
+                state.save_search_name = state.filter_text.trim().to_string();
+            }
+        }
+    }
+
+    // Handle save-search dialog
+    if state.save_search_pending {
+        render_save_search_dialog(ui, state);
+    }
+
+    // Bottom spacer + admin links
+    ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            ui.add_space(20.0);
+            ui.colored_label(
+                theme::TEXT_MUTED,
+                egui::RichText::new(format!("v{}", env!("CARGO_PKG_VERSION")))
+                    .size(11.0),
+            );
+        });
+        ui.add_space(4.0);
+
+        // Divider above bottom links
+        let rect = ui.available_rect_before_wrap();
+        ui.painter().line_segment(
+            [
+                egui::pos2(rect.min.x + 20.0, rect.max.y),
+                egui::pos2(rect.max.x - 20.0, rect.max.y),
+            ],
+            egui::Stroke::new(1.0, theme::BORDER),
+        );
+        ui.add_space(12.0);
+
+        // Small action links
+        ui.horizontal(|ui| {
+            ui.add_space(16.0);
+            if ui
+                .add(
+                    egui::Button::new(
+                        egui::RichText::new("Stats").size(11.0).color(theme::TEXT_MUTED),
+                    )
+                    .frame(false),
+                )
+                .clicked()
+            {
+                actions.push(ActionRequest::Stats);
+            }
+            if ui
+                .add(
+                    egui::Button::new(
+                        egui::RichText::new("Cache").size(11.0).color(theme::TEXT_MUTED),
+                    )
+                    .frame(false),
+                )
+                .clicked()
+            {
+                actions.push(ActionRequest::Cache);
+            }
+            if ui
+                .add(
+                    egui::Button::new(
+                        egui::RichText::new("IWADs").size(11.0).color(theme::TEXT_MUTED),
+                    )
+                    .frame(false),
+                )
+                .clicked()
+            {
+                actions.push(ActionRequest::Resources);
+            }
+        });
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Top bar (breadcrumbs + search + sort)
+// ---------------------------------------------------------------------------
+
+fn render_topbar(ui: &mut egui::Ui, state: &mut AppState, _actions: &mut Vec<ActionRequest>) {
+    ui.horizontal(|ui| {
+        // Breadcrumbs
+        render_breadcrumbs(ui, state);
+
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // Sort controls (right-aligned)
+            panels::sort_controls::render(ui, state);
+
+            // Search/filter
+            panels::filter_bar::render(ui, state);
+        });
+    });
+}
+
+/// Render the "Save Search" dialog as a floating window.
+fn render_save_search_dialog(ui: &mut egui::Ui, state: &mut AppState) {
+    let mut saved = false;
+    let mut cancelled = false;
+    egui::Window::new("Save Search")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ui.ctx(), |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Name:");
+                ui.text_edit_singleline(&mut state.save_search_name);
+            });
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui.button("Save").clicked() && !state.save_search_name.trim().is_empty() {
+                    saved = true;
+                }
+                if ui.button("Cancel").clicked()
+                    || ui.input(|i| i.key_pressed(egui::Key::Escape))
+                {
+                    cancelled = true;
+                }
+            });
+        });
+
+    if saved {
+        let name = state.save_search_name.trim().to_string();
+        let query = state.filter_text.trim().to_string();
+        state.saved_searches.retain(|s| s.name != name);
+        state
+            .saved_searches
+            .push(crate::persist::SavedSearch { name, query });
+        state.save_search_pending = false;
+        state.save_search_name.clear();
+    } else if cancelled {
+        state.save_search_pending = false;
+        state.save_search_name.clear();
+    }
+}
+
+fn render_breadcrumbs(ui: &mut egui::Ui, state: &AppState) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+
+        // Base crumb
+        let base = if state.view_mode == ViewMode::Import {
+            "Import"
+        } else {
+            "Library"
+        };
+
+        // If a dialog is open, the base is clickable (concept: navigate back)
+        let has_detail = state.active_dialog.is_some();
+        if has_detail {
+            ui.colored_label(theme::TEXT_SECONDARY, base);
+        } else {
+            ui.colored_label(
+                theme::TEXT_PRIMARY,
+                egui::RichText::new(base).strong(),
+            );
+        }
+
+        // WAD name crumb (when edit/sessions/etc dialog is open)
+        if let Some(ref dialog) = state.active_dialog {
+            let wad_title = match dialog {
+                ActiveDialog::Edit(e) => Some(e.title()),
+                _ => None,
+            };
+            if let Some(title) = wad_title {
+                ui.colored_label(theme::TEXT_MUTED, "  /  ");
+                ui.colored_label(theme::TEXT_SECONDARY, title);
+                ui.colored_label(theme::TEXT_MUTED, "  /  ");
+                ui.colored_label(
+                    theme::TEXT_ACCENT,
+                    egui::RichText::new("Edit").strong(),
+                );
+            }
+        }
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Now Playing hero
+// ---------------------------------------------------------------------------
+
+fn render_now_playing_hero(
+    ui: &mut egui::Ui,
+    state: &AppState,
+    thumbnails: &ThumbnailManager,
+) -> Option<ActionRequest> {
+    // Find the first WAD with "playing" status, or show active play state
+    let (wad_title, wad_author, wad_id, is_active) =
+        if let PlayState::Playing {
+            wad_id, wad_title, ..
+        } = &state.play_state
+        {
+            let author = state
+                .wads
+                .iter()
+                .find(|w| w.id == *wad_id)
+                .and_then(|w| w.author.clone());
+            (wad_title.clone(), author, *wad_id, true)
+        } else {
+            // Show the first "playing" status WAD
+            let playing_wad = state.wads.iter().find(|w| w.status == "playing");
+            match playing_wad {
+                Some(w) => (w.title.clone(), w.author.clone(), w.id, false),
+                None => return None, // No hero to show
+            }
+        };
+
+    let mut action = None;
+
+    let stats = state.stats_map.get(&wad_id);
+
+    ui.add_space(16.0);
+
+    // Hero frame
+    let hero_frame = egui::Frame::new()
+        .fill(Color32::from_rgb(0x22, 0x18, 0x0c))
+        .corner_radius(16)
+        .inner_margin(egui::Margin::symmetric(24, 20))
+        .stroke(egui::Stroke::new(1.0, Color32::from_rgb(0x3a, 0x2e, 0x1a)))
+        .outer_margin(egui::Margin::symmetric(20, 0));
+
+    hero_frame.show(ui, |ui| {
+        ui.horizontal(|ui| {
+            // Thumbnail (real or placeholder) — double-click to play, right-click for menu
+            let thumb_size = egui::vec2(120.0, 90.0);
+            let (thumb_rect, thumb_resp) =
+                ui.allocate_exact_size(thumb_size, egui::Sense::click());
+
+            if let Some(tex) = thumbnails.get(wad_id) {
+                let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+                ui.painter()
+                    .rect_filled(thumb_rect, 10.0, Color32::BLACK);
+                ui.painter()
+                    .image(tex.id(), thumb_rect, uv, Color32::WHITE);
+            } else {
+                let (c1, _c2, ci) = theme::thumb_colors(wad_id);
+                ui.painter().rect_filled(thumb_rect, 10.0, c1);
+                let initials: String = wad_title
+                    .chars()
+                    .filter(|c| c.is_alphanumeric())
+                    .take(2)
+                    .flat_map(|c| c.to_uppercase())
+                    .collect();
+                ui.painter().text(
+                    thumb_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    &initials,
+                    egui::FontId::proportional(28.0),
+                    ci,
+                );
+            }
+
+            // Hover outline on thumbnail
+            if thumb_resp.hovered() {
+                ui.painter().rect_stroke(
+                    thumb_rect,
+                    10.0,
+                    egui::Stroke::new(1.5, theme::TEXT_ACCENT),
+                    egui::StrokeKind::Outside,
+                );
+            }
+
+            // Double-click to play
+            if thumb_resp.double_clicked() {
+                action = Some(ActionRequest::Play(wad_id));
+            }
+
+            // Right-click context menu
+            if let Some(a) = panels::wad_context_menu(&thumb_resp, wad_id) {
+                action = Some(a);
+            }
+
+            ui.add_space(16.0);
+
+            // Info area
+            ui.vertical(|ui| {
+                let label_color = if is_active {
+                    theme::COLOR_SUCCESS
+                } else {
+                    Color32::from_rgb(0x55, 0x88, 0xdd)
+                };
+                let label_text = if is_active {
+                    "NOW PLAYING"
+                } else {
+                    "CONTINUE PLAYING"
+                };
+                ui.colored_label(
+                    label_color,
+                    egui::RichText::new(label_text).size(11.0).strong(),
+                );
+                ui.add_space(2.0);
+                ui.colored_label(
+                    theme::TEXT_PRIMARY,
+                    egui::RichText::new(&wad_title).size(20.0).strong(),
+                );
+                ui.add_space(2.0);
+                let meta = wad_author.as_deref().unwrap_or("");
+                ui.colored_label(
+                    theme::TEXT_SECONDARY,
+                    egui::RichText::new(meta).size(13.0),
+                );
+            });
+
+            // Right side: playtime + progress
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.vertical(|ui| {
+                    ui.with_layout(egui::Layout::top_down(egui::Align::RIGHT), |ui| {
+                        if let Some(s) = stats
+                            && s.playtime > 0
+                        {
+                            ui.colored_label(
+                                theme::TEXT_PRIMARY,
+                                egui::RichText::new(
+                                    caco_core::player::format_duration(s.playtime),
+                                )
+                                .size(22.0)
+                                .strong(),
+                            );
+                            ui.colored_label(
+                                theme::TEXT_MUTED,
+                                egui::RichText::new("TOTAL PLAYTIME").size(10.0),
+                            );
+                        }
+
+                        // Progress bar (from stats_snapshot if available)
+                        let wad = state.wads.iter().find(|w| w.id == wad_id);
+                        if let Some(wad) = wad
+                            && let Some(ref snapshot_json) = wad.stats_snapshot
+                            && let Ok(wad_stats) =
+                                serde_json::from_str::<caco_core::wad_stats::WadStats>(
+                                    snapshot_json,
+                                )
+                            && !wad_stats.maps.is_empty()
+                        {
+                            let played = wad_stats.played_maps().len();
+                            let total = wad_stats.maps.len();
+                            let pct = played as f32 / total as f32;
+
+                            ui.add_space(8.0);
+
+                            // Progress bar
+                            let bar_width = 200.0_f32;
+                            let bar_height = 6.0;
+                            let (bar_rect, _) = ui.allocate_exact_size(
+                                egui::vec2(bar_width, bar_height),
+                                egui::Sense::hover(),
+                            );
+                            ui.painter().rect_filled(
+                                bar_rect,
+                                3.0,
+                                Color32::from_rgb(0x3a, 0x2e, 0x1a),
+                            );
+                            if pct > 0.0 {
+                                let fill_rect = egui::Rect::from_min_size(
+                                    bar_rect.min,
+                                    egui::vec2(bar_rect.width() * pct, bar_height),
+                                );
+                                ui.painter().rect_filled(
+                                    fill_rect,
+                                    3.0,
+                                    theme::COLOR_SUCCESS,
+                                );
+                            }
+
+                            ui.colored_label(
+                                theme::TEXT_MUTED,
+                                egui::RichText::new(format!(
+                                    "{played} / {total} maps \u{00b7} {}%",
+                                    (pct * 100.0) as u32
+                                ))
+                                .size(11.0),
+                            );
+                        }
+                    });
+                });
+            });
+        });
+    });
+
+    action
+}
+
+// ---------------------------------------------------------------------------
+// Section header (above grid/table)
+// ---------------------------------------------------------------------------
+
+fn render_section_header(ui: &mut egui::Ui, state: &mut AppState) {
+    let margin = egui::Margin::symmetric(20, 0);
+    egui::Frame::new().inner_margin(margin).show(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.colored_label(
+                theme::TEXT_MUTED,
+                egui::RichText::new(format!(
+                    "ALL WADS \u{00b7} {}",
+                    state.wads.len()
+                ))
+                .size(13.0)
+                .strong(),
+            );
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // View toggle buttons
+                let list_selected = state.view_layout == ViewLayout::List;
+                let grid_selected = state.view_layout == ViewLayout::Grid;
+
+                // List button
+                let list_text = if list_selected {
+                    egui::RichText::new("List").size(12.0).color(theme::TEXT_PRIMARY)
+                } else {
+                    egui::RichText::new("List").size(12.0).color(theme::TEXT_SECONDARY)
+                };
+                let list_btn = ui.add(
+                    egui::Button::new(list_text)
+                        .fill(if list_selected {
+                            theme::BORDER_MED
+                        } else {
+                            theme::BG_LIGHT
+                        })
+                        .corner_radius(egui::CornerRadius {
+                            nw: 0,
+                            ne: 6,
+                            se: 6,
+                            sw: 0,
+                        }),
+                );
+                if list_btn.clicked() {
+                    state.view_layout = ViewLayout::List;
+                }
+
+                // Grid button
+                let grid_text = if grid_selected {
+                    egui::RichText::new("Grid").size(12.0).color(theme::TEXT_PRIMARY)
+                } else {
+                    egui::RichText::new("Grid").size(12.0).color(theme::TEXT_SECONDARY)
+                };
+                let grid_btn = ui.add(
+                    egui::Button::new(grid_text)
+                        .fill(if grid_selected {
+                            theme::BORDER_MED
+                        } else {
+                            theme::BG_LIGHT
+                        })
+                        .corner_radius(egui::CornerRadius {
+                            nw: 6,
+                            ne: 0,
+                            se: 0,
+                            sw: 6,
+                        }),
+                );
+                if grid_btn.clicked() {
+                    state.view_layout = ViewLayout::Grid;
+                }
+
+            });
+        });
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Status bar
+// ---------------------------------------------------------------------------
+
 fn render_status_bar(ui: &mut egui::Ui, state: &mut AppState) {
     ui.horizontal(|ui| {
         // Play state indicator
@@ -718,11 +1280,13 @@ fn render_status_bar(ui: &mut egui::Ui, state: &mut AppState) {
                 ui.colored_label(theme::severity_color(notif.severity), &notif.text);
             }
         }
-
     });
 }
 
-/// Render the keyboard shortcuts help dialog. Returns true when closed.
+// ---------------------------------------------------------------------------
+// Help / About dialogs
+// ---------------------------------------------------------------------------
+
 fn render_help_dialog(ctx: &egui::Context) -> bool {
     let mut closed = false;
     egui::Window::new("Keyboard Shortcuts")
@@ -768,7 +1332,6 @@ fn render_help_dialog(ctx: &egui::Context) -> bool {
     closed
 }
 
-/// Render a shortcut section with a heading and key/description grid.
 fn shortcut_section(ui: &mut egui::Ui, title: &str, shortcuts: &[(&str, &str)]) {
     ui.add_space(4.0);
     ui.strong(title);
@@ -787,7 +1350,6 @@ fn shortcut_section(ui: &mut egui::Ui, title: &str, shortcuts: &[(&str, &str)]) 
     ui.separator();
 }
 
-/// Render the About dialog. Returns true when closed.
 fn render_about_dialog(ctx: &egui::Context) -> bool {
     let mut closed = false;
     egui::Window::new("About Caco")

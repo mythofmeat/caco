@@ -1,0 +1,1263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Caco GUI Mockups</title>
+<style>
+  /* ── Reset ── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #111;
+    color: #eee;
+    overflow: hidden;
+    height: 100vh;
+  }
+
+  /* ── Concept Switcher ── */
+  .switcher {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 9999;
+    background: #000; border-bottom: 1px solid #333;
+    display: flex; gap: 0; align-items: center;
+    padding: 0 16px; height: 40px;
+  }
+  .switcher .label {
+    font-size: 12px; color: #888; margin-right: 16px; text-transform: uppercase;
+    letter-spacing: 1px; font-weight: 600;
+  }
+  .switcher button {
+    background: none; border: none; color: #888; font-size: 13px;
+    padding: 10px 16px; cursor: pointer; border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+  }
+  .switcher button:hover { color: #ccc; }
+  .switcher button.active { color: #fff; border-bottom-color: #ff6633; }
+
+  .concept { display: none; padding-top: 40px; height: 100vh; }
+  .concept.active { display: flex; flex-direction: column; }
+
+  /* ========================================================================
+     CONCEPT A: "Minimal" – Clean, airy, Spotify-esque
+     ======================================================================== */
+  .concept-a { background: #0d0d0d; font-family: "Inter", -apple-system, sans-serif; }
+
+  .concept-a .topbar {
+    display: flex; align-items: center; padding: 12px 24px; gap: 16px;
+    background: #0d0d0d; border-bottom: 1px solid #1a1a1a;
+  }
+  .concept-a .topbar .app-name {
+    font-size: 18px; font-weight: 700; color: #fff; letter-spacing: -0.5px;
+  }
+  .concept-a .topbar .nav-pills {
+    display: flex; gap: 4px; margin-left: 24px;
+  }
+  .concept-a .topbar .nav-pills button {
+    background: #1a1a1a; border: none; color: #999; font-size: 13px;
+    padding: 6px 16px; border-radius: 20px; cursor: pointer; transition: all 0.15s;
+  }
+  .concept-a .topbar .nav-pills button:hover { color: #fff; background: #222; }
+  .concept-a .topbar .nav-pills button.active { color: #fff; background: #333; }
+
+  .concept-a .search-area {
+    display: flex; align-items: center; margin-left: auto; gap: 12px;
+  }
+  .concept-a .search-box {
+    background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px;
+    padding: 7px 14px; color: #ccc; font-size: 13px; width: 280px;
+    outline: none; transition: border 0.2s;
+  }
+  .concept-a .search-box:focus { border-color: #444; }
+  .concept-a .search-box::placeholder { color: #555; }
+
+  .concept-a .sort-chip {
+    background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 6px;
+    padding: 6px 12px; color: #888; font-size: 12px; cursor: pointer;
+    display: flex; align-items: center; gap: 4px;
+  }
+
+  .concept-a .main-area {
+    display: flex; flex: 1; overflow: hidden;
+  }
+
+  .concept-a .wad-list {
+    flex: 1; overflow-y: auto; padding: 8px 0;
+  }
+  .concept-a .wad-item {
+    display: grid;
+    grid-template-columns: 48px 1fr 140px 100px 90px 90px;
+    align-items: center; padding: 10px 24px; gap: 12px;
+    cursor: pointer; transition: background 0.1s; border-radius: 0;
+  }
+  .concept-a .wad-item:hover { background: #151515; }
+  .concept-a .wad-item.selected { background: #1a1410; }
+  .concept-a .wad-item .id { color: #555; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .concept-a .wad-item .title-col .title {
+    font-size: 14px; color: #e8e8e8; font-weight: 500;
+  }
+  .concept-a .wad-item .title-col .tags {
+    display: flex; gap: 4px; margin-top: 2px;
+  }
+  .concept-a .wad-item .title-col .tag {
+    font-size: 10px; color: #666; background: #1a1a1a; padding: 1px 6px;
+    border-radius: 3px;
+  }
+  .concept-a .wad-item .author { color: #888; font-size: 13px; }
+  .concept-a .wad-item .status {
+    font-size: 12px; font-weight: 500;
+  }
+  .concept-a .wad-item .playtime { color: #666; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .concept-a .wad-item .last-played { color: #555; font-size: 12px; }
+
+  .concept-a .detail-sidebar {
+    width: 340px; border-left: 1px solid #1a1a1a; padding: 24px;
+    overflow-y: auto; background: #0a0a0a;
+  }
+  .concept-a .detail-sidebar .thumb {
+    width: 100%; aspect-ratio: 16/10; background: #1a0a06;
+    border-radius: 8px; margin-bottom: 16px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 28px; color: #331a0d; font-weight: 700;
+  }
+  .concept-a .detail-sidebar .wad-title {
+    font-size: 20px; font-weight: 700; color: #fff; margin-bottom: 4px;
+  }
+  .concept-a .detail-sidebar .wad-author { font-size: 14px; color: #888; margin-bottom: 12px; }
+  .concept-a .detail-sidebar .status-badge {
+    display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 12px;
+    font-weight: 600;
+  }
+  .concept-a .detail-sidebar .stat-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 20px 0;
+  }
+  .concept-a .detail-sidebar .stat-box {
+    background: #141414; border-radius: 8px; padding: 12px;
+  }
+  .concept-a .detail-sidebar .stat-box .stat-label { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
+  .concept-a .detail-sidebar .stat-box .stat-value { font-size: 18px; color: #fff; font-weight: 600; margin-top: 2px; }
+  .concept-a .detail-sidebar .actions {
+    display: flex; gap: 8px; margin-top: 16px;
+  }
+  .concept-a .detail-sidebar .actions button {
+    flex: 1; padding: 10px; border: none; border-radius: 8px; font-size: 13px;
+    font-weight: 600; cursor: pointer; transition: 0.15s;
+  }
+  .concept-a .detail-sidebar .btn-play { background: #ff6633; color: #fff; }
+  .concept-a .detail-sidebar .btn-play:hover { background: #ff7744; }
+  .concept-a .detail-sidebar .btn-edit { background: #1a1a1a; color: #ccc; border: 1px solid #2a2a2a !important; }
+  .concept-a .detail-sidebar .btn-edit:hover { background: #222; }
+  .concept-a .detail-sidebar .section-title {
+    font-size: 11px; color: #555; text-transform: uppercase; letter-spacing: 1px;
+    margin: 20px 0 8px; font-weight: 600;
+  }
+  .concept-a .detail-sidebar .desc { font-size: 13px; color: #777; line-height: 1.5; }
+  .concept-a .detail-sidebar .tags-wrap { display: flex; gap: 6px; flex-wrap: wrap; }
+  .concept-a .detail-sidebar .tag-pill {
+    background: #1a1410; color: #cc7744; font-size: 11px;
+    padding: 3px 10px; border-radius: 12px;
+  }
+  .concept-a .detail-sidebar .progress-bar {
+    height: 6px; background: #1a1a1a; border-radius: 3px; overflow: hidden;
+    margin-top: 8px;
+  }
+  .concept-a .detail-sidebar .progress-bar .fill {
+    height: 100%; border-radius: 3px; background: #ff6633;
+  }
+
+  .concept-a .status-bar {
+    padding: 6px 24px; font-size: 12px; color: #555;
+    border-top: 1px solid #1a1a1a; background: #0d0d0d;
+  }
+
+  /* Status colors (concept A) */
+  .concept-a .s-playing { color: #33cc33; }
+  .concept-a .s-toplay { color: #3366cc; }
+  .concept-a .s-finished { color: #808080; }
+  .concept-a .s-backlog { color: #cccc33; }
+  .concept-a .s-abandoned { color: #cc3333; }
+  .concept-a .badge-playing { background: #0d2a0d; color: #33cc33; }
+  .concept-a .badge-toplay { background: #0d1a33; color: #3366cc; }
+  .concept-a .badge-finished { background: #1a1a1a; color: #808080; }
+
+  /* ========================================================================
+     CONCEPT B: "Cover Flow" – Grid-first, big thumbnails, immersive
+     ======================================================================== */
+  .concept-b { background: #111118; font-family: "Inter", -apple-system, sans-serif; }
+
+  .concept-b .topbar {
+    display: flex; align-items: center; padding: 10px 20px; gap: 12px;
+    background: rgba(0,0,0,0.5); backdrop-filter: blur(12px);
+    border-bottom: 1px solid #222230;
+  }
+  .concept-b .topbar .app-name {
+    font-size: 16px; font-weight: 700; color: #ff5533;
+    letter-spacing: 2px; text-transform: uppercase;
+  }
+  .concept-b .topbar .search-box {
+    margin-left: auto; background: #1a1a22; border: 1px solid #2a2a35;
+    border-radius: 6px; padding: 6px 12px; color: #ccc; font-size: 13px;
+    width: 300px; outline: none;
+  }
+  .concept-b .topbar .search-box::placeholder { color: #555; }
+
+  .concept-b .filter-bar {
+    display: flex; gap: 8px; padding: 12px 20px;
+    border-bottom: 1px solid #1a1a22;
+  }
+  .concept-b .filter-bar button {
+    background: #1a1a22; border: 1px solid #2a2a35; border-radius: 6px;
+    color: #888; font-size: 12px; padding: 5px 14px; cursor: pointer;
+    transition: all 0.15s;
+  }
+  .concept-b .filter-bar button:hover { color: #ccc; border-color: #444; }
+  .concept-b .filter-bar button.active { color: #ff5533; border-color: #ff5533; background: #1a0d0a; }
+
+  .concept-b .grid-area {
+    flex: 1; overflow-y: auto; padding: 16px 20px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 16px; align-content: start;
+  }
+
+  .concept-b .card {
+    background: #16161e; border-radius: 10px; overflow: hidden;
+    cursor: pointer; transition: all 0.2s;
+    border: 2px solid transparent;
+  }
+  .concept-b .card:hover { transform: translateY(-2px); border-color: #333; }
+  .concept-b .card.selected { border-color: #ff5533; }
+  .concept-b .card .thumb {
+    aspect-ratio: 4/3; display: flex; align-items: center; justify-content: center;
+    font-size: 32px; font-weight: 800; position: relative; overflow: hidden;
+  }
+  .concept-b .card .thumb::after {
+    content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 40%;
+    background: linear-gradient(transparent, #16161e);
+  }
+  .concept-b .card .card-body { padding: 10px 12px 12px; }
+  .concept-b .card .card-title {
+    font-size: 13px; font-weight: 600; color: #e8e8e8;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .concept-b .card .card-meta {
+    font-size: 11px; color: #666; margin-top: 2px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .concept-b .card .card-status {
+    font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 4px;
+    display: inline-block; margin-top: 6px;
+  }
+  .concept-b .cs-playing { background: #0d2a0d; color: #33cc33; }
+  .concept-b .cs-toplay { background: #0d1a33; color: #4488ee; }
+  .concept-b .cs-finished { background: #1a1a1a; color: #888; }
+  .concept-b .cs-backlog { background: #2a2a0d; color: #cccc33; }
+  .concept-b .cs-abandoned { background: #2a0d0d; color: #cc3333; }
+
+  /* Placeholder thumb colors */
+  .concept-b .thumb-1 { background: linear-gradient(135deg, #3a0000, #660000); color: #882222; }
+  .concept-b .thumb-2 { background: linear-gradient(135deg, #002a11, #004422); color: #226644; }
+  .concept-b .thumb-3 { background: linear-gradient(135deg, #0a0a3a, #1a1a66); color: #3344aa; }
+  .concept-b .thumb-4 { background: linear-gradient(135deg, #331a00, #663300); color: #885522; }
+  .concept-b .thumb-5 { background: linear-gradient(135deg, #2a002a, #4a0e4e); color: #773388; }
+  .concept-b .thumb-6 { background: linear-gradient(135deg, #2a2a00, #554400); color: #887722; }
+
+  .concept-b .card .stars { color: #ff5533; font-size: 10px; }
+  .concept-b .card .playtime-label { font-size: 10px; color: #555; }
+
+  /* ========================================================================
+     CONCEPT C: "Dense Dashboard" – Information-dense, data-focused
+     ======================================================================== */
+  .concept-c { background: #0e1117; font-family: "JetBrains Mono", "Fira Code", monospace; }
+
+  .concept-c .topbar {
+    display: flex; align-items: center; padding: 6px 16px; gap: 8px;
+    background: #161b22; border-bottom: 1px solid #21262d;
+    font-size: 13px;
+  }
+  .concept-c .topbar .app-name {
+    color: #58a6ff; font-weight: 600; font-size: 14px;
+  }
+  .concept-c .topbar .separator { color: #30363d; margin: 0 4px; }
+  .concept-c .topbar .breadcrumb { color: #8b949e; }
+  .concept-c .topbar .stats-pills {
+    display: flex; gap: 8px; margin-left: auto;
+  }
+  .concept-c .topbar .stats-pill {
+    font-size: 11px; padding: 2px 8px; border-radius: 10px;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .concept-c .stats-pill .dot { width: 7px; height: 7px; border-radius: 50%; }
+
+  .concept-c .toolbar {
+    display: flex; align-items: center; gap: 8px; padding: 8px 16px;
+    background: #0e1117; border-bottom: 1px solid #21262d;
+  }
+  .concept-c .toolbar .search-box {
+    background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+    padding: 5px 10px; color: #c9d1d9; font-size: 12px; flex: 1;
+    font-family: inherit; outline: none; max-width: 400px;
+  }
+  .concept-c .toolbar .search-box:focus { border-color: #58a6ff; }
+  .concept-c .toolbar .search-box::placeholder { color: #484f58; }
+  .concept-c .toolbar .chip {
+    background: #21262d; border: 1px solid #30363d; border-radius: 14px;
+    color: #8b949e; font-size: 11px; padding: 4px 10px; cursor: pointer;
+  }
+  .concept-c .toolbar .chip:hover { color: #c9d1d9; border-color: #484f58; }
+  .concept-c .toolbar .view-toggle {
+    display: flex; gap: 0; margin-left: auto;
+  }
+  .concept-c .toolbar .view-toggle button {
+    background: #21262d; border: 1px solid #30363d; color: #8b949e;
+    padding: 4px 10px; font-size: 12px; cursor: pointer;
+    font-family: inherit;
+  }
+  .concept-c .toolbar .view-toggle button:first-child { border-radius: 6px 0 0 6px; }
+  .concept-c .toolbar .view-toggle button:last-child { border-radius: 0 6px 6px 0; border-left: none; }
+  .concept-c .toolbar .view-toggle button.active { background: #30363d; color: #c9d1d9; }
+
+  .concept-c .main-area { display: flex; flex: 1; overflow: hidden; }
+
+  .concept-c .table-area { flex: 1; overflow-y: auto; }
+  .concept-c table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .concept-c thead th {
+    text-align: left; padding: 8px 12px; color: #8b949e; font-weight: 600;
+    border-bottom: 1px solid #21262d; background: #161b22;
+    position: sticky; top: 0; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .concept-c tbody tr {
+    border-bottom: 1px solid #161b22; cursor: pointer; transition: background 0.1s;
+  }
+  .concept-c tbody tr:hover { background: #161b22; }
+  .concept-c tbody tr.selected { background: #1c2333; }
+  .concept-c tbody td { padding: 6px 12px; color: #c9d1d9; }
+  .concept-c .td-id { color: #484f58; font-variant-numeric: tabular-nums; width: 40px; }
+  .concept-c .td-title { font-weight: 500; }
+  .concept-c .td-author { color: #8b949e; }
+  .concept-c .td-year { color: #8b949e; text-align: center; width: 50px; }
+  .concept-c .td-status .badge {
+    font-size: 11px; padding: 1px 7px; border-radius: 3px; font-weight: 500;
+  }
+  .concept-c .bg-playing { background: #0d2a0d; color: #3fb950; }
+  .concept-c .bg-toplay { background: #0d1a33; color: #58a6ff; }
+  .concept-c .bg-finished { background: #1a1a1a; color: #8b949e; }
+  .concept-c .bg-backlog { background: #2a2a0d; color: #d29922; }
+  .concept-c .bg-abandoned { background: #2a0d0d; color: #f85149; }
+  .concept-c .td-rating { color: #d29922; letter-spacing: 1px; }
+  .concept-c .td-playtime { color: #8b949e; font-variant-numeric: tabular-nums; }
+  .concept-c .td-complevel { color: #484f58; text-align: center; width: 30px; }
+  .concept-c .td-tags { max-width: 200px; }
+  .concept-c .td-tags .micro-tag {
+    display: inline-block; background: #21262d; color: #8b949e; font-size: 10px;
+    padding: 0 5px; border-radius: 3px; margin: 0 2px;
+  }
+
+  .concept-c .sidebar {
+    width: 300px; border-left: 1px solid #21262d; padding: 16px;
+    overflow-y: auto; background: #0d1117;
+  }
+  .concept-c .sidebar .wad-name { font-size: 16px; font-weight: 600; color: #c9d1d9; }
+  .concept-c .sidebar .wad-meta { font-size: 12px; color: #8b949e; margin-top: 4px; }
+  .concept-c .sidebar .section-head {
+    font-size: 10px; color: #484f58; text-transform: uppercase; letter-spacing: 1px;
+    margin: 16px 0 6px; font-weight: 600;
+    padding-bottom: 4px; border-bottom: 1px solid #21262d;
+  }
+  .concept-c .sidebar .kv-row {
+    display: flex; justify-content: space-between; padding: 3px 0;
+    font-size: 12px;
+  }
+  .concept-c .sidebar .kv-row .k { color: #8b949e; }
+  .concept-c .sidebar .kv-row .v { color: #c9d1d9; font-variant-numeric: tabular-nums; }
+  .concept-c .sidebar .btn-row {
+    display: flex; gap: 6px; margin-top: 12px;
+  }
+  .concept-c .sidebar .btn-row button {
+    flex: 1; padding: 6px; border-radius: 6px; border: 1px solid #30363d;
+    background: #21262d; color: #c9d1d9; font-size: 12px; cursor: pointer;
+    font-family: inherit; transition: 0.15s;
+  }
+  .concept-c .sidebar .btn-row button:hover { border-color: #484f58; }
+  .concept-c .sidebar .btn-row .btn-primary { background: #238636; border-color: #238636; color: #fff; }
+  .concept-c .sidebar .btn-row .btn-primary:hover { background: #2ea043; }
+  .concept-c .sidebar .progress-wrap { margin-top: 8px; }
+  .concept-c .sidebar .progress-wrap .progress-label {
+    font-size: 11px; color: #8b949e; margin-bottom: 4px;
+  }
+  .concept-c .sidebar .progress-bar {
+    height: 4px; background: #21262d; border-radius: 2px; overflow: hidden;
+  }
+  .concept-c .sidebar .progress-bar .fill { height: 100%; background: #58a6ff; border-radius: 2px; }
+
+  /* ========================================================================
+     CONCEPT D: "Warm Retro" – Warmer palette, chunky, game-launcher feel
+     ======================================================================== */
+  .concept-d { background: #1c1410; font-family: "Outfit", -apple-system, sans-serif; }
+
+  .concept-d .sidebar-nav {
+    width: 200px; background: #16100c; border-right: 1px solid #2a1e16;
+    display: flex; flex-direction: column; padding: 16px 0;
+  }
+  .concept-d .sidebar-nav .logo {
+    font-size: 22px; font-weight: 800; color: #ff6633; padding: 0 20px;
+    margin-bottom: 24px; letter-spacing: -1px;
+  }
+  .concept-d .sidebar-nav .nav-item {
+    display: flex; align-items: center; gap: 10px; padding: 10px 20px;
+    color: #8a7a6a; font-size: 14px; cursor: pointer; transition: all 0.15s;
+    border-left: 3px solid transparent;
+  }
+  .concept-d .sidebar-nav .nav-item:hover { color: #c8b8a8; background: #201810; }
+  .concept-d .sidebar-nav .nav-item.active {
+    color: #ff6633; background: #201810; border-left-color: #ff6633;
+  }
+  .concept-d .sidebar-nav .nav-icon { width: 18px; text-align: center; }
+  .concept-d .sidebar-nav .nav-divider {
+    height: 1px; background: #2a1e16; margin: 12px 20px;
+  }
+  .concept-d .sidebar-nav .status-filters {
+    padding: 0 20px; margin-top: 8px;
+  }
+  .concept-d .sidebar-nav .sf-title {
+    font-size: 11px; color: #5a4a3a; text-transform: uppercase;
+    letter-spacing: 1px; margin-bottom: 8px;
+  }
+  .concept-d .sidebar-nav .sf-item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 0; color: #8a7a6a; font-size: 13px; cursor: pointer;
+  }
+  .concept-d .sidebar-nav .sf-item:hover { color: #c8b8a8; }
+  .concept-d .sidebar-nav .sf-count {
+    font-size: 11px; background: #2a1e16; padding: 1px 6px;
+    border-radius: 8px; color: #6a5a4a;
+  }
+
+  .concept-d .main-content {
+    flex: 1; display: flex; flex-direction: column; overflow: hidden;
+  }
+
+  .concept-d .header-bar {
+    display: flex; align-items: center; padding: 16px 24px 12px; gap: 16px;
+  }
+  .concept-d .header-bar .page-title {
+    font-size: 24px; font-weight: 700; color: #e8d8c8;
+  }
+  .concept-d .header-bar .search-box {
+    margin-left: auto; background: #261c14; border: 1px solid #3a2e24;
+    border-radius: 10px; padding: 8px 16px; color: #c8b8a8; font-size: 13px;
+    width: 280px; outline: none; font-family: inherit;
+  }
+  .concept-d .header-bar .search-box::placeholder { color: #5a4a3a; }
+  .concept-d .header-bar .search-box:focus { border-color: #ff6633; }
+
+  .concept-d .content-area {
+    flex: 1; overflow-y: auto; padding: 0 24px 24px;
+    display: flex; flex-direction: column; gap: 24px;
+  }
+
+  /* "Now Playing" hero section */
+  .concept-d .now-playing {
+    background: linear-gradient(135deg, #2a1808, #1c2418);
+    border-radius: 16px; padding: 20px 24px;
+    display: flex; align-items: center; gap: 20px;
+    border: 1px solid #3a2e1a;
+  }
+  .concept-d .now-playing .np-thumb {
+    width: 80px; height: 60px; background: #3a1a0a; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; font-weight: 700; color: #552211;
+  }
+  .concept-d .now-playing .np-info { flex: 1; }
+  .concept-d .now-playing .np-label { font-size: 11px; color: #33cc33; text-transform: uppercase; letter-spacing: 1px; }
+  .concept-d .now-playing .np-title { font-size: 18px; font-weight: 700; color: #e8d8c8; margin-top: 2px; }
+  .concept-d .now-playing .np-meta { font-size: 12px; color: #8a7a6a; margin-top: 2px; }
+  .concept-d .now-playing .np-progress {
+    width: 200px;
+  }
+  .concept-d .now-playing .np-progress-bar {
+    height: 6px; background: #3a2e1a; border-radius: 3px; overflow: hidden;
+  }
+  .concept-d .now-playing .np-progress-bar .fill { height: 100%; background: #33cc33; border-radius: 3px; }
+  .concept-d .now-playing .np-progress-text { font-size: 10px; color: #6a5a4a; margin-top: 4px; text-align: center; }
+
+  /* Quick stats row */
+  .concept-d .quick-stats {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+  }
+  .concept-d .qs-card {
+    background: #201810; border-radius: 12px; padding: 14px 16px;
+    border: 1px solid #2a1e16;
+  }
+  .concept-d .qs-card .qs-value {
+    font-size: 22px; font-weight: 700; color: #e8d8c8;
+  }
+  .concept-d .qs-card .qs-label { font-size: 11px; color: #6a5a4a; margin-top: 2px; }
+
+  /* WAD list with cards */
+  .concept-d .section-title {
+    font-size: 12px; color: #6a5a4a; text-transform: uppercase;
+    letter-spacing: 1px; font-weight: 600;
+  }
+
+  .concept-d .wad-cards {
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .concept-d .wad-card {
+    display: grid;
+    grid-template-columns: 56px 60px 1fr 120px 90px 80px 90px;
+    align-items: center; padding: 10px 16px; gap: 12px;
+    background: #201810; border-radius: 10px; cursor: pointer;
+    transition: all 0.15s; border: 1px solid transparent;
+  }
+  .concept-d .wad-card:hover { background: #261c14; border-color: #3a2e24; }
+  .concept-d .wad-card.selected { background: #2a1808; border-color: #ff6633; }
+
+  .concept-d .wad-card .thumb-small {
+    width: 56px; height: 42px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 700;
+  }
+  .concept-d .wad-card .wc-id { color: #5a4a3a; font-size: 12px; text-align: center; }
+  .concept-d .wad-card .wc-info { min-width: 0; }
+  .concept-d .wad-card .wc-title {
+    font-size: 14px; font-weight: 600; color: #e8d8c8;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .concept-d .wad-card .wc-author { font-size: 12px; color: #8a7a6a; }
+  .concept-d .wad-card .wc-status {
+    font-size: 12px; font-weight: 600;
+  }
+  .concept-d .wad-card .wc-rating { color: #ff6633; font-size: 13px; }
+  .concept-d .wad-card .wc-playtime { color: #6a5a4a; font-size: 12px; }
+  .concept-d .wad-card .wc-date { color: #5a4a3a; font-size: 12px; }
+
+  /* Status colors for concept D */
+  .concept-d .s-playing { color: #33cc33; }
+  .concept-d .s-toplay { color: #5588dd; }
+  .concept-d .s-finished { color: #8a7a6a; }
+  .concept-d .s-backlog { color: #cccc33; }
+  .concept-d .s-abandoned { color: #cc4444; }
+
+  /* Concept D thumb colors */
+  .concept-d .tc-1 { background: #3a1008; color: #5a2010; }
+  .concept-d .tc-2 { background: #082a14; color: #104a24; }
+  .concept-d .tc-3 { background: #0a0a2a; color: #1a1a4a; }
+  .concept-d .tc-4 { background: #2a1a08; color: #4a3018; }
+  .concept-d .tc-5 { background: #2a0a2a; color: #4a1a4a; }
+  .concept-d .tc-6 { background: #2a2a08; color: #4a4a18; }
+
+  /* ── Scrollbar styles ── */
+  ::-webkit-scrollbar { width: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: #444; }
+</style>
+</head>
+<body>
+
+<!-- Concept Switcher -->
+<div class="switcher">
+  <span class="label">Concepts</span>
+  <button class="active" onclick="showConcept('a')">A: Minimal</button>
+  <button onclick="showConcept('b')">B: Cover Flow</button>
+  <button onclick="showConcept('c')">C: Dense Dashboard</button>
+  <button onclick="showConcept('d')">D: Warm Launcher</button>
+</div>
+
+<!-- ============================================================
+     CONCEPT A: Minimal
+     ============================================================ -->
+<div id="concept-a" class="concept concept-a active">
+  <div class="topbar">
+    <span class="app-name">caco</span>
+    <div class="nav-pills">
+      <button class="active">All</button>
+      <button>Playing</button>
+      <button>To Play</button>
+      <button>Finished</button>
+    </div>
+    <div class="search-area">
+      <input class="search-box" placeholder="Filter (beets query syntax)..." value="">
+      <div class="sort-chip">Sort: Title &darr;</div>
+    </div>
+  </div>
+
+  <div class="main-area">
+    <div class="wad-list">
+      <div class="wad-item">
+        <span class="id">#</span>
+        <span class="title-col"><span class="title" style="color:#888;font-weight:600;font-size:12px">TITLE</span></span>
+        <span class="author" style="font-size:12px;font-weight:600;color:#555">AUTHOR</span>
+        <span class="status" style="font-size:12px;font-weight:600;color:#555">STATUS</span>
+        <span class="playtime" style="font-weight:600;color:#555">PLAYTIME</span>
+        <span class="last-played" style="font-weight:600;color:#444;font-size:12px">LAST PLAYED</span>
+      </div>
+      <div class="wad-item">
+        <span class="id">1</span>
+        <span class="title-col"><span class="title">Ancient Aliens</span><span class="tags"><span class="tag">megawad</span><span class="tag">boom</span></span></span>
+        <span class="author">skillsaw</span>
+        <span class="status s-playing">Playing</span>
+        <span class="playtime">4h 23m</span>
+        <span class="last-played">2 hours ago</span>
+      </div>
+      <div class="wad-item selected">
+        <span class="id">2</span>
+        <span class="title-col"><span class="title">Sunlust</span><span class="tags"><span class="tag">megawad</span><span class="tag">slaughter</span></span></span>
+        <span class="author">Ribbiks, Dannebubinga</span>
+        <span class="status s-toplay">To Play</span>
+        <span class="playtime">—</span>
+        <span class="last-played">—</span>
+      </div>
+      <div class="wad-item">
+        <span class="id">3</span>
+        <span class="title-col"><span class="title">Eviternity</span><span class="tags"><span class="tag">megawad</span><span class="tag">mbf21</span></span></span>
+        <span class="author">Dragonfly et al.</span>
+        <span class="status s-finished">Finished</span>
+        <span class="playtime">12h 05m</span>
+        <span class="last-played">3 days ago</span>
+      </div>
+      <div class="wad-item">
+        <span class="id">4</span>
+        <span class="title-col"><span class="title">Going Down</span><span class="tags"><span class="tag">megawad</span></span></span>
+        <span class="author">mouldy</span>
+        <span class="status s-finished">Finished</span>
+        <span class="playtime">6h 42m</span>
+        <span class="last-played">1 week ago</span>
+      </div>
+      <div class="wad-item">
+        <span class="id">5</span>
+        <span class="title-col"><span class="title">DBP 58: Immortal Warfare</span><span class="tags"><span class="tag">episode</span></span></span>
+        <span class="author">Various</span>
+        <span class="status s-backlog">Backlog</span>
+        <span class="playtime">—</span>
+        <span class="last-played">—</span>
+      </div>
+      <div class="wad-item">
+        <span class="id">6</span>
+        <span class="title-col"><span class="title">Sunder</span><span class="tags"><span class="tag">megawad</span><span class="tag">slaughter</span></span></span>
+        <span class="author">Insane_Gazebo</span>
+        <span class="status s-playing">Playing</span>
+        <span class="playtime">8h 11m</span>
+        <span class="last-played">yesterday</span>
+      </div>
+      <div class="wad-item">
+        <span class="id">7</span>
+        <span class="title-col"><span class="title">Valiant</span><span class="tags"><span class="tag">megawad</span><span class="tag">mbf</span></span></span>
+        <span class="author">skillsaw</span>
+        <span class="status s-finished">Finished</span>
+        <span class="playtime">9h 30m</span>
+        <span class="last-played">2 weeks ago</span>
+      </div>
+      <div class="wad-item">
+        <span class="id">8</span>
+        <span class="title-col"><span class="title">Scythe 2</span><span class="tags"><span class="tag">megawad</span></span></span>
+        <span class="author">Erik Alm</span>
+        <span class="status s-toplay">To Play</span>
+        <span class="playtime">—</span>
+        <span class="last-played">—</span>
+      </div>
+      <div class="wad-item">
+        <span class="id">9</span>
+        <span class="title-col"><span class="title">SIGIL</span><span class="tags"><span class="tag">episode</span></span></span>
+        <span class="author">John Romero</span>
+        <span class="status s-finished">Finished</span>
+        <span class="playtime">2h 15m</span>
+        <span class="last-played">1 month ago</span>
+      </div>
+      <div class="wad-item">
+        <span class="id">10</span>
+        <span class="title-col"><span class="title">Myhouse.wad</span><span class="tags"><span class="tag">single</span><span class="tag">gzdoom</span></span></span>
+        <span class="author">MyHouse</span>
+        <span class="status s-abandoned">Abandoned</span>
+        <span class="playtime">0h 45m</span>
+        <span class="last-played">3 months ago</span>
+      </div>
+    </div>
+
+    <div class="detail-sidebar">
+      <div class="thumb">SL</div>
+      <div class="wad-title">Sunlust</div>
+      <div class="wad-author">Ribbiks, Dannebubinga</div>
+      <div style="margin-top:8px"><span class="status-badge badge-toplay">To Play</span></div>
+
+      <div class="stat-grid">
+        <div class="stat-box">
+          <div class="stat-label">Playtime</div>
+          <div class="stat-value">—</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">Sessions</div>
+          <div class="stat-value">0</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">Beaten</div>
+          <div class="stat-value">0&times;</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">Maps</div>
+          <div class="stat-value">32</div>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn-play">Play</button>
+        <button class="btn-edit">Edit</button>
+        <button class="btn-edit">Sessions</button>
+      </div>
+
+      <div class="section-title">Tags</div>
+      <div class="tags-wrap">
+        <span class="tag-pill">megawad</span>
+        <span class="tag-pill">slaughter</span>
+      </div>
+
+      <div class="section-title">Description</div>
+      <div class="desc">Sunlust is a set of 32 Boom-compatible maps for Doom II, designed to be played from a pistol start. A love letter to challenging, visually stunning Doom.</div>
+
+      <div class="section-title">Source</div>
+      <div class="desc" style="color:#555">idgames &middot; sunlust.zip</div>
+    </div>
+  </div>
+
+  <div class="status-bar">147 WADs</div>
+</div>
+
+<!-- ============================================================
+     CONCEPT B: Cover Flow
+     ============================================================ -->
+<div id="concept-b" class="concept concept-b">
+  <div class="topbar">
+    <span class="app-name">CACO</span>
+    <div style="display:flex;gap:16px;margin-left:32px;">
+      <span style="color:#fff;font-size:13px;cursor:pointer;border-bottom:2px solid #ff5533;padding-bottom:6px">Library</span>
+      <span style="color:#666;font-size:13px;cursor:pointer;padding-bottom:6px">Import</span>
+    </div>
+    <input class="search-box" placeholder="Search library...">
+  </div>
+
+  <div class="filter-bar">
+    <button class="active">All</button>
+    <button>Playing</button>
+    <button>To Play</button>
+    <button>Backlog</button>
+    <button>Finished</button>
+    <button>Abandoned</button>
+    <span style="margin-left:auto;color:#555;font-size:12px">Sort: Last Added &darr;</span>
+  </div>
+
+  <div class="grid-area">
+    <div class="card selected">
+      <div class="thumb thumb-1">AA</div>
+      <div class="card-body">
+        <div class="card-title">Ancient Aliens</div>
+        <div class="card-meta"><span>skillsaw</span><span class="stars">&starf;&starf;&starf;&starf;&starf;</span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+          <span class="card-status cs-playing">Playing</span>
+          <span class="playtime-label">4h 23m</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="thumb thumb-2">SL</div>
+      <div class="card-body">
+        <div class="card-title">Sunlust</div>
+        <div class="card-meta"><span>Ribbiks</span><span class="stars">&starf;&starf;&starf;&starf;&starf;</span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+          <span class="card-status cs-toplay">To Play</span>
+          <span class="playtime-label">—</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="thumb thumb-3">EV</div>
+      <div class="card-body">
+        <div class="card-title">Eviternity</div>
+        <div class="card-meta"><span>Dragonfly</span><span class="stars">&starf;&starf;&starf;&starf;&star;</span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+          <span class="card-status cs-finished">Finished</span>
+          <span class="playtime-label">12h 05m</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="thumb thumb-4">GD</div>
+      <div class="card-body">
+        <div class="card-title">Going Down</div>
+        <div class="card-meta"><span>mouldy</span><span class="stars">&starf;&starf;&starf;&starf;&starf;</span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+          <span class="card-status cs-finished">Finished</span>
+          <span class="playtime-label">6h 42m</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="thumb thumb-5">SD</div>
+      <div class="card-body">
+        <div class="card-title">Sunder</div>
+        <div class="card-meta"><span>Insane_Gazebo</span><span class="stars">&starf;&starf;&starf;&starf;&star;</span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+          <span class="card-status cs-playing">Playing</span>
+          <span class="playtime-label">8h 11m</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="thumb thumb-6">VL</div>
+      <div class="card-body">
+        <div class="card-title">Valiant</div>
+        <div class="card-meta"><span>skillsaw</span><span class="stars">&starf;&starf;&starf;&starf;&starf;</span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+          <span class="card-status cs-finished">Finished</span>
+          <span class="playtime-label">9h 30m</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="thumb thumb-1">S2</div>
+      <div class="card-body">
+        <div class="card-title">Scythe 2</div>
+        <div class="card-meta"><span>Erik Alm</span><span class="stars">&starf;&starf;&starf;&starf;&starf;</span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+          <span class="card-status cs-toplay">To Play</span>
+          <span class="playtime-label">—</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="thumb thumb-2">SG</div>
+      <div class="card-body">
+        <div class="card-title">SIGIL</div>
+        <div class="card-meta"><span>John Romero</span><span class="stars">&starf;&starf;&starf;&starf;&star;</span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+          <span class="card-status cs-finished">Finished</span>
+          <span class="playtime-label">2h 15m</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="thumb thumb-3">MH</div>
+      <div class="card-body">
+        <div class="card-title">Myhouse.wad</div>
+        <div class="card-meta"><span>MyHouse</span><span class="stars">&starf;&starf;&starf;&star;&star;</span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+          <span class="card-status cs-abandoned">Abandoned</span>
+          <span class="playtime-label">0h 45m</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="thumb thumb-4">IW</div>
+      <div class="card-body">
+        <div class="card-title">DBP 58: Immortal Warfare</div>
+        <div class="card-meta"><span>Various</span><span></span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+          <span class="card-status cs-backlog">Backlog</span>
+          <span class="playtime-label">—</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="thumb thumb-5">LP</div>
+      <div class="card-body">
+        <div class="card-title">Lost Civilization</div>
+        <div class="card-meta"><span>Bauul</span><span class="stars">&starf;&starf;&starf;&starf;&starf;</span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+          <span class="card-status cs-toplay">To Play</span>
+          <span class="playtime-label">—</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="thumb thumb-6">CP</div>
+      <div class="card-body">
+        <div class="card-title">Cydonia</div>
+        <div class="card-meta"><span>Lutrov71</span><span class="stars">&starf;&starf;&starf;&starf;&star;</span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+          <span class="card-status cs-backlog">Backlog</span>
+          <span class="playtime-label">—</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     CONCEPT C: Dense Dashboard
+     ============================================================ -->
+<div id="concept-c" class="concept concept-c">
+  <div class="topbar">
+    <span class="app-name">caco</span>
+    <span class="separator">/</span>
+    <span class="breadcrumb">library</span>
+    <div class="stats-pills">
+      <span class="stats-pill" style="color:#3fb950"><span class="dot" style="background:#3fb950"></span> 2 playing</span>
+      <span class="stats-pill" style="color:#58a6ff"><span class="dot" style="background:#58a6ff"></span> 3 to-play</span>
+      <span class="stats-pill" style="color:#d29922"><span class="dot" style="background:#d29922"></span> 2 backlog</span>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <input class="search-box" placeholder="status:playing author:skillsaw tag:megawad ..." value="">
+    <span class="chip">status:playing</span>
+    <span class="chip">tag:megawad</span>
+    <span class="chip">year:&ge;2020</span>
+    <div class="view-toggle">
+      <button class="active">Table</button>
+      <button>Grid</button>
+    </div>
+  </div>
+
+  <div class="main-area">
+    <div class="table-area">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:40px">#</th>
+            <th>Title</th>
+            <th>Author</th>
+            <th style="width:50px;text-align:center">Year</th>
+            <th style="width:90px">Status</th>
+            <th style="width:70px">Rating</th>
+            <th style="width:70px">Playtime</th>
+            <th style="width:30px;text-align:center">CL</th>
+            <th style="width:180px">Tags</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="td-id">1</td>
+            <td class="td-title">Ancient Aliens</td>
+            <td class="td-author">skillsaw</td>
+            <td class="td-year">2016</td>
+            <td class="td-status"><span class="badge bg-playing">playing</span></td>
+            <td class="td-rating">&starf;&starf;&starf;&starf;&starf;</td>
+            <td class="td-playtime">4h 23m</td>
+            <td class="td-complevel">4</td>
+            <td class="td-tags"><span class="micro-tag">megawad</span><span class="micro-tag">boom</span></td>
+          </tr>
+          <tr class="selected">
+            <td class="td-id">2</td>
+            <td class="td-title">Sunlust</td>
+            <td class="td-author">Ribbiks, Dannebubinga</td>
+            <td class="td-year">2015</td>
+            <td class="td-status"><span class="badge bg-toplay">to-play</span></td>
+            <td class="td-rating">&starf;&starf;&starf;&starf;&starf;</td>
+            <td class="td-playtime">—</td>
+            <td class="td-complevel">9</td>
+            <td class="td-tags"><span class="micro-tag">megawad</span><span class="micro-tag">slaughter</span></td>
+          </tr>
+          <tr>
+            <td class="td-id">3</td>
+            <td class="td-title">Eviternity</td>
+            <td class="td-author">Dragonfly et al.</td>
+            <td class="td-year">2018</td>
+            <td class="td-status"><span class="badge bg-finished">finished</span></td>
+            <td class="td-rating">&starf;&starf;&starf;&starf;&star;</td>
+            <td class="td-playtime">12h 05m</td>
+            <td class="td-complevel">11</td>
+            <td class="td-tags"><span class="micro-tag">megawad</span><span class="micro-tag">mbf21</span></td>
+          </tr>
+          <tr>
+            <td class="td-id">4</td>
+            <td class="td-title">Going Down</td>
+            <td class="td-author">mouldy</td>
+            <td class="td-year">2014</td>
+            <td class="td-status"><span class="badge bg-finished">finished</span></td>
+            <td class="td-rating">&starf;&starf;&starf;&starf;&starf;</td>
+            <td class="td-playtime">6h 42m</td>
+            <td class="td-complevel">4</td>
+            <td class="td-tags"><span class="micro-tag">megawad</span></td>
+          </tr>
+          <tr>
+            <td class="td-id">5</td>
+            <td class="td-title">DBP 58: Immortal Warfare</td>
+            <td class="td-author">Various</td>
+            <td class="td-year">2024</td>
+            <td class="td-status"><span class="badge bg-backlog">backlog</span></td>
+            <td class="td-rating"></td>
+            <td class="td-playtime">—</td>
+            <td class="td-complevel">21</td>
+            <td class="td-tags"><span class="micro-tag">episode</span></td>
+          </tr>
+          <tr>
+            <td class="td-id">6</td>
+            <td class="td-title">Sunder</td>
+            <td class="td-author">Insane_Gazebo</td>
+            <td class="td-year">2009</td>
+            <td class="td-status"><span class="badge bg-playing">playing</span></td>
+            <td class="td-rating">&starf;&starf;&starf;&starf;&star;</td>
+            <td class="td-playtime">8h 11m</td>
+            <td class="td-complevel">9</td>
+            <td class="td-tags"><span class="micro-tag">megawad</span><span class="micro-tag">slaughter</span></td>
+          </tr>
+          <tr>
+            <td class="td-id">7</td>
+            <td class="td-title">Valiant</td>
+            <td class="td-author">skillsaw</td>
+            <td class="td-year">2015</td>
+            <td class="td-status"><span class="badge bg-finished">finished</span></td>
+            <td class="td-rating">&starf;&starf;&starf;&starf;&starf;</td>
+            <td class="td-playtime">9h 30m</td>
+            <td class="td-complevel">11</td>
+            <td class="td-tags"><span class="micro-tag">megawad</span><span class="micro-tag">mbf</span></td>
+          </tr>
+          <tr>
+            <td class="td-id">8</td>
+            <td class="td-title">Scythe 2</td>
+            <td class="td-author">Erik Alm</td>
+            <td class="td-year">2005</td>
+            <td class="td-status"><span class="badge bg-toplay">to-play</span></td>
+            <td class="td-rating">&starf;&starf;&starf;&starf;&starf;</td>
+            <td class="td-playtime">—</td>
+            <td class="td-complevel">2</td>
+            <td class="td-tags"><span class="micro-tag">megawad</span></td>
+          </tr>
+          <tr>
+            <td class="td-id">9</td>
+            <td class="td-title">SIGIL</td>
+            <td class="td-author">John Romero</td>
+            <td class="td-year">2019</td>
+            <td class="td-status"><span class="badge bg-finished">finished</span></td>
+            <td class="td-rating">&starf;&starf;&starf;&starf;&star;</td>
+            <td class="td-playtime">2h 15m</td>
+            <td class="td-complevel">2</td>
+            <td class="td-tags"><span class="micro-tag">episode</span></td>
+          </tr>
+          <tr>
+            <td class="td-id">10</td>
+            <td class="td-title">Myhouse.wad</td>
+            <td class="td-author">MyHouse</td>
+            <td class="td-year">2023</td>
+            <td class="td-status"><span class="badge bg-abandoned">abandoned</span></td>
+            <td class="td-rating">&starf;&starf;&starf;&star;&star;</td>
+            <td class="td-playtime">0h 45m</td>
+            <td class="td-complevel"></td>
+            <td class="td-tags"><span class="micro-tag">single</span><span class="micro-tag">gzdoom</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="sidebar">
+      <div class="wad-name">Sunlust</div>
+      <div class="wad-meta">Ribbiks, Dannebubinga &middot; 2015</div>
+
+      <div class="btn-row">
+        <button class="btn-primary">Play</button>
+        <button>Edit</button>
+        <button>Sessions</button>
+      </div>
+
+      <div class="section-head">Stats</div>
+      <div class="kv-row"><span class="k">Status</span><span class="v"><span class="badge bg-toplay" style="font-size:11px">to-play</span></span></div>
+      <div class="kv-row"><span class="k">Rating</span><span class="v" style="color:#d29922">&starf;&starf;&starf;&starf;&starf;</span></div>
+      <div class="kv-row"><span class="k">Playtime</span><span class="v">—</span></div>
+      <div class="kv-row"><span class="k">Sessions</span><span class="v">0</span></div>
+      <div class="kv-row"><span class="k">Beaten</span><span class="v">0&times;</span></div>
+
+      <div class="section-head">Config</div>
+      <div class="kv-row"><span class="k">Complevel</span><span class="v">9 (boom)</span></div>
+      <div class="kv-row"><span class="k">IWAD</span><span class="v">doom2</span></div>
+      <div class="kv-row"><span class="k">Source</span><span class="v">idgames</span></div>
+      <div class="kv-row"><span class="k">File</span><span class="v">sunlust.zip</span></div>
+
+      <div class="section-head">Tags</div>
+      <div style="display:flex;gap:4px;flex-wrap:wrap">
+        <span class="micro-tag">megawad</span>
+        <span class="micro-tag">slaughter</span>
+      </div>
+
+      <div class="section-head">Description</div>
+      <div style="font-size:12px;color:#8b949e;line-height:1.5">Sunlust is a set of 32 Boom-compatible maps for Doom II, designed to be played from a pistol start.</div>
+
+      <div class="progress-wrap">
+        <div class="progress-label">Maps: 0 / 32 (0%)</div>
+        <div class="progress-bar"><div class="fill" style="width:0%"></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     CONCEPT D: Warm Launcher
+     ============================================================ -->
+<div id="concept-d" class="concept concept-d" style="flex-direction:row">
+  <div class="sidebar-nav">
+    <div class="logo">caco</div>
+    <div class="nav-item active">
+      <span class="nav-icon">&#9776;</span> Library
+    </div>
+    <div class="nav-item">
+      <span class="nav-icon">&#43;</span> Import
+    </div>
+    <div class="nav-item">
+      <span class="nav-icon">&#9881;</span> Settings
+    </div>
+    <div class="nav-divider"></div>
+    <div class="status-filters">
+      <div class="sf-title">Status</div>
+      <div class="sf-item"><span>All</span><span class="sf-count">147</span></div>
+      <div class="sf-item" style="color:#33cc33"><span>Playing</span><span class="sf-count">2</span></div>
+      <div class="sf-item" style="color:#5588dd"><span>To Play</span><span class="sf-count">31</span></div>
+      <div class="sf-item" style="color:#cccc33"><span>Backlog</span><span class="sf-count">42</span></div>
+      <div class="sf-item" style="color:#8a7a6a"><span>Finished</span><span class="sf-count">68</span></div>
+      <div class="sf-item" style="color:#cc4444"><span>Abandoned</span><span class="sf-count">4</span></div>
+    </div>
+  </div>
+
+  <div class="main-content">
+    <div class="header-bar">
+      <span class="page-title">Library</span>
+      <input class="search-box" placeholder="Search WADs...">
+    </div>
+
+    <div class="content-area">
+      <!-- Now Playing section -->
+      <div class="now-playing">
+        <div class="np-thumb tc-1">AA</div>
+        <div class="np-info">
+          <div class="np-label">Now Playing</div>
+          <div class="np-title">Ancient Aliens</div>
+          <div class="np-meta">skillsaw &middot; 4h 23m played &middot; 18/32 maps</div>
+        </div>
+        <div class="np-progress">
+          <div class="np-progress-bar"><div class="fill" style="width:56%"></div></div>
+          <div class="np-progress-text">56% complete</div>
+        </div>
+      </div>
+
+      <!-- Quick stats -->
+      <div class="quick-stats">
+        <div class="qs-card">
+          <div class="qs-value">147</div>
+          <div class="qs-label">Total WADs</div>
+        </div>
+        <div class="qs-card">
+          <div class="qs-value">86h</div>
+          <div class="qs-label">Total Playtime</div>
+        </div>
+        <div class="qs-card">
+          <div class="qs-value">68</div>
+          <div class="qs-label">Finished</div>
+        </div>
+        <div class="qs-card">
+          <div class="qs-value">4.2</div>
+          <div class="qs-label">Avg Rating</div>
+        </div>
+      </div>
+
+      <!-- WAD list -->
+      <div class="section-title">All WADs</div>
+      <div class="wad-cards">
+        <div class="wad-card selected">
+          <div class="thumb-small tc-1">AA</div>
+          <div class="wc-id">#1</div>
+          <div class="wc-info">
+            <div class="wc-title">Ancient Aliens</div>
+            <div class="wc-author">skillsaw</div>
+          </div>
+          <div class="wc-status s-playing">Playing</div>
+          <div class="wc-rating">&starf;&starf;&starf;&starf;&starf;</div>
+          <div class="wc-playtime">4h 23m</div>
+          <div class="wc-date">2 hours ago</div>
+        </div>
+        <div class="wad-card">
+          <div class="thumb-small tc-2">SL</div>
+          <div class="wc-id">#2</div>
+          <div class="wc-info">
+            <div class="wc-title">Sunlust</div>
+            <div class="wc-author">Ribbiks, Dannebubinga</div>
+          </div>
+          <div class="wc-status s-toplay">To Play</div>
+          <div class="wc-rating">&starf;&starf;&starf;&starf;&starf;</div>
+          <div class="wc-playtime">—</div>
+          <div class="wc-date">—</div>
+        </div>
+        <div class="wad-card">
+          <div class="thumb-small tc-3">EV</div>
+          <div class="wc-id">#3</div>
+          <div class="wc-info">
+            <div class="wc-title">Eviternity</div>
+            <div class="wc-author">Dragonfly et al.</div>
+          </div>
+          <div class="wc-status s-finished">Finished</div>
+          <div class="wc-rating">&starf;&starf;&starf;&starf;&star;</div>
+          <div class="wc-playtime">12h 05m</div>
+          <div class="wc-date">3 days ago</div>
+        </div>
+        <div class="wad-card">
+          <div class="thumb-small tc-4">GD</div>
+          <div class="wc-id">#4</div>
+          <div class="wc-info">
+            <div class="wc-title">Going Down</div>
+            <div class="wc-author">mouldy</div>
+          </div>
+          <div class="wc-status s-finished">Finished</div>
+          <div class="wc-rating">&starf;&starf;&starf;&starf;&starf;</div>
+          <div class="wc-playtime">6h 42m</div>
+          <div class="wc-date">1 week ago</div>
+        </div>
+        <div class="wad-card">
+          <div class="thumb-small tc-5">SD</div>
+          <div class="wc-id">#5</div>
+          <div class="wc-info">
+            <div class="wc-title">Sunder</div>
+            <div class="wc-author">Insane_Gazebo</div>
+          </div>
+          <div class="wc-status s-playing">Playing</div>
+          <div class="wc-rating">&starf;&starf;&starf;&starf;&star;</div>
+          <div class="wc-playtime">8h 11m</div>
+          <div class="wc-date">yesterday</div>
+        </div>
+        <div class="wad-card">
+          <div class="thumb-small tc-6">VL</div>
+          <div class="wc-id">#6</div>
+          <div class="wc-info">
+            <div class="wc-title">Valiant</div>
+            <div class="wc-author">skillsaw</div>
+          </div>
+          <div class="wc-status s-finished">Finished</div>
+          <div class="wc-rating">&starf;&starf;&starf;&starf;&starf;</div>
+          <div class="wc-playtime">9h 30m</div>
+          <div class="wc-date">2 weeks ago</div>
+        </div>
+        <div class="wad-card">
+          <div class="thumb-small tc-1">S2</div>
+          <div class="wc-id">#7</div>
+          <div class="wc-info">
+            <div class="wc-title">Scythe 2</div>
+            <div class="wc-author">Erik Alm</div>
+          </div>
+          <div class="wc-status s-toplay">To Play</div>
+          <div class="wc-rating">&starf;&starf;&starf;&starf;&starf;</div>
+          <div class="wc-playtime">—</div>
+          <div class="wc-date">—</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function showConcept(id) {
+  document.querySelectorAll('.concept').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.switcher button').forEach(el => el.classList.remove('active'));
+  document.getElementById('concept-' + id).classList.add('active');
+  event.target.classList.add('active');
+}
+</script>
+</body>
+</html>

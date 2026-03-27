@@ -21,6 +21,8 @@ pub struct GuiState {
     pub active_tab: usize,
     #[serde(default)]
     pub saved_searches: Vec<SavedSearch>,
+    #[serde(default)]
+    pub hidden_tabs: Vec<usize>,
 }
 
 fn default_true() -> bool {
@@ -30,12 +32,13 @@ fn default_true() -> bool {
 impl Default for GuiState {
     fn default() -> Self {
         Self {
-            view_layout: "list".to_string(),
-            show_detail_panel: true,
+            view_layout: "grid".to_string(),
+            show_detail_panel: false,
             sort_field_index: 0,
             sort_desc: true,
             active_tab: 0,
             saved_searches: Vec::new(),
+            hidden_tabs: Vec::new(),
         }
     }
 }

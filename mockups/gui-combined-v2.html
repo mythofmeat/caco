@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Caco GUI — Combined v2 (Breadcrumbs + Edit Views)</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #1c1410;
+    color: #e8d8c8;
+    overflow: hidden;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── Concept Switcher ── */
+  .switcher {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 9999;
+    background: #000; border-bottom: 1px solid #333;
+    display: flex; gap: 0; align-items: center;
+    padding: 0 16px; height: 36px; flex-shrink: 0;
+  }
+  .switcher .label {
+    font-size: 11px; color: #888; margin-right: 16px; text-transform: uppercase;
+    letter-spacing: 1px; font-weight: 600;
+  }
+  .switcher button {
+    background: none; border: none; color: #888; font-size: 12px;
+    padding: 8px 14px; cursor: pointer; border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+  }
+  .switcher button:hover { color: #ccc; }
+  .switcher button.active { color: #fff; border-bottom-color: #ff6633; }
+
+  .concept { display: none; height: calc(100vh - 36px); margin-top: 36px; }
+  .concept.active { display: flex; }
+
+  /* ════════════════════════════════════════════════════════════════
+     Shared base: sidebar + topbar
+     ════════════════════════════════════════════════════════════════ */
+
+  /* ── Left Sidebar ── */
+  .sidebar-nav {
+    width: 200px;
+    background: #16100c;
+    border-right: 1px solid #2a1e16;
+    display: flex;
+    flex-direction: column;
+    padding: 16px 0;
+    flex-shrink: 0;
+  }
+  .sidebar-nav .logo {
+    font-size: 22px; font-weight: 800; color: #ff6633;
+    padding: 0 20px; margin-bottom: 28px; letter-spacing: -1px;
+  }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 20px; color: #8a7a6a; font-size: 14px;
+    cursor: pointer; transition: all 0.15s;
+    border-left: 3px solid transparent;
+  }
+  .nav-item:hover { color: #c8b8a8; background: #201810; }
+  .nav-item.active { color: #ff6633; background: #201810; border-left-color: #ff6633; }
+  .nav-icon { width: 18px; text-align: center; font-size: 15px; }
+  .nav-divider { height: 1px; background: #2a1e16; margin: 12px 20px; }
+
+  .status-filters { padding: 0 20px; margin-top: 8px; }
+  .sf-title {
+    font-size: 11px; color: #5a4a3a; text-transform: uppercase;
+    letter-spacing: 1px; margin-bottom: 8px; font-weight: 600;
+  }
+  .sf-item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 0; color: #8a7a6a; font-size: 13px; cursor: pointer;
+  }
+  .sf-item:hover { color: #c8b8a8; }
+  .sf-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: 8px; }
+  .sf-count {
+    font-size: 11px; background: #2a1e16; padding: 1px 6px;
+    border-radius: 8px; color: #6a5a4a;
+  }
+
+  /* ── Main Content Container ── */
+  .main-content {
+    flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0;
+  }
+
+  /* ── Topbar with breadcrumbs ── */
+  .topbar {
+    display: flex; align-items: center; padding: 10px 24px; gap: 12px;
+    background: #1a1410; border-bottom: 1px solid #2a1e16; flex-shrink: 0;
+  }
+  .breadcrumbs {
+    display: flex; align-items: center; gap: 0; font-size: 14px;
+  }
+  .breadcrumbs .crumb { color: #8a7a6a; cursor: pointer; transition: color 0.15s; }
+  .breadcrumbs .crumb:hover { color: #c8b8a8; }
+  .breadcrumbs .crumb.current { color: #e8d8c8; font-weight: 600; cursor: default; }
+  .breadcrumbs .sep { color: #3a2e24; margin: 0 8px; font-size: 12px; }
+
+  .topbar .search-box {
+    margin-left: auto; background: #261c14; border: 1px solid #3a2e24;
+    border-radius: 10px; padding: 8px 16px; color: #c8b8a8; font-size: 13px;
+    width: 300px; outline: none; font-family: inherit; transition: border 0.2s;
+  }
+  .topbar .search-box::placeholder { color: #5a4a3a; }
+  .topbar .search-box:focus { border-color: #ff6633; }
+  .topbar .sort-chip {
+    background: #261c14; border: 1px solid #3a2e24; border-radius: 8px;
+    padding: 7px 12px; color: #8a7a6a; font-size: 12px; cursor: pointer;
+    white-space: nowrap;
+  }
+
+  /* ── Scrollable content ── */
+  .content-scroll { flex: 1; overflow-y: auto; padding: 20px 24px 24px; }
+
+  /* ── Now Playing Hero ── */
+  .now-playing {
+    background: linear-gradient(135deg, #2a1808 0%, #1c2418 60%, #182018 100%);
+    border-radius: 16px; padding: 24px 28px;
+    display: flex; align-items: center; gap: 24px;
+    border: 1px solid #3a2e1a; margin-bottom: 24px;
+    position: relative; overflow: hidden;
+  }
+  .now-playing::before {
+    content: ''; position: absolute; top: 0; right: 0;
+    width: 300px; height: 100%;
+    background: radial-gradient(ellipse at right center, rgba(51,204,51,0.06), transparent 70%);
+    pointer-events: none;
+  }
+  .np-thumb {
+    width: 120px; height: 90px; background: #3a1a0a; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 28px; font-weight: 700; color: #552211; flex-shrink: 0;
+  }
+  .np-info { flex: 1; min-width: 0; }
+  .np-label { font-size: 11px; color: #33cc33; text-transform: uppercase; letter-spacing: 1.5px; font-weight: 600; }
+  .np-title { font-size: 22px; font-weight: 700; color: #e8d8c8; margin-top: 4px; }
+  .np-meta { font-size: 13px; color: #8a7a6a; margin-top: 4px; }
+  .np-right { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; flex-shrink: 0; }
+  .np-playtime { font-size: 24px; font-weight: 700; color: #c8b8a8; font-variant-numeric: tabular-nums; letter-spacing: -0.5px; }
+  .np-playtime-label { font-size: 10px; color: #5a4a3a; text-transform: uppercase; letter-spacing: 0.5px; }
+  .np-progress { width: 220px; }
+  .np-progress-bar { height: 6px; background: #3a2e1a; border-radius: 3px; overflow: hidden; }
+  .np-progress-bar .fill { height: 100%; background: #33cc33; border-radius: 3px; }
+  .np-progress-text { font-size: 11px; color: #6a5a4a; margin-top: 4px; text-align: right; }
+
+  /* ── Section Header ── */
+  .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .section-title { font-size: 13px; color: #6a5a4a; text-transform: uppercase; letter-spacing: 1px; font-weight: 600; }
+  .view-toggle { display: flex; gap: 0; }
+  .view-toggle button {
+    background: #261c14; border: 1px solid #3a2e24; color: #8a7a6a;
+    padding: 5px 12px; font-size: 12px; cursor: pointer; font-family: inherit;
+  }
+  .view-toggle button:first-child { border-radius: 6px 0 0 6px; }
+  .view-toggle button:last-child { border-radius: 0 6px 6px 0; border-left: none; }
+  .view-toggle button.active { background: #3a2e24; color: #e8d8c8; }
+
+  /* ── Card Grid ── */
+  .card-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px;
+  }
+  .card {
+    background: #201810; border-radius: 12px; overflow: hidden;
+    cursor: pointer; transition: all 0.2s; border: 2px solid transparent;
+  }
+  .card:hover { transform: translateY(-2px); border-color: #3a2e24; box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
+  .card.selected { border-color: #ff6633; box-shadow: 0 0 0 1px rgba(255,102,51,0.3), 0 8px 24px rgba(0,0,0,0.3); }
+  .card .thumb {
+    aspect-ratio: 4/3; display: flex; align-items: center; justify-content: center;
+    font-size: 28px; font-weight: 800; position: relative; overflow: hidden;
+  }
+  .card .thumb::after {
+    content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 50%;
+    background: linear-gradient(transparent, #201810);
+  }
+  .card .card-body { padding: 10px 14px 14px; }
+  .card .card-title { font-size: 14px; font-weight: 600; color: #e8d8c8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card .card-author { font-size: 12px; color: #8a7a6a; margin-top: 2px; }
+  .card .card-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; }
+  .card .card-status { font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 6px; }
+  .card .card-right { display: flex; align-items: center; gap: 8px; }
+  .card .stars { color: #ff6633; font-size: 11px; }
+  .card .playtime-label { font-size: 11px; color: #5a4a3a; }
+
+  .cs-playing { background: #0d2a0d; color: #33cc33; }
+  .cs-toplay { background: #0d1a33; color: #5588dd; }
+  .cs-finished { background: #1a1a16; color: #8a7a6a; }
+  .cs-backlog { background: #2a2a0d; color: #cccc33; }
+  .cs-abandoned { background: #2a0d0d; color: #cc4444; }
+
+  .tc-1 { background: linear-gradient(135deg, #3a0808, #661010); color: #882222; }
+  .tc-2 { background: linear-gradient(135deg, #082a14, #0a4422); color: #226644; }
+  .tc-3 { background: linear-gradient(135deg, #0a0a2a, #1a1a55); color: #334499; }
+  .tc-4 { background: linear-gradient(135deg, #2a1a08, #553308); color: #885522; }
+  .tc-5 { background: linear-gradient(135deg, #2a082a, #4a0e4e); color: #773388; }
+  .tc-6 { background: linear-gradient(135deg, #2a2a08, #4a4408); color: #887722; }
+
+  /* ════════════════════════════════════════════════════════════════
+     EDIT CONCEPT A: Slide-Over Panel (right side, replaces grid)
+     ════════════════════════════════════════════════════════════════ */
+
+  .concept-a .edit-split { display: flex; flex: 1; overflow: hidden; }
+  .concept-a .edit-split .grid-behind {
+    flex: 1; overflow-y: auto; padding: 20px 24px;
+    opacity: 0.3; pointer-events: none; filter: blur(1px);
+  }
+  .concept-a .slide-panel {
+    width: 480px; background: #1a1410; border-left: 1px solid #3a2e24;
+    display: flex; flex-direction: column; flex-shrink: 0;
+    box-shadow: -8px 0 32px rgba(0,0,0,0.4);
+  }
+  .slide-panel .panel-header {
+    display: flex; align-items: center; padding: 16px 20px;
+    border-bottom: 1px solid #2a1e16; gap: 12px;
+  }
+  .slide-panel .panel-header .panel-thumb {
+    width: 48px; height: 36px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 700; flex-shrink: 0;
+  }
+  .slide-panel .panel-header .panel-title-area { flex: 1; min-width: 0; }
+  .slide-panel .panel-header .panel-title { font-size: 16px; font-weight: 700; color: #e8d8c8; }
+  .slide-panel .panel-header .panel-subtitle { font-size: 12px; color: #8a7a6a; }
+  .slide-panel .panel-close {
+    background: none; border: none; color: #8a7a6a; font-size: 18px;
+    cursor: pointer; padding: 4px 8px; border-radius: 4px;
+  }
+  .slide-panel .panel-close:hover { background: #261c14; color: #c8b8a8; }
+
+  .slide-panel .panel-tabs {
+    display: flex; border-bottom: 1px solid #2a1e16; padding: 0 20px;
+  }
+  .slide-panel .panel-tab {
+    padding: 10px 16px; font-size: 13px; color: #8a7a6a;
+    cursor: pointer; border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+  }
+  .slide-panel .panel-tab:hover { color: #c8b8a8; }
+  .slide-panel .panel-tab.active { color: #ff6633; border-bottom-color: #ff6633; }
+
+  .slide-panel .panel-body {
+    flex: 1; overflow-y: auto; padding: 20px;
+  }
+
+  .slide-panel .panel-footer {
+    padding: 12px 20px; border-top: 1px solid #2a1e16;
+    display: flex; gap: 8px; justify-content: flex-end;
+  }
+
+  /* ════════════════════════════════════════════════════════════════
+     EDIT CONCEPT B: Full-Page Edit (replaces entire content area)
+     ════════════════════════════════════════════════════════════════ */
+
+  .concept-b .edit-page {
+    flex: 1; overflow-y: auto; padding: 24px 32px;
+  }
+  .edit-page .edit-header {
+    display: flex; align-items: flex-start; gap: 20px; margin-bottom: 28px;
+    padding-bottom: 20px; border-bottom: 1px solid #2a1e16;
+  }
+  .edit-page .edit-thumb {
+    width: 140px; height: 105px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 32px; font-weight: 800; flex-shrink: 0;
+  }
+  .edit-page .edit-header-info { flex: 1; }
+  .edit-page .edit-header-title { font-size: 24px; font-weight: 700; color: #e8d8c8; }
+  .edit-page .edit-header-meta { font-size: 13px; color: #8a7a6a; margin-top: 4px; }
+  .edit-page .edit-header-status {
+    display: inline-block; font-size: 12px; font-weight: 600;
+    padding: 3px 12px; border-radius: 8px; margin-top: 8px;
+  }
+
+  .edit-page .edit-columns {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 32px;
+  }
+  .edit-page .edit-section { margin-bottom: 24px; }
+  .edit-page .edit-section-title {
+    font-size: 12px; color: #6a5a4a; text-transform: uppercase;
+    letter-spacing: 1px; font-weight: 600; margin-bottom: 12px;
+    padding-bottom: 6px; border-bottom: 1px solid #2a1e16;
+  }
+
+  .edit-page .edit-actions {
+    display: flex; gap: 10px; margin-top: 8px;
+  }
+
+  /* ════════════════════════════════════════════════════════════════
+     EDIT CONCEPT C: Modal (polished, with preview)
+     ════════════════════════════════════════════════════════════════ */
+
+  .concept-c .modal-backdrop {
+    position: absolute; inset: 0;
+    background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 100;
+  }
+  .concept-c .modal-backdrop .grid-behind-c {
+    position: absolute; inset: 0; z-index: -1;
+  }
+  .modal-dialog {
+    background: #1a1410; border: 1px solid #3a2e24; border-radius: 16px;
+    width: 640px; max-height: 80vh; display: flex; flex-direction: column;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.5);
+    overflow: hidden;
+  }
+  .modal-dialog .modal-header {
+    display: flex; align-items: center; padding: 16px 24px;
+    border-bottom: 1px solid #2a1e16; gap: 16px;
+  }
+  .modal-dialog .modal-header .modal-thumb {
+    width: 64px; height: 48px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; font-weight: 700; flex-shrink: 0;
+  }
+  .modal-dialog .modal-header .modal-title-area { flex: 1; }
+  .modal-dialog .modal-header .modal-wad-title { font-size: 18px; font-weight: 700; color: #e8d8c8; }
+  .modal-dialog .modal-header .modal-wad-meta { font-size: 12px; color: #8a7a6a; margin-top: 2px; }
+  .modal-dialog .modal-header .modal-close {
+    background: none; border: none; color: #8a7a6a; font-size: 20px;
+    cursor: pointer; padding: 4px 8px; border-radius: 4px;
+  }
+  .modal-dialog .modal-tabs {
+    display: flex; border-bottom: 1px solid #2a1e16; padding: 0 24px; background: #16120e;
+  }
+  .modal-dialog .modal-tab {
+    padding: 10px 16px; font-size: 13px; color: #8a7a6a;
+    cursor: pointer; border-bottom: 2px solid transparent;
+  }
+  .modal-dialog .modal-tab.active { color: #ff6633; border-bottom-color: #ff6633; }
+  .modal-dialog .modal-body {
+    flex: 1; overflow-y: auto; padding: 20px 24px;
+  }
+  .modal-dialog .modal-footer {
+    padding: 12px 24px; border-top: 1px solid #2a1e16;
+    display: flex; gap: 8px; justify-content: flex-end;
+  }
+
+  /* ════════════════════════════════════════════════════════════════
+     Shared form styles
+     ════════════════════════════════════════════════════════════════ */
+  .form-group { margin-bottom: 14px; }
+  .form-label {
+    font-size: 12px; color: #8a7a6a; font-weight: 600; margin-bottom: 4px;
+    display: block;
+  }
+  .form-input {
+    width: 100%; background: #261c14; border: 1px solid #3a2e24;
+    border-radius: 8px; padding: 8px 12px; color: #e8d8c8;
+    font-size: 13px; font-family: inherit; outline: none;
+    transition: border 0.2s;
+  }
+  .form-input:focus { border-color: #ff6633; }
+  .form-input::placeholder { color: #5a4a3a; }
+
+  .form-textarea {
+    width: 100%; background: #261c14; border: 1px solid #3a2e24;
+    border-radius: 8px; padding: 8px 12px; color: #e8d8c8;
+    font-size: 13px; font-family: inherit; outline: none;
+    resize: vertical; min-height: 80px; transition: border 0.2s;
+  }
+  .form-textarea:focus { border-color: #ff6633; }
+
+  .form-select {
+    background: #261c14; border: 1px solid #3a2e24; border-radius: 8px;
+    padding: 8px 12px; color: #e8d8c8; font-size: 13px;
+    font-family: inherit; outline: none; cursor: pointer;
+    appearance: none; transition: border 0.2s;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%238a7a6a' d='M3 5l3 3 3-3'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    padding-right: 30px;
+  }
+  .form-select:focus { border-color: #ff6633; }
+
+  .form-row {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+  }
+  .form-row-3 {
+    display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;
+  }
+
+  /* Rating stars interactive */
+  .rating-picker { display: flex; gap: 4px; align-items: center; }
+  .rating-picker .star {
+    font-size: 20px; cursor: pointer; transition: color 0.1s;
+    color: #3a2e24;
+  }
+  .rating-picker .star.filled { color: #ff6633; }
+  .rating-picker .star:hover { color: #ff8855; }
+  .rating-clear { font-size: 11px; color: #5a4a3a; cursor: pointer; margin-left: 8px; }
+
+  /* Status picker (radio-style pills) */
+  .status-picker { display: flex; gap: 6px; flex-wrap: wrap; }
+  .status-option {
+    font-size: 12px; font-weight: 600; padding: 5px 14px;
+    border-radius: 8px; cursor: pointer; transition: all 0.15s;
+    border: 1px solid transparent;
+  }
+  .status-option.so-toplay { background: #0d1a33; color: #5588dd; }
+  .status-option.so-backlog { background: #2a2a0d; color: #cccc33; }
+  .status-option.so-playing { background: #0d2a0d; color: #33cc33; }
+  .status-option.so-finished { background: #1a1a16; color: #8a7a6a; }
+  .status-option.so-abandoned { background: #2a0d0d; color: #cc4444; }
+  .status-option.so-awaiting { background: #2a0d2a; color: #cc44cc; }
+  .status-option.selected { border-color: currentColor; box-shadow: 0 0 0 1px currentColor; }
+
+  /* Tag pills editable */
+  .tag-editor { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .tag-pill {
+    background: #261c14; color: #cc7744; font-size: 12px;
+    padding: 3px 10px; border-radius: 8px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .tag-pill .tag-remove {
+    font-size: 10px; color: #8a7a6a; cursor: pointer;
+    width: 14px; height: 14px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    background: #3a2e24;
+  }
+  .tag-pill .tag-remove:hover { background: #4a3e34; color: #cc4444; }
+  .tag-add {
+    background: none; border: 1px dashed #3a2e24; color: #6a5a4a;
+    font-size: 12px; padding: 3px 10px; border-radius: 8px;
+    cursor: pointer;
+  }
+  .tag-add:hover { border-color: #5a4a3a; color: #8a7a6a; }
+
+  /* Companion list */
+  .companion-list { display: flex; flex-direction: column; gap: 6px; }
+  .companion-item {
+    display: flex; align-items: center; gap: 10px;
+    background: #201810; border-radius: 8px; padding: 8px 12px;
+  }
+  .companion-item .comp-icon { color: #8a7a6a; font-size: 14px; }
+  .companion-item .comp-name { flex: 1; font-size: 13px; color: #e8d8c8; }
+  .companion-item .comp-size { font-size: 11px; color: #5a4a3a; }
+  .companion-toggle {
+    width: 36px; height: 20px; border-radius: 10px;
+    background: #3a2e24; position: relative; cursor: pointer;
+    transition: background 0.2s;
+  }
+  .companion-toggle.on { background: #33cc33; }
+  .companion-toggle .knob {
+    width: 16px; height: 16px; border-radius: 50%; background: #e8d8c8;
+    position: absolute; top: 2px; left: 2px; transition: left 0.2s;
+  }
+  .companion-toggle.on .knob { left: 18px; }
+  .companion-remove {
+    background: none; border: none; color: #5a4a3a; cursor: pointer;
+    font-size: 14px; padding: 2px 6px; border-radius: 4px;
+  }
+  .companion-remove:hover { color: #cc4444; background: #2a0d0d; }
+
+  /* Buttons */
+  .btn {
+    padding: 8px 20px; border-radius: 8px; border: none;
+    font-size: 13px; font-weight: 600; cursor: pointer;
+    font-family: inherit; transition: all 0.15s;
+  }
+  .btn-primary { background: #ff6633; color: #fff; }
+  .btn-primary:hover { background: #ff7744; }
+  .btn-secondary { background: #261c14; color: #c8b8a8; border: 1px solid #3a2e24; }
+  .btn-secondary:hover { background: #302418; border-color: #4a3e34; }
+  .btn-danger { background: #2a0d0d; color: #cc4444; border: 1px solid #3a1616; }
+  .btn-danger:hover { background: #3a1616; }
+
+  /* ── Scrollbar ── */
+  ::-webkit-scrollbar { width: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #3a2e24; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: #4a3e34; }
+</style>
+</head>
+<body>
+
+<!-- Concept Switcher -->
+<div class="switcher">
+  <span class="label">Edit Views</span>
+  <button class="active" onclick="showConcept('a')">A: Slide-Over Panel</button>
+  <button onclick="showConcept('b')">B: Full-Page Edit</button>
+  <button onclick="showConcept('c')">C: Polished Modal</button>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════
+     CONCEPT A: Slide-Over Panel
+     ════════════════════════════════════════════════════════════════ -->
+<div id="concept-a" class="concept concept-a active">
+  <div class="sidebar-nav">
+    <div class="logo">caco</div>
+    <div class="nav-item active"><span class="nav-icon">&#9776;</span> Library</div>
+    <div class="nav-item"><span class="nav-icon">&#43;</span> Import</div>
+    <div class="nav-item"><span class="nav-icon">&#9881;</span> Settings</div>
+    <div class="nav-divider"></div>
+    <div class="status-filters">
+      <div class="sf-title">Filter by Status</div>
+      <div class="sf-item"><span>All</span><span class="sf-count">147</span></div>
+      <div class="sf-item" style="color:#33cc33"><span><span class="sf-dot" style="background:#33cc33"></span>Playing</span><span class="sf-count">2</span></div>
+      <div class="sf-item" style="color:#5588dd"><span><span class="sf-dot" style="background:#5588dd"></span>To Play</span><span class="sf-count">31</span></div>
+      <div class="sf-item" style="color:#cccc33"><span><span class="sf-dot" style="background:#cccc33"></span>Backlog</span><span class="sf-count">42</span></div>
+      <div class="sf-item" style="color:#8a7a6a"><span><span class="sf-dot" style="background:#8a7a6a"></span>Finished</span><span class="sf-count">68</span></div>
+      <div class="sf-item" style="color:#cc4444"><span><span class="sf-dot" style="background:#cc4444"></span>Abandoned</span><span class="sf-count">4</span></div>
+    </div>
+  </div>
+  <div class="main-content">
+    <div class="topbar">
+      <div class="breadcrumbs">
+        <span class="crumb">Library</span>
+        <span class="sep">/</span>
+        <span class="crumb current">Sunlust</span>
+        <span class="sep">/</span>
+        <span class="crumb current" style="color:#ff6633">Edit</span>
+      </div>
+      <input class="search-box" placeholder="Search WADs..." disabled style="opacity:0.4">
+    </div>
+
+    <div class="edit-split">
+      <!-- Dimmed grid behind -->
+      <div class="grid-behind">
+        <div class="card-grid">
+          <div class="card"><div class="thumb tc-1" style="height:100px">AA</div><div class="card-body"><div class="card-title">Ancient Aliens</div><div class="card-author">skillsaw</div></div></div>
+          <div class="card selected"><div class="thumb tc-2" style="height:100px">SL</div><div class="card-body"><div class="card-title">Sunlust</div><div class="card-author">Ribbiks</div></div></div>
+          <div class="card"><div class="thumb tc-3" style="height:100px">EV</div><div class="card-body"><div class="card-title">Eviternity</div><div class="card-author">Dragonfly</div></div></div>
+          <div class="card"><div class="thumb tc-4" style="height:100px">GD</div><div class="card-body"><div class="card-title">Going Down</div><div class="card-author">mouldy</div></div></div>
+          <div class="card"><div class="thumb tc-5" style="height:100px">SD</div><div class="card-body"><div class="card-title">Sunder</div><div class="card-author">Insane_Gazebo</div></div></div>
+        </div>
+      </div>
+
+      <!-- Slide-over panel -->
+      <div class="slide-panel">
+        <div class="panel-header">
+          <div class="panel-thumb tc-2" style="color:#226644">SL</div>
+          <div class="panel-title-area">
+            <div class="panel-title">Sunlust</div>
+            <div class="panel-subtitle">Ribbiks, Dannebubinga &middot; 2015</div>
+          </div>
+          <button class="panel-close">&times;</button>
+        </div>
+
+        <div class="panel-tabs">
+          <div class="panel-tab active">Metadata</div>
+          <div class="panel-tab">Sourceport</div>
+          <div class="panel-tab">Sources</div>
+          <div class="panel-tab">Companions</div>
+        </div>
+
+        <div class="panel-body">
+          <div class="form-group">
+            <label class="form-label">Title</label>
+            <input class="form-input" value="Sunlust">
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Author</label>
+              <input class="form-input" value="Ribbiks, Dannebubinga">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Year</label>
+              <input class="form-input" value="2015">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Status</label>
+            <div class="status-picker">
+              <span class="status-option so-toplay selected">To Play</span>
+              <span class="status-option so-backlog">Backlog</span>
+              <span class="status-option so-playing">Playing</span>
+              <span class="status-option so-finished">Finished</span>
+              <span class="status-option so-abandoned">Abandoned</span>
+              <span class="status-option so-awaiting">Awaiting</span>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Rating</label>
+            <div class="rating-picker">
+              <span class="star filled">&starf;</span>
+              <span class="star filled">&starf;</span>
+              <span class="star filled">&starf;</span>
+              <span class="star filled">&starf;</span>
+              <span class="star filled">&starf;</span>
+              <span class="rating-clear">clear</span>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Tags</label>
+            <div class="tag-editor">
+              <span class="tag-pill">megawad <span class="tag-remove">&times;</span></span>
+              <span class="tag-pill">slaughter <span class="tag-remove">&times;</span></span>
+              <span class="tag-add">+ add tag</span>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Notes</label>
+            <input class="form-input" placeholder="Personal notes...">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Description</label>
+            <textarea class="form-textarea">Sunlust is a set of 32 Boom-compatible maps for Doom II, designed to be played from a pistol start.</textarea>
+          </div>
+        </div>
+
+        <div class="panel-footer">
+          <button class="btn btn-secondary">Cancel</button>
+          <button class="btn btn-primary">Save Changes</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════
+     CONCEPT B: Full-Page Edit
+     ════════════════════════════════════════════════════════════════ -->
+<div id="concept-b" class="concept concept-b">
+  <div class="sidebar-nav">
+    <div class="logo">caco</div>
+    <div class="nav-item active"><span class="nav-icon">&#9776;</span> Library</div>
+    <div class="nav-item"><span class="nav-icon">&#43;</span> Import</div>
+    <div class="nav-item"><span class="nav-icon">&#9881;</span> Settings</div>
+    <div class="nav-divider"></div>
+    <div class="status-filters">
+      <div class="sf-title">Filter by Status</div>
+      <div class="sf-item"><span>All</span><span class="sf-count">147</span></div>
+      <div class="sf-item" style="color:#33cc33"><span><span class="sf-dot" style="background:#33cc33"></span>Playing</span><span class="sf-count">2</span></div>
+      <div class="sf-item" style="color:#5588dd"><span><span class="sf-dot" style="background:#5588dd"></span>To Play</span><span class="sf-count">31</span></div>
+      <div class="sf-item" style="color:#cccc33"><span><span class="sf-dot" style="background:#cccc33"></span>Backlog</span><span class="sf-count">42</span></div>
+      <div class="sf-item" style="color:#8a7a6a"><span><span class="sf-dot" style="background:#8a7a6a"></span>Finished</span><span class="sf-count">68</span></div>
+      <div class="sf-item" style="color:#cc4444"><span><span class="sf-dot" style="background:#cc4444"></span>Abandoned</span><span class="sf-count">4</span></div>
+    </div>
+  </div>
+  <div class="main-content">
+    <div class="topbar">
+      <div class="breadcrumbs">
+        <span class="crumb">Library</span>
+        <span class="sep">/</span>
+        <span class="crumb">Sunlust</span>
+        <span class="sep">/</span>
+        <span class="crumb current" style="color:#ff6633">Edit</span>
+      </div>
+      <div style="margin-left:auto;display:flex;gap:8px">
+        <button class="btn btn-secondary">Cancel</button>
+        <button class="btn btn-primary">Save Changes</button>
+      </div>
+    </div>
+
+    <div class="edit-page">
+      <!-- Header with thumbnail + title -->
+      <div class="edit-header">
+        <div class="edit-thumb tc-2">SL</div>
+        <div class="edit-header-info">
+          <div class="edit-header-title">Sunlust</div>
+          <div class="edit-header-meta">Ribbiks, Dannebubinga &middot; 2015 &middot; idgames &middot; sunlust.zip</div>
+          <span class="edit-header-status cs-toplay">To Play</span>
+        </div>
+      </div>
+
+      <!-- Two-column layout for all fields -->
+      <div class="edit-columns">
+        <!-- Left column: Metadata -->
+        <div>
+          <div class="edit-section">
+            <div class="edit-section-title">Metadata</div>
+
+            <div class="form-group">
+              <label class="form-label">Title</label>
+              <input class="form-input" value="Sunlust">
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Author</label>
+                <input class="form-input" value="Ribbiks, Dannebubinga">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Year</label>
+                <input class="form-input" value="2015">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Status</label>
+              <div class="status-picker">
+                <span class="status-option so-toplay selected">To Play</span>
+                <span class="status-option so-backlog">Backlog</span>
+                <span class="status-option so-playing">Playing</span>
+                <span class="status-option so-finished">Finished</span>
+                <span class="status-option so-abandoned">Abandoned</span>
+                <span class="status-option so-awaiting">Awaiting</span>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Rating</label>
+              <div class="rating-picker">
+                <span class="star filled">&starf;</span>
+                <span class="star filled">&starf;</span>
+                <span class="star filled">&starf;</span>
+                <span class="star filled">&starf;</span>
+                <span class="star filled">&starf;</span>
+                <span class="rating-clear">clear</span>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Tags</label>
+              <div class="tag-editor">
+                <span class="tag-pill">megawad <span class="tag-remove">&times;</span></span>
+                <span class="tag-pill">slaughter <span class="tag-remove">&times;</span></span>
+                <span class="tag-add">+ add tag</span>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Notes</label>
+              <input class="form-input" placeholder="Personal notes...">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Description</label>
+              <textarea class="form-textarea">Sunlust is a set of 32 Boom-compatible maps for Doom II, designed to be played from a pistol start.</textarea>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right column: Sourceport + Sources + Companions -->
+        <div>
+          <div class="edit-section">
+            <div class="edit-section-title">Sourceport Config</div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Sourceport</label>
+                <input class="form-input" placeholder="default">
+              </div>
+              <div class="form-group">
+                <label class="form-label">IWAD</label>
+                <input class="form-input" placeholder="auto-detect">
+              </div>
+            </div>
+
+            <div class="form-row-3">
+              <div class="form-group">
+                <label class="form-label">Complevel</label>
+                <input class="form-input" value="9">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Config Profile</label>
+                <input class="form-input" placeholder="default">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Version</label>
+                <input class="form-input" placeholder="">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Custom Args</label>
+              <input class="form-input" placeholder='["--arg1", "value"]'>
+            </div>
+          </div>
+
+          <div class="edit-section">
+            <div class="edit-section-title">Source Info</div>
+
+            <div class="form-row-3">
+              <div class="form-group">
+                <label class="form-label">Source</label>
+                <input class="form-input" value="idgames" disabled style="opacity:0.6">
+              </div>
+              <div class="form-group" style="grid-column: span 2">
+                <label class="form-label">Source URL</label>
+                <input class="form-input" value="">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">idgames ID</label>
+              <input class="form-input" value="18964">
+            </div>
+          </div>
+
+          <div class="edit-section">
+            <div class="edit-section-title">Companion Files</div>
+
+            <div class="companion-list">
+              <div class="companion-item">
+                <span class="comp-icon">&#128196;</span>
+                <span class="comp-name">sunlust_fixes.deh</span>
+                <span class="comp-size">2.4 KB</span>
+                <div class="companion-toggle on"><div class="knob"></div></div>
+                <button class="companion-remove">&times;</button>
+              </div>
+            </div>
+            <button class="btn btn-secondary" style="margin-top:10px;padding:6px 14px;font-size:12px">+ Add Companion</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════
+     CONCEPT C: Polished Modal
+     ════════════════════════════════════════════════════════════════ -->
+<div id="concept-c" class="concept concept-c" style="position:relative">
+  <div class="sidebar-nav">
+    <div class="logo">caco</div>
+    <div class="nav-item active"><span class="nav-icon">&#9776;</span> Library</div>
+    <div class="nav-item"><span class="nav-icon">&#43;</span> Import</div>
+    <div class="nav-item"><span class="nav-icon">&#9881;</span> Settings</div>
+    <div class="nav-divider"></div>
+    <div class="status-filters">
+      <div class="sf-title">Filter by Status</div>
+      <div class="sf-item"><span>All</span><span class="sf-count">147</span></div>
+      <div class="sf-item" style="color:#33cc33"><span><span class="sf-dot" style="background:#33cc33"></span>Playing</span><span class="sf-count">2</span></div>
+      <div class="sf-item" style="color:#5588dd"><span><span class="sf-dot" style="background:#5588dd"></span>To Play</span><span class="sf-count">31</span></div>
+      <div class="sf-item" style="color:#cccc33"><span><span class="sf-dot" style="background:#cccc33"></span>Backlog</span><span class="sf-count">42</span></div>
+      <div class="sf-item" style="color:#8a7a6a"><span><span class="sf-dot" style="background:#8a7a6a"></span>Finished</span><span class="sf-count">68</span></div>
+      <div class="sf-item" style="color:#cc4444"><span><span class="sf-dot" style="background:#cc4444"></span>Abandoned</span><span class="sf-count">4</span></div>
+    </div>
+  </div>
+  <div class="main-content" style="position:relative">
+    <div class="topbar">
+      <div class="breadcrumbs">
+        <span class="crumb">Library</span>
+        <span class="sep">/</span>
+        <span class="crumb current">Sunlust</span>
+        <span class="sep">/</span>
+        <span class="crumb current" style="color:#ff6633">Edit</span>
+      </div>
+      <input class="search-box" placeholder="Search WADs..." disabled style="opacity:0.4">
+    </div>
+
+    <!-- Blurred backdrop with modal -->
+    <div class="modal-backdrop">
+      <div class="modal-dialog">
+        <div class="modal-header">
+          <div class="modal-thumb tc-2" style="color:#226644">SL</div>
+          <div class="modal-title-area">
+            <div class="modal-wad-title">Sunlust</div>
+            <div class="modal-wad-meta">Ribbiks, Dannebubinga &middot; 2015 &middot; idgames</div>
+          </div>
+          <button class="modal-close">&times;</button>
+        </div>
+
+        <div class="modal-tabs">
+          <div class="modal-tab active">Metadata</div>
+          <div class="modal-tab">Sourceport</div>
+          <div class="modal-tab">Sources</div>
+          <div class="modal-tab">Companions</div>
+        </div>
+
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">Title</label>
+            <input class="form-input" value="Sunlust">
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Author</label>
+              <input class="form-input" value="Ribbiks, Dannebubinga">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Year</label>
+              <input class="form-input" value="2015">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Status</label>
+            <div class="status-picker">
+              <span class="status-option so-toplay selected">To Play</span>
+              <span class="status-option so-backlog">Backlog</span>
+              <span class="status-option so-playing">Playing</span>
+              <span class="status-option so-finished">Finished</span>
+              <span class="status-option so-abandoned">Abandoned</span>
+              <span class="status-option so-awaiting">Awaiting</span>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Rating</label>
+            <div class="rating-picker">
+              <span class="star filled">&starf;</span>
+              <span class="star filled">&starf;</span>
+              <span class="star filled">&starf;</span>
+              <span class="star filled">&starf;</span>
+              <span class="star filled">&starf;</span>
+              <span class="rating-clear">clear</span>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Tags</label>
+            <div class="tag-editor">
+              <span class="tag-pill">megawad <span class="tag-remove">&times;</span></span>
+              <span class="tag-pill">slaughter <span class="tag-remove">&times;</span></span>
+              <span class="tag-add">+ add tag</span>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Notes</label>
+            <input class="form-input" placeholder="Personal notes...">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Description</label>
+            <textarea class="form-textarea" rows="3">Sunlust is a set of 32 Boom-compatible maps for Doom II, designed to be played from a pistol start.</textarea>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn btn-danger" style="margin-right:auto">Delete WAD</button>
+          <button class="btn btn-secondary">Cancel</button>
+          <button class="btn btn-primary">Save Changes</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function showConcept(id) {
+  document.querySelectorAll('.concept').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.switcher button').forEach(el => el.classList.remove('active'));
+  document.getElementById('concept-' + id).classList.add('active');
+  event.target.classList.add('active');
+}
+</script>
+</body>
+</html>

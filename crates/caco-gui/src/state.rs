@@ -35,8 +35,8 @@ pub enum ViewMode {
 
 #[derive(Default, PartialEq, Eq, Clone, Copy)]
 pub enum ViewLayout {
-    #[default]
     List,
+    #[default]
     Grid,
 }
 
@@ -160,6 +160,13 @@ pub struct AppState {
     pub saved_searches: Vec<SavedSearch>,
     pub save_search_pending: bool,
     pub save_search_name: String,
+
+    // Sidebar status counts (total library, not filtered)
+    pub status_counts: HashMap<String, usize>,
+    pub total_wad_count: usize,
+
+    // Hidden sidebar status filter tabs (indices into TABS)
+    pub hidden_tabs: std::collections::HashSet<usize>,
 }
 
 impl AppState {
@@ -204,6 +211,9 @@ impl AppState {
             saved_searches: persisted.saved_searches,
             save_search_pending: false,
             save_search_name: String::new(),
+            status_counts: HashMap::new(),
+            total_wad_count: 0,
+            hidden_tabs: persisted.hidden_tabs.iter().copied().collect(),
         }
     }
 
@@ -215,6 +225,31 @@ impl AppState {
     /// Returns true if a WAD is currently being played.
     pub fn is_playing(&self) -> bool {
         matches!(self.play_state, PlayState::Playing { .. })
+    }
+
+    /// Refresh sidebar status counts from the database.
+    pub fn refresh_status_counts(&mut self, conn: &Connection) {
+        self.status_counts.clear();
+        self.total_wad_count = 0;
+        if let Ok(all_wads) =
+            caco_core::db::search_wads(conn, None, Some("id"), false, false, 0)
+        {
+            self.total_wad_count = all_wads.len();
+            for wad in &all_wads {
+                *self.status_counts.entry(wad.status.clone()).or_insert(0) += 1;
+            }
+        }
+    }
+
+    /// Get count for a specific status (for sidebar display).
+    pub fn status_count(&self, statuses: Option<&[&str]>) -> usize {
+        match statuses {
+            None => self.total_wad_count,
+            Some(ss) => ss
+                .iter()
+                .map(|s| self.status_counts.get(*s).copied().unwrap_or(0))
+                .sum(),
+        }
     }
 
     /// Reload WAD list and stats from the database.
@@ -283,6 +318,9 @@ impl AppState {
                 self.notification = Some(Notification::error(format!("Query failed: {e}")));
             }
         }
+
+        // Refresh sidebar counts
+        self.refresh_status_counts(conn);
 
         self.needs_reload = false;
     }
@@ -424,6 +462,7 @@ impl AppState {
             sort_desc: self.sort_desc,
             active_tab: self.active_tab,
             saved_searches: self.saved_searches.clone(),
+            hidden_tabs: self.hidden_tabs.iter().copied().collect(),
         }
     }
 }
