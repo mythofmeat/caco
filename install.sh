@@ -12,6 +12,10 @@ sudo install -Dm755 target/release/caco     "$BINDIR/caco"
 sudo install -Dm755 target/release/caco-gui "$BINDIR/caco-gui"
 sudo install -Dm755 target/release/caco-tui "$BINDIR/caco-tui"
 
+echo "Installing desktop entry and icon..."
+sudo install -Dm644 assets/caco.desktop "$PREFIX/share/applications/caco.desktop"
+sudo install -Dm644 assets/caco.png     "$PREFIX/share/icons/hicolor/1024x1024/apps/caco.png"
+
 echo "Installed:"
 ls -lh "$BINDIR/caco" "$BINDIR/caco-gui" "$BINDIR/caco-tui"
 echo
