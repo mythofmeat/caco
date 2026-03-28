@@ -14,7 +14,8 @@ jobs:
 
       - name: Build package
         working-directory: contrib/arch
-        run: makepkg -sf --noconfirm
+        run: |
+          makepkg -sf --noconfirm
 
       - name: Upload to Gitea package registry
         working-directory: contrib/arch
@@ -22,5 +23,5 @@ jobs:
           for pkg in *.pkg.tar.zst; do
             curl --fail --user "eshen:${{ secrets.PACKAGE_TOKEN }}" \
                  --upload-file "$pkg" \
-                 "${{ gitea.server_url }}/api/packages/eshen/arch/shore"
+                 "${{ gitea.server_url }}/api/packages/eshen/arch/eshen"
           done

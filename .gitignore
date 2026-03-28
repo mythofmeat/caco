@@ -1,6 +1,7 @@
 # Build
 contrib/arch/pkg/
 contrib/arch/src/
+contrib/arch/caco-git/
 contrib/arch/caco-*.pkg.tar.zst
 contrib/arch/caco-*.tar.gz
 
