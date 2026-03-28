@@ -1,0 +1,13 @@
+# pack-refs with: peeled fully-peeled sorted 
+0dbd34e87bc5eb5b063a751939e99b3e2383f74d refs/heads/caco-dev
+9d74336b8a4c1b3936bb6b53e19c22ab032ecac7 refs/heads/caco-dev-rust
+0dbd34e87bc5eb5b063a751939e99b3e2383f74d refs/heads/caco-dev-worktree
+2cf60d88ee7274fcd3ed43cbd6d9cdb2669d0cfc refs/heads/dev
+97319dc9fa2666a5c3ca5b9ec8ac01a8c01c42ea refs/heads/helion-stats-reader
+b77b1a282b80f375d8c408ca3020eef74dfa1992 refs/heads/main
+72191603e3af66c6b624f7afbe54b41c2f9c5b95 refs/heads/mult-wad
+b188b8a8a4a93814a8bf9ced78201b68525c3ea2 refs/heads/sourceport-integration
+06ec7879bb122374d2d41d7da9f3809795210111 refs/tags/v1.0.0
+^9d74336b8a4c1b3936bb6b53e19c22ab032ecac7
+e59f9ca12b791f6cf6c85dc0b4bb9f86f8050d2a refs/tags/v1.1.0
+7065e29e8693ea71607a88a52e6da1ff3591e5e5 refs/tags/v1.2.0

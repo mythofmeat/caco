@@ -1,0 +1,26 @@
+name: Build and publish Arch package
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history needed for pkgver()
+
+      - name: Build package
+        working-directory: contrib/arch
+        run: makepkg -sf --noconfirm
+
+      - name: Upload to Gitea package registry
+        working-directory: contrib/arch
+        run: |
+          for pkg in *.pkg.tar.zst; do
+            curl --fail --user "eshen:${{ secrets.PACKAGE_TOKEN }}" \
+                 --upload-file "$pkg" \
+                 "${{ gitea.server_url }}/api/packages/eshen/arch/shore"
+          done

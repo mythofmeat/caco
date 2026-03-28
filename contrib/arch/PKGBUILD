@@ -1,6 +1,6 @@
 # Maintainer: eshen
-pkgname=caco
-pkgver=1.2.1
+pkgname=caco-git
+pkgver=1.2.0.r251.b77b1a2
 pkgrel=1
 pkgdesc="Doom WAD library manager"
 arch=('x86_64')
@@ -11,10 +11,20 @@ optdepends=(
     'vulkan-driver: GPU-accelerated rendering for caco-gui'
     'xdg-desktop-portal: native file dialogs in caco-gui'
 )
-makedepends=('cargo' 'gcc')
+makedepends=('cargo' 'gcc' 'git')
+provides=('caco')
+conflicts=('caco')
 options=(!lto)
-source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
+source=("$pkgname::git+$url.git")
 sha256sums=('SKIP')
+
+pkgver() {
+    cd "$pkgname"
+    printf "%s.r%s.%s" \
+        "$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')" \
+        "$(git rev-list --count HEAD)" \
+        "$(git rev-parse --short HEAD)"
+}
 
 prepare() {
     cd "$pkgname"
