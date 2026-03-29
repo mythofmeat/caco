@@ -224,55 +224,45 @@ fn gc_finished_wads(
         return Ok(0);
     }
 
-    // Split into auto-clean (idgames/re-downloadable) and interactive
-    let (auto_clean, interactive): (Vec<_>, Vec<_>) = entries.into_iter().partition(|e| {
-        e.wad.source_type == "idgames" || e.wad.idgames_id.is_some()
-    });
-
-    let mut total = 0u64;
-
-    // Auto-clean batch
-    if !auto_clean.is_empty() {
-        total += gc_auto_clean(conn, &auto_clean, opts, dry_run, yes)?;
-    }
-
-    // Interactive per-WAD
-    if !interactive.is_empty() {
-        total += gc_interactive(conn, &interactive, opts, dry_run)?;
-    }
-
-    Ok(total)
+    gc_batch_clean(conn, &entries, opts, dry_run, yes)
 }
 
 fn get_gc_candidates(conn: &Connection) -> Result<Vec<WadRecord>, String> {
-    let query = "intent:dropped , play:completed intent:shelved";
+    // All dropped (abandoned) WADs and all completed (finished) WADs regardless of intent.
+    let query = "intent:dropped , play:completed";
     let wads = db::search_wads(conn, Some(query), None, true, false, 0)
         .map_err(|e| format!("Search error: {e}"))?;
     Ok(wads.into_iter().filter(|w| !w.gc_ignore).collect())
 }
 
-fn gc_auto_clean(
+fn gc_batch_clean(
     conn: &Connection,
     entries: &[GcEntry],
     opts: &GcOptions,
     dry_run: bool,
     yes: bool,
 ) -> Result<u64, String> {
-    println!("Re-downloadable WADs (idgames):");
+    println!("Finished/abandoned WADs:");
     println!(
-        "  {:<6} {:<40} {:<12} {:>10} {:>10} {:>10}",
-        "ID", "Title", "Status", "Data", "Cache", "Companions"
+        "  {:<6} {:<40} {:<12} {:<6} {:>10} {:>10} {:>10}",
+        "ID", "Title", "Status", "Re-DL", "Data", "Cache", "Companions"
     );
-    println!("  {}", "-".repeat(92));
+    println!("  {}", "-".repeat(102));
 
     let mut total_size = 0u64;
     for entry in entries {
         let title = truncate(&entry.wad.title, 38);
+        let redownloadable = if entry.wad.source_type == "idgames" || entry.wad.idgames_id.is_some() {
+            "yes"
+        } else {
+            "no"
+        };
         println!(
-            "  {:<6} {:<40} {:<12} {:>10} {:>10} {:>10}",
+            "  {:<6} {:<40} {:<12} {:<6} {:>10} {:>10} {:>10}",
             entry.wad.id,
             title,
             entry.wad.status,
+            redownloadable,
             format_size(entry.data_size),
             format_size(entry.cache_size),
             format_size(entry.companion_size),
@@ -292,10 +282,11 @@ fn gc_auto_clean(
     }
 
     if !yes {
-        eprint!("  Clean all re-downloadable WADs? [y/N] ");
+        eprint!("  Clean all? [y/N] ");
         let _ = io::stderr().flush();
         let mut response = String::new();
-        if io::stdin().read_line(&mut response).is_err() || !response.trim().eq_ignore_ascii_case("y")
+        if io::stdin().read_line(&mut response).is_err()
+            || !response.trim().eq_ignore_ascii_case("y")
         {
             println!("  Skipped.");
             return Ok(0);
@@ -307,77 +298,6 @@ fn gc_auto_clean(
         freed += clean_wad_data(conn, entry, opts)?;
     }
     println!("  Cleaned {} WADs, {} freed.", entries.len(), format_size(freed));
-    Ok(freed)
-}
-
-fn gc_interactive(
-    conn: &Connection,
-    entries: &[GcEntry],
-    opts: &GcOptions,
-    dry_run: bool,
-) -> Result<u64, String> {
-    if dry_run {
-        println!("\nNon-downloadable WADs (would prompt individually):");
-        let mut total = 0u64;
-        for entry in entries {
-            println!(
-                "  {} (id:{}) — data: {}, cache: {}, companions: {}",
-                entry.wad.title,
-                entry.wad.id,
-                format_size(entry.data_size),
-                format_size(entry.cache_size),
-                format_size(entry.companion_size),
-            );
-            total += entry.total_size;
-        }
-        println!("  {} WADs, {} reclaimable (dry run)", entries.len(), format_size(total));
-        return Ok(total);
-    }
-
-    println!("\nNon-downloadable WADs:");
-    let mut freed = 0u64;
-
-    for entry in entries {
-        println!(
-            "\n  {} (id:{}) [{}]",
-            entry.wad.title, entry.wad.id, entry.wad.status
-        );
-        if entry.data_size > 0 {
-            println!("    Data: {}", format_size(entry.data_size));
-        }
-        if entry.cache_size > 0 {
-            println!("    Cache: {}", format_size(entry.cache_size));
-        }
-        if entry.companion_size > 0 {
-            println!("    Companions: {}", format_size(entry.companion_size));
-        }
-
-        eprint!("    Clean? [y/n/i(gnore)] ");
-        let _ = io::stderr().flush();
-        let mut response = String::new();
-        if io::stdin().read_line(&mut response).is_err() {
-            continue;
-        }
-
-        match response.trim().to_lowercase().as_str() {
-            "y" | "yes" => {
-                freed += clean_wad_data(conn, entry, opts)?;
-                println!("    Cleaned.");
-            }
-            "i" | "ignore" => {
-                let update = db::WadUpdate::new()
-                    .set_int("gc_ignore", Some(1))
-                    .map_err(|e| format!("Failed to build update: {e}"))?;
-                db::update_wad(conn, entry.wad.id, &update)
-                    .map_err(|e| format!("Failed to update: {e}"))?;
-                println!("    Ignored (will be skipped in future GC runs).");
-            }
-            _ => {
-                println!("    Skipped.");
-            }
-        }
-    }
-
     Ok(freed)
 }
 
