@@ -1,7 +1,10 @@
 use rusqlite::Connection;
 
 use super::connection::{attach_tags, fetch_tags_batch};
-use super::models::{AndGroup, ParsedQuery, QueryTerm, SourceType, WadRecord, STATUS_SHORTCUTS};
+use super::models::{
+    AndGroup, ParsedQuery, QueryTerm, SourceType, WadRecord, INTENT_SHORTCUTS,
+    PLAY_STATE_SHORTCUTS, STATUS_SHORTCUTS,
+};
 use crate::complevel::parse_complevel;
 use crate::Result;
 
@@ -172,6 +175,24 @@ pub fn normalize_status(value: &str) -> String {
         .unwrap_or(lower)
 }
 
+/// Normalize play state value, expanding shortcuts.
+pub fn normalize_play_state(value: &str) -> String {
+    let lower = value.to_lowercase();
+    PLAY_STATE_SHORTCUTS
+        .get(lower.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or(lower)
+}
+
+/// Normalize intent value, expanding shortcuts.
+pub fn normalize_intent(value: &str) -> String {
+    let lower = value.to_lowercase();
+    INTENT_SHORTCUTS
+        .get(lower.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or(lower)
+}
+
 /// Boxed SQL parameter for dynamic dispatch.
 type SqlParam = Box<dyn rusqlite::types::ToSql>;
 
@@ -221,6 +242,21 @@ fn build_term_sql(term: &QueryTerm) -> (String, Vec<SqlParam>) {
             let normalized = normalize_status(&term.value);
             ("wads.status = ?".into(), vec![Box::new(normalized)])
         }
+
+        Some("play") | Some("play_state") => {
+            let normalized = normalize_play_state(&term.value);
+            ("wads.play_state = ?".into(), vec![Box::new(normalized)])
+        }
+
+        Some("intent") => {
+            let normalized = normalize_intent(&term.value);
+            ("wads.intent = ?".into(), vec![Box::new(normalized)])
+        }
+
+        Some("avail") | Some("availability") => (
+            "wads.availability = ?".into(),
+            vec![Box::new(term.value.to_lowercase())],
+        ),
 
         Some("source") => (
             "wads.source_type = ?".into(),

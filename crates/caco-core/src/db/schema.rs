@@ -82,6 +82,8 @@ const POST_MIGRATION_INDEXES: &str = r#"
 CREATE INDEX IF NOT EXISTS idx_wads_deleted_at ON wads(deleted_at);
 CREATE INDEX IF NOT EXISTS idx_wads_cached_path ON wads(cached_path);
 CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON sessions(wad_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_wads_play_state ON wads(play_state);
+CREATE INDEX IF NOT EXISTS idx_wads_intent ON wads(intent);
 "#;
 
 // ---------------------------------------------------------------------------
@@ -119,6 +121,13 @@ static MIGRATIONS: &[Migration] = &[
     (21, "add_custom_config", migrate_add_custom_config),
     (22, "merge_custom_complevel_to_complevel", migrate_merge_custom_complevel),
     (23, "add_companion_tables_and_gc_ignore", migrate_add_companion_tables_and_gc_ignore),
+    // Python uses migration 24 for add_gc_ignore (split from Rust's migration 23).
+    // Our new migrations start at 25 to avoid collisions with Python-migrated databases.
+    (24, "add_gc_ignore_compat_noop", migrate_noop),
+    (25, "add_three_axis_columns", migrate_add_three_axis_columns),
+    (26, "add_playthroughs_table", migrate_add_playthroughs_table),
+    (27, "add_smart_collections", migrate_add_smart_collections),
+    (28, "add_wad_analysis_table", migrate_add_wad_analysis_table),
 ];
 
 // ---------------------------------------------------------------------------
@@ -409,6 +418,139 @@ fn migrate_add_companion_tables_and_gc_ignore(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+fn migrate_add_three_axis_columns(conn: &Connection) -> Result<()> {
+    // Add three new axis columns
+    add_column_if_missing(conn, "wads", "play_state", "TEXT DEFAULT 'unplayed'")?;
+    add_column_if_missing(conn, "wads", "intent", "TEXT DEFAULT 'inbox'")?;
+    add_column_if_missing(conn, "wads", "availability", "TEXT DEFAULT 'unavailable'")?;
+
+    // Backfill play_state and intent from existing status
+    conn.execute_batch(
+        "UPDATE wads SET play_state = 'unplayed', intent = 'queued'  WHERE status = 'to-play';
+         UPDATE wads SET play_state = 'unplayed', intent = 'shelved' WHERE status = 'backlog';
+         UPDATE wads SET play_state = 'started',  intent = 'queued'  WHERE status = 'playing';
+         UPDATE wads SET play_state = 'completed', intent = 'shelved' WHERE status = 'finished';
+         UPDATE wads SET play_state = 'unplayed', intent = 'dropped' WHERE status = 'abandoned';
+         UPDATE wads SET play_state = 'unplayed', intent = 'shelved' WHERE status = 'awaiting-update';",
+    )?;
+
+    // Refine abandoned WADs: if they have sessions, they were started
+    conn.execute(
+        "UPDATE wads SET play_state = 'started'
+         WHERE status = 'abandoned'
+           AND id IN (SELECT DISTINCT wad_id FROM sessions)",
+        [],
+    )?;
+
+    // Backfill availability from cached_path and source_url
+    conn.execute_batch(
+        "UPDATE wads SET availability = 'cached'       WHERE cached_path IS NOT NULL;
+         UPDATE wads SET availability = 'downloadable' WHERE cached_path IS NULL AND source_url IS NOT NULL;
+         UPDATE wads SET availability = 'unavailable'  WHERE cached_path IS NULL AND source_url IS NULL;",
+    )?;
+
+    // Add awaiting-update tag to WADs that had that status
+    conn.execute(
+        "INSERT OR IGNORE INTO tags (wad_id, tag)
+         SELECT id, 'awaiting-update' FROM wads WHERE status = 'awaiting-update'",
+        [],
+    )?;
+
+    Ok(())
+}
+
+fn migrate_add_smart_collections(conn: &Connection) -> Result<()> {
+    if !table_exists(conn, "smart_collections")? {
+        conn.execute_batch(
+            "CREATE TABLE smart_collections (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                query TEXT NOT NULL,
+                sort_by TEXT,
+                sort_desc INTEGER DEFAULT 1,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );",
+        )?;
+    }
+    Ok(())
+}
+
+fn migrate_add_wad_analysis_table(conn: &Connection) -> Result<()> {
+    if !table_exists(conn, "wad_analysis")? {
+        conn.execute_batch(
+            "CREATE TABLE wad_analysis (
+                wad_id INTEGER PRIMARY KEY REFERENCES wads(id) ON DELETE CASCADE,
+                total_maps INTEGER NOT NULL DEFAULT 0,
+                required_maps INTEGER NOT NULL DEFAULT 0,
+                secret_maps TEXT,
+                terminal_map TEXT,
+                has_umapinfo INTEGER DEFAULT 0,
+                analysis_json TEXT,
+                expected_map_count INTEGER,
+                analyzed_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );",
+        )?;
+    }
+    Ok(())
+}
+
+fn migrate_add_playthroughs_table(conn: &Connection) -> Result<()> {
+    if !table_exists(conn, "playthroughs")? {
+        conn.execute_batch(
+            "CREATE TABLE playthroughs (
+                id INTEGER PRIMARY KEY,
+                wad_id INTEGER NOT NULL REFERENCES wads(id) ON DELETE CASCADE,
+                started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                completed_at TEXT,
+                stats_snapshot TEXT,
+                notes TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX idx_playthroughs_wad_id ON playthroughs(wad_id);
+            CREATE INDEX idx_playthroughs_completed ON playthroughs(wad_id, completed_at);",
+        )?;
+    }
+
+    // Add playthrough_id column to sessions
+    add_column_if_missing(conn, "sessions", "playthrough_id", "INTEGER REFERENCES playthroughs(id)")?;
+
+    // Synthesize playthroughs from existing wad_completions
+    // For each completion, create a completed playthrough.
+    conn.execute_batch(
+        "INSERT INTO playthroughs (wad_id, started_at, completed_at, stats_snapshot, notes, created_at)
+         SELECT wad_id, completed_at, completed_at, stats_snapshot, notes, completed_at
+         FROM wad_completions
+         ORDER BY completed_at ASC;",
+    )?;
+
+    // For WADs currently 'playing' with sessions but no completions, create an active playthrough.
+    conn.execute_batch(
+        "INSERT INTO playthroughs (wad_id, started_at)
+         SELECT DISTINCT s.wad_id, MIN(s.started_at)
+         FROM sessions s
+         JOIN wads w ON w.id = s.wad_id
+         WHERE w.status = 'playing'
+           AND w.id NOT IN (SELECT DISTINCT wad_id FROM wad_completions)
+         GROUP BY s.wad_id;",
+    )?;
+
+    // Associate sessions with their nearest playthrough (best-effort by wad_id + chronological order).
+    // For each session, find the playthrough for the same wad that started before or at the session start.
+    conn.execute(
+        "UPDATE sessions SET playthrough_id = (
+            SELECT p.id FROM playthroughs p
+            WHERE p.wad_id = sessions.wad_id
+              AND p.started_at <= sessions.started_at
+            ORDER BY p.started_at DESC
+            LIMIT 1
+        )
+        WHERE playthrough_id IS NULL",
+        [],
+    )?;
+
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -433,6 +575,9 @@ mod tests {
         assert!(table_exists(&conn, "id24_wads").unwrap());
         assert!(table_exists(&conn, "companion_files_registry").unwrap());
         assert!(table_exists(&conn, "wad_companions").unwrap());
+        assert!(table_exists(&conn, "playthroughs").unwrap());
+        assert!(table_exists(&conn, "smart_collections").unwrap());
+        assert!(table_exists(&conn, "wad_analysis").unwrap());
     }
 
     #[test]
@@ -461,7 +606,7 @@ mod tests {
             "filename", "cached_path", "custom_iwad", "custom_sourceport",
             "custom_args", "created_at", "updated_at", "deleted_at", "version",
             "stats_snapshot", "companion_files", "custom_complevel", "complevel",
-            "custom_config", "gc_ignore",
+            "custom_config", "gc_ignore", "play_state", "intent", "availability",
         ];
         for col in &expected_columns {
             assert!(
@@ -479,7 +624,7 @@ mod tests {
         let expected = [
             "id", "wad_id", "started_at", "ended_at", "duration_seconds",
             "sourceport", "notes", "stats_before", "stats_after", "demo_file",
-            "exit_code",
+            "exit_code", "playthrough_id",
         ];
         for col in &expected {
             assert!(
@@ -534,5 +679,21 @@ mod tests {
         assert!(has_column(&conn, "wad_companions", "companion_id").unwrap());
         assert!(has_column(&conn, "wad_companions", "enabled").unwrap());
         assert!(has_column(&conn, "wad_companions", "load_order").unwrap());
+    }
+
+    #[test]
+    fn test_wad_analysis_schema() {
+        let conn = open_memory().unwrap();
+        init_db(&conn).unwrap();
+
+        assert!(has_column(&conn, "wad_analysis", "wad_id").unwrap());
+        assert!(has_column(&conn, "wad_analysis", "total_maps").unwrap());
+        assert!(has_column(&conn, "wad_analysis", "required_maps").unwrap());
+        assert!(has_column(&conn, "wad_analysis", "secret_maps").unwrap());
+        assert!(has_column(&conn, "wad_analysis", "terminal_map").unwrap());
+        assert!(has_column(&conn, "wad_analysis", "has_umapinfo").unwrap());
+        assert!(has_column(&conn, "wad_analysis", "analysis_json").unwrap());
+        assert!(has_column(&conn, "wad_analysis", "expected_map_count").unwrap());
+        assert!(has_column(&conn, "wad_analysis", "analyzed_at").unwrap());
     }
 }

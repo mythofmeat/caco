@@ -4,8 +4,50 @@ use chrono::Utc;
 use rusqlite::Connection;
 
 use super::connection::attach_tags;
-use super::models::{WadRecord, ALLOWED_UPDATE_FIELDS, SourceType, Status};
+use super::models::{
+    Availability, Intent, PlayState, WadRecord, ALLOWED_UPDATE_FIELDS, SourceType, Status,
+};
 use crate::Result;
+
+// ---------------------------------------------------------------------------
+// Axis sync helpers (dual-write during transition)
+// ---------------------------------------------------------------------------
+
+/// Map old status to new axes.
+pub fn sync_status_to_axes(status: Status) -> (PlayState, Intent) {
+    match status {
+        Status::ToPlay => (PlayState::Unplayed, Intent::Queued),
+        Status::Backlog => (PlayState::Unplayed, Intent::Shelved),
+        Status::Playing => (PlayState::Started, Intent::Queued),
+        Status::Finished => (PlayState::Completed, Intent::Shelved),
+        Status::Abandoned => (PlayState::Unplayed, Intent::Dropped),
+        Status::AwaitingUpdate => (PlayState::Unplayed, Intent::Shelved),
+    }
+}
+
+/// Map new axes to best-fit old status.
+pub fn sync_axes_to_status(play_state: PlayState, intent: Intent) -> Status {
+    match (play_state, intent) {
+        (PlayState::Completed, _) => Status::Finished,
+        (PlayState::Started, Intent::Dropped) => Status::Abandoned,
+        (PlayState::Started, _) => Status::Playing,
+        (PlayState::Unplayed, Intent::Dropped) => Status::Abandoned,
+        (PlayState::Unplayed, Intent::Queued) => Status::ToPlay,
+        (PlayState::Unplayed, Intent::Inbox) => Status::Backlog,
+        (PlayState::Unplayed, Intent::Shelved) => Status::Backlog,
+    }
+}
+
+/// Compute availability from WAD fields.
+pub fn compute_availability(cached_path: Option<&str>, source_url: Option<&str>) -> Availability {
+    if cached_path.is_some() {
+        Availability::Cached
+    } else if source_url.is_some() {
+        Availability::Downloadable
+    } else {
+        Availability::Unavailable
+    }
+}
 
 // ---------------------------------------------------------------------------
 // NewWad builder
@@ -23,6 +65,8 @@ pub struct NewWad {
     pub filename: Option<String>,
     pub cached_path: Option<String>,
     pub status: Status,
+    pub play_state: PlayState,
+    pub intent: Intent,
     pub version: Option<String>,
     pub tags: Vec<String>,
 }
@@ -40,6 +84,8 @@ impl NewWad {
             filename: None,
             cached_path: None,
             status: Status::Backlog,
+            play_state: PlayState::Unplayed,
+            intent: Intent::Inbox,
             version: None,
             tags: Vec::new(),
         }
@@ -81,7 +127,22 @@ impl NewWad {
     }
 
     pub fn status(mut self, v: Status) -> Self {
+        let (ps, intent) = sync_status_to_axes(v);
         self.status = v;
+        self.play_state = ps;
+        self.intent = intent;
+        self
+    }
+
+    pub fn play_state(mut self, v: PlayState) -> Self {
+        self.play_state = v;
+        self.status = sync_axes_to_status(v, self.intent);
+        self
+    }
+
+    pub fn intent(mut self, v: Intent) -> Self {
+        self.intent = v;
+        self.status = sync_axes_to_status(self.play_state, v);
         self
     }
 
@@ -141,9 +202,31 @@ impl WadUpdate {
         Ok(self)
     }
 
-    /// Set the status field (convenience).
+    /// Set the status field (convenience). Also syncs play_state and intent.
     pub fn set_status(self, status: Status) -> crate::Result<Self> {
-        self.set_text("status", Some(status.as_str().to_string()))
+        let (ps, intent) = sync_status_to_axes(status);
+        self.set_text("status", Some(status.as_str().to_string()))?
+            .set_text("play_state", Some(ps.as_str().to_string()))?
+            .set_text("intent", Some(intent.as_str().to_string()))
+    }
+
+    /// Set the play state. Also syncs the old status column.
+    pub fn set_play_state(self, ps: PlayState, current_intent: Intent) -> crate::Result<Self> {
+        let status = sync_axes_to_status(ps, current_intent);
+        self.set_text("play_state", Some(ps.as_str().to_string()))?
+            .set_text("status", Some(status.as_str().to_string()))
+    }
+
+    /// Set the intent. Also syncs the old status column.
+    pub fn set_intent(self, intent: Intent, current_play_state: PlayState) -> crate::Result<Self> {
+        let status = sync_axes_to_status(current_play_state, intent);
+        self.set_text("intent", Some(intent.as_str().to_string()))?
+            .set_text("status", Some(status.as_str().to_string()))
+    }
+
+    /// Set the availability.
+    pub fn set_availability(self, avail: Availability) -> crate::Result<Self> {
+        self.set_text("availability", Some(avail.as_str().to_string()))
     }
 
     /// Disable automatic completion recording when status is set to finished.
@@ -163,10 +246,15 @@ impl WadUpdate {
 
 /// Add a WAD to the library. Returns the new WAD ID.
 pub fn add_wad(conn: &Connection, wad: &NewWad) -> Result<i64> {
+    let avail = compute_availability(
+        wad.cached_path.as_deref(),
+        wad.source_url.as_deref(),
+    );
     conn.execute(
         "INSERT INTO wads (title, author, year, description, source_type,
-                          source_id, source_url, filename, cached_path, status, version)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                          source_id, source_url, filename, cached_path, status, version,
+                          play_state, intent, availability)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         rusqlite::params![
             wad.title,
             wad.author,
@@ -179,6 +267,9 @@ pub fn add_wad(conn: &Connection, wad: &NewWad) -> Result<i64> {
             wad.cached_path,
             wad.status.as_str(),
             wad.version,
+            wad.play_state.as_str(),
+            wad.intent.as_str(),
+            avail.as_str(),
         ],
     )?;
 
@@ -230,11 +321,48 @@ pub fn update_wad(conn: &Connection, wad_id: i64, update: &WadUpdate) -> Result<
             matches!(v, FieldValue::Text(Some(s)) if s == Status::Finished.as_str())
         });
 
+    // Auto-maintain availability when cached_path or source_url change.
+    // We need to figure out the effective values after this update.
+    let needs_avail_update = (update.fields.contains_key("cached_path")
+        || update.fields.contains_key("source_url"))
+        && !update.fields.contains_key("availability");
+
+    let mut extra_fields: Vec<(&str, FieldValue)> = Vec::new();
+
+    if needs_avail_update {
+        // Read current values to compute new availability
+        let (cur_cached, cur_source): (Option<String>, Option<String>) = conn.query_row(
+            "SELECT cached_path, source_url FROM wads WHERE id = ?1",
+            [wad_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+
+        let eff_cached = match update.fields.get("cached_path") {
+            Some(FieldValue::Text(v)) => v.as_deref(),
+            _ => cur_cached.as_deref(),
+        };
+        let eff_source = match update.fields.get("source_url") {
+            Some(FieldValue::Text(v)) => v.as_deref(),
+            _ => cur_source.as_deref(),
+        };
+
+        let avail = compute_availability(eff_cached, eff_source);
+        extra_fields.push(("availability", FieldValue::Text(Some(avail.as_str().to_string()))));
+    }
+
     // Build SET clause
     let mut set_parts = Vec::new();
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
     for (&field, value) in &update.fields {
+        set_parts.push(format!("{field} = ?"));
+        match value {
+            FieldValue::Text(v) => params.push(Box::new(v.clone())),
+            FieldValue::Int(v) => params.push(Box::new(*v)),
+        }
+    }
+
+    for (field, value) in &extra_fields {
         set_parts.push(format!("{field} = ?"));
         match value {
             FieldValue::Text(v) => params.push(Box::new(v.clone())),
@@ -594,6 +722,185 @@ mod tests {
 
         let counts = get_tag_counts(&conn).unwrap();
         assert_eq!(counts, vec![("doom".to_string(), 1)]);
+    }
+
+    // -----------------------------------------------------------------------
+    // Three-axis + dual-write tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_new_wad_defaults_to_inbox() {
+        let conn = setup();
+        let id = add_wad(
+            &conn,
+            &NewWad::new("Test", SourceType::Local),
+        )
+        .unwrap();
+
+        let wad = get_wad(&conn, id, false).unwrap().unwrap();
+        assert_eq!(wad.play_state, "unplayed");
+        assert_eq!(wad.intent, "inbox");
+        assert_eq!(wad.status, "backlog"); // synced
+    }
+
+    #[test]
+    fn test_new_wad_status_syncs_axes() {
+        let conn = setup();
+        let id = add_wad(
+            &conn,
+            &NewWad::new("Test", SourceType::Local).status(Status::Playing),
+        )
+        .unwrap();
+
+        let wad = get_wad(&conn, id, false).unwrap().unwrap();
+        assert_eq!(wad.play_state, "started");
+        assert_eq!(wad.intent, "queued");
+        assert_eq!(wad.status, "playing");
+    }
+
+    #[test]
+    fn test_new_wad_intent_syncs_status() {
+        let conn = setup();
+        let id = add_wad(
+            &conn,
+            &NewWad::new("Test", SourceType::Local).intent(Intent::Queued),
+        )
+        .unwrap();
+
+        let wad = get_wad(&conn, id, false).unwrap().unwrap();
+        assert_eq!(wad.intent, "queued");
+        assert_eq!(wad.status, "to-play"); // synced from (unplayed, queued)
+    }
+
+    #[test]
+    fn test_update_status_syncs_axes() {
+        let conn = setup();
+        let id = add_test_wad(&conn);
+
+        let update = WadUpdate::new().set_status(Status::Playing).unwrap();
+        update_wad(&conn, id, &update).unwrap();
+
+        let wad = get_wad(&conn, id, false).unwrap().unwrap();
+        assert_eq!(wad.status, "playing");
+        assert_eq!(wad.play_state, "started");
+        assert_eq!(wad.intent, "queued");
+    }
+
+    #[test]
+    fn test_update_play_state_syncs_status() {
+        let conn = setup();
+        let id = add_test_wad(&conn);
+
+        let wad = get_wad(&conn, id, false).unwrap().unwrap();
+        let current_intent = wad.intent_enum().unwrap();
+
+        let update = WadUpdate::new()
+            .set_play_state(PlayState::Completed, current_intent)
+            .unwrap();
+        update_wad(&conn, id, &update).unwrap();
+
+        let wad = get_wad(&conn, id, false).unwrap().unwrap();
+        assert_eq!(wad.play_state, "completed");
+        assert_eq!(wad.status, "finished"); // synced
+    }
+
+    #[test]
+    fn test_update_intent_syncs_status() {
+        let conn = setup();
+        let id = add_test_wad(&conn);
+
+        let wad = get_wad(&conn, id, false).unwrap().unwrap();
+        let current_ps = wad.play_state_enum().unwrap();
+
+        let update = WadUpdate::new()
+            .set_intent(Intent::Dropped, current_ps)
+            .unwrap();
+        update_wad(&conn, id, &update).unwrap();
+
+        let wad = get_wad(&conn, id, false).unwrap().unwrap();
+        assert_eq!(wad.intent, "dropped");
+        assert_eq!(wad.status, "abandoned"); // synced from (unplayed, dropped)
+    }
+
+    #[test]
+    fn test_availability_auto_computed_on_add() {
+        let conn = setup();
+
+        // No cached_path, no source_url → unavailable
+        let id1 = add_wad(&conn, &NewWad::new("No URL", SourceType::Local)).unwrap();
+        let w1 = get_wad(&conn, id1, false).unwrap().unwrap();
+        assert_eq!(w1.availability, "unavailable");
+
+        // With source_url → downloadable
+        let id2 = add_wad(
+            &conn,
+            &NewWad::new("Has URL", SourceType::Idgames).source_url("https://example.com/wad.zip"),
+        )
+        .unwrap();
+        let w2 = get_wad(&conn, id2, false).unwrap().unwrap();
+        assert_eq!(w2.availability, "downloadable");
+
+        // With cached_path → cached
+        let id3 = add_wad(
+            &conn,
+            &NewWad::new("Cached", SourceType::Local).cached_path("/tmp/test.wad"),
+        )
+        .unwrap();
+        let w3 = get_wad(&conn, id3, false).unwrap().unwrap();
+        assert_eq!(w3.availability, "cached");
+    }
+
+    #[test]
+    fn test_availability_auto_maintained_on_update() {
+        let conn = setup();
+        let id = add_wad(
+            &conn,
+            &NewWad::new("Test", SourceType::Idgames).source_url("https://example.com/wad.zip"),
+        )
+        .unwrap();
+
+        // Initially downloadable
+        let wad = get_wad(&conn, id, false).unwrap().unwrap();
+        assert_eq!(wad.availability, "downloadable");
+
+        // Set cached_path → should auto-update to cached
+        let update = WadUpdate::new()
+            .set_text("cached_path", Some("/tmp/test.wad".to_string()))
+            .unwrap();
+        update_wad(&conn, id, &update).unwrap();
+
+        let wad = get_wad(&conn, id, false).unwrap().unwrap();
+        assert_eq!(wad.availability, "cached");
+
+        // Clear cached_path → should auto-update back to downloadable
+        let update = WadUpdate::new()
+            .set_text("cached_path", None)
+            .unwrap();
+        update_wad(&conn, id, &update).unwrap();
+
+        let wad = get_wad(&conn, id, false).unwrap().unwrap();
+        assert_eq!(wad.availability, "downloadable");
+    }
+
+    #[test]
+    fn test_sync_status_to_axes_all_variants() {
+        assert_eq!(sync_status_to_axes(Status::ToPlay), (PlayState::Unplayed, Intent::Queued));
+        assert_eq!(sync_status_to_axes(Status::Backlog), (PlayState::Unplayed, Intent::Shelved));
+        assert_eq!(sync_status_to_axes(Status::Playing), (PlayState::Started, Intent::Queued));
+        assert_eq!(sync_status_to_axes(Status::Finished), (PlayState::Completed, Intent::Shelved));
+        assert_eq!(sync_status_to_axes(Status::Abandoned), (PlayState::Unplayed, Intent::Dropped));
+        assert_eq!(sync_status_to_axes(Status::AwaitingUpdate), (PlayState::Unplayed, Intent::Shelved));
+    }
+
+    #[test]
+    fn test_sync_axes_to_status_key_combos() {
+        assert_eq!(sync_axes_to_status(PlayState::Completed, Intent::Queued), Status::Finished);
+        assert_eq!(sync_axes_to_status(PlayState::Started, Intent::Queued), Status::Playing);
+        assert_eq!(sync_axes_to_status(PlayState::Started, Intent::Dropped), Status::Abandoned);
+        assert_eq!(sync_axes_to_status(PlayState::Unplayed, Intent::Queued), Status::ToPlay);
+        assert_eq!(sync_axes_to_status(PlayState::Unplayed, Intent::Shelved), Status::Backlog);
+        assert_eq!(sync_axes_to_status(PlayState::Unplayed, Intent::Inbox), Status::Backlog);
+        assert_eq!(sync_axes_to_status(PlayState::Unplayed, Intent::Dropped), Status::Abandoned);
     }
 
     #[test]
