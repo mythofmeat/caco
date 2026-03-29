@@ -695,10 +695,8 @@ fn render_sidebar(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Act
         }
 
         let is_active = state.view_mode == ViewMode::Library && state.active_tab == i;
-        let count = state.status_count(tab.status_filter);
-        let status_key = tab
-            .status_filter
-            .and_then(|s| s.first().copied());
+        let count = state.tab_count(tab.query_filter);
+        let status_key = tab.query_filter;
 
         let resp = theme::sidebar_status_item(ui, tab.label, count, status_key, is_active);
 

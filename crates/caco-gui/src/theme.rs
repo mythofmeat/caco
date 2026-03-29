@@ -62,6 +62,115 @@ pub fn status_display(status: &str) -> &str {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Play state colors
+// ---------------------------------------------------------------------------
+
+pub fn play_state_color(state: &str) -> Color32 {
+    match state {
+        "unplayed" => Color32::from_rgb(0x33, 0x66, 0xcc),
+        "started" => Color32::from_rgb(0x33, 0xcc, 0x33),
+        "completed" => Color32::from_rgb(0x80, 0x80, 0x80),
+        _ => TEXT_PRIMARY,
+    }
+}
+
+pub fn play_state_bg(state: &str) -> Color32 {
+    match state {
+        "unplayed" => Color32::from_rgb(0x0d, 0x14, 0x2a),
+        "started" => Color32::from_rgb(0x0d, 0x2a, 0x0d),
+        "completed" => Color32::from_rgb(0x1a, 0x1a, 0x1a),
+        _ => BG_MEDIUM,
+    }
+}
+
+pub fn play_state_display(state: &str) -> &str {
+    match state {
+        "unplayed" => "Unplayed",
+        "started" => "Started",
+        "completed" => "Completed",
+        _ => state,
+    }
+}
+
+/// Render a play_state value as a colored pill badge.
+pub fn play_state_pill(ui: &mut egui::Ui, state: &str) {
+    let color = play_state_color(state);
+    let label = play_state_display(state);
+    let bg = play_state_bg(state);
+    egui::Frame::new()
+        .fill(bg)
+        .corner_radius(6)
+        .inner_margin(egui::Margin::symmetric(10, 3))
+        .show(ui, |ui| {
+            ui.colored_label(color, egui::RichText::new(label).small().strong());
+        });
+}
+
+// ---------------------------------------------------------------------------
+// Intent colors
+// ---------------------------------------------------------------------------
+
+pub fn intent_color(intent: &str) -> Color32 {
+    match intent {
+        "inbox" => Color32::from_rgb(0xcc, 0xcc, 0x33),
+        "queued" => Color32::from_rgb(0x33, 0x66, 0xcc),
+        "shelved" => Color32::from_rgb(0x80, 0x80, 0x80),
+        "dropped" => Color32::from_rgb(0xcc, 0x33, 0x33),
+        _ => TEXT_PRIMARY,
+    }
+}
+
+pub fn intent_bg(intent: &str) -> Color32 {
+    match intent {
+        "inbox" => Color32::from_rgb(0x2a, 0x2a, 0x0d),
+        "queued" => Color32::from_rgb(0x0d, 0x14, 0x2a),
+        "shelved" => Color32::from_rgb(0x1a, 0x1a, 0x1a),
+        "dropped" => Color32::from_rgb(0x2a, 0x0d, 0x0d),
+        _ => BG_MEDIUM,
+    }
+}
+
+pub fn intent_display(intent: &str) -> &str {
+    match intent {
+        "inbox" => "Inbox",
+        "queued" => "Queued",
+        "shelved" => "Shelved",
+        "dropped" => "Dropped",
+        _ => intent,
+    }
+}
+
+/// Render an intent value as a colored pill badge.
+pub fn intent_pill(ui: &mut egui::Ui, intent: &str) {
+    let color = intent_color(intent);
+    let label = intent_display(intent);
+    let bg = intent_bg(intent);
+    egui::Frame::new()
+        .fill(bg)
+        .corner_radius(6)
+        .inner_margin(egui::Margin::symmetric(10, 3))
+        .show(ui, |ui| {
+            ui.colored_label(color, egui::RichText::new(label).small().strong());
+        });
+}
+
+// ---------------------------------------------------------------------------
+// Tab filter color (maps query filter keys to sidebar dot colors)
+// ---------------------------------------------------------------------------
+
+/// Map a tab query filter string (e.g. "intent:inbox") to a sidebar dot color.
+pub fn tab_filter_color(filter: &str) -> Color32 {
+    match filter {
+        "intent:inbox" => intent_color("inbox"),
+        "intent:queued" => intent_color("queued"),
+        "intent:shelved" => intent_color("shelved"),
+        "intent:dropped" => intent_color("dropped"),
+        "play:started" => play_state_color("started"),
+        _ => TEXT_SECONDARY,
+    }
+}
+
 pub fn severity_color(severity: crate::message::Severity) -> Color32 {
     match severity {
         crate::message::Severity::Info => COLOR_SUCCESS,
@@ -215,12 +324,13 @@ pub fn sidebar_nav_item(ui: &mut egui::Ui, label: &str, is_active: bool) -> bool
     response.clicked()
 }
 
-/// Render a sidebar status filter item. Returns the response for context menu attachment.
+/// Render a sidebar tab filter item. Returns the response for context menu attachment.
+/// `filter_key` is the tab's query filter (e.g. "intent:inbox", "play:started") or None for "All".
 pub fn sidebar_status_item(
     ui: &mut egui::Ui,
     label: &str,
     count: usize,
-    status_key: Option<&str>,
+    filter_key: Option<&str>,
     is_active: bool,
 ) -> egui::Response {
     let desired_size = egui::vec2(ui.available_width(), 28.0);
@@ -234,11 +344,11 @@ pub fn sidebar_status_item(
         painter.rect_filled(rect, 0.0, BG_DARK);
     }
 
-    // Status dot
-    let dot_color = status_key
-        .map(status_color)
+    // Status dot — resolve color from query filter key
+    let dot_color = filter_key
+        .map(tab_filter_color)
         .unwrap_or(TEXT_SECONDARY);
-    if status_key.is_some() {
+    if filter_key.is_some() {
         painter.circle_filled(
             egui::pos2(rect.min.x + 20.0, rect.center().y),
             3.5,
@@ -252,7 +362,7 @@ pub fn sidebar_status_item(
     } else {
         TEXT_SECONDARY
     };
-    let text_x = if status_key.is_some() { 32.0 } else { 20.0 };
+    let text_x = if filter_key.is_some() { 32.0 } else { 20.0 };
     painter.text(
         egui::pos2(rect.min.x + text_x, rect.center().y),
         egui::Align2::LEFT_CENTER,
