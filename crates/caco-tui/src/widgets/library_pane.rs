@@ -24,7 +24,8 @@ pub struct LibraryPaneState {
     pub filter: FilterInputState,
     pub sort: SortSelectState,
     pub info: WadInfoState,
-    pub status_filter: Option<Vec<String>>,
+    /// Tab query filter (e.g. "intent:inbox", "play:started"), or None for "All".
+    pub tab_query: Option<String>,
     pub status_mode: bool,
     pub show_panel: bool,
     pub show_trash: bool,
@@ -32,7 +33,7 @@ pub struct LibraryPaneState {
 
 impl LibraryPaneState {
     pub fn new(
-        status_filter: Option<Vec<String>>,
+        tab_query: Option<String>,
         sort_field: &str,
         sort_desc: bool,
     ) -> Self {
@@ -41,23 +42,19 @@ impl LibraryPaneState {
             filter: FilterInputState::new(),
             sort: SortSelectState::from_config(sort_field, sort_desc),
             info: WadInfoState::new(),
-            status_filter,
+            tab_query,
             status_mode: false,
             show_panel: true,
             show_trash: false,
         }
     }
 
-    /// Build the effective query string combining status filter and user query.
+    /// Build the effective query string combining tab query filter and user query.
     fn effective_query(&self) -> Option<String> {
         let mut parts = Vec::new();
 
-        if let Some(ref statuses) = self.status_filter {
-            let status_q: Vec<String> =
-                statuses.iter().map(|s| format!("status:{s}")).collect();
-            if !status_q.is_empty() {
-                parts.push(status_q.join(" , "));
-            }
+        if let Some(ref tab_q) = self.tab_query {
+            parts.push(tab_q.clone());
         }
 
         let user_query = self.filter.query();

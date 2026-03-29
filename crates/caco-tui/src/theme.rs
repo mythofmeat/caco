@@ -86,6 +86,58 @@ pub fn dim_style() -> Style {
     Style::default().fg(Color::DarkGray)
 }
 
+/// Map a play_state string to its ratatui Color.
+pub fn play_state_color(state: &str) -> Color {
+    match state {
+        "unplayed" => Color::Rgb(0x33, 0x66, 0xcc),  // blue
+        "started" => Color::Rgb(0x33, 0xcc, 0x33),    // green
+        "completed" => Color::Rgb(0x80, 0x80, 0x80),  // gray
+        _ => Color::White,
+    }
+}
+
+/// Return a Style with the play_state foreground color.
+pub fn play_state_style(state: &str) -> Style {
+    Style::default().fg(play_state_color(state))
+}
+
+/// Human-readable display name for a play_state string.
+pub fn play_state_display(state: &str) -> &str {
+    match state {
+        "unplayed" => "Unplayed",
+        "started" => "Started",
+        "completed" => "Completed",
+        _ => state,
+    }
+}
+
+/// Map an intent string to its ratatui Color.
+pub fn intent_color(intent: &str) -> Color {
+    match intent {
+        "inbox" => Color::Rgb(0xcc, 0xcc, 0x33),    // yellow
+        "queued" => Color::Rgb(0x33, 0x66, 0xcc),   // blue
+        "shelved" => Color::Rgb(0x80, 0x80, 0x80),  // gray
+        "dropped" => Color::Rgb(0xcc, 0x33, 0x33),  // red
+        _ => Color::White,
+    }
+}
+
+/// Return a Style with the intent foreground color.
+pub fn intent_style(intent: &str) -> Style {
+    Style::default().fg(intent_color(intent))
+}
+
+/// Human-readable display name for an intent string.
+pub fn intent_display(intent: &str) -> &str {
+    match intent {
+        "inbox" => "Inbox",
+        "queued" => "Queued",
+        "shelved" => "Shelved",
+        "dropped" => "Dropped",
+        _ => intent,
+    }
+}
+
 /// Rating stars string for a given rating (0-5).
 pub fn rating_stars(rating: Option<i32>) -> String {
     match rating {
