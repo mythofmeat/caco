@@ -128,6 +128,7 @@ static MIGRATIONS: &[Migration] = &[
     (26, "add_playthroughs_table", migrate_add_playthroughs_table),
     (27, "add_smart_collections", migrate_add_smart_collections),
     (28, "add_wad_analysis_table", migrate_add_wad_analysis_table),
+    (29, "fix_started_dropped_conflict", migrate_fix_started_dropped),
 ];
 
 // ---------------------------------------------------------------------------
@@ -434,14 +435,6 @@ fn migrate_add_three_axis_columns(conn: &Connection) -> Result<()> {
          UPDATE wads SET play_state = 'unplayed', intent = 'shelved' WHERE status = 'awaiting-update';",
     )?;
 
-    // Refine abandoned WADs: if they have sessions, they were started
-    conn.execute(
-        "UPDATE wads SET play_state = 'started'
-         WHERE status = 'abandoned'
-           AND id IN (SELECT DISTINCT wad_id FROM sessions)",
-        [],
-    )?;
-
     // Backfill availability from cached_path and source_url
     conn.execute_batch(
         "UPDATE wads SET availability = 'cached'       WHERE cached_path IS NOT NULL;
@@ -548,6 +541,17 @@ fn migrate_add_playthroughs_table(conn: &Connection) -> Result<()> {
         [],
     )?;
 
+    Ok(())
+}
+
+fn migrate_fix_started_dropped(conn: &Connection) -> Result<()> {
+    // started + dropped is contradictory: "playing" and "abandoned" at once.
+    // Normalize to unplayed + dropped (the base abandoned state).
+    conn.execute(
+        "UPDATE wads SET play_state = 'unplayed'
+         WHERE play_state = 'started' AND intent = 'dropped'",
+        [],
+    )?;
     Ok(())
 }
 

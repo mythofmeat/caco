@@ -135,12 +135,20 @@ impl NewWad {
     }
 
     pub fn play_state(mut self, v: PlayState) -> Self {
+        // Started + Dropped is invalid; un-drop to Queued.
+        if v == PlayState::Started && self.intent == Intent::Dropped {
+            self.intent = Intent::Queued;
+        }
         self.play_state = v;
         self.status = sync_axes_to_status(v, self.intent);
         self
     }
 
     pub fn intent(mut self, v: Intent) -> Self {
+        // Dropped + Started is invalid; reset to Unplayed.
+        if v == Intent::Dropped && self.play_state == PlayState::Started {
+            self.play_state = PlayState::Unplayed;
+        }
         self.intent = v;
         self.status = sync_axes_to_status(self.play_state, v);
         self
@@ -211,17 +219,37 @@ impl WadUpdate {
     }
 
     /// Set the play state. Also syncs the old status column.
+    /// If setting to Started while intent is Dropped, un-drops to Queued.
     pub fn set_play_state(self, ps: PlayState, current_intent: Intent) -> crate::Result<Self> {
-        let status = sync_axes_to_status(ps, current_intent);
-        self.set_text("play_state", Some(ps.as_str().to_string()))?
-            .set_text("status", Some(status.as_str().to_string()))
+        let effective_intent = if ps == PlayState::Started && current_intent == Intent::Dropped {
+            Intent::Queued
+        } else {
+            current_intent
+        };
+        let status = sync_axes_to_status(ps, effective_intent);
+        let mut result = self.set_text("play_state", Some(ps.as_str().to_string()))?
+            .set_text("status", Some(status.as_str().to_string()))?;
+        if effective_intent != current_intent {
+            result = result.set_text("intent", Some(effective_intent.as_str().to_string()))?;
+        }
+        Ok(result)
     }
 
     /// Set the intent. Also syncs the old status column.
+    /// If setting to Dropped while play_state is Started, resets play_state to Unplayed.
     pub fn set_intent(self, intent: Intent, current_play_state: PlayState) -> crate::Result<Self> {
-        let status = sync_axes_to_status(current_play_state, intent);
-        self.set_text("intent", Some(intent.as_str().to_string()))?
-            .set_text("status", Some(status.as_str().to_string()))
+        let effective_ps = if intent == Intent::Dropped && current_play_state == PlayState::Started {
+            PlayState::Unplayed
+        } else {
+            current_play_state
+        };
+        let status = sync_axes_to_status(effective_ps, intent);
+        let mut result = self.set_text("intent", Some(intent.as_str().to_string()))?
+            .set_text("status", Some(status.as_str().to_string()))?;
+        if effective_ps != current_play_state {
+            result = result.set_text("play_state", Some(effective_ps.as_str().to_string()))?;
+        }
+        Ok(result)
     }
 
     /// Set the availability.
@@ -901,6 +929,77 @@ mod tests {
         assert_eq!(sync_axes_to_status(PlayState::Unplayed, Intent::Shelved), Status::Backlog);
         assert_eq!(sync_axes_to_status(PlayState::Unplayed, Intent::Inbox), Status::Backlog);
         assert_eq!(sync_axes_to_status(PlayState::Unplayed, Intent::Dropped), Status::Abandoned);
+    }
+
+    #[test]
+    fn test_started_dropped_prevented_on_set_play_state() {
+        let conn = setup();
+        let id = add_test_wad(&conn);
+
+        // Set intent to dropped first
+        let update = WadUpdate::new()
+            .set_intent(Intent::Dropped, PlayState::Unplayed)
+            .unwrap();
+        update_wad(&conn, id, &update).unwrap();
+        let wad = get_wad(&conn, id, false).unwrap().unwrap();
+        assert_eq!(wad.intent, "dropped");
+
+        // Now try to set play_state to started — should un-drop to queued
+        let update = WadUpdate::new()
+            .set_play_state(PlayState::Started, Intent::Dropped)
+            .unwrap();
+        update_wad(&conn, id, &update).unwrap();
+
+        let wad = get_wad(&conn, id, false).unwrap().unwrap();
+        assert_eq!(wad.play_state, "started");
+        assert_eq!(wad.intent, "queued");
+        assert_eq!(wad.status, "playing");
+    }
+
+    #[test]
+    fn test_started_dropped_prevented_on_set_intent() {
+        let conn = setup();
+        let id = add_test_wad(&conn);
+
+        // Set play_state to started first
+        let update = WadUpdate::new()
+            .set_play_state(PlayState::Started, Intent::Inbox)
+            .unwrap();
+        update_wad(&conn, id, &update).unwrap();
+        let wad = get_wad(&conn, id, false).unwrap().unwrap();
+        assert_eq!(wad.play_state, "started");
+
+        // Now try to set intent to dropped — should reset play_state to unplayed
+        let update = WadUpdate::new()
+            .set_intent(Intent::Dropped, PlayState::Started)
+            .unwrap();
+        update_wad(&conn, id, &update).unwrap();
+
+        let wad = get_wad(&conn, id, false).unwrap().unwrap();
+        assert_eq!(wad.intent, "dropped");
+        assert_eq!(wad.play_state, "unplayed");
+        assert_eq!(wad.status, "abandoned");
+    }
+
+    #[test]
+    fn test_new_wad_started_dropped_prevented() {
+        let conn = setup();
+
+        // Setting play_state to started on a dropped WAD should un-drop
+        let wad = NewWad::new("Test", SourceType::Local)
+            .intent(Intent::Dropped)
+            .play_state(PlayState::Started);
+        assert_eq!(wad.play_state, PlayState::Started);
+        assert_eq!(wad.intent, Intent::Queued);
+        assert_eq!(wad.status, Status::Playing);
+
+        // Setting intent to dropped on a started WAD should un-start
+        let wad = NewWad::new("Test", SourceType::Local)
+            .play_state(PlayState::Started)
+            .intent(Intent::Dropped);
+        assert_eq!(wad.play_state, PlayState::Unplayed);
+        assert_eq!(wad.intent, Intent::Dropped);
+        assert_eq!(wad.status, Status::Abandoned);
     }
 
     #[test]

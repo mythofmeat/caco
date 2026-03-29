@@ -57,13 +57,12 @@ pub fn start_playthrough(conn: &Connection, wad_id: i64) -> Result<i64> {
     )?;
     let pt_id = conn.last_insert_rowid();
 
-    // Update WAD play_state to started + sync status
+    // Update WAD play_state to started + sync status.
+    // If intent was 'dropped', un-drop to 'queued' (playing un-abandons).
     conn.execute(
         "UPDATE wads SET play_state = 'started',
-                         status = CASE intent
-                             WHEN 'dropped' THEN 'abandoned'
-                             ELSE 'playing'
-                         END,
+                         intent = CASE intent WHEN 'dropped' THEN 'queued' ELSE intent END,
+                         status = 'playing',
                          updated_at = ?1
          WHERE id = ?2",
         rusqlite::params![now, wad_id],
