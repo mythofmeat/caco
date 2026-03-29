@@ -162,16 +162,29 @@ pub fn render(
                     }
 
                     if !drew_thumbnail {
-                        // Gradient placeholder
+                        // Smooth gradient placeholder from c1 (top) to c2 (bottom)
                         let (c1, c2, ci) = theme::thumb_colors(wad_id);
-                        // Draw top half with c1, bottom half with c2 for gradient feel
-                        let mid_y = thumb_rect.min.y + thumb_rect.height() * 0.4;
+                        let steps = 32;
+                        // Fill background with c1 for the rounded top corners
                         painter.rect_filled(thumb_rect, thumb_rounding, c1);
-                        let bottom_rect = Rect::from_min_max(
-                            egui::pos2(thumb_rect.min.x, mid_y),
-                            thumb_rect.max,
-                        );
-                        painter.rect_filled(bottom_rect, 0, c2);
+                        for i in 0..steps {
+                            let t0 = i as f32 / steps as f32;
+                            let t1 = (i + 1) as f32 / steps as f32;
+                            let band_y0 = thumb_rect.min.y + thumb_rect.height() * t0;
+                            let band_y1 = thumb_rect.min.y + thumb_rect.height() * t1;
+                            let r = c1.r() as f32 + (c2.r() as f32 - c1.r() as f32) * t0;
+                            let g = c1.g() as f32 + (c2.g() as f32 - c1.g() as f32) * t0;
+                            let b = c1.b() as f32 + (c2.b() as f32 - c1.b() as f32) * t0;
+                            let band = Rect::from_min_max(
+                                egui::pos2(thumb_rect.min.x, band_y0),
+                                egui::pos2(thumb_rect.max.x, band_y1),
+                            );
+                            painter.rect_filled(
+                                band,
+                                0,
+                                Color32::from_rgb(r as u8, g as u8, b as u8),
+                            );
+                        }
 
                         // Initials
                         let initials: String = wad
@@ -190,28 +203,6 @@ pub fn render(
                                 ci,
                             );
                         }
-                    }
-
-                    // Gradient overlay at bottom of thumbnail (fade to card bg)
-                    let fade_rect = Rect::from_min_max(
-                        egui::pos2(thumb_rect.min.x, thumb_rect.max.y - thumb_height * 0.4),
-                        thumb_rect.max,
-                    );
-                    // Approximate gradient with a few bands
-                    let steps = 6;
-                    for i in 0..steps {
-                        let t = i as f32 / steps as f32;
-                        let alpha = (t * t * 200.0) as u8;
-                        let band_y0 = fade_rect.min.y + fade_rect.height() * t;
-                        let band_y1 =
-                            fade_rect.min.y + fade_rect.height() * ((i + 1) as f32 / steps as f32);
-                        let band = Rect::from_min_max(
-                            egui::pos2(fade_rect.min.x, band_y0),
-                            egui::pos2(fade_rect.max.x, band_y1),
-                        );
-                        painter.rect_filled(band, 0, Color32::from_rgba_premultiplied(
-                            bg.r(), bg.g(), bg.b(), alpha,
-                        ));
                     }
 
                     // Card body
