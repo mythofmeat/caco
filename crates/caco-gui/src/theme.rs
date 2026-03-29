@@ -395,6 +395,66 @@ pub fn sidebar_status_item(
     response
 }
 
+/// Render a sidebar collection item (playlist-style). Returns the response.
+pub fn sidebar_collection_item(
+    ui: &mut egui::Ui,
+    name: &str,
+    is_active: bool,
+) -> egui::Response {
+    let desired_size = egui::vec2(ui.available_width(), 28.0);
+    let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
+
+    let is_hovered = response.hovered();
+    let painter = ui.painter();
+
+    // Background highlight
+    if is_active {
+        painter.rect_filled(rect, 0.0, BG_MEDIUM);
+    } else if is_hovered {
+        painter.rect_filled(rect, 0.0, BG_DARK);
+    }
+
+    // Left accent bar when active
+    if is_active {
+        painter.rect_filled(
+            egui::Rect::from_min_size(rect.min, egui::vec2(3.0, rect.height())),
+            0.0,
+            TEXT_ACCENT,
+        );
+    }
+
+    // List icon (≡)
+    let icon_color = if is_active {
+        TEXT_ACCENT
+    } else {
+        TEXT_MUTED
+    };
+    painter.text(
+        egui::pos2(rect.min.x + 20.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        "≡",
+        egui::FontId::proportional(13.0),
+        icon_color,
+    );
+
+    // Label
+    let text_color = if is_active {
+        TEXT_ACCENT
+    } else if is_hovered {
+        TEXT_PRIMARY
+    } else {
+        TEXT_SECONDARY
+    };
+    painter.text(
+        egui::pos2(rect.min.x + 34.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        name,
+        egui::FontId::proportional(13.0),
+        text_color,
+    );
+
+    response
+}
 
 // ---------------------------------------------------------------------------
 // Theme application

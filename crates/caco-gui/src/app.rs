@@ -435,12 +435,18 @@ impl eframe::App for CacoApp {
                     }
                 }
                 ActiveDialog::Collections(collections_state) => {
+                    let modified = collections_state.modified;
                     match collections_state.render(ctx, &self.conn) {
                         CollectionsResult::Closed => {
+                            if modified {
+                                self.state.refresh_collections(&self.conn);
+                            }
                             close_dialog = true;
                         }
                         CollectionsResult::LoadQuery(query) => {
                             close_dialog = true;
+                            self.state.refresh_collections(&self.conn);
+                            self.state.active_collection = None;
                             self.state.filter_text = query;
                             self.state.filter_changed_at =
                                 Some(std::time::Instant::now());
@@ -732,8 +738,11 @@ fn render_sidebar(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Act
 
         if resp.clicked() {
             state.view_mode = ViewMode::Library;
+            state.active_collection = None;
             if state.active_tab != i {
                 state.active_tab = i;
+                state.filter_text.clear();
+                state.applied_filter.clear();
                 state.needs_reload = true;
             }
         }
@@ -744,6 +753,82 @@ fn render_sidebar(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Act
         if state.active_tab == idx {
             state.active_tab = 0;
             state.needs_reload = true;
+        }
+    }
+
+    // Collections section
+    if !state.sidebar_collections.is_empty() {
+        ui.add_space(12.0);
+        let rect = ui.available_rect_before_wrap();
+        ui.painter().line_segment(
+            [
+                egui::pos2(rect.min.x + 20.0, rect.min.y),
+                egui::pos2(rect.max.x - 20.0, rect.min.y),
+            ],
+            egui::Stroke::new(1.0, theme::BORDER),
+        );
+        ui.add_space(16.0);
+
+        ui.horizontal(|ui| {
+            ui.add_space(20.0);
+            ui.colored_label(
+                theme::TEXT_MUTED,
+                egui::RichText::new("COLLECTIONS").size(11.0).strong(),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_space(16.0);
+                if ui
+                    .add(
+                        egui::Button::new(
+                            egui::RichText::new("+").size(13.0).color(theme::TEXT_MUTED),
+                        )
+                        .frame(false),
+                    )
+                    .on_hover_text("Manage collections")
+                    .clicked()
+                {
+                    actions.push(ActionRequest::Collections);
+                }
+            });
+        });
+        ui.add_space(4.0);
+
+        // Clone names to avoid borrow conflict
+        let collection_names: Vec<String> = state
+            .sidebar_collections
+            .iter()
+            .map(|c| c.name.clone())
+            .collect();
+
+        for name in &collection_names {
+            let is_active = state.active_collection.as_deref() == Some(name.as_str());
+            let resp = theme::sidebar_collection_item(ui, name, is_active);
+
+            if resp.clicked() {
+                // Find the collection and load its query + sort
+                if let Some(coll) = state
+                    .sidebar_collections
+                    .iter()
+                    .find(|c| c.name == *name)
+                {
+                    state.active_collection = Some(name.clone());
+                    state.active_tab = 0; // Reset to "All" tab
+                    state.filter_text = coll.query.clone();
+                    state.applied_filter = coll.query.clone();
+                    // Apply collection sort settings
+                    if let Some(ref sort_by) = coll.sort_by {
+                        if let Some(idx) = crate::state::SORT_FIELDS
+                            .iter()
+                            .position(|(key, _)| *key == sort_by.as_str())
+                        {
+                            state.sort_field_index = idx;
+                        }
+                        state.sort_desc = coll.sort_desc;
+                    }
+                    state.view_mode = ViewMode::Library;
+                    state.needs_reload = true;
+                }
+            }
         }
     }
 
@@ -807,14 +892,17 @@ fn render_sidebar(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Act
             {
                 actions.push(ActionRequest::Resources);
             }
-            if ui
-                .add(
-                    egui::Button::new(
-                        egui::RichText::new("Collections").size(11.0).color(theme::TEXT_MUTED),
+            if state.sidebar_collections.is_empty()
+                && ui
+                    .add(
+                        egui::Button::new(
+                            egui::RichText::new("Collections")
+                                .size(11.0)
+                                .color(theme::TEXT_MUTED),
+                        )
+                        .frame(false),
                     )
-                    .frame(false),
-                )
-                .clicked()
+                    .clicked()
             {
                 actions.push(ActionRequest::Collections);
             }

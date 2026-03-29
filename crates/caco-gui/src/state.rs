@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Instant;
 
+use caco_core::db::collections::{self, CollectionRecord};
 use caco_core::db::models::WadRecord;
 use caco_core::db::sessions::WadStats;
 use rusqlite::Connection;
@@ -165,6 +166,11 @@ pub struct AppState {
 
     // Hidden sidebar status filter tabs (indices into TABS)
     pub hidden_tabs: std::collections::HashSet<usize>,
+
+    // Sidebar collections (cached for display)
+    pub sidebar_collections: Vec<CollectionRecord>,
+    /// Name of the currently active collection (acts like a playlist selection).
+    pub active_collection: Option<String>,
 }
 
 impl AppState {
@@ -209,6 +215,8 @@ impl AppState {
             status_counts: HashMap::new(),
             total_wad_count: 0,
             hidden_tabs: persisted.hidden_tabs.iter().copied().collect(),
+            sidebar_collections: Vec::new(),
+            active_collection: None,
         }
     }
 
@@ -237,6 +245,17 @@ impl AppState {
                 // Keep legacy status counts for any remaining usage
                 *self.status_counts.entry(wad.status.clone()).or_insert(0) += 1;
             }
+        }
+    }
+
+    /// Refresh the sidebar collections list from the database.
+    pub fn refresh_collections(&mut self, conn: &Connection) {
+        self.sidebar_collections = collections::get_all_collections(conn).unwrap_or_default();
+        // Clear active collection if it was deleted
+        if let Some(ref name) = self.active_collection
+            && !self.sidebar_collections.iter().any(|c| c.name == *name)
+        {
+            self.active_collection = None;
         }
     }
 
@@ -308,8 +327,9 @@ impl AppState {
             }
         }
 
-        // Refresh sidebar counts
+        // Refresh sidebar counts and collections
         self.refresh_tab_counts(conn);
+        self.refresh_collections(conn);
 
         self.needs_reload = false;
     }
