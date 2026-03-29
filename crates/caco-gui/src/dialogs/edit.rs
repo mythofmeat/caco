@@ -1,7 +1,7 @@
 use caco_core::companion_service;
 use caco_core::complevel::parse_complevel;
 use caco_core::db::companions;
-use caco_core::db::models::Status;
+use caco_core::db::models::{Intent, PlayState};
 use caco_core::db::wads::{self, WadUpdate};
 use rusqlite::Connection;
 
@@ -52,12 +52,8 @@ enum CompanionAction {
 // Constants
 // ---------------------------------------------------------------------------
 
-// TODO: Replace this single status dropdown with separate play_state and intent
-// dropdowns once the transition period is complete. The dual-write layer in
-// caco-core keeps the legacy status column in sync with the new axes for now.
-const STATUSES: &[&str] = &[
-    "to-play", "backlog", "playing", "finished", "abandoned", "awaiting-update",
-];
+const PLAY_STATES: &[&str] = &["unplayed", "started", "completed"];
+const INTENTS: &[&str] = &["inbox", "queued", "shelved", "dropped"];
 
 // ---------------------------------------------------------------------------
 // EditDialogState
@@ -71,7 +67,8 @@ pub struct EditDialogState {
     title_field: String,
     author: String,
     year: String,
-    status: String,
+    play_state: String,
+    intent: String,
     rating: String,
     tags: String,
     notes: String,
@@ -138,7 +135,8 @@ impl EditDialogState {
             title_field: wad.title.clone(),
             author: wad.author.as_deref().unwrap_or("").to_string(),
             year: wad.year.map(|y| y.to_string()).unwrap_or_default(),
-            status: wad.status.clone(),
+            play_state: wad.play_state.clone(),
+            intent: wad.intent.clone(),
             rating: wad.rating.map(|r| r.to_string()).unwrap_or_default(),
             tags: wad.tags.join(", "),
             notes: wad.notes.as_deref().unwrap_or("").to_string(),
@@ -437,14 +435,16 @@ impl EditDialogState {
             );
         });
 
-        // Status picker (clickable pills)
-        form_label(ui, "Status");
+        // Play State picker (clickable pills)
+        form_label(ui, "Play State");
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
-            for &s in STATUSES {
-                let color = theme::status_color(s);
-                let bg = theme::status_bg(s);
-                let is_selected = self.status == s;
+            for &ps in PLAY_STATES {
+                let color = theme::play_state_color(ps);
+                let bg = theme::play_state_bg(ps);
+                let is_selected = self.play_state == ps;
+                // "started" is incompatible with "dropped" intent
+                let disabled = ps == "started" && self.intent == "dropped";
 
                 let stroke = if is_selected {
                     egui::Stroke::new(1.5, color)
@@ -452,23 +452,63 @@ impl EditDialogState {
                     egui::Stroke::NONE
                 };
 
+                let label_color = if disabled { theme::TEXT_MUTED } else { color };
                 let response = egui::Frame::new()
-                    .fill(bg)
+                    .fill(if disabled { theme::BG_MEDIUM } else { bg })
                     .corner_radius(8)
                     .inner_margin(egui::Margin::symmetric(12, 4))
                     .stroke(stroke)
                     .show(ui, |ui| {
                         ui.colored_label(
-                            color,
-                            egui::RichText::new(theme::status_display(s))
+                            label_color,
+                            egui::RichText::new(theme::play_state_display(ps))
                                 .size(12.0)
                                 .strong(),
                         );
                     })
                     .response;
 
-                if response.interact(egui::Sense::click()).clicked() {
-                    self.status = s.to_string();
+                if !disabled && response.interact(egui::Sense::click()).clicked() {
+                    self.play_state = ps.to_string();
+                }
+            }
+        });
+
+        // Intent picker (clickable pills)
+        form_label(ui, "Intent");
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            for &intent in INTENTS {
+                let color = theme::intent_color(intent);
+                let bg = theme::intent_bg(intent);
+                let is_selected = self.intent == intent;
+                // "dropped" is incompatible with "started" play_state
+                let disabled = intent == "dropped" && self.play_state == "started";
+
+                let stroke = if is_selected {
+                    egui::Stroke::new(1.5, color)
+                } else {
+                    egui::Stroke::NONE
+                };
+
+                let label_color = if disabled { theme::TEXT_MUTED } else { color };
+                let response = egui::Frame::new()
+                    .fill(if disabled { theme::BG_MEDIUM } else { bg })
+                    .corner_radius(8)
+                    .inner_margin(egui::Margin::symmetric(12, 4))
+                    .stroke(stroke)
+                    .show(ui, |ui| {
+                        ui.colored_label(
+                            label_color,
+                            egui::RichText::new(theme::intent_display(intent))
+                                .size(12.0)
+                                .strong(),
+                        );
+                    })
+                    .response;
+
+                if !disabled && response.interact(egui::Sense::click()).clicked() {
+                    self.intent = intent.to_string();
                 }
             }
         });
@@ -865,7 +905,14 @@ impl EditDialogState {
         };
 
         // Build WadUpdate
-        let status = Status::parse(&self.status);
+        let ps = PlayState::parse(&self.play_state).unwrap_or(PlayState::Unplayed);
+        let intent = Intent::parse(&self.intent).unwrap_or(Intent::Inbox);
+        // Enforce constraint: Started+Dropped is invalid — auto-correct intent to Queued
+        let final_intent = if ps == PlayState::Started && intent == Intent::Dropped {
+            Intent::Queued
+        } else {
+            intent
+        };
 
         let mut update = WadUpdate::new();
         update = update
@@ -876,9 +923,8 @@ impl EditDialogState {
             .unwrap();
         update = update.set_int("year", year).unwrap();
 
-        if let Some(s) = status {
-            update = update.set_status(s).unwrap();
-        }
+        update = update.set_play_state(ps, final_intent).unwrap();
+        update = update.set_text("intent", Some(final_intent.as_str().to_string())).unwrap();
 
         let rating: Option<i64> = if self.rating.is_empty() {
             None

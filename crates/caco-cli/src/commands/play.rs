@@ -157,9 +157,17 @@ fn ensure_wad_path(conn: &Connection, wad: &WadRecord) -> Result<(), String> {
         return Ok(());
     }
 
-    // Try to download from idgames
-    let idgames_id = wad.idgames_id.as_deref().and_then(|id| id.parse::<i64>().ok());
-    let idgames_id = match idgames_id {
+    // Try to download from idgames.
+    // Import stores the numeric ID in source_id; idgames_id is a later-added alias.
+    // Fall back to source_id when source_type is "idgames" and idgames_id is unset.
+    let idgames_id_str = wad.idgames_id.as_deref().or_else(|| {
+        if wad.source_type == "idgames" {
+            wad.source_id.as_deref()
+        } else {
+            None
+        }
+    });
+    let idgames_id = match idgames_id_str.and_then(|id| id.parse::<i64>().ok()) {
         Some(id) => id,
         None => {
             // Not an idgames WAD — can't auto-download
