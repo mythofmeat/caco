@@ -27,7 +27,7 @@ _caco_sourceports() {
 }
 
 _caco_query_fields() {
-    COMPREPLY+=($(compgen -W "id: title: author: year: filename: tag: status: source: iwad:" -- "$cur"))
+    COMPREPLY+=($(compgen -W "id: title: author: year: filename: tag: status: source: iwad: play: intent: avail:" -- "$cur"))
 }
 
 _caco_sort_fields() {
@@ -91,7 +91,7 @@ _caco() {
         if [[ "$cur" == -* ]]; then
             COMPREPLY=($(compgen -W "--tui --gui --help" -- "$cur"))
         else
-            COMPREPLY=($(compgen -W "ls info modify trash play import config random completions stats cache enrich companion gc" -- "$cur"))
+            COMPREPLY=($(compgen -W "ls info modify trash play import config random completions stats cache enrich companion gc collection" -- "$cur"))
         fi
         return
     fi
@@ -245,6 +245,20 @@ _caco() {
             elif [[ "$prev" == --ignore || "$prev" == --unignore ]]; then
                 _caco_wads
                 _caco_query_fields
+            fi
+            ;;
+        collection)
+            if [[ -z "$subcmd" ]]; then
+                COMPREPLY=($(compgen -W "add rm ls run" -- "$cur"))
+            else
+                case "$subcmd" in
+                    add)
+                        COMPREPLY=($(compgen -W "--sort --desc --help" -- "$cur"))
+                        ;;
+                    run|ls)
+                        COMPREPLY=($(compgen -W "-o --output --help" -- "$cur"))
+                        ;;
+                esac
             fi
             ;;
     esac

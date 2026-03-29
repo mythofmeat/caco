@@ -90,6 +90,18 @@ impl WadDetailScreen {
             Span::styled(status_display, theme::status_style(&wad.status)),
         ]));
 
+        let intent_display = theme::intent_display(&wad.intent);
+        lines.push(Line::from(vec![
+            Span::styled("Intent: ", theme::dim_style()),
+            Span::styled(intent_display, theme::intent_style(&wad.intent)),
+        ]));
+
+        let play_state_display = theme::play_state_display(&wad.play_state);
+        lines.push(Line::from(vec![
+            Span::styled("Play State: ", theme::dim_style()),
+            Span::styled(play_state_display, theme::play_state_style(&wad.play_state)),
+        ]));
+
         let stars = theme::rating_stars(wad.rating);
         if !stars.is_empty() {
             lines.push(Line::from(vec![

@@ -1,4 +1,5 @@
 pub mod companion_service;
+pub mod completion_detect;
 pub mod complevel;
 pub mod complevel_detect;
 pub mod config;
@@ -12,6 +13,7 @@ pub mod saves;
 pub mod sourceports;
 pub mod titlepic;
 pub mod utils;
+pub mod wad_analysis;
 pub mod wad_stats;
 
 pub use error::{Error, Result};

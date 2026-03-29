@@ -102,6 +102,7 @@ fn main() {
         Commands::Sessions(ref args) => commands::stats::run_sessions(&conn, args),
         Commands::Saves { ref command } => commands::saves::run(&conn, command),
         Commands::Demos { ref command } => commands::demos::run(&conn, command),
+        Commands::Collection { ref command } => commands::collection::run(&conn, command),
         Commands::Companion { ref command } => commands::companion::run(&conn, command),
         Commands::Profile { ref command } => commands::profile::run(&conn, command),
         Commands::Enrich(ref args) => commands::enrich::run(&conn, args),

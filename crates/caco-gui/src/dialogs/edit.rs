@@ -52,6 +52,9 @@ enum CompanionAction {
 // Constants
 // ---------------------------------------------------------------------------
 
+// TODO: Replace this single status dropdown with separate play_state and intent
+// dropdowns once the transition period is complete. The dual-write layer in
+// caco-core keeps the legacy status column in sync with the new axes for now.
 const STATUSES: &[&str] = &[
     "to-play", "backlog", "playing", "finished", "abandoned", "awaiting-update",
 ];

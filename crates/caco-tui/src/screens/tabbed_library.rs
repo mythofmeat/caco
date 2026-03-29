@@ -14,15 +14,16 @@ use crate::screens::Screen;
 use crate::widgets::import_pane::{self, ImportPaneState};
 use crate::widgets::library_pane::{self, LibraryPaneState};
 
-/// Tab definitions: (name, display, status_filter)
-const TABS: &[(&str, &str, Option<&[&str]>)] = &[
-    ("all", "All", None),
-    ("playing", "Playing", Some(&["playing"])),
-    ("to-play", "To Play", Some(&["to-play"])),
-    ("finished", "Finished", Some(&["finished"])),
-    ("backlog", "Backlog", Some(&["backlog"])),
-    ("other", "Other", Some(&["abandoned", "awaiting-update"])),
-    ("import", "Import", None), // special
+/// Tab definitions: (name, display, query_filter)
+/// The third element is a complete query string (or None for All/Import).
+const TABS: &[(&str, &str, Option<&str>)] = &[
+    ("all",     "All",     None),
+    ("inbox",   "Inbox",   Some("intent:inbox")),
+    ("queued",  "Queued",  Some("intent:queued")),
+    ("playing", "Playing", Some("play:started")),
+    ("shelved", "Shelved", Some("intent:shelved")),
+    ("dropped", "Dropped", Some("intent:dropped")),
+    ("import",  "Import",  None),
 ];
 
 /// Main screen with tabbed library views.
@@ -45,11 +46,11 @@ impl TabbedLibraryScreen {
             .position(|(name, _, _)| *name == cfg.tui.default_tab)
             .unwrap_or(0);
 
-        // Create library panes for tabs 0-5
+        // Create library panes for tabs 0-5 (all non-import tabs)
         let mut library_panes = Vec::new();
-        for (_, _, status_filter) in TABS.iter().take(6) {
-            let filter = status_filter.map(|sf| sf.iter().map(|s| s.to_string()).collect());
-            library_panes.push(LibraryPaneState::new(filter, sort_field, sort_desc));
+        for (_, _, query_filter) in TABS.iter().take(6) {
+            let tab_query = query_filter.map(|q| q.to_string());
+            library_panes.push(LibraryPaneState::new(tab_query, sort_field, sort_desc));
         }
 
         // Create import pane (tab 6) with a dummy sender for now

@@ -85,16 +85,16 @@ pub enum PlayState {
 
 pub struct TabDef {
     pub label: &'static str,
-    pub status_filter: Option<&'static [&'static str]>,
+    pub query_filter: Option<&'static str>,
 }
 
 pub const TABS: &[TabDef] = &[
-    TabDef { label: "All", status_filter: None },
-    TabDef { label: "Playing", status_filter: Some(&["playing"]) },
-    TabDef { label: "To Play", status_filter: Some(&["to-play"]) },
-    TabDef { label: "Finished", status_filter: Some(&["finished"]) },
-    TabDef { label: "Backlog", status_filter: Some(&["backlog"]) },
-    TabDef { label: "Other", status_filter: Some(&["abandoned", "awaiting-update"]) },
+    TabDef { label: "All",     query_filter: None },
+    TabDef { label: "Inbox",   query_filter: Some("intent:inbox") },
+    TabDef { label: "Queued",  query_filter: Some("intent:queued") },
+    TabDef { label: "Playing", query_filter: Some("play:started") },
+    TabDef { label: "Shelved", query_filter: Some("intent:shelved") },
+    TabDef { label: "Dropped", query_filter: Some("intent:dropped") },
 ];
 
 // ---------------------------------------------------------------------------
@@ -227,28 +227,29 @@ impl AppState {
         matches!(self.play_state, PlayState::Playing { .. })
     }
 
-    /// Refresh sidebar status counts from the database.
-    pub fn refresh_status_counts(&mut self, conn: &Connection) {
+    /// Refresh sidebar tab counts from the database.
+    pub fn refresh_tab_counts(&mut self, conn: &Connection) {
         self.status_counts.clear();
         self.total_wad_count = 0;
         if let Ok(all_wads) =
             caco_core::db::search_wads(conn, None, Some("id"), false, false, 0)
         {
             self.total_wad_count = all_wads.len();
+            // Count by intent and play_state for the new tab queries
             for wad in &all_wads {
+                *self.status_counts.entry(format!("intent:{}", wad.intent)).or_insert(0) += 1;
+                *self.status_counts.entry(format!("play:{}", wad.play_state)).or_insert(0) += 1;
+                // Keep legacy status counts for any remaining usage
                 *self.status_counts.entry(wad.status.clone()).or_insert(0) += 1;
             }
         }
     }
 
-    /// Get count for a specific status (for sidebar display).
-    pub fn status_count(&self, statuses: Option<&[&str]>) -> usize {
-        match statuses {
+    /// Get count for a tab's query filter (for sidebar display).
+    pub fn tab_count(&self, query_filter: Option<&str>) -> usize {
+        match query_filter {
             None => self.total_wad_count,
-            Some(ss) => ss
-                .iter()
-                .map(|s| self.status_counts.get(*s).copied().unwrap_or(0))
-                .sum(),
+            Some(q) => self.status_counts.get(q).copied().unwrap_or(0),
         }
     }
 
@@ -258,15 +259,8 @@ impl AppState {
         let tab = &TABS[self.active_tab];
         let mut query_parts: Vec<String> = Vec::new();
 
-        if let Some(statuses) = tab.status_filter {
-            if statuses.len() == 1 {
-                query_parts.push(format!("status:{}", statuses[0]));
-            } else {
-                // OR query: "status:a , status:b"
-                let parts: Vec<String> =
-                    statuses.iter().map(|s| format!("status:{s}")).collect();
-                query_parts.push(parts.join(" , "));
-            }
+        if let Some(qf) = tab.query_filter {
+            query_parts.push(qf.to_string());
         }
 
         if !self.applied_filter.is_empty() {
@@ -320,7 +314,7 @@ impl AppState {
         }
 
         // Refresh sidebar counts
-        self.refresh_status_counts(conn);
+        self.refresh_tab_counts(conn);
 
         self.needs_reload = false;
     }

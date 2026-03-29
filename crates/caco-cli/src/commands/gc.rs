@@ -245,7 +245,7 @@ fn gc_finished_wads(
 }
 
 fn get_gc_candidates(conn: &Connection) -> Result<Vec<WadRecord>, String> {
-    let query = "status:finished , status:abandoned";
+    let query = "intent:dropped , play:completed intent:shelved";
     let wads = db::search_wads(conn, Some(query), None, true, false, 0)
         .map_err(|e| format!("Search error: {e}"))?;
     Ok(wads.into_iter().filter(|w| !w.gc_ignore).collect())

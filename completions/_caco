@@ -49,6 +49,9 @@ __caco_query_fields() {
         'filename\::Filter by filename'
         'tag\::Filter by tag'
         'status\::Filter by status'
+        'play\::Filter by play state'
+        'intent\::Filter by intent'
+        'avail\::Filter by availability'
         'source\::Filter by source'
         'iwad\::Filter by IWAD'
     )
@@ -288,6 +291,52 @@ _caco_companion() {
     esac
 }
 
+_caco_collection() {
+    local -a subcmds
+    subcmds=(
+        'add:Create a smart collection'
+        'rm:Delete a smart collection'
+        'ls:List smart collections'
+        'run:Run a smart collection'
+    )
+
+    if (( CURRENT == 2 )); then
+        _describe 'collection command' subcmds
+        return
+    fi
+
+    local subcmd="${words[2]}"
+    (( CURRENT-- ))
+    shift words
+
+    case "$subcmd" in
+        add)
+            _arguments \
+                '--sort[Sort field]:field:' \
+                '--desc[Sort descending]' \
+                '--help[Show help]' \
+                '1:name:' \
+                '2:query:'
+            ;;
+        rm)
+            _arguments \
+                '--help[Show help]' \
+                '1:name:'
+            ;;
+        ls)
+            _arguments \
+                '(-o --output)'{-o,--output}'[Output format]:format:(json plain)' \
+                '--help[Show help]'
+            ;;
+        run)
+            _arguments \
+                '(-o --output)'{-o,--output}'[Output format]:format:(json plain)' \
+                '--help[Show help]' \
+                '1:name:'
+            ;;
+    esac
+}
+
 # ---------------------------------------------------------------------------
 # Main dispatcher
 # ---------------------------------------------------------------------------
@@ -311,6 +360,7 @@ _caco() {
         'enrich:Re-run enrichment for existing WADs'
         'companion:Manage companion files'
         'gc:Garbage collect finished/abandoned WAD data'
+        'collection:Manage smart collections'
     )
 
     if (( CURRENT == 2 )); then
@@ -344,6 +394,7 @@ _caco() {
         enrich) _caco_enrich ;;
         companion) _caco_companion ;;
         gc) _caco_gc ;;
+        collection) _caco_collection ;;
     esac
 }
 

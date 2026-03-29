@@ -15,6 +15,10 @@ use crate::screens::Screen;
 use crate::theme;
 
 /// Editing field types.
+// TODO: During the tri-axis transition, StatusCycle still cycles the legacy
+// status values. The dual-write layer in caco-core syncs intent/play_state
+// automatically. Once the legacy status column is removed, replace StatusCycle
+// with IntentCycle and PlayStateCycle field kinds.
 enum FieldKind {
     Text,
     StatusCycle,

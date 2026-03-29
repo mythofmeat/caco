@@ -89,6 +89,196 @@ impl FromStr for Status {
 }
 
 // ---------------------------------------------------------------------------
+// PlayState enum
+// ---------------------------------------------------------------------------
+
+/// Objective play state for a WAD, derived from playthrough records.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum PlayState {
+    Unplayed,
+    Started,
+    Completed,
+}
+
+impl PlayState {
+    pub const ALL: &[PlayState] = &[
+        PlayState::Unplayed,
+        PlayState::Started,
+        PlayState::Completed,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PlayState::Unplayed => "unplayed",
+            PlayState::Started => "started",
+            PlayState::Completed => "completed",
+        }
+    }
+
+    /// Parse a play state string, supporting shortcuts.
+    pub fn parse(s: &str) -> Option<PlayState> {
+        if let Ok(ps) = s.parse::<PlayState>() {
+            return Some(ps);
+        }
+        PLAY_STATE_SHORTCUTS
+            .get(s.to_lowercase().as_str())
+            .and_then(|full| full.parse().ok())
+    }
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            PlayState::Unplayed => "Unplayed",
+            PlayState::Started => "Started",
+            PlayState::Completed => "Completed",
+        }
+    }
+}
+
+impl fmt::Display for PlayState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for PlayState {
+    type Err = crate::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "unplayed" => Ok(PlayState::Unplayed),
+            "started" => Ok(PlayState::Started),
+            "completed" => Ok(PlayState::Completed),
+            _ => Err(crate::Error::InvalidPlayState(s.to_string())),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Intent enum
+// ---------------------------------------------------------------------------
+
+/// User's organizational intent for a WAD.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Intent {
+    Inbox,
+    Queued,
+    Shelved,
+    Dropped,
+}
+
+impl Intent {
+    pub const ALL: &[Intent] = &[
+        Intent::Inbox,
+        Intent::Queued,
+        Intent::Shelved,
+        Intent::Dropped,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Intent::Inbox => "inbox",
+            Intent::Queued => "queued",
+            Intent::Shelved => "shelved",
+            Intent::Dropped => "dropped",
+        }
+    }
+
+    /// Parse an intent string, supporting shortcuts.
+    pub fn parse(s: &str) -> Option<Intent> {
+        if let Ok(i) = s.parse::<Intent>() {
+            return Some(i);
+        }
+        INTENT_SHORTCUTS
+            .get(s.to_lowercase().as_str())
+            .and_then(|full| full.parse().ok())
+    }
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Intent::Inbox => "Inbox",
+            Intent::Queued => "Queued",
+            Intent::Shelved => "Shelved",
+            Intent::Dropped => "Dropped",
+        }
+    }
+}
+
+impl fmt::Display for Intent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for Intent {
+    type Err = crate::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "inbox" => Ok(Intent::Inbox),
+            "queued" => Ok(Intent::Queued),
+            "shelved" => Ok(Intent::Shelved),
+            "dropped" => Ok(Intent::Dropped),
+            _ => Err(crate::Error::InvalidIntent(s.to_string())),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Availability enum
+// ---------------------------------------------------------------------------
+
+/// File availability state for a WAD (system-managed).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Availability {
+    Cached,
+    Downloadable,
+    Unavailable,
+}
+
+impl Availability {
+    pub const ALL: &[Availability] = &[
+        Availability::Cached,
+        Availability::Downloadable,
+        Availability::Unavailable,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Availability::Cached => "cached",
+            Availability::Downloadable => "downloadable",
+            Availability::Unavailable => "unavailable",
+        }
+    }
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Availability::Cached => "Cached",
+            Availability::Downloadable => "Downloadable",
+            Availability::Unavailable => "Unavailable",
+        }
+    }
+}
+
+impl fmt::Display for Availability {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for Availability {
+    type Err = crate::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "cached" => Ok(Availability::Cached),
+            "downloadable" => Ok(Availability::Downloadable),
+            "unavailable" => Ok(Availability::Unavailable),
+            _ => Err(crate::Error::InvalidAvailability(s.to_string())),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // SourceType enum
 // ---------------------------------------------------------------------------
 
@@ -148,6 +338,9 @@ pub struct WadRecord {
     pub year: Option<i32>,
     pub description: Option<String>,
     pub status: String,
+    pub play_state: String,
+    pub intent: String,
+    pub availability: String,
     pub rating: Option<i32>,
     pub notes: Option<String>,
     pub source_type: String,
@@ -184,6 +377,9 @@ impl WadRecord {
             year: row.get("year")?,
             description: row.get("description")?,
             status: row.get("status")?,
+            play_state: row.get::<_, Option<String>>("play_state")?.unwrap_or_else(|| "unplayed".to_string()),
+            intent: row.get::<_, Option<String>>("intent")?.unwrap_or_else(|| "inbox".to_string()),
+            availability: row.get::<_, Option<String>>("availability")?.unwrap_or_else(|| "unavailable".to_string()),
             rating: row.get("rating")?,
             notes: row.get("notes")?,
             source_type: row.get("source_type")?,
@@ -211,6 +407,21 @@ impl WadRecord {
     /// Get the parsed status enum.
     pub fn status_enum(&self) -> Option<Status> {
         self.status.parse().ok()
+    }
+
+    /// Get the parsed play state enum.
+    pub fn play_state_enum(&self) -> Option<PlayState> {
+        self.play_state.parse().ok()
+    }
+
+    /// Get the parsed intent enum.
+    pub fn intent_enum(&self) -> Option<Intent> {
+        self.intent.parse().ok()
+    }
+
+    /// Get the parsed availability enum.
+    pub fn availability_enum(&self) -> Option<Availability> {
+        self.availability.parse().ok()
     }
 
     /// Get the parsed source type enum.
@@ -280,6 +491,28 @@ pub static STATUS_SHORTCUTS: LazyLock<HashMap<&'static str, &'static str>> = Laz
     ])
 });
 
+/// Play state shortcuts for query parsing.
+pub static PLAY_STATE_SHORTCUTS: LazyLock<HashMap<&'static str, &'static str>> =
+    LazyLock::new(|| {
+        HashMap::from([
+            ("u", "unplayed"),
+            ("s", "started"),
+            ("c", "completed"),
+            ("done", "completed"),
+        ])
+    });
+
+/// Intent shortcuts for query parsing.
+pub static INTENT_SHORTCUTS: LazyLock<HashMap<&'static str, &'static str>> =
+    LazyLock::new(|| {
+        HashMap::from([
+            ("i", "inbox"),
+            ("q", "queued"),
+            ("sh", "shelved"),
+            ("d", "dropped"),
+        ])
+    });
+
 /// OR separator for query syntax (space-comma-space).
 pub const OR_SEPARATOR: &str = " , ";
 
@@ -308,6 +541,9 @@ pub static ALLOWED_UPDATE_FIELDS: LazyLock<std::collections::HashSet<&'static st
             "deleted_at",
             "stats_snapshot",
             "gc_ignore",
+            "play_state",
+            "intent",
+            "availability",
         ]
         .into_iter()
         .collect()
@@ -326,6 +562,27 @@ pub static STATUS_METADATA: LazyLock<HashMap<&'static str, StatusMeta>> =
             ("finished",        ("Finished",         "#808080", "grey50",       "status-finished")),
             ("abandoned",       ("Abandoned",        "#cc3333", "red",          "status-abandoned")),
             ("awaiting-update", ("Awaiting Update",  "#cc33cc", "magenta",      "status-awaiting-update")),
+        ])
+    });
+
+/// Play state metadata: (display_name, hex_color, rich_color, css_class).
+pub static PLAY_STATE_METADATA: LazyLock<HashMap<&'static str, StatusMeta>> =
+    LazyLock::new(|| {
+        HashMap::from([
+            ("unplayed",  ("Unplayed",  "#3366cc", "dodger_blue1", "play-unplayed")),
+            ("started",   ("Started",   "#33cc33", "green1",       "play-started")),
+            ("completed", ("Completed", "#808080", "grey50",       "play-completed")),
+        ])
+    });
+
+/// Intent metadata: (display_name, hex_color, rich_color, css_class).
+pub static INTENT_METADATA: LazyLock<HashMap<&'static str, StatusMeta>> =
+    LazyLock::new(|| {
+        HashMap::from([
+            ("inbox",   ("Inbox",   "#cccc33", "yellow",       "intent-inbox")),
+            ("queued",  ("Queued",  "#3366cc", "dodger_blue1", "intent-queued")),
+            ("shelved", ("Shelved", "#808080", "grey50",       "intent-shelved")),
+            ("dropped", ("Dropped", "#cc3333", "red",          "intent-dropped")),
         ])
     });
 
@@ -408,7 +665,106 @@ mod tests {
     fn test_allowed_update_fields() {
         assert!(ALLOWED_UPDATE_FIELDS.contains("title"));
         assert!(ALLOWED_UPDATE_FIELDS.contains("status"));
+        assert!(ALLOWED_UPDATE_FIELDS.contains("play_state"));
+        assert!(ALLOWED_UPDATE_FIELDS.contains("intent"));
+        assert!(ALLOWED_UPDATE_FIELDS.contains("availability"));
         assert!(!ALLOWED_UPDATE_FIELDS.contains("id"));
         assert!(!ALLOWED_UPDATE_FIELDS.contains("created_at"));
+    }
+
+    // -----------------------------------------------------------------------
+    // PlayState tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_play_state_as_str_roundtrip() {
+        for &ps in PlayState::ALL {
+            let s = ps.as_str();
+            let parsed: PlayState = s.parse().unwrap();
+            assert_eq!(parsed, ps);
+        }
+    }
+
+    #[test]
+    fn test_play_state_shortcuts() {
+        assert_eq!(PlayState::parse("u"), Some(PlayState::Unplayed));
+        assert_eq!(PlayState::parse("s"), Some(PlayState::Started));
+        assert_eq!(PlayState::parse("c"), Some(PlayState::Completed));
+        assert_eq!(PlayState::parse("done"), Some(PlayState::Completed));
+    }
+
+    #[test]
+    fn test_play_state_display() {
+        assert_eq!(PlayState::Unplayed.to_string(), "unplayed");
+        assert_eq!(PlayState::Completed.to_string(), "completed");
+    }
+
+    #[test]
+    fn test_play_state_display_name() {
+        assert_eq!(PlayState::Unplayed.display_name(), "Unplayed");
+        assert_eq!(PlayState::Completed.display_name(), "Completed");
+    }
+
+    #[test]
+    fn test_invalid_play_state() {
+        assert!("invalid".parse::<PlayState>().is_err());
+        assert!(PlayState::parse("invalid").is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // Intent tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_intent_as_str_roundtrip() {
+        for &i in Intent::ALL {
+            let s = i.as_str();
+            let parsed: Intent = s.parse().unwrap();
+            assert_eq!(parsed, i);
+        }
+    }
+
+    #[test]
+    fn test_intent_shortcuts() {
+        assert_eq!(Intent::parse("i"), Some(Intent::Inbox));
+        assert_eq!(Intent::parse("q"), Some(Intent::Queued));
+        assert_eq!(Intent::parse("sh"), Some(Intent::Shelved));
+        assert_eq!(Intent::parse("d"), Some(Intent::Dropped));
+    }
+
+    #[test]
+    fn test_intent_display() {
+        assert_eq!(Intent::Inbox.to_string(), "inbox");
+        assert_eq!(Intent::Dropped.to_string(), "dropped");
+    }
+
+    #[test]
+    fn test_invalid_intent() {
+        assert!("invalid".parse::<Intent>().is_err());
+        assert!(Intent::parse("invalid").is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // Availability tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_availability_as_str_roundtrip() {
+        for &a in Availability::ALL {
+            let s = a.as_str();
+            let parsed: Availability = s.parse().unwrap();
+            assert_eq!(parsed, a);
+        }
+    }
+
+    #[test]
+    fn test_availability_display() {
+        assert_eq!(Availability::Cached.to_string(), "cached");
+        assert_eq!(Availability::Unavailable.to_string(), "unavailable");
+    }
+
+    #[test]
+    fn test_invalid_availability() {
+        assert!("invalid".parse::<Availability>().is_err());
     }
 }

@@ -1,8 +1,10 @@
+pub mod collections;
 pub mod companions;
 pub mod connection;
 pub mod id24;
 pub mod iwads;
 pub mod models;
+pub mod playthroughs;
 pub mod query;
 pub mod schema;
 pub mod sessions;
@@ -29,11 +31,24 @@ pub use iwads::{
     remove_iwad_with_paths, resolve_iwad_from_db, IwadRecord, DEFAULT_IWAD_PRIORITY,
     FAMILY_FALLBACKS, IWAD_ALIASES, KNOWN_IWAD_FILENAMES, KNOWN_IWADS,
 };
-pub use models::{
-    AndGroup, ParsedQuery, QueryTerm, SourceType, Status, StatusMeta, WadRecord,
-    ALLOWED_UPDATE_FIELDS, OR_SEPARATOR, STATUS_METADATA, STATUS_SHORTCUTS,
+pub use collections::{
+    create_collection, delete_collection, get_all_collections, get_collection, run_collection,
+    update_collection, CollectionRecord,
 };
-pub use query::{find_duplicate, normalize_status, parse_query, search_wads};
+pub use playthroughs::{
+    complete_playthrough, delete_playthrough, derive_play_state, ensure_playthrough,
+    get_active_playthrough, get_playthrough, get_playthroughs, get_times_completed,
+    get_times_completed_batch, start_playthrough, PlaythroughRecord,
+};
+pub use models::{
+    AndGroup, Availability, Intent, ParsedQuery, PlayState, QueryTerm, SourceType, Status,
+    StatusMeta, WadRecord, ALLOWED_UPDATE_FIELDS, INTENT_METADATA, INTENT_SHORTCUTS,
+    OR_SEPARATOR, PLAY_STATE_METADATA, PLAY_STATE_SHORTCUTS, STATUS_METADATA, STATUS_SHORTCUTS,
+};
+pub use query::{
+    find_duplicate, normalize_intent, normalize_play_state, normalize_status, parse_query,
+    search_wads,
+};
 pub use schema::init_db;
 pub use sessions::{
     add_wad_completion, clear_all_cached_paths, clear_cached_path,
