@@ -39,6 +39,7 @@ complete -c caco -n __fish_use_subcommand -a cache -d "Manage WAD file cache"
 complete -c caco -n __fish_use_subcommand -a enrich -d "Re-run enrichment for existing WADs"
 complete -c caco -n __fish_use_subcommand -a companion -d "Manage companion files"
 complete -c caco -n __fish_use_subcommand -a gc -d "Garbage collect finished/abandoned WAD data"
+complete -c caco -n __fish_use_subcommand -a collection -d "Manage smart collections"
 
 # =============================================================================
 # companion subcommands
@@ -72,6 +73,9 @@ complete -c caco -n "__fish_seen_subcommand_from ls" -a "year:" -d "Filter by ye
 complete -c caco -n "__fish_seen_subcommand_from ls" -a "filename:" -d "Filter by filename"
 complete -c caco -n "__fish_seen_subcommand_from ls" -a "tag:" -d "Filter by tag"
 complete -c caco -n "__fish_seen_subcommand_from ls" -a "status:" -d "Filter by status"
+complete -c caco -n "__fish_seen_subcommand_from ls" -a "play:" -d "Filter by play state"
+complete -c caco -n "__fish_seen_subcommand_from ls" -a "intent:" -d "Filter by intent"
+complete -c caco -n "__fish_seen_subcommand_from ls" -a "avail:" -d "Filter by availability"
 complete -c caco -n "__fish_seen_subcommand_from ls" -a "source:" -d "Filter by source"
 complete -c caco -n "__fish_seen_subcommand_from ls" -a "iwad:" -d "Filter by IWAD"
 
@@ -92,6 +96,8 @@ complete -c caco -n "__fish_seen_subcommand_from info" -a "title:" -d "Filter by
 complete -c caco -n "__fish_seen_subcommand_from info" -a "author:" -d "Filter by author"
 complete -c caco -n "__fish_seen_subcommand_from info" -a "tag:" -d "Filter by tag"
 complete -c caco -n "__fish_seen_subcommand_from info" -a "status:" -d "Filter by status"
+complete -c caco -n "__fish_seen_subcommand_from info" -a "play:" -d "Filter by play state"
+complete -c caco -n "__fish_seen_subcommand_from info" -a "intent:" -d "Filter by intent"
 
 # =============================================================================
 # modify command
@@ -107,6 +113,8 @@ complete -c caco -n "__fish_seen_subcommand_from modify" -xa "(__caco_wads)"
 
 # modify field=value completions
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "status=" -d "Set status"
+complete -c caco -n "__fish_seen_subcommand_from modify" -a "play=" -d "Set play state"
+complete -c caco -n "__fish_seen_subcommand_from modify" -a "intent=" -d "Set intent"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "rating=" -d "Set rating (1-5)"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "title=" -d "Set title"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "author=" -d "Set author"
@@ -142,6 +150,8 @@ complete -c caco -n "__fish_seen_subcommand_from modify" -a "title:" -d "Filter 
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "author:" -d "Filter by author"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "tag:" -d "Filter by tag"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "status:" -d "Filter by status"
+complete -c caco -n "__fish_seen_subcommand_from modify" -a "play:" -d "Filter by play state"
+complete -c caco -n "__fish_seen_subcommand_from modify" -a "intent:" -d "Filter by intent"
 
 # =============================================================================
 # trash command
@@ -157,6 +167,8 @@ complete -c caco -n "__fish_seen_subcommand_from trash" -xa "(__caco_wads)"
 complete -c caco -n "__fish_seen_subcommand_from trash" -a "id:" -d "Filter by ID"
 complete -c caco -n "__fish_seen_subcommand_from trash" -a "title:" -d "Filter by title"
 complete -c caco -n "__fish_seen_subcommand_from trash" -a "status:" -d "Filter by status"
+complete -c caco -n "__fish_seen_subcommand_from trash" -a "play:" -d "Filter by play state"
+complete -c caco -n "__fish_seen_subcommand_from trash" -a "intent:" -d "Filter by intent"
 
 # =============================================================================
 # play command
@@ -170,6 +182,8 @@ complete -c caco -n "__fish_seen_subcommand_from play" -a "title:" -d "Filter by
 complete -c caco -n "__fish_seen_subcommand_from play" -a "author:" -d "Filter by author"
 complete -c caco -n "__fish_seen_subcommand_from play" -a "tag:" -d "Filter by tag"
 complete -c caco -n "__fish_seen_subcommand_from play" -a "status:" -d "Filter by status"
+complete -c caco -n "__fish_seen_subcommand_from play" -a "play:" -d "Filter by play state"
+complete -c caco -n "__fish_seen_subcommand_from play" -a "intent:" -d "Filter by intent"
 
 # =============================================================================
 # import command
@@ -209,6 +223,8 @@ complete -c caco -n "__fish_seen_subcommand_from random" -a "id:" -d "Filter by 
 complete -c caco -n "__fish_seen_subcommand_from random" -a "title:" -d "Filter by title"
 complete -c caco -n "__fish_seen_subcommand_from random" -a "author:" -d "Filter by author"
 complete -c caco -n "__fish_seen_subcommand_from random" -a "status:" -d "Filter by status"
+complete -c caco -n "__fish_seen_subcommand_from random" -a "play:" -d "Filter by play state"
+complete -c caco -n "__fish_seen_subcommand_from random" -a "intent:" -d "Filter by intent"
 complete -c caco -n "__fish_seen_subcommand_from random" -a "tag:" -d "Filter by tag"
 complete -c caco -n "__fish_seen_subcommand_from random" -a "source:" -d "Filter by source"
 
@@ -245,6 +261,8 @@ complete -c caco -n "__fish_seen_subcommand_from enrich" -a "title:" -d "Filter 
 complete -c caco -n "__fish_seen_subcommand_from enrich" -a "author:" -d "Filter by author"
 complete -c caco -n "__fish_seen_subcommand_from enrich" -a "tag:" -d "Filter by tag"
 complete -c caco -n "__fish_seen_subcommand_from enrich" -a "status:" -d "Filter by status"
+complete -c caco -n "__fish_seen_subcommand_from enrich" -a "play:" -d "Filter by play state"
+complete -c caco -n "__fish_seen_subcommand_from enrich" -a "intent:" -d "Filter by intent"
 
 # =============================================================================
 # gc command
@@ -260,3 +278,15 @@ complete -c caco -n "__fish_seen_subcommand_from gc" -l orphans-only -d "Only cl
 complete -c caco -n "__fish_seen_subcommand_from gc" -l ignore -d "Mark WAD(s) as GC-ignored" -xa "(__caco_wads)"
 complete -c caco -n "__fish_seen_subcommand_from gc" -l unignore -d "Remove GC-ignore from WAD(s)" -xa "(__caco_wads)"
 
+# =============================================================================
+# collection subcommands
+# =============================================================================
+complete -c caco -n "__fish_seen_subcommand_from collection; and not __fish_seen_subcommand_from add rm ls run" -a add -d "Create a smart collection"
+complete -c caco -n "__fish_seen_subcommand_from collection; and not __fish_seen_subcommand_from add rm ls run" -a rm -d "Delete a smart collection"
+complete -c caco -n "__fish_seen_subcommand_from collection; and not __fish_seen_subcommand_from add rm ls run" -a ls -d "List smart collections"
+complete -c caco -n "__fish_seen_subcommand_from collection; and not __fish_seen_subcommand_from add rm ls run" -a run -d "Run a smart collection"
+
+complete -c caco -n "__fish_seen_subcommand_from collection; and __fish_seen_subcommand_from add" -l sort -d "Sort field"
+complete -c caco -n "__fish_seen_subcommand_from collection; and __fish_seen_subcommand_from add" -l desc -d "Sort descending"
+complete -c caco -n "__fish_seen_subcommand_from collection; and __fish_seen_subcommand_from run" -s o -l output -d "Output format" -xa "json plain"
+complete -c caco -n "__fish_seen_subcommand_from collection; and __fish_seen_subcommand_from ls" -s o -l output -d "Output format" -xa "json plain"
