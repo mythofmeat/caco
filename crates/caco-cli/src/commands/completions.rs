@@ -121,6 +121,16 @@ pub fn run_complete(conn: &Connection, args: &CompleteArgs) -> Result<(), String
                 println!("{}", status.as_str());
             }
         }
+        "play-states" => {
+            for ps in db::PlayState::ALL {
+                println!("{}", ps.as_str());
+            }
+        }
+        "intents" => {
+            for intent in db::Intent::ALL {
+                println!("{}", intent.as_str());
+            }
+        }
         "sort-fields" => {
             for field in parsing::SORT_FIELDS {
                 println!("{field}+");
@@ -146,7 +156,8 @@ pub fn run_complete(conn: &Connection, args: &CompleteArgs) -> Result<(), String
         }
         "query-fields" => {
             let fields = ["id:", "title:", "author:", "year:", "filename:", "tag:",
-                          "status:", "source:", "iwad:", "complevel:", "config:"];
+                          "status:", "source:", "iwad:", "complevel:", "config:",
+                          "play:", "intent:", "avail:"];
             for field in &fields {
                 println!("{field}");
             }

@@ -1,4 +1,5 @@
 pub mod cache;
+pub mod collection;
 pub mod companion;
 pub mod completions;
 pub mod config;
@@ -55,6 +56,11 @@ pub enum Commands {
     Demos {
         #[command(subcommand)]
         command: demos::DemosCommand,
+    },
+    /// Manage smart collections (saved queries)
+    Collection {
+        #[command(subcommand)]
+        command: collection::CollectionCommand,
     },
     /// Manage companion files
     Companion {
