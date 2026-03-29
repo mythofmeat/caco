@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use rusqlite::Connection;
 
 use crate::dialogs::cache::{CacheDialogState, CacheResult};
+use crate::dialogs::collections::{CollectionsDialogState, CollectionsResult};
 use crate::dialogs::delete::{DeleteDialogState, DeleteResult};
 use crate::dialogs::edit::{EditDialogState, EditResult};
 use crate::dialogs::link::{LinkDialogState, LinkResult};
@@ -95,6 +96,10 @@ impl CacoApp {
             ActionRequest::Resources => {
                 let dialog = ResourcesDialogState::new(&self.conn);
                 self.state.active_dialog = Some(ActiveDialog::Resources(dialog));
+            }
+            ActionRequest::Collections => {
+                let dialog = CollectionsDialogState::new(&self.conn);
+                self.state.active_dialog = Some(ActiveDialog::Collections(dialog));
             }
             ActionRequest::MapStats(wad_id) => {
                 if let Some(dialog) = WadStatsDialogState::new(&self.conn, wad_id) {
@@ -429,6 +434,20 @@ impl eframe::App for CacoApp {
                         CacheResult::Open => {}
                     }
                 }
+                ActiveDialog::Collections(collections_state) => {
+                    match collections_state.render(ctx, &self.conn) {
+                        CollectionsResult::Closed => {
+                            close_dialog = true;
+                        }
+                        CollectionsResult::LoadQuery(query) => {
+                            close_dialog = true;
+                            self.state.filter_text = query;
+                            self.state.filter_changed_at =
+                                Some(std::time::Instant::now());
+                        }
+                        CollectionsResult::Open => {}
+                    }
+                }
                 ActiveDialog::Resources(resources_state) => {
                     match resources_state.render(ctx, &self.conn) {
                         ResourcesResult::Closed => {
@@ -479,6 +498,7 @@ impl eframe::App for CacoApp {
             // Check if dialog was modified -> trigger reload
             let was_modified = match &self.state.active_dialog {
                 Some(ActiveDialog::Cache(s)) => s.modified,
+                Some(ActiveDialog::Collections(s)) => s.modified,
                 Some(ActiveDialog::Resources(s)) => s.modified,
                 _ => false,
             };
@@ -727,88 +747,6 @@ fn render_sidebar(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Act
         }
     }
 
-    // ── Saved searches section ──
-    if !state.saved_searches.is_empty() || !state.filter_text.trim().is_empty() {
-        ui.add_space(12.0);
-        let rect = ui.available_rect_before_wrap();
-        ui.painter().line_segment(
-            [
-                egui::pos2(rect.min.x + 20.0, rect.min.y),
-                egui::pos2(rect.max.x - 20.0, rect.min.y),
-            ],
-            egui::Stroke::new(1.0, theme::BORDER),
-        );
-        ui.add_space(12.0);
-
-        ui.horizontal(|ui| {
-            ui.add_space(20.0);
-            ui.colored_label(
-                theme::TEXT_MUTED,
-                egui::RichText::new("SAVED SEARCHES")
-                    .size(11.0)
-                    .strong(),
-            );
-        });
-        ui.add_space(6.0);
-
-        let mut load_query: Option<String> = None;
-        let mut delete_idx: Option<usize> = None;
-
-        for (i, search) in state.saved_searches.iter().enumerate() {
-            let is_active = state.view_mode == ViewMode::Library
-                && state.applied_filter == search.query
-                && !search.query.is_empty();
-
-            let resp = theme::sidebar_search_item(ui, &search.name, is_active);
-
-            // Right-click to delete
-            resp.context_menu(|ui| {
-                if ui.button(format!("Delete \"{}\"", search.name)).clicked() {
-                    delete_idx = Some(i);
-                    ui.close_menu();
-                }
-            });
-
-            if resp.clicked() {
-                load_query = Some(search.query.clone());
-            }
-        }
-
-        if let Some(query) = load_query {
-            state.view_mode = ViewMode::Library;
-            state.filter_text = query;
-            state.filter_changed_at = Some(std::time::Instant::now());
-        }
-        if let Some(idx) = delete_idx {
-            state.saved_searches.remove(idx);
-        }
-
-        // "Save current filter" button (only when there's an active filter)
-        if !state.filter_text.trim().is_empty() {
-            ui.add_space(4.0);
-            let save_resp = ui.horizontal(|ui| {
-                ui.add_space(16.0);
-                ui.add(
-                    egui::Button::new(
-                        egui::RichText::new("Save current filter...")
-                            .size(12.0)
-                            .color(theme::TEXT_MUTED),
-                    )
-                    .frame(false),
-                )
-            }).inner;
-            if save_resp.clicked() {
-                state.save_search_pending = true;
-                state.save_search_name = state.filter_text.trim().to_string();
-            }
-        }
-    }
-
-    // Handle save-search dialog
-    if state.save_search_pending {
-        render_save_search_dialog(ui, state);
-    }
-
     // Bottom spacer + admin links
     ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
         ui.add_space(8.0);
@@ -869,6 +807,17 @@ fn render_sidebar(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Act
             {
                 actions.push(ActionRequest::Resources);
             }
+            if ui
+                .add(
+                    egui::Button::new(
+                        egui::RichText::new("Collections").size(11.0).color(theme::TEXT_MUTED),
+                    )
+                    .frame(false),
+                )
+                .clicked()
+            {
+                actions.push(ActionRequest::Collections);
+            }
         });
     });
 }
@@ -890,47 +839,6 @@ fn render_topbar(ui: &mut egui::Ui, state: &mut AppState, _actions: &mut Vec<Act
             panels::filter_bar::render(ui, state);
         });
     });
-}
-
-/// Render the "Save Search" dialog as a floating window.
-fn render_save_search_dialog(ui: &mut egui::Ui, state: &mut AppState) {
-    let mut saved = false;
-    let mut cancelled = false;
-    egui::Window::new("Save Search")
-        .collapsible(false)
-        .resizable(false)
-        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-        .show(ui.ctx(), |ui| {
-            ui.horizontal(|ui| {
-                ui.label("Name:");
-                ui.text_edit_singleline(&mut state.save_search_name);
-            });
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                if ui.button("Save").clicked() && !state.save_search_name.trim().is_empty() {
-                    saved = true;
-                }
-                if ui.button("Cancel").clicked()
-                    || ui.input(|i| i.key_pressed(egui::Key::Escape))
-                {
-                    cancelled = true;
-                }
-            });
-        });
-
-    if saved {
-        let name = state.save_search_name.trim().to_string();
-        let query = state.filter_text.trim().to_string();
-        state.saved_searches.retain(|s| s.name != name);
-        state
-            .saved_searches
-            .push(crate::persist::SavedSearch { name, query });
-        state.save_search_pending = false;
-        state.save_search_name.clear();
-    } else if cancelled {
-        state.save_search_pending = false;
-        state.save_search_name.clear();
-    }
 }
 
 fn render_breadcrumbs(ui: &mut egui::Ui, state: &AppState) {

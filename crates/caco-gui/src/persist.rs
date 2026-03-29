@@ -1,12 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Serialize, Deserialize, Clone)]
-pub struct SavedSearch {
-    pub name: String,
-    pub query: String,
-}
-
 #[derive(Serialize, Deserialize)]
 pub struct GuiState {
     #[serde(default)]
@@ -19,8 +13,6 @@ pub struct GuiState {
     pub sort_desc: bool,
     #[serde(default)]
     pub active_tab: usize,
-    #[serde(default)]
-    pub saved_searches: Vec<SavedSearch>,
     #[serde(default)]
     pub hidden_tabs: Vec<usize>,
 }
@@ -37,7 +29,6 @@ impl Default for GuiState {
             sort_field_index: 0,
             sort_desc: true,
             active_tab: 0,
-            saved_searches: Vec::new(),
             hidden_tabs: Vec::new(),
         }
     }

@@ -14,8 +14,8 @@ pub enum CollectionCommand {
     Add {
         /// Collection name
         name: String,
-        /// Query string
-        query: String,
+        /// Query terms (same syntax as `caco ls`)
+        query: Vec<String>,
         /// Sort field
         #[arg(long)]
         sort: Option<String>,
@@ -46,7 +46,10 @@ pub enum CollectionCommand {
 
 pub fn run(conn: &Connection, cmd: &CollectionCommand) -> Result<(), String> {
     match cmd {
-        CollectionCommand::Add { name, query, sort, desc } => cmd_add(conn, name, query, sort.as_deref(), *desc),
+        CollectionCommand::Add { name, query, sort, desc } => {
+            let query_str = query.join(" ");
+            cmd_add(conn, name, &query_str, sort.as_deref(), *desc)
+        }
         CollectionCommand::Rm { name } => cmd_rm(conn, name),
         CollectionCommand::Ls { output } => cmd_ls(conn, output),
         CollectionCommand::Run { name, output } => cmd_run(conn, name, output),

@@ -1,4 +1,5 @@
 pub mod cache;
+pub mod collections;
 pub mod delete;
 pub mod edit;
 pub mod link;

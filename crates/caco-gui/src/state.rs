@@ -7,6 +7,7 @@ use caco_core::db::sessions::WadStats;
 use rusqlite::Connection;
 
 use crate::dialogs::cache::CacheDialogState;
+use crate::dialogs::collections::CollectionsDialogState;
 use crate::dialogs::delete::DeleteDialogState;
 use crate::dialogs::edit::EditDialogState;
 use crate::dialogs::link::LinkDialogState;
@@ -16,7 +17,7 @@ use crate::dialogs::stats::StatsDialogState;
 use crate::dialogs::wad_stats::WadStatsDialogState;
 use crate::import::state::ImportState;
 use crate::message::Notification;
-use crate::persist::{self, SavedSearch};
+use crate::persist;
 
 // ---------------------------------------------------------------------------
 // View mode (Library vs Import)
@@ -55,6 +56,7 @@ pub enum ActionRequest {
     Stats,
     Cache,
     Resources,
+    Collections,
 }
 
 // ---------------------------------------------------------------------------
@@ -67,6 +69,7 @@ pub enum ActiveDialog {
     Sessions(SessionsDialogState),
     Stats(StatsDialogState),
     Cache(CacheDialogState),
+    Collections(CollectionsDialogState),
     Resources(ResourcesDialogState),
     WadStats(WadStatsDialogState),
     Link(LinkDialogState),
@@ -156,11 +159,6 @@ pub struct AppState {
     // Import
     pub import: ImportState,
 
-    // Saved searches
-    pub saved_searches: Vec<SavedSearch>,
-    pub save_search_pending: bool,
-    pub save_search_name: String,
-
     // Sidebar status counts (total library, not filtered)
     pub status_counts: HashMap<String, usize>,
     pub total_wad_count: usize,
@@ -208,9 +206,6 @@ impl AppState {
             db_path,
             import: ImportState::default(),
             last_g_press: None,
-            saved_searches: persisted.saved_searches,
-            save_search_pending: false,
-            save_search_name: String::new(),
             status_counts: HashMap::new(),
             total_wad_count: 0,
             hidden_tabs: persisted.hidden_tabs.iter().copied().collect(),
@@ -455,7 +450,6 @@ impl AppState {
             sort_field_index: self.sort_field_index,
             sort_desc: self.sort_desc,
             active_tab: self.active_tab,
-            saved_searches: self.saved_searches.clone(),
             hidden_tabs: self.hidden_tabs.iter().copied().collect(),
         }
     }
