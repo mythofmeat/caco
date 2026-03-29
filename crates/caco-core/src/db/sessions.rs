@@ -7,6 +7,10 @@ use super::connection::{attach_tags, batch_query_i64, batch_query_string, SQLITE
 use super::models::WadRecord;
 use crate::Result;
 
+/// Minimum duration in seconds for a session to count as a real play session.
+/// Sessions shorter than this are still recorded but excluded from stats and listings.
+const MIN_SESSION_SECONDS: i64 = 300;
+
 // =============================================================================
 // Play Sessions
 // =============================================================================
@@ -122,13 +126,15 @@ impl SessionRecord {
     }
 }
 
-/// Get all play sessions for a WAD.
+/// Get all play sessions for a WAD (excludes short non-play sessions).
 pub fn get_sessions(conn: &Connection, wad_id: i64) -> Result<Vec<SessionRecord>> {
     let mut stmt = conn.prepare(
-        "SELECT * FROM sessions WHERE wad_id = ? ORDER BY started_at DESC",
+        "SELECT * FROM sessions WHERE wad_id = ? \
+         AND COALESCE(duration_seconds, 0) >= ? \
+         ORDER BY started_at DESC",
     )?;
     let rows = stmt
-        .query_map([wad_id], SessionRecord::from_row)?
+        .query_map(rusqlite::params![wad_id, MIN_SESSION_SECONDS], SessionRecord::from_row)?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     Ok(rows)
 }
@@ -136,8 +142,9 @@ pub fn get_sessions(conn: &Connection, wad_id: i64) -> Result<Vec<SessionRecord>
 /// Get total playtime in seconds for a WAD.
 pub fn get_total_playtime(conn: &Connection, wad_id: i64) -> Result<i64> {
     let total: i64 = conn.query_row(
-        "SELECT COALESCE(SUM(duration_seconds), 0) FROM sessions WHERE wad_id = ?",
-        [wad_id],
+        "SELECT COALESCE(SUM(duration_seconds), 0) FROM sessions \
+         WHERE wad_id = ? AND COALESCE(duration_seconds, 0) >= ?",
+        rusqlite::params![wad_id, MIN_SESSION_SECONDS],
         |row| row.get(0),
     )?;
     Ok(total)
@@ -155,8 +162,11 @@ pub fn get_total_playtime_batch(
     let result = batch_query_i64(
         conn,
         wad_ids,
-        "SELECT wad_id, COALESCE(SUM(duration_seconds), 0) as total \
-         FROM sessions WHERE wad_id IN ({placeholders}) GROUP BY wad_id",
+        &format!(
+            "SELECT wad_id, COALESCE(SUM(duration_seconds), 0) as total \
+             FROM sessions WHERE wad_id IN ({{placeholders}}) \
+             AND COALESCE(duration_seconds, 0) >= {MIN_SESSION_SECONDS} GROUP BY wad_id"
+        ),
         "total",
     )?;
     Ok(wad_ids.iter().map(|&id| (id, *result.get(&id).unwrap_or(&0))).collect())
@@ -166,8 +176,10 @@ pub fn get_total_playtime_batch(
 pub fn get_last_played(conn: &Connection, wad_id: i64) -> Result<Option<String>> {
     let result: Option<String> = conn
         .query_row(
-            "SELECT started_at FROM sessions WHERE wad_id = ? ORDER BY started_at DESC LIMIT 1",
-            [wad_id],
+            "SELECT started_at FROM sessions WHERE wad_id = ? \
+             AND COALESCE(duration_seconds, 0) >= ? \
+             ORDER BY started_at DESC LIMIT 1",
+            rusqlite::params![wad_id, MIN_SESSION_SECONDS],
             |row| row.get(0),
         )
         .ok();
@@ -182,21 +194,25 @@ pub fn get_last_played_batch(
     batch_query_string(
         conn,
         wad_ids,
-        "SELECT wad_id, MAX(started_at) as last_played \
-         FROM sessions WHERE wad_id IN ({placeholders}) GROUP BY wad_id",
+        &format!(
+            "SELECT wad_id, MAX(started_at) as last_played \
+             FROM sessions WHERE wad_id IN ({{placeholders}}) \
+             AND COALESCE(duration_seconds, 0) >= {MIN_SESSION_SECONDS} GROUP BY wad_id"
+        ),
         "last_played",
     )
 }
 
 /// Get the most recently played WAD across the entire library.
 pub fn get_most_recently_played(conn: &Connection) -> Result<Option<WadRecord>> {
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare(&format!(
         "SELECT wads.* FROM wads \
          JOIN sessions ON sessions.wad_id = wads.id \
          WHERE wads.deleted_at IS NULL \
+         AND COALESCE(sessions.duration_seconds, 0) >= {MIN_SESSION_SECONDS} \
          ORDER BY sessions.started_at DESC \
-         LIMIT 1",
-    )?;
+         LIMIT 1"
+    ))?;
     match stmt.query_row([], WadRecord::from_row) {
         Ok(mut wad) => {
             attach_tags(conn, &mut wad)?;
@@ -215,8 +231,11 @@ pub fn get_session_count_batch(
     batch_query_i64(
         conn,
         wad_ids,
-        "SELECT wad_id, COUNT(*) as count \
-         FROM sessions WHERE wad_id IN ({placeholders}) GROUP BY wad_id",
+        &format!(
+            "SELECT wad_id, COUNT(*) as count \
+             FROM sessions WHERE wad_id IN ({{placeholders}}) \
+             AND COALESCE(duration_seconds, 0) >= {MIN_SESSION_SECONDS} GROUP BY wad_id"
+        ),
         "count",
     )
 }
@@ -254,7 +273,9 @@ pub fn get_wad_stats_batch(
                      COALESCE(SUM(duration_seconds), 0) as playtime, \
                      MAX(started_at) as last_played, \
                      COUNT(*) as session_count \
-                 FROM sessions WHERE wad_id IN ({placeholders}) GROUP BY wad_id"
+                 FROM sessions WHERE wad_id IN ({placeholders}) \
+                 AND COALESCE(duration_seconds, 0) >= {MIN_SESSION_SECONDS} \
+                 GROUP BY wad_id"
             );
             let mut stmt = conn.prepare(&sql)?;
             let params: Vec<&dyn rusqlite::types::ToSql> =
@@ -313,13 +334,15 @@ pub fn get_wad_stats_batch(
 /// Get deletion-relevant stats for a single WAD.
 pub fn get_wad_stats(conn: &Connection, wad_id: i64) -> Result<(i64, i64)> {
     let session_count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM sessions WHERE wad_id = ?",
-        [wad_id],
+        "SELECT COUNT(*) FROM sessions WHERE wad_id = ? \
+         AND COALESCE(duration_seconds, 0) >= ?",
+        rusqlite::params![wad_id, MIN_SESSION_SECONDS],
         |row| row.get(0),
     )?;
     let total_playtime: i64 = conn.query_row(
-        "SELECT COALESCE(SUM(duration_seconds), 0) FROM sessions WHERE wad_id = ?",
-        [wad_id],
+        "SELECT COALESCE(SUM(duration_seconds), 0) FROM sessions \
+         WHERE wad_id = ? AND COALESCE(duration_seconds, 0) >= ?",
+        rusqlite::params![wad_id, MIN_SESSION_SECONDS],
         |row| row.get(0),
     )?;
     Ok((session_count, total_playtime))
@@ -632,20 +655,22 @@ fn get_library_stats(conn: &Connection) -> Result<LibraryOverview> {
     )?;
 
     let total_sessions: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM sessions",
-        [],
+        "SELECT COUNT(*) FROM sessions WHERE COALESCE(duration_seconds, 0) >= ?",
+        [MIN_SESSION_SECONDS],
         |row| row.get(0),
     )?;
 
     let total_playtime: i64 = conn.query_row(
-        "SELECT COALESCE(SUM(duration_seconds), 0) FROM sessions",
-        [],
+        "SELECT COALESCE(SUM(duration_seconds), 0) FROM sessions \
+         WHERE COALESCE(duration_seconds, 0) >= ?",
+        [MIN_SESSION_SECONDS],
         |row| row.get(0),
     )?;
 
     let wads_with_sessions: i64 = conn.query_row(
-        "SELECT COUNT(DISTINCT wad_id) FROM sessions",
-        [],
+        "SELECT COUNT(DISTINCT wad_id) FROM sessions \
+         WHERE COALESCE(duration_seconds, 0) >= ?",
+        [MIN_SESSION_SECONDS],
         |row| row.get(0),
     )?;
 
@@ -680,6 +705,7 @@ pub fn get_wads_played_by_period(
              COUNT(*) as session_count, \
              COALESCE(SUM(duration_seconds), 0) as total_playtime \
          FROM sessions \
+         WHERE COALESCE(duration_seconds, 0) >= {MIN_SESSION_SECONDS} \
          GROUP BY strftime({strftime}, started_at) \
          ORDER BY period DESC"
     );
@@ -703,16 +729,18 @@ pub fn get_wads_played_by_period(
 /// Returns (played_wads, finished_wads, completion_rate, total_completions).
 fn get_completion_rate(conn: &Connection) -> Result<(i64, i64, f64, i64)> {
     let played_wads: i64 = conn.query_row(
-        "SELECT COUNT(DISTINCT wad_id) FROM sessions",
-        [],
+        "SELECT COUNT(DISTINCT wad_id) FROM sessions \
+         WHERE COALESCE(duration_seconds, 0) >= ?",
+        [MIN_SESSION_SECONDS],
         |row| row.get(0),
     )?;
 
     let finished_wads: i64 = conn.query_row(
         "SELECT COUNT(DISTINCT wads.id) FROM wads \
          JOIN sessions ON sessions.wad_id = wads.id \
-         WHERE wads.status = 'finished' AND wads.deleted_at IS NULL",
-        [],
+         WHERE wads.status = 'finished' AND wads.deleted_at IS NULL \
+         AND COALESCE(sessions.duration_seconds, 0) >= ?",
+        [MIN_SESSION_SECONDS],
         |row| row.get(0),
     )?;
 
@@ -763,11 +791,12 @@ mod tests {
 
         end_session(&conn, session_id, Some("Test notes"), None).unwrap();
 
-        let sessions = get_sessions(&conn, wad_id).unwrap();
-        assert_eq!(sessions.len(), 1);
-        assert_eq!(sessions[0].sourceport.as_deref(), Some("dsda-doom"));
-        assert_eq!(sessions[0].notes.as_deref(), Some("Test notes"));
-        assert!(sessions[0].duration_seconds.is_some());
+        // Query directly to test session mechanics (get_sessions filters short sessions)
+        let mut stmt = conn.prepare("SELECT * FROM sessions WHERE id = ?").unwrap();
+        let session = stmt.query_row([session_id], SessionRecord::from_row).unwrap();
+        assert_eq!(session.sourceport.as_deref(), Some("dsda-doom"));
+        assert_eq!(session.notes.as_deref(), Some("Test notes"));
+        assert!(session.duration_seconds.is_some());
     }
 
     #[test]
@@ -795,16 +824,16 @@ mod tests {
         let id2 = add_test_wad(&conn);
 
         conn.execute(
-            "INSERT INTO sessions (wad_id, started_at, duration_seconds) VALUES (?1, '2024-01-01', 100)",
+            "INSERT INTO sessions (wad_id, started_at, duration_seconds) VALUES (?1, '2024-01-01', 1000)",
             [id1],
         ).unwrap();
         conn.execute(
-            "INSERT INTO sessions (wad_id, started_at, duration_seconds) VALUES (?1, '2024-01-02', 200)",
+            "INSERT INTO sessions (wad_id, started_at, duration_seconds) VALUES (?1, '2024-01-02', 2000)",
             [id1],
         ).unwrap();
 
         let batch = get_total_playtime_batch(&conn, &[id1, id2]).unwrap();
-        assert_eq!(batch[&id1], 300);
+        assert_eq!(batch[&id1], 3000);
         assert_eq!(batch[&id2], 0);
     }
 
@@ -856,9 +885,10 @@ mod tests {
 
         update_session_stats(&conn, session_id, Some("{\"before\": true}"), Some("{\"after\": true}")).unwrap();
 
-        let sessions = get_sessions(&conn, wad_id).unwrap();
-        assert_eq!(sessions[0].stats_before.as_deref(), Some("{\"before\": true}"));
-        assert_eq!(sessions[0].stats_after.as_deref(), Some("{\"after\": true}"));
+        let mut stmt = conn.prepare("SELECT * FROM sessions WHERE id = ?").unwrap();
+        let session = stmt.query_row([session_id], SessionRecord::from_row).unwrap();
+        assert_eq!(session.stats_before.as_deref(), Some("{\"before\": true}"));
+        assert_eq!(session.stats_after.as_deref(), Some("{\"after\": true}"));
     }
 
     #[test]
@@ -869,8 +899,9 @@ mod tests {
 
         update_session_demo(&conn, session_id, "/path/to/demo.lmp").unwrap();
 
-        let sessions = get_sessions(&conn, wad_id).unwrap();
-        assert_eq!(sessions[0].demo_file.as_deref(), Some("/path/to/demo.lmp"));
+        let mut stmt = conn.prepare("SELECT * FROM sessions WHERE id = ?").unwrap();
+        let session = stmt.query_row([session_id], SessionRecord::from_row).unwrap();
+        assert_eq!(session.demo_file.as_deref(), Some("/path/to/demo.lmp"));
     }
 
     #[test]
@@ -894,13 +925,13 @@ mod tests {
         let id2 = add_test_wad(&conn);
 
         conn.execute(
-            "INSERT INTO sessions (wad_id, started_at, duration_seconds) VALUES (?1, '2024-01-01', 100)",
+            "INSERT INTO sessions (wad_id, started_at, duration_seconds) VALUES (?1, '2024-01-01', 1000)",
             [id1],
         ).unwrap();
         add_wad_completion(&conn, id1, None, None, None).unwrap();
 
         let batch = get_wad_stats_batch(&conn, &[id1, id2]).unwrap();
-        assert_eq!(batch[&id1].playtime, 100);
+        assert_eq!(batch[&id1].playtime, 1000);
         assert_eq!(batch[&id1].session_count, 1);
         assert_eq!(batch[&id1].times_beaten, 1);
         assert!(batch[&id1].last_played.is_some());
@@ -962,14 +993,14 @@ mod tests {
         let id = add_test_wad(&conn);
 
         conn.execute(
-            "INSERT INTO sessions (wad_id, started_at, duration_seconds) VALUES (?1, '2024-01-01', 100)",
+            "INSERT INTO sessions (wad_id, started_at, duration_seconds) VALUES (?1, '2024-01-01', 1000)",
             [id],
         ).unwrap();
 
         let snapshot = get_stats_snapshot(&conn, "month").unwrap();
         assert_eq!(snapshot.total_wads, 1);
         assert_eq!(snapshot.total_sessions, 1);
-        assert_eq!(snapshot.total_playtime, 100);
+        assert_eq!(snapshot.total_playtime, 1000);
         assert_eq!(snapshot.wads_with_sessions, 1);
         assert_eq!(snapshot.played_wads, 1);
         assert!(!snapshot.activity.is_empty());
@@ -1001,11 +1032,11 @@ mod tests {
         .unwrap();
 
         conn.execute(
-            "INSERT INTO sessions (wad_id, started_at) VALUES (?1, '2024-01-01T00:00:00')",
+            "INSERT INTO sessions (wad_id, started_at, duration_seconds) VALUES (?1, '2024-01-01T00:00:00', 300)",
             [id1],
         ).unwrap();
         conn.execute(
-            "INSERT INTO sessions (wad_id, started_at) VALUES (?1, '2024-06-01T00:00:00')",
+            "INSERT INTO sessions (wad_id, started_at, duration_seconds) VALUES (?1, '2024-06-01T00:00:00', 600)",
             [id2],
         ).unwrap();
 
@@ -1035,7 +1066,8 @@ mod tests {
 
         end_session(&conn, session_id, None, Some(139)).unwrap();
 
-        let sessions = get_sessions(&conn, wad_id).unwrap();
-        assert_eq!(sessions[0].exit_code, Some(139));
+        let mut stmt = conn.prepare("SELECT * FROM sessions WHERE id = ?").unwrap();
+        let session = stmt.query_row([session_id], SessionRecord::from_row).unwrap();
+        assert_eq!(session.exit_code, Some(139));
     }
 }
