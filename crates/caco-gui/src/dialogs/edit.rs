@@ -907,9 +907,11 @@ impl EditDialogState {
         // Build WadUpdate
         let ps = PlayState::parse(&self.play_state).unwrap_or(PlayState::Unplayed);
         let intent = Intent::parse(&self.intent).unwrap_or(Intent::Inbox);
-        // Enforce constraint: Started+Dropped is invalid — auto-correct intent to Queued
-        let final_intent = if ps == PlayState::Started && intent == Intent::Dropped {
-            Intent::Queued
+        // Enforce constraint: Started+Dropped/Queued is invalid — auto-correct
+        let final_intent = if ps == PlayState::Started
+            && matches!(intent, Intent::Dropped | Intent::Queued)
+        {
+            Intent::Shelved
         } else {
             intent
         };

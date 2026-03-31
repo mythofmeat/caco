@@ -38,11 +38,11 @@ pub fn check_completion(analysis: &WadAnalysis, stats: &WadStats) -> CompletionV
         return CompletionVerdict::NoAnalysis;
     }
 
-    // Build the set of required map lumps
+    // Build the set of required map lumps (reachable, non-secret, non-dead-end)
     let mut required_lumps: Vec<String> = analysis
         .maps
         .iter()
-        .filter(|m| !m.is_secret && !m.is_dead_end && !m.is_terminal)
+        .filter(|m| m.reachable && !m.is_secret && !m.is_dead_end && !m.is_terminal)
         .map(|m| m.lump.clone())
         .collect();
 
@@ -175,6 +175,7 @@ mod tests {
                     is_secret,
                     is_dead_end: is_dead,
                     is_terminal: is_term,
+                    reachable: true,
                 }
             })
             .collect();
@@ -399,6 +400,70 @@ mod tests {
         // Multiple exits should still count
         let stats = make_stats(&[("MAP01", 5), ("MAP02", 3)]);
         assert_eq!(check_completion(&analysis, &stats), CompletionVerdict::Complete);
+    }
+
+    /// Integration test: check completion for a real WAD from the library.
+    /// Run with: cargo test -p caco-core check_real_wad -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn check_real_wad() {
+        use crate::utils::load_wad_data;
+        use std::path::PathBuf;
+
+        let db_path = dirs::data_dir().unwrap().join("caco/library.db");
+        if !db_path.exists() {
+            eprintln!("No library.db found, skipping");
+            return;
+        }
+        let conn = crate::db::open_connection(&db_path).unwrap();
+
+        // Check all playing WADs
+        let wads = crate::db::search_wads(&conn, Some("play:started"), None, false, false, 100)
+            .unwrap();
+        for wad in &wads {
+            let cached = match wad.cached_path.as_deref() {
+                Some(p) if std::path::Path::new(p).exists() => p,
+                _ => {
+                    eprintln!("[{}] {} — no cached file", wad.id, wad.title);
+                    continue;
+                }
+            };
+            let wad_data = match load_wad_data(&PathBuf::from(cached)) {
+                Some(d) => d,
+                None => {
+                    eprintln!("[{}] {} — could not load WAD data", wad.id, wad.title);
+                    continue;
+                }
+            };
+            let analysis = match crate::wad_analysis::analyze_wad(&wad_data) {
+                Some(a) => a,
+                None => {
+                    eprintln!("[{}] {} — analysis returned None", wad.id, wad.title);
+                    continue;
+                }
+            };
+
+            eprintln!("\n[{}] {}", wad.id, wad.title);
+            let unreachable: Vec<&str> = analysis.maps.iter()
+                .filter(|m| !m.reachable).map(|m| m.lump.as_str()).collect();
+            eprintln!("  total={} required={} secret={:?} terminal={:?} unreachable={:?}",
+                analysis.total_maps, analysis.required_maps,
+                analysis.secret_maps, analysis.terminal_map, unreachable);
+            for m in &analysis.maps {
+                let r = if m.reachable { "" } else { " UNREACHABLE" };
+                eprintln!("  {:8} exit={} secret_exit={} secret={} dead_end={} terminal={}{}",
+                    m.lump, m.has_normal_exit, m.has_secret_exit,
+                    m.is_secret, m.is_dead_end, m.is_terminal, r);
+            }
+
+            if let Some(ref ss) = wad.stats_snapshot {
+                let stats: crate::wad_stats::WadStats = serde_json::from_str(ss).unwrap();
+                let verdict = check_completion(&analysis, &stats);
+                eprintln!("  Verdict: {:?}", verdict);
+            } else {
+                eprintln!("  No stats snapshot");
+            }
+        }
     }
 
     #[test]

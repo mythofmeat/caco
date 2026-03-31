@@ -9,7 +9,7 @@ use rusqlite::Connection;
 use caco_core::config;
 use caco_core::db;
 use caco_core::db::models::WadRecord;
-use caco_core::player::{self, PlayOptions, RecordOption, format_duration};
+use caco_core::player::{self, AutoCompleteResult, PlayOptions, RecordOption, format_duration};
 use caco_core::wad_stats;
 use caco_sources::idgames::IdgamesClient;
 use crate::resolve;
@@ -109,6 +109,17 @@ pub fn run(conn: &Connection, args: &PlayArgs) -> Result<(), String> {
         && let Some(display) = wad_stats::get_progress_display(refreshed.stats_snapshot.as_deref())
     {
         eprintln!("Progress: {display}");
+    }
+
+    // Report auto-completion detection
+    match result.auto_complete {
+        AutoCompleteResult::Completed => {
+            eprintln!("All maps completed! Marked '{}' as finished.", wad.title);
+        }
+        AutoCompleteResult::Incomplete { exited, required } => {
+            eprintln!("Maps: {exited}/{required} required maps exited.");
+        }
+        AutoCompleteResult::Unknown => {}
     }
 
     Ok(())

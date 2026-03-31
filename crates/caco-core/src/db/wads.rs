@@ -18,7 +18,7 @@ pub fn sync_status_to_axes(status: Status) -> (PlayState, Intent) {
     match status {
         Status::ToPlay => (PlayState::Unplayed, Intent::Queued),
         Status::Backlog => (PlayState::Unplayed, Intent::Shelved),
-        Status::Playing => (PlayState::Started, Intent::Queued),
+        Status::Playing => (PlayState::Started, Intent::Shelved),
         Status::Finished => (PlayState::Completed, Intent::Shelved),
         Status::Abandoned => (PlayState::Unplayed, Intent::Dropped),
         Status::AwaitingUpdate => (PlayState::Unplayed, Intent::Shelved),
@@ -135,9 +135,9 @@ impl NewWad {
     }
 
     pub fn play_state(mut self, v: PlayState) -> Self {
-        // Started + Dropped is invalid; un-drop to Queued.
-        if v == PlayState::Started && self.intent == Intent::Dropped {
-            self.intent = Intent::Queued;
+        // Started + Dropped/Queued is invalid; shelve instead.
+        if v == PlayState::Started && matches!(self.intent, Intent::Dropped | Intent::Queued) {
+            self.intent = Intent::Shelved;
         }
         self.play_state = v;
         self.status = sync_axes_to_status(v, self.intent);
@@ -146,7 +146,10 @@ impl NewWad {
 
     pub fn intent(mut self, v: Intent) -> Self {
         // Dropped + Started is invalid; reset to Unplayed.
-        if v == Intent::Dropped && self.play_state == PlayState::Started {
+        // Queued + Started is invalid (mutually exclusive); reset to Unplayed.
+        if matches!(v, Intent::Dropped | Intent::Queued)
+            && self.play_state == PlayState::Started
+        {
             self.play_state = PlayState::Unplayed;
         }
         self.intent = v;
@@ -219,10 +222,13 @@ impl WadUpdate {
     }
 
     /// Set the play state. Also syncs the old status column.
-    /// If setting to Started while intent is Dropped, un-drops to Queued.
+    /// If setting to Started while intent is Dropped or Queued, shelves it
+    /// (playing is mutually exclusive with queued; playing un-abandons).
     pub fn set_play_state(self, ps: PlayState, current_intent: Intent) -> crate::Result<Self> {
-        let effective_intent = if ps == PlayState::Started && current_intent == Intent::Dropped {
-            Intent::Queued
+        let effective_intent = if ps == PlayState::Started
+            && matches!(current_intent, Intent::Dropped | Intent::Queued)
+        {
+            Intent::Shelved
         } else {
             current_intent
         };
@@ -236,9 +242,12 @@ impl WadUpdate {
     }
 
     /// Set the intent. Also syncs the old status column.
-    /// If setting to Dropped while play_state is Started, resets play_state to Unplayed.
+    /// If setting to Dropped or Queued while play_state is Started, resets play_state to Unplayed
+    /// (queued and playing are mutually exclusive; dropping un-starts).
     pub fn set_intent(self, intent: Intent, current_play_state: PlayState) -> crate::Result<Self> {
-        let effective_ps = if intent == Intent::Dropped && current_play_state == PlayState::Started {
+        let effective_ps = if matches!(intent, Intent::Dropped | Intent::Queued)
+            && current_play_state == PlayState::Started
+        {
             PlayState::Unplayed
         } else {
             current_play_state
@@ -782,7 +791,7 @@ mod tests {
 
         let wad = get_wad(&conn, id, false).unwrap().unwrap();
         assert_eq!(wad.play_state, "started");
-        assert_eq!(wad.intent, "queued");
+        assert_eq!(wad.intent, "shelved"); // playing and queued are mutually exclusive
         assert_eq!(wad.status, "playing");
     }
 
@@ -811,7 +820,7 @@ mod tests {
         let wad = get_wad(&conn, id, false).unwrap().unwrap();
         assert_eq!(wad.status, "playing");
         assert_eq!(wad.play_state, "started");
-        assert_eq!(wad.intent, "queued");
+        assert_eq!(wad.intent, "shelved"); // playing and queued are mutually exclusive
     }
 
     #[test]
@@ -914,7 +923,7 @@ mod tests {
     fn test_sync_status_to_axes_all_variants() {
         assert_eq!(sync_status_to_axes(Status::ToPlay), (PlayState::Unplayed, Intent::Queued));
         assert_eq!(sync_status_to_axes(Status::Backlog), (PlayState::Unplayed, Intent::Shelved));
-        assert_eq!(sync_status_to_axes(Status::Playing), (PlayState::Started, Intent::Queued));
+        assert_eq!(sync_status_to_axes(Status::Playing), (PlayState::Started, Intent::Shelved));
         assert_eq!(sync_status_to_axes(Status::Finished), (PlayState::Completed, Intent::Shelved));
         assert_eq!(sync_status_to_axes(Status::Abandoned), (PlayState::Unplayed, Intent::Dropped));
         assert_eq!(sync_status_to_axes(Status::AwaitingUpdate), (PlayState::Unplayed, Intent::Shelved));
@@ -944,7 +953,7 @@ mod tests {
         let wad = get_wad(&conn, id, false).unwrap().unwrap();
         assert_eq!(wad.intent, "dropped");
 
-        // Now try to set play_state to started — should un-drop to queued
+        // Now try to set play_state to started — should shelve (un-drop)
         let update = WadUpdate::new()
             .set_play_state(PlayState::Started, Intent::Dropped)
             .unwrap();
@@ -952,7 +961,7 @@ mod tests {
 
         let wad = get_wad(&conn, id, false).unwrap().unwrap();
         assert_eq!(wad.play_state, "started");
-        assert_eq!(wad.intent, "queued");
+        assert_eq!(wad.intent, "shelved");
         assert_eq!(wad.status, "playing");
     }
 
@@ -985,12 +994,12 @@ mod tests {
     fn test_new_wad_started_dropped_prevented() {
         let conn = setup();
 
-        // Setting play_state to started on a dropped WAD should un-drop
+        // Setting play_state to started on a dropped WAD should shelve
         let wad = NewWad::new("Test", SourceType::Local)
             .intent(Intent::Dropped)
             .play_state(PlayState::Started);
         assert_eq!(wad.play_state, PlayState::Started);
-        assert_eq!(wad.intent, Intent::Queued);
+        assert_eq!(wad.intent, Intent::Shelved);
         assert_eq!(wad.status, Status::Playing);
 
         // Setting intent to dropped on a started WAD should un-start
@@ -1000,6 +1009,22 @@ mod tests {
         assert_eq!(wad.play_state, PlayState::Unplayed);
         assert_eq!(wad.intent, Intent::Dropped);
         assert_eq!(wad.status, Status::Abandoned);
+
+        // Setting play_state to started on a queued WAD should shelve (mutually exclusive)
+        let wad = NewWad::new("Test", SourceType::Local)
+            .intent(Intent::Queued)
+            .play_state(PlayState::Started);
+        assert_eq!(wad.play_state, PlayState::Started);
+        assert_eq!(wad.intent, Intent::Shelved);
+        assert_eq!(wad.status, Status::Playing);
+
+        // Setting intent to queued on a started WAD should un-start
+        let wad = NewWad::new("Test", SourceType::Local)
+            .play_state(PlayState::Started)
+            .intent(Intent::Queued);
+        assert_eq!(wad.play_state, PlayState::Unplayed);
+        assert_eq!(wad.intent, Intent::Queued);
+        assert_eq!(wad.status, Status::ToPlay);
     }
 
     #[test]

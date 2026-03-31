@@ -1,3 +1,4 @@
+pub mod analysis;
 pub mod collections;
 pub mod companions;
 pub mod connection;
@@ -11,6 +12,7 @@ pub mod sessions;
 pub mod wads;
 
 // Re-export commonly used items
+pub use analysis::{get_analysis, save_analysis};
 pub use companions::{
     add_companion, find_companion_by_md5, get_all_companions, get_companions_batch,
     get_companions_for_wad, get_orphaned_companions, is_orphan, link_companion_to_wad,

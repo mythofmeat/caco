@@ -59,6 +59,14 @@ pub struct MapInfo {
     pub is_dead_end: bool,
     /// Map is identified as the end-of-wad map.
     pub is_terminal: bool,
+    /// Map is reachable through normal gameplay (not just via warp).
+    /// Maps beyond the vanilla flow (e.g. MAP33+ in Doom 2) are unreachable.
+    #[serde(default = "default_true")]
+    pub reachable: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Complete WAD analysis result.
@@ -134,6 +142,7 @@ pub fn analyze_wad(wad_data: &[u8]) -> Option<WadAnalysis> {
             is_secret: false,
             is_dead_end: !has_normal && !has_secret,
             is_terminal: false,
+            reachable: true, // default, refined below
         });
     }
 
@@ -155,6 +164,12 @@ pub fn analyze_wad(wad_data: &[u8]) -> Option<WadAnalysis> {
         }
     }
 
+    // Compute reachability: mark maps that can't be reached through normal play
+    let reachable_set = compute_reachability(&all_map_lumps, is_doom1, &umapinfo, &map_infos);
+    for info in &mut map_infos {
+        info.reachable = reachable_set.contains(&info.lump);
+    }
+
     // Build result vectors
     let secret_maps: Vec<String> = map_infos
         .iter()
@@ -171,13 +186,20 @@ pub fn analyze_wad(wad_data: &[u8]) -> Option<WadAnalysis> {
         .collect();
 
     let total_maps = map_infos.len();
-    // Required = total - secret - dead_end - terminal (if terminal has no exits)
+    // Required = reachable, non-secret, non-dead-end, non-terminal-dead-end.
+    // Unreachable count excludes maps already subtracted by other categories
+    // (secret, dead-end, terminal dead-end) to avoid double-counting.
     let terminal_excluded = map_infos
         .iter()
         .any(|m| m.is_terminal && m.is_dead_end);
+    let unreachable_count = map_infos
+        .iter()
+        .filter(|m| !m.reachable && !m.is_secret && !m.is_dead_end)
+        .count();
     let required_maps = total_maps
         - secret_maps.len()
         - dead_end_maps.len()
+        - unreachable_count
         - if terminal_excluded { 1 } else { 0 };
 
     Some(WadAnalysis {
@@ -606,6 +628,196 @@ fn map_sort_key(name: &str) -> (u32, u32) {
         return (ep, map);
     }
     (999, 999) // Unknown format sorts last
+}
+
+// ---------------------------------------------------------------------------
+// Reachability analysis
+// ---------------------------------------------------------------------------
+
+/// Compute the set of maps reachable from the start through normal gameplay.
+///
+/// For vanilla WADs (no UMAPINFO), the map flow is hardcoded by the engine:
+/// - Doom 2 (MAPxx): MAP01→MAP02→...→MAP30; MAP15 secret→MAP31; MAP31 secret→MAP32; MAP32→MAP16
+/// - Doom 1 (ExMy): E1M1→...→E1M8; ExMy secret→ExM9; ExM9→ExM(y+1) where y was the source
+///
+/// For UMAPINFO WADs, reachability follows the explicit `next`/`nextsecret` chains.
+fn compute_reachability(
+    all_maps: &[String],
+    is_doom1: bool,
+    umapinfo: &Option<HashMap<String, UmapinfoEntry>>,
+    map_infos: &[MapInfo],
+) -> HashSet<String> {
+    let map_set: HashSet<&str> = all_maps.iter().map(|s| s.as_str()).collect();
+
+    if let Some(umi) = umapinfo {
+        return compute_reachability_umapinfo(all_maps, umi, map_infos);
+    }
+
+    if is_doom1 {
+        compute_reachability_doom1(&map_set, map_infos)
+    } else {
+        compute_reachability_doom2(&map_set, map_infos)
+    }
+}
+
+/// Vanilla Doom 2 reachability: MAP01→MAP02→...→MAP30, secret exits to MAP31/32.
+fn compute_reachability_doom2(
+    map_set: &HashSet<&str>,
+    map_infos: &[MapInfo],
+) -> HashSet<String> {
+    let info_map: HashMap<&str, &MapInfo> = map_infos.iter().map(|m| (m.lump.as_str(), m)).collect();
+    let mut reachable = HashSet::new();
+
+    // Linear progression MAP01 → MAP30
+    for num in 1..=30 {
+        let name = format!("MAP{num:02}");
+        if map_set.contains(name.as_str()) {
+            reachable.insert(name);
+        }
+    }
+
+    // Secret maps: MAP15 secret exit → MAP31, MAP31 secret exit → MAP32
+    if let Some(m15) = info_map.get("MAP15")
+        && m15.has_secret_exit
+        && map_set.contains("MAP31")
+    {
+        reachable.insert("MAP31".to_string());
+    }
+    if let Some(m31) = info_map.get("MAP31")
+        && m31.has_secret_exit
+        && map_set.contains("MAP32")
+    {
+        reachable.insert("MAP32".to_string());
+    }
+
+    reachable
+}
+
+/// Vanilla Doom 1 reachability: ExM1→...→ExM8, secret exit → ExM9.
+fn compute_reachability_doom1(
+    map_set: &HashSet<&str>,
+    map_infos: &[MapInfo],
+) -> HashSet<String> {
+    let info_map: HashMap<&str, &MapInfo> = map_infos.iter().map(|m| (m.lump.as_str(), m)).collect();
+    let mut reachable = HashSet::new();
+
+    // Find all episodes present
+    let episodes: HashSet<u32> = map_infos
+        .iter()
+        .filter_map(|m| DOOM1_MAP_RE.captures(&m.lump))
+        .filter_map(|caps| caps[1].parse::<u32>().ok())
+        .collect();
+
+    for ep in &episodes {
+        // Linear progression ExM1 → ExM8
+        for map in 1..=8 {
+            let name = format!("E{ep}M{map}");
+            if map_set.contains(name.as_str()) {
+                reachable.insert(name);
+            }
+        }
+        // Secret map: any map in the episode with a secret exit → ExM9
+        let has_secret = (1..=8).any(|m| {
+            let name = format!("E{ep}M{m}");
+            info_map.get(name.as_str()).is_some_and(|i| i.has_secret_exit)
+        });
+        if has_secret {
+            let secret = format!("E{ep}M9");
+            if map_set.contains(secret.as_str()) {
+                reachable.insert(secret);
+            }
+        }
+    }
+
+    reachable
+}
+
+/// UMAPINFO reachability: follow `next`/`nextsecret` chains from the first map.
+///
+/// Many WADs only define UMAPINFO for a few maps (e.g. to set endgame on the
+/// final map). Maps without a UMAPINFO entry, or with an entry but no `next`
+/// field, fall back to vanilla map progression conventions.
+fn compute_reachability_umapinfo(
+    all_maps: &[String],
+    umapinfo: &HashMap<String, UmapinfoEntry>,
+    map_infos: &[MapInfo],
+) -> HashSet<String> {
+    let map_set: HashSet<&str> = all_maps.iter().map(|s| s.as_str()).collect();
+    let info_map: HashMap<&str, &MapInfo> = map_infos.iter().map(|m| (m.lump.as_str(), m)).collect();
+    let mut reachable = HashSet::new();
+    let mut queue = std::collections::VecDeque::new();
+
+    // Start from the first map
+    if let Some(first) = all_maps.first() {
+        queue.push_back(first.clone());
+    }
+
+    while let Some(current) = queue.pop_front() {
+        if !map_set.contains(current.as_str()) || reachable.contains(&current) {
+            continue;
+        }
+        reachable.insert(current.clone());
+
+        let entry = umapinfo.get(&current);
+
+        // Check for endgame — this map terminates the chain
+        if entry.is_some_and(|e| e.has_endgame) {
+            continue;
+        }
+
+        // Follow explicit UMAPINFO next if defined
+        let mut has_explicit_next = false;
+        if let Some(e) = entry {
+            if let Some(ref next) = e.next
+                && next != &current
+            {
+                queue.push_back(next.clone());
+                has_explicit_next = true;
+            }
+            if let Some(ref ns) = e.nextsecret
+                && info_map.get(current.as_str()).is_some_and(|m| m.has_secret_exit)
+            {
+                queue.push_back(ns.clone());
+            }
+        }
+
+        // Fall back to vanilla conventions when no explicit next is defined
+        if !has_explicit_next {
+            if let Some(caps) = DOOM2_MAP_RE.captures(&current)
+                && let Ok(num) = caps[1].parse::<u32>()
+                && num < 30
+            {
+                let next = format!("MAP{:02}", num + 1);
+                queue.push_back(next);
+            }
+            if let Some(caps) = DOOM1_MAP_RE.captures(&current)
+                && let Ok(ep) = caps[1].parse::<u32>()
+                && let Ok(map) = caps[2].parse::<u32>()
+                && map < 8
+            {
+                let next = format!("E{ep}M{}", map + 1);
+                queue.push_back(next);
+            }
+        }
+
+        // Vanilla secret exits (always check, even for UMAPINFO maps,
+        // unless nextsecret is explicitly defined)
+        let has_nextsecret = entry.is_some_and(|e| e.nextsecret.is_some());
+        if !has_nextsecret {
+            if current == "MAP15"
+                && info_map.get("MAP15").is_some_and(|m| m.has_secret_exit)
+            {
+                queue.push_back("MAP31".to_string());
+            }
+            if current == "MAP31"
+                && info_map.get("MAP31").is_some_and(|m| m.has_secret_exit)
+            {
+                queue.push_back("MAP32".to_string());
+            }
+        }
+    }
+
+    reachable
 }
 
 // ---------------------------------------------------------------------------
@@ -1104,6 +1316,7 @@ MAP MAP01
                 is_secret: false,
                 is_dead_end: false,
                 is_terminal: false,
+                reachable: true,
             })
             .collect();
 
@@ -1135,6 +1348,7 @@ MAP MAP01
                 is_secret: false,
                 is_dead_end: false,
                 is_terminal: false,
+                reachable: true,
             })
             .collect();
 
@@ -1177,6 +1391,7 @@ MAP MAP01
                 is_secret: false,
                 is_dead_end: false,
                 is_terminal: false,
+                reachable: true,
             })
             .collect();
 
@@ -1196,6 +1411,7 @@ MAP MAP01
                 is_secret: m == "MAP31" || m == "MAP32",
                 is_dead_end: false,
                 is_terminal: false,
+                reachable: true,
             })
             .collect();
 
@@ -1218,6 +1434,7 @@ MAP MAP01
                 is_secret: m == "E3M9",
                 is_dead_end: false,
                 is_terminal: false,
+                reachable: true,
             })
             .collect();
 
@@ -1241,6 +1458,7 @@ MAP MAP01
                 is_secret: false,
                 is_dead_end: false,
                 is_terminal: false,
+                reachable: true,
             })
             .collect();
 

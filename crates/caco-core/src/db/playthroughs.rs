@@ -58,10 +58,14 @@ pub fn start_playthrough(conn: &Connection, wad_id: i64) -> Result<i64> {
     let pt_id = conn.last_insert_rowid();
 
     // Update WAD play_state to started + sync status.
-    // If intent was 'dropped', un-drop to 'queued' (playing un-abandons).
+    // Playing and queued are mutually exclusive: leave the queue when playing starts.
+    // Also un-drop if abandoned (playing un-abandons).
     conn.execute(
         "UPDATE wads SET play_state = 'started',
-                         intent = CASE intent WHEN 'dropped' THEN 'queued' ELSE intent END,
+                         intent = CASE intent
+                             WHEN 'dropped' THEN 'shelved'
+                             WHEN 'queued' THEN 'shelved'
+                             ELSE intent END,
                          status = 'playing',
                          updated_at = ?1
          WHERE id = ?2",

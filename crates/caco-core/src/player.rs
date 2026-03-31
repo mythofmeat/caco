@@ -14,11 +14,23 @@ use crate::iwad_detect;
 use crate::sourceports;
 use crate::wad_stats;
 
+/// Whether auto-completion detection triggered after play.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AutoCompleteResult {
+    /// All required maps have been exited — playthrough was auto-completed.
+    Completed,
+    /// Not all maps exited yet.
+    Incomplete { exited: usize, required: usize },
+    /// Could not determine (no analysis or no stats).
+    Unknown,
+}
+
 /// Result of a play session.
 #[derive(Debug, Clone)]
 pub struct PlayResult {
     pub duration: Option<i64>,
     pub exit_code: Option<i32>,
+    pub auto_complete: AutoCompleteResult,
 }
 
 impl PlayResult {
@@ -310,6 +322,9 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
         }
     }
 
+    // Auto-completion detection: check if all required maps have been beaten
+    let auto_complete = check_auto_completion(conn, wad_id, &wad_path, stats_after.as_deref());
+
     // Build result
     let sessions = db::get_sessions(conn, wad_id)?;
     let duration = sessions.first().and_then(|s| s.duration_seconds);
@@ -317,6 +332,7 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
     Ok(PlayResult {
         duration,
         exit_code: status.code(),
+        auto_complete,
     })
 }
 
@@ -388,6 +404,7 @@ pub fn play_iwad(
     Ok(PlayResult {
         duration: Some(duration),
         exit_code: status.code(),
+        auto_complete: AutoCompleteResult::Unknown,
     })
 }
 
@@ -519,6 +536,74 @@ fn auto_track_stats(conn: &Connection, wad_id: i64) -> Option<String> {
     Some(json_str)
 }
 
+/// Check if a WAD has been completed based on map exit stats vs WAD analysis.
+///
+/// On first play, analyzes the WAD file and caches the result. After each
+/// session, compares the analysis against cumulative stats to detect completion.
+/// If all required maps have been exited, auto-completes the active playthrough.
+fn check_auto_completion(
+    conn: &Connection,
+    wad_id: i64,
+    wad_path: &Path,
+    stats_json: Option<&str>,
+) -> AutoCompleteResult {
+    use crate::completion_detect::{self, CompletionVerdict};
+    use crate::wad_analysis;
+
+    // Only check WADs that are currently being played
+    let wad = match db::get_wad(conn, wad_id, false) {
+        Ok(Some(w)) if w.play_state == "started" => w,
+        _ => return AutoCompleteResult::Unknown,
+    };
+
+    // Get or create WAD analysis
+    let analysis = match db::get_analysis(conn, wad_id) {
+        Ok(Some(a)) => a,
+        Ok(None) => {
+            // First time: analyze the WAD file (handles ZIP-wrapped WADs)
+            let wad_data = match crate::utils::load_wad_data(wad_path) {
+                Some(d) => d,
+                None => return AutoCompleteResult::Unknown,
+            };
+            let analysis = match wad_analysis::analyze_wad(&wad_data) {
+                Some(a) => a,
+                None => return AutoCompleteResult::Unknown,
+            };
+            let _ = db::save_analysis(conn, wad_id, &analysis);
+            analysis
+        }
+        Err(_) => return AutoCompleteResult::Unknown,
+    };
+
+    // Get current stats (prefer fresh stats_json, fall back to DB)
+    let stats_str = stats_json
+        .map(|s| s.to_string())
+        .or(wad.stats_snapshot);
+    let stats_str = match stats_str {
+        Some(s) => s,
+        None => return AutoCompleteResult::Unknown,
+    };
+    let stats: wad_stats::WadStats = match serde_json::from_str(&stats_str) {
+        Ok(s) => s,
+        Err(_) => return AutoCompleteResult::Unknown,
+    };
+
+    // Run completion check
+    match completion_detect::check_completion(&analysis, &stats) {
+        CompletionVerdict::Complete => {
+            // Auto-complete the active playthrough
+            if let Ok(Some(pt)) = db::get_active_playthrough(conn, wad_id) {
+                let _ = db::complete_playthrough(conn, pt.id, Some(&stats_str), None);
+            }
+            AutoCompleteResult::Completed
+        }
+        CompletionVerdict::Incomplete { exited, required } => {
+            AutoCompleteResult::Incomplete { exited, required }
+        }
+        CompletionVerdict::NoAnalysis => AutoCompleteResult::Unknown,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -527,17 +612,20 @@ mod tests {
     fn test_play_result_crashed() {
         assert!(PlayResult {
             duration: Some(60),
-            exit_code: Some(1)
+            exit_code: Some(1),
+            auto_complete: AutoCompleteResult::Unknown,
         }
         .crashed());
         assert!(!PlayResult {
             duration: Some(60),
-            exit_code: Some(0)
+            exit_code: Some(0),
+            auto_complete: AutoCompleteResult::Unknown,
         }
         .crashed());
         assert!(!PlayResult {
             duration: Some(60),
-            exit_code: None
+            exit_code: None,
+            auto_complete: AutoCompleteResult::Unknown,
         }
         .crashed());
     }

@@ -302,6 +302,12 @@ impl eframe::App for CacoApp {
                                         "Sourceport crashed (exit code {})",
                                         pr.exit_code.unwrap_or(-1)
                                     )));
+                            } else if pr.auto_complete
+                                == caco_core::player::AutoCompleteResult::Completed
+                            {
+                                self.state.notification = Some(Notification::info(
+                                    "All maps completed! Marked as finished.".to_string(),
+                                ));
                             } else if let Some(dur) = pr.duration {
                                 self.state.notification = Some(Notification::info(format!(
                                     "Played for {}",
