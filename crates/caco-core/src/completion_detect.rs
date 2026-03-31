@@ -428,14 +428,24 @@ mod tests {
                     continue;
                 }
             };
-            let wad_data = match load_wad_data(&PathBuf::from(cached)) {
-                Some(d) => d,
-                None => {
-                    eprintln!("[{}] {} — could not load WAD data", wad.id, wad.title);
-                    continue;
-                }
+            let path = PathBuf::from(cached);
+            let is_pk3 = path.extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| e.eq_ignore_ascii_case("pk3"));
+
+            let analysis = if is_pk3 {
+                crate::wad_analysis::analyze_pk3(&path)
+            } else {
+                let wad_data = match load_wad_data(&path) {
+                    Some(d) => d,
+                    None => {
+                        eprintln!("[{}] {} — could not load WAD data", wad.id, wad.title);
+                        continue;
+                    }
+                };
+                crate::wad_analysis::analyze_wad(&wad_data)
             };
-            let analysis = match crate::wad_analysis::analyze_wad(&wad_data) {
+            let analysis = match analysis {
                 Some(a) => a,
                 None => {
                     eprintln!("[{}] {} — analysis returned None", wad.id, wad.title);

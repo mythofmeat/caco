@@ -560,12 +560,23 @@ fn check_auto_completion(
     let analysis = match db::get_analysis(conn, wad_id) {
         Ok(Some(a)) => a,
         Ok(None) => {
-            // First time: analyze the WAD file (handles ZIP-wrapped WADs)
-            let wad_data = match crate::utils::load_wad_data(wad_path) {
-                Some(d) => d,
-                None => return AutoCompleteResult::Unknown,
+            // First time: analyze the file (PK3 or WAD)
+            let is_pk3 = wad_path
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| e.eq_ignore_ascii_case("pk3"));
+
+            let analysis = if is_pk3 {
+                wad_analysis::analyze_pk3(wad_path)
+            } else {
+                let wad_data = match crate::utils::load_wad_data(wad_path) {
+                    Some(d) => d,
+                    None => return AutoCompleteResult::Unknown,
+                };
+                wad_analysis::analyze_wad(&wad_data)
             };
-            let analysis = match wad_analysis::analyze_wad(&wad_data) {
+
+            let analysis = match analysis {
                 Some(a) => a,
                 None => return AutoCompleteResult::Unknown,
             };

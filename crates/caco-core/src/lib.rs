@@ -1,6 +1,7 @@
 pub mod companion_service;
 pub mod completion_detect;
 pub mod complevel;
+pub mod mapinfo;
 pub mod complevel_detect;
 pub mod config;
 pub mod db;

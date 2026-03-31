@@ -17,7 +17,8 @@ use crate::utils::parse_wad_directory;
 // ---------------------------------------------------------------------------
 
 static DOOM1_MAP_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^E(\d)M(\d)$").unwrap());
-static DOOM2_MAP_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^MAP(\d\d)$").unwrap());
+static DOOM2_MAP_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^MAP([1-9]\d{2}|\d{2})$").unwrap());
 
 /// Lumps that belong to a map definition (appear after the map marker).
 const MAP_LUMPS: &[&str] = &[
@@ -211,6 +212,364 @@ pub fn analyze_wad(wad_data: &[u8]) -> Option<WadAnalysis> {
         terminal_map: terminal,
         has_umapinfo,
     })
+}
+
+// ---------------------------------------------------------------------------
+// PK3 analysis
+// ---------------------------------------------------------------------------
+
+/// Analyze a PK3 file (ZDoom ZIP archive) to enumerate maps and detect
+/// completion requirements.
+///
+/// PK3 files store maps as individual WADs under `maps/` or embedded in
+/// root-level WAD files. Map flow is defined by MAPINFO/ZMAPINFO lumps.
+pub fn analyze_pk3(pk3_path: &std::path::Path) -> Option<WadAnalysis> {
+    use std::io::Read;
+
+    let file = std::fs::File::open(pk3_path).ok()?;
+    let mut archive = zip::ZipArchive::new(file).ok()?;
+
+    // --- Step 1: Discover maps and analyze exits ---
+    let mut map_infos: Vec<MapInfo> = Vec::new();
+    let mut found_maps = false;
+
+    // Try maps/ directory first
+    let map_wad_names: Vec<String> = (0..archive.len())
+        .filter_map(|i| {
+            let entry = archive.by_index(i).ok()?;
+            let name = entry.name().to_string();
+            if name.to_lowercase().starts_with("maps/")
+                && name.to_lowercase().ends_with(".wad")
+            {
+                Some(name)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if !map_wad_names.is_empty() {
+        found_maps = true;
+        for entry_name in &map_wad_names {
+            let mut entry = archive.by_name(entry_name).ok()?;
+            let mut data = Vec::new();
+            entry.read_to_end(&mut data).ok()?;
+
+            // Map lump name from filename stem (e.g., "maps/MAP01.WAD" -> "MAP01")
+            let stem = std::path::Path::new(entry_name)
+                .file_stem()
+                .and_then(|s| s.to_str())?
+                .to_uppercase();
+
+            let (has_normal, has_secret) = analyze_map_wad_exits(&data);
+            map_infos.push(MapInfo {
+                lump: stem,
+                has_normal_exit: has_normal,
+                has_secret_exit: has_secret,
+                is_secret: false,
+                is_dead_end: !has_normal && !has_secret,
+                is_terminal: false,
+                reachable: true,
+            });
+        }
+    }
+
+    // Fallback: scan root-level WAD files for embedded maps
+    if !found_maps {
+        let root_wad_names: Vec<String> = (0..archive.len())
+            .filter_map(|i| {
+                let entry = archive.by_index(i).ok()?;
+                let name = entry.name().to_string();
+                if !name.contains('/')
+                    && name.to_lowercase().ends_with(".wad")
+                {
+                    Some(name)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        for entry_name in &root_wad_names {
+            let mut entry = archive.by_name(entry_name).ok()?;
+            let mut data = Vec::new();
+            entry.read_to_end(&mut data).ok()?;
+
+            let directory = parse_wad_directory(&data);
+            let ranges = find_map_ranges(&directory);
+            for (name, start, end) in &ranges {
+                let (has_normal, has_secret) = detect_exits(&data, &directory, *start, *end);
+                map_infos.push(MapInfo {
+                    lump: name.to_uppercase(),
+                    has_normal_exit: has_normal,
+                    has_secret_exit: has_secret,
+                    is_secret: false,
+                    is_dead_end: !has_normal && !has_secret,
+                    is_terminal: false,
+                    reachable: true,
+                });
+            }
+            if !ranges.is_empty() {
+                found_maps = true;
+            }
+        }
+    }
+
+    if !found_maps || map_infos.is_empty() {
+        return None;
+    }
+
+    // --- Step 2: Read and parse MAPINFO/ZMAPINFO ---
+    let mut mapinfo_text = String::new();
+    let mapinfo_names: Vec<String> = (0..archive.len())
+        .filter_map(|i| {
+            let entry = archive.by_index(i).ok()?;
+            let name = entry.name().to_string();
+            let lower = name.to_lowercase();
+            // Match MAPINFO*, ZMAPINFO* at root (not in subdirectories, not directories)
+            if !name.contains('/')
+                && !name.ends_with('/')
+                && (lower.starts_with("mapinfo") || lower.starts_with("zmapinfo"))
+            {
+                Some(name)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    for entry_name in &mapinfo_names {
+        if let Ok(mut entry) = archive.by_name(entry_name) {
+            let mut text = String::new();
+            if entry.read_to_string(&mut text).is_ok() {
+                mapinfo_text.push('\n');
+                mapinfo_text.push_str(&text);
+            }
+        }
+    }
+
+    let mapinfo = if !mapinfo_text.is_empty() {
+        Some(crate::mapinfo::parse_mapinfo(&mapinfo_text))
+    } else {
+        None
+    };
+
+    // --- Step 3: Classify maps using MAPINFO flow data ---
+    let all_map_lumps: Vec<String> = map_infos.iter().map(|m| m.lump.clone()).collect();
+
+    if let Some(ref mi) = mapinfo {
+        // Convert MapinfoEntry to UmapinfoEntry for reuse of existing classification
+        let umapinfo: HashMap<String, UmapinfoEntry> = mi
+            .iter()
+            .map(|(k, v)| {
+                (
+                    k.clone(),
+                    UmapinfoEntry {
+                        next: v.next.clone(),
+                        nextsecret: v.secretnext.clone(),
+                        has_endgame: v.has_endgame,
+                    },
+                )
+            })
+            .collect();
+        let umi_opt = Some(umapinfo);
+
+        // Detect hub structure: if a non-map target receives >50% of next pointers
+        let is_hub = detect_hub_structure(mi, &all_map_lumps);
+
+        // Override exit/dead_end status using MAPINFO flow data.
+        // UDMF and ACS-based maps often have exits that aren't detectable
+        // via linedef scanning. If MAPINFO defines flow, trust it.
+        for info in &mut map_infos {
+            if let Some(entry) = mi.get(&info.lump) {
+                if entry.next.is_some() || entry.has_endgame {
+                    info.has_normal_exit = true;
+                    info.is_dead_end = false;
+                }
+                if entry.secretnext.is_some() {
+                    info.has_secret_exit = true;
+                    info.is_dead_end = false;
+                }
+            }
+        }
+
+        if is_hub {
+            // Hub WAD: all playable maps are reachable and completable.
+            let playable_re = regex::Regex::new(r"^(MAP\d+|E\dM\d)$").unwrap();
+            map_infos.retain(|m| playable_re.is_match(&m.lump));
+
+            for info in &mut map_infos {
+                info.reachable = true;
+                info.is_secret = false;
+                info.is_terminal = false;
+                info.is_dead_end = false; // Hub provides exit for all maps
+            }
+        } else {
+            // Linear/branching MAPINFO: use standard classification
+            // Filter out non-standard maps (TITLEMAP, DEBUGMAP, etc.)
+            let playable_re = regex::Regex::new(r"^(MAP\d+|E\dM\d)$").unwrap();
+            map_infos.retain(|m| playable_re.is_match(&m.lump));
+
+            let filtered_lumps: Vec<String> = map_infos.iter().map(|m| m.lump.clone()).collect();
+            let is_doom1 = filtered_lumps.first().is_some_and(|m| DOOM1_MAP_RE.is_match(m));
+
+            // Classify secrets
+            let secret_set = classify_secrets(&filtered_lumps, is_doom1, &umi_opt);
+            for info in &mut map_infos {
+                if secret_set.contains(&info.lump) {
+                    info.is_secret = true;
+                }
+            }
+
+            // Identify terminal
+            let terminal = identify_terminal(&filtered_lumps, is_doom1, &umi_opt, &map_infos);
+            if let Some(ref term) = terminal {
+                for info in &mut map_infos {
+                    if info.lump == *term {
+                        info.is_terminal = true;
+                    }
+                }
+            }
+
+            // Compute reachability
+            let reachable_set =
+                compute_reachability(&filtered_lumps, is_doom1, &umi_opt, &map_infos);
+            for info in &mut map_infos {
+                info.reachable = reachable_set.contains(&info.lump);
+            }
+        }
+    } else {
+        // No MAPINFO: filter to standard map names, use vanilla classification
+        let playable_re = regex::Regex::new(r"^(MAP\d+|E\dM\d)$").unwrap();
+        map_infos.retain(|m| playable_re.is_match(&m.lump));
+
+        let filtered_lumps: Vec<String> = map_infos.iter().map(|m| m.lump.clone()).collect();
+        let is_doom1 = filtered_lumps.first().is_some_and(|m| DOOM1_MAP_RE.is_match(m));
+
+        let secret_set = classify_secrets(&filtered_lumps, is_doom1, &None);
+        for info in &mut map_infos {
+            if secret_set.contains(&info.lump) {
+                info.is_secret = true;
+            }
+        }
+
+        let terminal = identify_terminal(&filtered_lumps, is_doom1, &None, &map_infos);
+        if let Some(ref term) = terminal {
+            for info in &mut map_infos {
+                if info.lump == *term {
+                    info.is_terminal = true;
+                }
+            }
+        }
+
+        let reachable_set =
+            compute_reachability(&filtered_lumps, is_doom1, &None, &map_infos);
+        for info in &mut map_infos {
+            info.reachable = reachable_set.contains(&info.lump);
+        }
+    }
+
+    // --- Step 4: Build result ---
+    let secret_maps: Vec<String> = map_infos
+        .iter()
+        .filter(|m| m.is_secret)
+        .map(|m| m.lump.clone())
+        .collect();
+
+    let dead_end_maps: Vec<String> = map_infos
+        .iter()
+        .filter(|m| m.is_dead_end && !m.is_secret && !m.is_terminal)
+        .map(|m| m.lump.clone())
+        .collect();
+
+    let terminal_map = map_infos
+        .iter()
+        .find(|m| m.is_terminal)
+        .map(|m| m.lump.clone());
+
+    let total_maps = map_infos.len();
+    let terminal_excluded = map_infos.iter().any(|m| m.is_terminal && m.is_dead_end);
+    let unreachable_count = map_infos
+        .iter()
+        .filter(|m| !m.reachable && !m.is_secret && !m.is_dead_end)
+        .count();
+    let required_maps = total_maps
+        - secret_maps.len()
+        - dead_end_maps.len()
+        - unreachable_count
+        - if terminal_excluded { 1 } else { 0 };
+
+    Some(WadAnalysis {
+        maps: map_infos,
+        total_maps,
+        required_maps,
+        secret_maps,
+        dead_end_maps,
+        terminal_map,
+        has_umapinfo: mapinfo.is_some(), // MAPINFO counts as structured flow data
+    })
+}
+
+/// Detect whether a MAPINFO describes a hub structure.
+///
+/// A hub is detected when a single `next` target receives more than half
+/// of all map entries, OR when multiple "mini-hubs" exist (maps that have
+/// 3+ other maps pointing back to them).
+fn detect_hub_structure(
+    mapinfo: &HashMap<String, crate::mapinfo::MapinfoEntry>,
+    playable_maps: &[String],
+) -> bool {
+    let playable_set: HashSet<&str> = playable_maps.iter().map(|s| s.as_str()).collect();
+    let playable_re = regex::Regex::new(r"^(MAP\d+|E\dM\d)$").unwrap();
+
+    // Count how many playable maps point to each target
+    let mut target_counts: HashMap<&str, usize> = HashMap::new();
+    for (name, entry) in mapinfo {
+        if !playable_re.is_match(name) {
+            continue;
+        }
+        if let Some(ref next) = entry.next {
+            *target_counts.entry(next.as_str()).or_default() += 1;
+        }
+    }
+
+    let playable_count = playable_maps
+        .iter()
+        .filter(|m| playable_re.is_match(m))
+        .count();
+
+    if playable_count == 0 {
+        return false;
+    }
+
+    // Single dominant hub: >50% of maps point to same target
+    if target_counts.values().max().is_some_and(|&max_count| max_count > playable_count / 2) {
+        return true;
+    }
+
+    // Multiple mini-hubs: sum of maps pointing to hub-like targets (3+ incoming)
+    // covers >50% of all maps
+    let hub_connected: usize = target_counts
+        .iter()
+        .filter(|&(target, &count)| count >= 3 && playable_set.contains(target.to_uppercase().as_str()))
+        .map(|(_, &count)| count)
+        .sum();
+
+    hub_connected > playable_count / 2
+}
+
+/// Analyze a single map WAD (from a PK3) for exit linedefs.
+fn analyze_map_wad_exits(wad_data: &[u8]) -> (bool, bool) {
+    let directory = parse_wad_directory(wad_data);
+    if directory.is_empty() {
+        return (false, false);
+    }
+    let map_ranges = find_map_ranges(&directory);
+    if let Some((_, start, end)) = map_ranges.first() {
+        detect_exits(wad_data, &directory, *start, *end)
+    } else {
+        (false, false)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1720,11 +2079,56 @@ MAP MAP04
     fn test_is_map_marker() {
         assert!(is_map_marker("MAP01"));
         assert!(is_map_marker("MAP32"));
+        assert!(is_map_marker("MAP100"));
+        assert!(is_map_marker("MAP213"));
         assert!(is_map_marker("E1M1"));
         assert!(is_map_marker("E4M9"));
         assert!(!is_map_marker("THINGS"));
         assert!(!is_map_marker("LINEDEFS"));
-        assert!(!is_map_marker("MAP001"));
+        assert!(!is_map_marker("MAP001")); // zero-padded, not a valid marker
         assert!(!is_map_marker(""));
+    }
+
+    /// Integration test: analyze PK3 files from ~/Downloads/zdoom/.
+    /// Run with: cargo test -p caco-core test_analyze_pk3_files -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn test_analyze_pk3_files() {
+        let zdoom_dir = dirs::home_dir().unwrap().join("Downloads/zdoom");
+        if !zdoom_dir.exists() {
+            eprintln!("No zdoom directory, skipping");
+            return;
+        }
+        for entry in std::fs::read_dir(&zdoom_dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().and_then(|e| e.to_str()) != Some("pk3") {
+                continue;
+            }
+            eprintln!("\n=== {} ===", path.file_name().unwrap().to_string_lossy());
+            match analyze_pk3(&path) {
+                Some(analysis) => {
+                    let unreachable: Vec<&str> = analysis.maps.iter()
+                        .filter(|m| !m.reachable).map(|m| m.lump.as_str()).collect();
+                    eprintln!("  total={} required={} secret={:?} terminal={:?}",
+                        analysis.total_maps, analysis.required_maps,
+                        analysis.secret_maps, analysis.terminal_map);
+                    if !unreachable.is_empty() {
+                        eprintln!("  unreachable={unreachable:?}");
+                    }
+                    for m in &analysis.maps {
+                        let flags: Vec<&str> = [
+                            m.is_secret.then_some("secret"),
+                            m.is_terminal.then_some("terminal"),
+                            m.is_dead_end.then_some("dead_end"),
+                            (!m.reachable).then_some("UNREACHABLE"),
+                        ].into_iter().flatten().collect();
+                        let flag_str = if flags.is_empty() { String::new() } else { format!(" [{}]", flags.join(", ")) };
+                        eprintln!("  {:10} exit={} secret_exit={}{}",
+                            m.lump, m.has_normal_exit, m.has_secret_exit, flag_str);
+                    }
+                }
+                None => eprintln!("  analysis returned None"),
+            }
+        }
     }
 }
