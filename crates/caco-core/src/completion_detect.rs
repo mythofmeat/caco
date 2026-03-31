@@ -84,6 +84,14 @@ pub fn check_completion(analysis: &WadAnalysis, stats: &WadStats) -> CompletionV
         .count();
     let required = required_lumps.len();
 
+    // If no required maps were identified, the analysis is inconclusive.
+    // (e.g. single-map WAD with ACS-only exit and no MAPINFO — the map is
+    // classified as terminal+dead-end and filtered out, leaving required=0.
+    // Returning Complete in that case would be a false positive.)
+    if required == 0 {
+        return CompletionVerdict::NoAnalysis;
+    }
+
     if exited >= required {
         CompletionVerdict::Complete
     } else {
