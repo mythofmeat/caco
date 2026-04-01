@@ -14,6 +14,8 @@ pub struct SourceportFamily {
     pub data_arg: Option<&'static str>,
     pub save_arg: Option<&'static str>,
     pub complevel_arg: Option<&'static str>,
+    /// Config file extension (e.g. "cfg" or "ini").
+    pub config_ext: &'static str,
 }
 
 /// All known sourceport families.
@@ -32,6 +34,7 @@ pub static FAMILIES: &[SourceportFamily] = &[
         data_arg: Some("-data"),
         save_arg: Some("-save"),
         complevel_arg: Some("-complevel"),
+        config_ext: "cfg",
     },
     SourceportFamily {
         name: "zdoom",
@@ -39,6 +42,7 @@ pub static FAMILIES: &[SourceportFamily] = &[
         data_arg: None,
         save_arg: Some("-savedir"),
         complevel_arg: None,
+        config_ext: "cfg",
     },
     SourceportFamily {
         name: "chocolate",
@@ -46,6 +50,7 @@ pub static FAMILIES: &[SourceportFamily] = &[
         data_arg: None,
         save_arg: Some("-savedir"),
         complevel_arg: None,
+        config_ext: "cfg",
     },
     SourceportFamily {
         name: "woof",
@@ -53,6 +58,7 @@ pub static FAMILIES: &[SourceportFamily] = &[
         data_arg: Some("-data"),
         save_arg: Some("-save"),
         complevel_arg: Some("-complevel"),
+        config_ext: "cfg",
     },
     SourceportFamily {
         name: "eternity",
@@ -60,6 +66,15 @@ pub static FAMILIES: &[SourceportFamily] = &[
         data_arg: None,
         save_arg: Some("-savedir"),
         complevel_arg: None,
+        config_ext: "cfg",
+    },
+    SourceportFamily {
+        name: "helion",
+        executables: &["helion"],
+        data_arg: None,
+        save_arg: Some("-savedir"),
+        complevel_arg: None,
+        config_ext: "ini",
     },
 ];
 
@@ -72,6 +87,7 @@ pub static SAVE_EXTENSIONS: LazyLock<HashMap<&'static str, &'static [&'static st
             ("chocolate", &[".dsg"][..]),
             ("woof", &[".dsg"][..]),
             ("eternity", &[".dsg"][..]),
+            ("helion", &[".dsg"][..]),
         ])
     });
 
@@ -156,6 +172,11 @@ pub fn get_complevel_args(executable: &str, complevel: i32) -> Vec<String> {
     }
 }
 
+/// Get the config file extension for a sourceport (e.g. "cfg" or "ini").
+pub fn config_ext(executable: &str) -> &'static str {
+    identify_family(executable).map_or("cfg", |f| f.config_ext)
+}
+
 /// Return CLI args to set the config file for the sourceport.
 ///
 /// Only dsda-family ports support `-config`.
@@ -236,6 +257,7 @@ mod tests {
         assert_eq!(identify_family("chocolate-doom").unwrap().name, "chocolate");
         assert_eq!(identify_family("woof").unwrap().name, "woof");
         assert_eq!(identify_family("eternity").unwrap().name, "eternity");
+        assert_eq!(identify_family("helion").unwrap().name, "helion");
         assert!(identify_family("unknown-port").is_none());
     }
 
@@ -514,5 +536,39 @@ mod tests {
     fn test_all_save_extensions() {
         assert!(ALL_SAVE_EXTENSIONS.contains(&".dsg"));
         assert!(ALL_SAVE_EXTENSIONS.contains(&".zds"));
+    }
+
+    #[test]
+    fn test_config_ext() {
+        assert_eq!(config_ext("dsda-doom"), "cfg");
+        assert_eq!(config_ext("gzdoom"), "cfg");
+        assert_eq!(config_ext("helion"), "ini");
+        assert_eq!(config_ext("unknown-port"), "cfg");
+    }
+
+    #[test]
+    fn test_helion_family() {
+        let family = identify_family("helion").unwrap();
+        assert_eq!(family.name, "helion");
+        assert!(family.data_arg.is_none());
+        assert_eq!(family.save_arg, Some("-savedir"));
+        assert!(family.complevel_arg.is_none());
+        assert_eq!(family.config_ext, "ini");
+    }
+
+    #[test]
+    fn test_helion_uses_deh_flag() {
+        assert!(uses_deh_flag("helion"));
+    }
+
+    #[test]
+    fn test_helion_data_dir_args() {
+        let args = get_data_dir_args("helion", "/data", None, None);
+        assert_eq!(args, vec!["-savedir", "/data"]);
+    }
+
+    #[test]
+    fn test_helion_save_extensions() {
+        assert_eq!(SAVE_EXTENSIONS.get("helion").unwrap(), &[".dsg"]);
     }
 }

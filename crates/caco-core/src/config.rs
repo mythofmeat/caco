@@ -564,13 +564,17 @@ pub fn find_wad_data_dir(wad_id: i64) -> Option<PathBuf> {
 
 /// Get the path to a sourceport config profile file.
 ///
-/// Path: `{sourceport_dir}/{basename}/{profile}.cfg`
+/// Path: `{sourceport_dir}/{basename}/{profile}.{ext}`
+///
+/// Extension is determined by the sourceport family (e.g. `.ini` for Helion,
+/// `.cfg` for everything else).
 pub fn get_profile_path(sourceport: &str, profile: &str) -> PathBuf {
     let basename = Path::new(sourceport)
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or(sourceport);
-    get_sourceport_dir().join(basename).join(format!("{profile}.cfg"))
+    let ext = crate::sourceports::config_ext(sourceport);
+    get_sourceport_dir().join(basename).join(format!("{profile}.{ext}"))
 }
 
 /// Scan the sourceport config directory for profiles.
@@ -589,7 +593,7 @@ pub fn list_profiles(sourceport: Option<&str>) -> HashMap<String, Vec<String>> {
             .unwrap_or(port);
         let port_dir = sp_dir.join(basename);
         if port_dir.is_dir() {
-            let mut profiles = collect_cfg_stems(&port_dir);
+            let mut profiles = collect_profile_stems(&port_dir);
             profiles.sort();
             if !profiles.is_empty() {
                 result.insert(basename.to_string(), profiles);
@@ -599,7 +603,7 @@ pub fn list_profiles(sourceport: Option<&str>) -> HashMap<String, Vec<String>> {
         let mut dirs: Vec<_> = entries.flatten().filter(|e| e.path().is_dir()).collect();
         dirs.sort_by_key(|e| e.file_name());
         for entry in dirs {
-            let mut profiles = collect_cfg_stems(&entry.path());
+            let mut profiles = collect_profile_stems(&entry.path());
             profiles.sort();
             if !profiles.is_empty()
                 && let Some(name) = entry.file_name().to_str()
@@ -699,13 +703,17 @@ pub fn which(name: &str) -> Option<String> {
     None
 }
 
-/// Collect `.cfg` file stems from a directory.
-fn collect_cfg_stems(dir: &Path) -> Vec<String> {
+/// Known config file extensions for sourceport profiles.
+const CONFIG_EXTENSIONS: &[&str] = &["cfg", "ini"];
+
+/// Collect config profile file stems from a directory.
+fn collect_profile_stems(dir: &Path) -> Vec<String> {
     let mut stems = Vec::new();
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("cfg")
+            if let Some(ext) = path.extension().and_then(|e| e.to_str())
+                && CONFIG_EXTENSIONS.contains(&ext)
                 && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
             {
                 stems.push(stem.to_string());
@@ -770,6 +778,13 @@ mod tests {
         let path = get_profile_path("dsda-doom", "controller");
         assert!(path.to_string_lossy().contains("dsda-doom"));
         assert!(path.to_string_lossy().ends_with("controller.cfg"));
+    }
+
+    #[test]
+    fn test_get_profile_path_helion() {
+        let path = get_profile_path("helion", "default");
+        assert!(path.to_string_lossy().contains("helion"));
+        assert!(path.to_string_lossy().ends_with("default.ini"));
     }
 
     #[test]
