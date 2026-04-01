@@ -12,6 +12,7 @@ use crate::db;
 use crate::demos;
 use crate::iwad_detect;
 use crate::sourceports;
+use crate::stats_watcher;
 use crate::wad_stats;
 use crate::zdoom_detect;
 
@@ -270,7 +271,7 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
         demo_path = Some(path);
     }
 
-    // Build -file list: id24 resources + companion files + main WAD
+    // Build -file list: id24 resources + companion files + stats mod + main WAD
     let mut file_args: Vec<String> = get_id24_resource_args(conn, Some(&wad_path));
     let mut deh_args: Vec<String> = Vec::new();
 
@@ -296,12 +297,20 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
         }
     }
 
+    // For zdoom-family ports, inject the stats reporter PK3 mod
+    let is_zdoom = sourceports::family_name(&port) == Some("zdoom");
+    if is_zdoom && config::get_auto_stats()
+        && let Ok(pk3_path) = stats_watcher::ensure_stats_mod()
+    {
+        file_args.push(pk3_path.to_string_lossy().into_owned());
+    }
+
     // Add DEH args before -file
     if !deh_args.is_empty() {
         cmd.args(&deh_args);
     }
 
-    // Add -file with id24 resources + companions + main WAD
+    // Add -file with id24 resources + companions + stats mod + main WAD
     file_args.push(wad_path.to_string_lossy().into_owned());
     cmd.arg("-file");
     cmd.args(&file_args);
@@ -309,6 +318,14 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
     // Add extra args from command line (highest priority)
     if !opts.extra_args.is_empty() {
         cmd.args(&opts.extra_args);
+    }
+
+    // For zdoom-family ports, set up logfile for stats collection
+    if is_zdoom && config::get_auto_stats()
+        && let Some(ref data_dir) = wad_data_dir
+    {
+        let log_path = data_dir.join(stats_watcher::LOG_FILENAME);
+        cmd.args(["+logfile", &log_path.to_string_lossy()]);
     }
 
     // Capture stats snapshot before play
@@ -329,6 +346,13 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
 
     // End session
     db::end_session(conn, session_id, None, status.code())?;
+
+    // For zdoom-family ports, parse the log and write levelstat.txt
+    if is_zdoom && config::get_auto_stats()
+        && let Some(ref data_dir) = wad_data_dir
+    {
+        stats_watcher::collect_zdoom_stats(data_dir);
+    }
 
     // Auto-track stats
     let stats_after = auto_track_stats(conn, wad_id);

@@ -12,6 +12,7 @@ pub mod player;
 pub mod resource_service;
 pub mod saves;
 pub mod sourceports;
+pub mod stats_watcher;
 pub mod titlepic;
 pub mod utils;
 pub mod wad_analysis;
