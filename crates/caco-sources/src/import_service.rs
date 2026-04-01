@@ -542,7 +542,7 @@ pub fn port_to_complevel(port_text: &str) -> Option<i32> {
 pub fn port_to_zdoom_required(port_text: &str) -> Option<bool> {
     let text = port_text.to_lowercase();
     let zdoom_keywords = [
-        "zdoom", "gzdoom", "lzdoom", "vkdoom", "qzdoom", "zandronum", "skulltag",
+        "zdoom", "gzdoom", "uzdoom", "lzdoom", "vkdoom", "qzdoom", "zandronum", "skulltag",
     ];
     for kw in &zdoom_keywords {
         if text.contains(kw) {

@@ -35,7 +35,7 @@ pub static FAMILIES: &[SourceportFamily] = &[
     },
     SourceportFamily {
         name: "zdoom",
-        executables: &["gzdoom", "lzdoom", "vkdoom", "qzdoom", "zdoom"],
+        executables: &["gzdoom", "uzdoom", "lzdoom", "vkdoom", "qzdoom", "zdoom"],
         data_arg: None,
         save_arg: Some("-savedir"),
         complevel_arg: None,
