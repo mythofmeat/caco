@@ -66,16 +66,30 @@ impl StatsDialogState {
 
                     ui.add_space(8.0);
 
-                    // By Status section
+                    // By Status section (remap legacy status → unified)
                     section_header(ui, "By Status");
-                    let statuses = [
-                        "to-play", "backlog", "playing", "finished", "abandoned", "awaiting-update",
-                    ];
-                    for status in statuses {
-                        let count = snap.wads_by_status.get(status).copied().unwrap_or(0);
+                    let mut unified_counts: std::collections::HashMap<&str, i64> =
+                        std::collections::HashMap::new();
+                    for (status, count) in &snap.wads_by_status {
+                        let unified = match status.as_str() {
+                            "to-play" => "queued",
+                            "backlog" => "inbox",
+                            "playing" => "playing",
+                            "finished" => "shelved",
+                            "abandoned" => "dropped",
+                            "awaiting-update" => "inbox",
+                            _ => "inbox",
+                        };
+                        *unified_counts.entry(unified).or_insert(0) += count;
+                    }
+                    for &status in theme::UNIFIED_STATUSES {
+                        let count = unified_counts.get(status).copied().unwrap_or(0);
                         if count > 0 {
                             ui.horizontal(|ui| {
-                                ui.colored_label(theme::status_color(status), theme::status_display(status));
+                                ui.colored_label(
+                                    theme::unified_status_color(status),
+                                    theme::unified_status_display(status),
+                                );
                                 ui.colored_label(theme::TEXT_SECONDARY, format!("{count}"));
                             });
                         }

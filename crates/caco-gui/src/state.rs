@@ -83,23 +83,6 @@ pub enum PlayState {
     Playing { wad_id: i64, wad_title: String },
 }
 
-// ---------------------------------------------------------------------------
-// Tab definitions
-// ---------------------------------------------------------------------------
-
-pub struct TabDef {
-    pub label: &'static str,
-    pub query_filter: Option<&'static str>,
-}
-
-pub const TABS: &[TabDef] = &[
-    TabDef { label: "All",     query_filter: None },
-    TabDef { label: "Inbox",   query_filter: Some("intent:inbox") },
-    TabDef { label: "Queued",  query_filter: Some("intent:queued") },
-    TabDef { label: "Playing", query_filter: Some("play:started") },
-    TabDef { label: "Shelved", query_filter: Some("intent:shelved") },
-    TabDef { label: "Dropped", query_filter: Some("intent:dropped") },
-];
 
 // ---------------------------------------------------------------------------
 // Sort definitions
@@ -123,8 +106,8 @@ pub struct AppState {
     // View mode
     pub view_mode: ViewMode,
 
-    // Tab
-    pub active_tab: usize,
+    // Status filter (None = all, Some("inbox"|"queued"|"playing"|"shelved"|"dropped"))
+    pub status_filter: Option<String>,
 
     // Filter
     pub filter_text: String,
@@ -160,12 +143,9 @@ pub struct AppState {
     // Import
     pub import: ImportState,
 
-    // Sidebar status counts (total library, not filtered)
+    // Sidebar status counts (unified status → count)
     pub status_counts: HashMap<String, usize>,
     pub total_wad_count: usize,
-
-    // Hidden sidebar status filter tabs (indices into TABS)
-    pub hidden_tabs: std::collections::HashSet<usize>,
 
     // Sidebar collections (cached for display)
     pub sidebar_collections: Vec<CollectionRecord>,
@@ -180,11 +160,6 @@ impl AppState {
             "grid" => ViewLayout::Grid,
             _ => ViewLayout::List,
         };
-        let active_tab = if persisted.active_tab < TABS.len() {
-            persisted.active_tab
-        } else {
-            0
-        };
         let sort_field_index = if persisted.sort_field_index < SORT_FIELDS.len() {
             persisted.sort_field_index
         } else {
@@ -194,7 +169,7 @@ impl AppState {
         Self {
             view_mode: ViewMode::default(),
             view_layout,
-            active_tab,
+            status_filter: persisted.status_filter,
             filter_text: String::new(),
             filter_changed_at: None,
             applied_filter: String::new(),
@@ -214,7 +189,6 @@ impl AppState {
             last_g_press: None,
             status_counts: HashMap::new(),
             total_wad_count: 0,
-            hidden_tabs: persisted.hidden_tabs.iter().copied().collect(),
             sidebar_collections: Vec::new(),
             active_collection: None,
         }
@@ -230,20 +204,17 @@ impl AppState {
         matches!(self.play_state, PlayState::Playing { .. })
     }
 
-    /// Refresh sidebar tab counts from the database.
-    pub fn refresh_tab_counts(&mut self, conn: &Connection) {
+    /// Refresh sidebar status counts from the database (unified statuses).
+    pub fn refresh_status_counts(&mut self, conn: &Connection) {
         self.status_counts.clear();
         self.total_wad_count = 0;
         if let Ok(all_wads) =
             caco_core::db::search_wads(conn, None, Some("id"), false, false, 0)
         {
             self.total_wad_count = all_wads.len();
-            // Count by intent and play_state for the new tab queries
             for wad in &all_wads {
-                *self.status_counts.entry(format!("intent:{}", wad.intent)).or_insert(0) += 1;
-                *self.status_counts.entry(format!("play:{}", wad.play_state)).or_insert(0) += 1;
-                // Keep legacy status counts for any remaining usage
-                *self.status_counts.entry(wad.status.clone()).or_insert(0) += 1;
+                let us = crate::theme::unified_status(&wad.play_state, &wad.intent);
+                *self.status_counts.entry(us.to_string()).or_insert(0) += 1;
             }
         }
     }
@@ -259,22 +230,24 @@ impl AppState {
         }
     }
 
-    /// Get count for a tab's query filter (for sidebar display).
-    pub fn tab_count(&self, query_filter: Option<&str>) -> usize {
-        match query_filter {
+    /// Get count for a unified status (for sidebar display).
+    pub fn status_count(&self, status: Option<&str>) -> usize {
+        match status {
             None => self.total_wad_count,
-            Some(q) => self.status_counts.get(q).copied().unwrap_or(0),
+            Some(s) => self.status_counts.get(s).copied().unwrap_or(0),
         }
     }
 
     /// Reload WAD list and stats from the database.
     pub fn reload(&mut self, conn: &Connection) {
-        // Build combined query from tab filter + user filter
-        let tab = &TABS[self.active_tab];
+        // Build combined query from status filter + user filter
         let mut query_parts: Vec<String> = Vec::new();
 
-        if let Some(qf) = tab.query_filter {
-            query_parts.push(qf.to_string());
+        if let Some(ref sf) = self.status_filter {
+            let qf = crate::theme::unified_status_query(sf);
+            if !qf.is_empty() {
+                query_parts.push(qf.to_string());
+            }
         }
 
         if !self.applied_filter.is_empty() {
@@ -328,7 +301,7 @@ impl AppState {
         }
 
         // Refresh sidebar counts and collections
-        self.refresh_tab_counts(conn);
+        self.refresh_status_counts(conn);
         self.refresh_collections(conn);
 
         self.needs_reload = false;
@@ -469,8 +442,7 @@ impl AppState {
             show_detail_panel: self.show_detail_panel,
             sort_field_index: self.sort_field_index,
             sort_desc: self.sort_desc,
-            active_tab: self.active_tab,
-            hidden_tabs: self.hidden_tabs.iter().copied().collect(),
+            status_filter: self.status_filter.clone(),
         }
     }
 }

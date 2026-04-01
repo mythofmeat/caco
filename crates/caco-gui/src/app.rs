@@ -16,7 +16,7 @@ use crate::import::state::SearchSource;
 use crate::message::{AppMessage, Notification};
 use crate::panels;
 use crate::persist;
-use crate::state::{ActionRequest, ActiveDialog, AppState, PlayState, ViewLayout, ViewMode, TABS};
+use crate::state::{ActionRequest, ActiveDialog, AppState, PlayState, ViewLayout, ViewMode};
 use crate::theme;
 use crate::thumbnails::{ThumbnailHint, ThumbnailManager};
 use crate::workers::BackgroundChannel;
@@ -692,113 +692,40 @@ fn render_sidebar(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Act
     );
     ui.add_space(16.0);
 
-    // Status filters
-    let has_hidden = !state.hidden_tabs.is_empty();
-    let section_resp = ui.horizontal(|ui| {
+    // Collections section
+    ui.horizontal(|ui| {
         ui.add_space(20.0);
         ui.colored_label(
             theme::TEXT_MUTED,
-            egui::RichText::new("FILTER BY STATUS")
-                .size(11.0)
-                .strong(),
+            egui::RichText::new("COLLECTIONS").size(11.0).strong(),
         );
-    }).response;
-
-    // Right-click on section header to show all hidden filters
-    if has_hidden {
-        let mut show_all = false;
-        section_resp.context_menu(|ui| {
-            if ui.button("Show all hidden filters").clicked() {
-                show_all = true;
-                ui.close_menu();
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add_space(16.0);
+            if ui
+                .add(
+                    egui::Button::new(
+                        egui::RichText::new("+").size(13.0).color(theme::TEXT_MUTED),
+                    )
+                    .frame(false),
+                )
+                .on_hover_text("Manage collections")
+                .clicked()
+            {
+                actions.push(ActionRequest::Collections);
             }
         });
-        if show_all {
-            state.hidden_tabs.clear();
-        }
-    }
-    ui.add_space(8.0);
+    });
+    ui.add_space(4.0);
 
-    let mut hide_tab: Option<usize> = None;
-    for (i, tab) in TABS.iter().enumerate() {
-        // Skip hidden tabs (but never hide "All")
-        if i != 0 && state.hidden_tabs.contains(&i) {
-            continue;
-        }
-
-        let is_active = state.view_mode == ViewMode::Library && state.active_tab == i;
-        let count = state.tab_count(tab.query_filter);
-        let status_key = tab.query_filter;
-
-        let resp = theme::sidebar_status_item(ui, tab.label, count, status_key, is_active);
-
-        // Right-click to hide (not on "All")
-        if i != 0 {
-            resp.context_menu(|ui| {
-                if ui.button(format!("Hide \"{}\"", tab.label)).clicked() {
-                    hide_tab = Some(i);
-                    ui.close_menu();
-                }
-            });
-        }
-
-        if resp.clicked() {
-            state.view_mode = ViewMode::Library;
-            state.active_collection = None;
-            if state.active_tab != i {
-                state.active_tab = i;
-                state.filter_text.clear();
-                state.applied_filter.clear();
-                state.needs_reload = true;
-            }
-        }
-    }
-    if let Some(idx) = hide_tab {
-        state.hidden_tabs.insert(idx);
-        // If the hidden tab was active, switch to All
-        if state.active_tab == idx {
-            state.active_tab = 0;
-            state.needs_reload = true;
-        }
-    }
-
-    // Collections section
-    if !state.sidebar_collections.is_empty() {
-        ui.add_space(12.0);
-        let rect = ui.available_rect_before_wrap();
-        ui.painter().line_segment(
-            [
-                egui::pos2(rect.min.x + 20.0, rect.min.y),
-                egui::pos2(rect.max.x - 20.0, rect.min.y),
-            ],
-            egui::Stroke::new(1.0, theme::BORDER),
-        );
-        ui.add_space(16.0);
-
+    if state.sidebar_collections.is_empty() {
         ui.horizontal(|ui| {
             ui.add_space(20.0);
             ui.colored_label(
                 theme::TEXT_MUTED,
-                egui::RichText::new("COLLECTIONS").size(11.0).strong(),
+                egui::RichText::new("No collections yet").size(12.0),
             );
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add_space(16.0);
-                if ui
-                    .add(
-                        egui::Button::new(
-                            egui::RichText::new("+").size(13.0).color(theme::TEXT_MUTED),
-                        )
-                        .frame(false),
-                    )
-                    .on_hover_text("Manage collections")
-                    .clicked()
-                {
-                    actions.push(ActionRequest::Collections);
-                }
-            });
         });
-        ui.add_space(4.0);
-
+    } else {
         // Clone names to avoid borrow conflict
         let collection_names: Vec<String> = state
             .sidebar_collections
@@ -818,7 +745,6 @@ fn render_sidebar(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Act
                     .find(|c| c.name == *name)
                 {
                     state.active_collection = Some(name.clone());
-                    state.active_tab = 0; // Reset to "All" tab
                     state.filter_text = coll.query.clone();
                     state.applied_filter = coll.query.clone();
                     // Apply collection sort settings
@@ -837,6 +763,71 @@ fn render_sidebar(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Act
             }
         }
     }
+
+    // Status filter dropdown
+    ui.add_space(12.0);
+    let rect = ui.available_rect_before_wrap();
+    ui.painter().line_segment(
+        [
+            egui::pos2(rect.min.x + 20.0, rect.min.y),
+            egui::pos2(rect.max.x - 20.0, rect.min.y),
+        ],
+        egui::Stroke::new(1.0, theme::BORDER),
+    );
+    ui.add_space(16.0);
+
+    ui.horizontal(|ui| {
+        ui.add_space(20.0);
+        ui.colored_label(
+            theme::TEXT_MUTED,
+            egui::RichText::new("FILTER BY STATUS").size(11.0).strong(),
+        );
+    });
+    ui.add_space(4.0);
+
+    ui.horizontal(|ui| {
+        ui.add_space(16.0);
+
+        let current_label = state
+            .status_filter
+            .as_deref()
+            .map(|s| {
+                let display = theme::unified_status_display(s);
+                let count = state.status_count(Some(s));
+                format!("{display} ({count})")
+            })
+            .unwrap_or_else(|| format!("All ({})", state.total_wad_count));
+
+        egui::ComboBox::from_id_salt("status_filter")
+            .selected_text(egui::RichText::new(&current_label).size(13.0).color(
+                state.status_filter.as_deref()
+                    .map(theme::unified_status_color)
+                    .unwrap_or(theme::TEXT_PRIMARY),
+            ))
+            .width(ui.available_width() - 20.0)
+            .show_ui(ui, |ui| {
+                // "All" option
+                let all_label = format!("All ({})", state.total_wad_count);
+                if ui.selectable_label(state.status_filter.is_none(), &all_label).clicked() {
+                    state.status_filter = None;
+                    state.needs_reload = true;
+                }
+
+                for &status in theme::UNIFIED_STATUSES {
+                    let count = state.status_count(Some(status));
+                    let label = format!("{} ({count})", theme::unified_status_display(status));
+                    let color = theme::unified_status_color(status);
+                    let is_selected = state.status_filter.as_deref() == Some(status);
+                    if ui
+                        .selectable_label(is_selected, egui::RichText::new(&label).color(color))
+                        .clicked()
+                    {
+                        state.status_filter = Some(status.to_string());
+                        state.needs_reload = true;
+                    }
+                }
+            });
+    });
 
     // Bottom spacer + admin links
     ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
@@ -897,20 +888,6 @@ fn render_sidebar(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Act
                 .clicked()
             {
                 actions.push(ActionRequest::Resources);
-            }
-            if state.sidebar_collections.is_empty()
-                && ui
-                    .add(
-                        egui::Button::new(
-                            egui::RichText::new("Collections")
-                                .size(11.0)
-                                .color(theme::TEXT_MUTED),
-                        )
-                        .frame(false),
-                    )
-                    .clicked()
-            {
-                actions.push(ActionRequest::Collections);
             }
         });
     });
@@ -998,8 +975,8 @@ fn render_now_playing_hero(
                 .and_then(|w| w.author.clone());
             (wad_title.clone(), author, *wad_id, true)
         } else {
-            // Show the first "playing" status WAD
-            let playing_wad = state.wads.iter().find(|w| w.status == "playing");
+            // Show the first WAD with play_state=started
+            let playing_wad = state.wads.iter().find(|w| w.play_state == "started");
             match playing_wad {
                 Some(w) => (w.title.clone(), w.author.clone(), w.id, false),
                 None => return None, // No hero to show

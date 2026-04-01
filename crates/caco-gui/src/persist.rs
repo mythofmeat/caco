@@ -12,9 +12,7 @@ pub struct GuiState {
     #[serde(default = "default_true")]
     pub sort_desc: bool,
     #[serde(default)]
-    pub active_tab: usize,
-    #[serde(default)]
-    pub hidden_tabs: Vec<usize>,
+    pub status_filter: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -28,8 +26,7 @@ impl Default for GuiState {
             show_detail_panel: false,
             sort_field_index: 0,
             sort_desc: true,
-            active_tab: 0,
-            hidden_tabs: Vec::new(),
+            status_filter: None,
         }
     }
 }

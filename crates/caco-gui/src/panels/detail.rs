@@ -68,11 +68,9 @@ pub fn render(
             ui.colored_label(theme::TEXT_SECONDARY, &subtitle);
         }
 
-        // Status pill + play_state + intent + rating
+        // Status pill + rating
         ui.horizontal_wrapped(|ui| {
-            theme::status_pill(ui, &wad.status);
-            theme::play_state_pill(ui, &wad.play_state);
-            theme::intent_pill(ui, &wad.intent);
+            theme::unified_status_pill(ui, &wad.play_state, &wad.intent);
             let stars = theme::rating_stars(wad.rating);
             if !stars.is_empty() {
                 ui.colored_label(theme::TEXT_ACCENT, &stars);

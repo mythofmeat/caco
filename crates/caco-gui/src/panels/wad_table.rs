@@ -111,9 +111,10 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<ActionRequest> 
                     ui.label(wad.author.as_deref().unwrap_or(""));
                 });
 
-                // Status (colored)
+                // Status (unified, colored)
                 row.col(|ui| {
-                    ui.colored_label(theme::status_color(&wad.status), theme::status_display(&wad.status));
+                    let us = theme::unified_status(&wad.play_state, &wad.intent);
+                    ui.colored_label(theme::unified_status_color(us), theme::unified_status_display(us));
                 });
 
                 if !compact {
