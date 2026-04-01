@@ -40,6 +40,11 @@ _caco_modify_fields() {
     COMPREPLY+=($(compgen -W "$(caco _complete modify-fields 2>/dev/null)" -- "$cur"))
 }
 
+_caco_profiles() {
+    local IFS=$'\n'
+    COMPREPLY+=($(compgen -W "$(caco _complete profiles 2>/dev/null)" -- "$cur"))
+}
+
 _caco_filedir() {
     if type _filedir &>/dev/null; then _filedir; else COMPREPLY=($(compgen -f -- "$cur")); fi
 }
@@ -91,7 +96,7 @@ _caco() {
         if [[ "$cur" == -* ]]; then
             COMPREPLY=($(compgen -W "--tui --gui --help" -- "$cur"))
         else
-            COMPREPLY=($(compgen -W "ls info modify trash play import config random completions stats cache enrich companion gc collection" -- "$cur"))
+            COMPREPLY=($(compgen -W "ls info modify trash play import config random completions stats cache enrich companion gc collection profile saves demos sessions" -- "$cur"))
         fi
         return
     fi
@@ -259,6 +264,100 @@ _caco() {
                         COMPREPLY=($(compgen -W "-o --output --help" -- "$cur"))
                         ;;
                 esac
+            fi
+            ;;
+        profile)
+            if [[ -z "$subcmd" ]]; then
+                COMPREPLY=($(compgen -W "ls create edit cp rm path" -- "$cur"))
+            else
+                case "$subcmd" in
+                    ls)
+                        if [[ "$cur" == -* ]]; then
+                            COMPREPLY=($(compgen -W "-p --sourceport --help" -- "$cur"))
+                        elif [[ "$prev" == -p || "$prev" == --sourceport ]]; then
+                            _caco_sourceports
+                        fi
+                        ;;
+                    create)
+                        if [[ "$cur" == -* ]]; then
+                            COMPREPLY=($(compgen -W "-p --sourceport --from --help" -- "$cur"))
+                        elif [[ "$prev" == -p || "$prev" == --sourceport ]]; then
+                            _caco_sourceports
+                        elif [[ "$prev" == --from ]]; then
+                            _caco_profiles
+                        fi
+                        ;;
+                    edit|path)
+                        if [[ "$cur" == -* ]]; then
+                            COMPREPLY=($(compgen -W "-p --sourceport --help" -- "$cur"))
+                        elif [[ "$prev" == -p || "$prev" == --sourceport ]]; then
+                            _caco_sourceports
+                        else
+                            _caco_profiles
+                        fi
+                        ;;
+                    cp)
+                        if [[ "$cur" == -* ]]; then
+                            COMPREPLY=($(compgen -W "-p --sourceport --help" -- "$cur"))
+                        elif [[ "$prev" == -p || "$prev" == --sourceport ]]; then
+                            _caco_sourceports
+                        else
+                            _caco_profiles
+                        fi
+                        ;;
+                    rm)
+                        if [[ "$cur" == -* ]]; then
+                            COMPREPLY=($(compgen -W "-p --sourceport -y --yes --help" -- "$cur"))
+                        elif [[ "$prev" == -p || "$prev" == --sourceport ]]; then
+                            _caco_sourceports
+                        else
+                            _caco_profiles
+                        fi
+                        ;;
+                esac
+            fi
+            ;;
+        saves)
+            if [[ -z "$subcmd" ]]; then
+                COMPREPLY=($(compgen -W "list backup restore clean backups" -- "$cur"))
+            else
+                case "$subcmd" in
+                    clean)
+                        if [[ "$cur" == -* ]]; then
+                            COMPREPLY=($(compgen -W "-y --yes --help" -- "$cur"))
+                        else
+                            _caco_wads
+                        fi
+                        ;;
+                    *)
+                        _caco_wads
+                        ;;
+                esac
+            fi
+            ;;
+        demos)
+            if [[ -z "$subcmd" ]]; then
+                COMPREPLY=($(compgen -W "list play clean" -- "$cur"))
+            else
+                case "$subcmd" in
+                    clean)
+                        if [[ "$cur" == -* ]]; then
+                            COMPREPLY=($(compgen -W "-y --yes --help" -- "$cur"))
+                        else
+                            _caco_wads
+                        fi
+                        ;;
+                    *)
+                        _caco_wads
+                        ;;
+                esac
+            fi
+            ;;
+        sessions)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--plain --help" -- "$cur"))
+            else
+                _caco_wads
             fi
             ;;
     esac

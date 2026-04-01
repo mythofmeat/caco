@@ -20,6 +20,10 @@ function __caco_sourceports
     caco _complete sourceports 2>/dev/null
 end
 
+function __caco_profiles
+    caco _complete profiles 2>/dev/null
+end
+
 # Global options
 complete -c caco -n __fish_use_subcommand -l tui -d "Launch TUI interface"
 complete -c caco -n __fish_use_subcommand -l gui -d "Launch GUI interface (requires PySide6)"
@@ -40,6 +44,10 @@ complete -c caco -n __fish_use_subcommand -a enrich -d "Re-run enrichment for ex
 complete -c caco -n __fish_use_subcommand -a companion -d "Manage companion files"
 complete -c caco -n __fish_use_subcommand -a gc -d "Garbage collect finished/abandoned WAD data"
 complete -c caco -n __fish_use_subcommand -a collection -d "Manage smart collections"
+complete -c caco -n __fish_use_subcommand -a profile -d "Manage sourceport config profiles"
+complete -c caco -n __fish_use_subcommand -a saves -d "Manage save files"
+complete -c caco -n __fish_use_subcommand -a demos -d "Manage demo files"
+complete -c caco -n __fish_use_subcommand -a sessions -d "Show play sessions"
 
 # =============================================================================
 # companion subcommands
@@ -290,3 +298,60 @@ complete -c caco -n "__fish_seen_subcommand_from collection; and __fish_seen_sub
 complete -c caco -n "__fish_seen_subcommand_from collection; and __fish_seen_subcommand_from add" -l desc -d "Sort descending"
 complete -c caco -n "__fish_seen_subcommand_from collection; and __fish_seen_subcommand_from run" -s o -l output -d "Output format" -xa "json plain"
 complete -c caco -n "__fish_seen_subcommand_from collection; and __fish_seen_subcommand_from ls" -s o -l output -d "Output format" -xa "json plain"
+
+# =============================================================================
+# profile subcommands
+# =============================================================================
+complete -c caco -n "__fish_seen_subcommand_from profile; and not __fish_seen_subcommand_from ls create edit cp rm path" -a ls -d "List config profiles"
+complete -c caco -n "__fish_seen_subcommand_from profile; and not __fish_seen_subcommand_from ls create edit cp rm path" -a create -d "Create a new profile"
+complete -c caco -n "__fish_seen_subcommand_from profile; and not __fish_seen_subcommand_from ls create edit cp rm path" -a edit -d "Open profile in editor"
+complete -c caco -n "__fish_seen_subcommand_from profile; and not __fish_seen_subcommand_from ls create edit cp rm path" -a cp -d "Copy a profile"
+complete -c caco -n "__fish_seen_subcommand_from profile; and not __fish_seen_subcommand_from ls create edit cp rm path" -a rm -d "Delete a profile"
+complete -c caco -n "__fish_seen_subcommand_from profile; and not __fish_seen_subcommand_from ls create edit cp rm path" -a path -d "Print path to profile file"
+
+complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from ls" -s p -l sourceport -d "Filter by sourceport" -xa "(__caco_sourceports)"
+complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from create" -s p -l sourceport -d "Sourceport" -xa "(__caco_sourceports)"
+complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from create" -l from -d "Copy from existing profile" -xa "(__caco_profiles)"
+complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from edit" -s p -l sourceport -d "Sourceport" -xa "(__caco_sourceports)"
+complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from edit" -xa "(__caco_profiles)"
+complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from cp" -s p -l sourceport -d "Sourceport" -xa "(__caco_sourceports)"
+complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from cp" -xa "(__caco_profiles)"
+complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from rm" -s p -l sourceport -d "Sourceport" -xa "(__caco_sourceports)"
+complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from rm" -s y -l yes -d "Skip confirmation"
+complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from rm" -xa "(__caco_profiles)"
+complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from path" -s p -l sourceport -d "Sourceport" -xa "(__caco_sourceports)"
+complete -c caco -n "__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from path" -xa "(__caco_profiles)"
+
+# =============================================================================
+# saves subcommands
+# =============================================================================
+complete -c caco -n "__fish_seen_subcommand_from saves; and not __fish_seen_subcommand_from list backup restore clean backups" -a list -d "List save files"
+complete -c caco -n "__fish_seen_subcommand_from saves; and not __fish_seen_subcommand_from list backup restore clean backups" -a backup -d "Backup save files"
+complete -c caco -n "__fish_seen_subcommand_from saves; and not __fish_seen_subcommand_from list backup restore clean backups" -a restore -d "Restore save files"
+complete -c caco -n "__fish_seen_subcommand_from saves; and not __fish_seen_subcommand_from list backup restore clean backups" -a clean -d "Clean save files"
+complete -c caco -n "__fish_seen_subcommand_from saves; and not __fish_seen_subcommand_from list backup restore clean backups" -a backups -d "List backups"
+
+complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcommand_from list" -xa "(__caco_wads)"
+complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcommand_from backup" -xa "(__caco_wads)"
+complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcommand_from restore" -xa "(__caco_wads)"
+complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcommand_from clean" -xa "(__caco_wads)"
+complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcommand_from clean" -s y -l yes -d "Skip confirmation"
+complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcommand_from backups" -xa "(__caco_wads)"
+
+# =============================================================================
+# demos subcommands
+# =============================================================================
+complete -c caco -n "__fish_seen_subcommand_from demos; and not __fish_seen_subcommand_from list play clean" -a list -d "List demo files"
+complete -c caco -n "__fish_seen_subcommand_from demos; and not __fish_seen_subcommand_from list play clean" -a play -d "Play a demo"
+complete -c caco -n "__fish_seen_subcommand_from demos; and not __fish_seen_subcommand_from list play clean" -a clean -d "Clean demo files"
+
+complete -c caco -n "__fish_seen_subcommand_from demos; and __fish_seen_subcommand_from list" -xa "(__caco_wads)"
+complete -c caco -n "__fish_seen_subcommand_from demos; and __fish_seen_subcommand_from play" -xa "(__caco_wads)"
+complete -c caco -n "__fish_seen_subcommand_from demos; and __fish_seen_subcommand_from clean" -xa "(__caco_wads)"
+complete -c caco -n "__fish_seen_subcommand_from demos; and __fish_seen_subcommand_from clean" -s y -l yes -d "Skip confirmation"
+
+# =============================================================================
+# sessions command
+# =============================================================================
+complete -c caco -n "__fish_seen_subcommand_from sessions" -xa "(__caco_wads)"
+complete -c caco -n "__fish_seen_subcommand_from sessions" -l plain -d "Plain TSV output"

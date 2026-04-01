@@ -35,6 +35,12 @@ __caco_sourceports() {
     compadd -a ports
 }
 
+__caco_profiles() {
+    local -a profiles
+    profiles=("${(@f)$(caco _complete profiles 2>/dev/null)}")
+    compadd -a profiles
+}
+
 # ---------------------------------------------------------------------------
 # Static completion helpers
 # ---------------------------------------------------------------------------
@@ -291,6 +297,135 @@ _caco_companion() {
     esac
 }
 
+_caco_profile() {
+    local -a subcmds
+    subcmds=(
+        'ls:List config profiles'
+        'create:Create a new profile'
+        'edit:Open profile in editor'
+        'cp:Copy a profile'
+        'rm:Delete a profile'
+        'path:Print path to profile file'
+    )
+
+    if (( CURRENT == 2 )); then
+        _describe 'profile command' subcmds
+        return
+    fi
+
+    local subcmd="${words[2]}"
+    (( CURRENT-- ))
+    shift words
+
+    case "$subcmd" in
+        ls)
+            _arguments \
+                '(-p --sourceport)'{-p,--sourceport}'[Filter by sourceport]:sourceport:__caco_sourceports' \
+                '--help[Show help]'
+            ;;
+        create)
+            _arguments \
+                '(-p --sourceport)'{-p,--sourceport}'[Sourceport]:sourceport:__caco_sourceports' \
+                '--from[Copy from existing profile]:profile:__caco_profiles' \
+                '--help[Show help]' \
+                '1:name:'
+            ;;
+        edit|path)
+            _arguments \
+                '(-p --sourceport)'{-p,--sourceport}'[Sourceport]:sourceport:__caco_sourceports' \
+                '--help[Show help]' \
+                '1:profile:__caco_profiles'
+            ;;
+        cp)
+            _arguments \
+                '(-p --sourceport)'{-p,--sourceport}'[Sourceport]:sourceport:__caco_sourceports' \
+                '--help[Show help]' \
+                '1:source:__caco_profiles' \
+                '2:dest:'
+            ;;
+        rm)
+            _arguments \
+                '(-p --sourceport)'{-p,--sourceport}'[Sourceport]:sourceport:__caco_sourceports' \
+                '(-y --yes)'{-y,--yes}'[Skip confirmation]' \
+                '--help[Show help]' \
+                '1:profile:__caco_profiles'
+            ;;
+    esac
+}
+
+_caco_saves() {
+    local -a subcmds
+    subcmds=(
+        'list:List save files'
+        'backup:Backup save files'
+        'restore:Restore save files'
+        'clean:Clean save files'
+        'backups:List backups'
+    )
+
+    if (( CURRENT == 2 )); then
+        _describe 'saves command' subcmds
+        return
+    fi
+
+    local subcmd="${words[2]}"
+    (( CURRENT-- ))
+    shift words
+
+    case "$subcmd" in
+        clean)
+            _arguments \
+                '(-y --yes)'{-y,--yes}'[Skip confirmation]' \
+                '--help[Show help]' \
+                '*:query:__caco_wads_or_query'
+            ;;
+        *)
+            _arguments \
+                '--help[Show help]' \
+                '*:query:__caco_wads_or_query'
+            ;;
+    esac
+}
+
+_caco_demos() {
+    local -a subcmds
+    subcmds=(
+        'list:List demo files'
+        'play:Play a demo'
+        'clean:Clean demo files'
+    )
+
+    if (( CURRENT == 2 )); then
+        _describe 'demos command' subcmds
+        return
+    fi
+
+    local subcmd="${words[2]}"
+    (( CURRENT-- ))
+    shift words
+
+    case "$subcmd" in
+        clean)
+            _arguments \
+                '(-y --yes)'{-y,--yes}'[Skip confirmation]' \
+                '--help[Show help]' \
+                '*:query:__caco_wads_or_query'
+            ;;
+        *)
+            _arguments \
+                '--help[Show help]' \
+                '*:query:__caco_wads_or_query'
+            ;;
+    esac
+}
+
+_caco_sessions() {
+    _arguments \
+        '--plain[Plain TSV output]' \
+        '--help[Show help]' \
+        '*:query:__caco_wads_or_query'
+}
+
 _caco_collection() {
     local -a subcmds
     subcmds=(
@@ -361,6 +496,10 @@ _caco() {
         'companion:Manage companion files'
         'gc:Garbage collect finished/abandoned WAD data'
         'collection:Manage smart collections'
+        'profile:Manage sourceport config profiles'
+        'saves:Manage save files'
+        'demos:Manage demo files'
+        'sessions:Show play sessions'
     )
 
     if (( CURRENT == 2 )); then
@@ -395,6 +534,10 @@ _caco() {
         companion) _caco_companion ;;
         gc) _caco_gc ;;
         collection) _caco_collection ;;
+        profile) _caco_profile ;;
+        saves) _caco_saves ;;
+        demos) _caco_demos ;;
+        sessions) _caco_sessions ;;
     esac
 }
 

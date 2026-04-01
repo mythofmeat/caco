@@ -143,6 +143,14 @@ pub fn run_complete(conn: &Connection, args: &CompleteArgs) -> Result<(), String
                 println!("{exe}");
             }
         }
+        "profiles" => {
+            let profiles = caco_core::config::list_profiles(None);
+            for (port, names) in &profiles {
+                for name in names {
+                    println!("{port}/{name}");
+                }
+            }
+        }
         "modify-fields" => {
             for field in parsing::MODIFY_FIELDS {
                 println!("{field}=");

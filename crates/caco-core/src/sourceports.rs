@@ -70,7 +70,7 @@ pub static FAMILIES: &[SourceportFamily] = &[
     },
     SourceportFamily {
         name: "helion",
-        executables: &["helion"],
+        executables: &["helion", "Helion"],
         data_arg: None,
         save_arg: Some("-savedir"),
         complevel_arg: None,
