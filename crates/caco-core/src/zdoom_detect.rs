@@ -1,47 +1,32 @@
 //! Auto-detect whether a WAD/PK3 requires a ZDoom-family sourceport.
 //!
-//! Scans WAD lump names (or PK3 ZIP entries) for lumps that only ZDoom-family
-//! sourceports support. Any match means dsda-doom, woof, chocolate-doom, etc.
-//! cannot load the file.
+//! The only reliable file-level signal is **UDMF map format**: maps stored as
+//! TEXTMAP lumps instead of standard THINGS/LINEDEFS/etc. dsda-doom and other
+//! Boom-lineage ports cannot parse UDMF maps at all.
 //!
-//! Detection lumps:
-//! - ZSCRIPT  — GZDoom 3.0+ scripting language
-//! - MODELDEF — 3D model support
-//! - VOXELDEF — Voxel definitions
-//! - TEXTMAP  — UDMF map format (only ZDoom-family fully supports)
-//! - SBARINFO — ZDoom custom statusbar definitions
-//! - MENUDEF  — ZDoom menu definitions
+//! Other ZDoom-associated lumps (ZSCRIPT, DECORATE, GLDEFS, MENUDEF, MODELDEF,
+//! VOXELDEF, SBARINFO) are intentionally NOT checked — WAD authors commonly
+//! include these as optional GZDoom enhancements while the core gameplay runs
+//! fine in dsda-doom, which silently ignores them. Confirmed with real-world
+//! false positives: Neon Overdrive (DECORATE), Eviternity II (ZSCRIPT+MENUDEF).
 //!
-//! Notably excluded:
-//! - DECORATE — often included as optional GZDoom enhancements in MBF21 WADs
-//! - GLDEFS   — same; dsda-doom ignores these without failing
+//! For PK3 files, maps live as individual WADs under `maps/` — each is checked
+//! for UDMF format.
 
-use std::collections::HashSet;
 use std::path::Path;
+
+use regex::Regex;
 use std::sync::LazyLock;
 
 use crate::utils::{load_wad_data, parse_wad_directory};
 
-/// Lump names that definitively indicate a ZDoom-family sourceport is required.
-///
-/// DECORATE and GLDEFS are intentionally excluded — MBF21 WADs often include
-/// these as optional GZDoom enhancements while remaining fully playable in
-/// dsda-doom (which silently ignores them).
-static ZDOOM_LUMPS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
-    HashSet::from([
-        "ZSCRIPT",
-        "MODELDEF",
-        "VOXELDEF",
-        "TEXTMAP",
-        "SBARINFO",
-        "MENUDEF",
-    ])
-});
+static MAP_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(E[1-9]M[0-9]|MAP[0-9][0-9])$").unwrap());
 
 /// Detect whether a WAD file requires a ZDoom-family sourceport.
 ///
-/// Returns `true` if any ZDoom-exclusive lumps are found, `false` if none are
-/// found, or `None` if the file cannot be read/parsed.
+/// Returns `true` if any maps use UDMF format (TEXTMAP), `false` if all maps
+/// use standard format, or `None` if the file cannot be read/parsed.
 pub fn detect_zdoom_required(wad_path: &Path) -> Option<bool> {
     let ext = wad_path
         .extension()
@@ -49,7 +34,7 @@ pub fn detect_zdoom_required(wad_path: &Path) -> Option<bool> {
         .map(|e| e.to_lowercase())
         .unwrap_or_default();
 
-    // PK3/PK7 files are ZIP archives — check entry names directly
+    // PK3/PK7 files are ZIP archives with maps/ directory
     if ext == "pk3" || ext == "pk7" {
         return detect_from_pk3(wad_path);
     }
@@ -61,36 +46,60 @@ pub fn detect_zdoom_required(wad_path: &Path) -> Option<bool> {
         return None;
     }
 
-    let found = directory
-        .iter()
-        .any(|(name, _, _)| ZDOOM_LUMPS.contains(name.as_str()));
-    Some(found)
+    Some(has_udmf_maps(&directory))
 }
 
-/// Check a PK3/PK7 (ZIP archive) for ZDoom-exclusive entries.
+/// Check if any maps in a WAD directory use UDMF format.
 ///
-/// Matches against basenames of ZIP entries, case-insensitively.
+/// UDMF maps have TEXTMAP as the first lump after the map marker:
+///   MAP01 → TEXTMAP → ... → ENDMAP
+/// Standard maps have THINGS/LINEDEFS/etc.:
+///   MAP01 → THINGS → LINEDEFS → ...
+fn has_udmf_maps(directory: &[(String, u32, u32)]) -> bool {
+    let names: Vec<&str> = directory.iter().map(|(n, _, _)| n.as_str()).collect();
+    for (i, name) in names.iter().enumerate() {
+        if MAP_RE.is_match(name)
+            && let Some(&next) = names.get(i + 1)
+            && next == "TEXTMAP"
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// Check a PK3/PK7 (ZIP archive) for UDMF-format maps.
+///
+/// PK3 maps are stored as individual WAD files under `maps/` (e.g.,
+/// `maps/MAP01.wad`). Each map WAD is checked for UDMF format.
 fn detect_from_pk3(pk3_path: &Path) -> Option<bool> {
     use std::fs::File;
+    use std::io::Read;
 
     let file = File::open(pk3_path).ok()?;
-    let archive = zip::ZipArchive::new(file).ok()?;
+    let mut archive = zip::ZipArchive::new(file).ok()?;
 
     for i in 0..archive.len() {
-        let name = match archive.name_for_index(i) {
-            Some(n) => n,
-            None => continue,
-        };
+        let is_map_wad = archive
+            .name_for_index(i)
+            .is_some_and(|n| {
+                let lower = n.to_lowercase();
+                lower.starts_with("maps/") && lower.ends_with(".wad")
+            });
 
-        // Extract basename and strip extension for matching
-        let basename = Path::new(name)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("")
-            .to_uppercase();
-
-        if ZDOOM_LUMPS.contains(basename.as_str()) {
-            return Some(true);
+        if is_map_wad {
+            let mut entry = match archive.by_index(i) {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            let mut buf = Vec::with_capacity(entry.size() as usize);
+            if entry.read_to_end(&mut buf).is_err() {
+                continue;
+            }
+            let directory = parse_wad_directory(&buf);
+            if has_udmf_maps(&directory) {
+                return Some(true);
+            }
         }
     }
 
@@ -144,56 +153,52 @@ mod tests {
         (dir, wad_path)
     }
 
-    // --- WAD detection tests ---
+    // --- UDMF detection ---
 
     #[test]
-    fn test_detect_zscript() {
-        let (_dir, path) = write_wad(&[("ZSCRIPT", b"version \"4.0\""), ("MAP01", &[])]);
+    fn test_detect_udmf_map() {
+        // MAP01 followed by TEXTMAP = UDMF format
+        let (_dir, path) = write_wad(&[
+            ("MAP01", &[]),
+            ("TEXTMAP", b"namespace = \"zdoom\";"),
+            ("ENDMAP", &[]),
+        ]);
         assert_eq!(detect_zdoom_required(&path), Some(true));
     }
 
     #[test]
-    fn test_detect_decorate_not_definitive() {
-        // DECORATE alone is NOT definitive — MBF21 WADs include it for GZDoom compat
-        let (_dir, path) = write_wad(&[("DECORATE", b"actor Foo {}"), ("MAP01", &[])]);
+    fn test_detect_udmf_exmy() {
+        let (_dir, path) = write_wad(&[
+            ("E1M1", &[]),
+            ("TEXTMAP", b"namespace = \"zdoom\";"),
+            ("ENDMAP", &[]),
+        ]);
+        assert_eq!(detect_zdoom_required(&path), Some(true));
+    }
+
+    #[test]
+    fn test_detect_udmf_multiple_maps() {
+        let (_dir, path) = write_wad(&[
+            ("MAP01", &[]),
+            ("TEXTMAP", b"namespace = \"zdoom\";"),
+            ("ENDMAP", &[]),
+            ("MAP02", &[]),
+            ("TEXTMAP", b"namespace = \"zdoom\";"),
+            ("ENDMAP", &[]),
+        ]);
+        assert_eq!(detect_zdoom_required(&path), Some(true));
+    }
+
+    // --- Standard format (not zdoom) ---
+
+    #[test]
+    fn test_detect_standard_maps() {
+        let (_dir, path) = write_wad(&[
+            ("MAP01", &[]),
+            ("THINGS", &[1, 2]),
+            ("LINEDEFS", &[3, 4]),
+        ]);
         assert_eq!(detect_zdoom_required(&path), Some(false));
-    }
-
-    #[test]
-    fn test_detect_gldefs_not_definitive() {
-        // GLDEFS alone is NOT definitive — same reason as DECORATE
-        let (_dir, path) = write_wad(&[("GLDEFS", b"brightmap {}"), ("MAP01", &[])]);
-        assert_eq!(detect_zdoom_required(&path), Some(false));
-    }
-
-    #[test]
-    fn test_detect_modeldef() {
-        let (_dir, path) = write_wad(&[("MODELDEF", b"Model Foo {}"), ("MAP01", &[])]);
-        assert_eq!(detect_zdoom_required(&path), Some(true));
-    }
-
-    #[test]
-    fn test_detect_voxeldef() {
-        let (_dir, path) = write_wad(&[("VOXELDEF", b"voxel test"), ("MAP01", &[])]);
-        assert_eq!(detect_zdoom_required(&path), Some(true));
-    }
-
-    #[test]
-    fn test_detect_textmap() {
-        let (_dir, path) = write_wad(&[("TEXTMAP", b"namespace = \"zdoom\";"), ("MAP01", &[])]);
-        assert_eq!(detect_zdoom_required(&path), Some(true));
-    }
-
-    #[test]
-    fn test_detect_sbarinfo() {
-        let (_dir, path) = write_wad(&[("SBARINFO", b"base Doom;"), ("MAP01", &[])]);
-        assert_eq!(detect_zdoom_required(&path), Some(true));
-    }
-
-    #[test]
-    fn test_detect_menudef() {
-        let (_dir, path) = write_wad(&[("MENUDEF", b"OptionMenu {}"), ("MAP01", &[])]);
-        assert_eq!(detect_zdoom_required(&path), Some(true));
     }
 
     #[test]
@@ -206,15 +211,90 @@ mod tests {
     fn test_detect_boom_wad() {
         let (_dir, path) = write_wad(&[
             ("MAP01", &[]),
+            ("THINGS", &[]),
             ("DEHACKED", b"Doom version = 19"),
             ("UMAPINFO", b"map MAP01 {}"),
         ]);
         assert_eq!(detect_zdoom_required(&path), Some(false));
     }
 
+    // --- Optional zdoom lumps should NOT trigger ---
+
+    #[test]
+    fn test_detect_zscript_not_definitive() {
+        // ZSCRIPT without UDMF maps — optional enhancement, not required
+        let (_dir, path) = write_wad(&[
+            ("MAP01", &[]),
+            ("THINGS", &[]),
+            ("ZSCRIPT", b"version \"4.0\""),
+        ]);
+        assert_eq!(detect_zdoom_required(&path), Some(false));
+    }
+
+    #[test]
+    fn test_detect_decorate_not_definitive() {
+        let (_dir, path) = write_wad(&[
+            ("MAP01", &[]),
+            ("THINGS", &[]),
+            ("DECORATE", b"actor Foo {}"),
+        ]);
+        assert_eq!(detect_zdoom_required(&path), Some(false));
+    }
+
+    #[test]
+    fn test_detect_menudef_not_definitive() {
+        let (_dir, path) = write_wad(&[
+            ("MAP01", &[]),
+            ("THINGS", &[]),
+            ("MENUDEF", b"OptionMenu {}"),
+        ]);
+        assert_eq!(detect_zdoom_required(&path), Some(false));
+    }
+
+    #[test]
+    fn test_detect_gldefs_not_definitive() {
+        let (_dir, path) = write_wad(&[
+            ("MAP01", &[]),
+            ("THINGS", &[]),
+            ("GLDEFS", b"brightmap {}"),
+        ]);
+        assert_eq!(detect_zdoom_required(&path), Some(false));
+    }
+
+    // --- Mixed: UDMF maps + optional lumps ---
+
+    #[test]
+    fn test_detect_udmf_with_zscript() {
+        let (_dir, path) = write_wad(&[
+            ("ZSCRIPT", b"version \"4.0\""),
+            ("MAP01", &[]),
+            ("TEXTMAP", b"namespace = \"zdoom\";"),
+            ("ENDMAP", &[]),
+        ]);
+        assert_eq!(detect_zdoom_required(&path), Some(true));
+    }
+
+    // --- TEXTMAP not after map marker should NOT trigger ---
+
+    #[test]
+    fn test_detect_textmap_not_after_map_marker() {
+        // TEXTMAP as a standalone lump (not following a map marker) is not UDMF
+        let (_dir, path) = write_wad(&[
+            ("TEXTMAP", b"some data"),
+            ("MAP01", &[]),
+            ("THINGS", &[]),
+        ]);
+        assert_eq!(detect_zdoom_required(&path), Some(false));
+    }
+
+    // --- Edge cases ---
+
     #[test]
     fn test_detect_nonexistent() {
-        assert_eq!(detect_zdoom_required(Path::new("/nonexistent/test.wad")), None);
+        assert_eq!(
+            detect_zdoom_required(Path::new("/nonexistent/test.wad")),
+            None
+        );
     }
 
     #[test]
@@ -234,13 +314,10 @@ mod tests {
     }
 
     #[test]
-    fn test_detect_multiple_zdoom_lumps() {
-        let (_dir, path) = write_wad(&[
-            ("ZSCRIPT", b"version \"4.0\""),
-            ("MODELDEF", b"Model Foo {}"),
-            ("MAP01", &[]),
-        ]);
-        assert_eq!(detect_zdoom_required(&path), Some(true));
+    fn test_detect_no_maps() {
+        // Resource WAD with no map markers
+        let (_dir, path) = write_wad(&[("TEXTURE1", &[0; 4]), ("PNAMES", &[0; 4])]);
+        assert_eq!(detect_zdoom_required(&path), Some(false));
     }
 
     // --- PK3 detection tests ---
@@ -260,52 +337,49 @@ mod tests {
     }
 
     #[test]
-    fn test_detect_pk3_with_zscript() {
-        let (_dir, path) = write_pk3(&[
-            ("ZSCRIPT.zs", b"version \"4.0\""),
-            ("maps/MAP01.wad", &[]),
+    fn test_detect_pk3_udmf_map() {
+        let map_wad = build_wad(&[
+            ("MAP01", &[]),
+            ("TEXTMAP", b"namespace = \"zdoom\";"),
+            ("ENDMAP", &[]),
         ]);
+        let (_dir, path) = write_pk3(&[("maps/MAP01.wad", &map_wad)]);
         assert_eq!(detect_zdoom_required(&path), Some(true));
     }
 
     #[test]
-    fn test_detect_pk3_with_modeldef() {
-        let (_dir, path) = write_pk3(&[
-            ("MODELDEF.txt", b"Model Foo {}"),
-            ("maps/MAP01.wad", &[]),
-        ]);
-        assert_eq!(detect_zdoom_required(&path), Some(true));
+    fn test_detect_pk3_standard_map() {
+        let map_wad = build_wad(&[("MAP01", &[]), ("THINGS", &[1, 2])]);
+        let (_dir, path) = write_pk3(&[("maps/MAP01.wad", &map_wad)]);
+        assert_eq!(detect_zdoom_required(&path), Some(false));
     }
 
     #[test]
-    fn test_detect_pk3_with_menudef() {
-        let (_dir, path) = write_pk3(&[
-            ("MENUDEF.txt", b"OptionMenu {}"),
-            ("maps/MAP01.wad", &[]),
-        ]);
-        assert_eq!(detect_zdoom_required(&path), Some(true));
-    }
-
-    #[test]
-    fn test_detect_pk3_vanilla_maps_only() {
-        let wad = build_wad(&[("MAP01", &[]), ("THINGS", &[])]);
-        let (_dir, path) = write_pk3(&[("maps/MAP01.wad", &wad)]);
+    fn test_detect_pk3_no_maps() {
+        let (_dir, path) = write_pk3(&[("ZSCRIPT.zs", b"version \"4.0\"")]);
         assert_eq!(detect_zdoom_required(&path), Some(false));
     }
 
     #[test]
     fn test_detect_pk3_nonexistent() {
-        assert_eq!(detect_zdoom_required(Path::new("/nonexistent/test.pk3")), None);
+        assert_eq!(
+            detect_zdoom_required(Path::new("/nonexistent/test.pk3")),
+            None
+        );
     }
 
     // --- ZIP-wrapped WAD tests ---
 
     #[test]
-    fn test_detect_zip_wrapped_zdoom_wad() {
+    fn test_detect_zip_wrapped_udmf_wad() {
         let dir = tempfile::tempdir().unwrap();
         let zip_path = dir.path().join("test.zip");
 
-        let wad = build_wad(&[("ZSCRIPT", b"version \"4.0\""), ("MAP01", &[])]);
+        let wad = build_wad(&[
+            ("MAP01", &[]),
+            ("TEXTMAP", b"namespace = \"zdoom\";"),
+            ("ENDMAP", &[]),
+        ]);
         let file = std::fs::File::create(&zip_path).unwrap();
         let mut zip = zip::ZipWriter::new(file);
         zip.start_file("test.wad", zip::write::SimpleFileOptions::default())
@@ -317,11 +391,11 @@ mod tests {
     }
 
     #[test]
-    fn test_detect_zip_wrapped_vanilla_wad() {
+    fn test_detect_zip_wrapped_standard_wad() {
         let dir = tempfile::tempdir().unwrap();
         let zip_path = dir.path().join("test.zip");
 
-        let wad = build_wad(&[("MAP01", &[]), ("MAP02", &[])]);
+        let wad = build_wad(&[("MAP01", &[]), ("THINGS", &[])]);
         let file = std::fs::File::create(&zip_path).unwrap();
         let mut zip = zip::ZipWriter::new(file);
         zip.start_file("test.wad", zip::write::SimpleFileOptions::default())
