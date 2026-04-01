@@ -34,7 +34,7 @@ struct EnrichResult {
 
 impl EnrichResult {
     fn has_changes(&self) -> bool {
-        self.complevel.is_some() || self.iwad.is_some() || self.zdoom_required.is_some()
+        self.complevel.is_some() || self.iwad.is_some() || self.zdoom_required == Some(true)
     }
 }
 
