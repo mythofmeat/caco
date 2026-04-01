@@ -6,13 +6,15 @@
 //!
 //! Detection lumps:
 //! - ZSCRIPT  — GZDoom 3.0+ scripting language
-//! - DECORATE — ZDoom actor definitions
-//! - GLDEFS   — OpenGL rendering definitions
 //! - MODELDEF — 3D model support
 //! - VOXELDEF — Voxel definitions
 //! - TEXTMAP  — UDMF map format (only ZDoom-family fully supports)
 //! - SBARINFO — ZDoom custom statusbar definitions
 //! - MENUDEF  — ZDoom menu definitions
+//!
+//! Notably excluded:
+//! - DECORATE — often included as optional GZDoom enhancements in MBF21 WADs
+//! - GLDEFS   — same; dsda-doom ignores these without failing
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -21,11 +23,13 @@ use std::sync::LazyLock;
 use crate::utils::{load_wad_data, parse_wad_directory};
 
 /// Lump names that definitively indicate a ZDoom-family sourceport is required.
+///
+/// DECORATE and GLDEFS are intentionally excluded — MBF21 WADs often include
+/// these as optional GZDoom enhancements while remaining fully playable in
+/// dsda-doom (which silently ignores them).
 static ZDOOM_LUMPS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     HashSet::from([
         "ZSCRIPT",
-        "DECORATE",
-        "GLDEFS",
         "MODELDEF",
         "VOXELDEF",
         "TEXTMAP",
@@ -149,15 +153,17 @@ mod tests {
     }
 
     #[test]
-    fn test_detect_decorate() {
+    fn test_detect_decorate_not_definitive() {
+        // DECORATE alone is NOT definitive — MBF21 WADs include it for GZDoom compat
         let (_dir, path) = write_wad(&[("DECORATE", b"actor Foo {}"), ("MAP01", &[])]);
-        assert_eq!(detect_zdoom_required(&path), Some(true));
+        assert_eq!(detect_zdoom_required(&path), Some(false));
     }
 
     #[test]
-    fn test_detect_gldefs() {
+    fn test_detect_gldefs_not_definitive() {
+        // GLDEFS alone is NOT definitive — same reason as DECORATE
         let (_dir, path) = write_wad(&[("GLDEFS", b"brightmap {}"), ("MAP01", &[])]);
-        assert_eq!(detect_zdoom_required(&path), Some(true));
+        assert_eq!(detect_zdoom_required(&path), Some(false));
     }
 
     #[test]
@@ -231,8 +237,7 @@ mod tests {
     fn test_detect_multiple_zdoom_lumps() {
         let (_dir, path) = write_wad(&[
             ("ZSCRIPT", b"version \"4.0\""),
-            ("DECORATE", b"actor Foo {}"),
-            ("GLDEFS", b"brightmap {}"),
+            ("MODELDEF", b"Model Foo {}"),
             ("MAP01", &[]),
         ]);
         assert_eq!(detect_zdoom_required(&path), Some(true));
@@ -264,18 +269,18 @@ mod tests {
     }
 
     #[test]
-    fn test_detect_pk3_with_decorate() {
+    fn test_detect_pk3_with_modeldef() {
         let (_dir, path) = write_pk3(&[
-            ("DECORATE.txt", b"actor Foo {}"),
+            ("MODELDEF.txt", b"Model Foo {}"),
             ("maps/MAP01.wad", &[]),
         ]);
         assert_eq!(detect_zdoom_required(&path), Some(true));
     }
 
     #[test]
-    fn test_detect_pk3_with_gldefs() {
+    fn test_detect_pk3_with_menudef() {
         let (_dir, path) = write_pk3(&[
-            ("GLDEFS.txt", b"brightmap {}"),
+            ("MENUDEF.txt", b"OptionMenu {}"),
             ("maps/MAP01.wad", &[]),
         ]);
         assert_eq!(detect_zdoom_required(&path), Some(true));
@@ -300,7 +305,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let zip_path = dir.path().join("test.zip");
 
-        let wad = build_wad(&[("DECORATE", b"actor Foo {}"), ("MAP01", &[])]);
+        let wad = build_wad(&[("ZSCRIPT", b"version \"4.0\""), ("MAP01", &[])]);
         let file = std::fs::File::create(&zip_path).unwrap();
         let mut zip = zip::ZipWriter::new(file);
         zip.start_file("test.wad", zip::write::SimpleFileOptions::default())
