@@ -196,7 +196,7 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
             cmd.args(&args);
         }
 
-    // Inject managed config profile for dsda-family ports
+    // Inject managed config profile
     let profile_name = opts
         .config_profile
         .as_deref()
@@ -342,7 +342,7 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
 
     let start = Instant::now();
     let status = child.wait()?;
-    let _elapsed = start.elapsed().as_secs() as i64;
+    let elapsed = start.elapsed().as_secs() as i64;
 
     // End session
     db::end_session(conn, session_id, None, status.code())?;
@@ -382,12 +382,8 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
     // Auto-completion detection: check if all required maps have been beaten
     let auto_complete = check_auto_completion(conn, wad_id, &wad_path, stats_after.as_deref());
 
-    // Build result
-    let sessions = db::get_sessions(conn, wad_id)?;
-    let duration = sessions.first().and_then(|s| s.duration_seconds);
-
     Ok(PlayResult {
-        duration,
+        duration: Some(elapsed),
         exit_code: status.code(),
         auto_complete,
     })

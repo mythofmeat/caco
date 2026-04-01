@@ -182,7 +182,7 @@ pub fn config_ext(executable: &str) -> &'static str {
 /// Only dsda-family ports support `-config`.
 pub fn get_config_args(executable: &str, config_path: &str) -> Vec<String> {
     match family_name(executable) {
-        Some("dsda") => vec!["-config".to_string(), config_path.to_string()],
+        Some("dsda" | "helion") => vec!["-config".to_string(), config_path.to_string()],
         _ => Vec::new(),
     }
 }
@@ -300,6 +300,14 @@ mod tests {
         assert_eq!(
             get_config_args("dsda-doom", "/path/to/config.cfg"),
             vec!["-config", "/path/to/config.cfg"]
+        );
+        assert_eq!(
+            get_config_args("helion", "/path/to/config.ini"),
+            vec!["-config", "/path/to/config.ini"]
+        );
+        assert_eq!(
+            get_config_args("Helion", "/path/to/config.ini"),
+            vec!["-config", "/path/to/config.ini"]
         );
         assert!(get_config_args("gzdoom", "/path/to/config.cfg").is_empty());
     }
