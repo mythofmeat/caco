@@ -115,6 +115,7 @@ pub struct Config {
     pub iwad_dir: String,
     pub sourceport_dir: String,
     pub companion_orphan_cleanup: String,
+    pub zdoom_sourceport: String,
 
     #[serde(default)]
     pub tui: TuiConfig,
@@ -151,6 +152,7 @@ impl Default for Config {
             iwad_dir: iwad_dir().to_string_lossy().into_owned(),
             sourceport_dir: String::new(),
             companion_orphan_cleanup: "ask".to_string(),
+            zdoom_sourceport: String::new(),
             tui: TuiConfig::default(),
             gui: GuiConfig::default(),
             list: ListConfig::default(),
@@ -453,6 +455,21 @@ pub fn get_companion_orphan_cleanup() -> String {
 /// Get the configured default sourceport.
 pub fn get_default_sourceport() -> String {
     load_config().sourceport.clone()
+}
+
+/// Get the configured ZDoom-family sourceport for WADs that require it.
+///
+/// Falls back to "uzdoom", then "gzdoom" if not configured.
+pub fn get_zdoom_sourceport() -> String {
+    let cfg = load_config();
+    if !cfg.zdoom_sourceport.is_empty() {
+        return cfg.zdoom_sourceport.clone();
+    }
+    // Try uzdoom first (modern fork), then gzdoom
+    if which("uzdoom").is_some() {
+        return "uzdoom".to_string();
+    }
+    "gzdoom".to_string()
 }
 
 /// Get the configured default IWAD.

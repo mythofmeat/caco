@@ -13,6 +13,7 @@ use crate::demos;
 use crate::iwad_detect;
 use crate::sourceports;
 use crate::wad_stats;
+use crate::zdoom_detect;
 
 /// Whether auto-completion detection triggered after play.
 #[derive(Debug, Clone, PartialEq)]
@@ -94,6 +95,38 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
             "No sourceport specified and no default configured".to_string(),
         ));
     }
+
+    // Auto-detect zdoom_required if not already set
+    let zdoom_required = match wad.zdoom_required {
+        Some(v) => v != 0,
+        None => {
+            if let Some(detected) = zdoom_detect::detect_zdoom_required(&wad_path) {
+                let update = db::WadUpdate::new()
+                    .set_int("zdoom_required", Some(i64::from(detected)))?;
+                db::update_wad(conn, wad_id, &update)?;
+                detected
+            } else {
+                false
+            }
+        }
+    };
+
+    // If zdoom required but current port isn't zdoom-family, force to zdoom sourceport
+    let port = if zdoom_required {
+        let is_zdoom_family = sourceports::family_name(&port)
+            .is_some_and(|name| name == "zdoom");
+        if is_zdoom_family {
+            port
+        } else {
+            let zdoom_port = config::get_zdoom_sourceport();
+            eprintln!(
+                "WAD requires ZDoom-family sourceport, using {zdoom_port} instead of {port}"
+            );
+            zdoom_port
+        }
+    } else {
+        port
+    };
 
     let port = config::resolve_sourceport(&port);
     let mut cmd = Command::new(&port);

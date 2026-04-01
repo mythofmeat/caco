@@ -130,6 +130,7 @@ static MIGRATIONS: &[Migration] = &[
     (28, "add_wad_analysis_table", migrate_add_wad_analysis_table),
     (29, "fix_started_dropped_conflict", migrate_fix_started_dropped),
     (30, "fix_started_queued_conflict", migrate_fix_started_queued),
+    (31, "add_zdoom_required", migrate_add_zdoom_required),
 ];
 
 // ---------------------------------------------------------------------------
@@ -565,6 +566,10 @@ fn migrate_fix_started_queued(conn: &Connection) -> Result<()> {
         [],
     )?;
     Ok(())
+}
+
+fn migrate_add_zdoom_required(conn: &Connection) -> Result<()> {
+    add_column_if_missing(conn, "wads", "zdoom_required", "INTEGER")
 }
 
 // ---------------------------------------------------------------------------

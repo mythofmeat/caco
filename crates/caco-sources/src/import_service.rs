@@ -222,9 +222,10 @@ impl ImportService {
                 if !entry.iwad.is_empty() {
                     auto_link_iwad(conn, wad_id, &entry.iwad);
                 }
-                // Auto-set complevel from port requirement
+                // Auto-set complevel and zdoom_required from port requirement
                 if !entry.port.is_empty() {
                     auto_link_complevel(conn, wad_id, &entry.port);
+                    auto_link_zdoom_required(conn, wad_id, &entry.port);
                 }
                 ImportResult::success(wad_id)
             }
@@ -498,6 +499,11 @@ impl ImportService {
                 auto_link_iwad(conn, wad_id, &entry.iwad);
             }
 
+            // Auto-set zdoom_required from port field
+            if !entry.port.is_empty() {
+                auto_link_zdoom_required(conn, wad_id, &entry.port);
+            }
+
             Ok(())
         })();
 
@@ -527,6 +533,36 @@ pub fn port_to_complevel(port_text: &str) -> Option<i32> {
         }
     }
     None
+}
+
+/// Map a Doom Wiki "port" field string to a zdoom_required boolean.
+///
+/// Returns `Some(true)` if the port text indicates a ZDoom-family sourceport,
+/// `None` if inconclusive.
+pub fn port_to_zdoom_required(port_text: &str) -> Option<bool> {
+    let text = port_text.to_lowercase();
+    let zdoom_keywords = [
+        "zdoom", "gzdoom", "lzdoom", "vkdoom", "qzdoom", "zandronum", "skulltag",
+    ];
+    for kw in &zdoom_keywords {
+        if text.contains(kw) {
+            return Some(true);
+        }
+    }
+    None
+}
+
+/// Auto-set zdoom_required based on Doom Wiki "port" field heuristic.
+fn auto_link_zdoom_required(conn: &Connection, wad_id: i64, port_text: &str) {
+    if let Some(true) = port_to_zdoom_required(port_text)
+        && let Ok(Some(wad)) = db::get_wad(conn, wad_id, false)
+        && wad.zdoom_required.is_none()
+    {
+        let update = WadUpdate::new()
+            .set_int("zdoom_required", Some(1))
+            .unwrap();
+        let _ = db::update_wad(conn, wad_id, &update);
+    }
 }
 
 /// Auto-set complevel based on Doom Wiki "port" field heuristic.

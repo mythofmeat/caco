@@ -8,7 +8,7 @@ use rusqlite::Connection;
 use caco_core::complevel::complevel_name;
 use caco_core::db::{self, WadRecord, WadUpdate};
 use caco_sources::doomwiki::DoomwikiClient;
-use caco_sources::import_service::{port_to_complevel, titles_match};
+use caco_sources::import_service::{port_to_complevel, port_to_zdoom_required, titles_match};
 
 #[derive(Args)]
 pub struct EnrichArgs {
@@ -29,11 +29,12 @@ struct EnrichResult {
     title: String,
     complevel: Option<i32>,
     iwad: Option<String>,
+    zdoom_required: Option<bool>,
 }
 
 impl EnrichResult {
     fn has_changes(&self) -> bool {
-        self.complevel.is_some() || self.iwad.is_some()
+        self.complevel.is_some() || self.iwad.is_some() || self.zdoom_required.is_some()
     }
 }
 
@@ -88,6 +89,9 @@ pub fn run(conn: &Connection, args: &EnrichArgs) -> Result<(), String> {
             if let Some(ref iwad) = result.iwad {
                 parts.push(format!("IWAD {iwad}"));
             }
+            if let Some(true) = result.zdoom_required {
+                parts.push("zdoom_required".to_string());
+            }
             println!("{verb} {} -> {}", result.title, parts.join(", "));
         }
         println!();
@@ -117,13 +121,15 @@ fn enrich_wad(
         title: wad.title.clone(),
         complevel: None,
         iwad: None,
+        zdoom_required: None,
     };
 
     let needs_complevel = wad.complevel.is_none();
     let needs_iwad = wad.custom_iwad.is_none();
+    let needs_zdoom = wad.zdoom_required.is_none();
 
     // Nothing to detect
-    if !needs_complevel && !needs_iwad {
+    if !needs_complevel && !needs_iwad && !needs_zdoom {
         return result;
     }
 
@@ -156,31 +162,62 @@ fn enrich_wad(
                     let _ = db::update_wad(conn, wad.id, &update);
                 }
             }
+
+            // Try zdoom_required detection from file
+            if needs_zdoom
+                && let Some(required) = caco_core::zdoom_detect::detect_zdoom_required(path)
+            {
+                result.zdoom_required = Some(required);
+                if !dry_run {
+                    let update = WadUpdate::new()
+                        .set_int("zdoom_required", Some(i64::from(required)))
+                        .unwrap();
+                    let _ = db::update_wad(conn, wad.id, &update);
+                }
+            }
         }
     }
 
-    // Stage 2: Doom Wiki lookup for complevel (if file detection didn't find it)
-    if result.complevel.is_none()
-        && needs_complevel
-        && !wad.title.is_empty()
-        && let Some(cl) = wiki_lookup_complevel(wad, wiki_lookups)
-    {
-        result.complevel = Some(cl);
-        if !dry_run {
-            let update = WadUpdate::new()
-                .set_int("complevel", Some(cl as i64))
-                .unwrap();
-            let _ = db::update_wad(conn, wad.id, &update);
+    // Stage 2: Doom Wiki lookup (if file detection left gaps)
+    let still_needs_complevel = result.complevel.is_none() && needs_complevel;
+    let still_needs_zdoom = result.zdoom_required.is_none() && needs_zdoom;
+    if !wad.title.is_empty() && (still_needs_complevel || still_needs_zdoom) {
+        let wiki_entry = wiki_lookup_port(wad, wiki_lookups);
+
+        if let Some(ref port_text) = wiki_entry {
+            if result.complevel.is_none() && needs_complevel
+                && let Some(cl) = port_to_complevel(port_text)
+            {
+                result.complevel = Some(cl);
+                if !dry_run {
+                    let update = WadUpdate::new()
+                        .set_int("complevel", Some(cl as i64))
+                        .unwrap();
+                    let _ = db::update_wad(conn, wad.id, &update);
+                }
+            }
+
+            if result.zdoom_required.is_none() && needs_zdoom
+                && let Some(true) = port_to_zdoom_required(port_text)
+            {
+                result.zdoom_required = Some(true);
+                if !dry_run {
+                    let update = WadUpdate::new()
+                        .set_int("zdoom_required", Some(1))
+                        .unwrap();
+                    let _ = db::update_wad(conn, wad.id, &update);
+                }
+            }
         }
     }
 
     result
 }
 
-/// Look up a WAD's complevel via Doom Wiki port field.
+/// Look up a WAD's port requirement via Doom Wiki.
 ///
-/// Returns the detected complevel or None.
-fn wiki_lookup_complevel(wad: &WadRecord, wiki_lookups: &mut u32) -> Option<i32> {
+/// Returns the port field text if found, or None.
+fn wiki_lookup_port(wad: &WadRecord, wiki_lookups: &mut u32) -> Option<String> {
     let client = DoomwikiClient::new();
     *wiki_lookups += 1;
 
@@ -198,7 +235,7 @@ fn wiki_lookup_complevel(wad: &WadRecord, wiki_lookups: &mut u32) -> Option<i32>
         return None;
     }
 
-    port_to_complevel(&entry.port)
+    Some(entry.port.clone())
 }
 
 #[cfg(test)]
@@ -260,6 +297,7 @@ mod tests {
             title: "Test".to_string(),
             complevel: None,
             iwad: None,
+            zdoom_required: None,
         };
         assert!(!result.has_changes());
     }
@@ -270,6 +308,7 @@ mod tests {
             title: "Test".to_string(),
             complevel: Some(9),
             iwad: None,
+            zdoom_required: None,
         };
         assert!(result.has_changes());
     }
@@ -280,6 +319,7 @@ mod tests {
             title: "Test".to_string(),
             complevel: None,
             iwad: Some("doom2".to_string()),
+            zdoom_required: None,
         };
         assert!(result.has_changes());
     }
@@ -290,6 +330,18 @@ mod tests {
             title: "Test".to_string(),
             complevel: Some(21),
             iwad: Some("doom".to_string()),
+            zdoom_required: None,
+        };
+        assert!(result.has_changes());
+    }
+
+    #[test]
+    fn test_enrich_result_has_changes_zdoom() {
+        let result = EnrichResult {
+            title: "Test".to_string(),
+            complevel: None,
+            iwad: None,
+            zdoom_required: Some(true),
         };
         assert!(result.has_changes());
     }
@@ -409,13 +461,15 @@ mod tests {
         let wad_data = build_wad(&[("MAP01", &[])]);
         std::fs::write(&wad_path, &wad_data).unwrap();
 
-        // Set both complevel and custom_iwad
+        // Set complevel, custom_iwad, and zdoom_required
         let update = db::WadUpdate::new()
             .set_text("cached_path", Some(wad_path.to_string_lossy().to_string()))
             .unwrap()
             .set_int("complevel", Some(9))
             .unwrap()
             .set_text("custom_iwad", Some("doom2".to_string()))
+            .unwrap()
+            .set_int("zdoom_required", Some(0))
             .unwrap();
         db::update_wad(&conn, wad_id, &update).unwrap();
 

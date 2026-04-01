@@ -16,5 +16,6 @@ pub mod titlepic;
 pub mod utils;
 pub mod wad_analysis;
 pub mod wad_stats;
+pub mod zdoom_detect;
 
 pub use error::{Error, Result};
