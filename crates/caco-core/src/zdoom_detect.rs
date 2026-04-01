@@ -70,8 +70,7 @@ fn has_udmf_maps(directory: &[(String, u32, u32)]) -> bool {
 
 /// Check a PK3/PK7 (ZIP archive) for UDMF-format maps.
 ///
-/// PK3 maps are stored as individual WAD files under `maps/` (e.g.,
-/// `maps/MAP01.wad`). Each map WAD is checked for UDMF format.
+/// Checks all `.wad` entries (under `maps/` or at any path) for UDMF format.
 fn detect_from_pk3(pk3_path: &Path) -> Option<bool> {
     use std::fs::File;
     use std::io::Read;
@@ -80,14 +79,11 @@ fn detect_from_pk3(pk3_path: &Path) -> Option<bool> {
     let mut archive = zip::ZipArchive::new(file).ok()?;
 
     for i in 0..archive.len() {
-        let is_map_wad = archive
+        let is_wad = archive
             .name_for_index(i)
-            .is_some_and(|n| {
-                let lower = n.to_lowercase();
-                lower.starts_with("maps/") && lower.ends_with(".wad")
-            });
+            .is_some_and(|n| n.to_lowercase().ends_with(".wad"));
 
-        if is_map_wad {
+        if is_wad {
             let mut entry = match archive.by_index(i) {
                 Ok(e) => e,
                 Err(_) => continue,
