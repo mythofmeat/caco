@@ -1,25 +1,19 @@
 # Maintainer: eshen
-pkgname=caco-git
+pkgbase=caco
+pkgname=('caco' 'caco-gui' 'caco-tui')
 pkgver=1.2.0.r251.b77b1a2
 pkgrel=1
 pkgdesc="Doom WAD library manager"
 arch=('x86_64')
 url="http://localhost:3000/eshen/caco"
 license=('custom')
-depends=('openssl' 'gcc-libs' 'glibc')
-optdepends=(
-    'vulkan-driver: GPU-accelerated rendering for caco-gui'
-    'xdg-desktop-portal: native file dialogs in caco-gui'
-)
 makedepends=('cargo' 'gcc' 'git')
-provides=('caco')
-conflicts=('caco')
 options=(!lto)
-source=("$pkgname::git+$url.git")
+source=("$pkgbase::git+$url.git")
 sha256sums=('SKIP')
 
 pkgver() {
-    cd "$pkgname"
+    cd "$pkgbase"
     printf "%s.r%s.%s" \
         "$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')" \
         "$(git rev-list --count HEAD)" \
@@ -27,13 +21,13 @@ pkgver() {
 }
 
 prepare() {
-    cd "$pkgname"
+    cd "$pkgbase"
     export RUSTUP_TOOLCHAIN=stable
     cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
 }
 
 build() {
-    cd "$pkgname"
+    cd "$pkgbase"
     export RUSTUP_TOOLCHAIN=stable
     export CARGO_TARGET_DIR=target
     unset RUSTFLAGS LDFLAGS
@@ -41,27 +35,47 @@ build() {
 }
 
 check() {
-    cd "$pkgname"
+    cd "$pkgbase"
     export RUSTUP_TOOLCHAIN=stable
     export CARGO_TARGET_DIR=target
     unset RUSTFLAGS LDFLAGS
     cargo test --frozen --workspace
 }
 
-package() {
-    cd "$pkgname"
+package_caco() {
+    pkgdesc="Doom WAD library manager - CLI"
+    depends=('openssl' 'gcc-libs' 'glibc')
 
-    # Binaries
-    install -Dm755 target/release/caco     "$pkgdir/usr/bin/caco"
-    install -Dm755 target/release/caco-gui "$pkgdir/usr/bin/caco-gui"
-    install -Dm755 target/release/caco-tui "$pkgdir/usr/bin/caco-tui"
+    cd "$pkgbase"
 
-    # Shell completions
+    install -Dm755 target/release/caco "$pkgdir/usr/bin/caco"
+
     install -Dm644 completions/caco.fish "$pkgdir/usr/share/fish/vendor_completions.d/caco.fish"
     install -Dm644 completions/caco.bash "$pkgdir/usr/share/bash-completion/completions/caco"
     install -Dm644 completions/_caco     "$pkgdir/usr/share/zsh/site-functions/_caco"
+}
 
-    # Desktop entry and icon
+package_caco-gui() {
+    pkgdesc="Doom WAD library manager - GUI"
+    depends=('openssl' 'gcc-libs' 'glibc')
+    optdepends=(
+        'vulkan-driver: GPU-accelerated rendering'
+        'xdg-desktop-portal: native file dialogs'
+    )
+
+    cd "$pkgbase"
+
+    install -Dm755 target/release/caco-gui "$pkgdir/usr/bin/caco-gui"
+
     install -Dm644 assets/caco.desktop "$pkgdir/usr/share/applications/caco.desktop"
     install -Dm644 assets/caco.png     "$pkgdir/usr/share/icons/hicolor/1024x1024/apps/caco.png"
+}
+
+package_caco-tui() {
+    pkgdesc="Doom WAD library manager - TUI"
+    depends=('openssl' 'gcc-libs' 'glibc')
+
+    cd "$pkgbase"
+
+    install -Dm755 target/release/caco-tui "$pkgdir/usr/bin/caco-tui"
 }
