@@ -121,10 +121,7 @@ impl ImportPaneState {
         match action {
             SearchAction::Search(query) => {
                 let tx = self.bg_tx.clone();
-                let source_clone = match source {
-                    SearchSource::Idgames => SearchSource::Idgames,
-                    SearchSource::Doomwiki => SearchSource::Doomwiki,
-                };
+                let source_clone = source.clone();
                 thread::spawn(move || {
                     let results = match source_clone {
                         SearchSource::Idgames => search_idgames(&query),

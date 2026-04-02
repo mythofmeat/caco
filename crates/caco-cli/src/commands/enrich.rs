@@ -142,10 +142,10 @@ fn enrich_wad(
                 && let Some(cl) = caco_core::complevel_detect::detect_complevel(path)
             {
                 result.complevel = Some(cl);
-                if !dry_run {
-                    let update = WadUpdate::new()
+                if !dry_run
+                    && let Ok(update) = WadUpdate::new()
                         .set_int("complevel", Some(cl as i64))
-                        .unwrap();
+                {
                     let _ = db::update_wad(conn, wad.id, &update);
                 }
             }
@@ -155,10 +155,10 @@ fn enrich_wad(
                 && let Some(family) = caco_core::iwad_detect::detect_iwad(path)
             {
                 result.iwad = Some(family.to_string());
-                if !dry_run {
-                    let update = WadUpdate::new()
+                if !dry_run
+                    && let Ok(update) = WadUpdate::new()
                         .set_text("custom_iwad", Some(family.to_string()))
-                        .unwrap();
+                {
                     let _ = db::update_wad(conn, wad.id, &update);
                 }
             }
@@ -168,10 +168,10 @@ fn enrich_wad(
                 && let Some(required) = caco_core::zdoom_detect::detect_zdoom_required(path)
             {
                 result.zdoom_required = Some(required);
-                if !dry_run {
-                    let update = WadUpdate::new()
+                if !dry_run
+                    && let Ok(update) = WadUpdate::new()
                         .set_int("zdoom_required", Some(i64::from(required)))
-                        .unwrap();
+                {
                     let _ = db::update_wad(conn, wad.id, &update);
                 }
             }
@@ -189,10 +189,10 @@ fn enrich_wad(
                 && let Some(cl) = port_to_complevel(port_text)
             {
                 result.complevel = Some(cl);
-                if !dry_run {
-                    let update = WadUpdate::new()
+                if !dry_run
+                    && let Ok(update) = WadUpdate::new()
                         .set_int("complevel", Some(cl as i64))
-                        .unwrap();
+                {
                     let _ = db::update_wad(conn, wad.id, &update);
                 }
             }
@@ -201,10 +201,10 @@ fn enrich_wad(
                 && let Some(true) = port_to_zdoom_required(port_text)
             {
                 result.zdoom_required = Some(true);
-                if !dry_run {
-                    let update = WadUpdate::new()
+                if !dry_run
+                    && let Ok(update) = WadUpdate::new()
                         .set_int("zdoom_required", Some(1))
-                        .unwrap();
+                {
                     let _ = db::update_wad(conn, wad.id, &update);
                 }
             }

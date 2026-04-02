@@ -3,7 +3,6 @@
 use clap::Subcommand;
 use rusqlite::Connection;
 
-use caco_core::config;
 use caco_core::demos;
 use caco_core::utils::format_size;
 use crate::resolve;
@@ -58,15 +57,8 @@ pub fn run(conn: &Connection, cmd: &DemosCommand) -> Result<(), String> {
     }
 }
 
-fn get_data_dir(conn: &Connection, query: &[String], yes: bool) -> Result<(caco_core::db::WadRecord, std::path::PathBuf), String> {
-    let wad = resolve::resolve_one_wad(conn, query, yes)?;
-    let data_dir = config::find_wad_data_dir(wad.id)
-        .unwrap_or_else(|| config::get_wad_data_dir(wad.id, &wad.title));
-    Ok((wad, data_dir))
-}
-
 fn list_demos(conn: &Connection, query: &[String], plain: bool, yes: bool) -> Result<(), String> {
-    let (wad, data_dir) = get_data_dir(conn, query, yes)?;
+    let (wad, data_dir) = resolve::resolve_data_dir(conn, query, yes)?;
 
     let files = demos::find_demo_files(&data_dir);
     if files.is_empty() {
@@ -105,7 +97,7 @@ fn play_demo(
     sourceport: Option<&str>,
     yes: bool,
 ) -> Result<(), String> {
-    let (wad, data_dir) = get_data_dir(conn, query, yes)?;
+    let (wad, data_dir) = resolve::resolve_data_dir(conn, query, yes)?;
     let demos_dir = demos::get_demos_dir(&data_dir);
 
     let files = demos::find_demo_files(&data_dir);
@@ -146,10 +138,10 @@ fn play_demo(
     let mut cmd = std::process::Command::new(&port);
 
     // Add IWAD
-    let iwad_name = wad.custom_iwad.as_deref().or_else(|| {
-        let iwad = caco_core::config::get_iwad();
-        if iwad.is_empty() { None } else { Some(Box::leak(iwad.into_boxed_str()) as &str) }
-    });
+    let default_iwad = caco_core::config::get_iwad();
+    let iwad_name = wad.custom_iwad.as_deref().or(
+        if default_iwad.is_empty() { None } else { Some(default_iwad.as_str()) }
+    );
     if let Some(iwad) = iwad_name {
         let db_resolved = caco_core::db::resolve_iwad_from_db(conn, iwad, None);
         let resolved = caco_core::config::resolve_iwad_path(iwad, db_resolved.as_deref());
@@ -178,7 +170,7 @@ fn play_demo(
 }
 
 fn clean_demos(conn: &Connection, query: &[String], dry_run: bool, yes: bool) -> Result<(), String> {
-    let (wad, data_dir) = get_data_dir(conn, query, yes)?;
+    let (wad, data_dir) = resolve::resolve_data_dir(conn, query, yes)?;
 
     let files = demos::find_demo_files(&data_dir);
     if files.is_empty() {
@@ -194,13 +186,8 @@ fn clean_demos(conn: &Connection, query: &[String], dry_run: bool, yes: bool) ->
         return Ok(());
     }
 
-    if !yes {
-        eprint!("Delete {} demo file(s) for '{}'? [y/N] ", files.len(), wad.title);
-        let _ = std::io::Write::flush(&mut std::io::stderr());
-        let mut response = String::new();
-        if std::io::stdin().read_line(&mut response).is_err() || !response.trim().to_lowercase().starts_with('y') {
-            return Err("Aborted.".to_string());
-        }
+    if !yes && !resolve::confirm(&format!("Delete {} demo file(s) for '{}'?", files.len(), wad.title)) {
+        return Err("Aborted.".to_string());
     }
 
     let deleted = demos::clean_demo_files(&data_dir);

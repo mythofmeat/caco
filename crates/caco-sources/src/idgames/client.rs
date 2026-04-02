@@ -217,36 +217,27 @@ impl IdgamesClient {
         format!("{}{}", MIRRORS[mirror % MIRRORS.len()], path)
     }
 
-    /// Download a file with optional progress callback.
-    ///
-    /// Uses atomic download: writes to a `.partial` file first, then renames
-    /// on success. Cleans up on failure.
-    pub fn download(
+    /// Atomic download: fetch URL to a `.partial` file, rename on success.
+    /// Cleans up the partial file on failure.
+    fn atomic_download(
         &self,
-        entry: &FileEntry,
-        dest: Option<&Path>,
-        mirror: usize,
+        url: &str,
+        dest_path: &Path,
         progress: Option<&dyn Fn(u64, u64)>,
     ) -> Result<PathBuf> {
-        let url = self.get_download_url(entry, mirror);
-        let dest_path = resolve_download_dest(dest, &entry.filename);
-        let partial = dest_path.with_extension(
-            format!(
-                "{}.partial",
-                dest_path
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .unwrap_or("")
-            ),
-        );
+        let partial = dest_path.with_extension(format!(
+            "{}.partial",
+            dest_path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+        ));
 
         let result = (|| -> Result<PathBuf> {
-            let response = self.client.get(&url).send()?;
+            let response = self.client.get(url).send()?;
             response.error_for_status_ref()?;
 
-            let total = response
-                .content_length()
-                .unwrap_or(0);
+            let total = response.content_length().unwrap_or(0);
 
             if let Some(parent) = partial.parent() {
                 fs::create_dir_all(parent)?;
@@ -262,8 +253,8 @@ impl IdgamesClient {
             }
 
             drop(file);
-            fs::rename(&partial, &dest_path)?;
-            Ok(dest_path.clone())
+            fs::rename(&partial, dest_path)?;
+            Ok(dest_path.to_path_buf())
         })();
 
         if result.is_err() && partial.exists() {
@@ -271,6 +262,22 @@ impl IdgamesClient {
         }
 
         result
+    }
+
+    /// Download a file with optional progress callback.
+    ///
+    /// Uses atomic download: writes to a `.partial` file first, then renames
+    /// on success. Cleans up on failure.
+    pub fn download(
+        &self,
+        entry: &FileEntry,
+        dest: Option<&Path>,
+        mirror: usize,
+        progress: Option<&dyn Fn(u64, u64)>,
+    ) -> Result<PathBuf> {
+        let url = self.get_download_url(entry, mirror);
+        let dest_path = resolve_download_dest(dest, &entry.filename);
+        self.atomic_download(&url, &dest_path, progress)
     }
 
     /// Download directly from a mirror, bypassing the API.
@@ -310,43 +317,7 @@ impl IdgamesClient {
         let url = format!("{mirror_base}{download_path}");
 
         let dest_path = dest_dir.join(filename);
-        let partial = dest_path.with_extension(format!(
-            "{}.partial",
-            dest_path
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("")
-        ));
-
-        let result = (|| -> Result<PathBuf> {
-            let response = self.client.get(&url).send()?;
-            response.error_for_status_ref()?;
-
-            let total = response.content_length().unwrap_or(0);
-
-            if let Some(parent) = partial.parent() {
-                fs::create_dir_all(parent)?;
-            }
-
-            let mut file = fs::File::create(&partial)?;
-            let bytes = response.bytes()?;
-            file.write_all(&bytes)?;
-            let downloaded = bytes.len() as u64;
-
-            if let Some(cb) = progress {
-                cb(downloaded, total);
-            }
-
-            drop(file);
-            fs::rename(&partial, &dest_path)?;
-            Ok(dest_path.clone())
-        })();
-
-        if result.is_err() && partial.exists() {
-            let _ = fs::remove_file(&partial);
-        }
-
-        result
+        self.atomic_download(&url, &dest_path, progress)
     }
 }
 

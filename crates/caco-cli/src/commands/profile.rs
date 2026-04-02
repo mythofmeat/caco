@@ -5,6 +5,8 @@ use rusqlite::Connection;
 
 use caco_core::config;
 
+use crate::resolve;
+
 #[derive(Subcommand)]
 pub enum ProfileCommand {
     /// List config profiles
@@ -208,13 +210,8 @@ fn remove_profile(conn: &Connection, name: &str, sourceport: Option<&str>, yes: 
         }
     }
 
-    if !yes {
-        eprint!("Delete profile '{name}' for '{port}'? [y/N] ");
-        let _ = std::io::Write::flush(&mut std::io::stderr());
-        let mut response = String::new();
-        if std::io::stdin().read_line(&mut response).is_err() || !response.trim().to_lowercase().starts_with('y') {
-            return Err("Aborted.".to_string());
-        }
+    if !yes && !resolve::confirm(&format!("Delete profile '{name}' for '{port}'?")) {
+        return Err("Aborted.".to_string());
     }
 
     std::fs::remove_file(&path).map_err(|e| format!("Failed to delete profile: {e}"))?;

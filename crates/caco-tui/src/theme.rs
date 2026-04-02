@@ -1,5 +1,7 @@
 use ratatui::style::{Color, Modifier, Style};
 
+use caco_core::db::models::{Intent, PlayState, Status};
+
 /// Map a status string to its ratatui Color (from STATUS_METADATA hex values).
 pub fn status_color(status: &str) -> Color {
     match status {
@@ -19,16 +21,8 @@ pub fn status_style(status: &str) -> Style {
 }
 
 /// Human-readable display name for a status string.
-pub fn status_display(status: &str) -> &str {
-    match status {
-        "to-play" => "To Play",
-        "backlog" => "Backlog",
-        "playing" => "Playing",
-        "finished" => "Finished",
-        "abandoned" => "Abandoned",
-        "awaiting-update" => "Awaiting Update",
-        _ => status,
-    }
+pub fn status_display(status: &str) -> &'static str {
+    Status::parse(status).map(|s| s.display_name()).unwrap_or("Unknown")
 }
 
 /// Style for the selected/highlighted row.
@@ -102,13 +96,8 @@ pub fn play_state_style(state: &str) -> Style {
 }
 
 /// Human-readable display name for a play_state string.
-pub fn play_state_display(state: &str) -> &str {
-    match state {
-        "unplayed" => "Unplayed",
-        "started" => "Started",
-        "completed" => "Completed",
-        _ => state,
-    }
+pub fn play_state_display(state: &str) -> &'static str {
+    PlayState::parse(state).map(|p| p.display_name()).unwrap_or("Unknown")
 }
 
 /// Map an intent string to its ratatui Color.
@@ -128,14 +117,8 @@ pub fn intent_style(intent: &str) -> Style {
 }
 
 /// Human-readable display name for an intent string.
-pub fn intent_display(intent: &str) -> &str {
-    match intent {
-        "inbox" => "Inbox",
-        "queued" => "Queued",
-        "shelved" => "Shelved",
-        "dropped" => "Dropped",
-        _ => intent,
-    }
+pub fn intent_display(intent: &str) -> &'static str {
+    Intent::parse(intent).map(|i| i.display_name()).unwrap_or("Unknown")
 }
 
 /// Rating stars string for a given rating (0-5).

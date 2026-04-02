@@ -3,8 +3,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use chrono::{Local, TimeZone, Utc};
+use chrono::Local;
 use regex::Regex;
+
+use crate::utils::system_time_to_rfc3339;
 
 /// Demo file extension.
 pub const DEMO_EXTENSION: &str = ".lmp";
@@ -50,14 +52,8 @@ pub fn find_demo_files(data_dir: &Path) -> Vec<DemoFile> {
         for entry in paths {
             let path = entry.path();
             if let Ok(meta) = path.metadata() {
-                let mtime = meta
-                    .modified()
-                    .ok()
-                    .and_then(|t| {
-                        let duration = t.duration_since(std::time::UNIX_EPOCH).ok()?;
-                        Utc.timestamp_opt(duration.as_secs() as i64, 0).single()
-                    })
-                    .map(|dt| dt.to_rfc3339())
+                let mtime = meta.modified()
+                    .map(system_time_to_rfc3339)
                     .unwrap_or_default();
 
                 demos.push(DemoFile {

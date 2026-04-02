@@ -410,6 +410,11 @@ impl eframe::App for CacoApp {
                             self.state.notification =
                                 Some(Notification::info("WAD deleted".to_string()));
                         }
+                        DeleteResult::Error(msg) => {
+                            close_dialog = true;
+                            self.state.notification =
+                                Some(Notification::error(msg));
+                        }
                         DeleteResult::Cancelled => {
                             close_dialog = true;
                         }

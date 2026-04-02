@@ -3,7 +3,6 @@
 use clap::Subcommand;
 use rusqlite::Connection;
 
-use caco_core::config;
 use caco_core::saves;
 use caco_core::utils::format_size;
 use crate::resolve;
@@ -74,15 +73,8 @@ pub fn run(conn: &Connection, cmd: &SavesCommand) -> Result<(), String> {
     }
 }
 
-fn get_data_dir(conn: &Connection, query: &[String], yes: bool) -> Result<(caco_core::db::WadRecord, std::path::PathBuf), String> {
-    let wad = resolve::resolve_one_wad(conn, query, yes)?;
-    let data_dir = config::find_wad_data_dir(wad.id)
-        .unwrap_or_else(|| config::get_wad_data_dir(wad.id, &wad.title));
-    Ok((wad, data_dir))
-}
-
 fn list_saves(conn: &Connection, query: &[String], plain: bool, yes: bool) -> Result<(), String> {
-    let (wad, data_dir) = get_data_dir(conn, query, yes)?;
+    let (wad, data_dir) = resolve::resolve_data_dir(conn, query, yes)?;
 
     let files = saves::find_save_files(&data_dir);
     if files.is_empty() {
@@ -115,7 +107,7 @@ fn list_saves(conn: &Connection, query: &[String], plain: bool, yes: bool) -> Re
 }
 
 fn backup(conn: &Connection, query: &[String], yes: bool) -> Result<(), String> {
-    let (wad, data_dir) = get_data_dir(conn, query, yes)?;
+    let (wad, data_dir) = resolve::resolve_data_dir(conn, query, yes)?;
 
     if !data_dir.is_dir() {
         return Err(format!("No data directory for '{}'.", wad.title));
@@ -127,17 +119,14 @@ fn backup(conn: &Connection, query: &[String], yes: bool) -> Result<(), String> 
 }
 
 fn restore(conn: &Connection, query: &[String], backup_arg: Option<&str>, yes: bool) -> Result<(), String> {
-    let (wad, data_dir) = get_data_dir(conn, query, yes)?;
+    let (wad, data_dir) = resolve::resolve_data_dir(conn, query, yes)?;
 
     let backup_path = saves::resolve_backup_path(wad.id, backup_arg)
         .ok_or_else(|| format!("No backup found for '{}'. Create one with: caco saves backup {}", wad.title, wad.id))?;
 
     if !yes {
-        eprint!("Restore from {}? This will overwrite existing data. [y/N] ",
-            backup_path.file_name().and_then(|n| n.to_str()).unwrap_or("backup"));
-        let _ = std::io::Write::flush(&mut std::io::stderr());
-        let mut response = String::new();
-        if std::io::stdin().read_line(&mut response).is_err() || !response.trim().to_lowercase().starts_with('y') {
+        let name = backup_path.file_name().and_then(|n| n.to_str()).unwrap_or("backup");
+        if !resolve::confirm(&format!("Restore from {name}? This will overwrite existing data.")) {
             return Err("Aborted.".to_string());
         }
     }
@@ -148,7 +137,7 @@ fn restore(conn: &Connection, query: &[String], backup_arg: Option<&str>, yes: b
 }
 
 fn clean(conn: &Connection, query: &[String], dry_run: bool, yes: bool) -> Result<(), String> {
-    let (wad, data_dir) = get_data_dir(conn, query, yes)?;
+    let (wad, data_dir) = resolve::resolve_data_dir(conn, query, yes)?;
 
     let files = saves::find_save_files(&data_dir);
     if files.is_empty() {
@@ -164,13 +153,8 @@ fn clean(conn: &Connection, query: &[String], dry_run: bool, yes: bool) -> Resul
         return Ok(());
     }
 
-    if !yes {
-        eprint!("Delete {} save file(s) for '{}'? [y/N] ", files.len(), wad.title);
-        let _ = std::io::Write::flush(&mut std::io::stderr());
-        let mut response = String::new();
-        if std::io::stdin().read_line(&mut response).is_err() || !response.trim().to_lowercase().starts_with('y') {
-            return Err("Aborted.".to_string());
-        }
+    if !yes && !resolve::confirm(&format!("Delete {} save file(s) for '{}'?", files.len(), wad.title)) {
+        return Err("Aborted.".to_string());
     }
 
     let deleted = saves::clean_save_files(&data_dir);

@@ -2,6 +2,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
+use chrono::{TimeZone, Utc};
 use md5::{Digest, Md5};
 use regex::Regex;
 use zip::ZipArchive;
@@ -101,6 +102,17 @@ pub fn truncate(text: &str, max_len: usize, suffix: &str) -> String {
     // Find a valid char boundary
     let end = text.floor_char_boundary(end);
     format!("{}{}", &text[..end], suffix)
+}
+
+/// Convert a [`std::time::SystemTime`] to an RFC 3339 string.
+///
+/// Returns an empty string if the conversion fails.
+pub fn system_time_to_rfc3339(time: std::time::SystemTime) -> String {
+    time.duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .and_then(|d| Utc.timestamp_opt(d.as_secs() as i64, 0).single())
+        .map(|dt| dt.to_rfc3339())
+        .unwrap_or_default()
 }
 
 /// Sanitize a WAD title for use as a directory name.

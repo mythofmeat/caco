@@ -65,21 +65,15 @@ fn parse_idgames_json_value(data: &serde_json::Value) -> Result<Vec<FileEntry>> 
 
     // Single file (action=get): content is the file entry directly
     // Search results (action=search): content has a "file" field
-    let files = if content.get("file").is_some() {
-        // Search result: content.file may be object or array
-        let file_val = content.get("file").unwrap();
-        if file_val.is_array() {
-            file_val.as_array().unwrap().clone()
-        } else if file_val.is_object() {
-            vec![file_val.clone()]
-        } else {
-            return Ok(Vec::new());
+    let files = match content.get("file") {
+        Some(val) if val.is_array() => val.as_array().expect("checked is_array").clone(),
+        Some(val) if val.is_object() => vec![val.clone()],
+        Some(_) => return Ok(Vec::new()),
+        None if content.get("id").is_some() => {
+            // Single file response (action=get): content IS the file entry
+            vec![content.clone()]
         }
-    } else if content.get("id").is_some() {
-        // Single file response (action=get): content IS the file entry
-        vec![content.clone()]
-    } else {
-        return Ok(Vec::new());
+        None => return Ok(Vec::new()),
     };
 
     let mut entries = Vec::new();

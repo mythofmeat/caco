@@ -4,14 +4,14 @@ use std::fs::{self, File};
 use std::io;
 use std::path::{Path, PathBuf};
 
-use chrono::{Local, TimeZone, Utc};
+use chrono::Local;
 use regex::Regex;
 use zip::write::SimpleFileOptions;
 use zip::ZipArchive;
 
 use crate::config::get_backup_dir;
 use crate::sourceports::ALL_SAVE_EXTENSIONS;
-use crate::utils::sanitize_dirname;
+use crate::utils::{sanitize_dirname, system_time_to_rfc3339};
 
 /// Information about a save file.
 #[derive(Debug, Clone)]
@@ -65,14 +65,8 @@ fn collect_save_files_recursive(base: &Path, dir: &Path, saves: &mut Vec<SaveFil
                 .unwrap_or_default();
             if ALL_SAVE_EXTENSIONS.contains(&ext.as_str())
                 && let Ok(meta) = path.metadata() {
-                    let mtime = meta
-                        .modified()
-                        .ok()
-                        .and_then(|t| {
-                            let duration = t.duration_since(std::time::UNIX_EPOCH).ok()?;
-                            Utc.timestamp_opt(duration.as_secs() as i64, 0).single()
-                        })
-                        .map(|dt| dt.to_rfc3339())
+                    let mtime = meta.modified()
+                        .map(system_time_to_rfc3339)
                         .unwrap_or_default();
 
                     saves.push(SaveFile {
@@ -219,14 +213,8 @@ pub fn list_backups(wad_id: i64) -> Vec<BackupInfo> {
                     .is_some_and(|n| n.starts_with(&prefix))
                 && path.extension().and_then(|e| e.to_str()) == Some("zip")
                 && let Ok(meta) = path.metadata() {
-                    let created = meta
-                        .modified()
-                        .ok()
-                        .and_then(|t| {
-                            let duration = t.duration_since(std::time::UNIX_EPOCH).ok()?;
-                            Utc.timestamp_opt(duration.as_secs() as i64, 0).single()
-                        })
-                        .map(|dt| dt.to_rfc3339())
+                    let created = meta.modified()
+                        .map(system_time_to_rfc3339)
                         .unwrap_or_default();
 
                     backups.push(BackupInfo {
@@ -274,14 +262,8 @@ pub fn list_all_backups() -> Vec<BackupInfo> {
                     .and_then(|c| c[1].parse::<i64>().ok());
 
                 if let Ok(meta) = path.metadata() {
-                    let created = meta
-                        .modified()
-                        .ok()
-                        .and_then(|t| {
-                            let duration = t.duration_since(std::time::UNIX_EPOCH).ok()?;
-                            Utc.timestamp_opt(duration.as_secs() as i64, 0).single()
-                        })
-                        .map(|dt| dt.to_rfc3339())
+                    let created = meta.modified()
+                        .map(system_time_to_rfc3339)
                         .unwrap_or_default();
 
                     backups.push(BackupInfo {

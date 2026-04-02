@@ -11,7 +11,7 @@ use caco_sources::idgames::IdgamesClient;
 use caco_sources::doomwiki::DoomwikiClient;
 use caco_sources::doomworld::DoomworldClient;
 use caco_sources::doomworld::llm;
-use caco_sources::import_service::ImportService;
+use caco_sources::import_service::{ImportResult, ImportService};
 use caco_sources::json_import::{self, JsonSource};
 use crate::picker;
 
@@ -85,6 +85,26 @@ pub struct ImportArgs {
     /// LLM model override
     #[arg(long)]
     llm_model: Option<String>,
+}
+
+/// Print the outcome of a batch import. Returns true if the WAD was imported.
+fn print_import_result(result: &ImportResult, display_name: &str, suffix: &str) -> bool {
+    if result.is_duplicate {
+        eprintln!(
+            "Duplicate: '{}' already exists as ID {}.",
+            result.duplicate_title.as_deref().unwrap_or("?"),
+            result.duplicate_id.unwrap_or(0),
+        );
+        false
+    } else if let Some(wad_id) = result.wad_id {
+        println!("Imported '{display_name}' (ID: {wad_id}){suffix}");
+        true
+    } else if let Some(ref err) = result.error {
+        eprintln!("Error importing '{display_name}': {err}");
+        false
+    } else {
+        false
+    }
 }
 
 pub fn run(conn: &Connection, args: &ImportArgs) -> Result<(), String> {
@@ -249,17 +269,8 @@ fn import_idgames_search(
     for idx in &selected {
         let entry = &results[*idx];
         let result = svc.import_idgames(conn, entry, tags.clone(), args.force);
-        if result.is_duplicate {
-            eprintln!(
-                "Duplicate: '{}' already exists as ID {}.",
-                result.duplicate_title.as_deref().unwrap_or("?"),
-                result.duplicate_id.unwrap_or(0),
-            );
-        } else if let Some(wad_id) = result.wad_id {
-            println!("Imported '{}' (ID: {wad_id})", entry.title);
+        if print_import_result(&result, &entry.title, "") {
             imported += 1;
-        } else if let Some(ref err) = result.error {
-            eprintln!("Error importing '{}': {err}", entry.title);
         }
     }
 
@@ -371,17 +382,8 @@ fn import_doomwiki_search(
     for idx in &selected {
         let entry = &results[*idx];
         let result = svc.import_doomwiki(conn, entry, tags.clone(), args.force);
-        if result.is_duplicate {
-            eprintln!(
-                "Duplicate: '{}' already exists as ID {}.",
-                result.duplicate_title.as_deref().unwrap_or("?"),
-                result.duplicate_id.unwrap_or(0),
-            );
-        } else if let Some(wad_id) = result.wad_id {
-            println!("Imported '{}' (ID: {wad_id})", entry.display_name());
+        if print_import_result(&result, entry.display_name(), "") {
             imported += 1;
-        } else if let Some(ref err) = result.error {
-            eprintln!("Error importing '{}': {err}", entry.display_name());
         }
     }
 
@@ -645,17 +647,8 @@ fn import_json_idgames(
     for idx in &selected {
         let entry = &entries[*idx];
         let result = svc.import_idgames(conn, entry, tags.clone(), args.force);
-        if result.is_duplicate {
-            eprintln!(
-                "Duplicate: '{}' already exists as ID {}.",
-                result.duplicate_title.as_deref().unwrap_or("?"),
-                result.duplicate_id.unwrap_or(0),
-            );
-        } else if let Some(wad_id) = result.wad_id {
-            println!("Imported '{}' (ID: {wad_id}) [from JSON]", entry.title);
+        if print_import_result(&result, &entry.title, " [from JSON]") {
             imported += 1;
-        } else if let Some(ref err) = result.error {
-            eprintln!("Error importing '{}': {err}", entry.title);
         }
     }
 
@@ -725,17 +718,8 @@ fn import_json_doomwiki(
     for idx in &selected {
         let entry = &entries[*idx];
         let result = svc.import_doomwiki(conn, entry, tags.clone(), args.force);
-        if result.is_duplicate {
-            eprintln!(
-                "Duplicate: '{}' already exists as ID {}.",
-                result.duplicate_title.as_deref().unwrap_or("?"),
-                result.duplicate_id.unwrap_or(0),
-            );
-        } else if let Some(wad_id) = result.wad_id {
-            println!("Imported '{}' (ID: {wad_id}) [from JSON]", entry.display_name());
+        if print_import_result(&result, entry.display_name(), " [from JSON]") {
             imported += 1;
-        } else if let Some(ref err) = result.error {
-            eprintln!("Error importing '{}': {err}", entry.display_name());
         }
     }
 

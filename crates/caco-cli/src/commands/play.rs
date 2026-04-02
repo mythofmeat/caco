@@ -8,6 +8,28 @@ use rusqlite::Connection;
 
 use caco_core::config;
 use caco_core::db;
+
+fn make_download_progress_bar(message: &str) -> ProgressBar {
+    let pb = ProgressBar::new(0);
+    pb.set_style(
+        ProgressStyle::with_template(
+            "Downloading {msg} [{bar:30}] {bytes}/{total_bytes} ({bytes_per_sec})",
+        )
+        .unwrap()
+        .progress_chars("=> "),
+    );
+    pb.set_message(message.to_string());
+    pb
+}
+
+fn progress_callback(pb: &ProgressBar) -> impl Fn(u64, u64) + '_ {
+    move |downloaded: u64, total: u64| {
+        if pb.length() != Some(total) {
+            pb.set_length(total);
+        }
+        pb.set_position(downloaded);
+    }
+}
 use caco_core::db::models::WadRecord;
 use caco_core::player::{self, AutoCompleteResult, PlayOptions, RecordOption, format_duration};
 use caco_core::wad_stats;
@@ -208,25 +230,11 @@ fn ensure_wad_path(conn: &Connection, wad: &WadRecord) -> Result<(), String> {
 
     if let Some(entry) = entry {
         // Normal API-based download
-        let pb = ProgressBar::new(0);
-        pb.set_style(
-            ProgressStyle::with_template(
-                "Downloading {msg} [{bar:30}] {bytes}/{total_bytes} ({bytes_per_sec})",
-            )
-            .unwrap()
-            .progress_chars("=> "),
-        );
-        pb.set_message(entry.filename.clone());
-
-        let progress_cb = |downloaded: u64, total: u64| {
-            if pb.length() != Some(total) {
-                pb.set_length(total);
-            }
-            pb.set_position(downloaded);
-        };
+        let pb = make_download_progress_bar(&entry.filename);
+        let cb = progress_callback(&pb);
 
         let dest = client
-            .download(&entry, Some(&cache_dir), mirror, Some(&progress_cb))
+            .download(&entry, Some(&cache_dir), mirror, Some(&cb))
             .map_err(|e| format!("Download failed: {e}"))?;
 
         pb.finish_and_clear();
@@ -249,25 +257,11 @@ fn ensure_wad_path(conn: &Connection, wad: &WadRecord) -> Result<(), String> {
             ));
         }
 
-        let pb = ProgressBar::new(0);
-        pb.set_style(
-            ProgressStyle::with_template(
-                "Downloading {msg} [{bar:30}] {bytes}/{total_bytes} ({bytes_per_sec})",
-            )
-            .unwrap()
-            .progress_chars("=> "),
-        );
-        pb.set_message(filename.to_string());
-
-        let progress_cb = |downloaded: u64, total: u64| {
-            if pb.length() != Some(total) {
-                pb.set_length(total);
-            }
-            pb.set_position(downloaded);
-        };
+        let pb = make_download_progress_bar(filename);
+        let cb = progress_callback(&pb);
 
         let dest = client
-            .download_direct(source_url, filename, &cache_dir, mirror, Some(&progress_cb))
+            .download_direct(source_url, filename, &cache_dir, mirror, Some(&cb))
             .map_err(|e| format!("Direct download failed: {e}"))?;
 
         pb.finish_and_clear();

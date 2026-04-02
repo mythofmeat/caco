@@ -1,11 +1,6 @@
-#![allow(
-    clippy::collapsible_if,
-    clippy::collapsible_else_if,
-    clippy::manual_map,
-    clippy::if_same_then_else,
-    clippy::needless_match,
-    clippy::let_and_return
-)]
+// Nested `if let` chains are common in TUI event/render code and are more
+// readable than collapsed `if let .. && let ..` chains at deep indentation.
+#![allow(clippy::collapsible_if, clippy::collapsible_else_if)]
 
 pub mod app;
 pub mod event;

@@ -92,7 +92,7 @@ impl FilterInputState {
 
 /// Render the filter input.
 pub fn render_filter_input(state: &FilterInputState, frame: &mut Frame, area: Rect) {
-    let prefix = if state.focused { "/ " } else { "/ " };
+    let prefix = "/ ";
     let count_str = format!(" ({} WADs)", state.wad_count);
 
     let mut spans = vec![Span::styled(

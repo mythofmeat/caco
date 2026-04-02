@@ -39,25 +39,17 @@ impl DoomwikiClient {
         let response = self.client.get(API_URL).query(&query).send()?;
 
         // Detect AWS WAF challenge (Doom Wiki uses AWS)
-        if response.status() == reqwest::StatusCode::FORBIDDEN
-            || (response.status().is_success()
-                && response
-                    .headers()
-                    .get("x-amzn-waf-action")
-                    .and_then(|v| v.to_str().ok())
-                    == Some("challenge"))
-        {
-            let waf_action = response
+        let is_waf_blocked = response.status() == reqwest::StatusCode::FORBIDDEN
+            || response
                 .headers()
                 .get("x-amzn-waf-action")
                 .and_then(|v| v.to_str().ok())
-                .unwrap_or("");
-            if waf_action == "challenge" || response.status() == reqwest::StatusCode::FORBIDDEN {
-                return Err(SourceError::WafBlocked {
-                    api_name: "doomwiki".to_string(),
-                    message: "Doom Wiki blocked the request (WAF challenge). Try again later or import manually.".to_string(),
-                });
-            }
+                == Some("challenge");
+        if is_waf_blocked {
+            return Err(SourceError::WafBlocked {
+                api_name: "doomwiki".to_string(),
+                message: "Doom Wiki blocked the request (WAF challenge). Try again later or import manually.".to_string(),
+            });
         }
 
         response.error_for_status_ref()?;

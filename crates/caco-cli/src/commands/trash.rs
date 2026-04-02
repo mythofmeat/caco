@@ -106,13 +106,8 @@ pub fn run(conn: &Connection, args: &TrashArgs) -> Result<(), String> {
             println!("Would permanently delete {} WAD(s).", wads.len());
             return Ok(());
         }
-        if !args.yes {
-            eprint!("Permanently delete all trashed WADs? [y/N] ");
-            let _ = std::io::Write::flush(&mut std::io::stderr());
-            let mut response = String::new();
-            if std::io::stdin().read_line(&mut response).is_err() || !response.trim().to_lowercase().starts_with('y') {
-                return Err("Aborted.".to_string());
-            }
+        if !args.yes && !resolve::confirm("Permanently delete all trashed WADs?") {
+            return Err("Aborted.".to_string());
         }
         let count = db::purge_all_deleted(conn).map_err(|e| e.to_string())?;
         println!("Purged {count} WAD(s).");
@@ -177,10 +172,7 @@ fn remove_iwad(conn: &Connection, spec: &str, yes: bool, dry_run: bool) -> Resul
             for v in &variants {
                 eprintln!("  {}/{}", v.family, v.variant);
             }
-            eprint!("Continue? [y/N] ");
-            let _ = std::io::Write::flush(&mut std::io::stderr());
-            let mut response = String::new();
-            if std::io::stdin().read_line(&mut response).is_err() || !response.trim().to_lowercase().starts_with('y') {
+            if !resolve::confirm("Continue?") {
                 return Err("Aborted.".to_string());
             }
         }
@@ -212,13 +204,8 @@ fn remove_id24(conn: &Connection, name: &str, yes: bool, dry_run: bool) -> Resul
         return Ok(());
     }
 
-    if !yes {
-        eprint!("Remove id24 WAD '{name}'? [y/N] ");
-        let _ = std::io::Write::flush(&mut std::io::stderr());
-        let mut response = String::new();
-        if std::io::stdin().read_line(&mut response).is_err() || !response.trim().to_lowercase().starts_with('y') {
-            return Err("Aborted.".to_string());
-        }
+    if !yes && !resolve::confirm(&format!("Remove id24 WAD '{name}'?")) {
+        return Err("Aborted.".to_string());
     }
 
     let removed = db::remove_id24_with_paths(conn, name).map_err(|e| e.to_string())?;

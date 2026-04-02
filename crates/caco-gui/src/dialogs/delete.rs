@@ -16,6 +16,7 @@ pub enum DeleteResult {
     Confirmed,
     Cancelled,
     Open,
+    Error(String),
 }
 
 impl DeleteDialogState {
@@ -90,9 +91,7 @@ impl DeleteDialogState {
                         match caco_core::db::wads::delete_wad(conn, self.wad_id, false) {
                             Ok(_) => result = DeleteResult::Confirmed,
                             Err(e) => {
-                                // Best-effort: log but still close
-                                eprintln!("delete failed: {e}");
-                                result = DeleteResult::Confirmed;
+                                result = DeleteResult::Error(format!("Delete failed: {e}"));
                             }
                         }
                     }

@@ -142,32 +142,16 @@ impl LibraryPaneState {
 
             // Actions
             (KeyCode::Char('i'), KeyModifiers::NONE) => {
-                if let Some(id) = self.table.selected_wad_id() {
-                    Some(AppMessage::PushScreen(ScreenId::WadDetail(id)))
-                } else {
-                    None
-                }
+                self.table.selected_wad_id().map(|id| AppMessage::PushScreen(ScreenId::WadDetail(id)))
             }
             (KeyCode::Char('h'), KeyModifiers::NONE) => {
-                if let Some(id) = self.table.selected_wad_id() {
-                    Some(AppMessage::PushScreen(ScreenId::Sessions(id)))
-                } else {
-                    None
-                }
+                self.table.selected_wad_id().map(|id| AppMessage::PushScreen(ScreenId::Sessions(id)))
             }
             (KeyCode::Char('e'), KeyModifiers::NONE) => {
-                if let Some(id) = self.table.selected_wad_id() {
-                    Some(AppMessage::PushScreen(ScreenId::WadEdit(id)))
-                } else {
-                    None
-                }
+                self.table.selected_wad_id().map(|id| AppMessage::PushScreen(ScreenId::WadEdit(id)))
             }
             (KeyCode::Char('d'), KeyModifiers::NONE) => {
-                if let Some(id) = self.table.selected_wad_id() {
-                    Some(AppMessage::PushScreen(ScreenId::ConfirmDelete(id)))
-                } else {
-                    None
-                }
+                self.table.selected_wad_id().map(|id| AppMessage::PushScreen(ScreenId::ConfirmDelete(id)))
             }
 
             // Status mode
@@ -212,11 +196,7 @@ impl LibraryPaneState {
 
             // Map stats
             (KeyCode::Char('M'), KeyModifiers::SHIFT | KeyModifiers::NONE) => {
-                if let Some(id) = self.table.selected_wad_id() {
-                    Some(AppMessage::PushScreen(ScreenId::WadStats(id)))
-                } else {
-                    None
-                }
+                self.table.selected_wad_id().map(|id| AppMessage::PushScreen(ScreenId::WadStats(id)))
             }
 
             // Trash
@@ -258,11 +238,7 @@ impl LibraryPaneState {
 
             // Play
             (KeyCode::Enter, KeyModifiers::NONE) => {
-                if let Some(id) = self.table.selected_wad_id() {
-                    Some(AppMessage::PlayWad(id))
-                } else {
-                    None
-                }
+                self.table.selected_wad_id().map(AppMessage::PlayWad)
             }
 
             _ => None,
@@ -363,7 +339,7 @@ pub fn render_library_pane(
 ) {
     // Layout: header (filter+sort) | content | status bar
     let show_status_mode = state.status_mode;
-    let bottom_height = if show_status_mode { 1 } else { 1 };
+    let bottom_height = 1;
 
     let layout = Layout::vertical([
         Constraint::Length(1), // filter + sort

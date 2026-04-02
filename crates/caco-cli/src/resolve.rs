@@ -1,6 +1,7 @@
 //! Query resolution: parse WAD IDs, ranges, or queries and return matching WADs.
 
 use std::io::{self, Write};
+use std::path::PathBuf;
 
 use rusqlite::Connection;
 
@@ -178,6 +179,27 @@ pub fn resolve_one_wad(
 ) -> Result<WadRecord, String> {
     let wads = resolve_wads(conn, query, ResolveMode::Pick, yes, false)?;
     wads.into_iter().next().ok_or_else(|| "No WAD selected.".to_string())
+}
+
+/// Prompt for y/N confirmation on stderr. Returns true if user confirms.
+pub fn confirm(prompt: &str) -> bool {
+    eprint!("{prompt} [y/N] ");
+    let _ = io::stderr().flush();
+    let mut response = String::new();
+    io::stdin().read_line(&mut response).is_ok()
+        && response.trim().to_lowercase().starts_with('y')
+}
+
+/// Resolve a WAD and its data directory from a query.
+pub fn resolve_data_dir(
+    conn: &Connection,
+    query: &[String],
+    yes: bool,
+) -> Result<(WadRecord, PathBuf), String> {
+    let wad = resolve_one_wad(conn, query, yes)?;
+    let data_dir = caco_core::config::find_wad_data_dir(wad.id)
+        .unwrap_or_else(|| caco_core::config::get_wad_data_dir(wad.id, &wad.title));
+    Ok((wad, data_dir))
 }
 
 #[cfg(test)]

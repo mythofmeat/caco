@@ -1,8 +1,12 @@
 use std::path::Path;
+use std::sync::LazyLock;
 
 use regex::Regex;
 use rusqlite::Connection;
 use unicode_normalization::UnicodeNormalization;
+
+static PUNCTUATION_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"[^a-z0-9\s]").unwrap());
 
 use crate::doomwiki::DoomwikiClient;
 use crate::doomworld::ForumThread;
@@ -90,8 +94,7 @@ fn normalize_title(title: &str) -> String {
         .filter(|c| !unicode_normalization::char::is_combining_mark(*c))
         .collect();
     // Remove punctuation (keep alphanumeric and spaces)
-    let re = Regex::new(r"[^a-z0-9\s]").unwrap();
-    let cleaned = re.replace_all(&stripped, "");
+    let cleaned = PUNCTUATION_RE.replace_all(&stripped, "");
     // Collapse whitespace
     cleaned.split_whitespace().collect::<Vec<_>>().join(" ")
 }
