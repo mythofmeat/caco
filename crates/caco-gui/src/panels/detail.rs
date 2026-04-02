@@ -119,19 +119,44 @@ pub fn render(
             && let Ok(wad_stats) = serde_json::from_str::<StatsData>(snapshot_json)
             && !wad_stats.maps.is_empty()
         {
-            let played = wad_stats.played_maps().len();
+            let analysis = caco_core::db::analysis::get_analysis(conn, wad_id)
+                .ok()
+                .flatten();
+
+            let secret_set: std::collections::HashSet<&str> = analysis
+                .as_ref()
+                .map(|a| a.secret_maps.iter().map(|s| s.as_str()).collect())
+                .unwrap_or_default();
+
             let total = wad_stats.maps.len();
-            let pct = if total > 0 {
-                (played as f32) / (total as f32)
+            let played_required = wad_stats
+                .played_maps()
+                .iter()
+                .filter(|m| !secret_set.contains(m.lump.as_str()))
+                .count();
+            let required_total = analysis
+                .as_ref()
+                .map(|a| a.required_maps)
+                .unwrap_or(total);
+            let secret_total = secret_set.len();
+            let played_secret = wad_stats
+                .played_maps()
+                .iter()
+                .filter(|m| secret_set.contains(m.lump.as_str()))
+                .count();
+
+            // Bar tracks required maps only
+            let pct = if required_total > 0 {
+                played_required as f32 / required_total as f32
             } else {
                 0.0
             };
-            let pct_display = (pct * 100.0) as u32;
+            let pct_display = (pct * 100.0).min(100.0) as u32;
 
             ui.add_space(2.0);
             ui.colored_label(
                 theme::TEXT_SECONDARY,
-                format!("Progress: {played}/{total} maps ({pct_display}%)"),
+                format!("Progress: {played_required}/{required_total} maps ({pct_display}%)"),
             );
             // Custom progress bar with outlined track
             let bar_height = 14.0;
@@ -145,7 +170,7 @@ pub fn render(
             if pct > 0.0 {
                 let fill_rect = egui::Rect::from_min_size(
                     rect.min,
-                    egui::vec2(rect.width() * pct, rect.height()),
+                    egui::vec2(rect.width() * pct.min(1.0), rect.height()),
                 );
                 painter.rect_filled(fill_rect, rounding, theme::TEXT_ACCENT);
             }
@@ -155,6 +180,27 @@ pub fn render(
                 egui::Stroke::new(1.0, theme::BORDER),
                 egui::StrokeKind::Outside,
             );
+            // Secret badge
+            if secret_total > 0 {
+                ui.horizontal(|ui| {
+                    let badge_text = format!("{played_secret}/{secret_total} secret");
+                    let badge = egui::RichText::new(&badge_text)
+                        .size(10.0)
+                        .color(theme::TEXT_PRIMARY);
+                    let badge_resp =
+                        ui.add(egui::Label::new(badge).selectable(false));
+                    let badge_rect = badge_resp.rect.expand2(egui::vec2(4.0, 1.0));
+                    ui.painter_at(badge_rect)
+                        .rect_filled(badge_rect, 3.0, theme::COLOR_SECRET_FILL);
+                    ui.painter_at(badge_rect).text(
+                        badge_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        &badge_text,
+                        egui::FontId::proportional(10.0),
+                        theme::TEXT_PRIMARY,
+                    );
+                });
+            }
         }
 
         // ── Actions ──

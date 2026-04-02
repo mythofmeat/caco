@@ -21,6 +21,9 @@ pub const COLOR_SUCCESS: Color32 = Color32::from_rgb(0x33, 0xcc, 0x33);
 pub const COLOR_WARNING: Color32 = Color32::from_rgb(0xcc, 0xcc, 0x33);
 pub const COLOR_ERROR: Color32 = Color32::from_rgb(0xcc, 0x44, 0x44);
 
+// Progress bar: secret map badge background
+pub const COLOR_SECRET_FILL: Color32 = Color32::from_rgb(0x99, 0x44, 0x22);
+
 // ---------------------------------------------------------------------------
 // Status colors
 // ---------------------------------------------------------------------------
