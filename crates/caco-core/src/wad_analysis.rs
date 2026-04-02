@@ -36,6 +36,12 @@ const VANILLA_NORMAL_EXITS: &[u16] = &[11, 52, 197];
 /// Vanilla/Boom secret exit linedef types.
 const VANILLA_SECRET_EXITS: &[u16] = &[51, 124, 198];
 
+/// Boom generalized exit linedef range: 0x3400..=0x37FF.
+const GEN_EXIT_BASE: u16 = 0x3400;
+const GEN_EXIT_END: u16 = 0x37FF;
+/// Bit 5 within the generalized exit encoding indicates a secret exit.
+const GEN_EXIT_SECRET_BIT: u16 = 0x20;
+
 /// UDMF normal exit specials.
 const UDMF_NORMAL_EXITS: &[i32] = &[243, 74, 75]; // Exit_Normal, Teleport_NewMap, Teleport_EndGame
 /// UDMF secret exit specials.
@@ -677,6 +683,14 @@ fn detect_vanilla_exits(linedefs: &[u8]) -> (bool, bool) {
         if VANILLA_SECRET_EXITS.contains(&special) {
             has_secret = true;
         }
+        // Boom generalized exit linedefs (0x3400..=0x37FF)
+        if (GEN_EXIT_BASE..=GEN_EXIT_END).contains(&special) {
+            if special & GEN_EXIT_SECRET_BIT != 0 {
+                has_secret = true;
+            } else {
+                has_normal = true;
+            }
+        }
     }
 
     (has_normal, has_secret)
@@ -1312,6 +1326,51 @@ mod tests {
     #[test]
     fn test_vanilla_empty_linedefs() {
         let (normal, secret) = detect_vanilla_exits(&[]);
+        assert!(!normal);
+        assert!(!secret);
+    }
+
+    #[test]
+    fn test_boom_generalized_normal_exit() {
+        // 0x3489 = W1 normal exit (from Neon Overdrive MAP14)
+        let linedefs = build_linedefs(&[0x3489]);
+        let (normal, secret) = detect_vanilla_exits(&linedefs);
+        assert!(normal, "generalized exit 0x3489 should be a normal exit");
+        assert!(!secret);
+    }
+
+    #[test]
+    fn test_boom_generalized_secret_exit() {
+        // 0x3420 = W1 secret exit (base + secret bit 0x20)
+        let linedefs = build_linedefs(&[0x3420]);
+        let (normal, secret) = detect_vanilla_exits(&linedefs);
+        assert!(!normal);
+        assert!(secret, "generalized exit 0x3420 should be a secret exit");
+    }
+
+    #[test]
+    fn test_boom_generalized_exit_range_boundaries() {
+        // Just below range: not an exit
+        let linedefs = build_linedefs(&[0x33FF]);
+        let (normal, secret) = detect_vanilla_exits(&linedefs);
+        assert!(!normal);
+        assert!(!secret);
+
+        // Bottom of range: normal exit
+        let linedefs = build_linedefs(&[0x3400]);
+        let (normal, secret) = detect_vanilla_exits(&linedefs);
+        assert!(normal);
+        assert!(!secret);
+
+        // Top of range: secret exit (0x37FF has bit 5 set)
+        let linedefs = build_linedefs(&[0x37FF]);
+        let (normal, secret) = detect_vanilla_exits(&linedefs);
+        assert!(!normal);
+        assert!(secret);
+
+        // Just above range: not an exit
+        let linedefs = build_linedefs(&[0x3800]);
+        let (normal, secret) = detect_vanilla_exits(&linedefs);
         assert!(!normal);
         assert!(!secret);
     }
