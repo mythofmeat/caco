@@ -2,7 +2,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use clap::Args;
@@ -281,16 +280,9 @@ fn gc_batch_clean(
         return Ok(total_size);
     }
 
-    if !yes {
-        eprint!("  Clean all? [y/N] ");
-        let _ = io::stderr().flush();
-        let mut response = String::new();
-        if io::stdin().read_line(&mut response).is_err()
-            || !response.trim().eq_ignore_ascii_case("y")
-        {
-            println!("  Skipped.");
-            return Ok(0);
-        }
+    if !yes && !resolve::confirm("  Clean all?") {
+        println!("  Skipped.");
+        return Ok(0);
     }
 
     let mut freed = 0u64;
@@ -660,16 +652,9 @@ where
         return Ok(total_size);
     }
 
-    if !yes {
-        eprint!("  Clean {} {}? [y/N] ", orphans.len(), label);
-        let _ = io::stderr().flush();
-        let mut response = String::new();
-        if io::stdin().read_line(&mut response).is_err()
-            || !response.trim().eq_ignore_ascii_case("y")
-        {
-            println!("  Skipped.");
-            return Ok(0);
-        }
+    if !yes && !resolve::confirm(&format!("  Clean {} {}?", orphans.len(), label)) {
+        println!("  Skipped.");
+        return Ok(0);
     }
 
     for (path, _) in orphans {

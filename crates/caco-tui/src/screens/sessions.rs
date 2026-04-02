@@ -3,6 +3,7 @@ use caco_core::db::wads::get_wad;
 use caco_core::player::format_duration;
 use caco_core::wad_stats;
 use crossterm::event::{KeyCode, KeyEvent};
+use crate::widgets::table_nav::{table_nav_next, table_nav_prev};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -16,8 +17,6 @@ use crate::theme;
 
 /// Session history screen.
 pub struct SessionsScreen {
-    #[allow(dead_code)]
-    wad_id: i64,
     wad_title: String,
     sessions: Vec<SessionRecord>,
     table_state: TableState,
@@ -38,7 +37,6 @@ impl SessionsScreen {
         }
 
         Self {
-            wad_id,
             wad_title,
             sessions,
             table_state,
@@ -187,23 +185,11 @@ impl Screen for SessionsScreen {
                 Some(AppMessage::PopScreen(ScreenResult::Cancelled))
             }
             KeyCode::Char('j') | KeyCode::Down => {
-                if !self.sessions.is_empty() {
-                    let i = match self.table_state.selected() {
-                        Some(i) => (i + 1).min(self.sessions.len() - 1),
-                        None => 0,
-                    };
-                    self.table_state.select(Some(i));
-                }
+                table_nav_next(&mut self.table_state, self.sessions.len());
                 None
             }
             KeyCode::Char('k') | KeyCode::Up => {
-                if !self.sessions.is_empty() {
-                    let i = match self.table_state.selected() {
-                        Some(i) => i.saturating_sub(1),
-                        None => 0,
-                    };
-                    self.table_state.select(Some(i));
-                }
+                table_nav_prev(&mut self.table_state, self.sessions.len());
                 None
             }
             _ => None,

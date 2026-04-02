@@ -65,22 +65,7 @@ impl ImportResult {
     }
 }
 
-/// Normalize tags from a comma-separated string to a clean list.
-///
-/// Strips whitespace, lowercases, and removes empty entries.
-pub fn normalize_tags(tags: Option<&str>) -> Option<Vec<String>> {
-    let tags = tags?;
-    let parts: Vec<String> = tags
-        .split(',')
-        .map(|t| t.trim().to_lowercase())
-        .filter(|t| !t.is_empty())
-        .collect();
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts)
-    }
-}
+pub use caco_core::utils::normalize_tags;
 
 /// Normalize a title for fuzzy comparison.
 ///

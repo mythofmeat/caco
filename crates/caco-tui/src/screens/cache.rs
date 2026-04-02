@@ -3,6 +3,7 @@ use std::fs;
 use caco_core::db::sessions::{clear_all_cached_paths, clear_cached_path, get_cached_wads};
 use caco_core::utils::format_size;
 use crossterm::event::{KeyCode, KeyEvent};
+use crate::widgets::table_nav::{table_nav_next, table_nav_prev};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -158,23 +159,11 @@ impl Screen for CacheScreen {
                 Some(AppMessage::PopScreen(ScreenResult::Cancelled))
             }
             KeyCode::Char('j') | KeyCode::Down => {
-                if !self.entries.is_empty() {
-                    let i = match self.table_state.selected() {
-                        Some(i) => (i + 1).min(self.entries.len() - 1),
-                        None => 0,
-                    };
-                    self.table_state.select(Some(i));
-                }
+                table_nav_next(&mut self.table_state, self.entries.len());
                 None
             }
             KeyCode::Char('k') | KeyCode::Up => {
-                if !self.entries.is_empty() {
-                    let i = match self.table_state.selected() {
-                        Some(i) => i.saturating_sub(1),
-                        None => 0,
-                    };
-                    self.table_state.select(Some(i));
-                }
+                table_nav_prev(&mut self.table_state, self.entries.len());
                 None
             }
             KeyCode::Char('d') => {

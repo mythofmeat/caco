@@ -1,4 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use super::table_nav::{table_nav_next, table_nav_prev};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -100,25 +101,11 @@ impl SearchPaneState {
     }
 
     fn next(&mut self) {
-        if self.results.is_empty() {
-            return;
-        }
-        let i = match self.table_state.selected() {
-            Some(i) => (i + 1).min(self.results.len() - 1),
-            None => 0,
-        };
-        self.table_state.select(Some(i));
+        table_nav_next(&mut self.table_state, self.results.len());
     }
 
     fn previous(&mut self) {
-        if self.results.is_empty() {
-            return;
-        }
-        let i = match self.table_state.selected() {
-            Some(i) => i.saturating_sub(1),
-            None => 0,
-        };
-        self.table_state.select(Some(i));
+        table_nav_prev(&mut self.table_state, self.results.len());
     }
 
     /// Get the currently selected search result.

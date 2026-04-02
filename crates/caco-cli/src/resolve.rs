@@ -155,14 +155,7 @@ pub fn resolve_wads(
             if results.len() > preview_count {
                 eprintln!("  ... and {} more", results.len() - preview_count);
             }
-            eprint!("Apply to all? [y/N] ");
-            let _ = io::stderr().flush();
-
-            let mut response = String::new();
-            if io::stdin().read_line(&mut response).is_err() {
-                return Err("Failed to read input.".to_string());
-            }
-            if response.trim().to_lowercase().starts_with('y') {
+            if confirm("Apply to all?") {
                 Ok(results)
             } else {
                 Err("Aborted.".to_string())

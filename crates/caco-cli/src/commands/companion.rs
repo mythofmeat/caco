@@ -8,6 +8,7 @@ use rusqlite::Connection;
 use caco_core::companion_service::{self, OrphanResult};
 use caco_core::config;
 use caco_core::db;
+use caco_core::utils::format_size;
 
 use crate::resolve;
 
@@ -100,13 +101,7 @@ fn cmd_rm(conn: &Connection, query: &[String], file: &str, yes: bool) -> Result<
         let other_links = companions_linked_elsewhere(conn, comp.companion_id, wad.id)?;
         if other_links == 0 {
             // It will become orphaned — ask user
-            eprint!("'{}' will be orphaned. Delete managed file? [y/N] ", file);
-            let _ = std::io::Write::flush(&mut std::io::stderr());
-            let mut response = String::new();
-            if std::io::stdin().read_line(&mut response).is_err() {
-                return Err("Failed to read input.".to_string());
-            }
-            if response.trim().to_lowercase().starts_with('y') {
+            if resolve::confirm(&format!("'{}' will be orphaned. Delete managed file?", file)) {
                 "delete"
             } else {
                 "keep"
@@ -213,7 +208,7 @@ fn cmd_ls(conn: &Connection, query: &[String], plain: bool) -> Result<(), String
         println!("Companions for '{}' (ID: {}):", wad.title, wad.id);
         for c in &companions {
             let status = if c.enabled { "enabled" } else { "disabled" };
-            let size = format_file_size(c.size);
+            let size = format_size(c.size as u64);
             println!(
                 "  [{}] {} ({}, order: {})",
                 status, c.filename, size, c.load_order,
@@ -239,7 +234,7 @@ fn list_all_companions(conn: &Connection, plain: bool) -> Result<(), String> {
     } else {
         println!("{} companion file(s) registered:", all.len());
         for c in &all {
-            let size = format_file_size(c.size);
+            let size = format_size(c.size as u64);
             println!("  {} ({}, md5: {})", c.filename, size, &c.md5[..12.min(c.md5.len())]);
         }
     }
@@ -262,16 +257,6 @@ fn companions_linked_elsewhere(
     Ok(count)
 }
 
-/// Format a file size in bytes to a human-readable string.
-fn format_file_size(bytes: i64) -> String {
-    if bytes < 1024 {
-        format!("{bytes} B")
-    } else if bytes < 1024 * 1024 {
-        format!("{:.1} KB", bytes as f64 / 1024.0)
-    } else {
-        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -288,28 +273,6 @@ mod tests {
 
     fn add_test_wad(conn: &Connection, title: &str) -> i64 {
         add_wad(conn, &NewWad::new(title, SourceType::Local)).unwrap()
-    }
-
-    // -- format_file_size tests --
-
-    #[test]
-    fn test_format_file_size_bytes() {
-        assert_eq!(format_file_size(0), "0 B");
-        assert_eq!(format_file_size(512), "512 B");
-        assert_eq!(format_file_size(1023), "1023 B");
-    }
-
-    #[test]
-    fn test_format_file_size_kb() {
-        assert_eq!(format_file_size(1024), "1.0 KB");
-        assert_eq!(format_file_size(2048), "2.0 KB");
-        assert_eq!(format_file_size(1536), "1.5 KB");
-    }
-
-    #[test]
-    fn test_format_file_size_mb() {
-        assert_eq!(format_file_size(1024 * 1024), "1.0 MB");
-        assert_eq!(format_file_size(5 * 1024 * 1024), "5.0 MB");
     }
 
     // -- companions_linked_elsewhere tests --

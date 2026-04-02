@@ -3,6 +3,7 @@
 use std::fs::{self, File};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 use chrono::Local;
 use regex::Regex;
@@ -12,6 +13,8 @@ use zip::ZipArchive;
 use crate::config::get_backup_dir;
 use crate::sourceports::ALL_SAVE_EXTENSIONS;
 use crate::utils::{sanitize_dirname, system_time_to_rfc3339};
+
+static BACKUP_ID_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\d+)_").unwrap());
 
 /// Information about a save file.
 #[derive(Debug, Clone)]
@@ -245,7 +248,6 @@ pub fn list_all_backups() -> Vec<BackupInfo> {
         return Vec::new();
     }
 
-    let id_re = Regex::new(r"^(\d+)_").unwrap();
     let mut backups = Vec::new();
 
     if let Ok(entries) = fs::read_dir(&backup_dir) {
@@ -257,7 +259,7 @@ pub fn list_all_backups() -> Vec<BackupInfo> {
                     .unwrap_or_default()
                     .to_string_lossy()
                     .into_owned();
-                let wad_id = id_re
+                let wad_id = BACKUP_ID_RE
                     .captures(&name)
                     .and_then(|c| c[1].parse::<i64>().ok());
 

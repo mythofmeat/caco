@@ -60,6 +60,30 @@ where
     }
 }
 
+/// Check if an HTTP response has a Cloudflare WAF challenge.
+///
+/// Returns `true` when status is 403 and the `cf-mitigated` header is `"challenge"`.
+pub fn is_cloudflare_challenged(response: &reqwest::blocking::Response) -> bool {
+    response.status() == reqwest::StatusCode::FORBIDDEN
+        && response
+            .headers()
+            .get("cf-mitigated")
+            .and_then(|v| v.to_str().ok())
+            == Some("challenge")
+}
+
+/// Check if an HTTP response has an AWS WAF challenge.
+///
+/// Returns `true` when status is 403 or the `x-amzn-waf-action` header is `"challenge"`.
+pub fn is_aws_waf_challenged(response: &reqwest::blocking::Response) -> bool {
+    response.status() == reqwest::StatusCode::FORBIDDEN
+        || response
+            .headers()
+            .get("x-amzn-waf-action")
+            .and_then(|v| v.to_str().ok())
+            == Some("challenge")
+}
+
 #[cfg(test)]
 mod tests {
     use serde::Deserialize;

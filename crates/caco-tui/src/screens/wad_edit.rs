@@ -61,10 +61,6 @@ impl WadEditScreen {
         let Some(wad) = get_wad(conn, self.wad_id, true).ok().flatten() else {
             return;
         };
-        let _ = caco_core::db::connection::attach_tags(conn, &mut wad.clone());
-        // Re-fetch with tags
-        let mut wad = get_wad(conn, self.wad_id, true).ok().flatten().unwrap();
-        let _ = caco_core::db::connection::attach_tags(conn, &mut wad);
 
         self.original_tags = wad.tags.clone();
 

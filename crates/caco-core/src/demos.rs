@@ -4,9 +4,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use chrono::Local;
-use regex::Regex;
 
-use crate::utils::system_time_to_rfc3339;
+use crate::utils::{sanitize_name, system_time_to_rfc3339};
 
 /// Demo file extension.
 pub const DEMO_EXTENSION: &str = ".lmp";
@@ -97,15 +96,11 @@ pub fn clean_demo_files(data_dir: &Path) -> Vec<PathBuf> {
 /// Sourceports append .lmp automatically when recording, so this returns
 /// the base name only.
 pub fn generate_demo_name(wad_stem: &str) -> String {
-    let re = Regex::new(r"[^a-zA-Z0-9]").unwrap();
-    let sanitized = re.replace_all(wad_stem, "-");
-    let sanitized = sanitized.trim_matches('-').to_lowercase();
-    let re2 = Regex::new(r"-+").unwrap();
-    let sanitized = re2.replace_all(&sanitized, "-");
+    let sanitized = sanitize_name(wad_stem, 48);
     let sanitized = if sanitized.is_empty() {
         "demo".to_string()
     } else {
-        sanitized[..sanitized.len().min(48)].to_string()
+        sanitized
     };
     let timestamp = Local::now().format("%Y%m%d_%H%M%S").to_string();
     format!("{sanitized}_{timestamp}")

@@ -4,6 +4,7 @@ use caco_core::wad_stats::{
     self, WadStats, format_time_secs, format_time_tics, skill_name,
 };
 use crossterm::event::{KeyCode, KeyEvent};
+use crate::widgets::table_nav::{table_nav_next, table_nav_prev};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -25,8 +26,6 @@ struct StatsEntry {
 
 /// Per-map stats screen with completion switching.
 pub struct WadStatsScreen {
-    #[allow(dead_code)]
-    wad_id: i64,
     wad_title: String,
     entries: Vec<StatsEntry>,
     current_entry: usize,
@@ -79,7 +78,6 @@ impl WadStatsScreen {
         }
 
         Self {
-            wad_id,
             wad_title,
             entries,
             current_entry: 0,
@@ -264,23 +262,14 @@ impl Screen for WadStatsScreen {
             KeyCode::Char('j') | KeyCode::Down => {
                 if let Some(stats) = self.current_stats() {
                     let count = stats.maps.iter().filter(|m| m.played()).count();
-                    if count > 0 {
-                        let i = match self.table_state.selected() {
-                            Some(i) => (i + 1).min(count - 1),
-                            None => 0,
-                        };
-                        self.table_state.select(Some(i));
-                    }
+                    table_nav_next(&mut self.table_state, count);
                 }
                 None
             }
             KeyCode::Char('k') | KeyCode::Up => {
-                if self.current_stats().is_some() {
-                    let i = match self.table_state.selected() {
-                        Some(i) => i.saturating_sub(1),
-                        None => 0,
-                    };
-                    self.table_state.select(Some(i));
+                if let Some(stats) = self.current_stats() {
+                    let count = stats.maps.iter().filter(|m| m.played()).count();
+                    table_nav_prev(&mut self.table_state, count);
                 }
                 None
             }

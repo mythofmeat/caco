@@ -1,11 +1,19 @@
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
+use std::sync::LazyLock;
 
 use chrono::{TimeZone, Utc};
 use md5::{Digest, Md5};
 use regex::Regex;
 use zip::ZipArchive;
+
+static NON_ALNUM_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[^a-z0-9]+").unwrap());
+static MULTI_HYPHEN_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"-{2,}").unwrap());
+static ZIP_MAP_DOOM1_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^E[1-9]M[0-9]$").unwrap());
+static ZIP_MAP_DOOM2_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^MAP[0-9][0-9]$").unwrap());
 
 /// Maximum size for a WAD inside a ZIP (256 MB).
 const MAX_ZIP_ENTRY_SIZE: u64 = 256 * 1024 * 1024;
@@ -115,19 +123,24 @@ pub fn system_time_to_rfc3339(time: std::time::SystemTime) -> String {
         .unwrap_or_default()
 }
 
-/// Sanitize a WAD title for use as a directory name.
+/// Sanitize text for use as a filename or directory component.
 ///
 /// Lowercase, replace non-alphanumeric with hyphens, strip leading/trailing
-/// hyphens, collapse runs, and truncate to 64 chars.
-pub fn sanitize_dirname(title: &str) -> String {
-    let re = Regex::new(r"[^a-z0-9]+").unwrap();
-    let name = title.to_lowercase();
-    let name = re.replace_all(&name, "-");
+/// hyphens, collapse runs, and truncate to `max_len` chars.
+pub fn sanitize_name(text: &str, max_len: usize) -> String {
+    let name = text.to_lowercase();
+    let name = NON_ALNUM_RE.replace_all(&name, "-");
     let name = name.trim_matches('-');
-    let re2 = Regex::new(r"-{2,}").unwrap();
-    let name = re2.replace_all(name, "-");
-    let name = &name[..name.len().min(64)];
+    let name = MULTI_HYPHEN_RE.replace_all(name, "-");
+    let name = &name[..name.len().min(max_len)];
     name.to_string()
+}
+
+/// Sanitize a WAD title for use as a directory name.
+///
+/// Shorthand for [`sanitize_name`] with a 64-char limit.
+pub fn sanitize_dirname(title: &str) -> String {
+    sanitize_name(title, 64)
 }
 
 /// Load WAD data from a file, handling ZIP-wrapped WADs.
@@ -190,8 +203,6 @@ fn try_read_wad_from_zip(path: &Path) -> Option<Vec<u8>> {
     }
 
     // Multiple WADs: pick the one with map lumps
-    let map_re_doom1 = Regex::new(r"^E[1-9]M[0-9]$").unwrap();
-    let map_re_doom2 = Regex::new(r"^MAP[0-9][0-9]$").unwrap();
     let mut first_wad: Option<Vec<u8>> = None;
 
     for &idx in &wad_indices {
@@ -207,9 +218,9 @@ fn try_read_wad_from_zip(path: &Path) -> Option<Vec<u8>> {
             continue;
         }
         let directory = parse_wad_directory(&buf);
-        let has_maps = directory
-            .iter()
-            .any(|(name, _, _)| map_re_doom1.is_match(name) || map_re_doom2.is_match(name));
+        let has_maps = directory.iter().any(|(name, _, _)| {
+            ZIP_MAP_DOOM1_RE.is_match(name) || ZIP_MAP_DOOM2_RE.is_match(name)
+        });
         if has_maps {
             return Some(buf);
         }
@@ -241,6 +252,23 @@ pub fn format_author_year(author: Option<&str>, year: Option<i32>) -> String {
         (Some(a), None) => a.to_string(),
         (None, Some(y)) => format!("({y})"),
         (None, None) => "Unknown author".to_string(),
+    }
+}
+
+/// Normalize tags from a comma-separated string to a clean list.
+///
+/// Strips whitespace, lowercases, and removes empty entries.
+pub fn normalize_tags(tags: Option<&str>) -> Option<Vec<String>> {
+    let tags = tags?;
+    let parts: Vec<String> = tags
+        .split(',')
+        .map(|t| t.trim().to_lowercase())
+        .filter(|t| !t.is_empty())
+        .collect();
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts)
     }
 }
 
@@ -548,5 +576,35 @@ mod tests {
 
         let data = load_wad_data(&zip_path).unwrap();
         assert_eq!(&data[..4], b"PWAD");
+    }
+
+    #[test]
+    fn test_normalize_tags_comma_separated() {
+        let result = normalize_tags(Some("cacoward, megawad, doom")).unwrap();
+        assert_eq!(result, vec!["cacoward", "megawad", "doom"]);
+    }
+
+    #[test]
+    fn test_normalize_tags_whitespace() {
+        let result = normalize_tags(Some("  tag1 , TAG2 , ")).unwrap();
+        assert_eq!(result, vec!["tag1", "tag2"]);
+    }
+
+    #[test]
+    fn test_normalize_tags_none() {
+        assert!(normalize_tags(None).is_none());
+    }
+
+    #[test]
+    fn test_normalize_tags_empty() {
+        assert!(normalize_tags(Some("")).is_none());
+        assert!(normalize_tags(Some(" , , ")).is_none());
+    }
+
+    #[test]
+    fn test_sanitize_name_custom_length() {
+        let result = sanitize_name("A Very Long Name Here", 10);
+        assert!(result.len() <= 10);
+        assert_eq!(result, "a-very-lon");
     }
 }

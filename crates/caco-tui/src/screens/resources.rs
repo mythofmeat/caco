@@ -6,6 +6,7 @@ use caco_core::db::id24::{self, Id24Record};
 use caco_core::db::iwads::{self, IwadRecord};
 use caco_core::resource_service;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crate::widgets::table_nav::{table_nav_next, table_nav_prev};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -309,47 +310,15 @@ impl Screen for ResourcesScreen {
             }
             (KeyCode::Char('j') | KeyCode::Down, KeyModifiers::NONE) => {
                 match self.active_tab {
-                    ResourceTab::Iwad => {
-                        if !self.iwads.is_empty() {
-                            let i = match self.iwad_table.selected() {
-                                Some(i) => (i + 1).min(self.iwads.len() - 1),
-                                None => 0,
-                            };
-                            self.iwad_table.select(Some(i));
-                        }
-                    }
-                    ResourceTab::Id24 => {
-                        if !self.id24s.is_empty() {
-                            let i = match self.id24_table.selected() {
-                                Some(i) => (i + 1).min(self.id24s.len() - 1),
-                                None => 0,
-                            };
-                            self.id24_table.select(Some(i));
-                        }
-                    }
+                    ResourceTab::Iwad => table_nav_next(&mut self.iwad_table, self.iwads.len()),
+                    ResourceTab::Id24 => table_nav_next(&mut self.id24_table, self.id24s.len()),
                 }
                 None
             }
             (KeyCode::Char('k') | KeyCode::Up, KeyModifiers::NONE) => {
                 match self.active_tab {
-                    ResourceTab::Iwad => {
-                        if !self.iwads.is_empty() {
-                            let i = match self.iwad_table.selected() {
-                                Some(i) => i.saturating_sub(1),
-                                None => 0,
-                            };
-                            self.iwad_table.select(Some(i));
-                        }
-                    }
-                    ResourceTab::Id24 => {
-                        if !self.id24s.is_empty() {
-                            let i = match self.id24_table.selected() {
-                                Some(i) => i.saturating_sub(1),
-                                None => 0,
-                            };
-                            self.id24_table.select(Some(i));
-                        }
-                    }
+                    ResourceTab::Iwad => table_nav_prev(&mut self.iwad_table, self.iwads.len()),
+                    ResourceTab::Id24 => table_nav_prev(&mut self.id24_table, self.id24s.len()),
                 }
                 None
             }

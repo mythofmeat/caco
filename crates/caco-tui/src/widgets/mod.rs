@@ -5,5 +5,6 @@ pub mod library_pane;
 pub mod search_pane;
 pub mod sort_select;
 pub mod status_bar;
+pub mod table_nav;
 pub mod wad_info;
 pub mod wad_table;

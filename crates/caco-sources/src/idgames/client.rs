@@ -46,18 +46,11 @@ impl IdgamesClient {
         let response = self.client.get(BASE_URL).query(&query).send()?;
 
         // Detect Cloudflare WAF challenge
-        if response.status() == reqwest::StatusCode::FORBIDDEN {
-            let cf_mitigated = response
-                .headers()
-                .get("cf-mitigated")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("");
-            if cf_mitigated == "challenge" {
-                return Err(SourceError::WafBlocked {
-                    api_name: "idgames".to_string(),
-                    message: "idgames API blocked by Cloudflare challenge. This is usually temporary — try again later.".to_string(),
-                });
-            }
+        if crate::http::is_cloudflare_challenged(&response) {
+            return Err(SourceError::WafBlocked {
+                api_name: "idgames".to_string(),
+                message: "idgames API blocked by Cloudflare challenge. This is usually temporary — try again later.".to_string(),
+            });
         }
 
         response.error_for_status_ref()?;

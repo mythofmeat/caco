@@ -224,39 +224,17 @@ fn import_idgames_search(
     let wad_records: Vec<db::WadRecord> = results
         .iter()
         .enumerate()
-        .map(|(i, entry)| db::WadRecord {
-            id: i as i64 + 1,
-            title: entry.title.clone(),
-            author: Some(entry.author.clone()),
-            year: caco_core::utils::extract_year(&entry.date),
-            status: "backlog".to_string(),
-            source_type: "idgames".to_string(),
-            description: if entry.description.is_empty() { None } else { Some(entry.description.clone()) },
-            rating: None,
-            notes: None,
-            source_id: Some(entry.id.to_string()),
-            source_url: None,
-            idgames_id: None,
-            filename: Some(entry.filename.clone()),
-            cached_path: None,
-            custom_iwad: None,
-            custom_sourceport: None,
-            custom_args: None,
-            companion_files: None,
-            custom_config: None,
-            version: None,
-            complevel: None,
-            zdoom_required: None,
-            stats_snapshot: None,
-            gc_ignore: false,
-            play_state: "unplayed".to_string(),
-            intent: "inbox".to_string(),
-            availability: "unavailable".to_string(),
-            deleted_at: None,
-            created_at: String::new(),
-            updated_at: String::new(),
-            tags: Vec::new(),
-        })
+        .map(|(i, entry)| picker_wad_record(
+            i,
+            entry.title.clone(),
+            Some(entry.author.clone()),
+            caco_core::utils::extract_year(&entry.date),
+            if entry.description.is_empty() { None } else { Some(entry.description.clone()) },
+            "idgames",
+            Some(entry.id.to_string()),
+            None,
+            Some(entry.filename.clone()),
+        ))
         .collect();
 
     let selected = picker::pick_wads(&wad_records, args.multi);
@@ -337,39 +315,17 @@ fn import_doomwiki_search(
     let wad_records: Vec<db::WadRecord> = results
         .iter()
         .enumerate()
-        .map(|(i, entry)| db::WadRecord {
-            id: i as i64 + 1,
-            title: entry.display_name().to_string(),
-            author: if entry.author.is_empty() { None } else { Some(entry.author.clone()) },
-            year: entry.year,
-            status: "backlog".to_string(),
-            source_type: "doomwiki".to_string(),
-            description: if entry.description.is_empty() { None } else { Some(entry.description.clone()) },
-            rating: None,
-            notes: None,
-            source_id: Some(entry.page_id.to_string()),
-            source_url: Some(entry.wiki_url.clone()),
-            idgames_id: None,
-            filename: None,
-            cached_path: None,
-            custom_iwad: None,
-            custom_sourceport: None,
-            custom_args: None,
-            companion_files: None,
-            custom_config: None,
-            version: None,
-            complevel: None,
-            zdoom_required: None,
-            stats_snapshot: None,
-            gc_ignore: false,
-            play_state: "unplayed".to_string(),
-            intent: "inbox".to_string(),
-            availability: "unavailable".to_string(),
-            deleted_at: None,
-            created_at: String::new(),
-            updated_at: String::new(),
-            tags: Vec::new(),
-        })
+        .map(|(i, entry)| picker_wad_record(
+            i,
+            entry.display_name().to_string(),
+            if entry.author.is_empty() { None } else { Some(entry.author.clone()) },
+            entry.year,
+            if entry.description.is_empty() { None } else { Some(entry.description.clone()) },
+            "doomwiki",
+            Some(entry.page_id.to_string()),
+            Some(entry.wiki_url.clone()),
+            None,
+        ))
         .collect();
 
     let selected = picker::pick_wads(&wad_records, args.multi);
@@ -602,39 +558,17 @@ fn import_json_idgames(
     let wad_records: Vec<db::WadRecord> = entries
         .iter()
         .enumerate()
-        .map(|(i, entry)| db::WadRecord {
-            id: i as i64 + 1,
-            title: entry.title.clone(),
-            author: Some(entry.author.clone()),
-            year: caco_core::utils::extract_year(&entry.date),
-            status: "backlog".to_string(),
-            source_type: "idgames".to_string(),
-            description: if entry.description.is_empty() { None } else { Some(entry.description.clone()) },
-            rating: None,
-            notes: None,
-            source_id: Some(entry.id.to_string()),
-            source_url: None,
-            idgames_id: None,
-            filename: Some(entry.filename.clone()),
-            cached_path: None,
-            custom_iwad: None,
-            custom_sourceport: None,
-            custom_args: None,
-            companion_files: None,
-            custom_config: None,
-            version: None,
-            complevel: None,
-            zdoom_required: None,
-            stats_snapshot: None,
-            gc_ignore: false,
-            play_state: "unplayed".to_string(),
-            intent: "inbox".to_string(),
-            availability: "unavailable".to_string(),
-            deleted_at: None,
-            created_at: String::new(),
-            updated_at: String::new(),
-            tags: Vec::new(),
-        })
+        .map(|(i, entry)| picker_wad_record(
+            i,
+            entry.title.clone(),
+            Some(entry.author.clone()),
+            caco_core::utils::extract_year(&entry.date),
+            if entry.description.is_empty() { None } else { Some(entry.description.clone()) },
+            "idgames",
+            Some(entry.id.to_string()),
+            None,
+            Some(entry.filename.clone()),
+        ))
         .collect();
 
     let selected = picker::pick_wads(&wad_records, args.multi);
@@ -673,39 +607,17 @@ fn import_json_doomwiki(
     let wad_records: Vec<db::WadRecord> = entries
         .iter()
         .enumerate()
-        .map(|(i, entry)| db::WadRecord {
-            id: i as i64 + 1,
-            title: entry.display_name().to_string(),
-            author: if entry.author.is_empty() { None } else { Some(entry.author.clone()) },
-            year: entry.year,
-            status: "backlog".to_string(),
-            source_type: "doomwiki".to_string(),
-            description: if entry.description.is_empty() { None } else { Some(entry.description.clone()) },
-            rating: None,
-            notes: None,
-            source_id: Some(entry.page_id.to_string()),
-            source_url: Some(entry.wiki_url.clone()),
-            idgames_id: None,
-            filename: None,
-            cached_path: None,
-            custom_iwad: None,
-            custom_sourceport: None,
-            custom_args: None,
-            companion_files: None,
-            custom_config: None,
-            version: None,
-            complevel: None,
-            zdoom_required: None,
-            stats_snapshot: None,
-            gc_ignore: false,
-            play_state: "unplayed".to_string(),
-            intent: "inbox".to_string(),
-            availability: "unavailable".to_string(),
-            deleted_at: None,
-            created_at: String::new(),
-            updated_at: String::new(),
-            tags: Vec::new(),
-        })
+        .map(|(i, entry)| picker_wad_record(
+            i,
+            entry.display_name().to_string(),
+            if entry.author.is_empty() { None } else { Some(entry.author.clone()) },
+            entry.year,
+            if entry.description.is_empty() { None } else { Some(entry.description.clone()) },
+            "doomwiki",
+            Some(entry.page_id.to_string()),
+            Some(entry.wiki_url.clone()),
+            None,
+        ))
         .collect();
 
     let selected = picker::pick_wads(&wad_records, args.multi);
@@ -831,5 +743,53 @@ fn try_register_id24(
         Ok(Some((name, version, title))) => Ok(Some((name, version, title))),
         Ok(None) => Ok(None),
         Err(_) => Ok(None),
+    }
+}
+
+/// Build a display-only WadRecord for the picker. Not persisted to DB.
+#[allow(clippy::too_many_arguments)]
+fn picker_wad_record(
+    index: usize,
+    title: String,
+    author: Option<String>,
+    year: Option<i32>,
+    description: Option<String>,
+    source_type: &str,
+    source_id: Option<String>,
+    source_url: Option<String>,
+    filename: Option<String>,
+) -> db::WadRecord {
+    db::WadRecord {
+        id: index as i64 + 1,
+        title,
+        author,
+        year,
+        status: "backlog".to_string(),
+        source_type: source_type.to_string(),
+        description,
+        rating: None,
+        notes: None,
+        source_id,
+        source_url,
+        idgames_id: None,
+        filename,
+        cached_path: None,
+        custom_iwad: None,
+        custom_sourceport: None,
+        custom_args: None,
+        companion_files: None,
+        custom_config: None,
+        version: None,
+        complevel: None,
+        zdoom_required: None,
+        stats_snapshot: None,
+        gc_ignore: false,
+        play_state: "unplayed".to_string(),
+        intent: "inbox".to_string(),
+        availability: "unavailable".to_string(),
+        deleted_at: None,
+        created_at: String::new(),
+        updated_at: String::new(),
+        tags: Vec::new(),
     }
 }

@@ -7,6 +7,8 @@ use caco_core::db;
 use caco_core::config;
 use caco_core::utils::format_size;
 
+use crate::resolve;
+
 #[derive(Subcommand)]
 pub enum CacheCommand {
     /// List cached WADs
@@ -178,13 +180,8 @@ fn clear_all(conn: &Connection, dry_run: bool, yes: bool) -> Result<(), String> 
         return Ok(());
     }
 
-    if !yes {
-        eprint!("Clear {} cached file(s)? [y/N] ", clearable.len());
-        let _ = std::io::Write::flush(&mut std::io::stderr());
-        let mut response = String::new();
-        if std::io::stdin().read_line(&mut response).is_err() || !response.trim().to_lowercase().starts_with('y') {
-            return Err("Aborted.".to_string());
-        }
+    if !yes && !resolve::confirm(&format!("Clear {} cached file(s)?", clearable.len())) {
+        return Err("Aborted.".to_string());
     }
 
     let mut cleared = 0;
@@ -264,13 +261,8 @@ fn prune(conn: &Connection, dry_run: bool, yes: bool) -> Result<(), String> {
         return Ok(());
     }
 
-    if !yes {
-        eprint!("Prune {} orphaned file(s)? [y/N] ", orphans.len());
-        let _ = std::io::Write::flush(&mut std::io::stderr());
-        let mut response = String::new();
-        if std::io::stdin().read_line(&mut response).is_err() || !response.trim().to_lowercase().starts_with('y') {
-            return Err("Aborted.".to_string());
-        }
+    if !yes && !resolve::confirm(&format!("Prune {} orphaned file(s)?", orphans.len())) {
+        return Err("Aborted.".to_string());
     }
 
     let mut pruned = 0;
