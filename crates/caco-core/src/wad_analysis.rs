@@ -42,6 +42,10 @@ const GEN_EXIT_END: u16 = 0x37FF;
 /// Bit 5 within the generalized exit encoding indicates a secret exit.
 const GEN_EXIT_SECRET_BIT: u16 = 0x20;
 
+/// Analysis format version.  Bump this whenever detection logic changes
+/// so that stale cached analyses are automatically invalidated and re-run.
+pub const ANALYSIS_VERSION: u32 = 2;
+
 /// UDMF normal exit specials.
 const UDMF_NORMAL_EXITS: &[i32] = &[243, 74, 75]; // Exit_Normal, Teleport_NewMap, Teleport_EndGame
 /// UDMF secret exit specials.
@@ -79,6 +83,9 @@ fn default_true() -> bool {
 /// Complete WAD analysis result.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WadAnalysis {
+    /// Analysis format version (defaults to 0 for pre-versioned entries).
+    #[serde(default)]
+    pub version: u32,
     /// All maps found in the WAD with their analysis.
     pub maps: Vec<MapInfo>,
     /// Total number of maps.
@@ -210,6 +217,7 @@ pub fn analyze_wad(wad_data: &[u8]) -> Option<WadAnalysis> {
         - if terminal_excluded { 1 } else { 0 };
 
     Some(WadAnalysis {
+        version: ANALYSIS_VERSION,
         maps: map_infos,
         total_maps,
         required_maps,
@@ -506,6 +514,7 @@ pub fn analyze_pk3(pk3_path: &std::path::Path) -> Option<WadAnalysis> {
         - if terminal_excluded { 1 } else { 0 };
 
     Some(WadAnalysis {
+        version: ANALYSIS_VERSION,
         maps: map_infos,
         total_maps,
         required_maps,

@@ -1,9 +1,13 @@
 use rusqlite::Connection;
 
-use crate::wad_analysis::WadAnalysis;
+use crate::wad_analysis::{WadAnalysis, ANALYSIS_VERSION};
 use crate::Result;
 
 /// Get stored WAD analysis, if any.
+///
+/// Returns `None` if no analysis exists or if the stored analysis was
+/// produced by an older version of the detection logic (triggering
+/// automatic re-analysis by the caller).
 pub fn get_analysis(conn: &Connection, wad_id: i64) -> Result<Option<WadAnalysis>> {
     let mut stmt = conn.prepare(
         "SELECT analysis_json FROM wad_analysis WHERE wad_id = ?1",
@@ -12,7 +16,12 @@ pub fn get_analysis(conn: &Connection, wad_id: i64) -> Result<Option<WadAnalysis
         Ok(Some(json)) => {
             let analysis: WadAnalysis = serde_json::from_str(&json)
                 .map_err(|e| crate::Error::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
-            Ok(Some(analysis))
+            if analysis.version < ANALYSIS_VERSION {
+                // Stale analysis from older detection logic — re-analyze.
+                Ok(None)
+            } else {
+                Ok(Some(analysis))
+            }
         }
         Ok(None) => Ok(None),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),

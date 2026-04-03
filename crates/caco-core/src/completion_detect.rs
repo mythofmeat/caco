@@ -196,6 +196,7 @@ mod tests {
             .count();
 
         WadAnalysis {
+            version: 0,
             total_maps: maps.len(),
             required_maps,
             secret_maps: secret.iter().map(|s| s.to_string()).collect(),
@@ -300,6 +301,7 @@ mod tests {
     #[test]
     fn test_no_analysis_empty_maps() {
         let analysis = WadAnalysis {
+            version: 0,
             maps: vec![],
             total_maps: 0,
             required_maps: 0,
