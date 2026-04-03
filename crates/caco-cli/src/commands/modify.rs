@@ -12,6 +12,24 @@ use crate::parsing::{self, ModifyAction};
 use crate::resolve::{self, ResolveMode};
 
 #[derive(Args)]
+#[command(after_long_help = "\
+ACTIONS:
+  field=value          Set a field (title, author, year, status, iwad, ...)
+  tag=value            Add a tag
+  !tag                 Remove all tags
+  !tag:pattern         Remove matching tags (glob supported)
+  !field               Clear a field
+  beaten+[N]           Add N completions (default 1)
+  beaten-N             Remove last N completions
+  beaten-TIMESTAMP     Remove completion by date
+  beaten=N             Set completion count
+
+EXAMPLES:
+  caco modify id:5 status=playing
+  caco modify id:5 tag=slaughter tag=hard
+  caco modify id:5 !tag:slaughter
+  caco modify id:5 !tag
+  caco modify id:5 beaten+")]
 pub struct ModifyArgs {
     /// Query + field=value actions
     args: Vec<String>,
@@ -56,9 +74,21 @@ pub struct ModifyArgs {
 pub fn run(conn: &Connection, args: &ModifyArgs) -> Result<(), String> {
     let (query_terms, actions, _sort) = parsing::parse_modify_args(&args.args)?;
 
-    if query_terms.is_empty() {
-        return Err("No query specified.".to_string());
-    }
+    // If no query was given but tag-removal actions were, implicitly query by those tags.
+    // e.g. `modify !tag:foo` → match WADs with tag:foo, then remove it.
+    let query_terms = if query_terms.is_empty() {
+        let implicit: Vec<String> = actions.iter().filter_map(|a| match a {
+            ModifyAction::RemoveTag { pattern } => Some(format!("tag:{pattern}")),
+            ModifyAction::RemoveAllTags => None,
+            _ => None,
+        }).collect();
+        if implicit.is_empty() {
+            return Err("No query specified.".to_string());
+        }
+        implicit
+    } else {
+        query_terms
+    };
 
     if actions.is_empty()
         && args.link.is_none()
