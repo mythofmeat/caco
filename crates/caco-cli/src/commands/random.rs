@@ -19,7 +19,7 @@ pub fn run(conn: &Connection, args: &RandomArgs) -> Result<(), String> {
     let query_str = if args.query.is_empty() {
         None
     } else {
-        Some(args.query.join(" "))
+        Some(crate::parsing::join_query_args(&args.query))
     };
 
     let results = db::search_wads(

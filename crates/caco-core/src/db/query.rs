@@ -775,6 +775,28 @@ mod tests {
     }
 
     #[test]
+    fn test_search_wads_tag_with_spaces() {
+        let conn = setup();
+        // Add a WAD with a multi-word tag
+        add_wad(
+            &conn,
+            &NewWad::new("TestWad", SourceType::Idgames).tags(vec!["multi word tag".into()]),
+        )
+        .unwrap();
+
+        // Quoted query — simulates CLI join_query_args quoting a space-containing token
+        let results =
+            search_wads(&conn, Some("tag:\"multi word tag\""), None, true, false, 0).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "TestWad");
+
+        // Partial match still works
+        let results =
+            search_wads(&conn, Some("tag:\"multi word\""), None, true, false, 0).unwrap();
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
     fn test_search_wads_tag_glob() {
         let conn = setup();
         add_test_wads(&conn);

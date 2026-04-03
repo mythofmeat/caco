@@ -43,7 +43,7 @@ pub fn run(conn: &Connection, args: &EnrichArgs) -> Result<(), String> {
     let query = if args.query.is_empty() {
         None
     } else {
-        Some(args.query.join(" "))
+        Some(crate::parsing::join_query_args(&args.query))
     };
 
     let mut wads = db::search_wads(conn, query.as_deref(), None, true, false, 0)

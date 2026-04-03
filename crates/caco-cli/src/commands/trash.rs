@@ -75,7 +75,7 @@ pub fn run(conn: &Connection, args: &TrashArgs) -> Result<(), String> {
         if args.query.is_empty() {
             return Err("No query specified for restore.".to_string());
         }
-        let query_str = args.query.join(" ");
+        let query_str = crate::parsing::join_query_args(&args.query);
         let wads = db::search_wads(conn, Some(&query_str), None, true, true, 0)
             .map_err(|e| e.to_string())?;
         if wads.is_empty() {

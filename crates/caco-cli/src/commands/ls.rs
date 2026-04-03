@@ -89,7 +89,7 @@ pub fn run(conn: &Connection, args: &LsArgs) -> Result<(), String> {
     let query_str = if query_terms.is_empty() {
         None
     } else {
-        Some(query_terms.join(" "))
+        Some(parsing::join_query_args(&query_terms))
     };
 
     let wads = db::search_wads(

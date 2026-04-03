@@ -1,5 +1,24 @@
 //! Sort extraction and modify action parsing from CLI arguments.
 
+/// Join query args into a single string, quoting terms that contain whitespace
+/// so the query parser's `shell_split` can reconstruct the original tokens.
+pub fn join_query_args(args: &[String]) -> String {
+    args.iter()
+        .map(|a| {
+            if a.contains(char::is_whitespace) {
+                if !a.contains('"') {
+                    format!("\"{a}\"")
+                } else {
+                    format!("'{a}'")
+                }
+            } else {
+                a.clone()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Valid sort field names.
 pub const SORT_FIELDS: &[&str] = &[
     "id", "playtime", "rating", "created", "title", "author", "last_played", "year",
@@ -279,5 +298,30 @@ mod tests {
         assert_eq!(field_to_column("idgames-id"), "idgames_id");
         assert_eq!(field_to_column("config"), "custom_config");
         assert_eq!(field_to_column("title"), "title");
+    }
+
+    #[test]
+    fn test_join_query_args_no_spaces() {
+        let args: Vec<String> = vec!["status:playing".into(), "tag:megawad".into()];
+        assert_eq!(join_query_args(&args), "status:playing tag:megawad");
+    }
+
+    #[test]
+    fn test_join_query_args_with_spaces() {
+        // Simulates: caco ls "tag:multi word"  (shell strips outer quotes)
+        let args: Vec<String> = vec!["tag:multi word".into()];
+        assert_eq!(join_query_args(&args), "\"tag:multi word\"");
+    }
+
+    #[test]
+    fn test_join_query_args_mixed() {
+        let args: Vec<String> = vec!["status:playing".into(), "tag:multi word".into()];
+        assert_eq!(join_query_args(&args), "status:playing \"tag:multi word\"");
+    }
+
+    #[test]
+    fn test_join_query_args_with_double_quotes() {
+        let args: Vec<String> = vec!["title:some \"thing\"".into()];
+        assert_eq!(join_query_args(&args), "'title:some \"thing\"'");
     }
 }

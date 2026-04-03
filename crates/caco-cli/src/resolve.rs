@@ -68,7 +68,7 @@ pub fn resolve_wads(
         return Err("No query specified.".to_string());
     }
 
-    let query_str = query.join(" ");
+    let query_str = crate::parsing::join_query_args(query);
 
     // Check for single numeric ID
     if query.len() == 1

@@ -47,7 +47,7 @@ pub enum CollectionCommand {
 pub fn run(conn: &Connection, cmd: &CollectionCommand) -> Result<(), String> {
     match cmd {
         CollectionCommand::Add { name, query, sort, desc } => {
-            let query_str = query.join(" ");
+            let query_str = crate::parsing::join_query_args(query);
             cmd_add(conn, name, &query_str, sort.as_deref(), *desc)
         }
         CollectionCommand::Rm { name } => cmd_rm(conn, name),
