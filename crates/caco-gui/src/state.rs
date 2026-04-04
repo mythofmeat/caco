@@ -58,6 +58,8 @@ pub enum ActionRequest {
     Cache,
     Resources,
     Collections,
+    EditCollection(String),
+    DeleteCollection(String),
 }
 
 // ---------------------------------------------------------------------------
@@ -96,6 +98,7 @@ pub const SORT_FIELDS: &[(&str, &str)] = &[
     ("last_played", "Last Played"),
     ("year", "Year"),
     ("rating", "Rating"),
+    ("random", "Random"),
 ];
 
 // ---------------------------------------------------------------------------

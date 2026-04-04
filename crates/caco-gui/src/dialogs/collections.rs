@@ -54,6 +54,21 @@ impl CollectionsDialogState {
         state
     }
 
+    /// Open the dialog with a specific collection pre-selected for editing.
+    pub fn new_editing(conn: &Connection, name: &str) -> Self {
+        let mut state = Self::new(conn);
+        if let Some(idx) = state.collections.iter().position(|c| c.name == name) {
+            state.selected = Some(idx);
+            let coll = &state.collections[idx];
+            state.form_name = coll.name.clone();
+            state.form_query = coll.query.clone();
+            state.form_sort = coll.sort_by.clone().unwrap_or_default();
+            state.form_desc = coll.sort_desc;
+            state.edit_mode = EditMode::Edit(coll.name.clone());
+        }
+        state
+    }
+
     fn load(&mut self, conn: &Connection) {
         self.collections = collections::get_all_collections(conn).unwrap_or_default();
         if self.selected.is_none() && !self.collections.is_empty() {

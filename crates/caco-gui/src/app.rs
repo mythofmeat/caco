@@ -101,6 +101,28 @@ impl CacoApp {
                 let dialog = CollectionsDialogState::new(&self.conn);
                 self.state.active_dialog = Some(ActiveDialog::Collections(dialog));
             }
+            ActionRequest::EditCollection(name) => {
+                let dialog = CollectionsDialogState::new_editing(&self.conn, &name);
+                self.state.active_dialog = Some(ActiveDialog::Collections(dialog));
+            }
+            ActionRequest::DeleteCollection(name) => {
+                if let Ok(true) =
+                    caco_core::db::collections::delete_collection(&self.conn, &name)
+                {
+                    // Clear active collection if we just deleted it
+                    if self.state.active_collection.as_deref() == Some(&name) {
+                        self.state.active_collection = None;
+                        self.state.filter_text.clear();
+                        self.state.applied_filter.clear();
+                    }
+                    self.state.sidebar_collections =
+                        caco_core::db::collections::get_all_collections(&self.conn)
+                            .unwrap_or_default();
+                    self.state.needs_reload = true;
+                    self.state.notification =
+                        Some(Notification::info(format!("Deleted collection '{name}'")));
+                }
+            }
             ActionRequest::MapStats(wad_id) => {
                 if let Some(dialog) = WadStatsDialogState::new(&self.conn, wad_id) {
                     self.state.active_dialog = Some(ActiveDialog::WadStats(dialog));
@@ -766,6 +788,19 @@ fn render_sidebar(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Act
                     state.needs_reload = true;
                 }
             }
+
+            // Right-click context menu
+            let ctx_name = name.clone();
+            resp.context_menu(|ui| {
+                if ui.button("Edit").clicked() {
+                    actions.push(ActionRequest::EditCollection(ctx_name.clone()));
+                    ui.close_menu();
+                }
+                if ui.button("Delete").clicked() {
+                    actions.push(ActionRequest::DeleteCollection(ctx_name.clone()));
+                    ui.close_menu();
+                }
+            });
         }
     }
 

@@ -280,7 +280,7 @@ pub fn sidebar_collection_item(
         );
     }
 
-    // List icon (≡)
+    // List icon
     let icon_color = if is_active {
         TEXT_ACCENT
     } else {
@@ -289,7 +289,7 @@ pub fn sidebar_collection_item(
     painter.text(
         egui::pos2(rect.min.x + 20.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
-        "≡",
+        "\u{2022}",
         egui::FontId::proportional(13.0),
         icon_color,
     );
