@@ -15,8 +15,8 @@ static ZIP_MAP_DOOM1_RE: LazyLock<Regex> =
 static ZIP_MAP_DOOM2_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^MAP[0-9][0-9]$").unwrap());
 
-/// Maximum size for a WAD inside a ZIP (256 MB).
-const MAX_ZIP_ENTRY_SIZE: u64 = 256 * 1024 * 1024;
+/// Maximum size for a WAD inside a ZIP (1 GiB).
+const MAX_ZIP_ENTRY_SIZE: u64 = 1024 * 1024 * 1024;
 
 /// Parse WAD header and directory. Returns `[(name, offset, size), ...]`.
 ///
