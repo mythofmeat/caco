@@ -594,12 +594,18 @@ fn migrate_consolidate_status(conn: &Connection) -> Result<()> {
         )?;
     }
 
-    // Step 3: Drop the now-unused columns
+    // Step 3: Drop indexes and the now-unused columns
     if has_column(conn, "wads", "play_state")? {
-        conn.execute_batch("ALTER TABLE wads DROP COLUMN play_state")?;
+        conn.execute_batch(
+            "DROP INDEX IF EXISTS idx_wads_play_state;
+             ALTER TABLE wads DROP COLUMN play_state",
+        )?;
     }
     if has_column(conn, "wads", "intent")? {
-        conn.execute_batch("ALTER TABLE wads DROP COLUMN intent")?;
+        conn.execute_batch(
+            "DROP INDEX IF EXISTS idx_wads_intent;
+             ALTER TABLE wads DROP COLUMN intent",
+        )?;
     }
 
     Ok(())
