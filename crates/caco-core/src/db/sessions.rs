@@ -606,7 +606,7 @@ pub struct StatsSnapshot {
     pub wads_with_sessions: i64,
     pub wads_by_status: HashMap<String, i64>,
     pub played_wads: i64,
-    pub finished_wads: i64,
+    pub completed_wads: i64,
     pub completion_rate: f64,
     pub total_completions: i64,
     pub activity: Vec<ActivityPeriod>,
@@ -634,7 +634,7 @@ pub fn get_stats_snapshot(conn: &Connection, period: &str) -> Result<StatsSnapsh
         wads_with_sessions: stats.3,
         wads_by_status: stats.4,
         played_wads: completion.0,
-        finished_wads: completion.1,
+        completed_wads: completion.1,
         completion_rate: completion.2,
         total_completions: completion.3,
         activity,
@@ -726,7 +726,7 @@ pub fn get_wads_played_by_period(
 
 /// Get completion statistics.
 ///
-/// Returns (played_wads, finished_wads, completion_rate, total_completions).
+/// Returns (played_wads, completed_wads, completion_rate, total_completions).
 fn get_completion_rate(conn: &Connection) -> Result<(i64, i64, f64, i64)> {
     let played_wads: i64 = conn.query_row(
         "SELECT COUNT(DISTINCT wad_id) FROM sessions \
@@ -735,10 +735,10 @@ fn get_completion_rate(conn: &Connection) -> Result<(i64, i64, f64, i64)> {
         |row| row.get(0),
     )?;
 
-    let finished_wads: i64 = conn.query_row(
+    let completed_wads: i64 = conn.query_row(
         "SELECT COUNT(DISTINCT wads.id) FROM wads \
          JOIN sessions ON sessions.wad_id = wads.id \
-         WHERE wads.status = 'finished' AND wads.deleted_at IS NULL \
+         WHERE wads.status = 'completed' AND wads.deleted_at IS NULL \
          AND COALESCE(sessions.duration_seconds, 0) >= ?",
         [MIN_SESSION_SECONDS],
         |row| row.get(0),
@@ -751,12 +751,12 @@ fn get_completion_rate(conn: &Connection) -> Result<(i64, i64, f64, i64)> {
     )?;
 
     let completion_rate = if played_wads > 0 {
-        finished_wads as f64 / played_wads as f64
+        completed_wads as f64 / played_wads as f64
     } else {
         0.0
     };
 
-    Ok((played_wads, finished_wads, completion_rate, total_completions))
+    Ok((played_wads, completed_wads, completion_rate, total_completions))
 }
 
 #[cfg(test)]

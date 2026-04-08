@@ -38,18 +38,17 @@ pub use collections::{
     update_collection, CollectionRecord,
 };
 pub use playthroughs::{
-    complete_playthrough, delete_playthrough, derive_play_state, ensure_playthrough,
+    complete_playthrough, delete_playthrough, ensure_playthrough,
     get_active_playthrough, get_playthrough, get_playthroughs, get_times_completed,
     get_times_completed_batch, start_playthrough, PlaythroughRecord,
 };
 pub use models::{
-    AndGroup, Availability, Intent, ParsedQuery, PlayState, QueryTerm, SourceType, Status,
-    StatusMeta, WadRecord, ALLOWED_UPDATE_FIELDS, INTENT_METADATA, INTENT_SHORTCUTS,
-    OR_SEPARATOR, PLAY_STATE_METADATA, PLAY_STATE_SHORTCUTS, STATUS_METADATA, STATUS_SHORTCUTS,
+    AndGroup, Availability, ParsedQuery, QueryTerm, SourceType, Status,
+    StatusMeta, WadRecord, ALLOWED_UPDATE_FIELDS, OR_SEPARATOR,
+    STATUS_METADATA, STATUS_SHORTCUTS,
 };
 pub use query::{
-    find_duplicate, normalize_intent, normalize_play_state, normalize_status, parse_query,
-    search_wads,
+    find_duplicate, normalize_status, parse_query, search_wads,
 };
 pub use schema::init_db;
 pub use sessions::{
