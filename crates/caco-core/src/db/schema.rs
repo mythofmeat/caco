@@ -594,6 +594,14 @@ fn migrate_consolidate_status(conn: &Connection) -> Result<()> {
         )?;
     }
 
+    // Step 3: Drop the now-unused columns
+    if has_column(conn, "wads", "play_state")? {
+        conn.execute_batch("ALTER TABLE wads DROP COLUMN play_state")?;
+    }
+    if has_column(conn, "wads", "intent")? {
+        conn.execute_batch("ALTER TABLE wads DROP COLUMN intent")?;
+    }
+
     Ok(())
 }
 
@@ -652,7 +660,7 @@ mod tests {
             "filename", "cached_path", "custom_iwad", "custom_sourceport",
             "custom_args", "created_at", "updated_at", "deleted_at", "version",
             "stats_snapshot", "companion_files", "custom_complevel", "complevel",
-            "custom_config", "gc_ignore", "play_state", "intent", "availability",
+            "custom_config", "gc_ignore", "availability",
         ];
         for col in &expected_columns {
             assert!(
