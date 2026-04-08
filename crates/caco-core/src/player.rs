@@ -49,6 +49,8 @@ pub struct PlayOptions {
     pub extra_args: Vec<String>,
     pub record: Option<RecordOption>,
     pub config_profile: Option<String>,
+    /// Start a fresh playthrough (resets stats tracking for completed WADs).
+    pub new_playthrough: bool,
 }
 
 /// Demo recording option.
@@ -58,6 +60,33 @@ pub enum RecordOption {
     Auto,
     /// Use a specific name (without extension).
     Named(String),
+}
+
+/// Start a new playthrough for a completed/abandoned WAD.
+///
+/// Creates a new playthrough record, sets status to in-progress,
+/// and clears the live stats snapshot so progress tracks fresh.
+/// The prior playthrough's stats are preserved on its own record.
+pub fn start_new_playthrough(conn: &Connection, wad_id: i64) -> crate::Result<i64> {
+    db::get_wad(conn, wad_id, false)?
+        .ok_or(crate::Error::WadNotFound(wad_id))?;
+
+    // Guard: must not already have an active playthrough
+    if db::get_active_playthrough(conn, wad_id)?.is_some() {
+        return Err(crate::Error::Config(
+            "WAD already has an active playthrough".to_string(),
+        ));
+    }
+
+    // Start new playthrough (sets status → in-progress)
+    let pt_id = db::start_playthrough(conn, wad_id)?;
+
+    // Clear live stats snapshot so auto-completion tracks fresh
+    let update = db::WadUpdate::new()
+        .set_text("stats_snapshot", None)?;
+    db::update_wad(conn, wad_id, &update)?;
+
+    Ok(pt_id)
 }
 
 /// Play a WAD with the specified sourceport.
@@ -326,6 +355,11 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
     {
         let log_path = data_dir.join(stats_watcher::LOG_FILENAME);
         cmd.args(["+logfile", &log_path.to_string_lossy()]);
+    }
+
+    // Handle --new-playthrough: start fresh before launching
+    if opts.new_playthrough {
+        start_new_playthrough(conn, wad_id)?;
     }
 
     // Capture stats snapshot before play
@@ -746,5 +780,67 @@ mod tests {
 
         let found = find_all_stats_files(dir.path());
         assert_eq!(found.len(), 2);
+    }
+
+    #[test]
+    fn test_new_playthrough_clears_stats_snapshot() {
+        use crate::db::{self, init_db, open_memory};
+        use crate::db::SourceType;
+
+        let conn = open_memory().unwrap();
+        init_db(&conn).unwrap();
+
+        // Create a WAD and complete a playthrough
+        let wad_id = db::add_wad(
+            &conn,
+            &db::NewWad::new("Test WAD", SourceType::Local),
+        ).unwrap();
+        let pt_id = db::start_playthrough(&conn, wad_id).unwrap();
+
+        // Set a stats snapshot on the WAD
+        let update = db::WadUpdate::new()
+            .set_text("stats_snapshot", Some(r#"{"maps":{}}"#.to_string()))
+            .unwrap();
+        db::update_wad(&conn, wad_id, &update).unwrap();
+
+        // Complete the playthrough
+        db::complete_playthrough(&conn, pt_id, Some(r#"{"maps":{}}"#), None).unwrap();
+
+        // Verify WAD is completed with a snapshot
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        assert_eq!(wad.status, "completed");
+        assert!(wad.stats_snapshot.is_some());
+
+        // Start a new playthrough (simulating --new-playthrough)
+        start_new_playthrough(&conn, wad_id).unwrap();
+
+        // Stats snapshot should be cleared
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        assert_eq!(wad.status, "in-progress");
+        assert!(wad.stats_snapshot.is_none());
+
+        // A new active playthrough should exist
+        let active = db::get_active_playthrough(&conn, wad_id).unwrap();
+        assert!(active.is_some());
+        assert_ne!(active.unwrap().id, pt_id);
+    }
+
+    #[test]
+    fn test_new_playthrough_rejects_active() {
+        use crate::db::{self, init_db, open_memory};
+        use crate::db::SourceType;
+
+        let conn = open_memory().unwrap();
+        init_db(&conn).unwrap();
+
+        let wad_id = db::add_wad(
+            &conn,
+            &db::NewWad::new("Test WAD", SourceType::Local),
+        ).unwrap();
+        db::start_playthrough(&conn, wad_id).unwrap();
+
+        // Should fail — already has an active playthrough
+        let result = start_new_playthrough(&conn, wad_id);
+        assert!(result.is_err());
     }
 }
