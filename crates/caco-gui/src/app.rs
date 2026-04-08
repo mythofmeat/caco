@@ -203,22 +203,24 @@ impl CacoApp {
                             .map(|p| !std::path::Path::new(p).exists())
                             .unwrap_or(true);
                         if needs_download {
+                            sender.send(AppMessage::Notify(Notification::info(format!(
+                                "Downloading {}...",
+                                wad.title
+                            ))));
+                            let client = caco_sources::idgames::IdgamesClient::new();
+                            let cache_dir = caco_core::config::get_cache_dir();
+                            std::fs::create_dir_all(&cache_dir)
+                                .map_err(|e| format!("Failed to create cache dir: {e}"))?;
+                            let mirror =
+                                caco_core::config::load_config().download_mirror as usize;
+
                             let idgames_id = wad
                                 .idgames_id
                                 .as_deref()
                                 .and_then(|id| id.parse::<i64>().ok());
-                            if let Some(ig_id) = idgames_id {
-                                sender.send(AppMessage::Notify(Notification::info(format!(
-                                    "Downloading {}...",
-                                    wad.title
-                                ))));
-                                let client = caco_sources::idgames::IdgamesClient::new();
-                                let cache_dir = caco_core::config::get_cache_dir();
-                                std::fs::create_dir_all(&cache_dir)
-                                    .map_err(|e| format!("Failed to create cache dir: {e}"))?;
-                                let mirror =
-                                    caco_core::config::load_config().download_mirror as usize;
-                                let dest = match client.get(Some(ig_id), None) {
+
+                            let dest = if let Some(ig_id) = idgames_id {
+                                match client.get(Some(ig_id), None) {
                                     Ok(entry) => client
                                         .download(&entry, Some(&cache_dir), mirror, None)
                                         .map_err(|e| format!("Download failed: {e}"))?,
@@ -230,7 +232,7 @@ impl CacoApp {
                                             || !source_url.contains("/idgames/")
                                         {
                                             return Err(format!(
-                                                "file not found: API blocked and no stored path for '{}'",
+                                                "API blocked and no stored path for '{}'",
                                                 wad.title
                                             ));
                                         }
@@ -251,21 +253,41 @@ impl CacoApp {
                                             "Failed to fetch idgames entry: {e}"
                                         ));
                                     }
-                                };
-                                let update = caco_core::db::WadUpdate::new()
-                                    .set_text(
-                                        "cached_path",
-                                        Some(dest.to_string_lossy().to_string()),
-                                    )
-                                    .map_err(|e| format!("Failed to build update: {e}"))?;
-                                caco_core::db::update_wad(&conn, wad_id, &update)
-                                    .map_err(|e| format!("Failed to update WAD record: {e}"))?;
+                                }
                             } else {
-                                return Err(format!(
-                                    "file not found: No WAD file available for '{}'. Link a file with: caco modify id:{} --link /path/to/wad",
-                                    wad.title, wad_id
-                                ));
-                            }
+                                // No numeric ID — try direct mirror via source_url
+                                let source_url =
+                                    wad.source_url.as_deref().unwrap_or("");
+                                let filename = wad.filename.as_deref().unwrap_or("");
+                                if filename.is_empty()
+                                    || !source_url.contains("/idgames/")
+                                {
+                                    return Err(format!(
+                                        "No WAD file available for '{}'. Link a file with: caco modify id:{} --link /path/to/wad",
+                                        wad.title, wad_id
+                                    ));
+                                }
+                                client
+                                    .download_direct(
+                                        source_url,
+                                        filename,
+                                        &cache_dir,
+                                        mirror,
+                                        None,
+                                    )
+                                    .map_err(|e| {
+                                        format!("Direct download failed: {e}")
+                                    })?
+                            };
+
+                            let update = caco_core::db::WadUpdate::new()
+                                .set_text(
+                                    "cached_path",
+                                    Some(dest.to_string_lossy().to_string()),
+                                )
+                                .map_err(|e| format!("Failed to build update: {e}"))?;
+                            caco_core::db::update_wad(&conn, wad_id, &update)
+                                .map_err(|e| format!("Failed to update WAD record: {e}"))?;
                         }
 
                         caco_core::player::play(
@@ -804,70 +826,7 @@ fn render_sidebar(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Act
         }
     }
 
-    // Status filter dropdown
-    ui.add_space(12.0);
-    let rect = ui.available_rect_before_wrap();
-    ui.painter().line_segment(
-        [
-            egui::pos2(rect.min.x + 20.0, rect.min.y),
-            egui::pos2(rect.max.x - 20.0, rect.min.y),
-        ],
-        egui::Stroke::new(1.0, theme::BORDER),
-    );
-    ui.add_space(16.0);
-
-    ui.horizontal(|ui| {
-        ui.add_space(20.0);
-        ui.colored_label(
-            theme::TEXT_MUTED,
-            egui::RichText::new("FILTER BY STATUS").size(11.0).strong(),
-        );
-    });
-    ui.add_space(4.0);
-
-    ui.horizontal(|ui| {
-        ui.add_space(16.0);
-
-        let current_label = state
-            .status_filter
-            .as_deref()
-            .map(|s| {
-                let display = theme::status_display(s);
-                let count = state.status_count(Some(s));
-                format!("{display} ({count})")
-            })
-            .unwrap_or_else(|| format!("All ({})", state.total_wad_count));
-
-        egui::ComboBox::from_id_salt("status_filter")
-            .selected_text(egui::RichText::new(&current_label).size(13.0).color(
-                state.status_filter.as_deref()
-                    .map(theme::status_color)
-                    .unwrap_or(theme::TEXT_PRIMARY),
-            ))
-            .width(ui.available_width() - 20.0)
-            .show_ui(ui, |ui| {
-                // "All" option
-                let all_label = format!("All ({})", state.total_wad_count);
-                if ui.selectable_label(state.status_filter.is_none(), &all_label).clicked() {
-                    state.status_filter = None;
-                    state.needs_reload = true;
-                }
-
-                for &status in theme::STATUSES {
-                    let count = state.status_count(Some(status));
-                    let label = format!("{} ({count})", theme::status_display(status));
-                    let color = theme::status_color(status);
-                    let is_selected = state.status_filter.as_deref() == Some(status);
-                    if ui
-                        .selectable_label(is_selected, egui::RichText::new(&label).color(color))
-                        .clicked()
-                    {
-                        state.status_filter = Some(status.to_string());
-                        state.needs_reload = true;
-                    }
-                }
-            });
-    });
+    // (Status filter pills are now rendered in the section header)
 
     // Bottom spacer + admin links
     ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
@@ -1331,6 +1290,33 @@ fn render_section_header(ui: &mut egui::Ui, state: &mut AppState) {
                 }
 
             });
+        });
+
+        // Status filter pills
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+
+            // "All" pill
+            let all_active = state.status_filters.is_empty();
+            if theme::filter_pill(ui, "All", all_active, None, state.total_wad_count) {
+                state.status_filters.clear();
+                state.needs_reload = true;
+            }
+
+            for &status in theme::STATUSES {
+                let is_active = state.status_filters.contains(status);
+                let count = state.status_count(Some(status));
+                let color = theme::status_color(status);
+                if theme::filter_pill(ui, theme::status_display(status), is_active, Some(color), count) {
+                    if is_active {
+                        state.status_filters.remove(status);
+                    } else {
+                        state.status_filters.insert(status.to_string());
+                    }
+                    state.needs_reload = true;
+                }
+            }
         });
     });
 }

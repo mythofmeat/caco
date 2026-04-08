@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -109,8 +109,8 @@ pub struct AppState {
     // View mode
     pub view_mode: ViewMode,
 
-    // Status filter (None = all, Some("unplayed"|"in-progress"|"completed"|"abandoned"))
-    pub status_filter: Option<String>,
+    // Status filters (empty = all; multiple entries produce OR query)
+    pub status_filters: HashSet<String>,
 
     // Filter
     pub filter_text: String,
@@ -172,7 +172,7 @@ impl AppState {
         Self {
             view_mode: ViewMode::default(),
             view_layout,
-            status_filter: persisted.status_filter,
+            status_filters: persisted.status_filters.into_iter().collect(),
             filter_text: String::new(),
             filter_changed_at: None,
             applied_filter: String::new(),
@@ -242,13 +242,21 @@ impl AppState {
 
     /// Reload WAD list and stats from the database.
     pub fn reload(&mut self, conn: &Connection) {
-        // Build combined query from status filter + user filter
+        // Build combined query from status filters + user filter
         let mut query_parts: Vec<String> = Vec::new();
 
-        if let Some(ref sf) = self.status_filter {
-            let qf = crate::theme::status_query(sf);
-            if !qf.is_empty() {
-                query_parts.push(qf.to_string());
+        if !self.status_filters.is_empty() {
+            // Multiple statuses use OR syntax: "status:a , status:b"
+            let status_q: Vec<&str> = self
+                .status_filters
+                .iter()
+                .filter_map(|s| {
+                    let q = crate::theme::status_query(s);
+                    if q.is_empty() { None } else { Some(q) }
+                })
+                .collect();
+            if !status_q.is_empty() {
+                query_parts.push(status_q.join(" , "));
             }
         }
 
@@ -444,7 +452,8 @@ impl AppState {
             show_detail_panel: self.show_detail_panel,
             sort_field_index: self.sort_field_index,
             sort_desc: self.sort_desc,
-            status_filter: self.status_filter.clone(),
+            status_filters: self.status_filters.iter().cloned().collect(),
+            status_filter: None,
         }
     }
 }

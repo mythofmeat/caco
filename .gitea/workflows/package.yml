@@ -2,7 +2,7 @@ name: Build and publish Arch package
 
 on:
   push:
-    branches: [main]
+    tags: ['v*']
 
 jobs:
   package:
@@ -11,6 +11,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0  # full history needed for pkgver()
+
+      - name: Verify tag is on main
+        run: |
+          git branch --contains HEAD | grep -qw main || \
+            { echo "::error::Tag is not on main — skipping build"; exit 1; }
 
       - name: Build package
         working-directory: contrib/arch

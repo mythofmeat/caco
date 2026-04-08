@@ -14,10 +14,7 @@ sha256sums=('SKIP')
 
 pkgver() {
     cd "$pkgbase"
-    printf "%s.r%s.%s" \
-        "$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')" \
-        "$(git rev-list --count HEAD)" \
-        "$(git rev-parse --short HEAD)"
+    git describe --tags --long | sed 's/^v//;s/-/.r/;s/-/./'
 }
 
 prepare() {

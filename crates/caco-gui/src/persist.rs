@@ -11,6 +11,10 @@ pub struct GuiState {
     pub sort_field_index: usize,
     #[serde(default = "default_true")]
     pub sort_desc: bool,
+    /// Multi-select status filters (empty = all).
+    #[serde(default)]
+    pub status_filters: Vec<String>,
+    /// Legacy single status filter — migrated to `status_filters` on load.
     #[serde(default)]
     pub status_filter: Option<String>,
 }
@@ -26,6 +30,7 @@ impl Default for GuiState {
             show_detail_panel: false,
             sort_field_index: 0,
             sort_desc: true,
+            status_filters: Vec::new(),
             status_filter: None,
         }
     }
@@ -47,16 +52,21 @@ pub fn load() -> GuiState {
         Ok(data) => serde_json::from_str(&data).unwrap_or_default(),
         Err(_) => return GuiState::default(),
     };
-    // Migrate old unified status filter values to new status values
-    if let Some(ref filter) = state.status_filter {
-        state.status_filter = match filter.as_str() {
+    // Migrate legacy single status_filter → status_filters
+    if let Some(filter) = state.status_filter.take() {
+        let migrated = match filter.as_str() {
             "inbox" | "queued" => Some("unplayed".to_string()),
             "playing" => Some("in-progress".to_string()),
             "shelved" => Some("completed".to_string()),
             "dropped" => Some("abandoned".to_string()),
-            "unplayed" | "in-progress" | "completed" | "abandoned" => state.status_filter,
+            "unplayed" | "in-progress" | "completed" | "abandoned" => Some(filter),
             _ => None,
         };
+        if let Some(s) = migrated
+            && state.status_filters.is_empty()
+        {
+            state.status_filters.push(s);
+        }
     }
     state
 }

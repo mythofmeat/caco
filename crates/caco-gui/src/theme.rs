@@ -89,6 +89,41 @@ pub fn status_pill(ui: &mut egui::Ui, status: &str) {
         });
 }
 
+/// Render a clickable status filter pill. Returns true if clicked.
+pub fn filter_pill(
+    ui: &mut egui::Ui,
+    label: &str,
+    is_active: bool,
+    accent: Option<Color32>,
+    count: usize,
+) -> bool {
+    let text = format!("{label} ({count})");
+
+    let (fill, text_color, stroke) = if is_active {
+        let c = accent.unwrap_or(TEXT_ACCENT);
+        // Active: tinted background, bright text, accent border
+        let bg = Color32::from_rgba_premultiplied(
+            c.r() / 5,
+            c.g() / 5,
+            c.b() / 5,
+            255,
+        );
+        (bg, c, egui::Stroke::new(1.0, c))
+    } else {
+        // Inactive: subtle background, muted text, no visible border
+        (BG_LIGHT, TEXT_SECONDARY, egui::Stroke::new(1.0, BORDER))
+    };
+
+    let btn = egui::Button::new(
+        egui::RichText::new(&text).size(11.5).color(text_color),
+    )
+    .fill(fill)
+    .stroke(stroke)
+    .corner_radius(14);
+
+    ui.add(btn).clicked()
+}
+
 pub fn severity_color(severity: crate::message::Severity) -> Color32 {
     match severity {
         crate::message::Severity::Info => COLOR_SUCCESS,
