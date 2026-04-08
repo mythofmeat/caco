@@ -5,6 +5,20 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.2.0] — 2026-04-08
+
+### Added
+- GUI: Completion badge overlay on grid cards showing progress status
+- GUI: "Start New Playthrough" context menu option for replaying WADs
+- CLI: `--new-playthrough` flag on play command for starting fresh playthroughs
+- CLI: Borderless table output with dimmed headers and truncated author names
+
+### Fixed
+- Clippy warnings from replay and badge changes
+
+### Changed
+- Removed dead detail panel code and unused `BeatenAdd`/`BeatenRemove` messages from GUI
+
 ## [2.1.0] — 2026-04-08
 
 ### Added
@@ -136,7 +150,8 @@ The original Python implementation. Key milestones:
 - **2026-03-10**: Comprehensive test suite, mypy integration, garbage collection
 - **2026-03-18**: JSON import fallback, Cloudflare bypass, offline support
 
-[Unreleased]: http://localhost:3000/eshen/caco/compare/v2.1.0...main
+[Unreleased]: http://localhost:3000/eshen/caco/compare/v2.2.0...main
+[2.2.0]: http://localhost:3000/eshen/caco/compare/v2.1.0...v2.2.0
 [2.1.0]: http://localhost:3000/eshen/caco/compare/v2.0.0...v2.1.0
 [2.0.0]: http://localhost:3000/eshen/caco/compare/v1.2.0...v2.0.0
 [1.2.0]: http://localhost:3000/eshen/caco/compare/v1.1.0...v1.2.0
