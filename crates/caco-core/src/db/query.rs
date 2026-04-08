@@ -2,8 +2,7 @@ use rusqlite::Connection;
 
 use super::connection::{attach_tags, fetch_tags_batch};
 use super::models::{
-    AndGroup, ParsedQuery, QueryTerm, SourceType, WadRecord, INTENT_SHORTCUTS,
-    PLAY_STATE_SHORTCUTS, STATUS_SHORTCUTS,
+    AndGroup, ParsedQuery, QueryTerm, SourceType, WadRecord, STATUS_SHORTCUTS,
 };
 use crate::complevel::parse_complevel;
 use crate::Result;
@@ -175,23 +174,6 @@ pub fn normalize_status(value: &str) -> String {
         .unwrap_or(lower)
 }
 
-/// Normalize play state value, expanding shortcuts.
-pub fn normalize_play_state(value: &str) -> String {
-    let lower = value.to_lowercase();
-    PLAY_STATE_SHORTCUTS
-        .get(lower.as_str())
-        .map(|s| s.to_string())
-        .unwrap_or(lower)
-}
-
-/// Normalize intent value, expanding shortcuts.
-pub fn normalize_intent(value: &str) -> String {
-    let lower = value.to_lowercase();
-    INTENT_SHORTCUTS
-        .get(lower.as_str())
-        .map(|s| s.to_string())
-        .unwrap_or(lower)
-}
 
 /// Boxed SQL parameter for dynamic dispatch.
 type SqlParam = Box<dyn rusqlite::types::ToSql>;
@@ -238,19 +220,9 @@ fn build_term_sql(term: &QueryTerm) -> (String, Vec<SqlParam>) {
             vec![Box::new(format!("%{}%", term.value))],
         ),
 
-        Some("status") => {
+        Some("status") | Some("play") | Some("play_state") => {
             let normalized = normalize_status(&term.value);
             ("wads.status = ?".into(), vec![Box::new(normalized)])
-        }
-
-        Some("play") | Some("play_state") => {
-            let normalized = normalize_play_state(&term.value);
-            ("wads.play_state = ?".into(), vec![Box::new(normalized)])
-        }
-
-        Some("intent") => {
-            let normalized = normalize_intent(&term.value);
-            ("wads.intent = ?".into(), vec![Box::new(normalized)])
         }
 
         Some("avail") | Some("availability") => (
@@ -612,7 +584,7 @@ mod tests {
             &NewWad::new("Ancient Aliens", SourceType::Idgames)
                 .author("skillsaw")
                 .year(2016)
-                .status(Status::Playing)
+                .status(Status::InProgress)
                 .tags(vec!["megawad".into(), "cacoward".into()]),
         )
         .unwrap();
@@ -622,7 +594,7 @@ mod tests {
             &NewWad::new("Sunlust", SourceType::Doomwiki)
                 .author("Ribbiks & Dannebubinga")
                 .year(2015)
-                .status(Status::Finished)
+                .status(Status::Completed)
                 .tags(vec!["megawad".into(), "slaughter".into()]),
         )
         .unwrap();
@@ -636,17 +608,17 @@ mod tests {
 
     #[test]
     fn test_parse_query_simple_field() {
-        let q = parse_query("status:playing");
+        let q = parse_query("status:in-progress");
         assert_eq!(q.or_groups.len(), 1);
         assert_eq!(q.or_groups[0].terms.len(), 1);
         assert_eq!(q.or_groups[0].terms[0].field.as_deref(), Some("status"));
-        assert_eq!(q.or_groups[0].terms[0].value, "playing");
+        assert_eq!(q.or_groups[0].terms[0].value, "in-progress");
         assert!(!q.or_groups[0].terms[0].negated);
     }
 
     #[test]
     fn test_parse_query_negation() {
-        let q = parse_query("-status:finished");
+        let q = parse_query("-status:completed");
         assert!(q.or_groups[0].terms[0].negated);
         assert_eq!(q.or_groups[0].terms[0].field.as_deref(), Some("status"));
 
@@ -657,7 +629,7 @@ mod tests {
 
     #[test]
     fn test_parse_query_or_groups() {
-        let q = parse_query("status:playing , status:to-play");
+        let q = parse_query("status:in-progress , status:unplayed");
         assert_eq!(q.or_groups.len(), 2);
     }
 
@@ -683,9 +655,9 @@ mod tests {
 
     #[test]
     fn test_normalize_status() {
-        assert_eq!(normalize_status("p"), "playing");
-        assert_eq!(normalize_status("f"), "finished");
-        assert_eq!(normalize_status("playing"), "playing");
+        assert_eq!(normalize_status("p"), "in-progress");
+        assert_eq!(normalize_status("f"), "completed");
+        assert_eq!(normalize_status("playing"), "in-progress");
         assert_eq!(normalize_status("unknown"), "unknown");
     }
 
@@ -713,7 +685,7 @@ mod tests {
         add_test_wads(&conn);
 
         let results =
-            search_wads(&conn, Some("status:playing"), None, true, false, 0).unwrap();
+            search_wads(&conn, Some("status:in-progress"), None, true, false, 0).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].title, "Ancient Aliens");
     }
@@ -743,7 +715,7 @@ mod tests {
         add_test_wads(&conn);
 
         let results =
-            search_wads(&conn, Some("-status:finished"), None, true, false, 0).unwrap();
+            search_wads(&conn, Some("-status:completed"), None, true, false, 0).unwrap();
         assert_eq!(results.len(), 2);
     }
 
@@ -754,7 +726,7 @@ mod tests {
 
         let results = search_wads(
             &conn,
-            Some("status:playing , status:finished"),
+            Some("status:in-progress , status:completed"),
             None,
             true,
             false,
