@@ -605,7 +605,7 @@ fn check_auto_completion(
 
     // Only check WADs that are currently being played
     let wad = match db::get_wad(conn, wad_id, false) {
-        Ok(Some(w)) if w.play_state == "started" => w,
+        Ok(Some(w)) if w.status == "in-progress" => w,
         _ => return AutoCompleteResult::Unknown,
     };
 
