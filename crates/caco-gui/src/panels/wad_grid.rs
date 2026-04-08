@@ -3,6 +3,9 @@ use egui::{Color32, CornerRadius, Rect, StrokeKind, Vec2};
 use crate::state::{ActionRequest, AppState};
 use crate::theme;
 
+/// Type alias to disambiguate from caco_core::db::sessions::WadStats.
+type StatsData = caco_core::wad_stats::WadStats;
+
 /// Card dimensions.
 const CARD_MIN_WIDTH: f32 = 190.0;
 const CARD_MAX_WIDTH: f32 = 260.0;
@@ -73,8 +76,9 @@ pub fn render(
         let thumb_width = card_w;
         let thumb_height = thumb_width * THUMB_ASPECT;
         let text_height = ui.text_style_height(&egui::TextStyle::Body);
-        // Card body: title + author + footer (status + stars + playtime)
-        let body_height = 12.0 + text_height * 2.0 + 8.0 + 20.0 + 12.0;
+        // Card body: title + author + footer (status + stars + playtime) + progress bar space
+        let progress_bar_height = 6.0; // thin progress bar + spacing
+        let body_height = 12.0 + text_height * 2.0 + 8.0 + 20.0 + 12.0 + progress_bar_height;
         let card_height = thumb_height + body_height;
 
         let wad_count = state.wads.len();
@@ -281,6 +285,38 @@ pub fn render(
                             egui::FontId::proportional(11.0),
                             theme::TEXT_MUTED,
                         );
+                    }
+
+                    // Progress bar for in-progress WADs with stats
+                    if wad.status == "in-progress"
+                        && let Some(ref snapshot_json) = wad.stats_snapshot
+                        && let Ok(wad_stats) = serde_json::from_str::<StatsData>(snapshot_json)
+                        && !wad_stats.maps.is_empty()
+                    {
+                            let total = wad_stats.maps.len();
+                            let played = wad_stats.played_maps().len();
+                            let pct = if total > 0 {
+                                (played as f32 / total as f32).min(1.0)
+                            } else {
+                                0.0
+                            };
+
+                            let bar_y = footer_y + 22.0;
+                            let bar_h = 4.0;
+                            let bar_x = body_x;
+                            let bar_w = rect.right() - 14.0 - bar_x;
+                            let bar_rect = Rect::from_min_size(
+                                egui::pos2(bar_x, bar_y),
+                                Vec2::new(bar_w, bar_h),
+                            );
+                            painter.rect_filled(bar_rect, 2.0, theme::BG_LIGHT);
+                            if pct > 0.0 {
+                                let fill_rect = Rect::from_min_size(
+                                    bar_rect.min,
+                                    Vec2::new(bar_w * pct, bar_h),
+                                );
+                                painter.rect_filled(fill_rect, 2.0, theme::TEXT_ACCENT);
+                            }
                     }
                 }
             });

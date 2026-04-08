@@ -826,70 +826,7 @@ fn render_sidebar(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Act
         }
     }
 
-    // Status filter dropdown
-    ui.add_space(12.0);
-    let rect = ui.available_rect_before_wrap();
-    ui.painter().line_segment(
-        [
-            egui::pos2(rect.min.x + 20.0, rect.min.y),
-            egui::pos2(rect.max.x - 20.0, rect.min.y),
-        ],
-        egui::Stroke::new(1.0, theme::BORDER),
-    );
-    ui.add_space(16.0);
-
-    ui.horizontal(|ui| {
-        ui.add_space(20.0);
-        ui.colored_label(
-            theme::TEXT_MUTED,
-            egui::RichText::new("FILTER BY STATUS").size(11.0).strong(),
-        );
-    });
-    ui.add_space(4.0);
-
-    ui.horizontal(|ui| {
-        ui.add_space(16.0);
-
-        let current_label = state
-            .status_filter
-            .as_deref()
-            .map(|s| {
-                let display = theme::status_display(s);
-                let count = state.status_count(Some(s));
-                format!("{display} ({count})")
-            })
-            .unwrap_or_else(|| format!("All ({})", state.total_wad_count));
-
-        egui::ComboBox::from_id_salt("status_filter")
-            .selected_text(egui::RichText::new(&current_label).size(13.0).color(
-                state.status_filter.as_deref()
-                    .map(theme::status_color)
-                    .unwrap_or(theme::TEXT_PRIMARY),
-            ))
-            .width(ui.available_width() - 20.0)
-            .show_ui(ui, |ui| {
-                // "All" option
-                let all_label = format!("All ({})", state.total_wad_count);
-                if ui.selectable_label(state.status_filter.is_none(), &all_label).clicked() {
-                    state.status_filter = None;
-                    state.needs_reload = true;
-                }
-
-                for &status in theme::STATUSES {
-                    let count = state.status_count(Some(status));
-                    let label = format!("{} ({count})", theme::status_display(status));
-                    let color = theme::status_color(status);
-                    let is_selected = state.status_filter.as_deref() == Some(status);
-                    if ui
-                        .selectable_label(is_selected, egui::RichText::new(&label).color(color))
-                        .clicked()
-                    {
-                        state.status_filter = Some(status.to_string());
-                        state.needs_reload = true;
-                    }
-                }
-            });
-    });
+    // (Status filter pills are now rendered in the section header)
 
     // Bottom spacer + admin links
     ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
@@ -1353,6 +1290,33 @@ fn render_section_header(ui: &mut egui::Ui, state: &mut AppState) {
                 }
 
             });
+        });
+
+        // Status filter pills
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+
+            // "All" pill
+            let all_active = state.status_filters.is_empty();
+            if theme::filter_pill(ui, "All", all_active, None, state.total_wad_count) {
+                state.status_filters.clear();
+                state.needs_reload = true;
+            }
+
+            for &status in theme::STATUSES {
+                let is_active = state.status_filters.contains(status);
+                let count = state.status_count(Some(status));
+                let color = theme::status_color(status);
+                if theme::filter_pill(ui, theme::status_display(status), is_active, Some(color), count) {
+                    if is_active {
+                        state.status_filters.remove(status);
+                    } else {
+                        state.status_filters.insert(status.to_string());
+                    }
+                    state.needs_reload = true;
+                }
+            }
         });
     });
 }
