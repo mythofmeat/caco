@@ -27,10 +27,6 @@ Thumbs.db
 # Claude Code
 .claude/
 
-# Task orchestration
-.ralph-tui/
-tasks/
-
 # pytest
 .pytest_cache/
 pytest-of-*/
@@ -52,3 +48,5 @@ config
 hooks
 objects
 refs
+
+.worktree
