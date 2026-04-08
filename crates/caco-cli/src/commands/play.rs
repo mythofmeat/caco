@@ -65,6 +65,10 @@ pub struct PlayArgs {
     /// Config profile name
     #[arg(short = 'C', long = "config")]
     config_profile: Option<String>,
+
+    /// Start a new playthrough (resets stats for completed WADs)
+    #[arg(long)]
+    new_playthrough: bool,
 }
 
 pub fn run(conn: &Connection, args: &PlayArgs) -> Result<(), String> {
@@ -110,6 +114,7 @@ pub fn run(conn: &Connection, args: &PlayArgs) -> Result<(), String> {
         extra_args,
         record,
         config_profile: args.config_profile.clone(),
+        new_playthrough: args.new_playthrough,
     };
 
     eprintln!("Playing: {} (ID: {})", wad.title, wad.id);
