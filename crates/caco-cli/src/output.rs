@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use comfy_table::{presets, Table, ContentArrangement, Cell, CellAlignment};
+use comfy_table::{presets, Table, Cell, CellAlignment, Color};
 
 use caco_core::db::{
     IwadRecord, Id24Record, WadRecord, WadCompanionRecord, WadStats, SessionRecord,
@@ -66,9 +66,16 @@ fn render_wad_list_table(wads: &[WadRecord], stats: &HashMap<i64, WadStats>) {
 
     let mut table = Table::new();
     table
-        .load_preset(presets::UTF8_FULL_CONDENSED)
-        .set_content_arrangement(ContentArrangement::Dynamic)
-        .set_header(vec!["ID", "Title", "Author", "Status", "Beaten", "Playtime", "Last Played"]);
+        .load_preset(presets::NOTHING)
+        .set_header(vec![
+            Cell::new("ID").fg(Color::DarkGrey),
+            Cell::new("Title").fg(Color::DarkGrey),
+            Cell::new("Author").fg(Color::DarkGrey),
+            Cell::new("Status").fg(Color::DarkGrey),
+            Cell::new("Beaten").fg(Color::DarkGrey),
+            Cell::new("Playtime").fg(Color::DarkGrey),
+            Cell::new("Last Played").fg(Color::DarkGrey),
+        ]);
 
     for wad in wads {
         let ws = stats.get(&wad.id);
@@ -83,10 +90,12 @@ fn render_wad_list_table(wads: &[WadRecord], stats: &HashMap<i64, WadStats>) {
             .map(|s| s.display_name().to_string())
             .unwrap_or_else(|| wad.status.clone());
 
+        let author = truncate_str(wad.author.as_deref().unwrap_or(""), 30);
+
         table.add_row(vec![
             Cell::new(wad.id).set_alignment(CellAlignment::Right),
             Cell::new(&wad.title),
-            Cell::new(wad.author.as_deref().unwrap_or("")),
+            Cell::new(&author),
             Cell::new(&status_display),
             Cell::new(beaten).set_alignment(CellAlignment::Right),
             Cell::new(if playtime > 0 { format_duration(playtime) } else { String::new() }).set_alignment(CellAlignment::Right),
@@ -334,8 +343,11 @@ pub fn render_tag_list(tags: &[(String, i64)], format: OutputFormat) {
             }
             let mut table = Table::new();
             table
-                .load_preset(presets::UTF8_FULL_CONDENSED)
-                .set_header(vec!["Tag", "Count"]);
+                .load_preset(presets::NOTHING)
+                .set_header(vec![
+                    Cell::new("Tag").fg(Color::DarkGrey),
+                    Cell::new("Count").fg(Color::DarkGrey),
+                ]);
             for (tag, count) in tags {
                 table.add_row(vec![
                     Cell::new(tag),
@@ -373,8 +385,13 @@ pub fn render_iwad_list(iwads: &[IwadRecord], preferred: &HashMap<String, String
             }
             let mut table = Table::new();
             table
-                .load_preset(presets::UTF8_FULL_CONDENSED)
-                .set_header(vec!["Family", "Variant", "Title", "Path"]);
+                .load_preset(presets::NOTHING)
+                .set_header(vec![
+                    Cell::new("Family").fg(Color::DarkGrey),
+                    Cell::new("Variant").fg(Color::DarkGrey),
+                    Cell::new("Title").fg(Color::DarkGrey),
+                    Cell::new("Path").fg(Color::DarkGrey),
+                ]);
             for iwad in iwads {
                 let is_preferred = preferred
                     .get(&iwad.family)
@@ -435,8 +452,13 @@ pub fn render_id24_list(id24s: &[Id24Record], format: OutputFormat) {
             }
             let mut table = Table::new();
             table
-                .load_preset(presets::UTF8_FULL_CONDENSED)
-                .set_header(vec!["Name", "Version", "Title", "Path"]);
+                .load_preset(presets::NOTHING)
+                .set_header(vec![
+                    Cell::new("Name").fg(Color::DarkGrey),
+                    Cell::new("Version").fg(Color::DarkGrey),
+                    Cell::new("Title").fg(Color::DarkGrey),
+                    Cell::new("Path").fg(Color::DarkGrey),
+                ]);
             for entry in id24s {
                 table.add_row(vec![
                     Cell::new(&entry.name),
@@ -494,8 +516,14 @@ pub fn render_session_list(
             }
             let mut table = Table::new();
             table
-                .load_preset(presets::UTF8_FULL_CONDENSED)
-                .set_header(vec!["Date", "Started", "Duration", "Sourceport", "Maps"]);
+                .load_preset(presets::NOTHING)
+                .set_header(vec![
+                    Cell::new("Date").fg(Color::DarkGrey),
+                    Cell::new("Started").fg(Color::DarkGrey),
+                    Cell::new("Duration").fg(Color::DarkGrey),
+                    Cell::new("Sourceport").fg(Color::DarkGrey),
+                    Cell::new("Maps").fg(Color::DarkGrey),
+                ]);
 
             for (i, session) in sessions.iter().enumerate() {
                 let date = format_timestamp(&session.started_at);
@@ -594,8 +622,13 @@ fn render_stats_table(snapshot: &StatsSnapshot, limit: usize) {
         println!();
         let mut table = Table::new();
         table
-            .load_preset(presets::UTF8_FULL_CONDENSED)
-            .set_header(vec!["Period", "WADs", "Sessions", "Playtime"]);
+            .load_preset(presets::NOTHING)
+            .set_header(vec![
+                Cell::new("Period").fg(Color::DarkGrey),
+                Cell::new("WADs").fg(Color::DarkGrey),
+                Cell::new("Sessions").fg(Color::DarkGrey),
+                Cell::new("Playtime").fg(Color::DarkGrey),
+            ]);
 
         for period in snapshot.activity.iter().take(limit) {
             table.add_row(vec![
@@ -660,6 +693,16 @@ pub fn format_time(ts: &str) -> String {
         ts[11..16].to_string()
     } else {
         String::new()
+    }
+}
+
+/// Truncate a string to `max` characters, appending "…" if truncated.
+fn truncate_str(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let truncated: String = s.chars().take(max - 1).collect();
+        format!("{truncated}…")
     }
 }
 
