@@ -30,78 +30,56 @@ pub const COLOR_SECRET_FILL: Color32 = Color32::from_rgb(0x99, 0x44, 0x22);
 
 
 // ---------------------------------------------------------------------------
-// Unified status (merges intent + play_state for GUI display)
+// Status helpers
 // ---------------------------------------------------------------------------
 
-/// All unified status values in display order.
-pub const UNIFIED_STATUSES: &[&str] = &["inbox", "queued", "playing", "shelved", "dropped"];
+pub const STATUSES: &[&str] = &["unplayed", "in-progress", "completed", "abandoned"];
 
-/// Compute the unified status from a WAD's play_state and intent fields.
-pub fn unified_status(play_state: &str, intent: &str) -> &'static str {
-    if play_state == "started" {
-        "playing"
-    } else {
-        match intent {
-            "inbox" => "inbox",
-            "queued" => "queued",
-            "shelved" => "shelved",
-            "dropped" => "dropped",
-            _ => "inbox",
-        }
-    }
-}
-
-/// Query filter string for a unified status value.
-pub fn unified_status_query(status: &str) -> &'static str {
+pub fn status_color(status: &str) -> Color32 {
     match status {
-        "inbox" => "intent:inbox ^play:started",
-        "queued" => "intent:queued",
-        "playing" => "play:started",
-        "shelved" => "intent:shelved ^play:started",
-        "dropped" => "intent:dropped",
-        _ => "",
-    }
-}
-
-pub fn unified_status_color(status: &str) -> Color32 {
-    match status {
-        "inbox" => Color32::from_rgb(0xcc, 0xcc, 0x33),
-        "queued" => Color32::from_rgb(0x33, 0x66, 0xcc),
-        "playing" => Color32::from_rgb(0x33, 0xcc, 0x33),
-        "shelved" => Color32::from_rgb(0x80, 0x80, 0x80),
-        "dropped" => Color32::from_rgb(0xcc, 0x33, 0x33),
+        "unplayed" => Color32::from_rgb(0x33, 0x66, 0xcc),
+        "in-progress" => Color32::from_rgb(0x33, 0xcc, 0x33),
+        "completed" => Color32::from_rgb(0x80, 0x80, 0x80),
+        "abandoned" => Color32::from_rgb(0xcc, 0x33, 0x33),
         _ => TEXT_PRIMARY,
     }
 }
 
-pub fn unified_status_bg(status: &str) -> Color32 {
+pub fn status_bg(status: &str) -> Color32 {
     match status {
-        "inbox" => Color32::from_rgb(0x2a, 0x2a, 0x0d),
-        "queued" => Color32::from_rgb(0x0d, 0x14, 0x2a),
-        "playing" => Color32::from_rgb(0x0d, 0x2a, 0x0d),
-        "shelved" => Color32::from_rgb(0x1a, 0x1a, 0x1a),
-        "dropped" => Color32::from_rgb(0x2a, 0x0d, 0x0d),
+        "unplayed" => Color32::from_rgb(0x0d, 0x14, 0x2a),
+        "in-progress" => Color32::from_rgb(0x0d, 0x2a, 0x0d),
+        "completed" => Color32::from_rgb(0x1a, 0x1a, 0x1a),
+        "abandoned" => Color32::from_rgb(0x2a, 0x0d, 0x0d),
         _ => BG_MEDIUM,
     }
 }
 
-pub fn unified_status_display(status: &str) -> &str {
+pub fn status_display(status: &str) -> &str {
     match status {
-        "inbox" => "Inbox",
-        "queued" => "Queued",
-        "playing" => "Playing",
-        "shelved" => "Shelved",
-        "dropped" => "Dropped",
+        "unplayed" => "Unplayed",
+        "in-progress" => "In Progress",
+        "completed" => "Completed",
+        "abandoned" => "Abandoned",
         _ => status,
     }
 }
 
-/// Render a unified status value as a colored pill badge.
-pub fn unified_status_pill(ui: &mut egui::Ui, play_state: &str, intent: &str) {
-    let status = unified_status(play_state, intent);
-    let color = unified_status_color(status);
-    let label = unified_status_display(status);
-    let bg = unified_status_bg(status);
+pub fn status_query(status: &str) -> &'static str {
+    match status {
+        "unplayed" => "status:unplayed",
+        "in-progress" => "status:in-progress",
+        "completed" => "status:completed",
+        "abandoned" => "status:abandoned",
+        _ => "",
+    }
+}
+
+/// Render a status value as a colored pill badge.
+pub fn status_pill(ui: &mut egui::Ui, status: &str) {
+    let color = status_color(status);
+    let label = status_display(status);
+    let bg = status_bg(status);
     egui::Frame::new()
         .fill(bg)
         .corner_radius(6)

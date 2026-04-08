@@ -832,7 +832,7 @@ fn render_sidebar(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Act
             .status_filter
             .as_deref()
             .map(|s| {
-                let display = theme::unified_status_display(s);
+                let display = theme::status_display(s);
                 let count = state.status_count(Some(s));
                 format!("{display} ({count})")
             })
@@ -841,7 +841,7 @@ fn render_sidebar(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Act
         egui::ComboBox::from_id_salt("status_filter")
             .selected_text(egui::RichText::new(&current_label).size(13.0).color(
                 state.status_filter.as_deref()
-                    .map(theme::unified_status_color)
+                    .map(theme::status_color)
                     .unwrap_or(theme::TEXT_PRIMARY),
             ))
             .width(ui.available_width() - 20.0)
@@ -853,10 +853,10 @@ fn render_sidebar(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Act
                     state.needs_reload = true;
                 }
 
-                for &status in theme::UNIFIED_STATUSES {
+                for &status in theme::STATUSES {
                     let count = state.status_count(Some(status));
-                    let label = format!("{} ({count})", theme::unified_status_display(status));
-                    let color = theme::unified_status_color(status);
+                    let label = format!("{} ({count})", theme::status_display(status));
+                    let color = theme::status_color(status);
                     let is_selected = state.status_filter.as_deref() == Some(status);
                     if ui
                         .selectable_label(is_selected, egui::RichText::new(&label).color(color))
@@ -1016,8 +1016,8 @@ fn render_now_playing_hero(
                 .and_then(|w| w.author.clone());
             (wad_title.clone(), author, *wad_id, true)
         } else {
-            // Show the first WAD with play_state=started
-            let playing_wad = state.wads.iter().find(|w| w.play_state == "started");
+            // Show the first WAD with in-progress status
+            let playing_wad = state.wads.iter().find(|w| w.status == "in-progress");
             match playing_wad {
                 Some(w) => (w.title.clone(), w.author.clone(), w.id, false),
                 None => return None, // No hero to show

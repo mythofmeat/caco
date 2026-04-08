@@ -227,8 +227,8 @@ fn gc_finished_wads(
 }
 
 fn get_gc_candidates(conn: &Connection) -> Result<Vec<WadRecord>, String> {
-    // All dropped (abandoned) WADs and all completed (finished) WADs regardless of intent.
-    let query = "intent:dropped , play:completed";
+    // All abandoned and completed WADs.
+    let query = "status:abandoned , status:completed";
     let wads = db::search_wads(conn, Some(query), None, true, false, 0)
         .map_err(|e| format!("Search error: {e}"))?;
     Ok(wads.into_iter().filter(|w| !w.gc_ignore).collect())
@@ -896,8 +896,8 @@ mod tests {
     #[test]
     fn test_gc_candidates_finds_finished() {
         let conn = setup();
-        add_wad_with_status(&conn, "Finished WAD", Status::Finished);
-        add_wad_with_status(&conn, "Playing WAD", Status::Playing);
+        add_wad_with_status(&conn, "Finished WAD", Status::Completed);
+        add_wad_with_status(&conn, "Playing WAD", Status::InProgress);
 
         let candidates = get_gc_candidates(&conn).unwrap();
         assert_eq!(candidates.len(), 1);
@@ -908,7 +908,7 @@ mod tests {
     fn test_gc_candidates_finds_abandoned() {
         let conn = setup();
         add_wad_with_status(&conn, "Abandoned WAD", Status::Abandoned);
-        add_wad_with_status(&conn, "To Play WAD", Status::ToPlay);
+        add_wad_with_status(&conn, "To Play WAD", Status::Unplayed);
 
         let candidates = get_gc_candidates(&conn).unwrap();
         assert_eq!(candidates.len(), 1);
@@ -918,9 +918,9 @@ mod tests {
     #[test]
     fn test_gc_candidates_finds_both_statuses() {
         let conn = setup();
-        add_wad_with_status(&conn, "Finished", Status::Finished);
+        add_wad_with_status(&conn, "Finished", Status::Completed);
         add_wad_with_status(&conn, "Abandoned", Status::Abandoned);
-        add_wad_with_status(&conn, "Playing", Status::Playing);
+        add_wad_with_status(&conn, "Playing", Status::InProgress);
 
         let candidates = get_gc_candidates(&conn).unwrap();
         assert_eq!(candidates.len(), 2);
@@ -929,11 +929,11 @@ mod tests {
     #[test]
     fn test_gc_candidates_excludes_gc_ignore() {
         let conn = setup();
-        let wad_id = add_wad_with_status(&conn, "Ignored WAD", Status::Finished);
+        let wad_id = add_wad_with_status(&conn, "Ignored WAD", Status::Completed);
         let update = db::WadUpdate::new().set_int("gc_ignore", Some(1)).unwrap();
         db::update_wad(&conn, wad_id, &update).unwrap();
 
-        add_wad_with_status(&conn, "Not Ignored", Status::Finished);
+        add_wad_with_status(&conn, "Not Ignored", Status::Completed);
 
         let candidates = get_gc_candidates(&conn).unwrap();
         assert_eq!(candidates.len(), 1);
@@ -950,9 +950,9 @@ mod tests {
     #[test]
     fn test_gc_candidates_no_finished_or_abandoned() {
         let conn = setup();
-        add_wad_with_status(&conn, "Playing", Status::Playing);
-        add_wad_with_status(&conn, "To Play", Status::ToPlay);
-        add_wad_with_status(&conn, "Backlog", Status::Backlog);
+        add_wad_with_status(&conn, "Playing", Status::InProgress);
+        add_wad_with_status(&conn, "To Play", Status::Unplayed);
+        add_wad_with_status(&conn, "Backlog", Status::Unplayed);
 
         let candidates = get_gc_candidates(&conn).unwrap();
         assert!(candidates.is_empty());
@@ -963,8 +963,8 @@ mod tests {
     #[test]
     fn test_get_existing_wad_ids_found() {
         let conn = setup();
-        let id1 = add_wad_with_status(&conn, "WAD 1", Status::Playing);
-        let id2 = add_wad_with_status(&conn, "WAD 2", Status::Playing);
+        let id1 = add_wad_with_status(&conn, "WAD 1", Status::InProgress);
+        let id2 = add_wad_with_status(&conn, "WAD 2", Status::InProgress);
 
         let existing = get_existing_wad_ids(&conn, &[id1, id2, 999]);
         assert!(existing.contains(&id1));
@@ -991,7 +991,7 @@ mod tests {
     #[test]
     fn test_handle_ignore_sets_gc_ignore() {
         let conn = setup();
-        let wad_id = add_wad_with_status(&conn, "My WAD", Status::Finished);
+        let wad_id = add_wad_with_status(&conn, "My WAD", Status::Completed);
 
         handle_ignore(&conn, &["My WAD".to_string()], true).unwrap();
 
@@ -1002,7 +1002,7 @@ mod tests {
     #[test]
     fn test_handle_unignore_clears_gc_ignore() {
         let conn = setup();
-        let wad_id = add_wad_with_status(&conn, "My WAD", Status::Finished);
+        let wad_id = add_wad_with_status(&conn, "My WAD", Status::Completed);
 
         // Set ignore first
         handle_ignore(&conn, &["My WAD".to_string()], true).unwrap();
@@ -1018,7 +1018,7 @@ mod tests {
     #[test]
     fn test_get_wad_companion_info_empty() {
         let conn = setup();
-        let wad_id = add_wad_with_status(&conn, "WAD", Status::Finished);
+        let wad_id = add_wad_with_status(&conn, "WAD", Status::Completed);
 
         let (infos, total_size) = get_wad_companion_info(&conn, wad_id).unwrap();
         assert!(infos.is_empty());
@@ -1028,7 +1028,7 @@ mod tests {
     #[test]
     fn test_get_wad_companion_info_with_companion() {
         let conn = setup();
-        let wad_id = add_wad_with_status(&conn, "WAD", Status::Finished);
+        let wad_id = add_wad_with_status(&conn, "WAD", Status::Completed);
         let c_id = db::add_companion(&conn, "md5abc", "patch.deh", "/nonexistent/path.deh", 100).unwrap();
         db::link_companion_to_wad(&conn, wad_id, c_id).unwrap();
 
@@ -1273,7 +1273,7 @@ mod tests {
     #[test]
     fn test_find_orphaned_companions_none() {
         let conn = setup();
-        let wad_id = add_wad_with_status(&conn, "WAD", Status::Playing);
+        let wad_id = add_wad_with_status(&conn, "WAD", Status::InProgress);
         let c_id = db::add_companion(&conn, "md5abc", "patch.deh", "/path/patch.deh", 100).unwrap();
         db::link_companion_to_wad(&conn, wad_id, c_id).unwrap();
 
@@ -1326,8 +1326,8 @@ mod tests {
     #[test]
     fn test_get_wad_companion_info_orphan_size() {
         let conn = setup();
-        let w1 = add_wad_with_status(&conn, "WAD 1", Status::Finished);
-        let w2 = add_wad_with_status(&conn, "WAD 2", Status::Playing);
+        let w1 = add_wad_with_status(&conn, "WAD 1", Status::Completed);
+        let w2 = add_wad_with_status(&conn, "WAD 2", Status::InProgress);
         let c_id = db::add_companion(&conn, "md5shared", "shared.deh", "/path/shared.deh", 100).unwrap();
 
         // Link to both WADs
@@ -1344,7 +1344,7 @@ mod tests {
     #[test]
     fn test_get_wad_companion_info_sole_owner() {
         let conn = setup();
-        let wad_id = add_wad_with_status(&conn, "Solo WAD", Status::Finished);
+        let wad_id = add_wad_with_status(&conn, "Solo WAD", Status::Completed);
 
         // Create a companion file at a real path
         let dir = tempfile::tempdir().unwrap();
@@ -1372,10 +1372,10 @@ mod tests {
     #[test]
     fn test_gc_candidates_excludes_all_non_gc_statuses() {
         let conn = setup();
-        add_wad_with_status(&conn, "Playing", Status::Playing);
-        add_wad_with_status(&conn, "To Play", Status::ToPlay);
-        add_wad_with_status(&conn, "Backlog", Status::Backlog);
-        add_wad_with_status(&conn, "Awaiting", Status::AwaitingUpdate);
+        add_wad_with_status(&conn, "Playing", Status::InProgress);
+        add_wad_with_status(&conn, "To Play", Status::Unplayed);
+        add_wad_with_status(&conn, "Backlog", Status::Unplayed);
+        add_wad_with_status(&conn, "Awaiting", Status::Unplayed);
 
         let candidates = get_gc_candidates(&conn).unwrap();
         assert!(candidates.is_empty());

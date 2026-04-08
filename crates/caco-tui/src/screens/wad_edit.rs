@@ -15,10 +15,6 @@ use crate::screens::Screen;
 use crate::theme;
 
 /// Editing field types.
-// TODO: During the tri-axis transition, StatusCycle still cycles the legacy
-// status values. The dual-write layer in caco-core syncs intent/play_state
-// automatically. Once the legacy status column is removed, replace StatusCycle
-// with IntentCycle and PlayStateCycle field kinds.
 enum FieldKind {
     Text,
     StatusCycle,
@@ -255,7 +251,7 @@ impl WadEditScreen {
     }
 
     fn cycle_status(&mut self, forward: bool) {
-        let statuses = ["to-play", "backlog", "playing", "finished", "abandoned", "awaiting-update"];
+        let statuses = ["unplayed", "in-progress", "completed", "abandoned"];
         if let Some(field) = self.fields.iter_mut().find(|f| f.name == "status") {
             let current = field.input.value().to_string();
             let idx = statuses.iter().position(|s| *s == current).unwrap_or(0);

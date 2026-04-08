@@ -75,7 +75,6 @@ pub fn field_to_column(field: &str) -> &str {
 pub const MODIFY_FIELDS: &[&str] = &[
     "title", "author", "year", "description", "status", "rating", "notes",
     "iwad", "sourceport", "args", "complevel", "config", "idgames-id", "version",
-    "play", "play_state", "intent",
 ];
 
 /// A parsed modify action from CLI arguments.

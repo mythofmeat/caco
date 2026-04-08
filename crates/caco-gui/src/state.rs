@@ -109,7 +109,7 @@ pub struct AppState {
     // View mode
     pub view_mode: ViewMode,
 
-    // Status filter (None = all, Some("inbox"|"queued"|"playing"|"shelved"|"dropped"))
+    // Status filter (None = all, Some("unplayed"|"in-progress"|"completed"|"abandoned"))
     pub status_filter: Option<String>,
 
     // Filter
@@ -146,7 +146,7 @@ pub struct AppState {
     // Import
     pub import: ImportState,
 
-    // Sidebar status counts (unified status → count)
+    // Sidebar status counts (status → count)
     pub status_counts: HashMap<String, usize>,
     pub total_wad_count: usize,
 
@@ -207,7 +207,7 @@ impl AppState {
         matches!(self.play_state, PlayState::Playing { .. })
     }
 
-    /// Refresh sidebar status counts from the database (unified statuses).
+    /// Refresh sidebar status counts from the database.
     pub fn refresh_status_counts(&mut self, conn: &Connection) {
         self.status_counts.clear();
         self.total_wad_count = 0;
@@ -216,8 +216,7 @@ impl AppState {
         {
             self.total_wad_count = all_wads.len();
             for wad in &all_wads {
-                let us = crate::theme::unified_status(&wad.play_state, &wad.intent);
-                *self.status_counts.entry(us.to_string()).or_insert(0) += 1;
+                *self.status_counts.entry(wad.status.clone()).or_insert(0) += 1;
             }
         }
     }
@@ -247,7 +246,7 @@ impl AppState {
         let mut query_parts: Vec<String> = Vec::new();
 
         if let Some(ref sf) = self.status_filter {
-            let qf = crate::theme::unified_status_query(sf);
+            let qf = crate::theme::status_query(sf);
             if !qf.is_empty() {
                 query_parts.push(qf.to_string());
             }

@@ -43,10 +43,22 @@ pub fn load() -> GuiState {
     if !path.exists() {
         return GuiState::default();
     }
-    match std::fs::read_to_string(&path) {
+    let mut state: GuiState = match std::fs::read_to_string(&path) {
         Ok(data) => serde_json::from_str(&data).unwrap_or_default(),
-        Err(_) => GuiState::default(),
+        Err(_) => return GuiState::default(),
+    };
+    // Migrate old unified status filter values to new status values
+    if let Some(ref filter) = state.status_filter {
+        state.status_filter = match filter.as_str() {
+            "inbox" | "queued" => Some("unplayed".to_string()),
+            "playing" => Some("in-progress".to_string()),
+            "shelved" => Some("completed".to_string()),
+            "dropped" => Some("abandoned".to_string()),
+            "unplayed" | "in-progress" | "completed" | "abandoned" => state.status_filter,
+            _ => None,
+        };
     }
+    state
 }
 
 pub fn save(state: &GuiState) {

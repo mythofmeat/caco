@@ -70,7 +70,7 @@ pub fn render(
 
         // Status pill + rating
         ui.horizontal_wrapped(|ui| {
-            theme::unified_status_pill(ui, &wad.play_state, &wad.intent);
+            theme::status_pill(ui, &wad.status);
             let stars = theme::rating_stars(wad.rating);
             if !stars.is_empty() {
                 ui.colored_label(theme::TEXT_ACCENT, &stars);

@@ -24,7 +24,7 @@ pub struct LibraryPaneState {
     pub filter: FilterInputState,
     pub sort: SortSelectState,
     pub info: WadInfoState,
-    /// Tab query filter (e.g. "intent:inbox", "play:started"), or None for "All".
+    /// Tab query filter (e.g. "status:unplayed"), or None for "All".
     pub tab_query: Option<String>,
     pub status_mode: bool,
     pub show_panel: bool,
@@ -253,19 +253,17 @@ impl LibraryPaneState {
         self.status_mode = false;
 
         let status = match key.code {
-            KeyCode::Char('p') => "playing",
-            KeyCode::Char('f') => "finished",
-            KeyCode::Char('t') => "to-play",
-            KeyCode::Char('b') => "backlog",
+            KeyCode::Char('u') => "unplayed",
+            KeyCode::Char('p') => "in-progress",
+            KeyCode::Char('c') => "completed",
             KeyCode::Char('a') => "abandoned",
-            KeyCode::Char('w') => "awaiting-update",
             KeyCode::Esc => return None,
             _ => return None,
         };
 
         if let Some(id) = self.table.selected_wad_id() {
             if let Ok(update) = db::wads::WadUpdate::new()
-                .set_status(Status::parse(status).unwrap_or(Status::ToPlay))
+                .set_status(Status::parse(status).unwrap_or(Status::Unplayed))
             {
                 let _ = wads::update_wad(conn, id, &update);
                 self.table.update_row(conn, id);
