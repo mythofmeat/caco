@@ -209,6 +209,50 @@ pub fn render(
                         }
                     }
 
+                    // Completion badge (top-right of thumbnail)
+                    let times_completed = stats.map_or(0, |s| s.times_beaten);
+                    if times_completed > 0 {
+                        let badge_size = 26.0;
+                        let badge_center = egui::pos2(
+                            thumb_rect.right() - 8.0 - badge_size / 2.0,
+                            thumb_rect.top() + 8.0 + badge_size / 2.0,
+                        );
+                        // Main circle
+                        painter.circle_filled(
+                            badge_center,
+                            badge_size / 2.0,
+                            Color32::from_black_alpha(178),
+                        );
+                        painter.text(
+                            badge_center,
+                            egui::Align2::CENTER_CENTER,
+                            "✓",
+                            egui::FontId::proportional(14.0),
+                            Color32::from_rgb(0x80, 0x80, 0x80),
+                        );
+
+                        // Count sub-badge for multiple completions
+                        if times_completed > 1 {
+                            let sub_size = 14.0;
+                            let sub_center = egui::pos2(
+                                badge_center.x + badge_size / 2.0 - sub_size / 3.0,
+                                badge_center.y - badge_size / 2.0 + sub_size / 3.0,
+                            );
+                            painter.circle_filled(
+                                sub_center,
+                                sub_size / 2.0,
+                                Color32::from_rgb(0x80, 0x80, 0x80),
+                            );
+                            painter.text(
+                                sub_center,
+                                egui::Align2::CENTER_CENTER,
+                                &times_completed.to_string(),
+                                egui::FontId::proportional(9.0),
+                                Color32::from_rgb(0x1a, 0x1a, 0x1a),
+                            );
+                        }
+                    }
+
                     // Card body
                     let body_x = rect.min.x + 14.0;
                     let body_top = thumb_rect.max.y + 10.0;
