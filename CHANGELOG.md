@@ -5,7 +5,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.1.0] — 2026-04-08
+
 ### Added
+- GUI: Multi-select filter pills replacing sidebar status dropdown, with grid progress bars
 - GUI: Random sort order, collection context menu, collection icon fix
 - GUI: Required vs secret map progress display in hero card
 - CLI: Improved modify UX for tag removal with clearer prompts
@@ -13,11 +16,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Analysis: Version-tracked cached analyses with automatic stale invalidation
 
 ### Fixed
+- Auto-download WADs without `idgames_id`, complevel 77 bug, playthrough initialization
+- DB: Drop indexes before columns in migration 32 to avoid SQLite errors
 - CLI: Preserve spaces in query args like `tag:"multi word"`
 - Analysis: Raise ZIP entry size cap to 1 GiB for large megaWADs
 - Helion: Pass `-config` arg correctly and use wall-clock playtime
 
 ### Changed
+- **Status model simplification**: Consolidated tri-axis intent/play_state into a single 4-value Status enum (unplayed/in-progress/completed/abandoned) via migration 32
 - Arch packaging: Split into separate `caco`, `caco-gui`, `caco-tui` packages
 - Codebase-wide deduplication and quality fixes across all crates
 
@@ -130,7 +136,8 @@ The original Python implementation. Key milestones:
 - **2026-03-10**: Comprehensive test suite, mypy integration, garbage collection
 - **2026-03-18**: JSON import fallback, Cloudflare bypass, offline support
 
-[Unreleased]: http://localhost:3000/eshen/caco/compare/v2.0.0...main
+[Unreleased]: http://localhost:3000/eshen/caco/compare/v2.1.0...main
+[2.1.0]: http://localhost:3000/eshen/caco/compare/v2.0.0...v2.1.0
 [2.0.0]: http://localhost:3000/eshen/caco/compare/v1.2.0...v2.0.0
 [1.2.0]: http://localhost:3000/eshen/caco/compare/v1.1.0...v1.2.0
 [1.1.0]: http://localhost:3000/eshen/caco/compare/v1.0.0...v1.1.0
