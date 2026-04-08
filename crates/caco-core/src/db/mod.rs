@@ -38,7 +38,7 @@ pub use collections::{
     update_collection, CollectionRecord,
 };
 pub use playthroughs::{
-    complete_playthrough, delete_playthrough, ensure_playthrough,
+    complete_playthrough, delete_playthrough, derive_status, ensure_playthrough,
     get_active_playthrough, get_playthrough, get_playthroughs, get_times_completed,
     get_times_completed_batch, start_playthrough, PlaythroughRecord,
 };

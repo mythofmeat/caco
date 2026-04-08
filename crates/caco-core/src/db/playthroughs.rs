@@ -4,7 +4,7 @@ use chrono::Utc;
 use rusqlite::Connection;
 
 use super::connection::batch_query_i64;
-use super::models::PlayState;
+use super::models::Status;
 use crate::Result;
 
 // ---------------------------------------------------------------------------
@@ -48,7 +48,7 @@ impl PlaythroughRecord {
 
 /// Start a new playthrough. Returns the playthrough ID.
 ///
-/// Also sets the WAD's `play_state` to `started` and syncs the `status` column.
+/// Also sets the WAD's `status` to `in-progress`.
 pub fn start_playthrough(conn: &Connection, wad_id: i64) -> Result<i64> {
     let now = Utc::now().to_rfc3339();
     conn.execute(
@@ -57,17 +57,8 @@ pub fn start_playthrough(conn: &Connection, wad_id: i64) -> Result<i64> {
     )?;
     let pt_id = conn.last_insert_rowid();
 
-    // Update WAD play_state to started + sync status.
-    // Playing and queued are mutually exclusive: leave the queue when playing starts.
-    // Also un-drop if abandoned (playing un-abandons).
     conn.execute(
-        "UPDATE wads SET play_state = 'started',
-                         intent = CASE intent
-                             WHEN 'dropped' THEN 'shelved'
-                             WHEN 'queued' THEN 'shelved'
-                             ELSE intent END,
-                         status = 'playing',
-                         updated_at = ?1
+        "UPDATE wads SET status = 'in-progress', updated_at = ?1
          WHERE id = ?2",
         rusqlite::params![now, wad_id],
     )?;
@@ -77,7 +68,7 @@ pub fn start_playthrough(conn: &Connection, wad_id: i64) -> Result<i64> {
 
 /// Complete an active playthrough.
 ///
-/// Also sets the WAD's `play_state` to `completed` and syncs the `status` column.
+/// Also sets the WAD's `status` to `completed`.
 pub fn complete_playthrough(
     conn: &Connection,
     playthrough_id: i64,
@@ -104,7 +95,7 @@ pub fn complete_playthrough(
     )?;
 
     conn.execute(
-        "UPDATE wads SET play_state = 'completed', status = 'finished', updated_at = ?1
+        "UPDATE wads SET status = 'completed', updated_at = ?1
          WHERE id = ?2",
         rusqlite::params![now, wad_id],
     )?;
@@ -198,9 +189,8 @@ pub fn get_times_completed_batch(
         .collect())
 }
 
-/// Derive the play state for a WAD from its playthrough records.
-pub fn derive_play_state(conn: &Connection, wad_id: i64) -> Result<PlayState> {
-    // Check for any playthrough at all
+/// Derive the status from playthrough records.
+pub fn derive_status(conn: &Connection, wad_id: i64) -> Result<Status> {
     let total: i64 = conn.query_row(
         "SELECT COUNT(*) FROM playthroughs WHERE wad_id = ?1",
         [wad_id],
@@ -208,10 +198,9 @@ pub fn derive_play_state(conn: &Connection, wad_id: i64) -> Result<PlayState> {
     )?;
 
     if total == 0 {
-        return Ok(PlayState::Unplayed);
+        return Ok(Status::Unplayed);
     }
 
-    // Check if there's an active (incomplete) playthrough
     let active: i64 = conn.query_row(
         "SELECT COUNT(*) FROM playthroughs WHERE wad_id = ?1 AND completed_at IS NULL",
         [wad_id],
@@ -219,11 +208,10 @@ pub fn derive_play_state(conn: &Connection, wad_id: i64) -> Result<PlayState> {
     )?;
 
     if active > 0 {
-        return Ok(PlayState::Started);
+        return Ok(Status::InProgress);
     }
 
-    // All playthroughs are completed
-    Ok(PlayState::Completed)
+    Ok(Status::Completed)
 }
 
 // ---------------------------------------------------------------------------
@@ -265,10 +253,9 @@ mod tests {
         assert_eq!(pt.wad_id, wad_id);
         assert!(pt.completed_at.is_none());
 
-        // WAD should now be play_state=started
+        // WAD should now be in-progress
         let wad = get_wad(&conn, wad_id, false).unwrap().unwrap();
-        assert_eq!(wad.play_state, "started");
-        assert_eq!(wad.status, "playing");
+        assert_eq!(wad.status, "in-progress");
     }
 
     #[test]
@@ -285,10 +272,9 @@ mod tests {
         assert_eq!(pt.stats_snapshot.as_deref(), Some("{\"stats\":1}"));
         assert_eq!(pt.notes.as_deref(), Some("GG"));
 
-        // WAD should be play_state=completed
+        // WAD should be completed
         let wad = get_wad(&conn, wad_id, false).unwrap().unwrap();
-        assert_eq!(wad.play_state, "completed");
-        assert_eq!(wad.status, "finished");
+        assert_eq!(wad.status, "completed");
 
         // Should also have created a backward-compat wad_completions record
         let comp_count: i64 = conn
@@ -405,24 +391,24 @@ mod tests {
     }
 
     #[test]
-    fn test_derive_play_state() {
+    fn test_derive_status() {
         let conn = setup();
         let wad_id = add_test_wad(&conn);
 
         // No playthroughs → unplayed
-        assert_eq!(derive_play_state(&conn, wad_id).unwrap(), PlayState::Unplayed);
+        assert_eq!(derive_status(&conn, wad_id).unwrap(), Status::Unplayed);
 
-        // Active playthrough → started
+        // Active playthrough → in-progress
         let pt = start_playthrough(&conn, wad_id).unwrap();
-        assert_eq!(derive_play_state(&conn, wad_id).unwrap(), PlayState::Started);
+        assert_eq!(derive_status(&conn, wad_id).unwrap(), Status::InProgress);
 
         // Completed → completed
         complete_playthrough(&conn, pt, None, None).unwrap();
-        assert_eq!(derive_play_state(&conn, wad_id).unwrap(), PlayState::Completed);
+        assert_eq!(derive_status(&conn, wad_id).unwrap(), Status::Completed);
 
-        // New active playthrough → started again
+        // New active playthrough → in-progress again
         start_playthrough(&conn, wad_id).unwrap();
-        assert_eq!(derive_play_state(&conn, wad_id).unwrap(), PlayState::Started);
+        assert_eq!(derive_status(&conn, wad_id).unwrap(), Status::InProgress);
     }
 
     #[test]
