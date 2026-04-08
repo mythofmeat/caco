@@ -46,13 +46,19 @@ pub fn complevel_name_string(cl: Option<i32>) -> String {
     }
 }
 
-/// Parse a complevel from a string — accepts integer or alias name.
+/// Maximum valid complevel value (MBF21).
+pub const MAX_COMPLEVEL: i32 = 21;
+
+/// Parse a complevel from a string — accepts integer (0–21) or alias name.
 ///
-/// Returns the complevel int, or None if invalid.
+/// Returns the complevel int, or None if invalid or out of range.
 pub fn parse_complevel(value: &str) -> Option<i32> {
     // Try as integer first
     if let Ok(n) = value.parse::<i32>() {
-        return Some(n);
+        if (0..=MAX_COMPLEVEL).contains(&n) {
+            return Some(n);
+        }
+        return None;
     }
     // Try as alias
     COMPLEVEL_ALIASES.get(value.to_lowercase().as_str()).copied()
@@ -98,5 +104,8 @@ mod tests {
     fn test_parse_complevel_invalid() {
         assert_eq!(parse_complevel("invalid"), None);
         assert_eq!(parse_complevel(""), None);
+        assert_eq!(parse_complevel("22"), None);
+        assert_eq!(parse_complevel("77"), None);
+        assert_eq!(parse_complevel("-1"), None);
     }
 }

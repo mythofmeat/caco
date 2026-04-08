@@ -105,22 +105,9 @@ pub fn detect_iwad(wad_path: &Path) -> Option<&'static str> {
 ///
 /// Returns the complevel as an integer, or None if no COMPLVL lump found.
 pub fn detect_complvl(wad_path: &Path) -> Option<i32> {
-    let wad_data = load_wad_data(wad_path)?;
-    let directory = parse_wad_directory(&wad_data);
-    if directory.is_empty() {
-        return None;
-    }
-
-    for (name, offset, size) in &directory {
-        if name == "COMPLVL" && *size >= 1 {
-            let off = *offset as usize;
-            if off < wad_data.len() {
-                return Some(wad_data[off] as i32);
-            }
-        }
-    }
-
-    None
+    // Delegate to the full COMPLVL parser in complevel_detect which handles
+    // both id24 single-byte and text formats correctly.
+    crate::complevel_detect::detect_complvl_from_path(wad_path)
 }
 
 /// Extract patch names from the PNAMES lump.

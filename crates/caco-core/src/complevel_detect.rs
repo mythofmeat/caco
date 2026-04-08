@@ -86,6 +86,30 @@ static DOOM_VERSION_RE: LazyLock<Regex> =
 static MBF21_BITS_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)MBF21\s+BITS").unwrap());
 
+/// Detect complevel from the COMPLVL lump only (id24 single byte or text).
+///
+/// Returns complevel int if a valid COMPLVL lump is found, or None.
+pub fn detect_complvl_from_path(wad_path: &Path) -> Option<i32> {
+    let wad_data = load_wad_data(wad_path)?;
+    if wad_data.len() < 12 {
+        return None;
+    }
+    let magic = &wad_data[..4];
+    if magic != b"IWAD" && magic != b"PWAD" {
+        return None;
+    }
+    let directory = parse_wad_directory(&wad_data);
+    for (name, offset, size) in &directory {
+        if name == "COMPLVL"
+            && *size >= 1
+            && let Some(cl) = parse_complvl_lump(&wad_data, *offset, *size)
+        {
+            return Some(cl);
+        }
+    }
+    None
+}
+
 /// Detect complevel from WAD file contents.
 ///
 /// Returns complevel int if confidently detected, or None if ambiguous.
@@ -156,7 +180,11 @@ fn parse_complvl_lump(wad_data: &[u8], offset: u32, size: u32) -> Option<i32> {
 
     if sz == 1 {
         // id24 format: single byte = complevel number
-        return Some(raw[0] as i32);
+        let val = raw[0] as i32;
+        if val <= crate::complevel::MAX_COMPLEVEL {
+            return Some(val);
+        }
+        return None;
     }
 
     // Text format: try to decode as a complevel name/number
