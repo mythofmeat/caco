@@ -39,9 +39,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<ActionRequest> 
     let text_height = ui.text_style_height(&egui::TextStyle::Body);
     let row_height = text_height + 6.0;
 
-    // When the detail panel is open, show fewer columns since stats are
-    // already visible in the sidebar.  This prevents column overflow.
-    let compact = state.show_detail_panel;
+    let compact = false;
 
     // Proportional column widths based on available space.
     let base = (available.x - 50.0).max(0.0); // subtract fixed ID column

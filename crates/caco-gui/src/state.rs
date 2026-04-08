@@ -52,8 +52,6 @@ pub enum ActionRequest {
     Delete(i64),
     Sessions(i64),
     MapStats(i64),
-    BeatenAdd(i64),
-    BeatenRemove(i64),
     Stats,
     Cache,
     Resources,
@@ -131,7 +129,6 @@ pub struct AppState {
 
     // UI flags
     pub view_layout: ViewLayout,
-    pub show_detail_panel: bool,
     pub notification: Option<Notification>,
     pub needs_reload: bool,
 
@@ -182,7 +179,6 @@ impl AppState {
             stats_map: HashMap::new(),
             selected_wad_id: None,
             selected_row: 0,
-            show_detail_panel: persisted.show_detail_panel,
             notification: None,
             needs_reload: true,
             active_dialog: None,
@@ -449,7 +445,6 @@ impl AppState {
                 ViewLayout::List => "list".to_string(),
                 ViewLayout::Grid => "grid".to_string(),
             },
-            show_detail_panel: self.show_detail_panel,
             sort_field_index: self.sort_field_index,
             sort_desc: self.sort_desc,
             status_filters: self.status_filters.iter().cloned().collect(),

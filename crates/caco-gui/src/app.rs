@@ -128,44 +128,6 @@ impl CacoApp {
                     self.state.active_dialog = Some(ActiveDialog::WadStats(dialog));
                 }
             }
-            ActionRequest::BeatenAdd(wad_id) => {
-                match caco_core::db::sessions::add_wad_completion(
-                    &self.conn, wad_id, None, None, None,
-                ) {
-                    Ok(_) => {
-                        self.state.needs_reload = true;
-                        self.state.notification =
-                            Some(Notification::info("Completion recorded".to_string()));
-                    }
-                    Err(e) => {
-                        self.state.notification =
-                            Some(Notification::error(format!("Failed to add completion: {e}")));
-                    }
-                }
-            }
-            ActionRequest::BeatenRemove(wad_id) => {
-                // Remove the most recent completion
-                match caco_core::db::sessions::get_wad_completions(&self.conn, wad_id) {
-                    Ok(completions) if !completions.is_empty() => {
-                        match caco_core::db::sessions::delete_wad_completion(
-                            &self.conn,
-                            completions[0].id,
-                        ) {
-                            Ok(_) => {
-                                self.state.needs_reload = true;
-                                self.state.notification =
-                                    Some(Notification::info("Completion removed".to_string()));
-                            }
-                            Err(e) => {
-                                self.state.notification = Some(Notification::error(format!(
-                                    "Failed to remove completion: {e}"
-                                )));
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
             ActionRequest::Play(wad_id) => {
                 if self.state.is_playing() {
                     return;

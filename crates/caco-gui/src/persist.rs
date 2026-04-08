@@ -5,8 +5,6 @@ use std::path::PathBuf;
 pub struct GuiState {
     #[serde(default)]
     pub view_layout: String,
-    #[serde(default = "default_true")]
-    pub show_detail_panel: bool,
     #[serde(default)]
     pub sort_field_index: usize,
     #[serde(default = "default_true")]
@@ -27,7 +25,6 @@ impl Default for GuiState {
     fn default() -> Self {
         Self {
             view_layout: "grid".to_string(),
-            show_detail_panel: false,
             sort_field_index: 0,
             sort_desc: true,
             status_filters: Vec::new(),
