@@ -2,7 +2,7 @@ name: Build and publish Arch package
 
 on:
   push:
-    branches: [main]
+    tags: ['v*']
 
 jobs:
   package:
