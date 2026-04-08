@@ -14,7 +14,8 @@ jobs:
 
       - name: Verify tag is on main
         run: |
-          git branch --contains HEAD | grep -qw main || \
+          git fetch origin main
+          git merge-base --is-ancestor HEAD origin/main || \
             { echo "::error::Tag is not on main — skipping build"; exit 1; }
 
       - name: Build package
