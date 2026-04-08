@@ -337,8 +337,15 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
         crate::Error::FileNotFound(format!("Failed to launch sourceport '{}': {}", port, e))
     })?;
 
-    // Start session tracking
+    // Ensure a playthrough exists (sets status → in-progress on first play)
+    let playthrough_id = db::ensure_playthrough(conn, wad_id)?;
+
+    // Start session tracking and link to the active playthrough
     let session_id = db::start_session(conn, wad_id, Some(&port))?;
+    let _ = conn.execute(
+        "UPDATE sessions SET playthrough_id = ?1 WHERE id = ?2",
+        rusqlite::params![playthrough_id, session_id],
+    );
 
     let start = Instant::now();
     let status = child.wait()?;
@@ -605,7 +612,7 @@ fn check_auto_completion(
 
     // Only check WADs that are currently being played
     let wad = match db::get_wad(conn, wad_id, false) {
-        Ok(Some(w)) if w.play_state == "started" => w,
+        Ok(Some(w)) if w.status == "in-progress" => w,
         _ => return AutoCompleteResult::Unknown,
     };
 

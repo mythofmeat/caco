@@ -200,17 +200,46 @@ fn ensure_wad_path(conn: &Connection, wad: &WadRecord) -> Result<(), String> {
             None
         }
     });
-    let idgames_id = match idgames_id_str.and_then(|id| id.parse::<i64>().ok()) {
-        Some(id) => id,
-        None => {
-            // Not an idgames WAD — can't auto-download
+    let idgames_id = idgames_id_str.and_then(|id| id.parse::<i64>().ok());
+
+    // If no numeric ID, try direct mirror download via source_url
+    if idgames_id.is_none() {
+        let source_url = wad.source_url.as_deref().unwrap_or("");
+        let filename = wad.filename.as_deref().unwrap_or("");
+
+        if filename.is_empty() || !source_url.contains("/idgames/") {
             return Err(format!(
                 "No WAD file available for '{}'. Link a file with: caco modify id:{} --link /path/to/wad",
                 wad.title, wad.id
             ));
         }
-    };
 
+        let client = IdgamesClient::new();
+        let cache_dir = config::get_cache_dir();
+        std::fs::create_dir_all(&cache_dir)
+            .map_err(|e| format!("Failed to create cache directory: {e}"))?;
+        let mirror = config::load_config().download_mirror as usize;
+
+        let pb = make_download_progress_bar(filename);
+        let cb = progress_callback(&pb);
+
+        let dest = client
+            .download_direct(source_url, filename, &cache_dir, mirror, Some(&cb))
+            .map_err(|e| format!("Direct download failed: {e}"))?;
+
+        pb.finish_and_clear();
+        eprintln!("Downloaded (via mirror): {filename}");
+
+        let update = db::WadUpdate::new()
+            .set_text("cached_path", Some(dest.to_string_lossy().to_string()))
+            .map_err(|e| format!("Failed to update cached_path: {e}"))?;
+        db::update_wad(conn, wad.id, &update)
+            .map_err(|e| format!("Failed to update WAD record: {e}"))?;
+
+        return Ok(());
+    }
+
+    let idgames_id = idgames_id.unwrap();
     let client = IdgamesClient::new();
     let cache_dir = config::get_cache_dir();
     std::fs::create_dir_all(&cache_dir)

@@ -16,7 +16,7 @@ Caco is a personal Doom WAD library manager inspired by `beets`. It tracks WADs 
 - Companion file management with MD5 deduplication
 - IWAD/id24 registry with auto-detection from WAD file contents
 - Sourceport config profile management
-- Garbage collection for finished/abandoned WAD data
+- Garbage collection for completed/abandoned WAD data
 - Three interfaces: CLI, TUI (ratatui), and GUI (egui)
 
 ## Dual Implementation
@@ -87,7 +87,7 @@ crates/
 │       └── db/
 │           ├── mod.rs          # Re-exports, open_connection(), init_db()
 │           ├── schema.rs       # Schema SQL, migrations (23+)
-│           ├── models.rs       # Status enum, WadRecord, NewWad, WadUpdate builders
+│           ├── models.rs       # Status enum (Unplayed/InProgress/Completed/Abandoned), WadRecord, NewWad, WadUpdate builders
 │           ├── connection.rs   # Connection helpers, tag helpers, batch chunking
 │           ├── query.rs        # Query parser, search_wads(), find_duplicate()
 │           ├── wads.rs         # WAD CRUD (add/get/update/delete), tag add/remove
@@ -210,7 +210,7 @@ egui = "0.31"           # Immediate-mode GUI
 - **Batch stats**: `get_total_playtime_batch()`, `get_last_played_batch()`, etc. — same N+1 avoidance as Python
 - **Query parser**: Same beets-style syntax as Python — field queries, OR, negation, status shortcuts, globs
 - **Companion system**: `companion_files_registry` + `wad_companions` junction table; `companion_service.rs` handles MD5 dedup + managed storage at `~/.local/share/caco/companions/{md5[:12]}_{filename}`
-- **GC**: `gc.rs` handles finished/abandoned cleanup with interactive y/n/i prompts; `gc_ignore` column for exclusion; orphan detection for data dirs, backups, and companions
+- **GC**: `gc.rs` handles completed/abandoned cleanup with interactive y/n/i prompts; `gc_ignore` column for exclusion; orphan detection for data dirs, backups, and companions
 - **Import service**: `import_service.rs` centralizes duplicate checking for all sources; auto-enriches with Doom Wiki metadata; JSON import fallback for Cloudflare-blocked APIs
 - **Player**: `player.rs` wraps sourceport execution; injects companion files, data dir args, complevel args, config profile; returns `PlayResult` with crash detection
 - **Detection**: `iwad_detect.rs` (PNAMES + map lumps), `complevel_detect.rs` (COMPLVL > UMAPINFO > DEHACKED > map lumps); both handle ZIP-wrapped WADs
@@ -276,13 +276,13 @@ src/caco/
 
 **Query syntax** (beets-style, used by ls/play/modify/trash/etc.):
 - Fields: `id:`, `title:`, `author:`, `year:`, `filename:`, `tag:`, `status:`, `source:`, `iwad:`, `complevel:`, `config:`
-- OR: `"status:playing , status:to-play"` (comma with spaces)
-- Negation: `^status:finished`
-- Status shortcuts: `t` (to-play), `b` (backlog), `p` (playing), `f` (finished), `a` (abandoned), `w` (awaiting-update)
+- OR: `"status:in-progress , status:unplayed"` (comma with spaces)
+- Negation: `^status:completed`
+- Status shortcuts: `u` (unplayed), `p`/`ip` (in-progress), `c`/`f`/`done` (completed), `a`/`d` (abandoned)
 - Glob patterns: `tag:caco*`
 - Free text searches title, author, description
 
-**Status enum**: `to-play`, `backlog`, `playing`, `finished`, `abandoned`, `awaiting-update`
+**Status enum**: `unplayed`, `in-progress`, `completed`, `abandoned`
 
 **Companion files**: `companion_files_registry` (id, md5 UNIQUE, filename, path, size) + `wad_companions` junction (wad_id, companion_id, enabled, load_order); DEH/BEX auto-detected; `-deh` for non-zdoom, `-file` for zdoom; orphan policy via `companion_orphan_cleanup` config
 

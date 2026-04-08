@@ -1,8 +1,8 @@
 use caco_core::companion_service;
 use caco_core::complevel::parse_complevel;
 use caco_core::db::companions;
-use caco_core::db::models::{Intent, PlayState};
-use crate::theme::UNIFIED_STATUSES;
+use caco_core::db::models::Status;
+use crate::theme::STATUSES;
 use caco_core::db::wads::{self, WadUpdate};
 use rusqlite::Connection;
 
@@ -66,7 +66,7 @@ pub struct EditDialogState {
     title_field: String,
     author: String,
     year: String,
-    unified_status: String,
+    status: String,
     rating: String,
     tags: String,
     notes: String,
@@ -133,7 +133,7 @@ impl EditDialogState {
             title_field: wad.title.clone(),
             author: wad.author.as_deref().unwrap_or("").to_string(),
             year: wad.year.map(|y| y.to_string()).unwrap_or_default(),
-            unified_status: theme::unified_status(&wad.play_state, &wad.intent).to_string(),
+            status: wad.status.clone(),
             rating: wad.rating.map(|r| r.to_string()).unwrap_or_default(),
             tags: wad.tags.join(", "),
             notes: wad.notes.as_deref().unwrap_or("").to_string(),
@@ -436,10 +436,10 @@ impl EditDialogState {
         form_label(ui, "Status");
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
-            for &status in UNIFIED_STATUSES {
-                let color = theme::unified_status_color(status);
-                let bg = theme::unified_status_bg(status);
-                let is_selected = self.unified_status == status;
+            for &status in STATUSES {
+                let color = theme::status_color(status);
+                let bg = theme::status_bg(status);
+                let is_selected = self.status == status;
 
                 let stroke = if is_selected {
                     egui::Stroke::new(1.5, color)
@@ -455,7 +455,7 @@ impl EditDialogState {
                     .show(ui, |ui| {
                         ui.colored_label(
                             color,
-                            egui::RichText::new(theme::unified_status_display(status))
+                            egui::RichText::new(theme::status_display(status))
                                 .size(12.0)
                                 .strong(),
                         );
@@ -463,7 +463,7 @@ impl EditDialogState {
                     .response;
 
                 if response.interact(egui::Sense::click()).clicked() {
-                    self.unified_status = status.to_string();
+                    self.status = status.to_string();
                 }
             }
         });
@@ -859,15 +859,7 @@ impl EditDialogState {
             }
         };
 
-        // Map unified status → play_state + intent
-        let (ps, intent) = match self.unified_status.as_str() {
-            "inbox" => (PlayState::Unplayed, Intent::Inbox),
-            "queued" => (PlayState::Unplayed, Intent::Queued),
-            "playing" => (PlayState::Started, Intent::Shelved),
-            "shelved" => (PlayState::Completed, Intent::Shelved),
-            "dropped" => (PlayState::Unplayed, Intent::Dropped),
-            _ => (PlayState::Unplayed, Intent::Inbox),
-        };
+        let status = Status::parse(&self.status).unwrap_or(Status::Unplayed);
 
         let mut update = WadUpdate::new();
         update = update
@@ -878,8 +870,7 @@ impl EditDialogState {
             .unwrap();
         update = update.set_int("year", year).unwrap();
 
-        update = update.set_play_state(ps, intent).unwrap();
-        update = update.set_text("intent", Some(intent.as_str().to_string())).unwrap();
+        update = update.set_status(status).unwrap();
 
         let rating: Option<i64> = if self.rating.is_empty() {
             None

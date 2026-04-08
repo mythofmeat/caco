@@ -82,18 +82,6 @@ pub fn render_wad_info(
         theme::status_style(&wad.status).add_modifier(Modifier::BOLD),
     )));
 
-    // Intent + Play State
-    lines.push(Line::from(vec![
-        Span::styled(
-            theme::intent_display(&wad.intent),
-            theme::intent_style(&wad.intent),
-        ),
-        Span::styled(" · ", theme::dim_style()),
-        Span::styled(
-            theme::play_state_display(&wad.play_state),
-            theme::play_state_style(&wad.play_state),
-        ),
-    ]));
     lines.push(Line::from(""));
 
     // Rating

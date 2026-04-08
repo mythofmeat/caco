@@ -1,16 +1,14 @@
 use ratatui::style::{Color, Modifier, Style};
 
-use caco_core::db::models::{Intent, PlayState, Status};
+use caco_core::db::models::Status;
 
 /// Map a status string to its ratatui Color (from STATUS_METADATA hex values).
 pub fn status_color(status: &str) -> Color {
     match status {
-        "to-play" => Color::Rgb(0x33, 0x66, 0xcc),
-        "backlog" => Color::Rgb(0xcc, 0xcc, 0x33),
-        "playing" => Color::Rgb(0x33, 0xcc, 0x33),
-        "finished" => Color::Rgb(0x80, 0x80, 0x80),
+        "unplayed" => Color::Rgb(0x33, 0x66, 0xcc),
+        "in-progress" => Color::Rgb(0x33, 0xcc, 0x33),
+        "completed" => Color::Rgb(0x80, 0x80, 0x80),
         "abandoned" => Color::Rgb(0xcc, 0x33, 0x33),
-        "awaiting-update" => Color::Rgb(0xcc, 0x33, 0xcc),
         _ => Color::Reset,
     }
 }
@@ -78,47 +76,6 @@ pub fn title_style() -> Style {
 /// Dim text style.
 pub fn dim_style() -> Style {
     Style::default().fg(Color::DarkGray)
-}
-
-/// Map a play_state string to its ratatui Color.
-pub fn play_state_color(state: &str) -> Color {
-    match state {
-        "unplayed" => Color::Rgb(0x33, 0x66, 0xcc),  // blue
-        "started" => Color::Rgb(0x33, 0xcc, 0x33),    // green
-        "completed" => Color::Rgb(0x80, 0x80, 0x80),  // gray
-        _ => Color::White,
-    }
-}
-
-/// Return a Style with the play_state foreground color.
-pub fn play_state_style(state: &str) -> Style {
-    Style::default().fg(play_state_color(state))
-}
-
-/// Human-readable display name for a play_state string.
-pub fn play_state_display(state: &str) -> &'static str {
-    PlayState::parse(state).map(|p| p.display_name()).unwrap_or("Unknown")
-}
-
-/// Map an intent string to its ratatui Color.
-pub fn intent_color(intent: &str) -> Color {
-    match intent {
-        "inbox" => Color::Rgb(0xcc, 0xcc, 0x33),    // yellow
-        "queued" => Color::Rgb(0x33, 0x66, 0xcc),   // blue
-        "shelved" => Color::Rgb(0x80, 0x80, 0x80),  // gray
-        "dropped" => Color::Rgb(0xcc, 0x33, 0x33),  // red
-        _ => Color::White,
-    }
-}
-
-/// Return a Style with the intent foreground color.
-pub fn intent_style(intent: &str) -> Style {
-    Style::default().fg(intent_color(intent))
-}
-
-/// Human-readable display name for an intent string.
-pub fn intent_display(intent: &str) -> &'static str {
-    Intent::parse(intent).map(|i| i.display_name()).unwrap_or("Unknown")
 }
 
 /// Rating stars string for a given rating (0-5).

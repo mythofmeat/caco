@@ -84,12 +84,10 @@ impl Screen for StatsScreen {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled("── By Status ──", section_style)));
         let status_order = [
-            "playing",
-            "to-play",
-            "backlog",
-            "finished",
+            "unplayed",
+            "in-progress",
+            "completed",
             "abandoned",
-            "awaiting-update",
         ];
         for status in &status_order {
             let count = snap.wads_by_status.get(*status).copied().unwrap_or(0);
@@ -111,8 +109,8 @@ impl Screen for StatsScreen {
             section_style,
         )));
         lines.push(Line::from(vec![
-            Span::styled("Finished: ", theme::dim_style()),
-            Span::raw(snap.finished_wads.to_string()),
+            Span::styled("Completed: ", theme::dim_style()),
+            Span::raw(snap.completed_wads.to_string()),
         ]));
         lines.push(Line::from(vec![
             Span::styled("Total Completions: ", theme::dim_style()),

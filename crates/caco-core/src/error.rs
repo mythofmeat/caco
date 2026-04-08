@@ -30,12 +30,6 @@ pub enum Error {
     #[error("invalid status: {0}")]
     InvalidStatus(String),
 
-    #[error("invalid play state: {0}")]
-    InvalidPlayState(String),
-
-    #[error("invalid intent: {0}")]
-    InvalidIntent(String),
-
     #[error("invalid availability: {0}")]
     InvalidAvailability(String),
 

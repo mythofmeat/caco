@@ -6,7 +6,7 @@ use clap::Args;
 use rusqlite::Connection;
 
 use caco_core::complevel::parse_complevel;
-use caco_core::db::{self, Intent, PlayState, Status, WadRecord, WadUpdate};
+use caco_core::db::{self, Status, WadRecord, WadUpdate};
 use caco_core::wad_stats;
 use crate::parsing::{self, ModifyAction};
 use crate::resolve::{self, ResolveMode};
@@ -25,7 +25,7 @@ ACTIONS:
   beaten=N             Set completion count
 
 EXAMPLES:
-  caco modify id:5 status=playing
+  caco modify id:5 status=in-progress
   caco modify id:5 tag=slaughter tag=hard
   caco modify id:5 !tag:slaughter
   caco modify id:5 !tag
@@ -175,8 +175,6 @@ fn apply_modifications(
                     "rating" => "rating",
                     "notes" => "notes",
                     "version" => "version",
-                    "play" | "play_state" => "play_state",
-                    "intent" => "intent",
                     other => return Err(format!("Unknown field: {other}")),
                 };
                 if col == "complevel" {
@@ -336,7 +334,7 @@ fn apply_modifications(
     Ok(any_change)
 }
 
-fn apply_field_update(update: WadUpdate, field: &str, value: &str, wad: &WadRecord) -> Result<WadUpdate, String> {
+fn apply_field_update(update: WadUpdate, field: &str, value: &str, _wad: &WadRecord) -> Result<WadUpdate, String> {
     // Map CLI field names to DB column names (using 'static str to avoid lifetime issues)
     let col: &'static str = match field {
         "iwad" => "custom_iwad",
@@ -353,8 +351,6 @@ fn apply_field_update(update: WadUpdate, field: &str, value: &str, wad: &WadReco
         "notes" => "notes",
         "complevel" => "complevel",
         "version" => "version",
-        "play" | "play_state" => "play_state",
-        "intent" => "intent",
         other => return Err(format!("Unknown field: {other}")),
     };
 
@@ -363,20 +359,6 @@ fn apply_field_update(update: WadUpdate, field: &str, value: &str, wad: &WadReco
             let status = Status::parse(value)
                 .ok_or_else(|| format!("Invalid status: {value}"))?;
             update.set_status(status).map_err(|e| e.to_string())
-        }
-        "play" | "play_state" => {
-            let ps = PlayState::parse(value)
-                .ok_or_else(|| format!("Invalid play state: {value}"))?;
-            let current_intent = Intent::parse(&wad.intent)
-                .unwrap_or(Intent::Inbox);
-            update.set_play_state(ps, current_intent).map_err(|e| e.to_string())
-        }
-        "intent" => {
-            let intent = Intent::parse(value)
-                .ok_or_else(|| format!("Invalid intent: {value}"))?;
-            let current_ps = PlayState::parse(&wad.play_state)
-                .unwrap_or(PlayState::Unplayed);
-            update.set_intent(intent, current_ps).map_err(|e| e.to_string())
         }
         "rating" => {
             let rating: i32 = value.parse().map_err(|_| format!("Invalid rating: {value}"))?;

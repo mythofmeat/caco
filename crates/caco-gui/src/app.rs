@@ -203,22 +203,24 @@ impl CacoApp {
                             .map(|p| !std::path::Path::new(p).exists())
                             .unwrap_or(true);
                         if needs_download {
+                            sender.send(AppMessage::Notify(Notification::info(format!(
+                                "Downloading {}...",
+                                wad.title
+                            ))));
+                            let client = caco_sources::idgames::IdgamesClient::new();
+                            let cache_dir = caco_core::config::get_cache_dir();
+                            std::fs::create_dir_all(&cache_dir)
+                                .map_err(|e| format!("Failed to create cache dir: {e}"))?;
+                            let mirror =
+                                caco_core::config::load_config().download_mirror as usize;
+
                             let idgames_id = wad
                                 .idgames_id
                                 .as_deref()
                                 .and_then(|id| id.parse::<i64>().ok());
-                            if let Some(ig_id) = idgames_id {
-                                sender.send(AppMessage::Notify(Notification::info(format!(
-                                    "Downloading {}...",
-                                    wad.title
-                                ))));
-                                let client = caco_sources::idgames::IdgamesClient::new();
-                                let cache_dir = caco_core::config::get_cache_dir();
-                                std::fs::create_dir_all(&cache_dir)
-                                    .map_err(|e| format!("Failed to create cache dir: {e}"))?;
-                                let mirror =
-                                    caco_core::config::load_config().download_mirror as usize;
-                                let dest = match client.get(Some(ig_id), None) {
+
+                            let dest = if let Some(ig_id) = idgames_id {
+                                match client.get(Some(ig_id), None) {
                                     Ok(entry) => client
                                         .download(&entry, Some(&cache_dir), mirror, None)
                                         .map_err(|e| format!("Download failed: {e}"))?,
@@ -230,7 +232,7 @@ impl CacoApp {
                                             || !source_url.contains("/idgames/")
                                         {
                                             return Err(format!(
-                                                "file not found: API blocked and no stored path for '{}'",
+                                                "API blocked and no stored path for '{}'",
                                                 wad.title
                                             ));
                                         }
@@ -251,21 +253,41 @@ impl CacoApp {
                                             "Failed to fetch idgames entry: {e}"
                                         ));
                                     }
-                                };
-                                let update = caco_core::db::WadUpdate::new()
-                                    .set_text(
-                                        "cached_path",
-                                        Some(dest.to_string_lossy().to_string()),
-                                    )
-                                    .map_err(|e| format!("Failed to build update: {e}"))?;
-                                caco_core::db::update_wad(&conn, wad_id, &update)
-                                    .map_err(|e| format!("Failed to update WAD record: {e}"))?;
+                                }
                             } else {
-                                return Err(format!(
-                                    "file not found: No WAD file available for '{}'. Link a file with: caco modify id:{} --link /path/to/wad",
-                                    wad.title, wad_id
-                                ));
-                            }
+                                // No numeric ID — try direct mirror via source_url
+                                let source_url =
+                                    wad.source_url.as_deref().unwrap_or("");
+                                let filename = wad.filename.as_deref().unwrap_or("");
+                                if filename.is_empty()
+                                    || !source_url.contains("/idgames/")
+                                {
+                                    return Err(format!(
+                                        "No WAD file available for '{}'. Link a file with: caco modify id:{} --link /path/to/wad",
+                                        wad.title, wad_id
+                                    ));
+                                }
+                                client
+                                    .download_direct(
+                                        source_url,
+                                        filename,
+                                        &cache_dir,
+                                        mirror,
+                                        None,
+                                    )
+                                    .map_err(|e| {
+                                        format!("Direct download failed: {e}")
+                                    })?
+                            };
+
+                            let update = caco_core::db::WadUpdate::new()
+                                .set_text(
+                                    "cached_path",
+                                    Some(dest.to_string_lossy().to_string()),
+                                )
+                                .map_err(|e| format!("Failed to build update: {e}"))?;
+                            caco_core::db::update_wad(&conn, wad_id, &update)
+                                .map_err(|e| format!("Failed to update WAD record: {e}"))?;
                         }
 
                         caco_core::player::play(
@@ -832,7 +854,7 @@ fn render_sidebar(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Act
             .status_filter
             .as_deref()
             .map(|s| {
-                let display = theme::unified_status_display(s);
+                let display = theme::status_display(s);
                 let count = state.status_count(Some(s));
                 format!("{display} ({count})")
             })
@@ -841,7 +863,7 @@ fn render_sidebar(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Act
         egui::ComboBox::from_id_salt("status_filter")
             .selected_text(egui::RichText::new(&current_label).size(13.0).color(
                 state.status_filter.as_deref()
-                    .map(theme::unified_status_color)
+                    .map(theme::status_color)
                     .unwrap_or(theme::TEXT_PRIMARY),
             ))
             .width(ui.available_width() - 20.0)
@@ -853,10 +875,10 @@ fn render_sidebar(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Act
                     state.needs_reload = true;
                 }
 
-                for &status in theme::UNIFIED_STATUSES {
+                for &status in theme::STATUSES {
                     let count = state.status_count(Some(status));
-                    let label = format!("{} ({count})", theme::unified_status_display(status));
-                    let color = theme::unified_status_color(status);
+                    let label = format!("{} ({count})", theme::status_display(status));
+                    let color = theme::status_color(status);
                     let is_selected = state.status_filter.as_deref() == Some(status);
                     if ui
                         .selectable_label(is_selected, egui::RichText::new(&label).color(color))
@@ -1016,8 +1038,8 @@ fn render_now_playing_hero(
                 .and_then(|w| w.author.clone());
             (wad_title.clone(), author, *wad_id, true)
         } else {
-            // Show the first WAD with play_state=started
-            let playing_wad = state.wads.iter().find(|w| w.play_state == "started");
+            // Show the first WAD with in-progress status
+            let playing_wad = state.wads.iter().find(|w| w.status == "in-progress");
             match playing_wad {
                 Some(w) => (w.title.clone(), w.author.clone(), w.id, false),
                 None => return None, // No hero to show

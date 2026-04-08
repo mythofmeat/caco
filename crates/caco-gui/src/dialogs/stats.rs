@@ -66,29 +66,19 @@ impl StatsDialogState {
 
                     ui.add_space(8.0);
 
-                    // By Status section (remap legacy status → unified)
+                    // By Status section
                     section_header(ui, "By Status");
-                    let mut unified_counts: std::collections::HashMap<&str, i64> =
-                        std::collections::HashMap::new();
-                    for (status, count) in &snap.wads_by_status {
-                        let unified = match status.as_str() {
-                            "to-play" => "queued",
-                            "backlog" => "inbox",
-                            "playing" => "playing",
-                            "finished" => "shelved",
-                            "abandoned" => "dropped",
-                            "awaiting-update" => "inbox",
-                            _ => "inbox",
-                        };
-                        *unified_counts.entry(unified).or_insert(0) += count;
-                    }
-                    for &status in theme::UNIFIED_STATUSES {
-                        let count = unified_counts.get(status).copied().unwrap_or(0);
+                    for &status in theme::STATUSES {
+                        let count = snap.wads_by_status
+                            .iter()
+                            .find(|(s, _)| s.as_str() == status)
+                            .map(|(_, c)| *c)
+                            .unwrap_or(0);
                         if count > 0 {
                             ui.horizontal(|ui| {
                                 ui.colored_label(
-                                    theme::unified_status_color(status),
-                                    theme::unified_status_display(status),
+                                    theme::status_color(status),
+                                    theme::status_display(status),
                                 );
                                 ui.colored_label(theme::TEXT_SECONDARY, format!("{count}"));
                             });
@@ -99,7 +89,7 @@ impl StatsDialogState {
 
                     // Completion section
                     section_header(ui, "Completion");
-                    stat_row(ui, "Finished WADs", &snap.finished_wads.to_string());
+                    stat_row(ui, "Completed WADs", &snap.completed_wads.to_string());
                     stat_row(ui, "Total Completions", &snap.total_completions.to_string());
                     if snap.total_wads > 0 {
                         stat_row(

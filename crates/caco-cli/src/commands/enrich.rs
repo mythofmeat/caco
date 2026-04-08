@@ -243,7 +243,7 @@ mod tests {
     use super::*;
     use caco_core::db::{self, init_db, open_memory};
     use caco_core::db::wads::{add_wad, NewWad};
-    use caco_core::db::models::{SourceType, Status};
+    use caco_core::db::models::SourceType;
 
     fn setup() -> Connection {
         let conn = open_memory().unwrap();

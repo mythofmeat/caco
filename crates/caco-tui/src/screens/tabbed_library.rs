@@ -17,13 +17,12 @@ use crate::widgets::library_pane::{self, LibraryPaneState};
 /// Tab definitions: (name, display, query_filter)
 /// The third element is a complete query string (or None for All/Import).
 const TABS: &[(&str, &str, Option<&str>)] = &[
-    ("all",     "All",     None),
-    ("inbox",   "Inbox",   Some("intent:inbox")),
-    ("queued",  "Queued",  Some("intent:queued")),
-    ("playing", "Playing", Some("play:started")),
-    ("shelved", "Shelved", Some("intent:shelved")),
-    ("dropped", "Dropped", Some("intent:dropped")),
-    ("import",  "Import",  None),
+    ("all",         "All",         None),
+    ("unplayed",    "Unplayed",    Some("status:unplayed")),
+    ("in-progress", "In Progress", Some("status:in-progress")),
+    ("completed",   "Completed",   Some("status:completed")),
+    ("abandoned",   "Abandoned",   Some("status:abandoned")),
+    ("import",      "Import",      None),
 ];
 
 /// Main screen with tabbed library views.
@@ -46,14 +45,14 @@ impl TabbedLibraryScreen {
             .position(|(name, _, _)| *name == cfg.tui.default_tab)
             .unwrap_or(0);
 
-        // Create library panes for tabs 0-5 (all non-import tabs)
+        // Create library panes for tabs 0-4 (all non-import tabs)
         let mut library_panes = Vec::new();
-        for (_, _, query_filter) in TABS.iter().take(6) {
+        for (_, _, query_filter) in TABS.iter().take(5) {
             let tab_query = query_filter.map(|q| q.to_string());
             library_panes.push(LibraryPaneState::new(tab_query, sort_field, sort_desc));
         }
 
-        // Create import pane (tab 6) with a dummy sender for now
+        // Create import pane (tab 5) with a dummy sender for now
         // The sender will be set by the App after construction
         let (tx, _rx) = mpsc::channel();
         let import_pane = ImportPaneState::new(tx);
@@ -84,7 +83,7 @@ impl TabbedLibraryScreen {
     }
 
     fn is_import_tab(&self) -> bool {
-        self.active_tab == 6
+        self.active_tab == 5
     }
 }
 
@@ -143,7 +142,7 @@ impl Screen for TabbedLibraryScreen {
             (KeyCode::Tab, KeyModifiers::NONE) => {
                 let old_tab = self.active_tab;
                 self.active_tab = (self.active_tab + 1) % TABS.len();
-                if self.active_tab < 6 && self.active_tab != old_tab {
+                if self.active_tab < 5 && self.active_tab != old_tab {
                     self.library_panes[self.active_tab].reload(conn);
                 }
                 return None;
@@ -155,7 +154,7 @@ impl Screen for TabbedLibraryScreen {
                 } else {
                     self.active_tab -= 1;
                 }
-                if self.active_tab < 6 && self.active_tab != old_tab {
+                if self.active_tab < 5 && self.active_tab != old_tab {
                     self.library_panes[self.active_tab].reload(conn);
                 }
                 return None;

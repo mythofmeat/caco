@@ -5,38 +5,9 @@ use rusqlite::Connection;
 
 use super::connection::attach_tags;
 use super::models::{
-    Availability, Intent, PlayState, WadRecord, ALLOWED_UPDATE_FIELDS, SourceType, Status,
+    Availability, WadRecord, ALLOWED_UPDATE_FIELDS, SourceType, Status,
 };
 use crate::Result;
-
-// ---------------------------------------------------------------------------
-// Axis sync helpers (dual-write during transition)
-// ---------------------------------------------------------------------------
-
-/// Map old status to new axes.
-pub fn sync_status_to_axes(status: Status) -> (PlayState, Intent) {
-    match status {
-        Status::ToPlay => (PlayState::Unplayed, Intent::Queued),
-        Status::Backlog => (PlayState::Unplayed, Intent::Shelved),
-        Status::Playing => (PlayState::Started, Intent::Shelved),
-        Status::Finished => (PlayState::Completed, Intent::Shelved),
-        Status::Abandoned => (PlayState::Unplayed, Intent::Dropped),
-        Status::AwaitingUpdate => (PlayState::Unplayed, Intent::Shelved),
-    }
-}
-
-/// Map new axes to best-fit old status.
-pub fn sync_axes_to_status(play_state: PlayState, intent: Intent) -> Status {
-    match (play_state, intent) {
-        (PlayState::Completed, _) => Status::Finished,
-        (PlayState::Started, Intent::Dropped) => Status::Abandoned,
-        (PlayState::Started, _) => Status::Playing,
-        (PlayState::Unplayed, Intent::Dropped) => Status::Abandoned,
-        (PlayState::Unplayed, Intent::Queued) => Status::ToPlay,
-        (PlayState::Unplayed, Intent::Inbox) => Status::Backlog,
-        (PlayState::Unplayed, Intent::Shelved) => Status::Backlog,
-    }
-}
 
 /// Compute availability from WAD fields.
 pub fn compute_availability(cached_path: Option<&str>, source_url: Option<&str>) -> Availability {
@@ -65,8 +36,6 @@ pub struct NewWad {
     pub filename: Option<String>,
     pub cached_path: Option<String>,
     pub status: Status,
-    pub play_state: PlayState,
-    pub intent: Intent,
     pub version: Option<String>,
     pub tags: Vec<String>,
 }
@@ -83,9 +52,7 @@ impl NewWad {
             source_url: None,
             filename: None,
             cached_path: None,
-            status: Status::Backlog,
-            play_state: PlayState::Unplayed,
-            intent: Intent::Inbox,
+            status: Status::Unplayed,
             version: None,
             tags: Vec::new(),
         }
@@ -127,33 +94,7 @@ impl NewWad {
     }
 
     pub fn status(mut self, v: Status) -> Self {
-        let (ps, intent) = sync_status_to_axes(v);
         self.status = v;
-        self.play_state = ps;
-        self.intent = intent;
-        self
-    }
-
-    pub fn play_state(mut self, v: PlayState) -> Self {
-        // Started + Dropped/Queued is invalid; shelve instead.
-        if v == PlayState::Started && matches!(self.intent, Intent::Dropped | Intent::Queued) {
-            self.intent = Intent::Shelved;
-        }
-        self.play_state = v;
-        self.status = sync_axes_to_status(v, self.intent);
-        self
-    }
-
-    pub fn intent(mut self, v: Intent) -> Self {
-        // Dropped + Started is invalid; reset to Unplayed.
-        // Queued + Started is invalid (mutually exclusive); reset to Unplayed.
-        if matches!(v, Intent::Dropped | Intent::Queued)
-            && self.play_state == PlayState::Started
-        {
-            self.play_state = PlayState::Unplayed;
-        }
-        self.intent = v;
-        self.status = sync_axes_to_status(self.play_state, v);
         self
     }
 
@@ -213,52 +154,9 @@ impl WadUpdate {
         Ok(self)
     }
 
-    /// Set the status field (convenience). Also syncs play_state and intent.
+    /// Set the status field (convenience).
     pub fn set_status(self, status: Status) -> crate::Result<Self> {
-        let (ps, intent) = sync_status_to_axes(status);
-        self.set_text("status", Some(status.as_str().to_string()))?
-            .set_text("play_state", Some(ps.as_str().to_string()))?
-            .set_text("intent", Some(intent.as_str().to_string()))
-    }
-
-    /// Set the play state. Also syncs the old status column.
-    /// If setting to Started while intent is Dropped or Queued, shelves it
-    /// (playing is mutually exclusive with queued; playing un-abandons).
-    pub fn set_play_state(self, ps: PlayState, current_intent: Intent) -> crate::Result<Self> {
-        let effective_intent = if ps == PlayState::Started
-            && matches!(current_intent, Intent::Dropped | Intent::Queued)
-        {
-            Intent::Shelved
-        } else {
-            current_intent
-        };
-        let status = sync_axes_to_status(ps, effective_intent);
-        let mut result = self.set_text("play_state", Some(ps.as_str().to_string()))?
-            .set_text("status", Some(status.as_str().to_string()))?;
-        if effective_intent != current_intent {
-            result = result.set_text("intent", Some(effective_intent.as_str().to_string()))?;
-        }
-        Ok(result)
-    }
-
-    /// Set the intent. Also syncs the old status column.
-    /// If setting to Dropped or Queued while play_state is Started, resets play_state to Unplayed
-    /// (queued and playing are mutually exclusive; dropping un-starts).
-    pub fn set_intent(self, intent: Intent, current_play_state: PlayState) -> crate::Result<Self> {
-        let effective_ps = if matches!(intent, Intent::Dropped | Intent::Queued)
-            && current_play_state == PlayState::Started
-        {
-            PlayState::Unplayed
-        } else {
-            current_play_state
-        };
-        let status = sync_axes_to_status(effective_ps, intent);
-        let mut result = self.set_text("intent", Some(intent.as_str().to_string()))?
-            .set_text("status", Some(status.as_str().to_string()))?;
-        if effective_ps != current_play_state {
-            result = result.set_text("play_state", Some(effective_ps.as_str().to_string()))?;
-        }
-        Ok(result)
+        self.set_text("status", Some(status.as_str().to_string()))
     }
 
     /// Set the availability.
@@ -290,8 +188,8 @@ pub fn add_wad(conn: &Connection, wad: &NewWad) -> Result<i64> {
     conn.execute(
         "INSERT INTO wads (title, author, year, description, source_type,
                           source_id, source_url, filename, cached_path, status, version,
-                          play_state, intent, availability)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                          availability)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         rusqlite::params![
             wad.title,
             wad.author,
@@ -304,8 +202,6 @@ pub fn add_wad(conn: &Connection, wad: &NewWad) -> Result<i64> {
             wad.cached_path,
             wad.status.as_str(),
             wad.version,
-            wad.play_state.as_str(),
-            wad.intent.as_str(),
             avail.as_str(),
         ],
     )?;
@@ -355,7 +251,7 @@ pub fn update_wad(conn: &Connection, wad_id: i64, update: &WadUpdate) -> Result<
     // Check if setting status to finished
     let recording_completion = update.record_completion
         && update.fields.get("status").is_some_and(|v| {
-            matches!(v, FieldValue::Text(Some(s)) if s == Status::Finished.as_str())
+            matches!(v, FieldValue::Text(Some(s)) if s == Status::Completed.as_str())
         });
 
     // Auto-maintain availability when cached_path or source_url change.
@@ -569,7 +465,7 @@ mod tests {
         assert_eq!(wad.author.as_deref(), Some("Erik Alm"));
         assert_eq!(wad.year, Some(2003));
         assert_eq!(wad.source_type, "idgames");
-        assert_eq!(wad.status, "backlog");
+        assert_eq!(wad.status, "unplayed");
         assert_eq!(wad.tags, vec!["cacoward", "megawad"]);
     }
 
@@ -587,13 +483,13 @@ mod tests {
         let update = WadUpdate::new()
             .set_text("title", Some("Updated Title".to_string()))
             .unwrap()
-            .set_status(Status::Playing)
+            .set_status(Status::InProgress)
             .unwrap();
         assert!(update_wad(&conn, id, &update).unwrap());
 
         let wad = get_wad(&conn, id, false).unwrap().unwrap();
         assert_eq!(wad.title, "Updated Title");
-        assert_eq!(wad.status, "playing");
+        assert_eq!(wad.status, "in-progress");
     }
 
     #[test]
@@ -607,7 +503,7 @@ mod tests {
         let conn = setup();
         let id = add_test_wad(&conn);
 
-        let update = WadUpdate::new().set_status(Status::Finished).unwrap();
+        let update = WadUpdate::new().set_status(Status::Completed).unwrap();
         update_wad(&conn, id, &update).unwrap();
 
         let count: i64 = conn
@@ -626,7 +522,7 @@ mod tests {
         let id = add_test_wad(&conn);
 
         let update = WadUpdate::new()
-            .set_status(Status::Finished)
+            .set_status(Status::Completed)
             .unwrap()
             .no_completion();
         update_wad(&conn, id, &update).unwrap();
@@ -761,12 +657,8 @@ mod tests {
         assert_eq!(counts, vec![("doom".to_string(), 1)]);
     }
 
-    // -----------------------------------------------------------------------
-    // Three-axis + dual-write tests
-    // -----------------------------------------------------------------------
-
     #[test]
-    fn test_new_wad_defaults_to_inbox() {
+    fn test_new_wad_defaults_to_unplayed() {
         let conn = setup();
         let id = add_wad(
             &conn,
@@ -775,88 +667,25 @@ mod tests {
         .unwrap();
 
         let wad = get_wad(&conn, id, false).unwrap().unwrap();
-        assert_eq!(wad.play_state, "unplayed");
-        assert_eq!(wad.intent, "inbox");
-        assert_eq!(wad.status, "backlog"); // synced
+        assert_eq!(wad.status, "unplayed");
     }
 
     #[test]
-    fn test_new_wad_status_syncs_axes() {
-        let conn = setup();
-        let id = add_wad(
-            &conn,
-            &NewWad::new("Test", SourceType::Local).status(Status::Playing),
-        )
-        .unwrap();
-
-        let wad = get_wad(&conn, id, false).unwrap().unwrap();
-        assert_eq!(wad.play_state, "started");
-        assert_eq!(wad.intent, "shelved"); // playing and queued are mutually exclusive
-        assert_eq!(wad.status, "playing");
-    }
-
-    #[test]
-    fn test_new_wad_intent_syncs_status() {
-        let conn = setup();
-        let id = add_wad(
-            &conn,
-            &NewWad::new("Test", SourceType::Local).intent(Intent::Queued),
-        )
-        .unwrap();
-
-        let wad = get_wad(&conn, id, false).unwrap().unwrap();
-        assert_eq!(wad.intent, "queued");
-        assert_eq!(wad.status, "to-play"); // synced from (unplayed, queued)
-    }
-
-    #[test]
-    fn test_update_status_syncs_axes() {
+    fn test_update_status() {
         let conn = setup();
         let id = add_test_wad(&conn);
 
-        let update = WadUpdate::new().set_status(Status::Playing).unwrap();
+        // Set to in-progress
+        let update = WadUpdate::new().set_status(Status::InProgress).unwrap();
         update_wad(&conn, id, &update).unwrap();
-
         let wad = get_wad(&conn, id, false).unwrap().unwrap();
-        assert_eq!(wad.status, "playing");
-        assert_eq!(wad.play_state, "started");
-        assert_eq!(wad.intent, "shelved"); // playing and queued are mutually exclusive
-    }
+        assert_eq!(wad.status, "in-progress");
 
-    #[test]
-    fn test_update_play_state_syncs_status() {
-        let conn = setup();
-        let id = add_test_wad(&conn);
-
-        let wad = get_wad(&conn, id, false).unwrap().unwrap();
-        let current_intent = wad.intent_enum().unwrap();
-
-        let update = WadUpdate::new()
-            .set_play_state(PlayState::Completed, current_intent)
-            .unwrap();
+        // Set to completed
+        let update = WadUpdate::new().set_status(Status::Completed).unwrap().no_completion();
         update_wad(&conn, id, &update).unwrap();
-
         let wad = get_wad(&conn, id, false).unwrap().unwrap();
-        assert_eq!(wad.play_state, "completed");
-        assert_eq!(wad.status, "finished"); // synced
-    }
-
-    #[test]
-    fn test_update_intent_syncs_status() {
-        let conn = setup();
-        let id = add_test_wad(&conn);
-
-        let wad = get_wad(&conn, id, false).unwrap().unwrap();
-        let current_ps = wad.play_state_enum().unwrap();
-
-        let update = WadUpdate::new()
-            .set_intent(Intent::Dropped, current_ps)
-            .unwrap();
-        update_wad(&conn, id, &update).unwrap();
-
-        let wad = get_wad(&conn, id, false).unwrap().unwrap();
-        assert_eq!(wad.intent, "dropped");
-        assert_eq!(wad.status, "abandoned"); // synced from (unplayed, dropped)
+        assert_eq!(wad.status, "completed");
     }
 
     #[test]
@@ -917,114 +746,6 @@ mod tests {
 
         let wad = get_wad(&conn, id, false).unwrap().unwrap();
         assert_eq!(wad.availability, "downloadable");
-    }
-
-    #[test]
-    fn test_sync_status_to_axes_all_variants() {
-        assert_eq!(sync_status_to_axes(Status::ToPlay), (PlayState::Unplayed, Intent::Queued));
-        assert_eq!(sync_status_to_axes(Status::Backlog), (PlayState::Unplayed, Intent::Shelved));
-        assert_eq!(sync_status_to_axes(Status::Playing), (PlayState::Started, Intent::Shelved));
-        assert_eq!(sync_status_to_axes(Status::Finished), (PlayState::Completed, Intent::Shelved));
-        assert_eq!(sync_status_to_axes(Status::Abandoned), (PlayState::Unplayed, Intent::Dropped));
-        assert_eq!(sync_status_to_axes(Status::AwaitingUpdate), (PlayState::Unplayed, Intent::Shelved));
-    }
-
-    #[test]
-    fn test_sync_axes_to_status_key_combos() {
-        assert_eq!(sync_axes_to_status(PlayState::Completed, Intent::Queued), Status::Finished);
-        assert_eq!(sync_axes_to_status(PlayState::Started, Intent::Queued), Status::Playing);
-        assert_eq!(sync_axes_to_status(PlayState::Started, Intent::Dropped), Status::Abandoned);
-        assert_eq!(sync_axes_to_status(PlayState::Unplayed, Intent::Queued), Status::ToPlay);
-        assert_eq!(sync_axes_to_status(PlayState::Unplayed, Intent::Shelved), Status::Backlog);
-        assert_eq!(sync_axes_to_status(PlayState::Unplayed, Intent::Inbox), Status::Backlog);
-        assert_eq!(sync_axes_to_status(PlayState::Unplayed, Intent::Dropped), Status::Abandoned);
-    }
-
-    #[test]
-    fn test_started_dropped_prevented_on_set_play_state() {
-        let conn = setup();
-        let id = add_test_wad(&conn);
-
-        // Set intent to dropped first
-        let update = WadUpdate::new()
-            .set_intent(Intent::Dropped, PlayState::Unplayed)
-            .unwrap();
-        update_wad(&conn, id, &update).unwrap();
-        let wad = get_wad(&conn, id, false).unwrap().unwrap();
-        assert_eq!(wad.intent, "dropped");
-
-        // Now try to set play_state to started — should shelve (un-drop)
-        let update = WadUpdate::new()
-            .set_play_state(PlayState::Started, Intent::Dropped)
-            .unwrap();
-        update_wad(&conn, id, &update).unwrap();
-
-        let wad = get_wad(&conn, id, false).unwrap().unwrap();
-        assert_eq!(wad.play_state, "started");
-        assert_eq!(wad.intent, "shelved");
-        assert_eq!(wad.status, "playing");
-    }
-
-    #[test]
-    fn test_started_dropped_prevented_on_set_intent() {
-        let conn = setup();
-        let id = add_test_wad(&conn);
-
-        // Set play_state to started first
-        let update = WadUpdate::new()
-            .set_play_state(PlayState::Started, Intent::Inbox)
-            .unwrap();
-        update_wad(&conn, id, &update).unwrap();
-        let wad = get_wad(&conn, id, false).unwrap().unwrap();
-        assert_eq!(wad.play_state, "started");
-
-        // Now try to set intent to dropped — should reset play_state to unplayed
-        let update = WadUpdate::new()
-            .set_intent(Intent::Dropped, PlayState::Started)
-            .unwrap();
-        update_wad(&conn, id, &update).unwrap();
-
-        let wad = get_wad(&conn, id, false).unwrap().unwrap();
-        assert_eq!(wad.intent, "dropped");
-        assert_eq!(wad.play_state, "unplayed");
-        assert_eq!(wad.status, "abandoned");
-    }
-
-    #[test]
-    fn test_new_wad_started_dropped_prevented() {
-        let conn = setup();
-
-        // Setting play_state to started on a dropped WAD should shelve
-        let wad = NewWad::new("Test", SourceType::Local)
-            .intent(Intent::Dropped)
-            .play_state(PlayState::Started);
-        assert_eq!(wad.play_state, PlayState::Started);
-        assert_eq!(wad.intent, Intent::Shelved);
-        assert_eq!(wad.status, Status::Playing);
-
-        // Setting intent to dropped on a started WAD should un-start
-        let wad = NewWad::new("Test", SourceType::Local)
-            .play_state(PlayState::Started)
-            .intent(Intent::Dropped);
-        assert_eq!(wad.play_state, PlayState::Unplayed);
-        assert_eq!(wad.intent, Intent::Dropped);
-        assert_eq!(wad.status, Status::Abandoned);
-
-        // Setting play_state to started on a queued WAD should shelve (mutually exclusive)
-        let wad = NewWad::new("Test", SourceType::Local)
-            .intent(Intent::Queued)
-            .play_state(PlayState::Started);
-        assert_eq!(wad.play_state, PlayState::Started);
-        assert_eq!(wad.intent, Intent::Shelved);
-        assert_eq!(wad.status, Status::Playing);
-
-        // Setting intent to queued on a started WAD should un-start
-        let wad = NewWad::new("Test", SourceType::Local)
-            .play_state(PlayState::Started)
-            .intent(Intent::Queued);
-        assert_eq!(wad.play_state, PlayState::Unplayed);
-        assert_eq!(wad.intent, Intent::Queued);
-        assert_eq!(wad.status, Status::ToPlay);
     }
 
     #[test]

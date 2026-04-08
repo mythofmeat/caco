@@ -568,8 +568,8 @@ fn render_stats_table(snapshot: &StatsSnapshot, limit: usize) {
     println!("  Total sessions: {}", snapshot.total_sessions);
     println!("  WADs played:    {}", snapshot.wads_with_sessions);
     println!();
-    println!("  Finished:       {} / {} played ({:.0}%)",
-        snapshot.finished_wads,
+    println!("  Completed:      {} / {} played ({:.0}%)",
+        snapshot.completed_wads,
         snapshot.played_wads,
         snapshot.completion_rate * 100.0,
     );
@@ -578,7 +578,7 @@ fn render_stats_table(snapshot: &StatsSnapshot, limit: usize) {
 
     // Status breakdown
     println!("  Status breakdown:");
-    let status_order = ["to-play", "backlog", "playing", "finished", "abandoned", "awaiting-update"];
+    let status_order = ["unplayed", "in-progress", "completed", "abandoned"];
     for status in &status_order {
         let count = snapshot.wads_by_status.get(*status).copied().unwrap_or(0);
         if count > 0 {
@@ -614,12 +614,12 @@ fn render_stats_plain(snapshot: &StatsSnapshot, limit: usize) {
     println!("total_playtime={}", snapshot.total_playtime);
     println!("total_sessions={}", snapshot.total_sessions);
     println!("wads_played={}", snapshot.wads_with_sessions);
-    println!("finished_wads={}", snapshot.finished_wads);
+    println!("completed_wads={}", snapshot.completed_wads);
     println!("played_wads={}", snapshot.played_wads);
     println!("completion_rate={:.2}", snapshot.completion_rate);
     println!("total_completions={}", snapshot.total_completions);
 
-    let status_order = ["to-play", "backlog", "playing", "finished", "abandoned", "awaiting-update"];
+    let status_order = ["unplayed", "in-progress", "completed", "abandoned"];
     for status in &status_order {
         let count = snapshot.wads_by_status.get(*status).copied().unwrap_or(0);
         println!("status_{status}={count}");

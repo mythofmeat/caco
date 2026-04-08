@@ -25,12 +25,10 @@ pub fn render_status_bar(hints: &[(&str, &str)], frame: &mut Frame, area: Rect) 
 /// Render a status mode indicator bar.
 pub fn render_status_mode_bar(frame: &mut Frame, area: Rect) {
     let hints = &[
-        ("p", "playing"),
-        ("f", "finished"),
-        ("t", "to-play"),
-        ("b", "backlog"),
+        ("u", "unplayed"),
+        ("p", "in-progress"),
+        ("c", "completed"),
         ("a", "abandoned"),
-        ("w", "awaiting"),
         ("Esc", "cancel"),
     ];
 

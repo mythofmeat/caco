@@ -234,10 +234,9 @@ pub fn render(
                     let footer_y = body_top + text_height * 2.0 + 10.0;
 
                     // Status badge (unified)
-                    let us = theme::unified_status(&wad.play_state, &wad.intent);
-                    let status_label = theme::unified_status_display(us);
-                    let status_color = theme::unified_status_color(us);
-                    let status_bg = theme::unified_status_bg(us);
+                    let status_label = theme::status_display(&wad.status);
+                    let status_color = theme::status_color(&wad.status);
+                    let status_bg = theme::status_bg(&wad.status);
 
                     // Measure status text
                     let status_galley = painter.layout_no_wrap(
