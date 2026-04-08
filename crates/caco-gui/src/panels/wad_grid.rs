@@ -246,7 +246,7 @@ pub fn render(
                             painter.text(
                                 sub_center,
                                 egui::Align2::CENTER_CENTER,
-                                &times_completed.to_string(),
+                                times_completed.to_string(),
                                 egui::FontId::proportional(9.0),
                                 Color32::from_rgb(0x1a, 0x1a, 0x1a),
                             );

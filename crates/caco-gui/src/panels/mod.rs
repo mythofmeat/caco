@@ -15,11 +15,11 @@ pub fn wad_context_menu(response: &egui::Response, wad_id: i64, status: &str) ->
             action = Some(ActionRequest::Play(wad_id));
             ui.close_menu();
         }
-        if status == "completed" || status == "abandoned" {
-            if ui.button("Start New Playthrough").clicked() {
-                action = Some(ActionRequest::StartNewPlaythrough(wad_id));
-                ui.close_menu();
-            }
+        if (status == "completed" || status == "abandoned")
+            && ui.button("Start New Playthrough").clicked()
+        {
+            action = Some(ActionRequest::StartNewPlaythrough(wad_id));
+            ui.close_menu();
         }
         if ui.button("Edit").clicked() {
             action = Some(ActionRequest::Edit(wad_id));
