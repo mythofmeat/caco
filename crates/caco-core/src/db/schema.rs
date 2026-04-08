@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS wads (
     description TEXT,
 
     -- Play status
-    status TEXT DEFAULT 'backlog',
+    status TEXT DEFAULT 'unplayed',
     rating INTEGER,
     notes TEXT,
 
@@ -82,8 +82,6 @@ const POST_MIGRATION_INDEXES: &str = r#"
 CREATE INDEX IF NOT EXISTS idx_wads_deleted_at ON wads(deleted_at);
 CREATE INDEX IF NOT EXISTS idx_wads_cached_path ON wads(cached_path);
 CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON sessions(wad_id, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_wads_play_state ON wads(play_state);
-CREATE INDEX IF NOT EXISTS idx_wads_intent ON wads(intent);
 "#;
 
 // ---------------------------------------------------------------------------
@@ -131,6 +129,7 @@ static MIGRATIONS: &[Migration] = &[
     (29, "fix_started_dropped_conflict", migrate_fix_started_dropped),
     (30, "fix_started_queued_conflict", migrate_fix_started_queued),
     (31, "add_zdoom_required", migrate_add_zdoom_required),
+    (32, "consolidate_status_columns", migrate_consolidate_status),
 ];
 
 // ---------------------------------------------------------------------------
@@ -570,6 +569,32 @@ fn migrate_fix_started_queued(conn: &Connection) -> Result<()> {
 
 fn migrate_add_zdoom_required(conn: &Connection) -> Result<()> {
     add_column_if_missing(conn, "wads", "zdoom_required", "INTEGER")
+}
+
+fn migrate_consolidate_status(conn: &Connection) -> Result<()> {
+    // Step 1: Map old status values to new ones
+    conn.execute_batch(
+        "UPDATE wads SET status = 'unplayed'    WHERE status IN ('backlog', 'to-play', 'awaiting-update');
+         UPDATE wads SET status = 'in-progress' WHERE status = 'playing';
+         UPDATE wads SET status = 'completed'   WHERE status = 'finished';",
+    )?;
+    // 'abandoned' stays as 'abandoned' — no change needed
+
+    // Step 2: Override based on play_state/intent where more accurate
+    if has_column(conn, "wads", "play_state")? {
+        conn.execute_batch(
+            "UPDATE wads SET status = 'in-progress' WHERE play_state = 'started' AND status != 'abandoned';
+             UPDATE wads SET status = 'completed'   WHERE play_state = 'completed' AND status != 'abandoned';",
+        )?;
+    }
+    if has_column(conn, "wads", "intent")? {
+        conn.execute(
+            "UPDATE wads SET status = 'abandoned' WHERE intent = 'dropped'",
+            [],
+        )?;
+    }
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
