@@ -48,6 +48,7 @@ pub enum ViewLayout {
 
 pub enum ActionRequest {
     Play(i64),
+    StartNewPlaythrough(i64),
     Edit(i64),
     Delete(i64),
     Sessions(i64),

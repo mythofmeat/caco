@@ -8,12 +8,18 @@ use crate::state::ActionRequest;
 
 /// Show a right-click context menu for a WAD with standard actions.
 /// Returns the chosen action, if any.
-pub fn wad_context_menu(response: &egui::Response, wad_id: i64) -> Option<ActionRequest> {
+pub fn wad_context_menu(response: &egui::Response, wad_id: i64, status: &str) -> Option<ActionRequest> {
     let mut action = None;
     response.context_menu(|ui| {
         if ui.button("Play").clicked() {
             action = Some(ActionRequest::Play(wad_id));
             ui.close_menu();
+        }
+        if status == "completed" || status == "abandoned" {
+            if ui.button("Start New Playthrough").clicked() {
+                action = Some(ActionRequest::StartNewPlaythrough(wad_id));
+                ui.close_menu();
+            }
         }
         if ui.button("Edit").clicked() {
             action = Some(ActionRequest::Edit(wad_id));

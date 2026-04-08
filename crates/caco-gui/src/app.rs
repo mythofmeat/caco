@@ -128,6 +128,19 @@ impl CacoApp {
                     self.state.active_dialog = Some(ActiveDialog::WadStats(dialog));
                 }
             }
+            ActionRequest::StartNewPlaythrough(wad_id) => {
+                match caco_core::player::start_new_playthrough(&self.conn, wad_id) {
+                    Ok(_) => {
+                        self.state.needs_reload = true;
+                        self.state.notification =
+                            Some(Notification::info("New playthrough started — stats reset".to_string()));
+                    }
+                    Err(e) => {
+                        self.state.notification =
+                            Some(Notification::error(format!("Failed to start playthrough: {e}")));
+                    }
+                }
+            }
             ActionRequest::Play(wad_id) => {
                 if self.state.is_playing() {
                     return;
@@ -1006,7 +1019,8 @@ fn render_now_playing_hero(
             }
 
             // Right-click context menu
-            if let Some(a) = panels::wad_context_menu(&thumb_resp, wad_id) {
+            let wad_status = state.wads.iter().find(|w| w.id == wad_id).map(|w| w.status.as_str()).unwrap_or("");
+            if let Some(a) = panels::wad_context_menu(&thumb_resp, wad_id, wad_status) {
                 action = Some(a);
             }
 
