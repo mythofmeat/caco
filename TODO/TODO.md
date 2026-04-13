@@ -1,0 +1,1 @@
+- [ ] bug: the icon doesn't appear for the .desktop launcher or on the top-left corner of the program window. however, editing the icon path in the caco.desktop file to: `/usr/share/icons/hicolor/1024x1024/apps/caco.png` does make it work in both cases.
