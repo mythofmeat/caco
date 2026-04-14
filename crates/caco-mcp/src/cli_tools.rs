@@ -64,7 +64,8 @@ pub struct InfoArgs {
     /// Show live playtime from an active session.
     #[serde(default)]
     pub live: bool,
-    /// Override beaten count (e.g. "+1" or "-1").
+    /// Filter level stats by completion timestamp (used with --levelstats).
+    /// Value is an ISO-8601 timestamp prefix, e.g. "2025-01" or "2025-01-15T10:30".
     #[serde(default)]
     pub beaten: Option<String>,
     /// Plain-text output mode (no colour).
@@ -208,7 +209,10 @@ impl CacoMcpServer {
 
     #[tool(
         name = "caco_info",
-        description = "Show WAD metadata and stats. Mirrors `caco info`. Defaults to JSON output."
+        description = "Show WAD metadata and stats. Mirrors `caco info`. Defaults to JSON output. \
+                       Query must identify a single WAD — use an ID or a sufficiently specific title. \
+                       Queries matching multiple WADs will fail (non-zero exit) because interactive \
+                       selection is unavailable over MCP."
     )]
     pub async fn caco_info(
         &self,
@@ -224,7 +228,9 @@ impl CacoMcpServer {
     #[tool(
         name = "caco_random",
         description = "Pick a random WAD from the library, optionally filtered by query. \
-                       Mirrors `caco random`."
+                       Mirrors `caco random`. \
+                       Output is plain text in stdout (just the WAD ID; or TSV of id/title/author \
+                       with `info: true`). `parsed_json` is always null for this tool."
     )]
     pub async fn caco_random(
         &self,
@@ -318,22 +324,22 @@ mod tests {
             output: None,
             levelstats: true,
             live: true,
-            beaten: Some("+1".into()),
+            beaten: Some("2025-01".into()),
             plain: true,
         };
         let argv = args.to_argv();
         assert!(argv.contains(&"--levelstats".to_string()));
         assert!(argv.contains(&"--live".to_string()));
         assert!(argv.contains(&"--plain".to_string()));
-        assert!(argv.windows(2).any(|w| w[0] == "--beaten" && w[1] == "+1"));
+        assert!(argv.windows(2).any(|w| w[0] == "--beaten" && w[1] == "2025-01"));
         assert!(argv.contains(&"id:7".to_string()));
     }
 
     #[test]
-    fn random_default_renders() {
+    fn random_default_renders_empty() {
         let args = RandomArgs::default();
         let argv = args.to_argv();
-        assert!(!argv.contains(&"--info".to_string()));
+        assert!(argv.is_empty(), "default random args should produce empty argv, got {:?}", argv);
     }
 
     #[test]
