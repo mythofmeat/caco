@@ -183,6 +183,17 @@ fn detect_source(args: &ImportArgs, source_str: &str) -> Result<SourceKind, Stri
     if source_str.contains("doomwiki.org") {
         return Ok(SourceKind::Doomwiki(source_str.to_string()));
     }
+    // idgames URLs are hosted under doomworld.com/idgames/... — route them
+    // to idgames before the generic doomworld forum match so they don't
+    // get rejected as invalid forum URLs.
+    if source_str.contains("doomworld.com/idgames") {
+        return match caco_sources::idgames::extract_idgames_id_from_url(source_str) {
+            Some(id) => Ok(SourceKind::IdgamesId(id)),
+            None => Err(format!(
+                "Could not extract idgames ID from URL: {source_str}"
+            )),
+        };
+    }
     if source_str.contains("doomworld.com") {
         return Ok(SourceKind::Doomworld(source_str.to_string()));
     }
@@ -789,5 +800,69 @@ fn picker_wad_record(
         created_at: String::new(),
         updated_at: String::new(),
         tags: Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn default_args() -> ImportArgs {
+        ImportArgs {
+            source: Vec::new(),
+            idgames: false,
+            doomwiki: false,
+            doomworld: false,
+            local: false,
+            url: None,
+            title: None,
+            author: None,
+            year: None,
+            tag: Vec::new(),
+            description: None,
+            force: false,
+            multi: false,
+            smart: false,
+            no_smart: false,
+            llm_backend: None,
+            llm_model: None,
+        }
+    }
+
+    #[test]
+    fn detect_source_routes_idgames_url_to_idgames_id() {
+        let args = default_args();
+        let url = "https://www.doomworld.com/idgames/?id=18184";
+        match detect_source(&args, url).unwrap() {
+            SourceKind::IdgamesId(id) => assert_eq!(id, 18184),
+            _ => panic!("expected IdgamesId"),
+        }
+    }
+
+    #[test]
+    fn detect_source_routes_idgames_index_php_url() {
+        let args = default_args();
+        let url = "https://www.doomworld.com/idgames/index.php?id=18184";
+        match detect_source(&args, url).unwrap() {
+            SourceKind::IdgamesId(id) => assert_eq!(id, 18184),
+            _ => panic!("expected IdgamesId"),
+        }
+    }
+
+    #[test]
+    fn detect_source_still_routes_forum_url_to_doomworld() {
+        let args = default_args();
+        let url = "https://www.doomworld.com/forum/topic/123-something/";
+        match detect_source(&args, url).unwrap() {
+            SourceKind::Doomworld(got) => assert_eq!(got, url),
+            _ => panic!("expected Doomworld"),
+        }
+    }
+
+    #[test]
+    fn detect_source_rejects_malformed_idgames_url() {
+        let args = default_args();
+        let url = "https://www.doomworld.com/idgames/?no-id-param=1";
+        assert!(detect_source(&args, url).is_err());
     }
 }

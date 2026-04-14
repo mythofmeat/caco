@@ -174,11 +174,13 @@ fn parse_doomwiki_json_value(data: &serde_json::Value) -> Result<Vec<WikiEntry>>
 pub fn idgames_api_url(query_or_id: &str) -> String {
     let base = "https://www.doomworld.com/idgames/api/api.php";
     if let Ok(id) = query_or_id.parse::<i64>() {
-        format!("{base}?action=get&id={id}&out=json")
-    } else {
-        let encoded = urlencoding::encode(query_or_id);
-        format!("{base}?action=search&query={encoded}&type=title&out=json")
+        return format!("{base}?action=get&id={id}&out=json");
     }
+    if let Some(id) = crate::idgames::extract_idgames_id_from_url(query_or_id) {
+        return format!("{base}?action=get&id={id}&out=json");
+    }
+    let encoded = urlencoding::encode(query_or_id);
+    format!("{base}?action=search&query={encoded}&type=title&out=json")
 }
 
 /// Build the Doom Wiki API URL the user should visit in their browser.
@@ -518,6 +520,24 @@ mod tests {
     fn test_idgames_api_url_query_with_spaces() {
         let url = idgames_api_url("ancient aliens");
         assert!(url.contains("ancient%20aliens"));
+    }
+
+    #[test]
+    fn test_idgames_api_url_from_doomworld_url() {
+        let url = idgames_api_url("https://www.doomworld.com/idgames/?id=18184");
+        assert_eq!(
+            url,
+            "https://www.doomworld.com/idgames/api/api.php?action=get&id=18184&out=json"
+        );
+    }
+
+    #[test]
+    fn test_idgames_api_url_from_index_php_url() {
+        let url = idgames_api_url("https://www.doomworld.com/idgames/index.php?id=18184");
+        assert_eq!(
+            url,
+            "https://www.doomworld.com/idgames/api/api.php?action=get&id=18184&out=json"
+        );
     }
 
     #[test]
