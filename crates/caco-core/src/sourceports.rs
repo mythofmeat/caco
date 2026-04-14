@@ -42,7 +42,7 @@ pub static FAMILIES: &[SourceportFamily] = &[
         data_arg: None,
         save_arg: Some("-savedir"),
         complevel_arg: None,
-        config_ext: "cfg",
+        config_ext: "ini",
     },
     SourceportFamily {
         name: "chocolate",
@@ -179,10 +179,12 @@ pub fn config_ext(executable: &str) -> &'static str {
 
 /// Return CLI args to set the config file for the sourceport.
 ///
-/// Only dsda-family ports support `-config`.
+/// dsda, helion, and zdoom-family ports support `-config`.
 pub fn get_config_args(executable: &str, config_path: &str) -> Vec<String> {
     match family_name(executable) {
-        Some("dsda" | "helion") => vec!["-config".to_string(), config_path.to_string()],
+        Some("dsda" | "helion" | "zdoom") => {
+            vec!["-config".to_string(), config_path.to_string()]
+        }
         _ => Vec::new(),
     }
 }
@@ -309,7 +311,12 @@ mod tests {
             get_config_args("Helion", "/path/to/config.ini"),
             vec!["-config", "/path/to/config.ini"]
         );
-        assert!(get_config_args("gzdoom", "/path/to/config.cfg").is_empty());
+        assert_eq!(
+            get_config_args("gzdoom", "/path/to/config.ini"),
+            vec!["-config", "/path/to/config.ini"]
+        );
+        assert!(get_config_args("chocolate-doom", "/path/to/config.cfg").is_empty());
+        assert!(get_config_args("unknown-port", "/path/to/config.cfg").is_empty());
     }
 
     #[test]
@@ -549,9 +556,27 @@ mod tests {
     #[test]
     fn test_config_ext() {
         assert_eq!(config_ext("dsda-doom"), "cfg");
-        assert_eq!(config_ext("gzdoom"), "cfg");
+        assert_eq!(config_ext("gzdoom"), "ini");
+        assert_eq!(config_ext("uzdoom"), "ini");
+        assert_eq!(config_ext("zdoom"), "ini");
         assert_eq!(config_ext("helion"), "ini");
         assert_eq!(config_ext("unknown-port"), "cfg");
+    }
+
+    #[test]
+    fn test_get_config_args_zdoom_family() {
+        assert_eq!(
+            get_config_args("gzdoom", "/tmp/p.ini"),
+            vec!["-config", "/tmp/p.ini"],
+        );
+        assert_eq!(
+            get_config_args("uzdoom", "/tmp/p.ini"),
+            vec!["-config", "/tmp/p.ini"],
+        );
+        assert_eq!(
+            get_config_args("zdoom", "/tmp/p.ini"),
+            vec!["-config", "/tmp/p.ini"],
+        );
     }
 
     #[test]
