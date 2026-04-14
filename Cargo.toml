@@ -23,6 +23,7 @@ strip = true
 [workspace.dependencies]
 # Error handling
 thiserror = "2"
+anyhow = "1"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
