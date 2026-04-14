@@ -1,4 +1,19 @@
 use std::path::PathBuf;
+use std::sync::Arc;
+
+const ICON_BYTES: &[u8] = include_bytes!("../../../assets/caco.png");
+
+/// Decode the embedded icon PNG into `egui::IconData`. Returns `None` if
+/// decoding fails so a bad asset never panics startup.
+fn load_icon() -> Option<egui::IconData> {
+    let img = image::load_from_memory(ICON_BYTES).ok()?.into_rgba8();
+    let (width, height) = img.dimensions();
+    Some(egui::IconData {
+        rgba: img.into_raw(),
+        width,
+        height,
+    })
+}
 
 fn main() -> eframe::Result<()> {
     // Parse optional --db-path argument
@@ -11,11 +26,16 @@ fn main() -> eframe::Result<()> {
 
     let db_path = db_path.unwrap_or_else(caco_core::config::get_db_path);
 
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_title("Caco")
+        .with_inner_size([1200.0, 800.0])
+        .with_min_inner_size([800.0, 400.0]);
+    if let Some(icon) = load_icon() {
+        viewport = viewport.with_icon(Arc::new(icon));
+    }
+
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("Caco")
-            .with_inner_size([1200.0, 800.0])
-            .with_min_inner_size([800.0, 400.0]),
+        viewport,
         persist_window: true,
         ..Default::default()
     };
