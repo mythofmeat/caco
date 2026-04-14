@@ -55,6 +55,11 @@ pub enum AppMessage {
         wad_id: i64,
         outcome: Result<PlayResult, String>,
     },
+    /// WAD could not be played because no downloadable source was available.
+    /// Triggers the "WAD Unavailable" link dialog.
+    PlayUnavailable {
+        wad_id: i64,
+    },
     SearchComplete(SearchSource, Vec<SearchResultEntry>),
     ImportComplete(Result<ImportResult, String>),
     ThumbnailReady {

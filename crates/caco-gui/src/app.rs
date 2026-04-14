@@ -164,7 +164,23 @@ impl CacoApp {
                 let sender = self.bg.sender();
                 let db_path = self.state.db_path.clone();
                 std::thread::spawn(move || {
-                    let outcome = (|| -> Result<caco_core::player::PlayResult, String> {
+                    // Local error type that distinguishes "WAD not available —
+                    // offer the link dialog" from other errors that should
+                    // surface as a toast. String errors from `?` default to
+                    // Message; Unavailable is chosen explicitly at the sites
+                    // where no downloadable source exists or the download
+                    // could not complete.
+                    enum PlayError {
+                        Message(String),
+                        Unavailable,
+                    }
+                    impl From<String> for PlayError {
+                        fn from(s: String) -> Self {
+                            PlayError::Message(s)
+                        }
+                    }
+
+                    let outcome = (|| -> Result<caco_core::player::PlayResult, PlayError> {
                         let conn = caco_core::db::open_connection(&db_path)
                             .map_err(|e| format!("DB open failed: {e}"))?;
 
@@ -206,10 +222,7 @@ impl CacoApp {
                                         if filename.is_empty()
                                             || !source_url.contains("/idgames/")
                                         {
-                                            return Err(format!(
-                                                "API blocked and no stored path for '{}'",
-                                                wad.title
-                                            ));
+                                            return Err(PlayError::Unavailable);
                                         }
                                         client
                                             .download_direct(
@@ -219,14 +232,10 @@ impl CacoApp {
                                                 mirror,
                                                 None,
                                             )
-                                            .map_err(|e| {
-                                                format!("Direct download failed: {e}")
-                                            })?
+                                            .map_err(|_| PlayError::Unavailable)?
                                     }
-                                    Err(e) => {
-                                        return Err(format!(
-                                            "Failed to fetch idgames entry: {e}"
-                                        ));
+                                    Err(_) => {
+                                        return Err(PlayError::Unavailable);
                                     }
                                 }
                             } else {
@@ -237,10 +246,7 @@ impl CacoApp {
                                 if filename.is_empty()
                                     || !source_url.contains("/idgames/")
                                 {
-                                    return Err(format!(
-                                        "No WAD file available for '{}'. Link a file with: caco modify id:{} --link /path/to/wad",
-                                        wad.title, wad_id
-                                    ));
+                                    return Err(PlayError::Unavailable);
                                 }
                                 client
                                     .download_direct(
@@ -250,9 +256,7 @@ impl CacoApp {
                                         mirror,
                                         None,
                                     )
-                                    .map_err(|e| {
-                                        format!("Direct download failed: {e}")
-                                    })?
+                                    .map_err(|_| PlayError::Unavailable)?
                             };
 
                             let update = caco_core::db::WadUpdate::new()
@@ -265,15 +269,30 @@ impl CacoApp {
                                 .map_err(|e| format!("Failed to update WAD record: {e}"))?;
                         }
 
-                        caco_core::player::play(
+                        let pr = caco_core::player::play(
                             &conn,
                             wad_id,
                             &caco_core::player::PlayOptions::default(),
                         )
-                        .map_err(|e| format!("{e}"))
+                        .map_err(|e| format!("{e}"))?;
+                        Ok(pr)
                     })();
 
-                    sender.send(AppMessage::PlayFinished { wad_id, outcome });
+                    match outcome {
+                        Ok(pr) => sender.send(AppMessage::PlayFinished {
+                            wad_id,
+                            outcome: Ok(pr),
+                        }),
+                        Err(PlayError::Message(msg)) => {
+                            sender.send(AppMessage::PlayFinished {
+                                wad_id,
+                                outcome: Err(msg),
+                            })
+                        }
+                        Err(PlayError::Unavailable) => {
+                            sender.send(AppMessage::PlayUnavailable { wad_id })
+                        }
+                    }
                 });
             }
         }
@@ -292,13 +311,27 @@ impl eframe::App for CacoApp {
                 AppMessage::Notify(notif) => {
                     self.state.notification = Some(notif);
                 }
+                AppMessage::PlayUnavailable { wad_id } => {
+                    self.state.play_state = PlayState::Idle;
+                    self.state.needs_reload = true;
+                    if let Some(dialog) = LinkDialogState::new(&self.conn, wad_id) {
+                        self.state.active_dialog = Some(ActiveDialog::Link(dialog));
+                    } else {
+                        self.state.notification = Some(Notification::error(
+                            "WAD is not available and could not be located in the database."
+                                .to_string(),
+                        ));
+                    }
+                }
                 AppMessage::PlayFinished { wad_id, outcome } => {
                     self.state.play_state = PlayState::Idle;
                     self.state.needs_reload = true;
 
                     match outcome {
                         Err(err) => {
-                            // Show link dialog for missing WAD files
+                            // Post-download "cached file vanished" still opens the
+                            // link dialog. All other string errors surface as a
+                            // toast; explicit unavailability uses PlayUnavailable.
                             if err.starts_with("file not found:") {
                                 if let Some(dialog) =
                                     LinkDialogState::new(&self.conn, wad_id)
