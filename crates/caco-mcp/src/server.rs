@@ -60,8 +60,12 @@ fn read_schema_version(db: &std::path::Path) -> Option<i64> {
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
     )
     .ok()?;
-    conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
-        .ok()
+    conn.query_row(
+        "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+        [],
+        |row| row.get::<_, i64>(0),
+    )
+    .ok()
 }
 
 #[tool_handler]
