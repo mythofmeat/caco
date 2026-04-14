@@ -41,13 +41,13 @@ pub fn resolve(explicit: Option<PathBuf>) -> Result<CacoBin> {
     let mut tried = Vec::new();
 
     // Sibling of current_exe
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(parent) = exe.parent() {
-            let candidate = parent.join(if cfg!(windows) { "caco.exe" } else { "caco" });
-            tried.push(candidate.clone());
-            if candidate.is_file() {
-                return Ok(CacoBin::Path(candidate));
-            }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(parent) = exe.parent()
+    {
+        let candidate = parent.join(if cfg!(windows) { "caco.exe" } else { "caco" });
+        tried.push(candidate.clone());
+        if candidate.is_file() {
+            return Ok(CacoBin::Path(candidate));
         }
     }
 
@@ -66,10 +66,10 @@ fn locate_workspace_root() -> Option<PathBuf> {
     let mut cur = std::env::current_exe().ok()?;
     while cur.pop() {
         let manifest = cur.join("Cargo.toml");
-        if let Ok(contents) = std::fs::read_to_string(&manifest) {
-            if contents.contains("[workspace]") {
-                return Some(cur);
-            }
+        if let Ok(contents) = std::fs::read_to_string(&manifest)
+            && contents.contains("[workspace]")
+        {
+            return Some(cur);
         }
     }
     None

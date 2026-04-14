@@ -214,8 +214,8 @@ pub enum CacoMcpError {
     #[error("caco binary not found (tried: {tried:?})")]
     CacoBinNotFound { tried: Vec<PathBuf> },
 
-    #[error("caco binary failed to spawn: {0}")]
-    CacoBinSpawn(#[from] std::io::Error),
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
 
     #[error("database error: {0}")]
     Database(#[from] rusqlite::Error),

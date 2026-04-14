@@ -1,6 +1,6 @@
 //! Sandbox reset implementation.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use fs_extra::dir::{self, CopyOptions};
 
@@ -56,11 +56,11 @@ pub fn reset_sandbox(paths: &SandboxPaths, opts: &ResetOptions) -> Result<()> {
     let config_src = dirs::config_dir()
         .map(|d| d.join("caco").join("config.toml"));
     let config_dst = paths.config_path();
-    if let Some(src) = config_src {
-        if src.is_file() {
-            std::fs::create_dir_all(config_dst.parent().unwrap())?;
-            std::fs::copy(&src, &config_dst)?;
-        }
+    if let Some(src) = config_src
+        && src.is_file()
+    {
+        std::fs::create_dir_all(config_dst.parent().unwrap())?;
+        std::fs::copy(&src, &config_dst)?;
     }
 
     Ok(())
@@ -80,6 +80,7 @@ fn copy_entry(src: &Path, dst_parent: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
     use tempfile::TempDir;
 
     fn seed_source(root: &Path) {
