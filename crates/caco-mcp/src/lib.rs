@@ -5,6 +5,7 @@
 pub mod bin_resolve;
 pub mod cli_runner;
 pub mod cli_tools;
+pub mod cli_tools_macros;
 pub mod error;
 pub mod introspect;
 pub mod reset;
