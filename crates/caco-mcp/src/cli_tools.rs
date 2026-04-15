@@ -776,7 +776,7 @@ impl CollectionArgs {
 // ---------- caco_import ----------
 
 #[derive(Deserialize, schemars::JsonSchema)]
-#[serde(tag = "source", rename_all = "lowercase")]
+#[serde(tag = "kind", rename_all = "lowercase")]
 pub enum ImportSource {
     /// idgames archive. `query` may be a numeric ID (direct fetch, no picker),
     /// a text query (invokes interactive picker — won't work over MCP), or a
@@ -1216,12 +1216,13 @@ impl CacoMcpServer {
     #[tool(
         name = "caco_import",
         description = "Import a WAD from idgames, Doom Wiki, Doomworld, a URL, or a local \
-                       file. Mirrors `caco import`. Pass `source` as a discriminated object: \
-                       `{\"source\": \"idgames\", \"query\": \"18184\"}`, \
-                       `{\"source\": \"doomwiki\", \"query\": \"Sunder\"}`, \
-                       `{\"source\": \"doomworld\", \"url\": \"...\"}`, \
-                       `{\"source\": \"url\", \"url\": \"...\"}`, or \
-                       `{\"source\": \"local\", \"path\": \"...\"}`. \
+                       file. Mirrors `caco import`. Pass `source` as a discriminated object \
+                       keyed by `kind`: \
+                       `{\"source\": {\"kind\": \"idgames\", \"query\": \"18184\"}}`, \
+                       `{\"source\": {\"kind\": \"doomwiki\", \"query\": \"Sunder\"}}`, \
+                       `{\"source\": {\"kind\": \"doomworld\", \"url\": \"...\"}}`, \
+                       `{\"source\": {\"kind\": \"url\", \"url\": \"...\"}}`, or \
+                       `{\"source\": {\"kind\": \"local\", \"path\": \"...\"}}`. \
                        MCP LIMITATIONS: `idgames` with a non-numeric query (text search) \
                        invokes an interactive picker and will not work over MCP — use a \
                        numeric idgames ID for direct fetch. `doomwiki` ALWAYS invokes the \
