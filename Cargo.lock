@@ -731,6 +731,7 @@ dependencies = [
  "clap",
  "dirs",
  "fs_extra",
+ "hex",
  "rmcp",
  "rusqlite",
  "schemars",
