@@ -773,6 +773,165 @@ impl CollectionArgs {
     }
 }
 
+// ---------- caco_import ----------
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(tag = "source", rename_all = "lowercase")]
+pub enum ImportSource {
+    /// idgames archive. `query` may be a numeric ID (direct fetch, no picker),
+    /// a text query (invokes interactive picker — won't work over MCP), or a
+    /// path to a saved JSON response (picker still required).
+    Idgames { query: String },
+    /// Doom Wiki search. Always invokes the interactive picker — won't work
+    /// over MCP. A `.json` path also routes to JSON import (still picker).
+    Doomwiki { query: String },
+    /// Doomworld forum thread URL — direct fetch, no picker.
+    Doomworld { url: String },
+    /// Direct URL import. The URL is also used as the title fallback when
+    /// `title` is not set.
+    Url { url: String },
+    /// Direct local file import — no picker.
+    Local { path: String },
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+pub struct ImportArgs {
+    /// Source-discriminated input (idgames/doomwiki/doomworld/url/local).
+    pub source: ImportSource,
+    /// Title override (-t / --title).
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Author override (-a / --author).
+    #[serde(default)]
+    pub author: Option<String>,
+    /// Year override.
+    #[serde(default)]
+    pub year: Option<i32>,
+    /// Tags to attach (repeatable).
+    #[serde(default)]
+    pub tag: Vec<String>,
+    /// Description (used by --url imports).
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Force import even if duplicate (-f / --force).
+    #[serde(default)]
+    pub force: bool,
+    /// Multi-select from search results — REQUIRES fzf, non-functional over MCP.
+    #[serde(default)]
+    pub multi: bool,
+    /// Force LLM-powered metadata extraction (Doomworld only).
+    #[serde(default)]
+    pub smart: bool,
+    /// Disable auto-LLM extraction (when `[llm]` is configured).
+    #[serde(default)]
+    pub no_smart: bool,
+    /// LLM backend override.
+    #[serde(default)]
+    pub llm_backend: Option<String>,
+    /// LLM model override.
+    #[serde(default)]
+    pub llm_model: Option<String>,
+}
+
+impl ImportArgs {
+    fn to_argv(&self) -> Vec<String> {
+        let mut argv = Vec::new();
+        match &self.source {
+            ImportSource::Idgames { query } => {
+                argv.push("--idgames".into());
+                argv.push(query.clone());
+            }
+            ImportSource::Doomwiki { query } => {
+                argv.push("--doomwiki".into());
+                argv.push(query.clone());
+            }
+            ImportSource::Doomworld { url } => {
+                argv.push("--doomworld".into());
+                argv.push(url.clone());
+            }
+            ImportSource::Url { url } => {
+                // Render URL twice: once as the --url flag value (which selects
+                // URL import mode), and once as the positional source (which
+                // becomes the title fallback when --title is not set).
+                argv.push("--url".into());
+                argv.push(url.clone());
+                argv.push(url.clone());
+            }
+            ImportSource::Local { path } => {
+                argv.push("--local".into());
+                argv.push(path.clone());
+            }
+        }
+        push_opt(&mut argv, "--title", self.title.as_ref());
+        push_opt(&mut argv, "--author", self.author.as_ref());
+        push_opt(&mut argv, "--year", self.year.as_ref());
+        push_multi(&mut argv, "--tag", &self.tag);
+        push_opt(&mut argv, "--description", self.description.as_ref());
+        push_flag(&mut argv, "--force", self.force);
+        push_flag(&mut argv, "--multi", self.multi);
+        push_flag(&mut argv, "--smart", self.smart);
+        push_flag(&mut argv, "--no-smart", self.no_smart);
+        push_opt(&mut argv, "--llm-backend", self.llm_backend.as_ref());
+        push_opt(&mut argv, "--llm-model", self.llm_model.as_ref());
+        argv
+    }
+}
+
+// ---------- caco_gc ----------
+
+#[derive(Deserialize, schemars::JsonSchema, Default)]
+pub struct GcArgs {
+    /// Preview cleanup without deleting.
+    #[serde(default)]
+    pub dry_run: bool,
+    /// Preserve save files (.dsg/.zds) in data dirs.
+    #[serde(default)]
+    pub keep_saves: bool,
+    /// Preserve demo files (.lmp) in data dirs.
+    #[serde(default)]
+    pub keep_demos: bool,
+    /// Skip data directory cleanup entirely.
+    #[serde(default)]
+    pub keep_data: bool,
+    /// Skip cache file cleanup entirely.
+    #[serde(default)]
+    pub keep_cache: bool,
+    /// Skip companion file cleanup.
+    #[serde(default)]
+    pub keep_companions: bool,
+    /// Only clean orphaned data dirs, backups, and companion files.
+    #[serde(default)]
+    pub orphans_only: bool,
+    /// Query terms to mark WAD(s) as GC-ignored. Repeatable; each entry
+    /// becomes a separate `--ignore <value>` pair.
+    #[serde(default)]
+    pub ignore: Vec<String>,
+    /// Query terms to remove GC-ignore from WAD(s). Repeatable; each entry
+    /// becomes a separate `--unignore <value>` pair.
+    #[serde(default)]
+    pub unignore: Vec<String>,
+}
+
+impl GcArgs {
+    fn to_argv(&self) -> Vec<String> {
+        let mut argv = Vec::new();
+        // Always inject -y: gc has interactive y/n/i prompts that we must
+        // force non-interactive. There is no MCP equivalent of the interactive
+        // `i` (ignore-this-WAD) response — use the `ignore` parameter instead.
+        argv.push("-y".into());
+        push_flag(&mut argv, "--dry-run", self.dry_run);
+        push_flag(&mut argv, "--keep-saves", self.keep_saves);
+        push_flag(&mut argv, "--keep-demos", self.keep_demos);
+        push_flag(&mut argv, "--keep-data", self.keep_data);
+        push_flag(&mut argv, "--keep-cache", self.keep_cache);
+        push_flag(&mut argv, "--keep-companions", self.keep_companions);
+        push_flag(&mut argv, "--orphans-only", self.orphans_only);
+        push_multi(&mut argv, "--ignore", &self.ignore);
+        push_multi(&mut argv, "--unignore", &self.unignore);
+        argv
+    }
+}
+
 // ---------- tool router ----------
 
 #[tool_router(router = cli_tools_router, vis = "pub")]
@@ -1048,6 +1207,57 @@ impl CacoMcpServer {
         Parameters(args): Parameters<CollectionArgs>,
     ) -> Result<Json<CliResult>, rmcp::ErrorData> {
         let mut argv = vec!["collection".into()];
+        argv.extend(args.to_argv());
+        let runner = CliRunner { bin: &self.caco_bin, paths: &self.paths };
+        let result = runner.run(argv).await.map_err(|e| e.into_mcp_error())?;
+        Ok(Json(result))
+    }
+
+    #[tool(
+        name = "caco_import",
+        description = "Import a WAD from idgames, Doom Wiki, Doomworld, a URL, or a local \
+                       file. Mirrors `caco import`. Pass `source` as a discriminated object: \
+                       `{\"source\": \"idgames\", \"query\": \"18184\"}`, \
+                       `{\"source\": \"doomwiki\", \"query\": \"Sunder\"}`, \
+                       `{\"source\": \"doomworld\", \"url\": \"...\"}`, \
+                       `{\"source\": \"url\", \"url\": \"...\"}`, or \
+                       `{\"source\": \"local\", \"path\": \"...\"}`. \
+                       MCP LIMITATIONS: `idgames` with a non-numeric query (text search) \
+                       invokes an interactive picker and will not work over MCP — use a \
+                       numeric idgames ID for direct fetch. `doomwiki` ALWAYS invokes the \
+                       picker and will not work over MCP. `idgames`/`doomwiki` with a `.json` \
+                       file path also invokes the picker. `doomworld`, `url`, `local`, and \
+                       `idgames` with a numeric ID all work directly. `multi: true` requires \
+                       fzf and is non-functional over MCP."
+    )]
+    pub async fn caco_import(
+        &self,
+        Parameters(args): Parameters<ImportArgs>,
+    ) -> Result<Json<CliResult>, rmcp::ErrorData> {
+        let mut argv = vec!["import".into()];
+        argv.extend(args.to_argv());
+        let runner = CliRunner { bin: &self.caco_bin, paths: &self.paths };
+        let result = runner.run(argv).await.map_err(|e| e.into_mcp_error())?;
+        Ok(Json(result))
+    }
+
+    #[tool(
+        name = "caco_gc",
+        description = "Garbage-collect data for completed/abandoned WADs. Mirrors `caco gc`. \
+                       The CLI's interactive y/n/i prompts are forced non-interactive by \
+                       always injecting `-y`. There is no MCP equivalent of the interactive \
+                       `i` (ignore-this-WAD) response — use the `ignore` parameter ahead of \
+                       time to mark WADs as GC-ignored \
+                       (e.g. `ignore: [\"status:abandoned\"]` or `ignore: [\"id:5\", \"id:7\"]`). \
+                       `ignore` and `unignore` are repeatable: multiple values produce \
+                       multiple `--ignore` / `--unignore` flag pairs. Use `dry_run: true` to \
+                       preview without deleting."
+    )]
+    pub async fn caco_gc(
+        &self,
+        Parameters(args): Parameters<GcArgs>,
+    ) -> Result<Json<CliResult>, rmcp::ErrorData> {
+        let mut argv = vec!["gc".into()];
         argv.extend(args.to_argv());
         let runner = CliRunner { bin: &self.caco_bin, paths: &self.paths };
         let result = runner.run(argv).await.map_err(|e| e.into_mcp_error())?;
@@ -1737,5 +1947,294 @@ mod tests {
         let argv = args.to_argv();
         assert!(argv.windows(2).any(|w| w[0] == "--output" && w[1] == "table"));
         assert_eq!(argv.last().unwrap(), "favs");
+    }
+
+    // ---------- caco_import tests ----------
+
+    fn import_args(source: ImportSource) -> ImportArgs {
+        ImportArgs {
+            source,
+            title: None,
+            author: None,
+            year: None,
+            tag: vec![],
+            description: None,
+            force: false,
+            multi: false,
+            smart: false,
+            no_smart: false,
+            llm_backend: None,
+            llm_model: None,
+        }
+    }
+
+    #[test]
+    fn import_idgames_renders() {
+        let args = import_args(ImportSource::Idgames {
+            query: "18184".into(),
+        });
+        let argv = args.to_argv();
+        assert!(argv
+            .windows(2)
+            .any(|w| w[0] == "--idgames" && w[1] == "18184"));
+        // No other source flags
+        assert!(!argv.contains(&"--doomwiki".to_string()));
+        assert!(!argv.contains(&"--doomworld".to_string()));
+        assert!(!argv.contains(&"--url".to_string()));
+        assert!(!argv.contains(&"--local".to_string()));
+        // Default ImportArgs should not render any metadata flags.
+        assert!(!argv.contains(&"--force".to_string()));
+        assert!(!argv.contains(&"--multi".to_string()));
+        assert!(!argv.contains(&"--smart".to_string()));
+        assert!(!argv.contains(&"--no-smart".to_string()));
+        assert!(!argv.contains(&"--title".to_string()));
+        assert!(!argv.contains(&"--author".to_string()));
+    }
+
+    #[test]
+    fn import_doomwiki_renders() {
+        let args = import_args(ImportSource::Doomwiki {
+            query: "Sunder".into(),
+        });
+        let argv = args.to_argv();
+        assert!(argv
+            .windows(2)
+            .any(|w| w[0] == "--doomwiki" && w[1] == "Sunder"));
+        assert!(!argv.contains(&"--idgames".to_string()));
+    }
+
+    #[test]
+    fn import_doomworld_renders() {
+        let args = import_args(ImportSource::Doomworld {
+            url: "https://www.doomworld.com/forum/topic/12345/".into(),
+        });
+        let argv = args.to_argv();
+        assert!(argv.windows(2).any(|w| {
+            w[0] == "--doomworld"
+                && w[1] == "https://www.doomworld.com/forum/topic/12345/"
+        }));
+    }
+
+    #[test]
+    fn import_url_renders_url_twice() {
+        let url = "https://example.com/cool.zip";
+        let args = import_args(ImportSource::Url { url: url.into() });
+        let argv = args.to_argv();
+        // --url <url> is present
+        assert!(argv.windows(2).any(|w| w[0] == "--url" && w[1] == url));
+        // URL also appears as the positional source for title fallback —
+        // that means the URL string appears at least TWICE in the argv.
+        let url_count = argv.iter().filter(|s| s.as_str() == url).count();
+        assert_eq!(
+            url_count, 2,
+            "URL must render twice (once as --url value, once as positional), got {url_count}: {argv:?}"
+        );
+    }
+
+    #[test]
+    fn import_local_renders() {
+        let args = import_args(ImportSource::Local {
+            path: "/tmp/cool.wad".into(),
+        });
+        let argv = args.to_argv();
+        assert!(argv
+            .windows(2)
+            .any(|w| w[0] == "--local" && w[1] == "/tmp/cool.wad"));
+    }
+
+    #[test]
+    fn import_metadata_flags_render() {
+        let args = ImportArgs {
+            source: ImportSource::Idgames {
+                query: "18184".into(),
+            },
+            title: Some("Cool WAD".into()),
+            author: Some("DoomGuy".into()),
+            year: Some(1994),
+            tag: vec!["fun".into(), "hard".into()],
+            description: Some("A great wad".into()),
+            force: true,
+            multi: true,
+            smart: true,
+            no_smart: false,
+            llm_backend: Some("anthropic".into()),
+            llm_model: Some("claude-3-5".into()),
+        };
+        let argv = args.to_argv();
+        assert!(argv
+            .windows(2)
+            .any(|w| w[0] == "--title" && w[1] == "Cool WAD"));
+        assert!(argv
+            .windows(2)
+            .any(|w| w[0] == "--author" && w[1] == "DoomGuy"));
+        assert!(argv
+            .windows(2)
+            .any(|w| w[0] == "--year" && w[1] == "1994"));
+        assert!(argv
+            .windows(2)
+            .any(|w| w[0] == "--description" && w[1] == "A great wad"));
+        assert!(argv.contains(&"--force".to_string()));
+        assert!(argv.contains(&"--multi".to_string()));
+        assert!(argv.contains(&"--smart".to_string()));
+        assert!(!argv.contains(&"--no-smart".to_string()));
+        assert!(argv
+            .windows(2)
+            .any(|w| w[0] == "--llm-backend" && w[1] == "anthropic"));
+        assert!(argv
+            .windows(2)
+            .any(|w| w[0] == "--llm-model" && w[1] == "claude-3-5"));
+        // Two --tag pairs in argv
+        let tag_positions: Vec<_> = argv
+            .iter()
+            .enumerate()
+            .filter(|(_, v)| v.as_str() == "--tag")
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(tag_positions.len(), 2);
+        assert_eq!(argv[tag_positions[0] + 1], "fun");
+        assert_eq!(argv[tag_positions[1] + 1], "hard");
+    }
+
+    #[test]
+    fn import_metadata_flags_default_omit() {
+        let args = import_args(ImportSource::Local {
+            path: "/tmp/cool.wad".into(),
+        });
+        let argv = args.to_argv();
+        // None of the optional metadata flags should be in argv.
+        for flag in [
+            "--title",
+            "--author",
+            "--year",
+            "--description",
+            "--force",
+            "--multi",
+            "--smart",
+            "--no-smart",
+            "--llm-backend",
+            "--llm-model",
+            "--tag",
+        ] {
+            assert!(
+                !argv.contains(&flag.to_string()),
+                "default ImportArgs should not render {flag}, got {argv:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn import_no_smart_renders() {
+        let args = ImportArgs {
+            no_smart: true,
+            ..import_args(ImportSource::Doomworld {
+                url: "https://www.doomworld.com/forum/topic/1/".into(),
+            })
+        };
+        let argv = args.to_argv();
+        assert!(argv.contains(&"--no-smart".to_string()));
+        assert!(!argv.contains(&"--smart".to_string()));
+    }
+
+    // ---------- caco_gc tests ----------
+
+    #[test]
+    fn gc_default_injects_yes() {
+        let args = GcArgs::default();
+        let argv = args.to_argv();
+        assert!(
+            argv.contains(&"-y".to_string()),
+            "gc must always inject -y to force non-interactive, got {argv:?}"
+        );
+        // No other flags set by default.
+        assert!(!argv.contains(&"--dry-run".to_string()));
+        assert!(!argv.contains(&"--keep-saves".to_string()));
+        assert!(!argv.contains(&"--keep-demos".to_string()));
+        assert!(!argv.contains(&"--keep-data".to_string()));
+        assert!(!argv.contains(&"--keep-cache".to_string()));
+        assert!(!argv.contains(&"--keep-companions".to_string()));
+        assert!(!argv.contains(&"--orphans-only".to_string()));
+        assert!(!argv.contains(&"--ignore".to_string()));
+        assert!(!argv.contains(&"--unignore".to_string()));
+    }
+
+    #[test]
+    fn gc_keep_flags_render() {
+        let args = GcArgs {
+            keep_saves: true,
+            keep_demos: true,
+            keep_data: true,
+            keep_cache: true,
+            keep_companions: true,
+            ..GcArgs::default()
+        };
+        let argv = args.to_argv();
+        assert!(argv.contains(&"-y".to_string()));
+        assert!(argv.contains(&"--keep-saves".to_string()));
+        assert!(argv.contains(&"--keep-demos".to_string()));
+        assert!(argv.contains(&"--keep-data".to_string()));
+        assert!(argv.contains(&"--keep-cache".to_string()));
+        assert!(argv.contains(&"--keep-companions".to_string()));
+    }
+
+    #[test]
+    fn gc_ignore_renders_multi() {
+        let args = GcArgs {
+            ignore: vec!["status:abandoned".into(), "tag:fun".into()],
+            ..GcArgs::default()
+        };
+        let argv = args.to_argv();
+        let positions: Vec<_> = argv
+            .iter()
+            .enumerate()
+            .filter(|(_, v)| v.as_str() == "--ignore")
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(
+            positions.len(),
+            2,
+            "ignore must produce two --ignore flag pairs, got {argv:?}"
+        );
+        assert_eq!(argv[positions[0] + 1], "status:abandoned");
+        assert_eq!(argv[positions[1] + 1], "tag:fun");
+    }
+
+    #[test]
+    fn gc_unignore_renders_multi() {
+        let args = GcArgs {
+            unignore: vec!["id:5".into(), "id:7".into()],
+            ..GcArgs::default()
+        };
+        let argv = args.to_argv();
+        let positions: Vec<_> = argv
+            .iter()
+            .enumerate()
+            .filter(|(_, v)| v.as_str() == "--unignore")
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(positions.len(), 2);
+        assert_eq!(argv[positions[0] + 1], "id:5");
+        assert_eq!(argv[positions[1] + 1], "id:7");
+    }
+
+    #[test]
+    fn gc_orphans_only_renders() {
+        let args = GcArgs {
+            orphans_only: true,
+            ..GcArgs::default()
+        };
+        let argv = args.to_argv();
+        assert!(argv.contains(&"--orphans-only".to_string()));
+        assert!(argv.contains(&"-y".to_string()));
+    }
+
+    #[test]
+    fn gc_dry_run_renders() {
+        let args = GcArgs {
+            dry_run: true,
+            ..GcArgs::default()
+        };
+        let argv = args.to_argv();
+        assert!(argv.contains(&"--dry-run".to_string()));
+        assert!(argv.contains(&"-y".to_string()));
     }
 }
