@@ -332,19 +332,30 @@ pub fn sidebar_collection_item(
 
 /// Apply the warm dark theme to the egui context.
 pub fn apply_doom_theme(ctx: &egui::Context) {
-    // Add Noto Sans Symbols as a fallback font for arrows, checkmarks, etc.
+    // Bundle Noto Sans Symbols 1 + 2 as fallbacks. The two fonts are designed
+    // to complement each other: Symbols 2 covers dingbats (✓ ✗ ★), geometric
+    // shapes (▲ ● ○), and misc symbols (☆ ⚠) — the common UI glyphs — while
+    // Symbols 1 covers arrows and more esoteric blocks. Neither egui's
+    // bundled Ubuntu-Light nor NotoEmoji include plain dingbats like U+2713,
+    // so without this any such character renders as tofu.
     let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert(
+        "symbols2".to_owned(),
+        std::sync::Arc::new(egui::FontData::from_static(include_bytes!(
+            "../../../assets/fonts/NotoSansSymbols2-Regular.ttf"
+        ))),
+    );
     fonts.font_data.insert(
         "symbols".to_owned(),
         std::sync::Arc::new(egui::FontData::from_static(include_bytes!(
             "../../../assets/fonts/NotoSansSymbols-Regular.ttf"
         ))),
     );
-    if let Some(family) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
-        family.push("symbols".to_owned());
-    }
-    if let Some(family) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
-        family.push("symbols".to_owned());
+    for family_name in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+        if let Some(family) = fonts.families.get_mut(&family_name) {
+            family.push("symbols2".to_owned());
+            family.push("symbols".to_owned());
+        }
     }
     ctx.set_fonts(fonts);
 
