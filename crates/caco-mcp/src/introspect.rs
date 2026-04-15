@@ -102,7 +102,7 @@ impl CacoMcpServer {
                 other => CacoMcpError::from(other).into_mcp_error(),
             })?;
         let mut stmt = conn
-            .prepare("SELECT tag FROM wad_tags WHERE wad_id = ?1 ORDER BY tag")
+            .prepare("SELECT tag FROM tags WHERE wad_id = ?1 ORDER BY tag")
             .map_err(CacoMcpError::from)
             .map_err(|e| e.into_mcp_error())?;
         let tags: Vec<String> = stmt
