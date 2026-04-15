@@ -52,6 +52,20 @@ pub struct InspectCompanionsArgs {
     pub wad_id: Option<i64>,
 }
 
+#[derive(Deserialize, schemars::JsonSchema)]
+pub struct RunSqlArgs {
+    pub sql: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct RunSqlResult {
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<serde_json::Value>>,
+    pub truncated: bool,
+}
+
+pub const RUN_SQL_ROW_LIMIT: usize = 10_000;
+
 #[tool_router(router = introspect_router, vis = "pub")]
 impl CacoMcpServer {
     #[tool(
@@ -225,6 +239,76 @@ impl CacoMcpServer {
             .collect();
         Ok(Json(rows))
     }
+
+    #[tool(
+        name = "run_sql",
+        description = "Run a read-only SELECT against the sandbox DB. Rejects writes and \
+                       multi-statement input. Caps result at 10000 rows (sets `truncated: true` \
+                       when the cap is hit)."
+    )]
+    pub fn run_sql(
+        &self,
+        Parameters(args): Parameters<RunSqlArgs>,
+    ) -> std::result::Result<Json<RunSqlResult>, rmcp::ErrorData> {
+        execute_run_sql(&self.paths, &args.sql)
+            .map(Json)
+            .map_err(|e| e.into_mcp_error())
+    }
+}
+
+/// Run a read-only SELECT against the sandbox DB.
+///
+/// Guards: connection opened read-only, `prepare()`'d statement must be
+/// `readonly()`, and input containing a non-terminal `;` is rejected so that
+/// piggybacked statements can't slip through.
+pub fn execute_run_sql(paths: &SandboxPaths, sql: &str) -> Result<RunSqlResult> {
+    if has_trailing_statement(sql) {
+        return Err(CacoMcpError::SqlRejected {
+            reason: "multiple statements not allowed".into(),
+        });
+    }
+    let conn =
+        Connection::open_with_flags(paths.db_path(), OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let stmt = conn.prepare(sql)?;
+    if !stmt.readonly() {
+        return Err(CacoMcpError::SqlRejected {
+            reason: "statement is not read-only".into(),
+        });
+    }
+    let columns: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
+    let n = columns.len();
+    let mut stmt = stmt;
+    let mut q = stmt.query([])?;
+    let mut rows: Vec<Vec<serde_json::Value>> = Vec::new();
+    let mut truncated = false;
+    while let Some(row) = q.next()? {
+        if rows.len() >= RUN_SQL_ROW_LIMIT {
+            truncated = true;
+            break;
+        }
+        let mut vals = Vec::with_capacity(n);
+        for i in 0..n {
+            let v: rusqlite::types::Value = row.get(i)?;
+            vals.push(match v {
+                rusqlite::types::Value::Null => serde_json::Value::Null,
+                rusqlite::types::Value::Integer(x) => serde_json::json!(x),
+                rusqlite::types::Value::Real(x) => serde_json::json!(x),
+                rusqlite::types::Value::Text(x) => serde_json::json!(x),
+                rusqlite::types::Value::Blob(x) => serde_json::json!(hex::encode(&x)),
+            });
+        }
+        rows.push(vals);
+    }
+    Ok(RunSqlResult { columns, rows, truncated })
+}
+
+/// Returns true if `sql` contains a `;` that is not at end-of-string
+/// (ignoring trailing whitespace and trailing `;`s). This catches piggybacked
+/// multi-statement input. It misses `;` inside string literals, but rusqlite's
+/// `prepare()` + readonly check will catch anything effectful regardless.
+fn has_trailing_statement(sql: &str) -> bool {
+    let trimmed = sql.trim_end_matches(|c: char| c.is_whitespace() || c == ';');
+    trimmed.contains(';')
 }
 
 /// Convert a rusqlite row to a JSON object keyed by column name.
@@ -243,4 +327,110 @@ fn row_to_json(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Value> {
         map.insert(name.to_string(), json_val);
     }
     Ok(serde_json::Value::Object(map))
+}
+
+#[cfg(test)]
+mod run_sql_tests {
+    use super::*;
+    use rusqlite::Connection;
+    use tempfile::TempDir;
+
+    fn seed_sandbox() -> (TempDir, SandboxPaths) {
+        let dir = TempDir::new().unwrap();
+        let sandbox = dir.path().to_path_buf();
+        let db = sandbox.join("library.db");
+        let conn = Connection::open(&db).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE wads(id INTEGER PRIMARY KEY, title TEXT);
+             INSERT INTO wads VALUES (1, 'Doom'), (2, 'Doom II');",
+        )
+        .unwrap();
+        let paths = SandboxPaths {
+            sandbox,
+            source_home: dir.path().to_path_buf(),
+        };
+        (dir, paths)
+    }
+
+    #[test]
+    fn select_returns_rows() {
+        let (_d, paths) = seed_sandbox();
+        let res = execute_run_sql(&paths, "SELECT id, title FROM wads ORDER BY id").unwrap();
+        assert_eq!(res.columns, vec!["id", "title"]);
+        assert_eq!(res.rows.len(), 2);
+        assert_eq!(res.rows[0][1], serde_json::json!("Doom"));
+        assert!(!res.truncated);
+    }
+
+    #[test]
+    fn rejects_insert() {
+        let (_d, paths) = seed_sandbox();
+        let err =
+            execute_run_sql(&paths, "INSERT INTO wads VALUES (3, 'Final Doom')").unwrap_err();
+        assert!(matches!(
+            err,
+            CacoMcpError::SqlRejected { .. } | CacoMcpError::Database(_)
+        ));
+    }
+
+    #[test]
+    fn rejects_delete() {
+        let (_d, paths) = seed_sandbox();
+        let err = execute_run_sql(&paths, "DELETE FROM wads").unwrap_err();
+        assert!(matches!(
+            err,
+            CacoMcpError::SqlRejected { .. } | CacoMcpError::Database(_)
+        ));
+    }
+
+    #[test]
+    fn rejects_update() {
+        let (_d, paths) = seed_sandbox();
+        let err =
+            execute_run_sql(&paths, "UPDATE wads SET title = 'x' WHERE id = 1").unwrap_err();
+        assert!(matches!(
+            err,
+            CacoMcpError::SqlRejected { .. } | CacoMcpError::Database(_)
+        ));
+    }
+
+    #[test]
+    fn rejects_multiple_statements() {
+        let (_d, paths) = seed_sandbox();
+        let err = execute_run_sql(&paths, "SELECT 1; SELECT 2").unwrap_err();
+        assert!(matches!(err, CacoMcpError::SqlRejected { .. }));
+    }
+
+    #[test]
+    fn allows_trailing_semicolon_and_whitespace() {
+        let (_d, paths) = seed_sandbox();
+        let res = execute_run_sql(&paths, "SELECT id FROM wads ;  \n").unwrap();
+        assert_eq!(res.rows.len(), 2);
+    }
+
+    #[test]
+    fn truncates_at_limit() {
+        let (_d, paths) = seed_sandbox();
+        let conn = Connection::open(paths.db_path()).unwrap();
+        conn.execute_batch("CREATE TABLE big(x INTEGER);").unwrap();
+        let tx = conn.unchecked_transaction().unwrap();
+        for i in 0..(RUN_SQL_ROW_LIMIT as i64 + 1) {
+            tx.execute("INSERT INTO big VALUES (?1)", [i]).unwrap();
+        }
+        tx.commit().unwrap();
+        drop(conn);
+
+        let res = execute_run_sql(&paths, "SELECT x FROM big").unwrap();
+        assert_eq!(res.rows.len(), RUN_SQL_ROW_LIMIT);
+        assert!(res.truncated);
+    }
+
+    #[test]
+    fn has_trailing_statement_detection() {
+        assert!(!has_trailing_statement("SELECT 1"));
+        assert!(!has_trailing_statement("SELECT 1;"));
+        assert!(!has_trailing_statement("SELECT 1; \n"));
+        assert!(has_trailing_statement("SELECT 1; SELECT 2"));
+        assert!(has_trailing_statement("SELECT 1;;SELECT 2"));
+    }
 }
