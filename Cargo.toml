@@ -45,6 +45,7 @@ regex = "1"
 # Hashing / binary
 md-5 = "0.10"
 byteorder = "1"
+hex = "0.4"
 
 # Image processing
 image = { version = "0.25", default-features = false, features = ["png"] }

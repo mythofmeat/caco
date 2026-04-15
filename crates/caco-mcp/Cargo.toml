@@ -28,6 +28,7 @@ clap = { workspace = true }
 dirs = { workspace = true }
 anyhow = { workspace = true }
 chrono = { workspace = true }
+hex = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
