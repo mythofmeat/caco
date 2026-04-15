@@ -46,6 +46,12 @@ pub struct InspectSessionsArgs {
     pub limit: Option<u32>,
 }
 
+#[derive(Deserialize, schemars::JsonSchema, Default)]
+pub struct InspectCompanionsArgs {
+    #[serde(default)]
+    pub wad_id: Option<i64>,
+}
+
 #[tool_router(router = introspect_router, vis = "pub")]
 impl CacoMcpServer {
     #[tool(
@@ -124,6 +130,95 @@ impl CacoMcpServer {
                 rusqlite::params_from_iter(params.iter().map(|p| p.as_ref())),
                 row_to_json,
             )
+            .map_err(CacoMcpError::from)
+            .map_err(|e| e.into_mcp_error())?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(Json(rows))
+    }
+
+    #[tool(
+        name = "inspect_companions",
+        description = "Return companion registry rows. When `wad_id` is set, joins `wad_companions` \
+                       and returns only companions attached to that WAD, ordered by load_order."
+    )]
+    pub fn inspect_companions(
+        &self,
+        Parameters(args): Parameters<InspectCompanionsArgs>,
+    ) -> std::result::Result<Json<Vec<serde_json::Value>>, rmcp::ErrorData> {
+        let conn = open_ro(&self.paths).map_err(|e| e.into_mcp_error())?;
+        let rows: Vec<serde_json::Value> = match args.wad_id {
+            Some(wid) => {
+                let mut stmt = conn
+                    .prepare(
+                        "SELECT c.*, wc.wad_id, wc.enabled, wc.load_order \
+                         FROM companion_files_registry c \
+                         JOIN wad_companions wc ON wc.companion_id = c.id \
+                         WHERE wc.wad_id = ?1 \
+                         ORDER BY wc.load_order",
+                    )
+                    .map_err(CacoMcpError::from)
+                    .map_err(|e| e.into_mcp_error())?;
+                stmt.query_map([wid], row_to_json)
+                    .map_err(CacoMcpError::from)
+                    .map_err(|e| e.into_mcp_error())?
+                    .filter_map(|r| r.ok())
+                    .collect()
+            }
+            None => {
+                let mut stmt = conn
+                    .prepare("SELECT * FROM companion_files_registry ORDER BY id")
+                    .map_err(CacoMcpError::from)
+                    .map_err(|e| e.into_mcp_error())?;
+                stmt.query_map([], row_to_json)
+                    .map_err(CacoMcpError::from)
+                    .map_err(|e| e.into_mcp_error())?
+                    .filter_map(|r| r.ok())
+                    .collect()
+            }
+        };
+        Ok(Json(rows))
+    }
+
+    #[tool(
+        name = "inspect_iwads",
+        description = "Return all registered IWADs, ordered by family then variant. Note: \
+                       priority is resolved in code against the user config, not stored in \
+                       the iwads table — rows here are the raw registry."
+    )]
+    pub fn inspect_iwads(
+        &self,
+        _p: Parameters<EmptyArgs>,
+    ) -> std::result::Result<Json<Vec<serde_json::Value>>, rmcp::ErrorData> {
+        let conn = open_ro(&self.paths).map_err(|e| e.into_mcp_error())?;
+        let mut stmt = conn
+            .prepare("SELECT * FROM iwads ORDER BY family, variant")
+            .map_err(CacoMcpError::from)
+            .map_err(|e| e.into_mcp_error())?;
+        let rows: Vec<serde_json::Value> = stmt
+            .query_map([], row_to_json)
+            .map_err(CacoMcpError::from)
+            .map_err(|e| e.into_mcp_error())?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(Json(rows))
+    }
+
+    #[tool(
+        name = "inspect_id24",
+        description = "Return all registered id24 WADs from the `id24_wads` table, ordered by name."
+    )]
+    pub fn inspect_id24(
+        &self,
+        _p: Parameters<EmptyArgs>,
+    ) -> std::result::Result<Json<Vec<serde_json::Value>>, rmcp::ErrorData> {
+        let conn = open_ro(&self.paths).map_err(|e| e.into_mcp_error())?;
+        let mut stmt = conn
+            .prepare("SELECT * FROM id24_wads ORDER BY name")
+            .map_err(CacoMcpError::from)
+            .map_err(|e| e.into_mcp_error())?;
+        let rows: Vec<serde_json::Value> = stmt
+            .query_map([], row_to_json)
             .map_err(CacoMcpError::from)
             .map_err(|e| e.into_mcp_error())?
             .filter_map(|r| r.ok())
