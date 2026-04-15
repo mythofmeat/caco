@@ -77,6 +77,23 @@ pub fn check_completion(analysis: &WadAnalysis, stats: &WadStats) -> CompletionV
         }
     }
 
+    // Bypassed-map heuristic: if the terminal map has been exited, any other
+    // required map with zero exits was bypassed by the WAD's actual play flow.
+    // Static analysis can't always reconstruct DEHACKED-patched progressions or
+    // custom exit handling (e.g. Pina Colada 2's MAP27 is an orphan slot that
+    // MAP26's patched exit skips over to reach MAP28). Treat reaching the
+    // credits as the authoritative completion signal.
+    if let Some(term) = &analysis.terminal_map
+        && !terminal_is_dead_end
+    {
+        let term_exits = stats_map.get(term.as_str()).copied().unwrap_or(0);
+        if term_exits >= 1 {
+            required_lumps.retain(|lump| {
+                lump == term || stats_map.get(lump.as_str()).copied().unwrap_or(0) >= 1
+            });
+        }
+    }
+
     // Count how many required maps have been exited
     let exited = required_lumps
         .iter()
@@ -484,6 +501,185 @@ mod tests {
                 eprintln!("  No stats snapshot");
             }
         }
+    }
+
+    #[test]
+    fn test_bypassed_intermediate_map_excluded_when_terminal_exited() {
+        // Reproduces Pina Colada 2 (WAD id:61): 28 map slots exist in the WAD
+        // but only 27 are in the real play flow. MAP27 is an orphan slot that
+        // MAP26's patched exit skips over. Player exited MAP01-MAP26 + MAP28
+        // (the credits map); MAP27 has zero exits because it's unreachable in
+        // normal play. Auto-completion should fire because the terminal map
+        // has been exited.
+        let map_names: Vec<String> = (1..=28).map(|i| format!("MAP{i:02}")).collect();
+        let map_refs: Vec<&str> = map_names.iter().map(|s| s.as_str()).collect();
+        let analysis = make_analysis(&map_refs, &[], &[], Some("MAP28"));
+
+        let stat_owned: Vec<(String, i32)> = (1..=26)
+            .map(|i| (format!("MAP{i:02}"), 1))
+            .chain(std::iter::once(("MAP27".to_string(), 0)))
+            .chain(std::iter::once(("MAP28".to_string(), 1)))
+            .collect();
+        let stat_entries: Vec<(&str, i32)> = stat_owned
+            .iter()
+            .map(|(l, n)| (l.as_str(), *n))
+            .collect();
+        let stats = make_stats(&stat_entries);
+
+        assert_eq!(check_completion(&analysis, &stats), CompletionVerdict::Complete);
+    }
+
+    #[test]
+    fn test_bypass_excludes_multiple_zero_exit_maps() {
+        // Two orphan map slots in the WAD (MAP27 and MAP29), terminal MAP30
+        // reached by the player. Both orphans should be excluded.
+        let map_names: Vec<String> = (1..=30).map(|i| format!("MAP{i:02}")).collect();
+        let map_refs: Vec<&str> = map_names.iter().map(|s| s.as_str()).collect();
+        let analysis = make_analysis(&map_refs, &[], &[], Some("MAP30"));
+
+        // Exit everything except MAP27 and MAP29
+        let stat_owned: Vec<(String, i32)> = (1..=30)
+            .filter(|i| *i != 27 && *i != 29)
+            .map(|i| (format!("MAP{i:02}"), 1))
+            .chain(std::iter::once(("MAP27".to_string(), 0)))
+            .chain(std::iter::once(("MAP29".to_string(), 0)))
+            .collect();
+        let stat_entries: Vec<(&str, i32)> = stat_owned
+            .iter()
+            .map(|(l, n)| (l.as_str(), *n))
+            .collect();
+        let stats = make_stats(&stat_entries);
+
+        assert_eq!(check_completion(&analysis, &stats), CompletionVerdict::Complete);
+    }
+
+    #[test]
+    fn test_bypass_preserves_secret_map_exclusion() {
+        // Secret maps (MAP31/MAP32) are already filtered before the bypass
+        // heuristic runs — whether they have exits or not shouldn't matter.
+        let analysis = make_analysis(
+            &["MAP01", "MAP02", "MAP03", "MAP31", "MAP32"],
+            &["MAP31", "MAP32"],
+            &[],
+            Some("MAP03"),
+        );
+        // All main maps exited, secrets untouched
+        let stats = make_stats(&[
+            ("MAP01", 1),
+            ("MAP02", 1),
+            ("MAP03", 1),
+            ("MAP31", 0),
+            ("MAP32", 0),
+        ]);
+        assert_eq!(check_completion(&analysis, &stats), CompletionVerdict::Complete);
+    }
+
+    #[test]
+    fn test_bypass_warp_to_terminal_only_completes() {
+        // Known trade-off: if the player warps straight to the terminal and
+        // exits it, the bypass heuristic excludes every other required map
+        // and marks the WAD complete. This documents the current behavior so
+        // any future tightening is a conscious choice, not an accident.
+        let analysis = make_analysis(
+            &["MAP01", "MAP02", "MAP03", "MAP04", "MAP05"],
+            &[],
+            &[],
+            Some("MAP05"),
+        );
+        // Only terminal exited via warp
+        let stats = make_stats(&[
+            ("MAP01", 0),
+            ("MAP02", 0),
+            ("MAP03", 0),
+            ("MAP04", 0),
+            ("MAP05", 1),
+        ]);
+        assert_eq!(check_completion(&analysis, &stats), CompletionVerdict::Complete);
+    }
+
+    #[test]
+    fn test_bypass_no_terminal_map_no_effect() {
+        // Analysis with no terminal (rare but possible — e.g. single-map WAD
+        // with no endgame markers). The bypass block is guarded by
+        // `terminal_map`; a missing terminal means the heuristic never fires.
+        let analysis = WadAnalysis {
+            version: 0,
+            total_maps: 3,
+            required_maps: 3,
+            secret_maps: vec![],
+            dead_end_maps: vec![],
+            terminal_map: None,
+            has_umapinfo: false,
+            maps: vec!["MAP01", "MAP02", "MAP03"]
+                .iter()
+                .map(|&n| MapInfo {
+                    lump: n.to_string(),
+                    has_normal_exit: true,
+                    has_secret_exit: false,
+                    is_secret: false,
+                    is_dead_end: false,
+                    is_terminal: false,
+                    reachable: true,
+                })
+                .collect(),
+        };
+        // MAP03 unexited — without a terminal, the heuristic can't fire, so
+        // this must still read as Incomplete.
+        let stats = make_stats(&[("MAP01", 1), ("MAP02", 1), ("MAP03", 0)]);
+        assert!(matches!(
+            check_completion(&analysis, &stats),
+            CompletionVerdict::Incomplete { .. }
+        ));
+    }
+
+    #[test]
+    fn test_bypass_preserves_dead_end_exclusion() {
+        // A dead-end map (e.g. MAP08 in PC2) is filtered before the bypass
+        // heuristic runs. Even though its exit count is irrelevant to the
+        // required set, this sanity-checks that the heuristic doesn't
+        // re-introduce dead-ends by accident.
+        let analysis = make_analysis(
+            &["MAP01", "MAP02", "MAP03", "MAP04"],
+            &[],
+            &["MAP02"],
+            Some("MAP04"),
+        );
+        // MAP02 is dead-end (excluded). MAP03 was never entered. Player
+        // warped to MAP04 and exited.
+        let stats = make_stats(&[
+            ("MAP01", 1),
+            ("MAP02", 0),
+            ("MAP03", 0),
+            ("MAP04", 1),
+        ]);
+        // Required before heuristic: MAP01, MAP03, MAP04 (MAP02 is dead-end).
+        // Bypass fires (terminal exited): MAP03 removed. MAP01 retained.
+        // Required = {MAP01, MAP04}, Exited = 2 → Complete.
+        assert_eq!(check_completion(&analysis, &stats), CompletionVerdict::Complete);
+    }
+
+    #[test]
+    fn test_bypassed_heuristic_not_applied_when_terminal_not_exited() {
+        // Same orphan-slot shape as the PC2 case, but the player hasn't
+        // reached the credits map yet. The heuristic must stay conservative
+        // mid-playthrough: MAP27 with zero exits still counts as missing.
+        let map_names: Vec<String> = (1..=28).map(|i| format!("MAP{i:02}")).collect();
+        let map_refs: Vec<&str> = map_names.iter().map(|s| s.as_str()).collect();
+        let analysis = make_analysis(&map_refs, &[], &[], Some("MAP28"));
+
+        let stat_owned: Vec<(String, i32)> = (1..=25)
+            .map(|i| (format!("MAP{i:02}"), 1))
+            .collect();
+        let stat_entries: Vec<(&str, i32)> = stat_owned
+            .iter()
+            .map(|(l, n)| (l.as_str(), *n))
+            .collect();
+        let stats = make_stats(&stat_entries);
+
+        assert!(matches!(
+            check_completion(&analysis, &stats),
+            CompletionVerdict::Incomplete { .. }
+        ));
     }
 
     #[test]
