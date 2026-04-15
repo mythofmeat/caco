@@ -6,6 +6,7 @@ use serde::Deserialize;
 
 use crate::cli_runner::{CliResult, CliRunner};
 use crate::cli_tools_macros::{push_flag, push_multi, push_opt};
+use crate::schema_transform::flatten_action_enum;
 use crate::server::CacoMcpServer;
 
 // ---------- caco_ls ----------
@@ -246,6 +247,7 @@ impl ModifyArgs {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(tag = "action", rename_all = "lowercase")]
+#[schemars(transform = flatten_action_enum)]
 pub enum CacheArgs {
     /// List cached WADs.
     List {
@@ -378,6 +380,7 @@ impl ConfigArgs {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(tag = "action", rename_all = "lowercase")]
+#[schemars(transform = flatten_action_enum)]
 pub enum SavesArgs {
     /// List save files for a WAD.
     List {
@@ -470,6 +473,7 @@ impl SavesArgs {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(tag = "action", rename_all = "lowercase")]
+#[schemars(transform = flatten_action_enum)]
 pub enum DemosArgs {
     /// List demo files for a WAD.
     List {
@@ -541,6 +545,7 @@ impl DemosArgs {
 /// MCP. Use `path` to locate the file and edit it out-of-band if needed.
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(tag = "action", rename_all = "lowercase")]
+#[schemars(transform = flatten_action_enum)]
 pub enum ProfileArgs {
     /// List config profiles.
     Ls {
@@ -626,6 +631,7 @@ impl ProfileArgs {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(tag = "action", rename_all = "lowercase")]
+#[schemars(transform = flatten_action_enum)]
 pub enum CompanionArgs {
     /// Register a companion file and link to a WAD.
     Add {
@@ -710,6 +716,7 @@ impl CompanionArgs {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(tag = "action", rename_all = "lowercase")]
+#[schemars(transform = flatten_action_enum)]
 pub enum CollectionArgs {
     /// Create a new smart collection.
     Add {
@@ -777,6 +784,7 @@ impl CollectionArgs {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "lowercase")]
+#[schemars(inline)]
 pub enum ImportSource {
     /// idgames archive. `query` may be a numeric ID (direct fetch, no picker),
     /// a text query (invokes interactive picker — won't work over MCP), or a

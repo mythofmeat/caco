@@ -11,4 +11,5 @@ pub mod introspect;
 pub mod reset;
 pub mod sandbox;
 pub mod sandbox_tools;
+pub mod schema_transform;
 pub mod server;

@@ -34,8 +34,17 @@ pub struct InspectWadArgs {
 
 #[derive(Serialize, schemars::JsonSchema)]
 pub struct InspectedWad {
-    pub record: serde_json::Value,
+    pub record: serde_json::Map<String, serde_json::Value>,
     pub tags: Vec<String>,
+}
+
+/// Wrapper returned by `inspect_*` tools whose payload is a list of DB rows.
+/// MCP clients (Claude Code's Zod validator in particular) reject tool
+/// output schemas whose root isn't `type: "object"`, so every list-returning
+/// tool packages its rows here.
+#[derive(Serialize, schemars::JsonSchema)]
+pub struct InspectRows {
+    pub rows: Vec<serde_json::Value>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema, Default)]
@@ -93,7 +102,7 @@ impl CacoMcpServer {
         Parameters(args): Parameters<InspectWadArgs>,
     ) -> std::result::Result<Json<InspectedWad>, rmcp::ErrorData> {
         let conn = open_ro(&self.paths).map_err(|e| e.into_mcp_error())?;
-        let record: serde_json::Value = conn
+        let record_val: serde_json::Value = conn
             .query_row("SELECT * FROM wads WHERE id = ?1", [args.id], row_to_json)
             .map_err(|e| match e {
                 rusqlite::Error::QueryReturnedNoRows => {
@@ -101,6 +110,10 @@ impl CacoMcpServer {
                 }
                 other => CacoMcpError::from(other).into_mcp_error(),
             })?;
+        let record = match record_val {
+            serde_json::Value::Object(m) => m,
+            _ => serde_json::Map::new(),
+        };
         let mut stmt = conn
             .prepare("SELECT tag FROM tags WHERE wad_id = ?1 ORDER BY tag")
             .map_err(CacoMcpError::from)
@@ -121,7 +134,7 @@ impl CacoMcpServer {
     pub fn inspect_sessions(
         &self,
         Parameters(args): Parameters<InspectSessionsArgs>,
-    ) -> std::result::Result<Json<Vec<serde_json::Value>>, rmcp::ErrorData> {
+    ) -> std::result::Result<Json<InspectRows>, rmcp::ErrorData> {
         let conn = open_ro(&self.paths).map_err(|e| e.into_mcp_error())?;
         let limit = args.limit.unwrap_or(100).min(10_000);
         let (sql, params): (&str, Vec<Box<dyn rusqlite::ToSql>>) = if let Some(wid) = args.wad_id {
@@ -148,7 +161,7 @@ impl CacoMcpServer {
             .map_err(|e| e.into_mcp_error())?
             .filter_map(|r| r.ok())
             .collect();
-        Ok(Json(rows))
+        Ok(Json(InspectRows { rows }))
     }
 
     #[tool(
@@ -159,7 +172,7 @@ impl CacoMcpServer {
     pub fn inspect_companions(
         &self,
         Parameters(args): Parameters<InspectCompanionsArgs>,
-    ) -> std::result::Result<Json<Vec<serde_json::Value>>, rmcp::ErrorData> {
+    ) -> std::result::Result<Json<InspectRows>, rmcp::ErrorData> {
         let conn = open_ro(&self.paths).map_err(|e| e.into_mcp_error())?;
         let rows: Vec<serde_json::Value> = match args.wad_id {
             Some(wid) => {
@@ -191,7 +204,7 @@ impl CacoMcpServer {
                     .collect()
             }
         };
-        Ok(Json(rows))
+        Ok(Json(InspectRows { rows }))
     }
 
     #[tool(
@@ -203,7 +216,7 @@ impl CacoMcpServer {
     pub fn inspect_iwads(
         &self,
         _p: Parameters<EmptyArgs>,
-    ) -> std::result::Result<Json<Vec<serde_json::Value>>, rmcp::ErrorData> {
+    ) -> std::result::Result<Json<InspectRows>, rmcp::ErrorData> {
         let conn = open_ro(&self.paths).map_err(|e| e.into_mcp_error())?;
         let mut stmt = conn
             .prepare("SELECT * FROM iwads ORDER BY family, variant")
@@ -215,7 +228,7 @@ impl CacoMcpServer {
             .map_err(|e| e.into_mcp_error())?
             .filter_map(|r| r.ok())
             .collect();
-        Ok(Json(rows))
+        Ok(Json(InspectRows { rows }))
     }
 
     #[tool(
@@ -225,7 +238,7 @@ impl CacoMcpServer {
     pub fn inspect_id24(
         &self,
         _p: Parameters<EmptyArgs>,
-    ) -> std::result::Result<Json<Vec<serde_json::Value>>, rmcp::ErrorData> {
+    ) -> std::result::Result<Json<InspectRows>, rmcp::ErrorData> {
         let conn = open_ro(&self.paths).map_err(|e| e.into_mcp_error())?;
         let mut stmt = conn
             .prepare("SELECT * FROM id24_wads ORDER BY name")
@@ -237,7 +250,7 @@ impl CacoMcpServer {
             .map_err(|e| e.into_mcp_error())?
             .filter_map(|r| r.ok())
             .collect();
-        Ok(Json(rows))
+        Ok(Json(InspectRows { rows }))
     }
 
     #[tool(
