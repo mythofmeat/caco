@@ -170,6 +170,15 @@ crates/
 │           ├── form_panel.rs   # URL/local/Doomworld forms
 │           ├── state.rs        # Import state management
 │           └── workers.rs      # Async import operations
+├── caco-mcp/           # MCP server (rmcp) — sandboxed library access for LLMs
+│   └── src/
+│       ├── main.rs, lib.rs, server.rs  # Entry point, CacoMcpServer, rmcp ServerHandler
+│       ├── sandbox.rs, reset.rs        # Sandbox paths, safety guard, bootstrap
+│       ├── bin_resolve.rs, cli_runner.rs # Dev caco bin discovery + shell-out
+│       ├── cli_tools.rs                # 17 caco_* tools (1:1 with CLI commands)
+│       ├── cli_tools_macros.rs         # push_flag/push_opt/push_multi helpers
+│       ├── sandbox_tools.rs            # sandbox_info, reset_sandbox
+│       └── introspect.rs               # 7 inspect_* tools + run_sql (read-only)
 ```
 
 ## Rust Dependencies

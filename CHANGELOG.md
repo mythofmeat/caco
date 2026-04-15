@@ -5,6 +5,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- MCP server (`caco-mcp`): new workspace crate and `caco-mcp-server` binary exposing 17 CLI commands (`caco_ls`, `caco_info`, `caco_modify`, `caco_trash`, `caco_random`, `caco_import`, `caco_cache`, `caco_stats`, `caco_sessions`, `caco_saves`, `caco_demos`, `caco_collection`, `caco_companion`, `caco_profile`, `caco_enrich`, `caco_gc`, `caco_config`) and 7 read-only DB introspection tools (`inspect_schema_version`, `inspect_wad`, `inspect_sessions`, `inspect_companions`, `inspect_iwads`, `inspect_id24`, `run_sql`) over the Model Context Protocol. All operations run against a sandboxed copy of the user's library; a hard safety guard refuses any path that resolves to the real `CACO_HOME` / `XDG_DATA_HOME/caco`. `run_sql` opens the DB read-only, requires `Statement::readonly()`, and rejects multi-statement input.
+
 ## [2.2.0] — 2026-04-08
 
 ### Added
