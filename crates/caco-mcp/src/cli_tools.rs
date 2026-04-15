@@ -344,7 +344,9 @@ pub struct SessionsArgs {
     /// Plain TSV output.
     #[serde(default)]
     pub plain: bool,
-    /// Auto-select first match. REQUIRED in MCP context when the query matches multiple WADs.
+    /// Maps to `caco sessions -y`. NOTE: has no effect in MCP context — `caco sessions`
+    /// uses interactive picker mode (`ResolveMode::Pick`), which ignores `--yes`. To select
+    /// a single WAD reliably, pass a precise query like `id:N` instead.
     #[serde(default)]
     pub yes: bool,
 }
@@ -517,10 +519,11 @@ impl CacoMcpServer {
 
     #[tool(
         name = "caco_sessions",
-        description = "Show play session history for a specific WAD. Mirrors `caco sessions`. \
-                       The query must identify a single WAD — use an ID or a precise title. \
-                       Set `yes: true` to auto-select the first match if the query is broad \
-                       (required in MCP context when interactive selection is unavailable)."
+        description = "Show play-session history for a WAD. Mirrors `caco sessions`. \
+                       Query must identify a single WAD — use an ID like `id:N` or a \
+                       sufficiently specific title. Broad queries that match multiple WADs \
+                       will invoke an interactive picker that does not work reliably over MCP, \
+                       even with `yes: true`."
     )]
     pub async fn caco_sessions(
         &self,
