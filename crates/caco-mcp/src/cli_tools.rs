@@ -5,7 +5,7 @@ use rmcp::{tool, tool_router};
 use serde::Deserialize;
 
 use crate::cli_runner::{CliResult, CliRunner};
-use crate::cli_tools_macros::{push_flag, push_opt};
+use crate::cli_tools_macros::{push_flag, push_multi, push_opt};
 use crate::server::CacoMcpServer;
 
 // ---------- caco_ls ----------
@@ -187,6 +187,191 @@ impl EnrichArgs {
     }
 }
 
+// ---------- caco_modify ----------
+
+#[derive(Deserialize, schemars::JsonSchema, Default)]
+pub struct ModifyArgs {
+    /// Query terms and modifier tokens interleaved as the CLI expects them.
+    /// E.g. ["id:5", "tag+hard", "beaten+1", "author=Doomer"].
+    /// The first tokens match WADs; the remainder apply changes. See `caco modify --help`.
+    #[serde(default)]
+    pub terms: Vec<String>,
+    /// Completion notes (for beaten+ actions).
+    #[serde(default)]
+    pub notes: Option<String>,
+    /// Completion date override (ISO 8601).
+    #[serde(default)]
+    pub date: Option<String>,
+    /// Attach a stats file (path) to the WAD.
+    #[serde(default)]
+    pub stats_file: Option<String>,
+    /// Target completion timestamp when attaching stats (prefix match).
+    #[serde(default)]
+    pub beaten: Option<String>,
+    /// Link a local file to the WAD cache.
+    #[serde(default)]
+    pub link: Option<String>,
+    /// Companion files to add (paths; repeatable).
+    #[serde(default)]
+    pub add_files: Vec<String>,
+    /// Companion files to remove (identifiers; repeatable).
+    #[serde(default)]
+    pub remove_files: Vec<String>,
+    /// Preview changes without applying.
+    #[serde(default)]
+    pub dry_run: bool,
+    /// Skip confirmations. REQUIRED in MCP context when the query matches multiple WADs.
+    #[serde(default)]
+    pub yes: bool,
+}
+
+impl ModifyArgs {
+    fn to_argv(&self) -> Vec<String> {
+        let mut argv = Vec::new();
+        push_opt(&mut argv, "--notes", self.notes.as_ref());
+        push_opt(&mut argv, "--date", self.date.as_ref());
+        push_opt(&mut argv, "--stats-file", self.stats_file.as_ref());
+        push_opt(&mut argv, "--beaten", self.beaten.as_ref());
+        push_opt(&mut argv, "--link", self.link.as_ref());
+        push_multi(&mut argv, "--add-file", &self.add_files);
+        push_multi(&mut argv, "--remove-file", &self.remove_files);
+        push_flag(&mut argv, "--dry-run", self.dry_run);
+        push_flag(&mut argv, "--yes", self.yes);
+        argv.extend(self.terms.clone());
+        argv
+    }
+}
+
+// ---------- caco_cache ----------
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(tag = "action", rename_all = "lowercase")]
+pub enum CacheArgs {
+    /// List cached WADs.
+    List {
+        /// Plain TSV output.
+        #[serde(default)]
+        plain: bool,
+        /// Show orphaned cache files.
+        #[serde(default)]
+        orphans: bool,
+    },
+    /// Remove cached WAD files.
+    Clear {
+        /// Query terms (required unless `all` is true).
+        #[serde(default)]
+        query: Vec<String>,
+        /// Clear every cached file.
+        #[serde(default)]
+        all: bool,
+        /// Preview changes without deleting.
+        #[serde(default)]
+        dry_run: bool,
+        /// Skip confirmation.
+        #[serde(default)]
+        yes: bool,
+    },
+    /// Remove orphaned cache files.
+    Prune {
+        /// Preview changes.
+        #[serde(default)]
+        dry_run: bool,
+        /// Skip confirmation.
+        #[serde(default)]
+        yes: bool,
+    },
+}
+
+impl CacheArgs {
+    fn to_argv(&self) -> Vec<String> {
+        match self {
+            CacheArgs::List { plain, orphans } => {
+                let mut argv = vec!["list".into()];
+                push_flag(&mut argv, "--plain", *plain);
+                push_flag(&mut argv, "--orphans", *orphans);
+                argv
+            }
+            CacheArgs::Clear { query, all, dry_run, yes } => {
+                let mut argv = vec!["clear".into()];
+                push_flag(&mut argv, "--all", *all);
+                push_flag(&mut argv, "--dry-run", *dry_run);
+                push_flag(&mut argv, "--yes", *yes);
+                argv.extend(query.clone());
+                argv
+            }
+            CacheArgs::Prune { dry_run, yes } => {
+                let mut argv = vec!["prune".into()];
+                push_flag(&mut argv, "--dry-run", *dry_run);
+                push_flag(&mut argv, "--yes", *yes);
+                argv
+            }
+        }
+    }
+}
+
+// ---------- caco_stats ----------
+
+#[derive(Deserialize, schemars::JsonSchema, Default)]
+pub struct StatsArgs {
+    /// Group activity by "month" (default) or "year".
+    #[serde(default)]
+    pub period: Option<String>,
+    /// Number of periods to show (default: 12).
+    #[serde(default)]
+    pub limit: Option<u32>,
+    /// Key=value (plain) output.
+    #[serde(default)]
+    pub plain: bool,
+}
+
+impl StatsArgs {
+    fn to_argv(&self) -> Vec<String> {
+        let mut argv = Vec::new();
+        push_opt(&mut argv, "--period", self.period.as_ref());
+        push_opt(&mut argv, "--limit", self.limit.as_ref());
+        push_flag(&mut argv, "--plain", self.plain);
+        argv
+    }
+}
+
+// ---------- caco_sessions ----------
+
+#[derive(Deserialize, schemars::JsonSchema, Default)]
+pub struct SessionsArgs {
+    /// Query or WAD id to select the WAD.
+    #[serde(default)]
+    pub query: Vec<String>,
+    /// Plain TSV output.
+    #[serde(default)]
+    pub plain: bool,
+    /// Auto-select first match. REQUIRED in MCP context when the query matches multiple WADs.
+    #[serde(default)]
+    pub yes: bool,
+}
+
+impl SessionsArgs {
+    fn to_argv(&self) -> Vec<String> {
+        let mut argv = Vec::new();
+        push_flag(&mut argv, "--plain", self.plain);
+        push_flag(&mut argv, "--yes", self.yes);
+        argv.extend(self.query.clone());
+        argv
+    }
+}
+
+// ---------- caco_config ----------
+
+/// READ-ONLY: prints the current config file to stdout.
+/// The `--edit` flag is deliberately not exposed because it spawns $EDITOR interactively.
+#[derive(Deserialize, schemars::JsonSchema, Default)]
+pub struct ConfigArgs {}
+
+impl ConfigArgs {
+    fn to_argv(&self) -> Vec<String> {
+        Vec::new()
+    }
+}
+
 // ---------- tool router ----------
 
 #[tool_router(router = cli_tools_router, vis = "pub")]
@@ -270,6 +455,96 @@ impl CacoMcpServer {
         Parameters(args): Parameters<EnrichArgs>,
     ) -> Result<Json<CliResult>, rmcp::ErrorData> {
         let mut argv = vec!["enrich".into()];
+        argv.extend(args.to_argv());
+        let runner = CliRunner { bin: &self.caco_bin, paths: &self.paths };
+        let result = runner.run(argv).await.map_err(|e| e.into_mcp_error())?;
+        Ok(Json(result))
+    }
+
+    #[tool(
+        name = "caco_modify",
+        description = "Modify WAD metadata, tags, and completions. Mirrors `caco modify`. \
+                       Pass query terms and action tokens interleaved in `terms` \
+                       (e.g. [\"id:5\", \"tag+hard\", \"beaten+1\"]). \
+                       When the query matches multiple WADs, set `yes: true` to apply to all \
+                       without a confirmation prompt (required in MCP context — stdin is not a tty)."
+    )]
+    pub async fn caco_modify(
+        &self,
+        Parameters(args): Parameters<ModifyArgs>,
+    ) -> Result<Json<CliResult>, rmcp::ErrorData> {
+        let mut argv = vec!["modify".into()];
+        argv.extend(args.to_argv());
+        let runner = CliRunner { bin: &self.caco_bin, paths: &self.paths };
+        let result = runner.run(argv).await.map_err(|e| e.into_mcp_error())?;
+        Ok(Json(result))
+    }
+
+    #[tool(
+        name = "caco_cache",
+        description = "List, clear, or prune the WAD download cache. Mirrors `caco cache`. \
+                       Pass `{\"action\": \"list\"}`, `{\"action\": \"clear\", ...}`, \
+                       or `{\"action\": \"prune\", ...}`. \
+                       Set `yes: true` to skip confirmation prompts (required in MCP context)."
+    )]
+    pub async fn caco_cache(
+        &self,
+        Parameters(args): Parameters<CacheArgs>,
+    ) -> Result<Json<CliResult>, rmcp::ErrorData> {
+        let mut argv = vec!["cache".into()];
+        argv.extend(args.to_argv());
+        let runner = CliRunner { bin: &self.caco_bin, paths: &self.paths };
+        let result = runner.run(argv).await.map_err(|e| e.into_mcp_error())?;
+        Ok(Json(result))
+    }
+
+    #[tool(
+        name = "caco_stats",
+        description = "Show library play statistics grouped by month or year. \
+                       Mirrors `caco stats`. \
+                       Omit `period` and `limit` to use CLI defaults (month, 12 periods)."
+    )]
+    pub async fn caco_stats(
+        &self,
+        Parameters(args): Parameters<StatsArgs>,
+    ) -> Result<Json<CliResult>, rmcp::ErrorData> {
+        let mut argv = vec!["stats".into()];
+        argv.extend(args.to_argv());
+        let runner = CliRunner { bin: &self.caco_bin, paths: &self.paths };
+        let result = runner.run(argv).await.map_err(|e| e.into_mcp_error())?;
+        Ok(Json(result))
+    }
+
+    #[tool(
+        name = "caco_sessions",
+        description = "Show play session history for a specific WAD. Mirrors `caco sessions`. \
+                       The query must identify a single WAD — use an ID or a precise title. \
+                       Set `yes: true` to auto-select the first match if the query is broad \
+                       (required in MCP context when interactive selection is unavailable)."
+    )]
+    pub async fn caco_sessions(
+        &self,
+        Parameters(args): Parameters<SessionsArgs>,
+    ) -> Result<Json<CliResult>, rmcp::ErrorData> {
+        let mut argv = vec!["sessions".into()];
+        argv.extend(args.to_argv());
+        let runner = CliRunner { bin: &self.caco_bin, paths: &self.paths };
+        let result = runner.run(argv).await.map_err(|e| e.into_mcp_error())?;
+        Ok(Json(result))
+    }
+
+    #[tool(
+        name = "caco_config",
+        description = "Print the current caco config file to stdout. READ-ONLY. \
+                       Mirrors `caco config` (without --edit). \
+                       The `--edit` flag is deliberately not exposed because it spawns \
+                       $EDITOR interactively, which is incompatible with MCP."
+    )]
+    pub async fn caco_config(
+        &self,
+        Parameters(args): Parameters<ConfigArgs>,
+    ) -> Result<Json<CliResult>, rmcp::ErrorData> {
+        let mut argv = vec!["config".into()];
         argv.extend(args.to_argv());
         let runner = CliRunner { bin: &self.caco_bin, paths: &self.paths };
         let result = runner.run(argv).await.map_err(|e| e.into_mcp_error())?;
@@ -406,5 +681,125 @@ mod tests {
         assert!(argv.contains(&"--complevel".to_string()));
         assert!(argv.contains(&"--dry-run".to_string()));
         assert!(argv.contains(&"status:unplayed".to_string()));
+    }
+
+    #[test]
+    fn modify_flags_render() {
+        let args = ModifyArgs {
+            terms: vec!["id:5".into(), "tag+hard".into()],
+            notes: Some("fun wad".into()),
+            date: None,
+            stats_file: Some("/tmp/stats.txt".into()),
+            beaten: None,
+            link: None,
+            add_files: vec!["brutal.deh".into(), "fix.wad".into()],
+            remove_files: vec!["old.deh".into()],
+            dry_run: true,
+            yes: true,
+        };
+        let argv = args.to_argv();
+        // push_opt
+        assert!(argv.windows(2).any(|w| w[0] == "--notes" && w[1] == "fun wad"));
+        assert!(argv.windows(2).any(|w| w[0] == "--stats-file" && w[1] == "/tmp/stats.txt"));
+        // push_multi: two --add-file pairs
+        let add_file_positions: Vec<_> = argv.iter().enumerate()
+            .filter(|(_, v)| v.as_str() == "--add-file")
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(add_file_positions.len(), 2);
+        assert_eq!(argv[add_file_positions[0] + 1], "brutal.deh");
+        assert_eq!(argv[add_file_positions[1] + 1], "fix.wad");
+        // push_multi: one --remove-file pair
+        assert!(argv.windows(2).any(|w| w[0] == "--remove-file" && w[1] == "old.deh"));
+        // dry_run renders with hyphen
+        assert!(argv.contains(&"--dry-run".to_string()));
+        assert!(argv.contains(&"--yes".to_string()));
+        // terms appended at the end
+        assert!(argv.contains(&"id:5".to_string()));
+        assert!(argv.contains(&"tag+hard".to_string()));
+        // absent Option fields produce no flags
+        assert!(!argv.contains(&"--date".to_string()));
+        assert!(!argv.contains(&"--beaten".to_string()));
+    }
+
+    #[test]
+    fn cache_list_default_renders() {
+        let args = CacheArgs::List { plain: false, orphans: false };
+        let argv = args.to_argv();
+        assert_eq!(argv[0], "list");
+        assert!(!argv.contains(&"--plain".to_string()));
+        assert!(!argv.contains(&"--orphans".to_string()));
+    }
+
+    #[test]
+    fn cache_list_flags_render() {
+        let args = CacheArgs::List { plain: true, orphans: true };
+        let argv = args.to_argv();
+        assert_eq!(argv[0], "list");
+        assert!(argv.contains(&"--plain".to_string()));
+        assert!(argv.contains(&"--orphans".to_string()));
+    }
+
+    #[test]
+    fn cache_clear_renders_query() {
+        let args = CacheArgs::Clear {
+            query: vec!["id:3".into()],
+            all: false,
+            dry_run: true,
+            yes: true,
+        };
+        let argv = args.to_argv();
+        assert_eq!(argv[0], "clear");
+        assert!(!argv.contains(&"--all".to_string()));
+        assert!(argv.contains(&"--dry-run".to_string()));
+        assert!(argv.contains(&"--yes".to_string()));
+        assert!(argv.contains(&"id:3".to_string()));
+    }
+
+    #[test]
+    fn cache_prune_renders() {
+        let args = CacheArgs::Prune { dry_run: true, yes: false };
+        let argv = args.to_argv();
+        assert_eq!(argv[0], "prune");
+        assert!(argv.contains(&"--dry-run".to_string()));
+        assert!(!argv.contains(&"--yes".to_string()));
+    }
+
+    #[test]
+    fn stats_defaults_empty() {
+        let args = StatsArgs::default();
+        let argv = args.to_argv();
+        assert!(argv.is_empty(), "default stats args should produce empty argv, got {:?}", argv);
+    }
+
+    #[test]
+    fn stats_flags_render() {
+        let args = StatsArgs {
+            period: Some("year".into()),
+            limit: Some(6),
+            plain: true,
+        };
+        let argv = args.to_argv();
+        assert!(argv.windows(2).any(|w| w[0] == "--period" && w[1] == "year"));
+        assert!(argv.windows(2).any(|w| w[0] == "--limit" && w[1] == "6"));
+        assert!(argv.contains(&"--plain".to_string()));
+    }
+
+    #[test]
+    fn sessions_yes_renders() {
+        let args = SessionsArgs {
+            query: vec!["id:7".into()],
+            plain: false,
+            yes: true,
+        };
+        let argv = args.to_argv();
+        assert!(argv.contains(&"--yes".to_string()));
+        assert!(!argv.contains(&"--plain".to_string()));
+        assert!(argv.contains(&"id:7".to_string()));
+    }
+
+    #[test]
+    fn config_empty_argv() {
+        assert!(ConfigArgs {}.to_argv().is_empty());
     }
 }
