@@ -959,6 +959,7 @@ impl CacoMcpServer {
                        Pass `{\"action\": \"list\"|\"backup\"|\"restore\"|\"clean\"|\"backups\", ...}`. \
                        Set `yes: true` to auto-select the first matching WAD; otherwise the \
                        underlying CLI uses an interactive picker that does not work over MCP. \
+                       For `clean` and `restore`, `yes` also skips the destructive-confirmation prompt. \
                        Output is plain text (or TSV with `plain: true`); `parsed_json` is null."
     )]
     pub async fn caco_saves(
@@ -1017,10 +1018,11 @@ impl CacoMcpServer {
         description = "Manage companion files (DEH/BEX/WAD attachments) for WADs. Mirrors \
                        `caco companion`. Pass `{\"action\": \"add\"|\"rm\"|\"enable\"|\
                        \"disable\"|\"ls\", ...}`. \
-                       All variants except `ls` resolve a single WAD via the CLI's interactive \
-                       picker (`ResolveMode::Pick`), which IGNORES `--yes` and does not work \
-                       reliably over MCP. Use a precise query like `id:N` or a sufficiently \
-                       specific title to avoid the picker. \
+                       All variants resolve a single WAD via the CLI's interactive picker \
+                       (`ResolveMode::Pick`), which IGNORES `--yes` and does not work reliably \
+                       over MCP. (`ls` skips the picker only when called with an empty query.) \
+                       Use a precise query like `id:N` or a sufficiently specific title to avoid \
+                       the picker. \
                        Output is plain text; `parsed_json` is null."
     )]
     pub async fn caco_companion(
