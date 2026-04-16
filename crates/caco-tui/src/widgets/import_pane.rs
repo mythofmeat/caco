@@ -152,7 +152,7 @@ impl ImportPaneState {
                             .parse()
                             .map_err(|e: std::num::ParseIntError| e.to_string())?;
                         let file_entry = client.get(Some(id), None).map_err(|e| e.to_string())?;
-                        let service = ImportService;
+                        let service = ImportService::new();
                         let result = service.import_idgames(&conn, &file_entry, None, false);
                         if let Some(err) = &result.error {
                             return Err(err.clone());
@@ -172,7 +172,7 @@ impl ImportPaneState {
                             .get_entry(&source_id)
                             .map_err(|e| e.to_string())?
                             .ok_or_else(|| "Wiki page not found".to_string())?;
-                        let service = ImportService;
+                        let service = ImportService::new();
                         let result = service.import_doomwiki(&conn, &wiki_entry, None, false);
                         if let Some(err) = &result.error {
                             return Err(err.clone());
@@ -205,7 +205,7 @@ impl ImportPaneState {
                             let result: Result<_, String> = (|| {
                                 let conn = caco_core::db::open_connection(&db_path)
                                     .map_err(|e| e.to_string())?;
-                                let service = ImportService;
+                                let service = ImportService::new();
                                 let result = service.import_url(
                                     &conn,
                                     &title,
@@ -236,7 +236,7 @@ impl ImportPaneState {
                             let result: Result<_, String> = (|| {
                                 let conn = caco_core::db::open_connection(&db_path)
                                     .map_err(|e| e.to_string())?;
-                                let service = ImportService;
+                                let service = ImportService::new();
                                 let result = service.import_local(
                                     &conn,
                                     &title,
@@ -269,7 +269,7 @@ impl ImportPaneState {
                                     .map_err(|e| e.to_string())?;
                                 let client = caco_sources::doomworld::DoomworldClient::new();
                                 let thread = client.get_thread(&url).map_err(|e| e.to_string())?;
-                                let service = ImportService;
+                                let service = ImportService::new();
                                 let result = service.import_doomworld(
                                     &conn,
                                     &thread,

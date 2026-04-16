@@ -1,5 +1,5 @@
 use std::path::Path;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use regex::Regex;
 use rusqlite::Connection;
@@ -89,9 +89,31 @@ pub fn titles_match(a: &str, b: &str) -> bool {
 }
 
 /// Handles duplicate checking and WAD import for all source types.
-pub struct ImportService;
+///
+/// Holds shared HTTP clients so auto-enrichment and auto-link passes
+/// don't re-construct a `reqwest::Client` (and its TLS state) on every
+/// import. Clone is cheap — the clients are Arc'd.
+#[derive(Clone)]
+pub struct ImportService {
+    doomwiki: Arc<DoomwikiClient>,
+    idgames: Arc<IdgamesClient>,
+}
+
+impl Default for ImportService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl ImportService {
+    /// Construct a fresh service with newly-built HTTP clients.
+    pub fn new() -> Self {
+        Self {
+            doomwiki: Arc::new(DoomwikiClient::new()),
+            idgames: Arc::new(IdgamesClient::new()),
+        }
+    }
+
     /// Import from idgames archive.
     ///
     /// Duplicate detection: source_id + filename + author.
@@ -218,7 +240,7 @@ impl ImportService {
                 auto_link_zdoom_required(tx, wad_id, &entry.port);
             }
             if !entry.link.is_empty() {
-                auto_link_idgames_from_url(tx, wad_id, &entry.link);
+                self.auto_link_idgames_from_url(tx, wad_id, &entry.link);
             }
             Ok(wad_id)
         });
@@ -448,8 +470,7 @@ impl ImportService {
         }
 
         let result: std::result::Result<(), Box<dyn std::error::Error>> = (|| {
-            let client = DoomwikiClient::new();
-            let results = client.search_wads(title, 5)?;
+            let results = self.doomwiki.search_wads(title, 5)?;
             if results.is_empty() {
                 return Ok(());
             }
@@ -622,32 +643,33 @@ fn apply_idgames_link(conn: &Connection, wad_id: i64, idgames_id: i64, filename:
     let _ = db::update_wad(conn, wad_id, &update);
 }
 
-/// Resolve an idgames link parsed off a Doom Wiki page and stamp it onto a WAD.
-///
-/// Two URL shapes are accepted: query-string ids (`/idgames/?id=N`) yield the
-/// id directly without a network round-trip; path-style URLs (`/idgames/<path>`,
-/// produced by the wiki's `{{ig|file=...}}` template) trigger an idgames API
-/// lookup so the resolved id and filename can be persisted. Network and
-/// parser errors are silently swallowed so a flaky idgames API never blocks
-/// the wiki import.
-fn auto_link_idgames_from_url(conn: &Connection, wad_id: i64, link: &str) {
-    if let Some(id) = extract_idgames_id_from_url(link) {
-        apply_idgames_link(conn, wad_id, id, None);
-        return;
-    }
+impl ImportService {
+    /// Resolve an idgames link parsed off a Doom Wiki page and stamp it onto a WAD.
+    ///
+    /// Two URL shapes are accepted: query-string ids (`/idgames/?id=N`) yield the
+    /// id directly without a network round-trip; path-style URLs (`/idgames/<path>`,
+    /// produced by the wiki's `{{ig|file=...}}` template) trigger an idgames API
+    /// lookup so the resolved id and filename can be persisted. Network and
+    /// parser errors are silently swallowed so a flaky idgames API never blocks
+    /// the wiki import.
+    fn auto_link_idgames_from_url(&self, conn: &Connection, wad_id: i64, link: &str) {
+        if let Some(id) = extract_idgames_id_from_url(link) {
+            apply_idgames_link(conn, wad_id, id, None);
+            return;
+        }
 
-    let Some(file_path) = extract_idgames_file_path_from_url(link) else {
-        return;
-    };
-
-    let client = IdgamesClient::new();
-    if let Ok(entry) = client.get(None, Some(&file_path)) {
-        let filename = if entry.filename.is_empty() {
-            None
-        } else {
-            Some(entry.filename.as_str())
+        let Some(file_path) = extract_idgames_file_path_from_url(link) else {
+            return;
         };
-        apply_idgames_link(conn, wad_id, entry.id, filename);
+
+        if let Ok(entry) = self.idgames.get(None, Some(&file_path)) {
+            let filename = if entry.filename.is_empty() {
+                None
+            } else {
+                Some(entry.filename.as_str())
+            };
+            apply_idgames_link(conn, wad_id, entry.id, filename);
+        }
     }
 }
 
@@ -751,7 +773,7 @@ mod tests {
     #[test]
     fn test_import_url() {
         let conn = setup();
-        let svc = ImportService;
+        let svc = ImportService::new();
 
         let result = svc.import_url(
             &conn,
@@ -781,7 +803,7 @@ mod tests {
     #[test]
     fn test_import_url_duplicate() {
         let conn = setup();
-        let svc = ImportService;
+        let svc = ImportService::new();
 
         let r1 = svc.import_url(
             &conn,
@@ -813,7 +835,7 @@ mod tests {
     #[test]
     fn test_import_url_duplicate_force() {
         let conn = setup();
-        let svc = ImportService;
+        let svc = ImportService::new();
 
         svc.import_url(
             &conn,
@@ -843,7 +865,7 @@ mod tests {
     #[test]
     fn test_import_idgames() {
         let conn = setup();
-        let svc = ImportService;
+        let svc = ImportService::new();
 
         let entry = FileEntry {
             id: 19312,
@@ -886,7 +908,7 @@ mod tests {
     #[test]
     fn test_import_idgames_duplicate() {
         let conn = setup();
-        let svc = ImportService;
+        let svc = ImportService::new();
 
         let entry = FileEntry {
             id: 100,
@@ -922,7 +944,7 @@ mod tests {
     #[test]
     fn test_import_doomwiki() {
         let conn = setup();
-        let svc = ImportService;
+        let svc = ImportService::new();
 
         let entry = crate::doomwiki::WikiEntry {
             page_id: 5678,
@@ -1043,7 +1065,12 @@ mod tests {
         let new = NewWad::new("Test", SourceType::Doomwiki);
         let wad_id = db::add_wad(&conn, &new).unwrap();
 
-        auto_link_idgames_from_url(&conn, wad_id, "https://www.doomworld.com/idgames/?id=18184");
+        let svc = ImportService::new();
+        svc.auto_link_idgames_from_url(
+            &conn,
+            wad_id,
+            "https://www.doomworld.com/idgames/?id=18184",
+        );
 
         let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
         assert_eq!(wad.idgames_id.as_deref(), Some("18184"));
@@ -1055,7 +1082,8 @@ mod tests {
         let new = NewWad::new("Test", SourceType::Doomwiki);
         let wad_id = db::add_wad(&conn, &new).unwrap();
 
-        auto_link_idgames_from_url(&conn, wad_id, "https://example.com/downloads/scythe.zip");
+        let svc = ImportService::new();
+        svc.auto_link_idgames_from_url(&conn, wad_id, "https://example.com/downloads/scythe.zip");
 
         let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
         assert!(wad.idgames_id.is_none());
@@ -1093,7 +1121,7 @@ mod tests {
     #[test]
     fn test_import_doomworld() {
         let conn = setup();
-        let svc = ImportService;
+        let svc = ImportService::new();
 
         let thread = crate::doomworld::ForumThread {
             thread_id: 134292,
@@ -1128,7 +1156,7 @@ mod tests {
     #[test]
     fn test_import_doomworld_with_overrides() {
         let conn = setup();
-        let svc = ImportService;
+        let svc = ImportService::new();
 
         let thread = crate::doomworld::ForumThread {
             thread_id: 99999,
@@ -1171,7 +1199,7 @@ mod tests {
     #[test]
     fn test_import_doomworld_duplicate() {
         let conn = setup();
-        let svc = ImportService;
+        let svc = ImportService::new();
 
         let thread = crate::doomworld::ForumThread {
             thread_id: 55555,
@@ -1198,7 +1226,7 @@ mod tests {
     #[test]
     fn test_import_doomworld_duplicate_force() {
         let conn = setup();
-        let svc = ImportService;
+        let svc = ImportService::new();
 
         let thread = crate::doomworld::ForumThread {
             thread_id: 44444,
@@ -1223,7 +1251,7 @@ mod tests {
     #[test]
     fn test_import_doomworld_long_description() {
         let conn = setup();
-        let svc = ImportService;
+        let svc = ImportService::new();
 
         let long_text = "a".repeat(3000);
         let thread = crate::doomworld::ForumThread {

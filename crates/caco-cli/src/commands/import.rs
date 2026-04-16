@@ -276,7 +276,7 @@ fn import_idgames_search(
         return Err("No selection made.".to_string());
     }
 
-    let svc = ImportService;
+    let svc = ImportService::new();
     let mut imported = 0;
     for idx in &selected {
         let entry = &results[*idx];
@@ -308,7 +308,7 @@ fn import_idgames_id(
         Err(e) => return Err(e.to_string()),
     };
 
-    let svc = ImportService;
+    let svc = ImportService::new();
     let result = svc.import_idgames(conn, &entry, tags, force);
 
     if result.is_duplicate {
@@ -377,7 +377,7 @@ fn import_doomwiki_search(
         return Err("No selection made.".to_string());
     }
 
-    let svc = ImportService;
+    let svc = ImportService::new();
     let mut imported = 0;
     for idx in &selected {
         let entry = &results[*idx];
@@ -410,7 +410,7 @@ fn import_doomwiki_page(
         Err(e) => return Err(e.to_string()),
     };
 
-    let svc = ImportService;
+    let svc = ImportService::new();
     let result = svc.import_doomwiki(conn, &entry, tags, force);
 
     if result.is_duplicate {
@@ -436,7 +436,7 @@ fn import_url(
 ) -> Result<(), String> {
     let title = args.title.as_deref().unwrap_or(source_str);
 
-    let svc = ImportService;
+    let svc = ImportService::new();
     let result = svc.import_url(
         conn,
         title,
@@ -487,7 +487,7 @@ fn import_doomworld(
     let final_version = llm_metadata.as_ref().and_then(|m| m.version.as_deref());
     let final_complevel = llm_metadata.as_ref().and_then(|m| m.complevel);
 
-    let svc = ImportService;
+    let svc = ImportService::new();
     let result = svc.import_doomworld(
         conn,
         &thread,
@@ -672,7 +672,7 @@ fn import_json_idgames(
         return Err("No selection made.".to_string());
     }
 
-    let svc = ImportService;
+    let svc = ImportService::new();
     let mut imported = 0;
     for idx in &selected {
         let entry = &entries[*idx];
@@ -734,7 +734,7 @@ fn import_json_doomwiki(
         return Err("No selection made.".to_string());
     }
 
-    let svc = ImportService;
+    let svc = ImportService::new();
     let mut imported = 0;
     for idx in &selected {
         let entry = &entries[*idx];
@@ -783,7 +783,7 @@ fn import_local(
         .or_else(|| path.file_stem().and_then(|s| s.to_str()))
         .unwrap_or("Unknown WAD");
 
-    let svc = ImportService;
+    let svc = ImportService::new();
     let result = svc.import_local(
         conn,
         title,

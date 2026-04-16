@@ -86,7 +86,7 @@ pub fn spawn_import_idgames(sender: BackgroundSender, db_path: PathBuf, source_i
                 .parse()
                 .map_err(|e: std::num::ParseIntError| e.to_string())?;
             let file_entry = client.get(Some(id), None).map_err(|e| e.to_string())?;
-            let service = ImportService;
+            let service = ImportService::new();
             let result = service.import_idgames(&conn, &file_entry, None, false);
             if let Some(err) = &result.error {
                 return Err(err.clone());
@@ -106,7 +106,7 @@ pub fn spawn_import_doomwiki(sender: BackgroundSender, db_path: PathBuf, source_
                 .get_entry(&source_id)
                 .map_err(|e| e.to_string())?
                 .ok_or_else(|| "Wiki page not found".to_string())?;
-            let service = ImportService;
+            let service = ImportService::new();
             let result = service.import_doomwiki(&conn, &wiki_entry, None, false);
             if let Some(err) = &result.error {
                 return Err(err.clone());
@@ -126,7 +126,7 @@ pub fn spawn_import_form(
     thread::spawn(move || {
         let result: Result<_, String> = (|| {
             let conn = caco_core::db::open_connection(&db_path).map_err(|e| e.to_string())?;
-            let service = ImportService;
+            let service = ImportService::new();
 
             let get = |name: &str| -> String {
                 values
