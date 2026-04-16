@@ -54,7 +54,7 @@ package_caco() {
 
 package_caco-gui() {
     pkgdesc="Doom WAD library manager - GUI"
-    depends=('openssl' 'gcc-libs' 'glibc')
+    depends=('openssl' 'gcc-libs' 'glibc' 'hicolor-icon-theme' 'desktop-file-utils')
     optdepends=(
         'vulkan-driver: GPU-accelerated rendering'
         'xdg-desktop-portal: native file dialogs'
@@ -65,7 +65,11 @@ package_caco-gui() {
     install -Dm755 target/release/caco-gui "$pkgdir/usr/bin/caco-gui"
 
     install -Dm644 assets/caco.desktop "$pkgdir/usr/share/applications/caco.desktop"
-    install -Dm644 assets/caco.png     "$pkgdir/usr/share/icons/hicolor/1024x1024/apps/caco.png"
+    # 256x256 is a standard hicolor size that KDE/GTK icon caches scan.
+    # 1024x1024 is not a standard freedesktop size — launchers skip it.
+    install -Dm644 assets/caco.png     "$pkgdir/usr/share/icons/hicolor/256x256/apps/caco.png"
+    # Scalable fallback so high-DPI launchers can pick the large source directly.
+    install -Dm644 assets/caco.png     "$pkgdir/usr/share/icons/hicolor/scalable/apps/caco.png"
 }
 
 package_caco-tui() {
