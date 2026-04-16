@@ -163,6 +163,7 @@ pub fn restore_backup(backup_path: &Path, data_dir: &Path) -> crate::Result<usiz
     }
 
     fs::create_dir_all(data_dir)?;
+    let canonical_root = fs::canonicalize(data_dir)?;
 
     let file = File::open(backup_path)?;
     let mut archive =
@@ -179,16 +180,38 @@ pub fn restore_backup(backup_path: &Path, data_dir: &Path) -> crate::Result<usiz
             .by_index(i)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
+        // enclosed_name rejects absolute paths and `..` components; this guard
+        // is defence-in-depth in case of future zip-crate changes or symlink
+        // races after directory creation.
         let Some(enclosed) = entry.enclosed_name() else {
+            tracing::warn!("skipping zip entry with unsafe name: {}", entry.name());
             continue;
         };
-        let outpath = data_dir.join(enclosed);
+        let outpath = data_dir.join(&enclosed);
 
         if entry.is_dir() {
             fs::create_dir_all(&outpath)?;
+            if let Ok(canon) = fs::canonicalize(&outpath)
+                && !canon.starts_with(&canonical_root)
+            {
+                tracing::warn!(
+                    "refusing to extract zip entry outside data dir: {}",
+                    enclosed.display()
+                );
+                continue;
+            }
         } else {
             if let Some(parent) = outpath.parent() {
                 fs::create_dir_all(parent)?;
+                if let Ok(canon_parent) = fs::canonicalize(parent)
+                    && !canon_parent.starts_with(&canonical_root)
+                {
+                    tracing::warn!(
+                        "refusing to extract zip entry outside data dir: {}",
+                        enclosed.display()
+                    );
+                    continue;
+                }
             }
             let mut outfile = File::create(&outpath)?;
             io::copy(&mut entry, &mut outfile)?;
@@ -335,6 +358,8 @@ pub fn resolve_backup_path(wad_id: i64, backup_arg: Option<&str>) -> Option<Path
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
+
     use super::*;
 
     #[test]
@@ -403,5 +428,31 @@ mod tests {
     #[test]
     fn test_resolve_backup_nonexistent() {
         assert!(resolve_backup_path(999, None).is_none());
+    }
+
+    #[test]
+    fn test_restore_rejects_path_traversal() {
+        use zip::write::{SimpleFileOptions, ZipWriter};
+
+        let dir = tempfile::tempdir().unwrap();
+        let zip_path = dir.path().join("evil.zip");
+        {
+            let f = File::create(&zip_path).unwrap();
+            let mut zip = ZipWriter::new(f);
+            let opts = SimpleFileOptions::default();
+            zip.start_file("../../evil.txt", opts).unwrap();
+            zip.write_all(b"pwned").unwrap();
+            zip.start_file("safe.txt", opts).unwrap();
+            zip.write_all(b"ok").unwrap();
+            zip.finish().unwrap();
+        }
+
+        let restore_dir = dir.path().join("restore");
+        let _ = restore_backup(&zip_path, &restore_dir).unwrap();
+
+        // The traversal entry must not have escaped the restore dir.
+        assert!(!dir.path().join("evil.txt").exists());
+        assert!(!restore_dir.join("evil.txt").exists());
+        assert!(restore_dir.join("safe.txt").exists());
     }
 }

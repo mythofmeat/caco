@@ -1,5 +1,4 @@
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use reqwest::blocking::Client;
@@ -226,7 +225,7 @@ impl IdgamesClient {
         ));
 
         let result = (|| -> Result<PathBuf> {
-            let response = self.client.get(url).send()?;
+            let mut response = self.client.get(url).send()?;
             response.error_for_status_ref()?;
 
             let total = response.content_length().unwrap_or(0);
@@ -236,9 +235,7 @@ impl IdgamesClient {
             }
 
             let mut file = fs::File::create(&partial)?;
-            let bytes = response.bytes()?;
-            file.write_all(&bytes)?;
-            let downloaded = bytes.len() as u64;
+            let downloaded = response.copy_to(&mut file)?;
 
             if let Some(cb) = progress {
                 cb(downloaded, total);

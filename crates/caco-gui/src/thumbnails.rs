@@ -1,10 +1,50 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::sync::{Arc, Mutex, OnceLock, mpsc};
 
 use egui::TextureHandle;
 
 use crate::message::AppMessage;
 use crate::workers::BackgroundSender;
+
+type ThumbJob = Box<dyn FnOnce() + Send + 'static>;
+
+/// Bounded worker pool for thumbnail jobs.
+///
+/// Scrolling a large grid can otherwise spawn hundreds of concurrent threads.
+/// Cap at min(available_parallelism, 4) — grid renders don't benefit from more.
+static POOL: OnceLock<mpsc::Sender<ThumbJob>> = OnceLock::new();
+
+fn pool_submit(job: ThumbJob) {
+    let tx = POOL.get_or_init(|| {
+        let (tx, rx) = mpsc::channel::<ThumbJob>();
+        let rx = Arc::new(Mutex::new(rx));
+        let workers = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4)
+            .min(4);
+        for _ in 0..workers {
+            let rx = Arc::clone(&rx);
+            std::thread::spawn(move || {
+                loop {
+                    let job = {
+                        let guard = match rx.lock() {
+                            Ok(g) => g,
+                            Err(_) => break,
+                        };
+                        guard.recv()
+                    };
+                    match job {
+                        Ok(job) => job(),
+                        Err(_) => break,
+                    }
+                }
+            });
+        }
+        tx
+    });
+    let _ = tx.send(job);
+}
 
 /// Metadata needed for wiki scraping fallback.
 pub struct ThumbnailHint {
@@ -76,7 +116,7 @@ impl ThumbnailManager {
         let source_url = hint.source_url.clone();
         let title = hint.title.clone();
 
-        std::thread::spawn(move || {
+        pool_submit(Box::new(move || {
             let cache_dir = caco_core::config::thumbnail_cache_dir();
             let cache_path = cache_dir.join(format!("{wad_id}.png"));
 
@@ -134,7 +174,7 @@ impl ThumbnailManager {
 
             // 4. Nothing found — mark as failed so we don't retry.
             sender.send(AppMessage::ThumbnailFailed { wad_id });
-        });
+        }));
     }
 
     /// Handle a ThumbnailReady message from the background thread.
