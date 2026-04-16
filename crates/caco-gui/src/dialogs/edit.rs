@@ -881,7 +881,18 @@ impl EditDialogState {
         update = update
             .set_text("custom_config", opt_str(&self.config))
             .unwrap();
-        update = update.set_text("custom_args", opt_str(&self.args)).unwrap();
+        let custom_args = if self.args.trim().is_empty() {
+            None
+        } else {
+            match caco_core::player::normalize_custom_args(&self.args) {
+                Ok(json) => Some(json),
+                Err(e) => {
+                    self.error_message = Some(format!("Invalid args: {e}"));
+                    return Err(());
+                }
+            }
+        };
+        update = update.set_text("custom_args", custom_args).unwrap();
         update = update.set_text("version", opt_str(&self.version)).unwrap();
 
         // Sources tab fields

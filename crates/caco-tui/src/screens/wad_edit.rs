@@ -192,9 +192,19 @@ impl WadEditScreen {
         update = update
             .set_text("custom_config", opt_str(&self.get_field_value("config")))
             .unwrap();
-        update = update
-            .set_text("custom_args", opt_str(&self.get_field_value("args")))
-            .unwrap();
+        let args_raw = self.get_field_value("args");
+        let custom_args = if args_raw.trim().is_empty() {
+            None
+        } else {
+            match caco_core::player::normalize_custom_args(&args_raw) {
+                Ok(json) => Some(json),
+                Err(e) => {
+                    self.error_message = Some(format!("Invalid args: {e}"));
+                    return None;
+                }
+            }
+        };
+        update = update.set_text("custom_args", custom_args).unwrap();
         update = update
             .set_text("version", opt_str(&self.get_field_value("version")))
             .unwrap();

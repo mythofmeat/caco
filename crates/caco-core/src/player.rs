@@ -16,6 +16,24 @@ use crate::stats_watcher;
 use crate::wad_stats;
 use crate::zdoom_detect;
 
+/// Parses a custom args string into a validated JSON array for DB storage.
+/// Accepts either a JSON array (`["--fast", "--nomusic"]`) or space-separated flags.
+/// Returns the normalised JSON string.
+pub fn normalize_custom_args(raw: &str) -> Result<String, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok("[]".to_string());
+    }
+    if trimmed.starts_with('[') {
+        let args: Vec<String> =
+            serde_json::from_str(trimmed).map_err(|e| format!("Invalid JSON args: {e}"))?;
+        serde_json::to_string(&args).map_err(|e| e.to_string())
+    } else {
+        let args: Vec<String> = trimmed.split_whitespace().map(|s| s.to_string()).collect();
+        serde_json::to_string(&args).map_err(|e| e.to_string())
+    }
+}
+
 /// Whether auto-completion detection triggered after play.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AutoCompleteResult {
@@ -212,7 +230,7 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
         }
     }
 
-    // Add per-WAD custom args
+    // Add per-WAD custom args (tolerant read: silently skip malformed data already stored)
     if let Some(ref custom_args) = wad.custom_args
         && let Ok(args) = serde_json::from_str::<Vec<String>>(custom_args)
     {
@@ -759,6 +777,30 @@ mod tests {
             }
             .crashed()
         );
+    }
+
+    #[test]
+    fn test_normalize_custom_args_json_array() {
+        let result = normalize_custom_args(r#"["--fast", "--nomusic"]"#).unwrap();
+        assert_eq!(result, r#"["--fast","--nomusic"]"#);
+    }
+
+    #[test]
+    fn test_normalize_custom_args_space_separated() {
+        let result = normalize_custom_args("--fast --nomusic").unwrap();
+        assert_eq!(result, r#"["--fast","--nomusic"]"#);
+    }
+
+    #[test]
+    fn test_normalize_custom_args_empty() {
+        assert_eq!(normalize_custom_args("").unwrap(), "[]");
+        assert_eq!(normalize_custom_args("  ").unwrap(), "[]");
+    }
+
+    #[test]
+    fn test_normalize_custom_args_malformed_json() {
+        assert!(normalize_custom_args("[bad").is_err());
+        assert!(normalize_custom_args(r#"["ok", 42]"#).is_err());
     }
 
     #[test]

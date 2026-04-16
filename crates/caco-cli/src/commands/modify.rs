@@ -415,16 +415,7 @@ fn apply_field_update(
                 .map_err(|e| e.to_string())
         }
         "args" => {
-            // Accept JSON array or space-separated args
-            let json = if value.starts_with('[') {
-                // Validate JSON
-                serde_json::from_str::<Vec<String>>(value)
-                    .map_err(|e| format!("Invalid JSON args: {e}"))?;
-                value.to_string()
-            } else {
-                let args: Vec<String> = value.split_whitespace().map(|s| s.to_string()).collect();
-                serde_json::to_string(&args).map_err(|e| e.to_string())?
-            };
+            let json = caco_core::player::normalize_custom_args(value)?;
             update.set_text(col, Some(json)).map_err(|e| e.to_string())
         }
         _ => update
