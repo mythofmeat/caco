@@ -3,11 +3,59 @@
 All notable changes to Caco are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [3.0.0] — 2026-04-16
+
+### BREAKING CHANGES
+
+- **CLI**: The `--plain` flag has been removed from `cache list`, `saves list`, `saves backups`, `demos list`, and `stats`. Use `-o plain` (or `-o json` / `-o table`) instead. `--plain` remains on `info --levelstats`, `sessions`, and `companion ls` where it is a content-format selector, not a list-output switch.
+- **Sourceport profiles**: zdoom-family ports (gzdoom, uzdoom, lzdoom, vkdoom, qzdoom, zdoom) now write their config as `.ini`, not `.cfg`, matching what the ports actually read. Existing `.cfg` profiles for zdoom ports are orphaned — rename to `.ini` if they contain real content.
 
 ### Added
 
-- MCP server (`caco-mcp`): new workspace crate and `caco-mcp-server` binary exposing 17 CLI commands (`caco_ls`, `caco_info`, `caco_modify`, `caco_trash`, `caco_random`, `caco_import`, `caco_cache`, `caco_stats`, `caco_sessions`, `caco_saves`, `caco_demos`, `caco_collection`, `caco_companion`, `caco_profile`, `caco_enrich`, `caco_gc`, `caco_config`) and 7 read-only DB introspection tools (`inspect_schema_version`, `inspect_wad`, `inspect_sessions`, `inspect_companions`, `inspect_iwads`, `inspect_id24`, `run_sql`) over the Model Context Protocol. All operations run against a sandboxed copy of the user's library; a hard safety guard refuses any path that resolves to the real `CACO_HOME` / `XDG_DATA_HOME/caco`. `run_sql` opens the DB read-only, requires `Statement::readonly()`, and rejects multi-statement input.
+- **MCP server (`caco-mcp`)**: new workspace crate and `caco-mcp-server` binary exposing 17 CLI commands (`caco_ls`, `caco_info`, `caco_modify`, `caco_trash`, `caco_random`, `caco_import`, `caco_cache`, `caco_stats`, `caco_sessions`, `caco_saves`, `caco_demos`, `caco_collection`, `caco_companion`, `caco_profile`, `caco_enrich`, `caco_gc`, `caco_config`) and 7 read-only DB introspection tools (`inspect_schema_version`, `inspect_wad`, `inspect_sessions`, `inspect_companions`, `inspect_iwads`, `inspect_id24`, `run_sql`) over the Model Context Protocol. All operations run against a sandboxed copy of the user's library; a hard safety guard refuses any path that resolves to the real `CACO_HOME` / `XDG_DATA_HOME/caco`. `run_sql` opens the DB read-only, requires `Statement::readonly()`, and rejects multi-statement input.
+- **Import**: Doom Wiki pages that link to their idgames archive entry (via `{{ig|...}}` templates) now auto-populate `idgames_id` on the imported WAD, making them downloadable via `caco play` without manual follow-up.
+- **Config reload**: Ctrl+R in the TUI and GUI re-reads `~/.config/caco/config.toml` without a restart. Subsequent reads see new values; in-memory state captured at startup (default sort, window geometry) still requires a restart.
+- **DB migration backups**: Before running any pending migration, the live database is snapshotted to `~/.local/share/caco/backups/pre-migration-<N>.db`. README gains a "Recovering from a bad migration" section documenting the recovery path.
+- **CI**: New `.gitea/workflows/ci.yml` runs fmt + clippy + tests on every push and PR. `package.yml` remains the tag-only release pipeline.
+- **Bundled font**: NotoSansSymbols2 is now bundled so the completed-WAD ✓ badge and other dingbats render instead of showing tofu.
+- **Icon**: GUI window now embeds `assets/caco.png` so the title bar and taskbar show the proper icon. `install.sh` places the icon at standard `256x256` plus a scalable fallback and runs `gtk-update-icon-cache`.
+
+### Fixed
+
+- **Completion tracking**: WADs with DEHACKED-patched exit handling (e.g. Pina Colada 2) now auto-complete when the terminal map is exited, even when static analysis incorrectly marks orphan map slots as required.
+- **Doom Wiki imports**: `caco import https://doomwiki.org/wiki/<title>` now extracts the title from the URL and fetches the page directly, instead of doing a failed search with the entire URL as a query.
+- **idgames URL routing**: `doomworld.com/idgames/?id=N` URLs now route to the idgames importer instead of being handed to the Doomworld forum client, which rejected them. The JSON fallback path is fixed similarly.
+- **GUI Unavailable dialog**: Download failures (API blocked, no stored path, direct download failed, idgames fetch failed) now surface the Link dialog instead of a plain toast, so the user can relink or open the source URL.
+- **MCP sandbox isolation**: `reset_sandbox` now strips `db_path`, `cache_dir`, `data_dir`, `iwad_dir`, `sourceport_dir`, and `iwad_dirs` from the copied config. Previously absolute path fields in the user's config could let a sandboxed caco invocation reach the real library despite env-var isolation.
+- **GUI dingbats**: Completed-WAD ✓ badge rendered as tofu; NotoSansSymbols2 is now bundled to cover dingbats, geometric shapes, and misc symbols.
+- **P0 correctness bugs from counter-review**: AWS WAF challenge detection used `||` where `&&` was intended; `Screen::on_search_complete` hook added so TUI search results actually reach the screen; `gc` output now uses UTF-8-safe truncation; `ls` plain/JSON renderers now include completions and companions (scripted consumers were silently losing data).
+- **Transactions**: Player pre-session block (ensure_playthrough + start_session + id update) is now atomic; each import path wraps add_wad + auto-link/enrich in one transaction so partial imports roll back cleanly; migrations wrap body + `schema_migrations` insert so failed migrations roll back atomically and aren't recorded as applied.
+- **custom_args validation**: TUI and GUI edit paths now normalize and validate `custom_args` on write, matching the CLI. Previously malformed JSON was silently stored and only surfaced at launch time.
+
+### Changed
+
+- **Output flags**: `cache list`, `saves list`, `saves backups`, `demos list`, and `stats` now take `-o plain|json|table` (see Breaking Changes). Each command emits a JSON representation alongside its table and plain formats, matching `ls`, `info`, and `collection`.
+- **GUI file pickers**: `rfd::FileDialog::pick_file` / `save_file` now run on short-lived worker threads so the egui update loop no longer freezes while the OS picker is open. Every dialog site (Link, Edit companions, Resources IWAD/id24, WAD stats Import/Export, local import Browse) polls a receiver each frame and gates the button on receiver-empty so a second picker can't spawn.
+- **DB types**: `WadRecord.status` / `availability` / `source_type` are now typed enums instead of `String`, eliminating per-site `Status::parse` calls and typos that compiled.
+- **DB: WadUpdate error accumulation**: Setters now return `Self` and collect rejected field names into a `Vec<String>`; `update_wad` validates up front and returns `Error::InvalidFields` listing every bad field at once, instead of short-circuiting with bare `None`.
+- **DB schema**: Migration 33 drops the now-unused `custom_complevel` column (migration 22 had already merged its data into `complevel`).
+- **GUI status counts**: Sidebar refresh now uses a single `GROUP BY` aggregate query instead of materialising every WAD row to count in Rust.
+- **GUI grid rendering**: Cards outside the scroll viewport now skip painter ops and event handling, cutting per-frame work from O(total_wads) to O(visible). `allocate_exact_size` still runs so scrollbar extents and keyboard-navigation indices stay consistent.
+- **GUI action dispatch**: `CacoApp` now dispatches every queued `ActionRequest` per frame instead of only the first; rapid clicks are no longer silently dropped.
+- **GUI config snapshot**: Global config is now an `ArcSwap<Config>` snapshot rather than `OnceLock<Config>`, so `load_config()` returns `Arc<Config>` from a lock-free snapshot and `reload_config()` atomically publishes new values.
+- **GUI filter debounce**: The 150ms filter debounce is now a testable `FilterQuery` struct with a pure `poll()` method, replacing the three loose `AppState` fields. Six unit tests cover the timing cases.
+- **ImportService**: Now a stateful struct holding `Arc<DoomwikiClient>` and `Arc<IdgamesClient>` so repeated auto-enrich / auto-link passes reuse the same `reqwest::Client` and TLS state instead of rebuilding per call.
+- **Downloads**: idgames downloads now stream via `Response::copy_to` instead of buffering the entire response. Memory stays flat for large WADs.
+- **Thumbnails**: Per-request `thread::spawn` replaced with a bounded mpsc worker pool capped at `min(available_parallelism, 4)`.
+- **ZIP extraction**: Defence-in-depth canonicalization check on save extract paths in addition to the existing `enclosed_name` guard.
+- **Dev builds**: Now link with `mold` via clang for faster iteration. Requires clang and mold (both standard on Arch).
+- **GUI code structure**: `app.rs` split from 1427 lines into `app/help.rs`, `app/status_bar.rs`, `app/section_header.rs`, `app/hero.rs`, `app/sidebar.rs`, `app/topbar.rs`, and `app/dialogs.rs` submodules.
+- **Tests**: +28 new unit tests covering TUI filter_input/library_pane, GUI thumbnails, and GUI import state. Workspace test count now 1299.
+
+## [2.2.1] — 2026-04-10
+
+### Changed
+- Gitea workflow adjustments
 
 ## [2.2.0] — 2026-04-08
 
@@ -154,7 +202,9 @@ The original Python implementation. Key milestones:
 - **2026-03-10**: Comprehensive test suite, mypy integration, garbage collection
 - **2026-03-18**: JSON import fallback, Cloudflare bypass, offline support
 
-[Unreleased]: http://localhost:3000/eshen/caco/compare/v2.2.0...main
+[Unreleased]: http://localhost:3000/eshen/caco/compare/v3.0.0...main
+[3.0.0]: http://localhost:3000/eshen/caco/compare/v2.2.1...v3.0.0
+[2.2.1]: http://localhost:3000/eshen/caco/compare/v2.2.0...v2.2.1
 [2.2.0]: http://localhost:3000/eshen/caco/compare/v2.1.0...v2.2.0
 [2.1.0]: http://localhost:3000/eshen/caco/compare/v2.0.0...v2.1.0
 [2.0.0]: http://localhost:3000/eshen/caco/compare/v1.2.0...v2.0.0
