@@ -22,8 +22,10 @@ use crate::thumbnails::{ThumbnailHint, ThumbnailManager};
 use crate::workers::BackgroundChannel;
 
 mod help;
+mod status_bar;
 
 use help::{render_about_dialog, render_help_dialog};
+use status_bar::render_status_bar;
 
 pub struct CacoApp {
     conn: Connection,
@@ -1316,25 +1318,3 @@ fn render_section_header(ui: &mut egui::Ui, state: &mut AppState) {
     });
 }
 
-// ---------------------------------------------------------------------------
-// Status bar
-// ---------------------------------------------------------------------------
-
-fn render_status_bar(ui: &mut egui::Ui, state: &mut AppState) {
-    ui.horizontal(|ui| {
-        // Play state indicator
-        if let PlayState::Playing { wad_title, .. } = &state.play_state {
-            ui.colored_label(theme::COLOR_SUCCESS, format!("Playing: {wad_title}..."));
-            ui.separator();
-        }
-
-        // Notification
-        if let Some(notif) = &state.notification {
-            if notif.is_expired() {
-                state.notification = None;
-            } else {
-                ui.colored_label(theme::severity_color(notif.severity), &notif.text);
-            }
-        }
-    });
-}
