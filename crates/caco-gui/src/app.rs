@@ -1,16 +1,17 @@
 use std::path::PathBuf;
 
+use egui::Color32;
 use rusqlite::Connection;
 
-use crate::dialogs::cache::{CacheDialogState, CacheResult};
-use crate::dialogs::collections::{CollectionsDialogState, CollectionsResult};
-use crate::dialogs::delete::{DeleteDialogState, DeleteResult};
-use crate::dialogs::edit::{EditDialogState, EditResult};
-use crate::dialogs::link::{LinkDialogState, LinkResult};
-use crate::dialogs::resources::{ResourcesDialogState, ResourcesResult};
-use crate::dialogs::sessions::{SessionsDialogState, SessionsResult};
-use crate::dialogs::stats::{StatsDialogState, StatsResult};
-use crate::dialogs::wad_stats::{WadStatsDialogState, WadStatsResult};
+use crate::dialogs::cache::CacheDialogState;
+use crate::dialogs::collections::CollectionsDialogState;
+use crate::dialogs::delete::DeleteDialogState;
+use crate::dialogs::edit::EditDialogState;
+use crate::dialogs::link::LinkDialogState;
+use crate::dialogs::resources::ResourcesDialogState;
+use crate::dialogs::sessions::SessionsDialogState;
+use crate::dialogs::stats::StatsDialogState;
+use crate::dialogs::wad_stats::WadStatsDialogState;
 use crate::import;
 use crate::import::state::SearchSource;
 use crate::message::{AppMessage, Notification};
@@ -21,6 +22,7 @@ use crate::theme;
 use crate::thumbnails::{ThumbnailHint, ThumbnailManager};
 use crate::workers::BackgroundChannel;
 
+mod dialogs;
 mod help;
 mod hero;
 mod section_header;
@@ -28,7 +30,7 @@ mod sidebar;
 mod status_bar;
 mod topbar;
 
-use help::{render_about_dialog, render_help_dialog};
+use dialogs::render_active_dialog;
 use hero::render_now_playing_hero;
 use section_header::render_section_header;
 use sidebar::render_sidebar;
@@ -424,136 +426,8 @@ impl eframe::App for CacoApp {
             self.state.reload(&self.conn);
         }
 
-        // 4. Render dialogs (modal, overlays everything)
-        let mut close_dialog = false;
-        if let Some(dialog) = &mut self.state.active_dialog {
-            match dialog {
-                ActiveDialog::Edit(edit_state) => match edit_state.render(ctx, &self.conn) {
-                    EditResult::Saved => {
-                        close_dialog = true;
-                        self.state.needs_reload = true;
-                        self.state.notification =
-                            Some(Notification::info("WAD updated".to_string()));
-                    }
-                    EditResult::Cancelled => {
-                        close_dialog = true;
-                    }
-                    EditResult::Modified => {
-                        close_dialog = true;
-                        self.state.needs_reload = true;
-                    }
-                    EditResult::Open => {}
-                },
-                ActiveDialog::Delete(delete_state) => match delete_state.render(ctx, &self.conn) {
-                    DeleteResult::Confirmed => {
-                        close_dialog = true;
-                        self.state.needs_reload = true;
-                        self.state.notification =
-                            Some(Notification::info("WAD deleted".to_string()));
-                    }
-                    DeleteResult::Error(msg) => {
-                        close_dialog = true;
-                        self.state.notification = Some(Notification::error(msg));
-                    }
-                    DeleteResult::Cancelled => {
-                        close_dialog = true;
-                    }
-                    DeleteResult::Open => {}
-                },
-                ActiveDialog::Sessions(sessions_state) => match sessions_state.render(ctx) {
-                    SessionsResult::Closed => {
-                        close_dialog = true;
-                    }
-                    SessionsResult::Open => {}
-                },
-                ActiveDialog::Stats(stats_state) => match stats_state.render(ctx) {
-                    StatsResult::Closed => {
-                        close_dialog = true;
-                    }
-                    StatsResult::Open => {}
-                },
-                ActiveDialog::Cache(cache_state) => match cache_state.render(ctx, &self.conn) {
-                    CacheResult::Closed => {
-                        close_dialog = true;
-                    }
-                    CacheResult::Open => {}
-                },
-                ActiveDialog::Collections(collections_state) => {
-                    let modified = collections_state.modified;
-                    match collections_state.render(ctx, &self.conn) {
-                        CollectionsResult::Closed => {
-                            if modified {
-                                self.state.refresh_collections(&self.conn);
-                            }
-                            close_dialog = true;
-                        }
-                        CollectionsResult::LoadQuery(query) => {
-                            close_dialog = true;
-                            self.state.refresh_collections(&self.conn);
-                            self.state.active_collection = None;
-                            self.state.filter.input = query;
-                            self.state.filter.mark_changed(std::time::Instant::now());
-                        }
-                        CollectionsResult::Open => {}
-                    }
-                }
-                ActiveDialog::Resources(resources_state) => {
-                    match resources_state.render(ctx, &self.conn) {
-                        ResourcesResult::Closed => {
-                            close_dialog = true;
-                        }
-                        ResourcesResult::Open => {}
-                    }
-                }
-                ActiveDialog::WadStats(wad_stats_state) => {
-                    match wad_stats_state.render(ctx, &self.conn) {
-                        WadStatsResult::Closed => {
-                            close_dialog = true;
-                        }
-                        WadStatsResult::Modified => {
-                            close_dialog = true;
-                            self.state.needs_reload = true;
-                        }
-                        WadStatsResult::Open => {}
-                    }
-                }
-                ActiveDialog::Link(link_state) => match link_state.render(ctx, &self.conn) {
-                    LinkResult::Linked => {
-                        close_dialog = true;
-                        self.state.needs_reload = true;
-                        self.state.notification =
-                            Some(Notification::info("WAD file linked".to_string()));
-                    }
-                    LinkResult::Cancelled => {
-                        close_dialog = true;
-                    }
-                    LinkResult::Open => {}
-                },
-                ActiveDialog::Help => {
-                    if render_help_dialog(ctx) {
-                        close_dialog = true;
-                    }
-                }
-                ActiveDialog::About => {
-                    if render_about_dialog(ctx) {
-                        close_dialog = true;
-                    }
-                }
-            }
-        }
-        if close_dialog {
-            // Check if dialog was modified -> trigger reload
-            let was_modified = match &self.state.active_dialog {
-                Some(ActiveDialog::Cache(s)) => s.modified,
-                Some(ActiveDialog::Collections(s)) => s.modified,
-                Some(ActiveDialog::Resources(s)) => s.modified,
-                _ => false,
-            };
-            if was_modified {
-                self.state.needs_reload = true;
-            }
-            self.state.active_dialog = None;
-        }
+        // 4. Render active dialog (modal, overlays everything)
+        render_active_dialog(&mut self.state, &self.conn, ctx);
 
         // 5. Handle keyboard accelerators
         let mut quit = false;
@@ -690,5 +564,3 @@ impl eframe::App for CacoApp {
         }
     }
 }
-
-use egui::Color32;
