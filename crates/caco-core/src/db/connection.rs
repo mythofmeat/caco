@@ -1,12 +1,26 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, Transaction};
 
 use crate::Result;
 
 /// Conservative limit for SQLite's SQLITE_MAX_VARIABLE_NUMBER (default 999).
 pub const SQLITE_MAX_VARS: usize = 900;
+
+/// Run `f` inside a SQLite transaction. Commits on `Ok`, rolls back on `Err` or panic.
+///
+/// Uses `unchecked_transaction` so callers can pass a shared `&Connection`; rusqlite
+/// connections are `!Sync` so single-threaded use is already enforced.
+pub fn with_transaction<F, T>(conn: &Connection, f: F) -> Result<T>
+where
+    F: FnOnce(&Transaction<'_>) -> Result<T>,
+{
+    let tx = conn.unchecked_transaction()?;
+    let out = f(&tx)?;
+    tx.commit()?;
+    Ok(out)
+}
 
 /// Open a database connection with recommended pragmas.
 ///

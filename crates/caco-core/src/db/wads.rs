@@ -250,87 +250,83 @@ pub fn update_wad(conn: &Connection, wad_id: i64, update: &WadUpdate) -> Result<
         );
 
     // Auto-maintain availability when cached_path or source_url change.
-    // We need to figure out the effective values after this update.
     let needs_avail_update = (update.fields.contains_key("cached_path")
         || update.fields.contains_key("source_url"))
         && !update.fields.contains_key("availability");
 
-    let mut extra_fields: Vec<(&str, FieldValue)> = Vec::new();
+    super::connection::with_transaction(conn, |tx| {
+        let mut extra_fields: Vec<(&str, FieldValue)> = Vec::new();
 
-    if needs_avail_update {
-        // Read current values to compute new availability
-        let (cur_cached, cur_source): (Option<String>, Option<String>) = conn.query_row(
-            "SELECT cached_path, source_url FROM wads WHERE id = ?1",
-            [wad_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )?;
-
-        let eff_cached = match update.fields.get("cached_path") {
-            Some(FieldValue::Text(v)) => v.as_deref(),
-            _ => cur_cached.as_deref(),
-        };
-        let eff_source = match update.fields.get("source_url") {
-            Some(FieldValue::Text(v)) => v.as_deref(),
-            _ => cur_source.as_deref(),
-        };
-
-        let avail = compute_availability(eff_cached, eff_source);
-        extra_fields.push((
-            "availability",
-            FieldValue::Text(Some(avail.as_str().to_string())),
-        ));
-    }
-
-    // Build SET clause
-    let mut set_parts = Vec::new();
-    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-
-    for (&field, value) in &update.fields {
-        set_parts.push(format!("{field} = ?"));
-        match value {
-            FieldValue::Text(v) => params.push(Box::new(v.clone())),
-            FieldValue::Int(v) => params.push(Box::new(*v)),
-        }
-    }
-
-    for (field, value) in &extra_fields {
-        set_parts.push(format!("{field} = ?"));
-        match value {
-            FieldValue::Text(v) => params.push(Box::new(v.clone())),
-            FieldValue::Int(v) => params.push(Box::new(*v)),
-        }
-    }
-
-    // Always update updated_at
-    set_parts.push("updated_at = ?".to_string());
-    params.push(Box::new(Utc::now().to_rfc3339()));
-
-    // Add wad_id as final param
-    params.push(Box::new(wad_id));
-
-    let sql = format!("UPDATE wads SET {} WHERE id = ?", set_parts.join(", "));
-
-    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-    let count = conn.execute(&sql, param_refs.as_slice())?;
-    let updated = count > 0;
-
-    // Record completion atomically if status was set to 'finished'
-    if updated && recording_completion {
-        let snapshot: Option<String> = conn
-            .query_row(
-                "SELECT stats_snapshot FROM wads WHERE id = ?1",
+        if needs_avail_update {
+            let (cur_cached, cur_source): (Option<String>, Option<String>) = tx.query_row(
+                "SELECT cached_path, source_url FROM wads WHERE id = ?1",
                 [wad_id],
-                |row| row.get(0),
-            )
-            .ok()
-            .flatten();
-        conn.execute(
-            "INSERT INTO wad_completions (wad_id, stats_snapshot) VALUES (?1, ?2)",
-            rusqlite::params![wad_id, snapshot],
-        )?;
-    }
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
 
-    Ok(updated)
+            let eff_cached = match update.fields.get("cached_path") {
+                Some(FieldValue::Text(v)) => v.as_deref(),
+                _ => cur_cached.as_deref(),
+            };
+            let eff_source = match update.fields.get("source_url") {
+                Some(FieldValue::Text(v)) => v.as_deref(),
+                _ => cur_source.as_deref(),
+            };
+
+            let avail = compute_availability(eff_cached, eff_source);
+            extra_fields.push((
+                "availability",
+                FieldValue::Text(Some(avail.as_str().to_string())),
+            ));
+        }
+
+        // Build SET clause
+        let mut set_parts = Vec::new();
+        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+        for (&field, value) in &update.fields {
+            set_parts.push(format!("{field} = ?"));
+            match value {
+                FieldValue::Text(v) => params.push(Box::new(v.clone())),
+                FieldValue::Int(v) => params.push(Box::new(*v)),
+            }
+        }
+
+        for (field, value) in &extra_fields {
+            set_parts.push(format!("{field} = ?"));
+            match value {
+                FieldValue::Text(v) => params.push(Box::new(v.clone())),
+                FieldValue::Int(v) => params.push(Box::new(*v)),
+            }
+        }
+
+        set_parts.push("updated_at = ?".to_string());
+        params.push(Box::new(Utc::now().to_rfc3339()));
+        params.push(Box::new(wad_id));
+
+        let sql = format!("UPDATE wads SET {} WHERE id = ?", set_parts.join(", "));
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+        let count = tx.execute(&sql, param_refs.as_slice())?;
+        let updated = count > 0;
+
+        if updated && recording_completion {
+            let snapshot: Option<String> = tx
+                .query_row(
+                    "SELECT stats_snapshot FROM wads WHERE id = ?1",
+                    [wad_id],
+                    |row| row.get(0),
+                )
+                .ok()
+                .flatten();
+            tx.execute(
+                "INSERT INTO wad_completions (wad_id, stats_snapshot) VALUES (?1, ?2)",
+                rusqlite::params![wad_id, snapshot],
+            )?;
+        }
+
+        Ok(updated)
+    })
 }
 
 /// Soft-delete a WAD (or permanently delete with `purge=true`).

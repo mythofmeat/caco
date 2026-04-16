@@ -169,16 +169,21 @@ pub fn init_db(conn: &Connection) -> Result<()> {
         )
         .unwrap_or(0);
 
-    // Run only pending migrations
+    // Run only pending migrations. Each migration + its version-record INSERT run in
+    // one transaction so a failed migration rolls back and is not recorded as applied.
     for &(version, name, func) in MIGRATIONS {
         if version > current_version {
-            func(conn).map_err(|e| {
+            super::connection::with_transaction(conn, |tx| {
+                func(tx)?;
+                tx.execute(
+                    "INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (?1, ?2)",
+                    rusqlite::params![version, name],
+                )?;
+                Ok(())
+            })
+            .map_err(|e| {
                 crate::Error::MigrationFailed(format!("migration {version} ({name}): {e}"))
             })?;
-            conn.execute(
-                "INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (?1, ?2)",
-                rusqlite::params![version, name],
-            )?;
         }
     }
 
