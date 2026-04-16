@@ -418,6 +418,27 @@ pub fn get_all_tags(conn: &Connection) -> Result<Vec<String>> {
     Ok(tags)
 }
 
+/// Count non-deleted WADs grouped by status.
+///
+/// Keyed by the raw `status` column string ("unplayed", "in-progress", etc.).
+/// Returns an empty map if no WADs match; statuses with zero WADs are absent.
+pub fn get_status_counts(conn: &Connection) -> Result<HashMap<String, i64>> {
+    let mut stmt = conn.prepare(
+        "SELECT status, COUNT(*) FROM wads
+         WHERE deleted_at IS NULL
+         GROUP BY status",
+    )?;
+    let mut counts = HashMap::new();
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+    })?;
+    for row in rows {
+        let (status, count) = row?;
+        counts.insert(status, count);
+    }
+    Ok(counts)
+}
+
 /// Get all tags with their WAD counts (excluding deleted WADs).
 pub fn get_tag_counts(conn: &Connection) -> Result<Vec<(String, i64)>> {
     let mut stmt = conn.prepare(

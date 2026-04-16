@@ -59,6 +59,7 @@ pub use sessions::{
     update_session_demo, update_session_stats, update_wad_completion,
 };
 pub use wads::{
-    FieldValue, NewWad, WadUpdate, add_tag, add_wad, delete_wad, get_all_tags, get_tag_counts,
-    get_wad, purge_all_deleted, remove_all_tags, remove_tag, restore_wad, update_wad,
+    FieldValue, NewWad, WadUpdate, add_tag, add_wad, delete_wad, get_all_tags, get_status_counts,
+    get_tag_counts, get_wad, purge_all_deleted, remove_all_tags, remove_tag, restore_wad,
+    update_wad,
 };

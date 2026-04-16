@@ -150,6 +150,7 @@ static MIGRATIONS: &[Migration] = &[
     ),
     (31, "add_zdoom_required", migrate_add_zdoom_required),
     (32, "consolidate_status_columns", migrate_consolidate_status),
+    (33, "drop_custom_complevel", migrate_drop_custom_complevel),
 ];
 
 // ---------------------------------------------------------------------------
@@ -428,6 +429,13 @@ fn migrate_merge_custom_complevel(conn: &Connection) -> Result<()> {
          WHERE custom_complevel IS NOT NULL
            AND complevel IS NULL",
     )?;
+    Ok(())
+}
+
+fn migrate_drop_custom_complevel(conn: &Connection) -> Result<()> {
+    if has_column(conn, "wads", "custom_complevel")? {
+        conn.execute("ALTER TABLE wads DROP COLUMN custom_complevel", [])?;
+    }
     Ok(())
 }
 
@@ -737,7 +745,6 @@ mod tests {
             "version",
             "stats_snapshot",
             "companion_files",
-            "custom_complevel",
             "complevel",
             "custom_config",
             "gc_ignore",

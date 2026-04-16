@@ -207,10 +207,11 @@ impl AppState {
     pub fn refresh_status_counts(&mut self, conn: &Connection) {
         self.status_counts.clear();
         self.total_wad_count = 0;
-        if let Ok(all_wads) = caco_core::db::search_wads(conn, None, Some("id"), false, false, 0) {
-            self.total_wad_count = all_wads.len();
-            for wad in &all_wads {
-                *self.status_counts.entry(wad.status.clone()).or_insert(0) += 1;
+        if let Ok(counts) = caco_core::db::get_status_counts(conn) {
+            for (status, count) in counts {
+                let count = count as usize;
+                self.total_wad_count += count;
+                self.status_counts.insert(status, count);
             }
         }
     }
