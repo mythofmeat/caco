@@ -123,6 +123,7 @@ pub fn run(conn: &Connection, args: &ImportArgs) -> Result<(), String> {
         SourceKind::IdgamesSearch(query) => import_idgames_search(conn, &query, tags, args),
         SourceKind::IdgamesId(id) => import_idgames_id(conn, id, tags, args.force),
         SourceKind::Doomwiki(query) => import_doomwiki_search(conn, &query, tags, args),
+        SourceKind::DoomwikiPage(title) => import_doomwiki_page(conn, &title, tags, args.force),
         SourceKind::Doomworld(url) => import_doomworld(conn, &url, tags, args),
         SourceKind::Url(url) => import_url(conn, &url, &source_str, tags, args),
         SourceKind::Local(path) => import_local(conn, &path, tags, args),
@@ -134,6 +135,8 @@ enum SourceKind {
     IdgamesSearch(String),
     IdgamesId(i64),
     Doomwiki(String),
+    /// Direct Doom Wiki page fetch by title (no picker).
+    DoomwikiPage(String),
     Doomworld(String),
     Url(String),
     Local(String),
@@ -181,6 +184,9 @@ fn detect_source(args: &ImportArgs, source_str: &str) -> Result<SourceKind, Stri
     }
 
     if source_str.contains("doomwiki.org") {
+        if let Some(title) = caco_sources::doomwiki::extract_doomwiki_title_from_url(source_str) {
+            return Ok(SourceKind::DoomwikiPage(title));
+        }
         return Ok(SourceKind::Doomwiki(source_str.to_string()));
     }
     // idgames URLs are hosted under doomworld.com/idgames/... — route them
@@ -356,6 +362,40 @@ fn import_doomwiki_search(
 
     if imported > 0 && selected.len() > 1 {
         println!("Imported {imported} WAD(s).");
+    }
+    Ok(())
+}
+
+fn import_doomwiki_page(
+    conn: &Connection,
+    title: &str,
+    tags: Option<Vec<String>>,
+    force: bool,
+) -> Result<(), String> {
+    let client = DoomwikiClient::new();
+    let entry = match client.get_entry(title) {
+        Ok(Some(e)) => e,
+        Ok(None) => return Err(format!("Doom Wiki page not found: '{title}'")),
+        Err(caco_sources::SourceError::WafBlocked { .. }) => {
+            print_api_hint("doomwiki", title);
+            return Err("Doom Wiki blocked the request (WAF challenge).".to_string());
+        }
+        Err(e) => return Err(e.to_string()),
+    };
+
+    let svc = ImportService;
+    let result = svc.import_doomwiki(conn, &entry, tags, force);
+
+    if result.is_duplicate {
+        println!(
+            "Already in library: '{}' (ID: {})",
+            result.duplicate_title.as_deref().unwrap_or("?"),
+            result.duplicate_id.unwrap_or(0),
+        );
+    } else if let Some(wad_id) = result.wad_id {
+        println!("Imported '{}' (ID: {wad_id})", entry.display_name());
+    } else if let Some(ref err) = result.error {
+        return Err(format!("Import error: {err}"));
     }
     Ok(())
 }
@@ -864,5 +904,27 @@ mod tests {
         let args = default_args();
         let url = "https://www.doomworld.com/idgames/?no-id-param=1";
         assert!(detect_source(&args, url).is_err());
+    }
+
+    #[test]
+    fn detect_source_routes_doomwiki_wiki_url_to_page() {
+        let args = default_args();
+        let url = "https://doomwiki.org/wiki/DBP31:_Santa%27s_Outback_Bender";
+        match detect_source(&args, url).unwrap() {
+            SourceKind::DoomwikiPage(title) => {
+                assert_eq!(title, "DBP31: Santa's Outback Bender")
+            }
+            _ => panic!("expected DoomwikiPage"),
+        }
+    }
+
+    #[test]
+    fn detect_source_falls_back_to_search_for_non_wiki_doomwiki_url() {
+        let args = default_args();
+        let url = "https://doomwiki.org/w/index.php?search=foo";
+        match detect_source(&args, url).unwrap() {
+            SourceKind::Doomwiki(got) => assert_eq!(got, url),
+            _ => panic!("expected Doomwiki search fallback"),
+        }
     }
 }
