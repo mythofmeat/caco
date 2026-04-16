@@ -2,6 +2,7 @@ use egui_extras::{Column, TableBuilder};
 use rusqlite::Connection;
 
 use crate::theme;
+use crate::workers::{FileDialogReceiver, FileDialogRequest, spawn_file_dialog};
 
 // Use a type alias to disambiguate from db::sessions::WadStats
 type StatsData = caco_core::wad_stats::WadStats;
@@ -18,6 +19,12 @@ pub struct WadStatsDialogState {
     wad_id: i64,
     entries: Vec<StatsEntry>,
     selected_index: usize,
+    /// Open-picker in flight for the Import button.
+    pending_import: Option<FileDialogReceiver>,
+    /// Save-picker in flight for the Export button, along with the stats
+    /// snapshot captured when the user clicked (so later UI edits don't
+    /// change what gets written).
+    pending_export: Option<(StatsData, FileDialogReceiver)>,
 }
 
 /// Result of showing the WAD stats dialog.
@@ -65,12 +72,35 @@ impl WadStatsDialogState {
             wad_id,
             entries,
             selected_index: 0,
+            pending_import: None,
+            pending_export: None,
         })
     }
 
     /// Render the WAD stats dialog. Returns the dialog result.
     pub fn render(&mut self, ctx: &egui::Context, conn: &Connection) -> WadStatsResult {
         let mut result = WadStatsResult::Open;
+
+        // Drain any in-flight pickers from prior frames.
+        if let Some(rx) = &self.pending_import
+            && let Ok(picked) = rx.try_recv()
+        {
+            self.pending_import = None;
+            if let Some(path) = picked
+                && self.import_stats_from(conn, &path)
+            {
+                result = WadStatsResult::Modified;
+            }
+        }
+        if let Some((_, rx)) = &self.pending_export
+            && let Ok(picked) = rx.try_recv()
+        {
+            let (stats, _) = self.pending_export.take().unwrap();
+            if let Some(path) = picked {
+                let text = caco_core::wad_stats::format_stats(&stats);
+                let _ = std::fs::write(path, text);
+            }
+        }
 
         egui::Window::new(format!("Map Stats \u{2014} {}", self.wad_title))
             .collapsible(false)
@@ -83,8 +113,9 @@ impl WadStatsDialogState {
                     ui.add_space(8.0);
 
                     ui.horizontal(|ui| {
-                        if ui.button("Import").clicked() && self.do_import(conn) {
-                            result = WadStatsResult::Modified;
+                        let busy = self.pending_import.is_some();
+                        if ui.add_enabled(!busy, egui::Button::new("Import")).clicked() {
+                            self.pending_import = Some(spawn_import_picker(ctx));
                         }
                         if ui.button("Close").clicked() {
                             result = WadStatsResult::Closed;
@@ -184,11 +215,20 @@ impl WadStatsDialogState {
 
                 // Action buttons
                 ui.horizontal(|ui| {
-                    if ui.button("Import").clicked() && self.do_import(conn) {
-                        result = WadStatsResult::Modified;
+                    let import_busy = self.pending_import.is_some();
+                    if ui
+                        .add_enabled(!import_busy, egui::Button::new("Import"))
+                        .clicked()
+                    {
+                        self.pending_import = Some(spawn_import_picker(ctx));
                     }
-                    if ui.button("Export").clicked() {
-                        do_export(&export_stats);
+                    let export_busy = self.pending_export.is_some();
+                    if ui
+                        .add_enabled(!export_busy, egui::Button::new("Export"))
+                        .clicked()
+                    {
+                        let rx = spawn_export_picker(ctx, &export_stats);
+                        self.pending_export = Some((export_stats, rx));
                     }
                     if ui.button("Close").clicked() {
                         result = WadStatsResult::Closed;
@@ -204,17 +244,10 @@ impl WadStatsDialogState {
         result
     }
 
-    /// Import stats from a file picker.
-    fn do_import(&mut self, conn: &Connection) -> bool {
-        let dir = dirs::home_dir().unwrap_or_default();
-        let path = rfd::FileDialog::new()
-            .add_filter("Stats files", &["txt"])
-            .set_directory(&dir)
-            .pick_file();
-
-        let Some(path) = path else { return false };
-
-        let stats = match caco_core::wad_stats::parse_stats_file(&path) {
+    /// Parse a stats file the user picked, write it to the DB, and refresh
+    /// in-memory entries. Returns `true` if DB state changed.
+    fn import_stats_from(&mut self, conn: &Connection, path: &std::path::Path) -> bool {
+        let stats = match caco_core::wad_stats::parse_stats_file(path) {
             Ok(s) => s,
             Err(_) => return false,
         };
@@ -274,24 +307,27 @@ impl WadStatsDialogState {
     }
 }
 
-/// Export stats to a file via save-file picker.
-fn do_export(stats: &StatsData) {
-    let dir = dirs::home_dir().unwrap_or_default();
+/// Spawn the import file picker off the egui loop.
+fn spawn_import_picker(ctx: &egui::Context) -> FileDialogReceiver {
+    let req = FileDialogRequest::open()
+        .add_filter("Stats files", &["txt"])
+        .set_directory(dirs::home_dir().unwrap_or_default());
+    spawn_file_dialog(Some(ctx.clone()), req)
+}
+
+/// Spawn the export save-picker off the egui loop. The default filename is
+/// chosen based on the selected stats format.
+fn spawn_export_picker(ctx: &egui::Context, stats: &StatsData) -> FileDialogReceiver {
     let default_name = if stats.format == "levelstat_txt" {
         "levelstat.txt"
     } else {
         "stats.txt"
     };
-    let path = rfd::FileDialog::new()
+    let req = FileDialogRequest::save()
         .add_filter("Stats files", &["txt"])
-        .set_directory(&dir)
-        .set_file_name(default_name)
-        .save_file();
-
-    if let Some(path) = path {
-        let text = caco_core::wad_stats::format_stats(stats);
-        let _ = std::fs::write(path, text);
-    }
+        .set_directory(dirs::home_dir().unwrap_or_default())
+        .set_file_name(default_name);
+    spawn_file_dialog(Some(ctx.clone()), req)
 }
 
 /// Format a ratio like "45/50" or just the value if total is unknown.

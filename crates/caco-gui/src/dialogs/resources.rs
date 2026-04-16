@@ -30,6 +30,8 @@ pub struct ResourcesDialogState {
     import_path: String,
     status_text: Option<(String, bool)>, // (message, is_error)
     pub modified: bool,
+    /// Active "Browse…" file picker, polled each frame.
+    pending_browse: Option<crate::workers::FileDialogReceiver>,
 }
 
 /// Result of showing the resources dialog.
@@ -51,6 +53,7 @@ impl ResourcesDialogState {
             import_path: String::new(),
             status_text: None,
             modified: false,
+            pending_browse: None,
         };
         state.load(conn);
         state
@@ -110,6 +113,16 @@ impl ResourcesDialogState {
 
     /// Render the resources dialog. Returns the dialog result.
     pub fn render(&mut self, ctx: &egui::Context, conn: &Connection) -> ResourcesResult {
+        // Collect any pending Browse… picker result.
+        if let Some(rx) = &self.pending_browse
+            && let Ok(picked) = rx.try_recv()
+        {
+            self.pending_browse = None;
+            if let Some(path) = picked {
+                self.import_path = path.display().to_string();
+            }
+        }
+
         let mut result = ResourcesResult::Open;
 
         egui::Window::new("Resources")
@@ -165,14 +178,18 @@ impl ResourcesDialogState {
                     );
                     let enter_pressed =
                         response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    if ui.button("Browse…").clicked() {
-                        let mut dialog = rfd::FileDialog::new().add_filter("WAD files", &["wad"]);
+                    let browse_busy = self.pending_browse.is_some();
+                    if ui
+                        .add_enabled(!browse_busy, egui::Button::new("Browse\u{2026}"))
+                        .clicked()
+                    {
+                        let mut req = crate::workers::FileDialogRequest::open()
+                            .add_filter("WAD files", &["wad"]);
                         if let Some(dir) = dirs::home_dir() {
-                            dialog = dialog.set_directory(dir);
+                            req = req.set_directory(dir);
                         }
-                        if let Some(path) = dialog.pick_file() {
-                            self.import_path = path.display().to_string();
-                        }
+                        self.pending_browse =
+                            Some(crate::workers::spawn_file_dialog(Some(ctx.clone()), req));
                     }
                     if ui.button("Add").clicked() || enter_pressed {
                         self.do_import(conn);

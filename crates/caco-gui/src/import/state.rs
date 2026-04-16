@@ -82,6 +82,9 @@ pub struct FormState {
     pub fields: Vec<FormField>,
     pub is_submitting: bool,
     pub status_text: String,
+    /// Async file picker for the Local-import "Browse…" button. Polled each
+    /// frame; result is written into the `path` field.
+    pub pending_browse: Option<crate::workers::FileDialogReceiver>,
 }
 
 impl FormState {
@@ -115,6 +118,7 @@ impl FormState {
             fields,
             is_submitting: false,
             status_text: String::new(),
+            pending_browse: None,
         }
     }
 
@@ -143,6 +147,7 @@ impl FormState {
         }
         self.status_text.clear();
         self.is_submitting = false;
+        self.pending_browse = None;
     }
 }
 

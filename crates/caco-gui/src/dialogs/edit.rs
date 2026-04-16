@@ -87,6 +87,8 @@ pub struct EditDialogState {
     // Companions tab
     companions: Vec<CompanionEntry>,
     companions_modified: bool,
+    /// Async file-picker for the "Add companion" button, polled each frame.
+    pending_companion_pick: Option<crate::workers::FileDialogReceiver>,
 
     // Tag add state
     adding_tag: bool,
@@ -151,6 +153,7 @@ impl EditDialogState {
 
             companions,
             companions_modified: false,
+            pending_companion_pick: None,
 
             adding_tag: false,
             new_tag_text: String::new(),
@@ -161,6 +164,24 @@ impl EditDialogState {
 
     /// Render the edit dialog. Returns the dialog result.
     pub fn render(&mut self, ctx: &egui::Context, conn: &Connection) -> EditResult {
+        // Pick up the result of an async companion file-picker if it's ready.
+        if let Some(rx) = &self.pending_companion_pick
+            && let Ok(picked) = rx.try_recv()
+        {
+            self.pending_companion_pick = None;
+            if let Some(path) = picked {
+                match companion_service::register_companion(conn, self.wad_id, &path) {
+                    Ok(_) => {
+                        self.companions_modified = true;
+                        self.reload_companions(conn);
+                    }
+                    Err(e) => {
+                        self.error_message = Some(format!("Failed to add companion: {e}"));
+                    }
+                }
+            }
+        }
+
         let mut result = EditResult::Open;
         let mut companion_action: Option<CompanionAction> = None;
 
@@ -400,7 +421,7 @@ impl EditDialogState {
 
         // Process deferred companion actions
         if let Some(action) = companion_action {
-            self.process_companion_action(action, conn);
+            self.process_companion_action(action, conn, ctx);
         }
 
         result
@@ -759,25 +780,23 @@ impl EditDialogState {
     // Companion action processing
     // -----------------------------------------------------------------------
 
-    fn process_companion_action(&mut self, action: CompanionAction, conn: &Connection) {
+    fn process_companion_action(
+        &mut self,
+        action: CompanionAction,
+        conn: &Connection,
+        ctx: &egui::Context,
+    ) {
         match action {
             CompanionAction::Add => {
-                let start_dir = dirs::home_dir().unwrap_or_default();
-                if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("Companion Files", &["deh", "bex", "wad", "pk3", "zip"])
-                    .set_directory(start_dir)
-                    .pick_file()
-                {
-                    match companion_service::register_companion(conn, self.wad_id, &path) {
-                        Ok(_) => {
-                            self.companions_modified = true;
-                            self.reload_companions(conn);
-                        }
-                        Err(e) => {
-                            self.error_message = Some(format!("Failed to add companion: {e}"));
-                        }
-                    }
+                // Skip if a picker is already in flight.
+                if self.pending_companion_pick.is_some() {
+                    return;
                 }
+                let req = crate::workers::FileDialogRequest::open()
+                    .add_filter("Companion Files", &["deh", "bex", "wad", "pk3", "zip"])
+                    .set_directory(dirs::home_dir().unwrap_or_default());
+                self.pending_companion_pick =
+                    Some(crate::workers::spawn_file_dialog(Some(ctx.clone()), req));
             }
             CompanionAction::Remove(companion_id) => {
                 match companion_service::unregister_companion(conn, self.wad_id, companion_id, None)

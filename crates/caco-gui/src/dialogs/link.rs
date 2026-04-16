@@ -1,12 +1,18 @@
+use std::path::Path;
+
 use rusqlite::Connection;
 
 use crate::theme;
+use crate::workers::{FileDialogReceiver, FileDialogRequest, spawn_file_dialog};
 
 /// State for the WAD Unavailable / Link dialog.
 pub struct LinkDialogState {
     pub wad_id: i64,
     pub wad_title: String,
     pub source_url: Option<String>,
+    /// Active file picker, if the user clicked "Link Local File". Polled
+    /// each frame; resolves to `Some(path)` or `None` (cancelled).
+    pending_picker: Option<FileDialogReceiver>,
 }
 
 /// Result of showing the link dialog.
@@ -26,10 +32,25 @@ impl LinkDialogState {
             wad_id,
             wad_title: wad.title,
             source_url: wad.source_url,
+            pending_picker: None,
         })
     }
 
-    pub fn render(&self, ctx: &egui::Context, conn: &Connection) -> LinkResult {
+    pub fn render(&mut self, ctx: &egui::Context, conn: &Connection) -> LinkResult {
+        // First: check if an async file picker has returned since last frame.
+        if let Some(rx) = &self.pending_picker
+            && let Ok(picked) = rx.try_recv()
+        {
+            self.pending_picker = None;
+            if let Some(path) = picked {
+                match link_picked_file(conn, self.wad_id, &path) {
+                    Ok(()) => return LinkResult::Linked,
+                    Err(e) => eprintln!("Failed to link file: {e}"),
+                }
+            }
+            // Cancelled picker or failed link: fall through to keep dialog open.
+        }
+
         let mut result = LinkResult::Open;
 
         egui::Window::new("WAD Unavailable")
@@ -70,11 +91,17 @@ impl LinkDialogState {
                         let _ = open::that(url);
                     }
 
-                    // Link Local File button
-                    if ui.button("Link Local File").clicked()
-                        && let Some(true) = pick_and_link_file(conn, self.wad_id)
+                    // Link Local File button — spawn an async picker. Disabled
+                    // while one is already in flight.
+                    let picker_busy = self.pending_picker.is_some();
+                    if ui
+                        .add_enabled(!picker_busy, egui::Button::new("Link Local File"))
+                        .clicked()
                     {
-                        result = LinkResult::Linked;
+                        let req = FileDialogRequest::open()
+                            .add_filter("WAD/ZIP files", &["wad", "zip", "WAD", "ZIP"])
+                            .set_directory(dirs::home_dir().unwrap_or_default());
+                        self.pending_picker = Some(spawn_file_dialog(Some(ctx.clone()), req));
                     }
 
                     if ui.button("Cancel").clicked() {
@@ -92,48 +119,30 @@ impl LinkDialogState {
     }
 }
 
-/// Open a file picker, copy the selected file to the cache dir, and update the WAD's
-/// cached_path and filename. Returns `Some(true)` on success, `Some(false)` on error,
-/// `None` if the user cancelled the picker.
-fn pick_and_link_file(conn: &Connection, wad_id: i64) -> Option<bool> {
-    let start_dir = dirs::home_dir().unwrap_or_default();
-    let path = rfd::FileDialog::new()
-        .add_filter("WAD/ZIP files", &["wad", "zip", "WAD", "ZIP"])
-        .set_directory(&start_dir)
-        .pick_file()?;
-
+/// Copy the selected file into the cache dir and update the WAD record.
+fn link_picked_file(conn: &Connection, wad_id: i64, path: &Path) -> Result<(), String> {
     let filename = path
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "unknown.wad".to_string());
 
-    // Copy file to cache directory
     let cache_dir = caco_core::config::get_cache_dir();
     let dest = cache_dir.join(&filename);
 
-    if let Err(e) = std::fs::create_dir_all(&cache_dir) {
-        eprintln!("Failed to create cache dir: {e}");
-        return Some(false);
-    }
+    std::fs::create_dir_all(&cache_dir).map_err(|e| format!("Failed to create cache dir: {e}"))?;
 
     // Only copy if source != destination
-    if path != dest
-        && let Err(e) = std::fs::copy(&path, &dest)
-    {
-        eprintln!("Failed to copy WAD to cache: {e}");
-        return Some(false);
+    if path != dest {
+        std::fs::copy(path, &dest).map_err(|e| format!("Failed to copy WAD to cache: {e}"))?;
     }
 
-    // Update DB: cached_path and filename
     let dest_str = dest.to_string_lossy().to_string();
     let update = caco_core::db::wads::WadUpdate::new()
         .set_text("cached_path", Some(dest_str))
         .set_text("filename", Some(filename));
 
-    if let Err(e) = caco_core::db::wads::update_wad(conn, wad_id, &update) {
-        eprintln!("Failed to update WAD: {e}");
-        return Some(false);
-    }
+    caco_core::db::wads::update_wad(conn, wad_id, &update)
+        .map_err(|e| format!("Failed to update WAD: {e}"))?;
 
-    Some(true)
+    Ok(())
 }
