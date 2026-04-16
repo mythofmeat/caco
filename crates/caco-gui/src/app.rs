@@ -110,8 +110,7 @@ impl CacoApp {
                     // Clear active collection if we just deleted it
                     if self.state.active_collection.as_deref() == Some(&name) {
                         self.state.active_collection = None;
-                        self.state.filter_text.clear();
-                        self.state.applied_filter.clear();
+                        self.state.filter.set_both(String::new());
                     }
                     self.state.sidebar_collections =
                         caco_core::db::collections::get_all_collections(&self.conn)
@@ -479,8 +478,8 @@ impl eframe::App for CacoApp {
                             close_dialog = true;
                             self.state.refresh_collections(&self.conn);
                             self.state.active_collection = None;
-                            self.state.filter_text = query;
-                            self.state.filter_changed_at = Some(std::time::Instant::now());
+                            self.state.filter.input = query;
+                            self.state.filter.mark_changed(std::time::Instant::now());
                         }
                         CollectionsResult::Open => {}
                     }
@@ -769,8 +768,7 @@ fn render_sidebar(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Act
                 // Find the collection and load its query + sort
                 if let Some(coll) = state.sidebar_collections.iter().find(|c| c.name == *name) {
                     state.active_collection = Some(name.clone());
-                    state.filter_text = coll.query.clone();
-                    state.applied_filter = coll.query.clone();
+                    state.filter.set_both(coll.query.clone());
                     // Apply collection sort settings
                     if let Some(ref sort_by) = coll.sort_by {
                         if let Some(idx) = crate::state::SORT_FIELDS

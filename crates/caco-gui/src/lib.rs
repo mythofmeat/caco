@@ -1,5 +1,6 @@
 pub mod app;
 pub mod dialogs;
+pub mod filter_query;
 pub mod import;
 pub mod message;
 pub mod panels;

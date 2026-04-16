@@ -16,6 +16,7 @@ use crate::dialogs::resources::ResourcesDialogState;
 use crate::dialogs::sessions::SessionsDialogState;
 use crate::dialogs::stats::StatsDialogState;
 use crate::dialogs::wad_stats::WadStatsDialogState;
+use crate::filter_query::{FilterCheck, FilterQuery};
 use crate::import::state::ImportState;
 use crate::message::Notification;
 use crate::persist;
@@ -110,10 +111,8 @@ pub struct AppState {
     // Status filters (empty = all; multiple entries produce OR query)
     pub status_filters: HashSet<String>,
 
-    // Filter
-    pub filter_text: String,
-    pub filter_changed_at: Option<Instant>,
-    pub applied_filter: String,
+    // Filter (debounced)
+    pub filter: FilterQuery,
 
     // Sort
     pub sort_field_index: usize,
@@ -170,9 +169,7 @@ impl AppState {
             view_mode: ViewMode::default(),
             view_layout,
             status_filters: persisted.status_filters.into_iter().collect(),
-            filter_text: String::new(),
-            filter_changed_at: None,
-            applied_filter: String::new(),
+            filter: FilterQuery::new(),
             sort_field_index,
             sort_desc: persisted.sort_desc,
             wads: Vec::new(),
@@ -255,8 +252,8 @@ impl AppState {
             }
         }
 
-        if !self.applied_filter.is_empty() {
-            query_parts.push(self.applied_filter.clone());
+        if !self.filter.applied.is_empty() {
+            query_parts.push(self.filter.applied.clone());
         }
 
         let query = if query_parts.is_empty() {
@@ -314,19 +311,10 @@ impl AppState {
 
     /// Check if filter debounce has elapsed and apply if so.
     pub fn check_filter_debounce(&mut self, ctx: &egui::Context, conn: &Connection) {
-        if let Some(changed_at) = self.filter_changed_at {
-            let elapsed = changed_at.elapsed();
-            if elapsed.as_millis() >= 150 {
-                self.filter_changed_at = None;
-                if self.applied_filter != self.filter_text {
-                    self.applied_filter = self.filter_text.clone();
-                    self.reload(conn);
-                }
-            } else {
-                // Schedule a repaint after the remaining debounce time
-                let remaining = std::time::Duration::from_millis(150) - elapsed;
-                ctx.request_repaint_after(remaining);
-            }
+        match self.filter.poll(Instant::now()) {
+            FilterCheck::Idle => {}
+            FilterCheck::Pending { remaining } => ctx.request_repaint_after(remaining),
+            FilterCheck::Apply => self.reload(conn),
         }
     }
 
