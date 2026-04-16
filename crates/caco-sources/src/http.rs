@@ -70,10 +70,10 @@ pub fn is_cloudflare_challenged(response: &reqwest::blocking::Response) -> bool 
 
 /// Check if an HTTP response has an AWS WAF challenge.
 ///
-/// Returns `true` when status is 403 or the `x-amzn-waf-action` header is `"challenge"`.
+/// Returns `true` when status is 403 and the `x-amzn-waf-action` header is `"challenge"`.
 pub fn is_aws_waf_challenged(response: &reqwest::blocking::Response) -> bool {
     response.status() == reqwest::StatusCode::FORBIDDEN
-        || response
+        && response
             .headers()
             .get("x-amzn-waf-action")
             .and_then(|v| v.to_str().ok())

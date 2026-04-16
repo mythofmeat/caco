@@ -180,8 +180,8 @@ pub fn render_wad_info(
 ) {
     match format {
         OutputFormat::Table => render_wad_info_table(wad, stats, completions, companions),
-        OutputFormat::Plain => render_wad_info_plain(wad, stats),
-        OutputFormat::Json => render_wad_info_json(wad, stats),
+        OutputFormat::Plain => render_wad_info_plain(wad, stats, completions, companions),
+        OutputFormat::Json => render_wad_info_json(wad, stats, completions, companions),
     }
 }
 
@@ -311,7 +311,12 @@ fn render_wad_info_table(
     }
 }
 
-fn render_wad_info_plain(wad: &WadRecord, stats: &WadStats) {
+fn render_wad_info_plain(
+    wad: &WadRecord,
+    stats: &WadStats,
+    completions: &[CompletionRecord],
+    companions: &[WadCompanionRecord],
+) {
     println!("id={}", wad.id);
     println!("title={}", wad.title);
     if let Some(a) = &wad.author {
@@ -343,9 +348,30 @@ fn render_wad_info_plain(wad: &WadRecord, stats: &WadStats) {
     if let Some(n) = &wad.notes {
         println!("notes={n}");
     }
+    for comp in completions {
+        let notes = comp.notes.as_deref().unwrap_or("");
+        let has_stats = if comp.stats_snapshot.is_some() {
+            "1"
+        } else {
+            "0"
+        };
+        println!(
+            "completion\t{}\t{}\t{}",
+            comp.completed_at, has_stats, notes
+        );
+    }
+    for c in companions {
+        let enabled = if c.enabled { "1" } else { "0" };
+        println!("companion\t{}\t{}", c.filename, enabled);
+    }
 }
 
-fn render_wad_info_json(wad: &WadRecord, stats: &WadStats) {
+fn render_wad_info_json(
+    wad: &WadRecord,
+    stats: &WadStats,
+    completions: &[CompletionRecord],
+    companions: &[WadCompanionRecord],
+) {
     let mut val = serde_json::to_value(wad).unwrap_or(serde_json::Value::Null);
     if let serde_json::Value::Object(ref mut map) = val {
         map.insert("playtime".to_string(), serde_json::json!(stats.playtime));
@@ -361,6 +387,30 @@ fn render_wad_info_json(wad: &WadRecord, stats: &WadStats) {
             "last_played".to_string(),
             serde_json::json!(stats.last_played),
         );
+        let completions_json: Vec<serde_json::Value> = completions
+            .iter()
+            .map(|c| {
+                serde_json::json!({
+                    "completed_at": c.completed_at,
+                    "notes": c.notes,
+                    "has_stats": c.stats_snapshot.is_some(),
+                })
+            })
+            .collect();
+        map.insert(
+            "completions".to_string(),
+            serde_json::json!(completions_json),
+        );
+        let companions_json: Vec<serde_json::Value> = companions
+            .iter()
+            .map(|c| {
+                serde_json::json!({
+                    "filename": c.filename,
+                    "enabled": c.enabled,
+                })
+            })
+            .collect();
+        map.insert("companions".to_string(), serde_json::json!(companions_json));
     }
     println!("{}", serde_json::to_string_pretty(&val).unwrap_or_default());
 }
@@ -742,7 +792,7 @@ pub fn format_time(ts: &str) -> String {
 }
 
 /// Truncate a string to `max` characters, appending "…" if truncated.
-fn truncate_str(s: &str, max: usize) -> String {
+pub(crate) fn truncate_str(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         s.to_string()
     } else {

@@ -34,7 +34,7 @@ pub struct TabbedLibraryScreen {
 }
 
 impl TabbedLibraryScreen {
-    pub fn new(conn: &Connection) -> Self {
+    pub fn new(conn: &Connection, bg_tx: mpsc::Sender<AppMessage>) -> Self {
         let cfg = config::load_config();
         let sort_field = &cfg.tui.default_sort;
         let sort_desc = cfg.tui.default_sort_desc;
@@ -52,10 +52,7 @@ impl TabbedLibraryScreen {
             library_panes.push(LibraryPaneState::new(tab_query, sort_field, sort_desc));
         }
 
-        // Create import pane (tab 5) with a dummy sender for now
-        // The sender will be set by the App after construction
-        let (tx, _rx) = mpsc::channel();
-        let import_pane = ImportPaneState::new(tx);
+        let import_pane = ImportPaneState::new(bg_tx);
 
         let mut screen = Self {
             active_tab: initial_tab,
@@ -70,16 +67,6 @@ impl TabbedLibraryScreen {
         }
 
         screen
-    }
-
-    /// Set the background sender for import operations.
-    pub fn set_bg_sender(&mut self, tx: mpsc::Sender<AppMessage>) {
-        self.import_pane = ImportPaneState::new(tx);
-    }
-
-    /// Process search results from background thread.
-    pub fn on_search_complete(&mut self, source: SearchSource, results: Vec<SearchResultEntry>) {
-        self.import_pane.on_search_complete(source, results);
     }
 
     fn is_import_tab(&self) -> bool {
@@ -190,5 +177,9 @@ impl Screen for TabbedLibraryScreen {
         for pane in &mut self.library_panes {
             pane.reload(conn);
         }
+    }
+
+    fn on_search_complete(&mut self, source: SearchSource, results: Vec<SearchResultEntry>) {
+        self.import_pane.on_search_complete(source, results);
     }
 }

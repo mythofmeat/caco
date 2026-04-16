@@ -13,7 +13,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use rusqlite::Connection;
 
-use crate::message::{AppMessage, ScreenResult};
+use crate::message::{AppMessage, ScreenResult, SearchResultEntry, SearchSource};
 
 /// Trait for all TUI screens.
 pub trait Screen {
@@ -38,4 +38,7 @@ pub trait Screen {
 
     /// Called when this screen becomes active again after a pushed screen pops.
     fn on_resume(&mut self, _conn: &Connection, _result: Option<ScreenResult>) {}
+
+    /// Called when a background search completes. Default no-op; override where relevant.
+    fn on_search_complete(&mut self, _source: SearchSource, _results: Vec<SearchResultEntry>) {}
 }

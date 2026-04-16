@@ -12,6 +12,7 @@ use caco_core::db::{self, WadRecord};
 use caco_core::demos::DEMO_EXTENSION;
 use caco_core::sourceports::ALL_SAVE_EXTENSIONS;
 
+use crate::output::truncate_str;
 use crate::resolve;
 
 // =============================================================================
@@ -250,7 +251,7 @@ fn gc_batch_clean(
 
     let mut total_size = 0u64;
     for entry in entries {
-        let title = truncate(&entry.wad.title, 38);
+        let title = truncate_str(&entry.wad.title, 38);
         let redownloadable = if entry.wad.source_type == "idgames" || entry.wad.idgames_id.is_some()
         {
             "yes"
@@ -787,14 +788,6 @@ fn format_size(bytes: u64) -> String {
     }
 }
 
-fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        format!("{}…", &s[..max - 1])
-    }
-}
-
 // =============================================================================
 // Tests
 // =============================================================================
@@ -873,25 +866,6 @@ mod tests {
     #[test]
     fn test_format_size_gb() {
         assert_eq!(format_size(3 * 1024 * 1024 * 1024), "3.0 GB");
-    }
-
-    // -- truncate tests --
-
-    #[test]
-    fn test_truncate_short() {
-        assert_eq!(truncate("hello", 10), "hello");
-    }
-
-    #[test]
-    fn test_truncate_exact() {
-        assert_eq!(truncate("hello", 5), "hello");
-    }
-
-    #[test]
-    fn test_truncate_long() {
-        let result = truncate("hello world", 8);
-        assert!(result.len() <= 10); // Unicode ellipsis
-        assert!(result.ends_with('…'));
     }
 
     // -- get_gc_candidates tests --

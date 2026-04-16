@@ -52,7 +52,7 @@ pub struct App {
 impl App {
     pub fn new(conn: Connection) -> Self {
         let (bg_tx, bg_rx) = mpsc::channel();
-        let initial_screen = TabbedLibraryScreen::new(&conn);
+        let initial_screen = TabbedLibraryScreen::new(&conn, bg_tx.clone());
         Self {
             conn,
             screen_stack: vec![Box::new(initial_screen)],
@@ -254,11 +254,10 @@ impl App {
             AppMessage::PlayWad(wad_id) => {
                 self.play_wad(wad_id);
             }
-            AppMessage::SearchComplete(_source, _results) => {
-                // Forward to top screen (should be TabbedLibrary on Import tab)
-                if let Some(_screen) = self.screen_stack.last_mut() {
-                    // The screen handles this via tick/message passing
-                    // Store in the bg channel for the import pane to pick up
+            AppMessage::SearchComplete(source, results) => {
+                // Forward to the base screen (TabbedLibraryScreen), which owns the import pane.
+                if let Some(screen) = self.screen_stack.first_mut() {
+                    screen.on_search_complete(source, results);
                 }
             }
             AppMessage::ImportComplete(result) => match result {
