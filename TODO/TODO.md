@@ -1,1 +1,0 @@
-- [ ] chore: the readme documentation is woefully out of date

@@ -5,14 +5,16 @@ A personal Doom WAD library manager inspired by [beets](https://beets.io). Impor
 ## Features
 
 - **Import from anywhere** — idgames archive, Doom Wiki, Doomworld forums, URLs, or local files. Auto-enriches with Doom Wiki metadata.
-- **Smart queries** — beets-style filters (`status:playing`, `tag:megawad`, `author:"erik alm"`) with OR, negation, and glob support.
+- **Smart queries** — beets-style filters (`status:in-progress`, `tag:megawad`, `author:"erik alm"`) with OR, negation, and glob support.
 - **Play tracking** — automatic playtime, session history, per-map stats (kills/items/secrets/time), and completion counts.
 - **IWAD management** — register your IWADs once, and caco auto-detects which one each WAD needs.
 - **Companion files** — manage DEH patches, music WADs, and other companion files with automatic deduplication.
 - **Per-WAD isolation** — saves, stats, and configs are separated per WAD so nothing gets mixed up.
 - **On-demand downloads** — idgames WADs are cached when you play, with configurable auto-cleanup.
-- **Garbage collection** — reclaim disk space from finished/abandoned WADs with smart cleanup.
+- **Garbage collection** — reclaim disk space from completed / abandoned WADs with smart cleanup.
 - **Three interfaces** — CLI, TUI (ratatui), and GUI (egui with thumbnails and grid/list views).
+- **MCP server** — expose the library to Claude or other MCP clients via a sandboxed read/write interface (`caco-mcp`).
+- **Smart collections** — save queries by name and re-run them (`caco collection add`).
 
 ## Installation
 
@@ -40,6 +42,8 @@ pip install -e .
 pip install -e '.[gui]'  # Optional: Qt6 GUI
 ```
 
+The Python implementation also ships live stats watchers (Helion / UZDoom) that the Rust port does not yet have.
+
 ## Quick Start
 
 ```bash
@@ -56,7 +60,7 @@ caco ls
 caco play scythe
 
 # 4. Track progress
-caco modify scythe status=finished rating=5
+caco modify scythe status=completed rating=5
 caco modify scythe beaten+1
 ```
 
@@ -68,7 +72,7 @@ The primary interface. Every command supports `--help` for detailed usage.
 
 ```bash
 caco ls                            # List library
-caco ls status:playing playtime-   # Filter + sort
+caco ls status:in-progress playtime-  # Filter + sort
 caco info "Eviternity"             # WAD details
 caco modify id:1 status=p tag=megawad rating=4
 caco play 1 -- -warp 15 -skill 4   # Play with extra args
@@ -84,15 +88,31 @@ Terminal interface with vim-style navigation, tabbed filtering, and live search.
 caco-tui
 ```
 
-Key bindings: `j/k` navigate, `Enter` plays, `/` filters, `e` edits, `s` sets status, `r` cycles rating, `+/-` adjusts beaten count. Press `?` or `q` to quit.
+Key bindings:
+
+- **Navigate:** `j`/`k`, `gg`/`G`, `Ctrl-d`/`Ctrl-u`
+- **Filter / sort:** `/` or `f` filter, `o` cycle sort, `O` reverse
+- **Actions:** `Enter` play, `i` info, `e` edit, `d` delete, `h` sessions, `M` map stats
+- **Status:** `s`, then `u` / `p` / `c` / `a`
+- **Rating / beaten:** `r` cycle rating, `R` clear, `+` / `-` adjust beaten count
+- **Screens:** `S` stats, `C` cache, `W` resources, `Tab`/`Shift-Tab` switch tabs
+- **Trash view:** `T` toggle, `u` untrash
+- **Help / quit:** `?` help, `q` quit
 
 ### GUI
 
-Desktop application with a dark Doom-inspired theme, WAD thumbnails, and grid/list views.
+Desktop application with a dark Doom-inspired theme.
 
 ```bash
 caco-gui
 ```
+
+- Grid and list views with sortable columns and a live filter bar
+- WAD thumbnails scraped from the Doom Wiki (or extracted from TITLEPIC) with on-disk caching
+- Right-click context menu (play, edit, delete, sessions, map stats, new playthrough)
+- Right-hand detail sidebar with metadata, play stats, and quick actions
+- Dialogs for editing WADs, confirming deletes, browsing sessions, viewing library stats, managing the cache, and registering IWADs / id24 WADs
+- Keyboard shortcuts: `j/k`, `g`/`G`, `Home`/`End`, `Enter`, `E`, `D`, `S`, `P`, `Esc`
 
 ## Importing
 
@@ -117,21 +137,23 @@ Caco uses beets-style query syntax across all commands (`ls`, `play`, `modify`, 
 ```bash
 caco ls scythe                     # Free text search
 caco ls title:scythe author:alm    # Field queries (AND)
-caco ls "status:playing , status:to-play"  # OR queries
-caco ls ^status:finished           # Negation
+caco ls "status:in-progress , status:unplayed"  # OR queries
+caco ls ^status:completed          # Negation
 caco ls tag:caco*                  # Glob patterns
-caco ls status:p playtime-         # Query + sort
+caco ls status:p playtime-         # Query + sort (shortcut + sort)
 ```
 
 **Fields:** `id`, `title`, `author`, `year`, `filename`, `tag`, `status`, `source`, `iwad`, `complevel`, `config`
 
-**Status shortcuts:** `t` (to-play), `b` (backlog), `p` (playing), `f` (finished), `a` (abandoned), `w` (awaiting-update)
+**Status values:** `unplayed`, `in-progress`, `completed`, `abandoned`
+
+**Status shortcuts:** `u` (unplayed); `p`, `ip` (in-progress); `c`, `f`, `done` (completed); `a`, `d` (abandoned)
 
 ## Managing Your Library
 
 ```bash
 # Modify metadata
-caco modify id:1 status=playing rating=4 tag=megawad
+caco modify id:1 status=in-progress rating=4 tag=megawad
 caco modify id:1 title="New Title" author="Author" year=2024
 caco modify id:1 !rating              # Clear a field
 
@@ -141,11 +163,18 @@ caco modify id:1 beaten+1 --notes "UV max" --date 2024-06-15
 
 # Per-WAD launch config
 caco modify id:1 iwad=tnt sourceport=dsda-doom complevel=boom
+caco modify id:1 config=controller
 caco modify id:1 args="-warp 1"
 
 # Companion files (DEH patches, music WADs, etc.)
 caco companion add id:1 /path/to/music.wad
 caco companion ls id:1
+
+# Smart collections (saved queries)
+caco collection add megawads tag:megawad status:u --sort year
+caco collection ls
+caco collection run megawads
+caco collection rm megawads
 
 # Trash (soft delete with restore)
 caco trash id:1
@@ -203,18 +232,23 @@ iwad = "doom2"
 iwad_dirs = ["/usr/share/games/doom", "~/games/iwads"]
 sourceport_args = ["-nomusic"]
 
-[list]
-format = ["id", "title", "author", "status", "playtime", "tags"]
-sort = "id+"
+auto_detect_iwad = true
+auto_detect_complevel = true
+auto_doomwiki_enrich = true
+cache_max_size_gb = 20.0
+cache_auto_clean = true
 
-[list.colors]
-to-play = "blue"
-playing = "green"
-finished = "dim"
+[list]
+format = ["id", "title", "author", "status", "beaten", "playtime", "last_played"]
+sort = "id+"
 
 [gui]
 default_view = "list"
-thumbnail_size = 128
+thumbnail_size = 160
+
+[tui]
+default_tab = "all"
+default_sort = "id"
 ```
 
 See `config.example.toml` for all available options.
@@ -231,17 +265,17 @@ Supports fish, bash, and zsh with dynamic completions for WAD names, tags, IWADs
 ## Scripting
 
 ```bash
-caco ls -o plain                   # TSV output
+caco ls -o plain                   # TSV output (default is `table`)
 caco ls -o json                    # JSON output
 caco info 1 -o json                # Structured WAD data
-caco random status:to-play         # Random WAD ID
+caco random status:unplayed        # Random WAD ID
 caco play $(caco random)           # Play a random WAD
 ```
 
 ## Garbage Collection
 
 ```bash
-caco gc                            # Clean finished/abandoned WAD data
+caco gc                            # Clean completed/abandoned WAD data
 caco gc --dry-run                  # Preview reclaimable space
 caco gc --keep-saves               # Clean but keep save files
 caco gc --orphans-only             # Only clean orphaned dirs/backups
@@ -259,14 +293,26 @@ idgames WADs are cleaned automatically (re-downloadable). Non-idgames WADs promp
 | `~/.local/share/caco/wads/` | Cached WAD files |
 | `~/.local/share/caco/data/` | Per-WAD saves, stats, configs |
 | `~/.local/share/caco/iwads/` | Managed IWADs |
+| `~/.local/share/caco/id24/` | Managed id24 WADs |
 | `~/.local/share/caco/companions/` | Managed companion files |
+| `~/.local/share/caco/sourceports/` | Per-sourceport config profiles |
 | `~/.local/share/caco/backups/` | Save backups |
+| `~/.cache/caco/thumbnails/` | GUI thumbnail cache |
 
 ## Supported Sourceports
 
-dsda-doom / nyan-doom, Helion, uzdoom.
+Caco recognises six sourceport families. Family membership determines which per-WAD features caco can inject at launch time:
 
-Other sourceports work too — they just don't get data directory isolation, config injection or stat tracking.
+| Family | Members | Data dir | Save dir | Complevel |
+|--------|---------|----------|----------|-----------|
+| `dsda` | dsda-doom, nyan-doom, nugget-doom, prboom+, glboom+ | yes | yes | yes |
+| `woof` | woof | yes | yes | yes |
+| `zdoom` | gzdoom, uzdoom, lzdoom, vkdoom, qzdoom, zdoom | no | yes | — |
+| `chocolate` | chocolate-doom, crispy-doom | no | yes | — |
+| `eternity` | eternity | no | yes | — |
+| `helion` | helion | no | yes | — |
+
+Unknown sourceports still launch, they just skip isolation and auto-injection. Stat tracking currently works with dsda / woof (levelstat.txt) and has dedicated live watchers for Helion and UZDoom in the Python implementation.
 
 ## Development
 
