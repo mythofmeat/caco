@@ -158,11 +158,11 @@ caco random [query] [--info]
 caco companion add|rm|enable|disable|ls
 caco gc [--dry-run] [-y] [--keep-saves|--keep-demos|--keep-data|--keep-cache|--keep-companions] [--orphans-only] [--ignore|--unignore]
 caco enrich [query] [--complevel] [--dry-run]
-caco stats [--period month|year] [--limit N] [--plain]
+caco stats [--period month|year] [--limit N] [-o plain|json|table]
 caco sessions <query> [--plain]
-caco cache list|clear|prune
-caco saves list|backup|restore|clean|backups
-caco demos list|play|clean
+caco cache list [-o plain|json|table] [--orphans] | clear | prune
+caco saves list [-o plain|json|table] | backup | restore | clean | backups [-o plain|json|table]
+caco demos list [-o plain|json|table] | play | clean
 caco profile ls|create|edit|cp|rm|path
 caco config [--edit]
 caco completions [fish|bash|zsh]

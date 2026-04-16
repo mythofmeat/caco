@@ -185,9 +185,11 @@ _caco() {
             ;;
         stats)
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "-p --period -n --limit --plain --help" -- "$cur"))
+                COMPREPLY=($(compgen -W "-p --period -n --limit -o --output --help" -- "$cur"))
             elif [[ "$prev" == -p || "$prev" == --period ]]; then
                 COMPREPLY=($(compgen -W "month year" -- "$cur"))
+            elif [[ "$prev" == -o || "$prev" == --output ]]; then
+                COMPREPLY=($(compgen -W "plain json table" -- "$cur"))
             fi
             ;;
         cache)
@@ -196,7 +198,11 @@ _caco() {
             else
                 case "$subcmd" in
                     list)
-                        COMPREPLY=($(compgen -W "--plain --orphans --help" -- "$cur"))
+                        if [[ "$prev" == -o || "$prev" == --output ]]; then
+                            COMPREPLY=($(compgen -W "plain json table" -- "$cur"))
+                        else
+                            COMPREPLY=($(compgen -W "-o --output --orphans --help" -- "$cur"))
+                        fi
                         ;;
                     clear)
                         COMPREPLY=($(compgen -W "--all --dry-run -y --yes --help" -- "$cur"))
@@ -322,6 +328,15 @@ _caco() {
                 COMPREPLY=($(compgen -W "list backup restore clean backups" -- "$cur"))
             else
                 case "$subcmd" in
+                    list|backups)
+                        if [[ "$prev" == -o || "$prev" == --output ]]; then
+                            COMPREPLY=($(compgen -W "plain json table" -- "$cur"))
+                        elif [[ "$cur" == -* ]]; then
+                            COMPREPLY=($(compgen -W "-o --output -y --yes --help" -- "$cur"))
+                        else
+                            _caco_wads
+                        fi
+                        ;;
                     clean)
                         if [[ "$cur" == -* ]]; then
                             COMPREPLY=($(compgen -W "-y --yes --help" -- "$cur"))
@@ -340,6 +355,15 @@ _caco() {
                 COMPREPLY=($(compgen -W "list play clean" -- "$cur"))
             else
                 case "$subcmd" in
+                    list)
+                        if [[ "$prev" == -o || "$prev" == --output ]]; then
+                            COMPREPLY=($(compgen -W "plain json table" -- "$cur"))
+                        elif [[ "$cur" == -* ]]; then
+                            COMPREPLY=($(compgen -W "-o --output -y --yes --help" -- "$cur"))
+                        else
+                            _caco_wads
+                        fi
+                        ;;
                     clean)
                         if [[ "$cur" == -* ]]; then
                             COMPREPLY=($(compgen -W "-y --yes --help" -- "$cur"))

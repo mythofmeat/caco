@@ -7,15 +7,16 @@ use caco_core::config;
 use caco_core::db;
 use caco_core::utils::format_size;
 
+use crate::output::OutputFormat;
 use crate::resolve;
 
 #[derive(Subcommand)]
 pub enum CacheCommand {
     /// List cached WADs
     List {
-        /// Plain TSV output
-        #[arg(long)]
-        plain: bool,
+        /// Output format: plain | json | table
+        #[arg(short = 'o', long = "output", default_value = "table")]
+        output: String,
         /// Show orphaned cache files
         #[arg(long)]
         orphans: bool,
@@ -47,11 +48,12 @@ pub enum CacheCommand {
 
 pub fn run(conn: &Connection, cmd: &CacheCommand) -> Result<(), String> {
     match cmd {
-        CacheCommand::List { plain, orphans } => {
+        CacheCommand::List { output, orphans } => {
+            let format: OutputFormat = output.parse()?;
             if *orphans {
-                list_orphans(conn, *plain)
+                list_orphans(conn, format)
             } else {
-                list_cached(conn, *plain)
+                list_cached(conn, format)
             }
         }
         CacheCommand::Clear {
@@ -70,78 +72,98 @@ pub fn run(conn: &Connection, cmd: &CacheCommand) -> Result<(), String> {
     }
 }
 
-fn list_cached(conn: &Connection, plain: bool) -> Result<(), String> {
+fn list_cached(conn: &Connection, format: OutputFormat) -> Result<(), String> {
     let wads = db::get_cached_wads(conn).map_err(|e| e.to_string())?;
-    if wads.is_empty() {
+    if wads.is_empty() && format != OutputFormat::Json {
         println!("No cached WADs.");
         return Ok(());
     }
 
-    let mut total_size: u64 = 0;
-
-    if plain {
-        println!("ID\tTitle\tFilename\tSize");
-    } else {
-        use comfy_table::{Cell, CellAlignment, Table, presets};
-        let mut table = Table::new();
-        table
-            .load_preset(presets::UTF8_FULL_CONDENSED)
-            .set_header(vec!["ID", "Title", "Filename", "Size"]);
-
-        for wad in &wads {
-            let size = wad
+    // Pre-compute per-row size once.
+    let rows: Vec<(i64, &str, &str, Option<&str>, u64)> = wads
+        .iter()
+        .map(|w| {
+            let size = w
                 .cached_path
                 .as_deref()
                 .and_then(|p| std::fs::metadata(p).ok())
                 .map(|m| m.len())
                 .unwrap_or(0);
-            total_size += size;
+            (
+                w.id,
+                w.title.as_str(),
+                w.filename.as_deref().unwrap_or(""),
+                w.cached_path.as_deref(),
+                size,
+            )
+        })
+        .collect();
+    let total_size: u64 = rows.iter().map(|r| r.4).sum();
 
-            table.add_row(vec![
-                Cell::new(wad.id).set_alignment(CellAlignment::Right),
-                Cell::new(&wad.title),
-                Cell::new(wad.filename.as_deref().unwrap_or("")),
-                Cell::new(format_size(size)).set_alignment(CellAlignment::Right),
-            ]);
+    match format {
+        OutputFormat::Table => {
+            use comfy_table::{Cell, CellAlignment, Table, presets};
+            let mut table = Table::new();
+            table
+                .load_preset(presets::UTF8_FULL_CONDENSED)
+                .set_header(vec!["ID", "Title", "Filename", "Size"]);
+            for (id, title, filename, _path, size) in &rows {
+                table.add_row(vec![
+                    Cell::new(id).set_alignment(CellAlignment::Right),
+                    Cell::new(title),
+                    Cell::new(filename),
+                    Cell::new(format_size(*size)).set_alignment(CellAlignment::Right),
+                ]);
+            }
+            println!("{table}");
+            println!(
+                "{} cached WAD(s), {} total",
+                rows.len(),
+                format_size(total_size)
+            );
         }
-        println!("{table}");
-        println!(
-            "{} cached WAD(s), {} total",
-            wads.len(),
-            format_size(total_size)
-        );
-        return Ok(());
+        OutputFormat::Plain => {
+            println!("ID\tTitle\tFilename\tSize");
+            for (id, title, filename, _path, size) in &rows {
+                println!("{id}\t{title}\t{filename}\t{}", format_size(*size));
+            }
+            println!("total\t{}\t{}", rows.len(), format_size(total_size));
+        }
+        OutputFormat::Json => {
+            let items: Vec<_> = rows
+                .iter()
+                .map(|(id, title, filename, path, size)| {
+                    serde_json::json!({
+                        "id": id,
+                        "title": title,
+                        "filename": filename,
+                        "cached_path": path,
+                        "size": size,
+                    })
+                })
+                .collect();
+            let out = serde_json::json!({
+                "count": rows.len(),
+                "total_size": total_size,
+                "items": items,
+            });
+            println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
+        }
     }
-
-    for wad in &wads {
-        let size = wad
-            .cached_path
-            .as_deref()
-            .and_then(|p| std::fs::metadata(p).ok())
-            .map(|m| m.len())
-            .unwrap_or(0);
-        total_size += size;
-        println!(
-            "{}\t{}\t{}\t{}",
-            wad.id,
-            wad.title,
-            wad.filename.as_deref().unwrap_or(""),
-            format_size(size),
-        );
-    }
-    println!("total\t{}\t{}", wads.len(), format_size(total_size));
     Ok(())
 }
 
-fn list_orphans(conn: &Connection, plain: bool) -> Result<(), String> {
+fn list_orphans(conn: &Connection, format: OutputFormat) -> Result<(), String> {
     let cache_dir = config::get_cache_dir();
-    if !cache_dir.is_dir() {
+    if !cache_dir.is_dir() && format != OutputFormat::Json {
         println!("No cache directory found.");
         return Ok(());
     }
 
     let mut orphans = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(&cache_dir) {
+    if cache_dir.is_dir()
+        && let Ok(entries) = std::fs::read_dir(&cache_dir)
+    {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_file() {
@@ -161,20 +183,40 @@ fn list_orphans(conn: &Connection, plain: bool) -> Result<(), String> {
         }
     }
 
-    if orphans.is_empty() {
+    if orphans.is_empty() && format != OutputFormat::Json {
         println!("No orphaned cache files.");
         return Ok(());
     }
 
-    if plain {
-        println!("Filename\tSize");
-        for (_, name, size) in &orphans {
-            println!("{name}\t{}", format_size(*size));
+    match format {
+        OutputFormat::Table => {
+            println!("{} orphaned file(s):", orphans.len());
+            for (_, name, size) in &orphans {
+                println!("  {name} ({})", format_size(*size));
+            }
         }
-    } else {
-        println!("{} orphaned file(s):", orphans.len());
-        for (_, name, size) in &orphans {
-            println!("  {name} ({})", format_size(*size));
+        OutputFormat::Plain => {
+            println!("Filename\tSize");
+            for (_, name, size) in &orphans {
+                println!("{name}\t{}", format_size(*size));
+            }
+        }
+        OutputFormat::Json => {
+            let items: Vec<_> = orphans
+                .iter()
+                .map(|(path, name, size)| {
+                    serde_json::json!({
+                        "filename": name,
+                        "path": path.to_string_lossy(),
+                        "size": size,
+                    })
+                })
+                .collect();
+            let out = serde_json::json!({
+                "count": orphans.len(),
+                "items": items,
+            });
+            println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
         }
     }
     Ok(())

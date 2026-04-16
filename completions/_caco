@@ -185,7 +185,7 @@ _caco_stats() {
     _arguments \
         '(-p --period)'{-p,--period}'[Group by period]:period:(month year)' \
         '(-n --limit)'{-n,--limit}'[Number of periods]:limit:' \
-        '--plain[Key=value output]' \
+        '(-o --output)'{-o,--output}'[Output format]:format:(plain json table)' \
         '--help[Show help]'
 }
 
@@ -209,7 +209,7 @@ _caco_cache() {
     case "$subcmd" in
         list)
             _arguments \
-                '--plain[Output as TSV]' \
+                '(-o --output)'{-o,--output}'[Output format]:format:(plain json table)' \
                 '--orphans[Show orphaned files]' \
                 '--help[Show help]'
             ;;
@@ -379,6 +379,13 @@ _caco_saves() {
                 '--help[Show help]' \
                 '*:query:__caco_wads_or_query'
             ;;
+        list|backups)
+            _arguments \
+                '(-o --output)'{-o,--output}'[Output format]:format:(plain json table)' \
+                '(-y --yes)'{-y,--yes}'[Skip confirmation]' \
+                '--help[Show help]' \
+                '*:query:__caco_wads_or_query'
+            ;;
         *)
             _arguments \
                 '--help[Show help]' \
@@ -407,6 +414,13 @@ _caco_demos() {
     case "$subcmd" in
         clean)
             _arguments \
+                '(-y --yes)'{-y,--yes}'[Skip confirmation]' \
+                '--help[Show help]' \
+                '*:query:__caco_wads_or_query'
+            ;;
+        list)
+            _arguments \
+                '(-o --output)'{-o,--output}'[Output format]:format:(plain json table)' \
                 '(-y --yes)'{-y,--yes}'[Skip confirmation]' \
                 '--help[Show help]' \
                 '*:query:__caco_wads_or_query'

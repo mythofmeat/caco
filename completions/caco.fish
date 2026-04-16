@@ -241,7 +241,7 @@ complete -c caco -n "__fish_seen_subcommand_from random" -a "source:" -d "Filter
 # =============================================================================
 complete -c caco -n "__fish_seen_subcommand_from stats" -s p -l period -d "Group by period" -xa "month year"
 complete -c caco -n "__fish_seen_subcommand_from stats" -s n -l limit -d "Number of periods"
-complete -c caco -n "__fish_seen_subcommand_from stats" -l plain -d "Key=value output"
+complete -c caco -n "__fish_seen_subcommand_from stats" -s o -l output -d "Output format" -xa "plain json table"
 
 # =============================================================================
 # cache subcommands
@@ -250,7 +250,7 @@ complete -c caco -n "__fish_seen_subcommand_from cache; and not __fish_seen_subc
 complete -c caco -n "__fish_seen_subcommand_from cache; and not __fish_seen_subcommand_from list clear prune" -a clear -d "Remove cached files"
 complete -c caco -n "__fish_seen_subcommand_from cache; and not __fish_seen_subcommand_from list clear prune" -a prune -d "Remove orphaned files"
 
-complete -c caco -n "__fish_seen_subcommand_from cache; and __fish_seen_subcommand_from list" -l plain -d "Output as TSV"
+complete -c caco -n "__fish_seen_subcommand_from cache; and __fish_seen_subcommand_from list" -s o -l output -d "Output format" -xa "plain json table"
 complete -c caco -n "__fish_seen_subcommand_from cache; and __fish_seen_subcommand_from list" -l orphans -d "Show orphaned files"
 complete -c caco -n "__fish_seen_subcommand_from cache; and __fish_seen_subcommand_from clear" -l all -d "Clear entire cache"
 complete -c caco -n "__fish_seen_subcommand_from cache; and __fish_seen_subcommand_from clear" -l dry-run -d "Show what would be deleted"
@@ -332,11 +332,13 @@ complete -c caco -n "__fish_seen_subcommand_from saves; and not __fish_seen_subc
 complete -c caco -n "__fish_seen_subcommand_from saves; and not __fish_seen_subcommand_from list backup restore clean backups" -a backups -d "List backups"
 
 complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcommand_from list" -xa "(__caco_wads)"
+complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcommand_from list" -s o -l output -d "Output format" -xa "plain json table"
 complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcommand_from backup" -xa "(__caco_wads)"
 complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcommand_from restore" -xa "(__caco_wads)"
 complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcommand_from clean" -xa "(__caco_wads)"
 complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcommand_from clean" -s y -l yes -d "Skip confirmation"
 complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcommand_from backups" -xa "(__caco_wads)"
+complete -c caco -n "__fish_seen_subcommand_from saves; and __fish_seen_subcommand_from backups" -s o -l output -d "Output format" -xa "plain json table"
 
 # =============================================================================
 # demos subcommands
@@ -346,6 +348,7 @@ complete -c caco -n "__fish_seen_subcommand_from demos; and not __fish_seen_subc
 complete -c caco -n "__fish_seen_subcommand_from demos; and not __fish_seen_subcommand_from list play clean" -a clean -d "Clean demo files"
 
 complete -c caco -n "__fish_seen_subcommand_from demos; and __fish_seen_subcommand_from list" -xa "(__caco_wads)"
+complete -c caco -n "__fish_seen_subcommand_from demos; and __fish_seen_subcommand_from list" -s o -l output -d "Output format" -xa "plain json table"
 complete -c caco -n "__fish_seen_subcommand_from demos; and __fish_seen_subcommand_from play" -xa "(__caco_wads)"
 complete -c caco -n "__fish_seen_subcommand_from demos; and __fish_seen_subcommand_from clean" -xa "(__caco_wads)"
 complete -c caco -n "__fish_seen_subcommand_from demos; and __fish_seen_subcommand_from clean" -s y -l yes -d "Skip confirmation"

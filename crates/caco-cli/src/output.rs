@@ -666,12 +666,47 @@ pub fn render_session_list(
 // Stats rendering
 // ---------------------------------------------------------------------------
 
-pub fn render_stats(snapshot: &StatsSnapshot, limit: usize, plain: bool) {
-    if plain {
-        render_stats_plain(snapshot, limit);
-    } else {
-        render_stats_table(snapshot, limit);
+pub fn render_stats(snapshot: &StatsSnapshot, limit: usize, format: OutputFormat) {
+    match format {
+        OutputFormat::Plain => render_stats_plain(snapshot, limit),
+        OutputFormat::Json => render_stats_json(snapshot, limit),
+        OutputFormat::Table => render_stats_table(snapshot, limit),
     }
+}
+
+fn render_stats_json(snapshot: &StatsSnapshot, limit: usize) {
+    let mut status_map = serde_json::Map::new();
+    for (status, count) in &snapshot.wads_by_status {
+        status_map.insert(status.clone(), serde_json::json!(count));
+    }
+
+    let activity: Vec<_> = snapshot
+        .activity
+        .iter()
+        .take(limit)
+        .map(|period| {
+            serde_json::json!({
+                "period": period.period,
+                "wad_count": period.wad_count,
+                "session_count": period.session_count,
+                "total_playtime": period.total_playtime,
+            })
+        })
+        .collect();
+
+    let out = serde_json::json!({
+        "total_wads": snapshot.total_wads,
+        "total_playtime": snapshot.total_playtime,
+        "total_sessions": snapshot.total_sessions,
+        "wads_played": snapshot.wads_with_sessions,
+        "completed_wads": snapshot.completed_wads,
+        "played_wads": snapshot.played_wads,
+        "completion_rate": snapshot.completion_rate,
+        "total_completions": snapshot.total_completions,
+        "wads_by_status": serde_json::Value::Object(status_map),
+        "activity": activity,
+    });
+    println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
 }
 
 fn render_stats_table(snapshot: &StatsSnapshot, limit: usize) {

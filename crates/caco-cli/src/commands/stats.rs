@@ -18,14 +18,15 @@ pub struct StatsArgs {
     #[arg(long, default_value_t = 12)]
     limit: usize,
 
-    /// Key=value output
-    #[arg(long)]
-    plain: bool,
+    /// Output format: plain | json | table
+    #[arg(short = 'o', long = "output", default_value = "table")]
+    output: String,
 }
 
 pub fn run_stats(conn: &Connection, args: &StatsArgs) -> Result<(), String> {
+    let format: output::OutputFormat = args.output.parse()?;
     let snapshot = db::get_stats_snapshot(conn, &args.period).map_err(|e| e.to_string())?;
-    output::render_stats(&snapshot, args.limit, args.plain);
+    output::render_stats(&snapshot, args.limit, format);
     Ok(())
 }
 

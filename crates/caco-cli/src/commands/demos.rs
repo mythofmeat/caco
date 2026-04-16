@@ -3,6 +3,7 @@
 use clap::Subcommand;
 use rusqlite::Connection;
 
+use crate::output::OutputFormat;
 use crate::resolve;
 use caco_core::demos;
 use caco_core::utils::format_size;
@@ -13,9 +14,9 @@ pub enum DemosCommand {
     List {
         /// WAD query
         query: Vec<String>,
-        /// Plain TSV output
-        #[arg(long)]
-        plain: bool,
+        /// Output format: plain | json | table
+        #[arg(short = 'o', long = "output", default_value = "table")]
+        output: String,
         /// Auto-select first match
         #[arg(short = 'y', long)]
         yes: bool,
@@ -49,7 +50,10 @@ pub enum DemosCommand {
 
 pub fn run(conn: &Connection, cmd: &DemosCommand) -> Result<(), String> {
     match cmd {
-        DemosCommand::List { query, plain, yes } => list_demos(conn, query, *plain, *yes),
+        DemosCommand::List { query, output, yes } => {
+            let format: OutputFormat = output.parse()?;
+            list_demos(conn, query, format, *yes)
+        }
         DemosCommand::Play {
             query,
             demo,
@@ -64,35 +68,62 @@ pub fn run(conn: &Connection, cmd: &DemosCommand) -> Result<(), String> {
     }
 }
 
-fn list_demos(conn: &Connection, query: &[String], plain: bool, yes: bool) -> Result<(), String> {
+fn list_demos(
+    conn: &Connection,
+    query: &[String],
+    format: OutputFormat,
+    yes: bool,
+) -> Result<(), String> {
     let (wad, data_dir) = resolve::resolve_data_dir(conn, query, yes)?;
 
     let files = demos::find_demo_files(&data_dir);
-    if files.is_empty() {
+    if files.is_empty() && format != OutputFormat::Json {
         println!("No demos for '{}'.", wad.title);
         return Ok(());
     }
 
-    if plain {
-        println!("Name\tSize\tModified");
-        for f in &files {
-            println!("{}\t{}\t{}", f.name, format_size(f.size), f.mtime_iso);
+    match format {
+        OutputFormat::Plain => {
+            println!("Name\tSize\tModified");
+            for f in &files {
+                println!("{}\t{}\t{}", f.name, format_size(f.size), f.mtime_iso);
+            }
         }
-    } else {
-        use comfy_table::{Cell, CellAlignment, Table, presets};
-        let mut table = Table::new();
-        table
-            .load_preset(presets::UTF8_FULL_CONDENSED)
-            .set_header(vec!["Name", "Size", "Modified"]);
-        for f in &files {
-            table.add_row(vec![
-                Cell::new(&f.name),
-                Cell::new(format_size(f.size)).set_alignment(CellAlignment::Right),
-                Cell::new(&f.mtime_iso),
-            ]);
+        OutputFormat::Table => {
+            use comfy_table::{Cell, CellAlignment, Table, presets};
+            let mut table = Table::new();
+            table
+                .load_preset(presets::UTF8_FULL_CONDENSED)
+                .set_header(vec!["Name", "Size", "Modified"]);
+            for f in &files {
+                table.add_row(vec![
+                    Cell::new(&f.name),
+                    Cell::new(format_size(f.size)).set_alignment(CellAlignment::Right),
+                    Cell::new(&f.mtime_iso),
+                ]);
+            }
+            println!("Demos for '{}' (ID: {}):", wad.title, wad.id);
+            println!("{table}");
         }
-        println!("Demos for '{}' (ID: {}):", wad.title, wad.id);
-        println!("{table}");
+        OutputFormat::Json => {
+            let items: Vec<_> = files
+                .iter()
+                .map(|f| {
+                    serde_json::json!({
+                        "name": f.name,
+                        "size": f.size,
+                        "modified": f.mtime_iso,
+                    })
+                })
+                .collect();
+            let out = serde_json::json!({
+                "wad_id": wad.id,
+                "wad_title": wad.title,
+                "count": files.len(),
+                "items": items,
+            });
+            println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
+        }
     }
     Ok(())
 }

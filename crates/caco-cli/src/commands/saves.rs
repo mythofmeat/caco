@@ -3,6 +3,7 @@
 use clap::Subcommand;
 use rusqlite::Connection;
 
+use crate::output::OutputFormat;
 use crate::resolve;
 use caco_core::saves;
 use caco_core::utils::format_size;
@@ -13,9 +14,9 @@ pub enum SavesCommand {
     List {
         /// WAD query
         query: Vec<String>,
-        /// Plain TSV output
-        #[arg(long)]
-        plain: bool,
+        /// Output format: plain | json | table
+        #[arg(short = 'o', long = "output", default_value = "table")]
+        output: String,
         /// Auto-select first match
         #[arg(short = 'y', long)]
         yes: bool,
@@ -54,9 +55,9 @@ pub enum SavesCommand {
     Backups {
         /// WAD query (optional)
         query: Vec<String>,
-        /// Plain TSV output
-        #[arg(long)]
-        plain: bool,
+        /// Output format: plain | json | table
+        #[arg(short = 'o', long = "output", default_value = "table")]
+        output: String,
         /// Auto-select first match
         #[arg(short = 'y', long)]
         yes: bool,
@@ -65,7 +66,10 @@ pub enum SavesCommand {
 
 pub fn run(conn: &Connection, cmd: &SavesCommand) -> Result<(), String> {
     match cmd {
-        SavesCommand::List { query, plain, yes } => list_saves(conn, query, *plain, *yes),
+        SavesCommand::List { query, output, yes } => {
+            let format: OutputFormat = output.parse()?;
+            list_saves(conn, query, format, *yes)
+        }
         SavesCommand::Backup { query, yes } => backup(conn, query, *yes),
         SavesCommand::Restore { query, backup, yes } => {
             restore(conn, query, backup.as_deref(), *yes)
@@ -75,39 +79,69 @@ pub fn run(conn: &Connection, cmd: &SavesCommand) -> Result<(), String> {
             dry_run,
             yes,
         } => clean(conn, query, *dry_run, *yes),
-        SavesCommand::Backups { query, plain, yes } => list_backups(conn, query, *plain, *yes),
+        SavesCommand::Backups { query, output, yes } => {
+            let format: OutputFormat = output.parse()?;
+            list_backups(conn, query, format, *yes)
+        }
     }
 }
 
-fn list_saves(conn: &Connection, query: &[String], plain: bool, yes: bool) -> Result<(), String> {
+fn list_saves(
+    conn: &Connection,
+    query: &[String],
+    format: OutputFormat,
+    yes: bool,
+) -> Result<(), String> {
     let (wad, data_dir) = resolve::resolve_data_dir(conn, query, yes)?;
 
     let files = saves::find_save_files(&data_dir);
-    if files.is_empty() {
+    if files.is_empty() && format != OutputFormat::Json {
         println!("No save files for '{}'.", wad.title);
         return Ok(());
     }
 
-    if plain {
-        println!("Name\tSize\tModified");
-        for f in &files {
-            println!("{}\t{}\t{}", f.name, format_size(f.size), f.mtime_iso);
+    match format {
+        OutputFormat::Plain => {
+            println!("Name\tSize\tModified");
+            for f in &files {
+                println!("{}\t{}\t{}", f.name, format_size(f.size), f.mtime_iso);
+            }
         }
-    } else {
-        use comfy_table::{Cell, CellAlignment, Table, presets};
-        let mut table = Table::new();
-        table
-            .load_preset(presets::UTF8_FULL_CONDENSED)
-            .set_header(vec!["Name", "Size", "Modified"]);
-        for f in &files {
-            table.add_row(vec![
-                Cell::new(&f.name),
-                Cell::new(format_size(f.size)).set_alignment(CellAlignment::Right),
-                Cell::new(&f.mtime_iso),
-            ]);
+        OutputFormat::Table => {
+            use comfy_table::{Cell, CellAlignment, Table, presets};
+            let mut table = Table::new();
+            table
+                .load_preset(presets::UTF8_FULL_CONDENSED)
+                .set_header(vec!["Name", "Size", "Modified"]);
+            for f in &files {
+                table.add_row(vec![
+                    Cell::new(&f.name),
+                    Cell::new(format_size(f.size)).set_alignment(CellAlignment::Right),
+                    Cell::new(&f.mtime_iso),
+                ]);
+            }
+            println!("Save files for '{}' (ID: {}):", wad.title, wad.id);
+            println!("{table}");
         }
-        println!("Save files for '{}' (ID: {}):", wad.title, wad.id);
-        println!("{table}");
+        OutputFormat::Json => {
+            let items: Vec<_> = files
+                .iter()
+                .map(|f| {
+                    serde_json::json!({
+                        "name": f.name,
+                        "size": f.size,
+                        "modified": f.mtime_iso,
+                    })
+                })
+                .collect();
+            let out = serde_json::json!({
+                "wad_id": wad.id,
+                "wad_title": wad.title,
+                "count": files.len(),
+                "items": items,
+            });
+            println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
+        }
     }
     Ok(())
 }
@@ -188,7 +222,12 @@ fn clean(conn: &Connection, query: &[String], dry_run: bool, yes: bool) -> Resul
     Ok(())
 }
 
-fn list_backups(conn: &Connection, query: &[String], plain: bool, yes: bool) -> Result<(), String> {
+fn list_backups(
+    conn: &Connection,
+    query: &[String],
+    format: OutputFormat,
+    yes: bool,
+) -> Result<(), String> {
     let backups = if query.is_empty() {
         saves::list_all_backups()
     } else {
@@ -196,39 +235,60 @@ fn list_backups(conn: &Connection, query: &[String], plain: bool, yes: bool) -> 
         saves::list_backups(wad.id)
     };
 
-    if backups.is_empty() {
+    if backups.is_empty() && format != OutputFormat::Json {
         println!("No backups found.");
         return Ok(());
     }
 
-    if plain {
-        println!("Name\tWadID\tSize\tCreated");
-        for b in &backups {
-            let wad_id_str = b.wad_id.map(|id| id.to_string()).unwrap_or_default();
-            println!(
-                "{}\t{}\t{}\t{}",
-                b.name,
-                wad_id_str,
-                format_size(b.size),
-                b.created_iso
-            );
+    match format {
+        OutputFormat::Plain => {
+            println!("Name\tWadID\tSize\tCreated");
+            for b in &backups {
+                let wad_id_str = b.wad_id.map(|id| id.to_string()).unwrap_or_default();
+                println!(
+                    "{}\t{}\t{}\t{}",
+                    b.name,
+                    wad_id_str,
+                    format_size(b.size),
+                    b.created_iso
+                );
+            }
         }
-    } else {
-        use comfy_table::{Cell, CellAlignment, Table, presets};
-        let mut table = Table::new();
-        table
-            .load_preset(presets::UTF8_FULL_CONDENSED)
-            .set_header(vec!["Name", "WAD ID", "Size", "Created"]);
-        for b in &backups {
-            table.add_row(vec![
-                Cell::new(&b.name),
-                Cell::new(b.wad_id.map(|id| id.to_string()).unwrap_or_default())
-                    .set_alignment(CellAlignment::Right),
-                Cell::new(format_size(b.size)).set_alignment(CellAlignment::Right),
-                Cell::new(&b.created_iso),
-            ]);
+        OutputFormat::Table => {
+            use comfy_table::{Cell, CellAlignment, Table, presets};
+            let mut table = Table::new();
+            table
+                .load_preset(presets::UTF8_FULL_CONDENSED)
+                .set_header(vec!["Name", "WAD ID", "Size", "Created"]);
+            for b in &backups {
+                table.add_row(vec![
+                    Cell::new(&b.name),
+                    Cell::new(b.wad_id.map(|id| id.to_string()).unwrap_or_default())
+                        .set_alignment(CellAlignment::Right),
+                    Cell::new(format_size(b.size)).set_alignment(CellAlignment::Right),
+                    Cell::new(&b.created_iso),
+                ]);
+            }
+            println!("{table}");
         }
-        println!("{table}");
+        OutputFormat::Json => {
+            let items: Vec<_> = backups
+                .iter()
+                .map(|b| {
+                    serde_json::json!({
+                        "name": b.name,
+                        "wad_id": b.wad_id,
+                        "size": b.size,
+                        "created": b.created_iso,
+                    })
+                })
+                .collect();
+            let out = serde_json::json!({
+                "count": backups.len(),
+                "items": items,
+            });
+            println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
+        }
     }
     Ok(())
 }
