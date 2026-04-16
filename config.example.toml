@@ -4,6 +4,10 @@
 # Default sourceport (full path is also acceptable)
 # sourceport = "gzdoom"
 
+# Sourceport for WADs that require the ZDoom family (auto-detected).
+# Falls back to uzdoom, then gzdoom if empty.
+# zdoom_sourceport = "gzdoom"
+
 # Default IWAD for playing WADs
 # With iwad_dirs set, you can use short names like "doom2" instead of full paths
 # iwad = "doom2"
@@ -26,6 +30,9 @@
 # Per-WAD data directory (saves, stats, configs per WAD)
 # data_dir = "~/.local/share/caco/data"
 
+# Sourceport config profiles directory
+# sourceport_dir = "~/.local/share/caco/sourceports"
+
 # Preferred idgames download mirror (0-4)
 # 0 = youfailit.net (default, fastest)
 # 1 = quaddicted.com
@@ -33,6 +40,10 @@
 # 3 = braindrainlan.nu
 # 4 = xvertigox.com
 # download_mirror = 0
+
+# How local-file imports are placed into the cache.
+# "move" (default), "copy", or "symlink"
+# link_mode = "move"
 
 # Manage per-WAD data directories (inject -data/-save args to sourceport)
 # manage_data_dirs = true
@@ -43,6 +54,16 @@
 # Auto-detect required IWAD from WAD file contents on first play
 # auto_detect_iwad = true
 
+# Auto-detect complevel from WAD file contents (COMPLVL / UMAPINFO / DEHACKED heuristics)
+# auto_detect_complevel = true
+
+# Auto-enrich imported WADs with Doom Wiki metadata when a matching page is found
+# auto_doomwiki_enrich = true
+
+# Companion orphan cleanup policy on `gc`/detach:
+# "ask" (prompt), "delete" (remove file), or "keep" (leave in managed storage)
+# companion_orphan_cleanup = "ask"
+
 # Cache auto-cleanup settings
 # Maximum cache size in GB (0 = unlimited)
 # cache_max_size_gb = 0
@@ -52,6 +73,21 @@
 
 # Automatically clean cache before downloading new WADs
 # cache_auto_clean = false
+
+# Per-family IWAD variant priority overrides.
+# Keys are IWAD family names (doom, doom2, tnt, plutonia, heretic, hexen).
+# Values list variant names in descending priority.
+# [iwad_priority]
+# doom2 = ["doom2-bfg", "doom2"]
+
+# LLM-assisted metadata extraction (optional, used by Doomworld imports).
+# backend: "claude-code", "openrouter", "anthropic", "openai", or "" to disable.
+# model:   backend-specific model name override, or "" for the default.
+# api_key: required for openrouter/anthropic/openai backends.
+# [llm]
+# backend = ""
+# model = ""
+# api_key = ""
 
 # List display configuration
 # [list]
@@ -69,7 +105,7 @@
 # TUI configuration
 # [tui]
 
-# Starting tab (all, playing, to-play, finished, backlog, other)
+# Starting tab (all, unplayed, in-progress, completed, abandoned, import)
 # default_tab = "all"
 
 # Default sort field (id, title, author, playtime, last_played, year, rating)
@@ -81,7 +117,7 @@
 # GUI configuration
 # [gui]
 
-# Starting tab (all, playing, to-play, finished, backlog, other)
+# Starting tab (all, unplayed, in-progress, completed, abandoned)
 # default_tab = "all"
 
 # Default sort field (id, title, author, playtime, last_played, year, rating)
