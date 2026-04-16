@@ -1,14 +1,14 @@
 use std::fs;
 
+use crate::widgets::table_nav::{table_nav_next, table_nav_prev};
 use caco_core::db::sessions::{clear_all_cached_paths, clear_cached_path, get_cached_wads};
 use caco_core::utils::format_size;
 use crossterm::event::{KeyCode, KeyEvent};
-use crate::widgets::table_nav::{table_nav_next, table_nav_prev};
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table, TableState};
-use ratatui::Frame;
 use rusqlite::Connection;
 
 use crate::message::{AppMessage, ScreenResult, Severity};

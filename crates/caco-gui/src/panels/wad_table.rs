@@ -74,10 +74,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<ActionRequest> 
             }
             for label in headers {
                 header.col(|ui| {
-                    ui.colored_label(
-                        theme::TEXT_ACCENT,
-                        egui::RichText::new(label).strong(),
-                    );
+                    ui.colored_label(theme::TEXT_ACCENT, egui::RichText::new(label).strong());
                 });
             }
         })
@@ -111,7 +108,10 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<ActionRequest> 
 
                 // Status (unified, colored)
                 row.col(|ui| {
-                    ui.colored_label(theme::status_color(&wad.status), theme::status_display(&wad.status));
+                    ui.colored_label(
+                        theme::status_color(&wad.status),
+                        theme::status_display(&wad.status),
+                    );
                 });
 
                 if !compact {
@@ -151,7 +151,8 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<ActionRequest> 
                     state.selected_row = idx;
                     state.selected_wad_id = Some(wad_id);
                 }
-                if let Some(a) = super::wad_context_menu(&response, wad_id, &state.wads[idx].status) {
+                if let Some(a) = super::wad_context_menu(&response, wad_id, &state.wads[idx].status)
+                {
                     action = Some(a);
                 }
             });

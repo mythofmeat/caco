@@ -110,10 +110,7 @@ pub fn update_collection(
 
 /// Delete a collection by name. Returns true if deleted.
 pub fn delete_collection(conn: &Connection, name: &str) -> Result<bool> {
-    let count = conn.execute(
-        "DELETE FROM smart_collections WHERE name = ?1",
-        [name],
-    )?;
+    let count = conn.execute("DELETE FROM smart_collections WHERE name = ?1", [name])?;
     Ok(count > 0)
 }
 
@@ -142,7 +139,7 @@ mod tests {
     use crate::db::connection::open_memory;
     use crate::db::models::SourceType;
     use crate::db::schema::init_db;
-    use crate::db::wads::{add_wad, NewWad};
+    use crate::db::wads::{NewWad, add_wad};
 
     fn setup() -> Connection {
         let conn = open_memory().unwrap();

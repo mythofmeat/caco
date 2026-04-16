@@ -55,8 +55,7 @@ pub fn reset_sandbox(paths: &SandboxPaths, opts: &ResetOptions) -> Result<()> {
     // Copy user config to <sandbox>/config/config.toml, sanitized so that
     // absolute path fields (db_path, cache_dir, data_dir, etc.) don't override
     // the CACO_HOME-derived sandbox defaults at runtime.
-    let config_src = dirs::config_dir()
-        .map(|d| d.join("caco").join("config.toml"));
+    let config_src = dirs::config_dir().map(|d| d.join("caco").join("config.toml"));
     let config_dst = paths.config_path();
     if let Some(src) = config_src
         && src.is_file()
@@ -130,12 +129,13 @@ mod tests {
         seed_source(src.path());
         // Ensure the sandbox path is safe (point forbidden paths elsewhere)
         temp_env::with_vars(
-            [("XDG_DATA_HOME", Some("/nonexistent/xdg")), ("CACO_HOME", Some("/nonexistent"))],
+            [
+                ("XDG_DATA_HOME", Some("/nonexistent/xdg")),
+                ("CACO_HOME", Some("/nonexistent")),
+            ],
             || {
-                let paths = SandboxPaths::new(
-                    dst.path().join("sb"),
-                    src.path().to_path_buf(),
-                ).unwrap();
+                let paths =
+                    SandboxPaths::new(dst.path().join("sb"), src.path().to_path_buf()).unwrap();
                 reset_sandbox(&paths, &ResetOptions::default()).unwrap();
                 assert!(paths.db_path().is_file());
                 assert!(paths.sandbox.join("wads/doom2.wad").is_file());
@@ -150,12 +150,13 @@ mod tests {
         let dst = TempDir::new().unwrap();
         seed_source(src.path());
         temp_env::with_vars(
-            [("XDG_DATA_HOME", Some("/nonexistent/xdg")), ("CACO_HOME", Some("/nonexistent"))],
+            [
+                ("XDG_DATA_HOME", Some("/nonexistent/xdg")),
+                ("CACO_HOME", Some("/nonexistent")),
+            ],
             || {
-                let paths = SandboxPaths::new(
-                    dst.path().join("sb"),
-                    src.path().to_path_buf(),
-                ).unwrap();
+                let paths =
+                    SandboxPaths::new(dst.path().join("sb"), src.path().to_path_buf()).unwrap();
                 reset_sandbox(&paths, &ResetOptions { skip_wads: true }).unwrap();
                 assert!(paths.db_path().is_file());
                 assert!(!paths.sandbox.join("wads").exists());
@@ -172,7 +173,10 @@ mod tests {
         std::fs::create_dir_all(&sb).unwrap();
         std::fs::write(sb.join("stale.txt"), b"stale").unwrap();
         temp_env::with_vars(
-            [("XDG_DATA_HOME", Some("/nonexistent/xdg")), ("CACO_HOME", Some("/nonexistent"))],
+            [
+                ("XDG_DATA_HOME", Some("/nonexistent/xdg")),
+                ("CACO_HOME", Some("/nonexistent")),
+            ],
             || {
                 let paths = SandboxPaths::new(sb.clone(), src.path().to_path_buf()).unwrap();
                 reset_sandbox(&paths, &ResetOptions::default()).unwrap();
@@ -240,16 +244,16 @@ auto_stats = true
 
         temp_env::with_vars(
             [
-                ("XDG_CONFIG_HOME", Some(fake_config_home.path().to_str().unwrap())),
+                (
+                    "XDG_CONFIG_HOME",
+                    Some(fake_config_home.path().to_str().unwrap()),
+                ),
                 ("XDG_DATA_HOME", Some("/nonexistent/xdg")),
                 ("CACO_HOME", Some("/nonexistent")),
             ],
             || {
-                let paths = SandboxPaths::new(
-                    dst.path().join("sb"),
-                    src.path().to_path_buf(),
-                )
-                .unwrap();
+                let paths =
+                    SandboxPaths::new(dst.path().join("sb"), src.path().to_path_buf()).unwrap();
                 reset_sandbox(&paths, &ResetOptions::default()).unwrap();
 
                 let copied = std::fs::read_to_string(paths.config_path()).unwrap();
@@ -271,12 +275,14 @@ auto_stats = true
     fn errors_when_source_home_missing() {
         let dst = TempDir::new().unwrap();
         temp_env::with_vars(
-            [("XDG_DATA_HOME", Some("/nonexistent/xdg")), ("CACO_HOME", Some("/nonexistent"))],
+            [
+                ("XDG_DATA_HOME", Some("/nonexistent/xdg")),
+                ("CACO_HOME", Some("/nonexistent")),
+            ],
             || {
-                let paths = SandboxPaths::new(
-                    dst.path().join("sb"),
-                    PathBuf::from("/nonexistent/source"),
-                ).unwrap();
+                let paths =
+                    SandboxPaths::new(dst.path().join("sb"), PathBuf::from("/nonexistent/source"))
+                        .unwrap();
                 let err = reset_sandbox(&paths, &ResetOptions::default()).unwrap_err();
                 assert!(matches!(err, CacoMcpError::SourceHomeMissing { .. }));
             },

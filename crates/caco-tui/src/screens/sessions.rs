@@ -1,14 +1,14 @@
+use crate::widgets::table_nav::{table_nav_next, table_nav_prev};
 use caco_core::db::sessions::{SessionRecord, get_sessions};
 use caco_core::db::wads::get_wad;
 use caco_core::player::format_duration;
 use caco_core::wad_stats;
 use crossterm::event::{KeyCode, KeyEvent};
-use crate::widgets::table_nav::{table_nav_next, table_nav_prev};
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table, TableState};
-use ratatui::Frame;
 use rusqlite::Connection;
 
 use crate::message::{AppMessage, ScreenResult};
@@ -81,7 +81,11 @@ impl Screen for SessionsScreen {
                     let (date, time) = if let Some(idx) = s.started_at.find('T') {
                         (
                             s.started_at[..idx].to_string(),
-                            s.started_at[idx + 1..].split('.').next().unwrap_or("").to_string(),
+                            s.started_at[idx + 1..]
+                                .split('.')
+                                .next()
+                                .unwrap_or("")
+                                .to_string(),
                         )
                     } else if let Some(idx) = s.started_at.find(' ') {
                         (
@@ -102,7 +106,9 @@ impl Screen for SessionsScreen {
                     // Compute maps played from stats_before/stats_after
                     let maps = match (&s.stats_before, &s.stats_after) {
                         (_, Some(after)) => {
-                            let before = s.stats_before.as_deref()
+                            let before = s
+                                .stats_before
+                                .as_deref()
                                 .and_then(|s| wad_stats::stats_from_json(s).ok());
                             let after = wad_stats::stats_from_json(after).ok();
                             match (before.as_ref(), after) {
@@ -134,10 +140,9 @@ impl Screen for SessionsScreen {
 
                     // Status: crash indicator
                     let (status_text, status_style) = match s.exit_code {
-                        Some(code) if code != 0 => (
-                            format!("Crash ({code})"),
-                            Style::default().fg(Color::Red),
-                        ),
+                        Some(code) if code != 0 => {
+                            (format!("Crash ({code})"), Style::default().fg(Color::Red))
+                        }
                         Some(0) => ("OK".to_string(), Style::default().fg(Color::Green)),
                         _ => ("—".to_string(), theme::dim_style()),
                     };

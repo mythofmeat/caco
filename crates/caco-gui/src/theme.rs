@@ -28,7 +28,6 @@ pub const COLOR_SECRET_FILL: Color32 = Color32::from_rgb(0x99, 0x44, 0x22);
 // Status colors
 // ---------------------------------------------------------------------------
 
-
 // ---------------------------------------------------------------------------
 // Status helpers
 // ---------------------------------------------------------------------------
@@ -102,24 +101,17 @@ pub fn filter_pill(
     let (fill, text_color, stroke) = if is_active {
         let c = accent.unwrap_or(TEXT_ACCENT);
         // Active: tinted background, bright text, accent border
-        let bg = Color32::from_rgba_premultiplied(
-            c.r() / 5,
-            c.g() / 5,
-            c.b() / 5,
-            255,
-        );
+        let bg = Color32::from_rgba_premultiplied(c.r() / 5, c.g() / 5, c.b() / 5, 255);
         (bg, c, egui::Stroke::new(1.0, c))
     } else {
         // Inactive: subtle background, muted text, no visible border
         (BG_LIGHT, TEXT_SECONDARY, egui::Stroke::new(1.0, BORDER))
     };
 
-    let btn = egui::Button::new(
-        egui::RichText::new(&text).size(11.5).color(text_color),
-    )
-    .fill(fill)
-    .stroke(stroke)
-    .corner_radius(14);
+    let btn = egui::Button::new(egui::RichText::new(&text).size(11.5).color(text_color))
+        .fill(fill)
+        .stroke(stroke)
+        .corner_radius(14);
 
     ui.add(btn).clicked()
 }
@@ -190,7 +182,6 @@ pub fn thumb_colors(wad_id: i64) -> (Color32, Color32, Color32) {
 // UI helpers — pills, badges, section labels
 // ---------------------------------------------------------------------------
 
-
 /// Render a tag as a small accent-tinted pill.
 pub fn tag_pill(ui: &mut egui::Ui, tag: &str) {
     egui::Frame::new()
@@ -229,11 +220,7 @@ pub fn sidebar_nav_item(ui: &mut egui::Ui, label: &str, is_active: bool) -> bool
 
     // Background
     if is_active || is_hovered {
-        painter.rect_filled(
-            rect,
-            0.0,
-            if is_active { BG_MEDIUM } else { BG_DARK },
-        );
+        painter.rect_filled(rect, 0.0, if is_active { BG_MEDIUM } else { BG_DARK });
     }
 
     // Left accent border
@@ -264,13 +251,8 @@ pub fn sidebar_nav_item(ui: &mut egui::Ui, label: &str, is_active: bool) -> bool
     response.clicked()
 }
 
-
 /// Render a sidebar collection item (playlist-style). Returns the response.
-pub fn sidebar_collection_item(
-    ui: &mut egui::Ui,
-    name: &str,
-    is_active: bool,
-) -> egui::Response {
+pub fn sidebar_collection_item(ui: &mut egui::Ui, name: &str, is_active: bool) -> egui::Response {
     let desired_size = egui::vec2(ui.available_width(), 28.0);
     let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
 
@@ -294,11 +276,7 @@ pub fn sidebar_collection_item(
     }
 
     // List icon
-    let icon_color = if is_active {
-        TEXT_ACCENT
-    } else {
-        TEXT_MUTED
-    };
+    let icon_color = if is_active { TEXT_ACCENT } else { TEXT_MUTED };
     painter.text(
         egui::pos2(rect.min.x + 20.0, rect.center().y),
         egui::Align2::LEFT_CENTER,

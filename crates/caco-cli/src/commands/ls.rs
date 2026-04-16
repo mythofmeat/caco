@@ -5,9 +5,9 @@ use std::collections::HashMap;
 use clap::Args;
 use rusqlite::Connection;
 
-use caco_core::db;
 use crate::output::{self, OutputFormat};
 use crate::parsing;
+use caco_core::db;
 
 #[derive(Args)]
 pub struct LsArgs {

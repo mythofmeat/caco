@@ -8,7 +8,11 @@ use crate::state::ActionRequest;
 
 /// Show a right-click context menu for a WAD with standard actions.
 /// Returns the chosen action, if any.
-pub fn wad_context_menu(response: &egui::Response, wad_id: i64, status: &str) -> Option<ActionRequest> {
+pub fn wad_context_menu(
+    response: &egui::Response,
+    wad_id: i64,
+    status: &str,
+) -> Option<ActionRequest> {
     let mut action = None;
     response.context_menu(|ui| {
         if ui.button("Play").clicked() {

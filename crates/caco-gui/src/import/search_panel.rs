@@ -123,18 +123,12 @@ fn render_results_table(
 
                 let entry = &state.results[idx];
                 row.col(|ui| {
-                    if ui
-                        .selectable_label(is_selected, &entry.title)
-                        .clicked()
-                    {
+                    if ui.selectable_label(is_selected, &entry.title).clicked() {
                         clicked_row = Some(idx);
                     }
                 });
                 row.col(|ui| {
-                    ui.colored_label(
-                        theme::TEXT_SECONDARY,
-                        entry.author.as_deref().unwrap_or(""),
-                    );
+                    ui.colored_label(theme::TEXT_SECONDARY, entry.author.as_deref().unwrap_or(""));
                 });
                 row.col(|ui| {
                     ui.colored_label(theme::TEXT_SECONDARY, entry.extra_display());
@@ -149,11 +143,7 @@ fn render_results_table(
     None
 }
 
-fn render_preview(
-    ui: &mut egui::Ui,
-    state: &SearchState,
-    action: &mut Option<SearchPanelAction>,
-) {
+fn render_preview(ui: &mut egui::Ui, state: &SearchState, action: &mut Option<SearchPanelAction>) {
     let Some(idx) = state.selected_row else {
         ui.colored_label(theme::TEXT_SECONDARY, "Select a result to preview");
         return;

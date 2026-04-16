@@ -6,9 +6,9 @@ use std::path::PathBuf;
 use clap::Args;
 use rusqlite::Connection;
 
+use crate::parsing;
 use caco_core::db;
 use caco_core::sourceports;
-use crate::parsing;
 
 const FISH_SCRIPT: &str = include_str!("../../../../completions/caco.fish");
 const BASH_SCRIPT: &str = include_str!("../../../../completions/caco.bash");
@@ -58,7 +58,11 @@ pub fn run_completions(args: &CompletionsArgs) -> Result<(), String> {
         "fish" => FISH_SCRIPT,
         "bash" => BASH_SCRIPT,
         "zsh" => ZSH_SCRIPT,
-        other => return Err(format!("Unknown shell: {other} (expected bash, fish, or zsh)")),
+        other => {
+            return Err(format!(
+                "Unknown shell: {other} (expected bash, fish, or zsh)"
+            ));
+        }
     };
 
     if args.install {
@@ -67,8 +71,7 @@ pub fn run_completions(args: &CompletionsArgs) -> Result<(), String> {
             fs::create_dir_all(parent)
                 .map_err(|e| format!("Failed to create {}: {e}", parent.display()))?;
         }
-        fs::write(&path, script)
-            .map_err(|e| format!("Failed to write {}: {e}", path.display()))?;
+        fs::write(&path, script).map_err(|e| format!("Failed to write {}: {e}", path.display()))?;
         eprintln!("Installed {shell} completions to {}", path.display());
         match shell.as_str() {
             "zsh" => {
@@ -94,8 +97,8 @@ pub fn run_completions(args: &CompletionsArgs) -> Result<(), String> {
 pub fn run_complete(conn: &Connection, args: &CompleteArgs) -> Result<(), String> {
     match args.context.as_str() {
         "wads" => {
-            let wads = db::search_wads(conn, None, None, true, false, 0)
-                .map_err(|e| e.to_string())?;
+            let wads =
+                db::search_wads(conn, None, None, true, false, 0).map_err(|e| e.to_string())?;
             for wad in &wads {
                 println!("{}\t{}", wad.id, wad.title);
             }
@@ -153,8 +156,19 @@ pub fn run_complete(conn: &Connection, args: &CompleteArgs) -> Result<(), String
             println!("beaten=");
         }
         "query-fields" => {
-            let fields = ["id:", "title:", "author:", "year:", "filename:", "tag:",
-                          "status:", "source:", "iwad:", "complevel:", "config:"];
+            let fields = [
+                "id:",
+                "title:",
+                "author:",
+                "year:",
+                "filename:",
+                "tag:",
+                "status:",
+                "source:",
+                "iwad:",
+                "complevel:",
+                "config:",
+            ];
             for field in &fields {
                 println!("{field}");
             }

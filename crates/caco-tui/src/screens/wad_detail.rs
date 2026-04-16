@@ -3,11 +3,11 @@ use caco_core::db::sessions::{WadStats, get_wad_stats_batch};
 use caco_core::db::wads::get_wad;
 use caco_core::player::format_duration;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
-use ratatui::Frame;
 use rusqlite::Connection;
 
 use crate::message::{AppMessage, ScreenId, ScreenResult};
@@ -210,10 +210,7 @@ impl WadDetailScreen {
         if let Some(ref desc) = wad.description {
             if !desc.is_empty() {
                 lines.push(Line::from(""));
-                lines.push(Line::from(Span::styled(
-                    "── Description ──",
-                    section_style,
-                )));
+                lines.push(Line::from(Span::styled("── Description ──", section_style)));
                 for line in desc.lines() {
                     lines.push(Line::from(line.to_string()));
                 }

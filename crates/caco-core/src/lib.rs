@@ -1,13 +1,13 @@
 pub mod companion_service;
 pub mod completion_detect;
 pub mod complevel;
-pub mod mapinfo;
 pub mod complevel_detect;
 pub mod config;
 pub mod db;
 pub mod demos;
 pub mod error;
 pub mod iwad_detect;
+pub mod mapinfo;
 pub mod player;
 pub mod resource_service;
 pub mod saves;

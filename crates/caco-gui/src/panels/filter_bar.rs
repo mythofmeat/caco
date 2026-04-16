@@ -23,10 +23,8 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
     // Clear button (only shown when there's text)
     if !state.filter_text.is_empty() {
         let clear = ui.add(
-            egui::Button::new(
-                egui::RichText::new("\u{00d7}").color(theme::TEXT_SECONDARY),
-            )
-            .frame(false),
+            egui::Button::new(egui::RichText::new("\u{00d7}").color(theme::TEXT_SECONDARY))
+                .frame(false),
         );
         if clear.on_hover_text("Clear filter").clicked() {
             state.filter_text.clear();

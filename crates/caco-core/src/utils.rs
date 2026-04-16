@@ -10,8 +10,7 @@ use zip::ZipArchive;
 
 static NON_ALNUM_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[^a-z0-9]+").unwrap());
 static MULTI_HYPHEN_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"-{2,}").unwrap());
-static ZIP_MAP_DOOM1_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^E[1-9]M[0-9]$").unwrap());
+static ZIP_MAP_DOOM1_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^E[1-9]M[0-9]$").unwrap());
 static ZIP_MAP_DOOM2_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^MAP[0-9][0-9]$").unwrap());
 
@@ -161,9 +160,10 @@ pub fn load_wad_data(wad_path: &Path) -> Option<Vec<u8>> {
 
     // Try ZIP first for .zip or non-standard extensions
     if (ext == "zip" || !matches!(ext.as_str(), "wad" | "pk3" | "pk7"))
-        && let Some(data) = try_read_wad_from_zip(wad_path) {
-            return Some(data);
-        }
+        && let Some(data) = try_read_wad_from_zip(wad_path)
+    {
+        return Some(data);
+    }
 
     // Fall back to reading raw bytes
     std::fs::read(wad_path).ok()
@@ -218,9 +218,9 @@ fn try_read_wad_from_zip(path: &Path) -> Option<Vec<u8>> {
             continue;
         }
         let directory = parse_wad_directory(&buf);
-        let has_maps = directory.iter().any(|(name, _, _)| {
-            ZIP_MAP_DOOM1_RE.is_match(name) || ZIP_MAP_DOOM2_RE.is_match(name)
-        });
+        let has_maps = directory
+            .iter()
+            .any(|(name, _, _)| ZIP_MAP_DOOM1_RE.is_match(name) || ZIP_MAP_DOOM2_RE.is_match(name));
         if has_maps {
             return Some(buf);
         }
@@ -265,11 +265,7 @@ pub fn normalize_tags(tags: Option<&str>) -> Option<Vec<String>> {
         .map(|t| t.trim().to_lowercase())
         .filter(|t| !t.is_empty())
         .collect();
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts)
-    }
+    if parts.is_empty() { None } else { Some(parts) }
 }
 
 #[cfg(test)]
@@ -316,7 +312,10 @@ mod tests {
 
     #[test]
     fn test_format_author_year() {
-        assert_eq!(format_author_year(Some("Romero"), Some(1994)), "Romero (1994)");
+        assert_eq!(
+            format_author_year(Some("Romero"), Some(1994)),
+            "Romero (1994)"
+        );
         assert_eq!(format_author_year(Some("Romero"), None), "Romero");
         assert_eq!(format_author_year(None, Some(1994)), "(1994)");
         assert_eq!(format_author_year(None, None), "Unknown author");

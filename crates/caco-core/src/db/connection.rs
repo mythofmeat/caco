@@ -55,12 +55,13 @@ pub fn fetch_tags_batch(conn: &Connection, wad_ids: &[i64]) -> Result<HashMap<i6
 
     for chunk in wad_ids.chunks(SQLITE_MAX_VARS) {
         let placeholders: String = itertools_placeholders(chunk.len());
-        let sql = format!(
-            "SELECT wad_id, tag FROM tags WHERE wad_id IN ({placeholders}) ORDER BY tag"
-        );
+        let sql =
+            format!("SELECT wad_id, tag FROM tags WHERE wad_id IN ({placeholders}) ORDER BY tag");
         let mut stmt = conn.prepare(&sql)?;
-        let params: Vec<&dyn rusqlite::types::ToSql> =
-            chunk.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+        let params: Vec<&dyn rusqlite::types::ToSql> = chunk
+            .iter()
+            .map(|id| id as &dyn rusqlite::types::ToSql)
+            .collect();
         let rows = stmt.query_map(params.as_slice(), |row| {
             Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
         })?;
@@ -111,8 +112,10 @@ pub fn batch_query_i64(
         let placeholders = itertools_placeholders(chunk.len());
         let sql = query_template.replace("{placeholders}", &placeholders);
         let mut stmt = conn.prepare(&sql)?;
-        let params: Vec<&dyn rusqlite::types::ToSql> =
-            chunk.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+        let params: Vec<&dyn rusqlite::types::ToSql> = chunk
+            .iter()
+            .map(|id| id as &dyn rusqlite::types::ToSql)
+            .collect();
         let rows = stmt.query_map(params.as_slice(), |row| {
             let wad_id: i64 = row.get("wad_id")?;
             let val: i64 = row.get(result_column)?;
@@ -146,8 +149,10 @@ pub fn batch_query_string(
         let placeholders = itertools_placeholders(chunk.len());
         let sql = query_template.replace("{placeholders}", &placeholders);
         let mut stmt = conn.prepare(&sql)?;
-        let params: Vec<&dyn rusqlite::types::ToSql> =
-            chunk.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+        let params: Vec<&dyn rusqlite::types::ToSql> = chunk
+            .iter()
+            .map(|id| id as &dyn rusqlite::types::ToSql)
+            .collect();
         let rows = stmt.query_map(params.as_slice(), |row| {
             let wad_id: i64 = row.get("wad_id")?;
             let val: String = row.get(result_column)?;
@@ -186,10 +191,8 @@ mod tests {
     #[test]
     fn test_fetch_tags_empty_db() {
         let conn = open_memory().unwrap();
-        conn.execute_batch(
-            "CREATE TABLE tags (id INTEGER PRIMARY KEY, wad_id INTEGER, tag TEXT);",
-        )
-        .unwrap();
+        conn.execute_batch("CREATE TABLE tags (id INTEGER PRIMARY KEY, wad_id INTEGER, tag TEXT);")
+            .unwrap();
         let tags = fetch_tags(&conn, 1).unwrap();
         assert!(tags.is_empty());
     }

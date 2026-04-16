@@ -18,7 +18,14 @@ pub const TICS_PER_SECOND: f64 = 35.0;
 
 /// Human-readable names for skill levels.
 pub static SKILL_NAMES: LazyLock<HashMap<i32, &'static str>> = LazyLock::new(|| {
-    HashMap::from([(0, "-"), (1, "ITYTD"), (2, "HNTR"), (3, "HMP"), (4, "UV"), (5, "NM")])
+    HashMap::from([
+        (0, "-"),
+        (1, "ITYTD"),
+        (2, "HNTR"),
+        (3, "HMP"),
+        (4, "UV"),
+        (5, "NM"),
+    ])
 });
 
 /// Per-map statistics entry (superset of both formats).
@@ -120,9 +127,10 @@ impl WadStats {
         } else {
             let played = self.played_maps();
             if let Some(last) = played.last()
-                && last.total_time_secs >= 0.0 {
-                    return format_time_secs(last.total_time_secs);
-                }
+                && last.total_time_secs >= 0.0
+            {
+                return format_time_secs(last.total_time_secs);
+            }
             "-".to_string()
         }
     }
@@ -200,7 +208,9 @@ pub fn parse_stats_file(path: &Path) -> crate::Result<WadStats> {
 pub fn parse_stats_text(text: &str) -> crate::Result<WadStats> {
     let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
     if lines.is_empty() {
-        return Err(crate::Error::InvalidWadFormat("Empty stats file".to_string()));
+        return Err(crate::Error::InvalidWadFormat(
+            "Empty stats file".to_string(),
+        ));
     }
 
     if is_stats_txt(&lines) {
@@ -326,7 +336,10 @@ pub fn format_stats(stats: &WadStats) -> String {
 }
 
 fn format_stats_txt(stats: &WadStats) -> String {
-    let mut lines = vec![stats.version.to_string(), stats.header_total_kills.to_string()];
+    let mut lines = vec![
+        stats.version.to_string(),
+        stats.header_total_kills.to_string(),
+    ];
     for m in &stats.maps {
         lines.push(format!(
             "{} {} {} {} {} {} {} {} {} {} {} {} {} {} {}",
@@ -396,11 +409,23 @@ pub fn stats_from_json(json_str: &str) -> crate::Result<WadStats> {
 
 /// Return the lesser of two values, treating negatives as unset.
 fn min_positive_i32(a: i32, b: i32) -> i32 {
-    if a < 0 { b } else if b < 0 { a } else { a.min(b) }
+    if a < 0 {
+        b
+    } else if b < 0 {
+        a
+    } else {
+        a.min(b)
+    }
 }
 
 fn min_positive_f64(a: f64, b: f64) -> f64 {
-    if a < 0.0 { b } else if b < 0.0 { a } else { a.min(b) }
+    if a < 0.0 {
+        b
+    } else if b < 0.0 {
+        a
+    } else {
+        a.min(b)
+    }
 }
 
 /// Merge multiple WadStats into one, keeping the best data per map.
@@ -416,16 +441,23 @@ pub fn merge_stats(stats_list: &[WadStats]) -> WadStats {
     }
 
     let has_stats_txt = stats_list.iter().any(|s| s.format == "stats_txt");
-    let fmt = if has_stats_txt { "stats_txt" } else { &stats_list[0].format };
+    let fmt = if has_stats_txt {
+        "stats_txt"
+    } else {
+        &stats_list[0].format
+    };
 
-    let mut merged: std::collections::HashMap<String, MapStats> =
-        std::collections::HashMap::new();
+    let mut merged: std::collections::HashMap<String, MapStats> = std::collections::HashMap::new();
 
     for stats in stats_list {
         for m in &stats.maps {
             if let Some(existing) = merged.get_mut(&m.lump) {
-                if m.episode > 0 { existing.episode = m.episode; }
-                if m.map_num > 0 { existing.map_num = m.map_num; }
+                if m.episode > 0 {
+                    existing.episode = m.episode;
+                }
+                if m.map_num > 0 {
+                    existing.map_num = m.map_num;
+                }
                 existing.best_skill = existing.best_skill.max(m.best_skill);
                 existing.total_exits = existing.total_exits.max(m.total_exits);
                 existing.cumulative_kills = existing.cumulative_kills.max(m.cumulative_kills);
@@ -433,7 +465,8 @@ pub fn merge_stats(stats_list: &[WadStats]) -> WadStats {
                 existing.best_max_time = min_positive_i32(existing.best_max_time, m.best_max_time);
                 existing.best_nm_time = min_positive_i32(existing.best_nm_time, m.best_nm_time);
                 existing.time_secs = min_positive_f64(existing.time_secs, m.time_secs);
-                existing.total_time_secs = min_positive_f64(existing.total_time_secs, m.total_time_secs);
+                existing.total_time_secs =
+                    min_positive_f64(existing.total_time_secs, m.total_time_secs);
                 existing.kills = existing.kills.max(m.kills);
                 existing.items = existing.items.max(m.items);
                 existing.secrets = existing.secrets.max(m.secrets);
@@ -460,7 +493,11 @@ pub fn merge_stats(stats_list: &[WadStats]) -> WadStats {
     maps.sort_by(|a, b| a.lump.cmp(&b.lump));
 
     let version = stats_list.iter().map(|s| s.version).max().unwrap_or(1);
-    let header_total_kills = stats_list.iter().map(|s| s.header_total_kills).max().unwrap_or(0);
+    let header_total_kills = stats_list
+        .iter()
+        .map(|s| s.header_total_kills)
+        .max()
+        .unwrap_or(0);
 
     WadStats {
         format: fmt.to_string(),
@@ -599,8 +636,7 @@ pub fn compute_stats_delta(before: Option<&WadStats>, after: &WadStats) -> Stats
                         best_time_before: Some(prev.best_time),
                         best_time_after: Some(m.best_time),
                         time_improved: Some(
-                            m.best_time > 0
-                                && (prev.best_time < 0 || m.best_time < prev.best_time),
+                            m.best_time > 0 && (prev.best_time < 0 || m.best_time < prev.best_time),
                         ),
                         time_secs: None,
                         kills: None,
@@ -669,7 +705,10 @@ pub fn compute_map_progress(stats: &WadStats) -> MapProgress {
     } else {
         let secret_total = stats.maps.iter().filter(|m| is_secret_map(&m.lump)).count();
         let played_maps = stats.played_maps();
-        let secret_played = played_maps.iter().filter(|m| is_secret_map(&m.lump)).count();
+        let secret_played = played_maps
+            .iter()
+            .filter(|m| is_secret_map(&m.lump))
+            .count();
         MapProgress {
             played: played_maps.len() - secret_played,
             total: Some(stats.maps.len() - secret_total),
@@ -695,7 +734,10 @@ fn format_progress_bar(progress: &MapProgress, width: usize) -> Option<String> {
     if let Some(secret_total) = progress.secret_total
         && secret_total > 0
     {
-        result.push_str(&format!(" | {}/{secret_total} secret", progress.secret_played));
+        result.push_str(&format!(
+            " | {}/{secret_total} secret",
+            progress.secret_played
+        ));
     }
     Some(result)
 }
@@ -712,7 +754,10 @@ fn format_map_progress(progress: &MapProgress) -> Option<String> {
         if let Some(secret_total) = progress.secret_total
             && secret_total > 0
         {
-            return Some(format!("{base} | {}/{secret_total} secret", progress.secret_played));
+            return Some(format!(
+                "{base} | {}/{secret_total} secret",
+                progress.secret_played
+            ));
         }
         return Some(base);
     }
@@ -1275,9 +1320,9 @@ mod tests {
         let progress = compute_map_progress(&stats);
         // MAP01 played, MAP02 played, MAP31 secret+unplayed, MAP35 played
         assert_eq!(progress.total, Some(3)); // 4 total - 1 secret = 3
-        assert_eq!(progress.played, 3);      // MAP01, MAP02, MAP35
+        assert_eq!(progress.played, 3); // MAP01, MAP02, MAP35
         assert_eq!(progress.secret_total, Some(1)); // MAP31
-        assert_eq!(progress.secret_played, 0);      // MAP31 unplayed
+        assert_eq!(progress.secret_played, 0); // MAP31 unplayed
     }
 
     #[test]
@@ -1290,7 +1335,7 @@ mod tests {
     #[test]
     fn test_merge_stats_single() {
         let stats = parse_stats_text("1\n0\nMAP01 1 1 4 9734 -1 -1 1 128 102 1 0 113 9 1").unwrap();
-        let merged = merge_stats(&[stats.clone()]);
+        let merged = merge_stats(std::slice::from_ref(&stats));
         assert_eq!(merged.maps.len(), stats.maps.len());
         assert_eq!(merged.maps[0].best_skill, 4);
     }
@@ -1322,6 +1367,6 @@ mod tests {
         let slow = parse_stats_text("1\n0\nMAP01 1 1 4 9000 -1 -1 2 50 50 3 1 50 3 1").unwrap();
         let merged = merge_stats(&[fast, slow]);
         assert_eq!(merged.maps[0].best_time, 5000); // fastest
-        assert_eq!(merged.maps[0].total_exits, 2);  // highest
+        assert_eq!(merged.maps[0].total_exits, 2); // highest
     }
 }

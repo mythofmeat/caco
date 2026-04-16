@@ -30,11 +30,11 @@ fn progress_callback(pb: &ProgressBar) -> impl Fn(u64, u64) + '_ {
         pb.set_position(downloaded);
     }
 }
+use crate::resolve;
 use caco_core::db::models::WadRecord;
 use caco_core::player::{self, AutoCompleteResult, PlayOptions, RecordOption, format_duration};
 use caco_core::wad_stats;
 use caco_sources::idgames::IdgamesClient;
-use crate::resolve;
 
 #[derive(Args)]
 pub struct PlayArgs {

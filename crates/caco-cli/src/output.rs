@@ -2,11 +2,11 @@
 
 use std::collections::HashMap;
 
-use comfy_table::{presets, Table, Cell, CellAlignment, Color};
+use comfy_table::{Cell, CellAlignment, Color, Table, presets};
 
 use caco_core::db::{
-    IwadRecord, Id24Record, WadRecord, WadCompanionRecord, WadStats, SessionRecord,
-    CompletionRecord, StatsSnapshot, Status,
+    CompletionRecord, Id24Record, IwadRecord, SessionRecord, StatsSnapshot, Status,
+    WadCompanionRecord, WadRecord, WadStats,
 };
 use caco_core::player::format_duration;
 
@@ -46,11 +46,7 @@ impl std::fmt::Display for OutputFormat {
 // WAD list rendering
 // ---------------------------------------------------------------------------
 
-pub fn render_wad_list(
-    wads: &[WadRecord],
-    stats: &HashMap<i64, WadStats>,
-    format: OutputFormat,
-) {
+pub fn render_wad_list(wads: &[WadRecord], stats: &HashMap<i64, WadStats>, format: OutputFormat) {
     match format {
         OutputFormat::Table => render_wad_list_table(wads, stats),
         OutputFormat::Plain => render_wad_list_plain(wads, stats),
@@ -65,17 +61,15 @@ fn render_wad_list_table(wads: &[WadRecord], stats: &HashMap<i64, WadStats>) {
     }
 
     let mut table = Table::new();
-    table
-        .load_preset(presets::NOTHING)
-        .set_header(vec![
-            Cell::new("ID").fg(Color::DarkGrey),
-            Cell::new("Title").fg(Color::DarkGrey),
-            Cell::new("Author").fg(Color::DarkGrey),
-            Cell::new("Status").fg(Color::DarkGrey),
-            Cell::new("Beaten").fg(Color::DarkGrey),
-            Cell::new("Playtime").fg(Color::DarkGrey),
-            Cell::new("Last Played").fg(Color::DarkGrey),
-        ]);
+    table.load_preset(presets::NOTHING).set_header(vec![
+        Cell::new("ID").fg(Color::DarkGrey),
+        Cell::new("Title").fg(Color::DarkGrey),
+        Cell::new("Author").fg(Color::DarkGrey),
+        Cell::new("Status").fg(Color::DarkGrey),
+        Cell::new("Beaten").fg(Color::DarkGrey),
+        Cell::new("Playtime").fg(Color::DarkGrey),
+        Cell::new("Last Played").fg(Color::DarkGrey),
+    ]);
 
     for wad in wads {
         let ws = stats.get(&wad.id);
@@ -98,7 +92,12 @@ fn render_wad_list_table(wads: &[WadRecord], stats: &HashMap<i64, WadStats>) {
             Cell::new(&author),
             Cell::new(&status_display),
             Cell::new(beaten).set_alignment(CellAlignment::Right),
-            Cell::new(if playtime > 0 { format_duration(playtime) } else { String::new() }).set_alignment(CellAlignment::Right),
+            Cell::new(if playtime > 0 {
+                format_duration(playtime)
+            } else {
+                String::new()
+            })
+            .set_alignment(CellAlignment::Right),
             Cell::new(&last),
         ]);
     }
@@ -125,7 +124,11 @@ fn render_wad_list_plain(wads: &[WadRecord], stats: &HashMap<i64, WadStats>) {
             wad.author.as_deref().unwrap_or(""),
             wad.status,
             beaten,
-            if playtime > 0 { format_duration(playtime) } else { String::new() },
+            if playtime > 0 {
+                format_duration(playtime)
+            } else {
+                String::new()
+            },
             last,
         );
     }
@@ -158,7 +161,10 @@ fn render_wad_list_json(wads: &[WadRecord], stats: &HashMap<i64, WadStats>) {
             val
         })
         .collect();
-    println!("{}", serde_json::to_string_pretty(&items).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&items).unwrap_or_default()
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -253,7 +259,11 @@ fn render_wad_info_table(
         println!("  Completions ({}):", completions.len());
         for comp in completions {
             let ts = format_timestamp(&comp.completed_at);
-            let has_stats = if comp.stats_snapshot.is_some() { " *" } else { "" };
+            let has_stats = if comp.stats_snapshot.is_some() {
+                " *"
+            } else {
+                ""
+            };
             let notes = comp
                 .notes
                 .as_deref()
@@ -304,28 +314,53 @@ fn render_wad_info_table(
 fn render_wad_info_plain(wad: &WadRecord, stats: &WadStats) {
     println!("id={}", wad.id);
     println!("title={}", wad.title);
-    if let Some(a) = &wad.author { println!("author={a}"); }
-    if let Some(y) = wad.year { println!("year={y}"); }
+    if let Some(a) = &wad.author {
+        println!("author={a}");
+    }
+    if let Some(y) = wad.year {
+        println!("year={y}");
+    }
     println!("status={}", wad.status);
-    if let Some(r) = wad.rating { println!("rating={r}"); }
-    if !wad.tags.is_empty() { println!("tags={}", wad.tags.join(",")); }
+    if let Some(r) = wad.rating {
+        println!("rating={r}");
+    }
+    if !wad.tags.is_empty() {
+        println!("tags={}", wad.tags.join(","));
+    }
     println!("source_type={}", wad.source_type);
-    if let Some(u) = &wad.source_url { println!("source_url={u}"); }
+    if let Some(u) = &wad.source_url {
+        println!("source_url={u}");
+    }
     println!("playtime={}", stats.playtime);
     println!("sessions={}", stats.session_count);
     println!("times_beaten={}", stats.times_beaten);
-    if let Some(lp) = &stats.last_played { println!("last_played={lp}"); }
-    if let Some(d) = &wad.description { println!("description={d}"); }
-    if let Some(n) = &wad.notes { println!("notes={n}"); }
+    if let Some(lp) = &stats.last_played {
+        println!("last_played={lp}");
+    }
+    if let Some(d) = &wad.description {
+        println!("description={d}");
+    }
+    if let Some(n) = &wad.notes {
+        println!("notes={n}");
+    }
 }
 
 fn render_wad_info_json(wad: &WadRecord, stats: &WadStats) {
     let mut val = serde_json::to_value(wad).unwrap_or(serde_json::Value::Null);
     if let serde_json::Value::Object(ref mut map) = val {
         map.insert("playtime".to_string(), serde_json::json!(stats.playtime));
-        map.insert("times_beaten".to_string(), serde_json::json!(stats.times_beaten));
-        map.insert("session_count".to_string(), serde_json::json!(stats.session_count));
-        map.insert("last_played".to_string(), serde_json::json!(stats.last_played));
+        map.insert(
+            "times_beaten".to_string(),
+            serde_json::json!(stats.times_beaten),
+        );
+        map.insert(
+            "session_count".to_string(),
+            serde_json::json!(stats.session_count),
+        );
+        map.insert(
+            "last_played".to_string(),
+            serde_json::json!(stats.last_played),
+        );
     }
     println!("{}", serde_json::to_string_pretty(&val).unwrap_or_default());
 }
@@ -342,12 +377,10 @@ pub fn render_tag_list(tags: &[(String, i64)], format: OutputFormat) {
                 return;
             }
             let mut table = Table::new();
-            table
-                .load_preset(presets::NOTHING)
-                .set_header(vec![
-                    Cell::new("Tag").fg(Color::DarkGrey),
-                    Cell::new("Count").fg(Color::DarkGrey),
-                ]);
+            table.load_preset(presets::NOTHING).set_header(vec![
+                Cell::new("Tag").fg(Color::DarkGrey),
+                Cell::new("Count").fg(Color::DarkGrey),
+            ]);
             for (tag, count) in tags {
                 table.add_row(vec![
                     Cell::new(tag),
@@ -367,7 +400,10 @@ pub fn render_tag_list(tags: &[(String, i64)], format: OutputFormat) {
                 .iter()
                 .map(|(tag, count)| serde_json::json!({"tag": tag, "count": count}))
                 .collect();
-            println!("{}", serde_json::to_string_pretty(&items).unwrap_or_default());
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&items).unwrap_or_default()
+            );
         }
     }
 }
@@ -376,7 +412,11 @@ pub fn render_tag_list(tags: &[(String, i64)], format: OutputFormat) {
 // IWAD list rendering
 // ---------------------------------------------------------------------------
 
-pub fn render_iwad_list(iwads: &[IwadRecord], preferred: &HashMap<String, String>, format: OutputFormat) {
+pub fn render_iwad_list(
+    iwads: &[IwadRecord],
+    preferred: &HashMap<String, String>,
+    format: OutputFormat,
+) {
     match format {
         OutputFormat::Table => {
             if iwads.is_empty() {
@@ -384,14 +424,12 @@ pub fn render_iwad_list(iwads: &[IwadRecord], preferred: &HashMap<String, String
                 return;
             }
             let mut table = Table::new();
-            table
-                .load_preset(presets::NOTHING)
-                .set_header(vec![
-                    Cell::new("Family").fg(Color::DarkGrey),
-                    Cell::new("Variant").fg(Color::DarkGrey),
-                    Cell::new("Title").fg(Color::DarkGrey),
-                    Cell::new("Path").fg(Color::DarkGrey),
-                ]);
+            table.load_preset(presets::NOTHING).set_header(vec![
+                Cell::new("Family").fg(Color::DarkGrey),
+                Cell::new("Variant").fg(Color::DarkGrey),
+                Cell::new("Title").fg(Color::DarkGrey),
+                Cell::new("Path").fg(Color::DarkGrey),
+            ]);
             for iwad in iwads {
                 let is_preferred = preferred
                     .get(&iwad.family)
@@ -434,7 +472,10 @@ pub fn render_iwad_list(iwads: &[IwadRecord], preferred: &HashMap<String, String
                     })
                 })
                 .collect();
-            println!("{}", serde_json::to_string_pretty(&items).unwrap_or_default());
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&items).unwrap_or_default()
+            );
         }
     }
 }
@@ -451,14 +492,12 @@ pub fn render_id24_list(id24s: &[Id24Record], format: OutputFormat) {
                 return;
             }
             let mut table = Table::new();
-            table
-                .load_preset(presets::NOTHING)
-                .set_header(vec![
-                    Cell::new("Name").fg(Color::DarkGrey),
-                    Cell::new("Version").fg(Color::DarkGrey),
-                    Cell::new("Title").fg(Color::DarkGrey),
-                    Cell::new("Path").fg(Color::DarkGrey),
-                ]);
+            table.load_preset(presets::NOTHING).set_header(vec![
+                Cell::new("Name").fg(Color::DarkGrey),
+                Cell::new("Version").fg(Color::DarkGrey),
+                Cell::new("Title").fg(Color::DarkGrey),
+                Cell::new("Path").fg(Color::DarkGrey),
+            ]);
             for entry in id24s {
                 table.add_row(vec![
                     Cell::new(&entry.name),
@@ -493,7 +532,10 @@ pub fn render_id24_list(id24s: &[Id24Record], format: OutputFormat) {
                     })
                 })
                 .collect();
-            println!("{}", serde_json::to_string_pretty(&items).unwrap_or_default());
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&items).unwrap_or_default()
+            );
         }
     }
 }
@@ -515,15 +557,13 @@ pub fn render_session_list(
                 return;
             }
             let mut table = Table::new();
-            table
-                .load_preset(presets::NOTHING)
-                .set_header(vec![
-                    Cell::new("Date").fg(Color::DarkGrey),
-                    Cell::new("Started").fg(Color::DarkGrey),
-                    Cell::new("Duration").fg(Color::DarkGrey),
-                    Cell::new("Sourceport").fg(Color::DarkGrey),
-                    Cell::new("Maps").fg(Color::DarkGrey),
-                ]);
+            table.load_preset(presets::NOTHING).set_header(vec![
+                Cell::new("Date").fg(Color::DarkGrey),
+                Cell::new("Started").fg(Color::DarkGrey),
+                Cell::new("Duration").fg(Color::DarkGrey),
+                Cell::new("Sourceport").fg(Color::DarkGrey),
+                Cell::new("Maps").fg(Color::DarkGrey),
+            ]);
 
             for (i, session) in sessions.iter().enumerate() {
                 let date = format_timestamp(&session.started_at);
@@ -533,7 +573,8 @@ pub fn render_session_list(
                     .map(format_duration)
                     .unwrap_or_else(|| "--".to_string());
                 let port = session.sourceport.as_deref().unwrap_or("--");
-                let maps = deltas.get(i)
+                let maps = deltas
+                    .get(i)
                     .and_then(|d| d.as_ref())
                     .map(|maps| maps.join(", "))
                     .unwrap_or_else(|| "--".to_string());
@@ -565,7 +606,8 @@ pub fn render_session_list(
                     .map(format_duration)
                     .unwrap_or_else(|| "--".to_string());
                 let port = session.sourceport.as_deref().unwrap_or("--");
-                let maps = deltas.get(i)
+                let maps = deltas
+                    .get(i)
                     .and_then(|d| d.as_ref())
                     .map(|maps| maps.join(","))
                     .unwrap_or_else(|| "--".to_string());
@@ -592,11 +634,15 @@ fn render_stats_table(snapshot: &StatsSnapshot, limit: usize) {
     println!("==================");
     println!();
     println!("  Total WADs:     {}", snapshot.total_wads);
-    println!("  Total playtime: {}", format_duration(snapshot.total_playtime));
+    println!(
+        "  Total playtime: {}",
+        format_duration(snapshot.total_playtime)
+    );
     println!("  Total sessions: {}", snapshot.total_sessions);
     println!("  WADs played:    {}", snapshot.wads_with_sessions);
     println!();
-    println!("  Completed:      {} / {} played ({:.0}%)",
+    println!(
+        "  Completed:      {} / {} played ({:.0}%)",
         snapshot.completed_wads,
         snapshot.played_wads,
         snapshot.completion_rate * 100.0,
@@ -621,21 +667,20 @@ fn render_stats_table(snapshot: &StatsSnapshot, limit: usize) {
     if !snapshot.activity.is_empty() {
         println!();
         let mut table = Table::new();
-        table
-            .load_preset(presets::NOTHING)
-            .set_header(vec![
-                Cell::new("Period").fg(Color::DarkGrey),
-                Cell::new("WADs").fg(Color::DarkGrey),
-                Cell::new("Sessions").fg(Color::DarkGrey),
-                Cell::new("Playtime").fg(Color::DarkGrey),
-            ]);
+        table.load_preset(presets::NOTHING).set_header(vec![
+            Cell::new("Period").fg(Color::DarkGrey),
+            Cell::new("WADs").fg(Color::DarkGrey),
+            Cell::new("Sessions").fg(Color::DarkGrey),
+            Cell::new("Playtime").fg(Color::DarkGrey),
+        ]);
 
         for period in snapshot.activity.iter().take(limit) {
             table.add_row(vec![
                 Cell::new(&period.period),
                 Cell::new(period.wad_count).set_alignment(CellAlignment::Right),
                 Cell::new(period.session_count).set_alignment(CellAlignment::Right),
-                Cell::new(format_duration(period.total_playtime)).set_alignment(CellAlignment::Right),
+                Cell::new(format_duration(period.total_playtime))
+                    .set_alignment(CellAlignment::Right),
             ]);
         }
         println!("{table}");
@@ -732,8 +777,14 @@ mod tests {
 
     #[test]
     fn test_output_format_parse() {
-        assert_eq!("table".parse::<OutputFormat>().unwrap(), OutputFormat::Table);
-        assert_eq!("plain".parse::<OutputFormat>().unwrap(), OutputFormat::Plain);
+        assert_eq!(
+            "table".parse::<OutputFormat>().unwrap(),
+            OutputFormat::Table
+        );
+        assert_eq!(
+            "plain".parse::<OutputFormat>().unwrap(),
+            OutputFormat::Plain
+        );
         assert_eq!("json".parse::<OutputFormat>().unwrap(), OutputFormat::Json);
         assert!("invalid".parse::<OutputFormat>().is_err());
     }

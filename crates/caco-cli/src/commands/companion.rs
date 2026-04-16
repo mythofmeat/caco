@@ -73,9 +73,8 @@ fn cmd_add(conn: &Connection, query: &[String], file: &str) -> Result<(), String
     let wad = resolve::resolve_one_wad(conn, query, false)?;
     let file_path = Path::new(file);
 
-    let (_companion_id, filename) =
-        companion_service::register_companion(conn, wad.id, file_path)
-            .map_err(|e| format!("Failed to register companion: {e}"))?;
+    let (_companion_id, filename) = companion_service::register_companion(conn, wad.id, file_path)
+        .map_err(|e| format!("Failed to register companion: {e}"))?;
 
     println!("Added '{}' to '{}'.", filename, wad.title);
     Ok(())
@@ -84,8 +83,7 @@ fn cmd_add(conn: &Connection, query: &[String], file: &str) -> Result<(), String
 fn cmd_rm(conn: &Connection, query: &[String], file: &str, yes: bool) -> Result<(), String> {
     let wad = resolve::resolve_one_wad(conn, query, false)?;
 
-    let companions =
-        db::get_companions_for_wad(conn, wad.id).map_err(|e| e.to_string())?;
+    let companions = db::get_companions_for_wad(conn, wad.id).map_err(|e| e.to_string())?;
 
     let comp = companions
         .iter()
@@ -101,7 +99,10 @@ fn cmd_rm(conn: &Connection, query: &[String], file: &str, yes: bool) -> Result<
         let other_links = companions_linked_elsewhere(conn, comp.companion_id, wad.id)?;
         if other_links == 0 {
             // It will become orphaned — ask user
-            if resolve::confirm(&format!("'{}' will be orphaned. Delete managed file?", file)) {
+            if resolve::confirm(&format!(
+                "'{}' will be orphaned. Delete managed file?",
+                file
+            )) {
                 "delete"
             } else {
                 "keep"
@@ -116,9 +117,13 @@ fn cmd_rm(conn: &Connection, query: &[String], file: &str, yes: bool) -> Result<
         &policy
     };
 
-    let result =
-        companion_service::unregister_companion(conn, wad.id, comp.companion_id, Some(effective_policy))
-            .map_err(|e| format!("Failed to remove companion: {e}"))?;
+    let result = companion_service::unregister_companion(
+        conn,
+        wad.id,
+        comp.companion_id,
+        Some(effective_policy),
+    )
+    .map_err(|e| format!("Failed to remove companion: {e}"))?;
 
     match result {
         OrphanResult::Deleted => {
@@ -128,7 +133,10 @@ fn cmd_rm(conn: &Connection, query: &[String], file: &str, yes: bool) -> Result<
             println!("Removed '{}' from '{}' (orphan kept).", file, wad.title);
         }
         OrphanResult::NotOrphaned => {
-            println!("Removed '{}' from '{}' (still linked to other WADs).", file, wad.title);
+            println!(
+                "Removed '{}' from '{}' (still linked to other WADs).",
+                file, wad.title
+            );
         }
     }
     Ok(())
@@ -137,8 +145,7 @@ fn cmd_rm(conn: &Connection, query: &[String], file: &str, yes: bool) -> Result<
 fn cmd_enable(conn: &Connection, query: &[String], file: &str) -> Result<(), String> {
     let wad = resolve::resolve_one_wad(conn, query, false)?;
 
-    let companions =
-        db::get_companions_for_wad(conn, wad.id).map_err(|e| e.to_string())?;
+    let companions = db::get_companions_for_wad(conn, wad.id).map_err(|e| e.to_string())?;
 
     let comp = companions
         .iter()
@@ -150,8 +157,7 @@ fn cmd_enable(conn: &Connection, query: &[String], file: &str) -> Result<(), Str
         return Ok(());
     }
 
-    db::set_companion_enabled(conn, wad.id, comp.companion_id, true)
-        .map_err(|e| e.to_string())?;
+    db::set_companion_enabled(conn, wad.id, comp.companion_id, true).map_err(|e| e.to_string())?;
     println!("Enabled '{}' for '{}'.", file, wad.title);
     Ok(())
 }
@@ -159,8 +165,7 @@ fn cmd_enable(conn: &Connection, query: &[String], file: &str) -> Result<(), Str
 fn cmd_disable(conn: &Connection, query: &[String], file: &str) -> Result<(), String> {
     let wad = resolve::resolve_one_wad(conn, query, false)?;
 
-    let companions =
-        db::get_companions_for_wad(conn, wad.id).map_err(|e| e.to_string())?;
+    let companions = db::get_companions_for_wad(conn, wad.id).map_err(|e| e.to_string())?;
 
     let comp = companions
         .iter()
@@ -172,8 +177,7 @@ fn cmd_disable(conn: &Connection, query: &[String], file: &str) -> Result<(), St
         return Ok(());
     }
 
-    db::set_companion_enabled(conn, wad.id, comp.companion_id, false)
-        .map_err(|e| e.to_string())?;
+    db::set_companion_enabled(conn, wad.id, comp.companion_id, false).map_err(|e| e.to_string())?;
     println!("Disabled '{}' for '{}'.", file, wad.title);
     Ok(())
 }
@@ -185,8 +189,7 @@ fn cmd_ls(conn: &Connection, query: &[String], plain: bool) -> Result<(), String
     }
 
     let wad = resolve::resolve_one_wad(conn, query, false)?;
-    let companions =
-        db::get_companions_for_wad(conn, wad.id).map_err(|e| e.to_string())?;
+    let companions = db::get_companions_for_wad(conn, wad.id).map_err(|e| e.to_string())?;
 
     if companions.is_empty() {
         println!("No companion files for '{}'.", wad.title);
@@ -235,7 +238,12 @@ fn list_all_companions(conn: &Connection, plain: bool) -> Result<(), String> {
         println!("{} companion file(s) registered:", all.len());
         for c in &all {
             let size = format_size(c.size as u64);
-            println!("  {} ({}, md5: {})", c.filename, size, &c.md5[..12.min(c.md5.len())]);
+            println!(
+                "  {} ({}, md5: {})",
+                c.filename,
+                size,
+                &c.md5[..12.min(c.md5.len())]
+            );
         }
     }
     Ok(())
@@ -257,13 +265,12 @@ fn companions_linked_elsewhere(
     Ok(count)
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use caco_core::db::{self, init_db, open_memory};
-    use caco_core::db::wads::{add_wad, NewWad};
     use caco_core::db::models::SourceType;
+    use caco_core::db::wads::{NewWad, add_wad};
+    use caco_core::db::{self, init_db, open_memory};
 
     fn setup() -> Connection {
         let conn = open_memory().unwrap();
@@ -367,7 +374,8 @@ mod tests {
     fn test_enable_disable_companion_db() {
         let conn = setup();
         let wad_id = add_test_wad(&conn, "Test WAD");
-        let c_id = db::add_companion(&conn, "md5test", "patch.deh", "/path/patch.deh", 100).unwrap();
+        let c_id =
+            db::add_companion(&conn, "md5test", "patch.deh", "/path/patch.deh", 100).unwrap();
         db::link_companion_to_wad(&conn, wad_id, c_id).unwrap();
 
         // Default: enabled
@@ -400,7 +408,8 @@ mod tests {
     fn test_would_be_orphan_sole_link() {
         let conn = setup();
         let wad_id = add_test_wad(&conn, "WAD");
-        let c_id = db::add_companion(&conn, "md5test", "patch.deh", "/path/patch.deh", 100).unwrap();
+        let c_id =
+            db::add_companion(&conn, "md5test", "patch.deh", "/path/patch.deh", 100).unwrap();
         db::link_companion_to_wad(&conn, wad_id, c_id).unwrap();
 
         assert!(db::would_be_orphan(&conn, c_id, wad_id).unwrap());
@@ -411,7 +420,8 @@ mod tests {
         let conn = setup();
         let w1 = add_test_wad(&conn, "WAD 1");
         let w2 = add_test_wad(&conn, "WAD 2");
-        let c_id = db::add_companion(&conn, "md5test", "patch.deh", "/path/patch.deh", 100).unwrap();
+        let c_id =
+            db::add_companion(&conn, "md5test", "patch.deh", "/path/patch.deh", 100).unwrap();
         db::link_companion_to_wad(&conn, w1, c_id).unwrap();
         db::link_companion_to_wad(&conn, w2, c_id).unwrap();
 

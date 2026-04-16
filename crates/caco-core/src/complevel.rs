@@ -61,7 +61,9 @@ pub fn parse_complevel(value: &str) -> Option<i32> {
         return None;
     }
     // Try as alias
-    COMPLEVEL_ALIASES.get(value.to_lowercase().as_str()).copied()
+    COMPLEVEL_ALIASES
+        .get(value.to_lowercase().as_str())
+        .copied()
 }
 
 #[cfg(test)]

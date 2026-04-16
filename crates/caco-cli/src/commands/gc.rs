@@ -251,7 +251,8 @@ fn gc_batch_clean(
     let mut total_size = 0u64;
     for entry in entries {
         let title = truncate(&entry.wad.title, 38);
-        let redownloadable = if entry.wad.source_type == "idgames" || entry.wad.idgames_id.is_some() {
+        let redownloadable = if entry.wad.source_type == "idgames" || entry.wad.idgames_id.is_some()
+        {
             "yes"
         } else {
             "no"
@@ -289,7 +290,11 @@ fn gc_batch_clean(
     for entry in entries {
         freed += clean_wad_data(conn, entry, opts)?;
     }
-    println!("  Cleaned {} WADs, {} freed.", entries.len(), format_size(freed));
+    println!(
+        "  Cleaned {} WADs, {} freed.",
+        entries.len(),
+        format_size(freed)
+    );
     Ok(freed)
 }
 
@@ -379,10 +384,7 @@ fn get_wad_companion_info(
     let mut total_size = 0u64;
 
     for wc in &wad_companions {
-        let file_size = Path::new(&wc.path)
-            .metadata()
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let file_size = Path::new(&wc.path).metadata().map(|m| m.len()).unwrap_or(0);
 
         let would_orphan = db::would_be_orphan(conn, wc.companion_id, wad_id)
             .map_err(|e| format!("Failed to check orphan: {e}"))?;
@@ -638,12 +640,14 @@ where
 {
     let total_size: u64 = orphans.iter().map(|(_, s)| *s).sum();
 
-    println!("\nFound {} {} ({}):", orphans.len(), label, format_size(total_size));
+    println!(
+        "\nFound {} {} ({}):",
+        orphans.len(),
+        label,
+        format_size(total_size)
+    );
     for (path, size) in orphans {
-        let name = path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy();
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
         println!("  {} ({})", name, format_size(*size));
     }
 
@@ -798,9 +802,9 @@ fn truncate(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use caco_core::db::{self, init_db, open_memory};
-    use caco_core::db::wads::{add_wad, NewWad};
     use caco_core::db::models::{SourceType, Status};
+    use caco_core::db::wads::{NewWad, add_wad};
+    use caco_core::db::{self, init_db, open_memory};
 
     fn setup() -> Connection {
         let conn = open_memory().unwrap();
@@ -809,8 +813,7 @@ mod tests {
     }
 
     fn add_wad_with_status(conn: &Connection, title: &str, status: Status) -> i64 {
-        let wad_id = add_wad(conn, &NewWad::new(title, SourceType::Local).status(status)).unwrap();
-        wad_id
+        add_wad(conn, &NewWad::new(title, SourceType::Local).status(status)).unwrap()
     }
 
     // -- parse_wad_id_prefix tests --
@@ -1006,11 +1009,21 @@ mod tests {
 
         // Set ignore first
         handle_ignore(&conn, &["My WAD".to_string()], true).unwrap();
-        assert!(db::get_wad(&conn, wad_id, false).unwrap().unwrap().gc_ignore);
+        assert!(
+            db::get_wad(&conn, wad_id, false)
+                .unwrap()
+                .unwrap()
+                .gc_ignore
+        );
 
         // Unignore
         handle_ignore(&conn, &["My WAD".to_string()], false).unwrap();
-        assert!(!db::get_wad(&conn, wad_id, false).unwrap().unwrap().gc_ignore);
+        assert!(
+            !db::get_wad(&conn, wad_id, false)
+                .unwrap()
+                .unwrap()
+                .gc_ignore
+        );
     }
 
     // -- companion orphan measurement --
@@ -1029,7 +1042,8 @@ mod tests {
     fn test_get_wad_companion_info_with_companion() {
         let conn = setup();
         let wad_id = add_wad_with_status(&conn, "WAD", Status::Completed);
-        let c_id = db::add_companion(&conn, "md5abc", "patch.deh", "/nonexistent/path.deh", 100).unwrap();
+        let c_id =
+            db::add_companion(&conn, "md5abc", "patch.deh", "/nonexistent/path.deh", 100).unwrap();
         db::link_companion_to_wad(&conn, wad_id, c_id).unwrap();
 
         let (infos, _) = get_wad_companion_info(&conn, wad_id).unwrap();
@@ -1295,7 +1309,8 @@ mod tests {
             "orphan.deh",
             &file_path.to_string_lossy(),
             14,
-        ).unwrap();
+        )
+        .unwrap();
 
         let orphans = find_orphaned_companions(&conn);
         assert_eq!(orphans.len(), 1);
@@ -1311,14 +1326,19 @@ mod tests {
             "missing.deh",
             "/nonexistent/missing.deh",
             100,
-        ).unwrap();
+        )
+        .unwrap();
 
         let orphans = find_orphaned_companions(&conn);
         // File doesn't exist, so not in orphans list
         assert!(orphans.is_empty());
 
         // But the DB record should have been cleaned up
-        assert!(db::find_companion_by_md5(&conn, "md5missing").unwrap().is_none());
+        assert!(
+            db::find_companion_by_md5(&conn, "md5missing")
+                .unwrap()
+                .is_none()
+        );
     }
 
     // -- GC companion size measurement --
@@ -1328,7 +1348,8 @@ mod tests {
         let conn = setup();
         let w1 = add_wad_with_status(&conn, "WAD 1", Status::Completed);
         let w2 = add_wad_with_status(&conn, "WAD 2", Status::InProgress);
-        let c_id = db::add_companion(&conn, "md5shared", "shared.deh", "/path/shared.deh", 100).unwrap();
+        let c_id =
+            db::add_companion(&conn, "md5shared", "shared.deh", "/path/shared.deh", 100).unwrap();
 
         // Link to both WADs
         db::link_companion_to_wad(&conn, w1, c_id).unwrap();
@@ -1357,7 +1378,8 @@ mod tests {
             "solo.deh",
             &file_path.to_string_lossy(),
             14,
-        ).unwrap();
+        )
+        .unwrap();
         db::link_companion_to_wad(&conn, wad_id, c_id).unwrap();
 
         // This WAD is the sole owner — would be orphaned on cleanup

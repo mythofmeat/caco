@@ -1,17 +1,13 @@
+use crate::widgets::table_nav::{table_nav_next, table_nav_prev};
 use caco_core::db::sessions::get_wad_completions;
 use caco_core::db::wads::get_wad;
-use caco_core::wad_stats::{
-    self, WadStats, format_time_secs, format_time_tics, skill_name,
-};
+use caco_core::wad_stats::{self, WadStats, format_time_secs, format_time_tics, skill_name};
 use crossterm::event::{KeyCode, KeyEvent};
-use crate::widgets::table_nav::{table_nav_next, table_nav_prev};
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{
-    Block, BorderType, Borders, Cell, Paragraph, Row, Table, TableState,
-};
-use ratatui::Frame;
+use ratatui::widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table, TableState};
 use rusqlite::Connection;
 
 use crate::message::{AppMessage, ScreenResult};
@@ -61,7 +57,11 @@ impl WadStatsScreen {
                     .stats_snapshot
                     .as_ref()
                     .and_then(|s| wad_stats::stats_from_json(s).ok());
-                let date = comp.completed_at.split('T').next().unwrap_or(&comp.completed_at);
+                let date = comp
+                    .completed_at
+                    .split('T')
+                    .next()
+                    .unwrap_or(&comp.completed_at);
                 let date = date.split(' ').next().unwrap_or(date);
                 entries.push(StatsEntry {
                     label: format!("#{} ({})", i + 1, date),
@@ -104,7 +104,7 @@ impl Screen for WadStatsScreen {
 
         let layout = Layout::vertical([
             Constraint::Length(1), // header
-            Constraint::Min(1),   // table
+            Constraint::Min(1),    // table
             Constraint::Length(1), // hints
         ])
         .split(inner);

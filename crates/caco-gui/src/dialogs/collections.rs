@@ -1,9 +1,7 @@
 use egui_extras::{Column, TableBuilder};
 use rusqlite::Connection;
 
-use caco_core::db::collections::{
-    self, CollectionRecord,
-};
+use caco_core::db::collections::{self, CollectionRecord};
 
 use crate::theme;
 
@@ -123,8 +121,7 @@ impl CollectionsDialogState {
                 // Button row
                 ui.horizontal(|ui| {
                     let is_editing = !matches!(self.edit_mode, EditMode::None);
-                    let has_selection =
-                        self.selected.is_some() && !self.collections.is_empty();
+                    let has_selection = self.selected.is_some() && !self.collections.is_empty();
 
                     if ui
                         .add_enabled(!is_editing, egui::Button::new("Add"))
@@ -169,14 +166,11 @@ impl CollectionsDialogState {
                         result = CollectionsResult::LoadQuery(query);
                     }
 
-                    ui.with_layout(
-                        egui::Layout::right_to_left(egui::Align::Center),
-                        |ui| {
-                            if ui.button("Close").clicked() {
-                                result = CollectionsResult::Closed;
-                            }
-                        },
-                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Close").clicked() {
+                            result = CollectionsResult::Closed;
+                        }
+                    });
                 });
             });
 
@@ -192,7 +186,10 @@ impl CollectionsDialogState {
 
     fn render_table(&mut self, ui: &mut egui::Ui) {
         if self.collections.is_empty() {
-            ui.colored_label(theme::TEXT_SECONDARY, "No collections. Create one with Add.");
+            ui.colored_label(
+                theme::TEXT_SECONDARY,
+                "No collections. Create one with Add.",
+            );
             return;
         }
 
@@ -325,8 +322,7 @@ impl CollectionsDialogState {
             EditMode::Add => {
                 match collections::create_collection(conn, name, query, sort_by, self.form_desc) {
                     Ok(_) => {
-                        self.status_text =
-                            Some((format!("Created collection '{name}'"), false));
+                        self.status_text = Some((format!("Created collection '{name}'"), false));
                         self.edit_mode = EditMode::None;
                         self.modified = true;
                         self.load(conn);

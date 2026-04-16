@@ -91,7 +91,9 @@ fn main() {
     // Dispatch to command handler
     let result = match cli.command {
         Commands::Ls(ref args) => commands::ls::run(&conn, args),
-        Commands::Info(ref args) | Commands::InfoAlias(ref args) => commands::info::run(&conn, args),
+        Commands::Info(ref args) | Commands::InfoAlias(ref args) => {
+            commands::info::run(&conn, args)
+        }
         Commands::Modify(ref args) => commands::modify::run(&conn, args),
         Commands::Trash(ref args) => commands::trash::run(&conn, args),
         Commands::Random(ref args) => commands::random::run(&conn, args),

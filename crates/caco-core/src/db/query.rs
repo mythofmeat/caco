@@ -1,11 +1,9 @@
 use rusqlite::Connection;
 
 use super::connection::{attach_tags, fetch_tags_batch};
-use super::models::{
-    AndGroup, ParsedQuery, QueryTerm, SourceType, WadRecord, STATUS_SHORTCUTS,
-};
-use crate::complevel::parse_complevel;
+use super::models::{AndGroup, ParsedQuery, QueryTerm, STATUS_SHORTCUTS, SourceType, WadRecord};
 use crate::Result;
+use crate::complevel::parse_complevel;
 
 /// Convert a glob pattern to SQL LIKE pattern.
 fn glob_to_like(pattern: &str) -> String {
@@ -174,7 +172,6 @@ pub fn normalize_status(value: &str) -> String {
         .unwrap_or(lower)
 }
 
-
 /// Boxed SQL parameter for dynamic dispatch.
 type SqlParam = Box<dyn rusqlite::types::ToSql>;
 
@@ -185,7 +182,11 @@ fn build_term_sql(term: &QueryTerm) -> (String, Vec<SqlParam>) {
             let like = format!("%{}%", term.value);
             (
                 "(wads.title LIKE ? OR wads.author LIKE ? OR wads.description LIKE ?)".into(),
-                vec![Box::new(like.clone()), Box::new(like.clone()), Box::new(like)],
+                vec![
+                    Box::new(like.clone()),
+                    Box::new(like.clone()),
+                    Box::new(like),
+                ],
             )
         }
 
@@ -278,7 +279,11 @@ fn build_term_sql(term: &QueryTerm) -> (String, Vec<SqlParam>) {
             let like = format!("%{}%", term.value);
             (
                 "(wads.title LIKE ? OR wads.author LIKE ? OR wads.description LIKE ?)".into(),
-                vec![Box::new(like.clone()), Box::new(like.clone()), Box::new(like)],
+                vec![
+                    Box::new(like.clone()),
+                    Box::new(like.clone()),
+                    Box::new(like),
+                ],
             )
         }
     };
@@ -324,7 +329,15 @@ fn build_query_sql(parsed: &ParsedQuery) -> (String, Vec<SqlParam>) {
 
 /// Allowed sort fields for `search_wads`.
 const ALLOWED_SORT_FIELDS: &[&str] = &[
-    "id", "playtime", "rating", "created", "title", "author", "last_played", "year", "random",
+    "id",
+    "playtime",
+    "rating",
+    "created",
+    "title",
+    "author",
+    "last_played",
+    "year",
+    "random",
 ];
 
 /// Search WADs with beets-style query syntax.
@@ -432,8 +445,7 @@ pub fn search_wads(
         )
     };
 
-    let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-        params.iter().map(|p| p.as_ref()).collect();
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
 
     let mut stmt = conn.prepare(&sql)?;
     let mut results: Vec<WadRecord> = stmt
@@ -475,9 +487,8 @@ pub fn find_duplicate(
             SourceType::Idgames | SourceType::Doomwiki | SourceType::Doomworld
         )
     {
-        let mut stmt = conn.prepare(
-            "SELECT * FROM wads WHERE source_type = ? AND source_id = ?",
-        )?;
+        let mut stmt =
+            conn.prepare("SELECT * FROM wads WHERE source_type = ? AND source_id = ?")?;
         match stmt.query_row(
             rusqlite::params![source_type.as_str(), sid],
             WadRecord::from_row,
@@ -495,9 +506,8 @@ pub fn find_duplicate(
     if let Some(url) = source_url
         && matches!(source_type, SourceType::Url | SourceType::Local)
     {
-        let mut stmt = conn.prepare(
-            "SELECT * FROM wads WHERE source_type = ? AND source_url = ?",
-        )?;
+        let mut stmt =
+            conn.prepare("SELECT * FROM wads WHERE source_type = ? AND source_url = ?")?;
         match stmt.query_row(
             rusqlite::params![source_type.as_str(), url],
             WadRecord::from_row,
@@ -533,8 +543,7 @@ pub fn find_duplicate(
                 WadRecord::from_row,
             )
         } else {
-            let mut stmt =
-                conn.prepare("SELECT * FROM wads WHERE LOWER(filename) LIKE ?")?;
+            let mut stmt = conn.prepare("SELECT * FROM wads WHERE LOWER(filename) LIKE ?")?;
             stmt.query_row(
                 rusqlite::params![format!("%{normalized}%")],
                 WadRecord::from_row,
@@ -560,7 +569,7 @@ mod tests {
     use crate::db::connection::open_memory;
     use crate::db::models::Status;
     use crate::db::schema::init_db;
-    use crate::db::wads::{add_wad, NewWad};
+    use crate::db::wads::{NewWad, add_wad};
 
     fn setup() -> Connection {
         let conn = open_memory().unwrap();
@@ -684,8 +693,7 @@ mod tests {
         let conn = setup();
         add_test_wads(&conn);
 
-        let results =
-            search_wads(&conn, Some("status:in-progress"), None, true, false, 0).unwrap();
+        let results = search_wads(&conn, Some("status:in-progress"), None, true, false, 0).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].title, "Ancient Aliens");
     }
@@ -714,8 +722,7 @@ mod tests {
         let conn = setup();
         add_test_wads(&conn);
 
-        let results =
-            search_wads(&conn, Some("-status:completed"), None, true, false, 0).unwrap();
+        let results = search_wads(&conn, Some("-status:completed"), None, true, false, 0).unwrap();
         assert_eq!(results.len(), 2);
     }
 
@@ -763,8 +770,7 @@ mod tests {
         assert_eq!(results[0].title, "TestWad");
 
         // Partial match still works
-        let results =
-            search_wads(&conn, Some("tag:\"multi word\""), None, true, false, 0).unwrap();
+        let results = search_wads(&conn, Some("tag:\"multi word\""), None, true, false, 0).unwrap();
         assert_eq!(results.len(), 1);
     }
 
@@ -874,8 +880,7 @@ mod tests {
         let conn = setup();
         add_wad(
             &conn,
-            &NewWad::new("URL WAD", SourceType::Url)
-                .source_url("https://example.com/test.wad"),
+            &NewWad::new("URL WAD", SourceType::Url).source_url("https://example.com/test.wad"),
         )
         .unwrap();
 
@@ -898,28 +903,14 @@ mod tests {
         add_test_wads(&conn);
 
         // Both terms must match
-        let results = search_wads(
-            &conn,
-            Some("author:alm year:2003"),
-            None,
-            true,
-            false,
-            0,
-        )
-        .unwrap();
+        let results =
+            search_wads(&conn, Some("author:alm year:2003"), None, true, false, 0).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].title, "Scythe");
 
         // Contradictory terms
-        let results = search_wads(
-            &conn,
-            Some("author:alm year:2016"),
-            None,
-            true,
-            false,
-            0,
-        )
-        .unwrap();
+        let results =
+            search_wads(&conn, Some("author:alm year:2016"), None, true, false, 0).unwrap();
         assert_eq!(results.len(), 0);
     }
 
@@ -945,8 +936,7 @@ mod tests {
         conn.execute("UPDATE wads SET complevel = 9 WHERE id = ?", [id])
             .unwrap();
 
-        let results =
-            search_wads(&conn, Some("complevel:boom"), None, true, false, 0).unwrap();
+        let results = search_wads(&conn, Some("complevel:boom"), None, true, false, 0).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].title, "Boom WAD");
 

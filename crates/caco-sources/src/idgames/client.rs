@@ -65,7 +65,10 @@ impl IdgamesClient {
             return Err(SourceError::Api(msg.to_string()));
         }
 
-        Ok(data.get("content").cloned().unwrap_or(serde_json::Value::Null))
+        Ok(data
+            .get("content")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null))
     }
 
     /// Check if the API server is responding.
@@ -98,7 +101,9 @@ impl IdgamesClient {
     /// Get file details by ID or filename.
     pub fn get(&self, id: Option<i64>, file: Option<&str>) -> Result<FileEntry> {
         if id.is_none() && file.is_none() {
-            return Err(SourceError::Api("Must provide either id or file".to_string()));
+            return Err(SourceError::Api(
+                "Must provide either id or file".to_string(),
+            ));
         }
 
         let mut params: Vec<(&str, String)> = Vec::new();
@@ -146,11 +151,7 @@ impl IdgamesClient {
     }
 
     /// Get the latest files.
-    pub fn latest_files(
-        &self,
-        limit: Option<i64>,
-        startid: Option<i64>,
-    ) -> Result<Vec<FileEntry>> {
+    pub fn latest_files(&self, limit: Option<i64>, startid: Option<i64>) -> Result<Vec<FileEntry>> {
         let mut params: Vec<(&str, String)> = Vec::new();
         if let Some(l) = limit {
             params.push(("limit", l.to_string()));
@@ -176,7 +177,10 @@ impl IdgamesClient {
         if content.is_null() {
             return Ok(Vec::new());
         }
-        let votes_val = content.get("vote").cloned().unwrap_or(serde_json::Value::Null);
+        let votes_val = content
+            .get("vote")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
         Ok(normalize_list::<Vote>(&votes_val))
     }
 
@@ -195,18 +199,16 @@ impl IdgamesClient {
         if content.is_null() {
             return Ok(Vec::new());
         }
-        let dirs_val = content.get("dir").cloned().unwrap_or(serde_json::Value::Null);
+        let dirs_val = content
+            .get("dir")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
         Ok(normalize_list::<Directory>(&dirs_val))
     }
 
     /// Get the download URL for a file entry.
     pub fn get_download_url(&self, entry: &FileEntry, mirror: usize) -> String {
-        let path = format!(
-            "{}/{}",
-            entry.dir.trim_matches('/'),
-            entry.filename
-        )
-        .replace("//", "/");
+        let path = format!("{}/{}", entry.dir.trim_matches('/'), entry.filename).replace("//", "/");
         format!("{}{}", MIRRORS[mirror % MIRRORS.len()], path)
     }
 
@@ -220,10 +222,7 @@ impl IdgamesClient {
     ) -> Result<PathBuf> {
         let partial = dest_path.with_extension(format!(
             "{}.partial",
-            dest_path
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("")
+            dest_path.extension().and_then(|e| e.to_str()).unwrap_or("")
         ));
 
         let result = (|| -> Result<PathBuf> {
@@ -290,7 +289,8 @@ impl IdgamesClient {
     ) -> Result<PathBuf> {
         if filename.is_empty() || !source_url.contains("/idgames/") {
             return Err(SourceError::Api(
-                "Cannot construct direct download URL: missing idgames path or filename".to_string(),
+                "Cannot construct direct download URL: missing idgames path or filename"
+                    .to_string(),
             ));
         }
 
@@ -374,7 +374,10 @@ fn parse_file_list(content: &serde_json::Value) -> Result<Vec<FileEntry>> {
     if content.is_null() {
         return Ok(Vec::new());
     }
-    let files_val = content.get("file").cloned().unwrap_or(serde_json::Value::Null);
+    let files_val = content
+        .get("file")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
     Ok(normalize_list::<FileEntry>(&files_val))
 }
 

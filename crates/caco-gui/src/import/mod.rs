@@ -3,7 +3,7 @@ pub mod search_panel;
 pub mod state;
 pub mod workers;
 
-use state::{FormKind, ImportState, SearchResultEntry, SearchSource, IMPORT_SOURCES};
+use state::{FormKind, IMPORT_SOURCES, ImportState, SearchResultEntry, SearchSource};
 
 use crate::theme;
 
@@ -44,16 +44,12 @@ pub fn render(ui: &mut egui::Ui, state: &mut ImportState) -> Option<ImportAction
     // Dispatch to active source panel
     match state.active_source {
         0 => {
-            if let Some(a) =
-                search_panel::render(ui, &mut state.idgames, SearchSource::Idgames)
-            {
+            if let Some(a) = search_panel::render(ui, &mut state.idgames, SearchSource::Idgames) {
                 action = Some(map_search_action(SearchSource::Idgames, a));
             }
         }
         1 => {
-            if let Some(a) =
-                search_panel::render(ui, &mut state.doomwiki, SearchSource::Doomwiki)
-            {
+            if let Some(a) = search_panel::render(ui, &mut state.doomwiki, SearchSource::Doomwiki) {
                 action = Some(map_search_action(SearchSource::Doomwiki, a));
             }
         }
@@ -98,10 +94,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut ImportState) -> Option<ImportAction
     action
 }
 
-fn map_search_action(
-    source: SearchSource,
-    a: search_panel::SearchPanelAction,
-) -> ImportAction {
+fn map_search_action(source: SearchSource, a: search_panel::SearchPanelAction) -> ImportAction {
     match a {
         search_panel::SearchPanelAction::Search(q) => ImportAction::Search(source, q),
         search_panel::SearchPanelAction::Import(entry) => {
@@ -110,10 +103,7 @@ fn map_search_action(
     }
 }
 
-fn map_form_action(
-    kind: FormKind,
-    a: form_panel::FormPanelAction,
-) -> ImportAction {
+fn map_form_action(kind: FormKind, a: form_panel::FormPanelAction) -> ImportAction {
     match a {
         form_panel::FormPanelAction::Submit(values) => ImportAction::ImportForm(kind, values),
     }

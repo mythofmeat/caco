@@ -29,15 +29,27 @@ pub struct Notification {
 
 impl Notification {
     pub fn info(text: String) -> Self {
-        Self { text, severity: Severity::Info, created_at: Instant::now() }
+        Self {
+            text,
+            severity: Severity::Info,
+            created_at: Instant::now(),
+        }
     }
 
     pub fn warning(text: String) -> Self {
-        Self { text, severity: Severity::Warning, created_at: Instant::now() }
+        Self {
+            text,
+            severity: Severity::Warning,
+            created_at: Instant::now(),
+        }
     }
 
     pub fn error(text: String) -> Self {
-        Self { text, severity: Severity::Error, created_at: Instant::now() }
+        Self {
+            text,
+            severity: Severity::Error,
+            created_at: Instant::now(),
+        }
     }
 
     pub fn is_expired(&self) -> bool {

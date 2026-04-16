@@ -74,9 +74,7 @@ mod tests {
     #[test]
     fn strips_url_query() {
         assert_eq!(
-            extract_doomwiki_title_from_url(
-                "https://doomwiki.org/wiki/Scythe?action=history"
-            ),
+            extract_doomwiki_title_from_url("https://doomwiki.org/wiki/Scythe?action=history"),
             Some("Scythe".to_string()),
         );
     }

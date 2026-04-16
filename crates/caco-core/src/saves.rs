@@ -7,8 +7,8 @@ use std::sync::LazyLock;
 
 use chrono::Local;
 use regex::Regex;
-use zip::write::SimpleFileOptions;
 use zip::ZipArchive;
+use zip::write::SimpleFileOptions;
 
 use crate::config::get_backup_dir;
 use crate::sourceports::ALL_SAVE_EXTENSIONS;
@@ -67,23 +67,29 @@ fn collect_save_files_recursive(base: &Path, dir: &Path, saves: &mut Vec<SaveFil
                 .map(|e| format!(".{}", e.to_lowercase()))
                 .unwrap_or_default();
             if ALL_SAVE_EXTENSIONS.contains(&ext.as_str())
-                && let Ok(meta) = path.metadata() {
-                    let mtime = meta.modified()
-                        .map(system_time_to_rfc3339)
-                        .unwrap_or_default();
+                && let Ok(meta) = path.metadata()
+            {
+                let mtime = meta
+                    .modified()
+                    .map(system_time_to_rfc3339)
+                    .unwrap_or_default();
 
-                    saves.push(SaveFile {
-                        name: path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
-                        rel_path: path
-                            .strip_prefix(base)
-                            .unwrap_or(&path)
-                            .to_string_lossy()
-                            .into_owned(),
-                        size: meta.len(),
-                        mtime_iso: mtime,
-                        path,
-                    });
-                }
+                saves.push(SaveFile {
+                    name: path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned(),
+                    rel_path: path
+                        .strip_prefix(base)
+                        .unwrap_or(&path)
+                        .to_string_lossy()
+                        .into_owned(),
+                    size: meta.len(),
+                    mtime_iso: mtime,
+                    path,
+                });
+            }
         }
     }
 }
@@ -109,8 +115,7 @@ pub fn create_backup(wad_id: i64, title: &str, data_dir: &Path) -> crate::Result
 
     let file = File::create(&backup_path)?;
     let mut zip = zip::ZipWriter::new(file);
-    let options = SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
     let mut files = Vec::new();
     collect_all_files_recursive(data_dir, &mut files);
@@ -127,8 +132,7 @@ pub fn create_backup(wad_id: i64, title: &str, data_dir: &Path) -> crate::Result
         io::copy(&mut f, &mut zip)?;
     }
 
-    zip.finish()
-        .map_err(io::Error::other)?;
+    zip.finish().map_err(io::Error::other)?;
 
     Ok(backup_path)
 }
@@ -215,23 +219,25 @@ pub fn list_backups(wad_id: i64) -> Vec<BackupInfo> {
                     .and_then(|n| n.to_str())
                     .is_some_and(|n| n.starts_with(&prefix))
                 && path.extension().and_then(|e| e.to_str()) == Some("zip")
-                && let Ok(meta) = path.metadata() {
-                    let created = meta.modified()
-                        .map(system_time_to_rfc3339)
-                        .unwrap_or_default();
+                && let Ok(meta) = path.metadata()
+            {
+                let created = meta
+                    .modified()
+                    .map(system_time_to_rfc3339)
+                    .unwrap_or_default();
 
-                    backups.push(BackupInfo {
-                        name: path
-                            .file_name()
-                            .unwrap_or_default()
-                            .to_string_lossy()
-                            .into_owned(),
-                        wad_id: Some(wad_id),
-                        size: meta.len(),
-                        created_iso: created,
-                        path,
-                    });
-                }
+                backups.push(BackupInfo {
+                    name: path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned(),
+                    wad_id: Some(wad_id),
+                    size: meta.len(),
+                    created_iso: created,
+                    path,
+                });
+            }
         }
     }
 
@@ -264,7 +270,8 @@ pub fn list_all_backups() -> Vec<BackupInfo> {
                     .and_then(|c| c[1].parse::<i64>().ok());
 
                 if let Ok(meta) = path.metadata() {
-                    let created = meta.modified()
+                    let created = meta
+                        .modified()
                         .map(system_time_to_rfc3339)
                         .unwrap_or_default();
 

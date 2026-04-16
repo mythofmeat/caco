@@ -105,11 +105,7 @@ impl WadStatsDialogState {
                         .selected_text(current_label)
                         .show_ui(ui, |ui| {
                             for (i, entry) in self.entries.iter().enumerate() {
-                                ui.selectable_value(
-                                    &mut self.selected_index,
-                                    i,
-                                    &entry.label,
-                                );
+                                ui.selectable_value(&mut self.selected_index, i, &entry.label);
                             }
                         });
                 });
@@ -127,23 +123,27 @@ impl WadStatsDialogState {
                     .striped(true)
                     .resizable(true)
                     .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                    .column(Column::initial(70.0).at_least(50.0))   // Map
-                    .column(Column::initial(50.0).at_least(40.0))   // Skill
-                    .column(Column::initial(70.0).at_least(50.0))   // Time
-                    .column(Column::initial(80.0).at_least(60.0))   // Kills
-                    .column(Column::initial(80.0).at_least(60.0))   // Items
-                    .column(Column::remainder().at_least(60.0));    // Secrets
+                    .column(Column::initial(70.0).at_least(50.0)) // Map
+                    .column(Column::initial(50.0).at_least(40.0)) // Skill
+                    .column(Column::initial(70.0).at_least(50.0)) // Time
+                    .column(Column::initial(80.0).at_least(60.0)) // Kills
+                    .column(Column::initial(80.0).at_least(60.0)) // Items
+                    .column(Column::remainder().at_least(60.0)); // Secrets
 
                 table
                     .header(row_height + 2.0, |mut header| {
                         for label in ["Map", "Skill", "Time", "Kills", "Items", "Secrets"] {
-                            header.col(|ui| { ui.strong(label); });
+                            header.col(|ui| {
+                                ui.strong(label);
+                            });
                         }
                     })
                     .body(|body| {
                         body.rows(row_height, played.len(), |mut row| {
                             let m = played[row.index()];
-                            row.col(|ui| { ui.label(&m.lump); });
+                            row.col(|ui| {
+                                ui.label(&m.lump);
+                            });
                             row.col(|ui| {
                                 ui.label(caco_core::wad_stats::skill_name(m.best_skill));
                             });
@@ -225,21 +225,17 @@ impl WadStatsDialogState {
         };
 
         // Attach to most recent completion
-        let completions = caco_core::db::sessions::get_wad_completions(conn, self.wad_id)
-            .unwrap_or_default();
+        let completions =
+            caco_core::db::sessions::get_wad_completions(conn, self.wad_id).unwrap_or_default();
 
         if let Some(latest) = completions.first() {
-            let _ = caco_core::db::sessions::update_wad_completion(
-                conn,
-                latest.id,
-                Some(&json),
-                None,
-            );
+            let _ =
+                caco_core::db::sessions::update_wad_completion(conn, latest.id, Some(&json), None);
         }
 
         // Also update the WAD's stats_snapshot
-        if let Ok(update) = caco_core::db::wads::WadUpdate::new()
-            .set_text("stats_snapshot", Some(json))
+        if let Ok(update) =
+            caco_core::db::wads::WadUpdate::new().set_text("stats_snapshot", Some(json))
         {
             let _ = caco_core::db::wads::update_wad(conn, self.wad_id, &update);
         }

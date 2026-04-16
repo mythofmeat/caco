@@ -23,10 +23,7 @@ impl CacoMcpServer {
         name = "sandbox_info",
         description = "Return the sandbox path, source home, and DB state."
     )]
-    pub async fn sandbox_info_tool(
-        &self,
-        _p: Parameters<SandboxInfoParams>,
-    ) -> Json<SandboxInfo> {
+    pub async fn sandbox_info_tool(&self, _p: Parameters<SandboxInfoParams>) -> Json<SandboxInfo> {
         Json(self.compute_sandbox_info())
     }
 

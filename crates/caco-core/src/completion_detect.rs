@@ -47,10 +47,7 @@ pub fn check_completion(analysis: &WadAnalysis, stats: &WadStats) -> CompletionV
         .collect();
 
     // Include terminal map in required set initially (unless it's a dead-end)
-    let terminal_is_dead_end = analysis
-        .maps
-        .iter()
-        .any(|m| m.is_terminal && m.is_dead_end);
+    let terminal_is_dead_end = analysis.maps.iter().any(|m| m.is_terminal && m.is_dead_end);
 
     if let Some(term) = &analysis.terminal_map
         && !terminal_is_dead_end
@@ -192,7 +189,7 @@ mod tests {
             .map(|&name| {
                 let is_secret = secret_set.contains(name);
                 let is_dead = dead_end_set.contains(name);
-                let is_term = terminal.map_or(false, |t| t == name);
+                let is_term = terminal == Some(name);
                 MapInfo {
                     lump: name.to_string(),
                     has_normal_exit: !is_dead,
@@ -207,9 +204,7 @@ mod tests {
 
         let required_maps = maps
             .iter()
-            .filter(|m| {
-                !m.is_secret && !m.is_dead_end && !(m.is_terminal && m.is_dead_end)
-            })
+            .filter(|m| !m.is_secret && !m.is_dead_end)
             .count();
 
         WadAnalysis {
@@ -261,24 +256,17 @@ mod tests {
 
     #[test]
     fn test_complete_all_maps_exited() {
-        let analysis = make_analysis(
-            &["MAP01", "MAP02", "MAP03"],
-            &[],
-            &[],
-            Some("MAP03"),
-        );
+        let analysis = make_analysis(&["MAP01", "MAP02", "MAP03"], &[], &[], Some("MAP03"));
         let stats = make_stats(&[("MAP01", 1), ("MAP02", 1), ("MAP03", 1)]);
-        assert_eq!(check_completion(&analysis, &stats), CompletionVerdict::Complete);
+        assert_eq!(
+            check_completion(&analysis, &stats),
+            CompletionVerdict::Complete
+        );
     }
 
     #[test]
     fn test_incomplete_missing_maps() {
-        let analysis = make_analysis(
-            &["MAP01", "MAP02", "MAP03"],
-            &[],
-            &[],
-            Some("MAP03"),
-        );
+        let analysis = make_analysis(&["MAP01", "MAP02", "MAP03"], &[], &[], Some("MAP03"));
         let stats = make_stats(&[("MAP01", 1)]);
         assert_eq!(
             check_completion(&analysis, &stats),
@@ -299,20 +287,21 @@ mod tests {
         );
         let stats = make_stats(&[("MAP01", 1), ("MAP02", 1), ("MAP03", 1)]);
         // Secret maps not required
-        assert_eq!(check_completion(&analysis, &stats), CompletionVerdict::Complete);
+        assert_eq!(
+            check_completion(&analysis, &stats),
+            CompletionVerdict::Complete
+        );
     }
 
     #[test]
     fn test_complete_with_dead_end_excluded() {
-        let analysis = make_analysis(
-            &["MAP01", "MAP02", "MAP03"],
-            &[],
-            &["MAP03"],
-            None,
-        );
+        let analysis = make_analysis(&["MAP01", "MAP02", "MAP03"], &[], &["MAP03"], None);
         let stats = make_stats(&[("MAP01", 1), ("MAP02", 1)]);
         // MAP03 is dead-end, not required
-        assert_eq!(check_completion(&analysis, &stats), CompletionVerdict::Complete);
+        assert_eq!(
+            check_completion(&analysis, &stats),
+            CompletionVerdict::Complete
+        );
     }
 
     #[test]
@@ -328,7 +317,10 @@ mod tests {
             has_umapinfo: false,
         };
         let stats = make_stats(&[]);
-        assert_eq!(check_completion(&analysis, &stats), CompletionVerdict::NoAnalysis);
+        assert_eq!(
+            check_completion(&analysis, &stats),
+            CompletionVerdict::NoAnalysis
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -341,26 +333,19 @@ mod tests {
         // terminal is within 2 slots of furthest progress.
         // Terminal map has exits in the linedef analysis (has_normal_exit=true)
         // but the player never managed to exit it (total_exits=0 in stats).
-        let analysis = make_analysis(
-            &["MAP01", "MAP02", "MAP03"],
-            &[],
-            &[],
-            Some("MAP03"),
-        );
+        let analysis = make_analysis(&["MAP01", "MAP02", "MAP03"], &[], &[], Some("MAP03"));
         let stats = make_stats(&[("MAP01", 1), ("MAP02", 1), ("MAP03", 0)]);
         // MAP03 is terminal, player reached it (MAP02 exited), MAP03 within 2 slots
         // -> credits-map heuristic should exclude MAP03
-        assert_eq!(check_completion(&analysis, &stats), CompletionVerdict::Complete);
+        assert_eq!(
+            check_completion(&analysis, &stats),
+            CompletionVerdict::Complete
+        );
     }
 
     #[test]
     fn test_credits_map_heuristic_not_applied_when_preceding_not_exited() {
-        let analysis = make_analysis(
-            &["MAP01", "MAP02", "MAP03"],
-            &[],
-            &[],
-            Some("MAP03"),
-        );
+        let analysis = make_analysis(&["MAP01", "MAP02", "MAP03"], &[], &[], Some("MAP03"));
         // Player only exited MAP01, not MAP02 (the predecessor to terminal MAP03)
         let stats = make_stats(&[("MAP01", 1)]);
         assert_eq!(
@@ -397,12 +382,7 @@ mod tests {
     #[test]
     fn test_terminal_dead_end_already_excluded() {
         // Terminal map is a dead-end (no exit linedefs) — already excluded from required
-        let mut analysis = make_analysis(
-            &["MAP01", "MAP02", "MAP03"],
-            &[],
-            &[],
-            Some("MAP03"),
-        );
+        let mut analysis = make_analysis(&["MAP01", "MAP02", "MAP03"], &[], &[], Some("MAP03"));
         // Make MAP03 a dead-end terminal
         for m in &mut analysis.maps {
             if m.lump == "MAP03" {
@@ -413,20 +393,21 @@ mod tests {
         analysis.dead_end_maps.clear(); // Dead-end list doesn't include terminal
 
         let stats = make_stats(&[("MAP01", 1), ("MAP02", 1)]);
-        assert_eq!(check_completion(&analysis, &stats), CompletionVerdict::Complete);
+        assert_eq!(
+            check_completion(&analysis, &stats),
+            CompletionVerdict::Complete
+        );
     }
 
     #[test]
     fn test_multiple_exits_count() {
-        let analysis = make_analysis(
-            &["MAP01", "MAP02"],
-            &[],
-            &[],
-            Some("MAP02"),
-        );
+        let analysis = make_analysis(&["MAP01", "MAP02"], &[], &[], Some("MAP02"));
         // Multiple exits should still count
         let stats = make_stats(&[("MAP01", 5), ("MAP02", 3)]);
-        assert_eq!(check_completion(&analysis, &stats), CompletionVerdict::Complete);
+        assert_eq!(
+            check_completion(&analysis, &stats),
+            CompletionVerdict::Complete
+        );
     }
 
     /// Integration test: check completion for a real WAD from the library.
@@ -445,8 +426,8 @@ mod tests {
         let conn = crate::db::open_connection(&db_path).unwrap();
 
         // Check all playing WADs
-        let wads = crate::db::search_wads(&conn, Some("play:started"), None, false, false, 100)
-            .unwrap();
+        let wads =
+            crate::db::search_wads(&conn, Some("play:started"), None, false, false, 100).unwrap();
         for wad in &wads {
             let cached = match wad.cached_path.as_deref() {
                 Some(p) if std::path::Path::new(p).exists() => p,
@@ -456,7 +437,8 @@ mod tests {
                 }
             };
             let path = PathBuf::from(cached);
-            let is_pk3 = path.extension()
+            let is_pk3 = path
+                .extension()
                 .and_then(|e| e.to_str())
                 .is_some_and(|e| e.eq_ignore_ascii_case("pk3"));
 
@@ -481,16 +463,32 @@ mod tests {
             };
 
             eprintln!("\n[{}] {}", wad.id, wad.title);
-            let unreachable: Vec<&str> = analysis.maps.iter()
-                .filter(|m| !m.reachable).map(|m| m.lump.as_str()).collect();
-            eprintln!("  total={} required={} secret={:?} terminal={:?} unreachable={:?}",
-                analysis.total_maps, analysis.required_maps,
-                analysis.secret_maps, analysis.terminal_map, unreachable);
+            let unreachable: Vec<&str> = analysis
+                .maps
+                .iter()
+                .filter(|m| !m.reachable)
+                .map(|m| m.lump.as_str())
+                .collect();
+            eprintln!(
+                "  total={} required={} secret={:?} terminal={:?} unreachable={:?}",
+                analysis.total_maps,
+                analysis.required_maps,
+                analysis.secret_maps,
+                analysis.terminal_map,
+                unreachable
+            );
             for m in &analysis.maps {
                 let r = if m.reachable { "" } else { " UNREACHABLE" };
-                eprintln!("  {:8} exit={} secret_exit={} secret={} dead_end={} terminal={}{}",
-                    m.lump, m.has_normal_exit, m.has_secret_exit,
-                    m.is_secret, m.is_dead_end, m.is_terminal, r);
+                eprintln!(
+                    "  {:8} exit={} secret_exit={} secret={} dead_end={} terminal={}{}",
+                    m.lump,
+                    m.has_normal_exit,
+                    m.has_secret_exit,
+                    m.is_secret,
+                    m.is_dead_end,
+                    m.is_terminal,
+                    r
+                );
             }
 
             if let Some(ref ss) = wad.stats_snapshot {
@@ -520,13 +518,14 @@ mod tests {
             .chain(std::iter::once(("MAP27".to_string(), 0)))
             .chain(std::iter::once(("MAP28".to_string(), 1)))
             .collect();
-        let stat_entries: Vec<(&str, i32)> = stat_owned
-            .iter()
-            .map(|(l, n)| (l.as_str(), *n))
-            .collect();
+        let stat_entries: Vec<(&str, i32)> =
+            stat_owned.iter().map(|(l, n)| (l.as_str(), *n)).collect();
         let stats = make_stats(&stat_entries);
 
-        assert_eq!(check_completion(&analysis, &stats), CompletionVerdict::Complete);
+        assert_eq!(
+            check_completion(&analysis, &stats),
+            CompletionVerdict::Complete
+        );
     }
 
     #[test]
@@ -544,13 +543,14 @@ mod tests {
             .chain(std::iter::once(("MAP27".to_string(), 0)))
             .chain(std::iter::once(("MAP29".to_string(), 0)))
             .collect();
-        let stat_entries: Vec<(&str, i32)> = stat_owned
-            .iter()
-            .map(|(l, n)| (l.as_str(), *n))
-            .collect();
+        let stat_entries: Vec<(&str, i32)> =
+            stat_owned.iter().map(|(l, n)| (l.as_str(), *n)).collect();
         let stats = make_stats(&stat_entries);
 
-        assert_eq!(check_completion(&analysis, &stats), CompletionVerdict::Complete);
+        assert_eq!(
+            check_completion(&analysis, &stats),
+            CompletionVerdict::Complete
+        );
     }
 
     #[test]
@@ -571,7 +571,10 @@ mod tests {
             ("MAP31", 0),
             ("MAP32", 0),
         ]);
-        assert_eq!(check_completion(&analysis, &stats), CompletionVerdict::Complete);
+        assert_eq!(
+            check_completion(&analysis, &stats),
+            CompletionVerdict::Complete
+        );
     }
 
     #[test]
@@ -594,7 +597,10 @@ mod tests {
             ("MAP04", 0),
             ("MAP05", 1),
         ]);
-        assert_eq!(check_completion(&analysis, &stats), CompletionVerdict::Complete);
+        assert_eq!(
+            check_completion(&analysis, &stats),
+            CompletionVerdict::Complete
+        );
     }
 
     #[test]
@@ -610,7 +616,7 @@ mod tests {
             dead_end_maps: vec![],
             terminal_map: None,
             has_umapinfo: false,
-            maps: vec!["MAP01", "MAP02", "MAP03"]
+            maps: ["MAP01", "MAP02", "MAP03"]
                 .iter()
                 .map(|&n| MapInfo {
                     lump: n.to_string(),
@@ -646,16 +652,14 @@ mod tests {
         );
         // MAP02 is dead-end (excluded). MAP03 was never entered. Player
         // warped to MAP04 and exited.
-        let stats = make_stats(&[
-            ("MAP01", 1),
-            ("MAP02", 0),
-            ("MAP03", 0),
-            ("MAP04", 1),
-        ]);
+        let stats = make_stats(&[("MAP01", 1), ("MAP02", 0), ("MAP03", 0), ("MAP04", 1)]);
         // Required before heuristic: MAP01, MAP03, MAP04 (MAP02 is dead-end).
         // Bypass fires (terminal exited): MAP03 removed. MAP01 retained.
         // Required = {MAP01, MAP04}, Exited = 2 → Complete.
-        assert_eq!(check_completion(&analysis, &stats), CompletionVerdict::Complete);
+        assert_eq!(
+            check_completion(&analysis, &stats),
+            CompletionVerdict::Complete
+        );
     }
 
     #[test]
@@ -667,13 +671,9 @@ mod tests {
         let map_refs: Vec<&str> = map_names.iter().map(|s| s.as_str()).collect();
         let analysis = make_analysis(&map_refs, &[], &[], Some("MAP28"));
 
-        let stat_owned: Vec<(String, i32)> = (1..=25)
-            .map(|i| (format!("MAP{i:02}"), 1))
-            .collect();
-        let stat_entries: Vec<(&str, i32)> = stat_owned
-            .iter()
-            .map(|(l, n)| (l.as_str(), *n))
-            .collect();
+        let stat_owned: Vec<(String, i32)> = (1..=25).map(|i| (format!("MAP{i:02}"), 1)).collect();
+        let stat_entries: Vec<(&str, i32)> =
+            stat_owned.iter().map(|(l, n)| (l.as_str(), *n)).collect();
         let stats = make_stats(&stat_entries);
 
         assert!(matches!(
@@ -684,12 +684,7 @@ mod tests {
 
     #[test]
     fn test_no_stats_for_any_map() {
-        let analysis = make_analysis(
-            &["MAP01", "MAP02", "MAP03"],
-            &[],
-            &[],
-            Some("MAP03"),
-        );
+        let analysis = make_analysis(&["MAP01", "MAP02", "MAP03"], &[], &[], Some("MAP03"));
         let stats = make_stats(&[]);
         assert_eq!(
             check_completion(&analysis, &stats),

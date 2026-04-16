@@ -22,9 +22,8 @@ static DOOM2_MAP_RE: LazyLock<Regex> =
 
 /// Lumps that belong to a map definition (appear after the map marker).
 const MAP_LUMPS: &[&str] = &[
-    "THINGS", "LINEDEFS", "SIDEDEFS", "VERTEXES", "SEGS", "SSECTORS", "NODES",
-    "SECTORS", "REJECT", "BLOCKMAP", "BEHAVIOR", "SCRIPTS", "TEXTMAP", "ENDMAP",
-    "DIALOGUE", "ZNODES",
+    "THINGS", "LINEDEFS", "SIDEDEFS", "VERTEXES", "SEGS", "SSECTORS", "NODES", "SECTORS", "REJECT",
+    "BLOCKMAP", "BEHAVIOR", "SCRIPTS", "TEXTMAP", "ENDMAP", "DIALOGUE", "ZNODES",
 ];
 
 // ---------------------------------------------------------------------------
@@ -147,8 +146,7 @@ pub fn analyze_wad(wad_data: &[u8]) -> Option<WadAnalysis> {
     // Analyze each map for exits
     let mut map_infos: Vec<MapInfo> = Vec::with_capacity(map_ranges.len());
     for (name, start_idx, end_idx) in &map_ranges {
-        let (has_normal, has_secret) =
-            detect_exits(wad_data, &directory, *start_idx, *end_idx);
+        let (has_normal, has_secret) = detect_exits(wad_data, &directory, *start_idx, *end_idx);
         map_infos.push(MapInfo {
             lump: name.clone(),
             has_normal_exit: has_normal,
@@ -203,9 +201,7 @@ pub fn analyze_wad(wad_data: &[u8]) -> Option<WadAnalysis> {
     // Required = reachable, non-secret, non-dead-end, non-terminal-dead-end.
     // Unreachable count excludes maps already subtracted by other categories
     // (secret, dead-end, terminal dead-end) to avoid double-counting.
-    let terminal_excluded = map_infos
-        .iter()
-        .any(|m| m.is_terminal && m.is_dead_end);
+    let terminal_excluded = map_infos.iter().any(|m| m.is_terminal && m.is_dead_end);
     let unreachable_count = map_infos
         .iter()
         .filter(|m| !m.reachable && !m.is_secret && !m.is_dead_end)
@@ -252,9 +248,7 @@ pub fn analyze_pk3(pk3_path: &std::path::Path) -> Option<WadAnalysis> {
         .filter_map(|i| {
             let entry = archive.by_index(i).ok()?;
             let name = entry.name().to_string();
-            if name.to_lowercase().starts_with("maps/")
-                && name.to_lowercase().ends_with(".wad")
-            {
+            if name.to_lowercase().starts_with("maps/") && name.to_lowercase().ends_with(".wad") {
                 Some(name)
             } else {
                 None
@@ -294,9 +288,7 @@ pub fn analyze_pk3(pk3_path: &std::path::Path) -> Option<WadAnalysis> {
             .filter_map(|i| {
                 let entry = archive.by_index(i).ok()?;
                 let name = entry.name().to_string();
-                if !name.contains('/')
-                    && name.to_lowercase().ends_with(".wad")
-                {
+                if !name.contains('/') && name.to_lowercase().ends_with(".wad") {
                     Some(name)
                 } else {
                     None
@@ -425,7 +417,9 @@ pub fn analyze_pk3(pk3_path: &std::path::Path) -> Option<WadAnalysis> {
             map_infos.retain(|m| playable_re.is_match(&m.lump));
 
             let filtered_lumps: Vec<String> = map_infos.iter().map(|m| m.lump.clone()).collect();
-            let is_doom1 = filtered_lumps.first().is_some_and(|m| DOOM1_MAP_RE.is_match(m));
+            let is_doom1 = filtered_lumps
+                .first()
+                .is_some_and(|m| DOOM1_MAP_RE.is_match(m));
 
             // Classify secrets
             let secret_set = classify_secrets(&filtered_lumps, is_doom1, &umi_opt);
@@ -458,7 +452,9 @@ pub fn analyze_pk3(pk3_path: &std::path::Path) -> Option<WadAnalysis> {
         map_infos.retain(|m| playable_re.is_match(&m.lump));
 
         let filtered_lumps: Vec<String> = map_infos.iter().map(|m| m.lump.clone()).collect();
-        let is_doom1 = filtered_lumps.first().is_some_and(|m| DOOM1_MAP_RE.is_match(m));
+        let is_doom1 = filtered_lumps
+            .first()
+            .is_some_and(|m| DOOM1_MAP_RE.is_match(m));
 
         let secret_set = classify_secrets(&filtered_lumps, is_doom1, &None);
         for info in &mut map_infos {
@@ -476,8 +472,7 @@ pub fn analyze_pk3(pk3_path: &std::path::Path) -> Option<WadAnalysis> {
             }
         }
 
-        let reachable_set =
-            compute_reachability(&filtered_lumps, is_doom1, &None, &map_infos);
+        let reachable_set = compute_reachability(&filtered_lumps, is_doom1, &None, &map_infos);
         for info in &mut map_infos {
             info.reachable = reachable_set.contains(&info.lump);
         }
@@ -558,7 +553,11 @@ fn detect_hub_structure(
     }
 
     // Single dominant hub: >50% of maps point to same target
-    if target_counts.values().max().is_some_and(|&max_count| max_count > playable_count / 2) {
+    if target_counts
+        .values()
+        .max()
+        .is_some_and(|&max_count| max_count > playable_count / 2)
+    {
         return true;
     }
 
@@ -566,7 +565,9 @@ fn detect_hub_structure(
     // covers >50% of all maps
     let hub_connected: usize = target_counts
         .iter()
-        .filter(|&(target, &count)| count >= 3 && playable_set.contains(target.to_uppercase().as_str()))
+        .filter(|&(target, &count)| {
+            count >= 3 && playable_set.contains(target.to_uppercase().as_str())
+        })
         .map(|(_, &count)| count)
         .sum();
 
@@ -785,9 +786,8 @@ fn parse_umapinfo(text: &str) -> HashMap<String, UmapinfoEntry> {
         LazyLock::new(|| Regex::new(r#"(?i)^\s*next\s*=\s*"?(\w+)"?"#).unwrap());
     static NEXTSECRET_RE: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r#"(?i)^\s*nextsecret\s*=\s*"?(\w+)"?"#).unwrap());
-    static ENDGAME_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(?i)^\s*(endgame|endpic|endcast|endbunny)\s*=").unwrap()
-    });
+    static ENDGAME_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)^\s*(endgame|endpic|endcast|endbunny)\s*=").unwrap());
 
     let mut entries = HashMap::new();
     let mut current_map: Option<String> = None;
@@ -1043,11 +1043,9 @@ fn compute_reachability(
 }
 
 /// Vanilla Doom 2 reachability: MAP01→MAP02→...→MAP30, secret exits to MAP31/32.
-fn compute_reachability_doom2(
-    map_set: &HashSet<&str>,
-    map_infos: &[MapInfo],
-) -> HashSet<String> {
-    let info_map: HashMap<&str, &MapInfo> = map_infos.iter().map(|m| (m.lump.as_str(), m)).collect();
+fn compute_reachability_doom2(map_set: &HashSet<&str>, map_infos: &[MapInfo]) -> HashSet<String> {
+    let info_map: HashMap<&str, &MapInfo> =
+        map_infos.iter().map(|m| (m.lump.as_str(), m)).collect();
     let mut reachable = HashSet::new();
 
     // Linear progression MAP01 → MAP30
@@ -1076,11 +1074,9 @@ fn compute_reachability_doom2(
 }
 
 /// Vanilla Doom 1 reachability: ExM1→...→ExM8, secret exit → ExM9.
-fn compute_reachability_doom1(
-    map_set: &HashSet<&str>,
-    map_infos: &[MapInfo],
-) -> HashSet<String> {
-    let info_map: HashMap<&str, &MapInfo> = map_infos.iter().map(|m| (m.lump.as_str(), m)).collect();
+fn compute_reachability_doom1(map_set: &HashSet<&str>, map_infos: &[MapInfo]) -> HashSet<String> {
+    let info_map: HashMap<&str, &MapInfo> =
+        map_infos.iter().map(|m| (m.lump.as_str(), m)).collect();
     let mut reachable = HashSet::new();
 
     // Find all episodes present
@@ -1101,7 +1097,9 @@ fn compute_reachability_doom1(
         // Secret map: any map in the episode with a secret exit → ExM9
         let has_secret = (1..=8).any(|m| {
             let name = format!("E{ep}M{m}");
-            info_map.get(name.as_str()).is_some_and(|i| i.has_secret_exit)
+            info_map
+                .get(name.as_str())
+                .is_some_and(|i| i.has_secret_exit)
         });
         if has_secret {
             let secret = format!("E{ep}M9");
@@ -1125,7 +1123,8 @@ fn compute_reachability_umapinfo(
     map_infos: &[MapInfo],
 ) -> HashSet<String> {
     let map_set: HashSet<&str> = all_maps.iter().map(|s| s.as_str()).collect();
-    let info_map: HashMap<&str, &MapInfo> = map_infos.iter().map(|m| (m.lump.as_str(), m)).collect();
+    let info_map: HashMap<&str, &MapInfo> =
+        map_infos.iter().map(|m| (m.lump.as_str(), m)).collect();
     let mut reachable = HashSet::new();
     let mut queue = std::collections::VecDeque::new();
 
@@ -1157,7 +1156,9 @@ fn compute_reachability_umapinfo(
                 has_explicit_next = true;
             }
             if let Some(ref ns) = e.nextsecret
-                && info_map.get(current.as_str()).is_some_and(|m| m.has_secret_exit)
+                && info_map
+                    .get(current.as_str())
+                    .is_some_and(|m| m.has_secret_exit)
             {
                 queue.push_back(ns.clone());
             }
@@ -1186,14 +1187,10 @@ fn compute_reachability_umapinfo(
         // unless nextsecret is explicitly defined)
         let has_nextsecret = entry.is_some_and(|e| e.nextsecret.is_some());
         if !has_nextsecret {
-            if current == "MAP15"
-                && info_map.get("MAP15").is_some_and(|m| m.has_secret_exit)
-            {
+            if current == "MAP15" && info_map.get("MAP15").is_some_and(|m| m.has_secret_exit) {
                 queue.push_back("MAP31".to_string());
             }
-            if current == "MAP31"
-                && info_map.get("MAP31").is_some_and(|m| m.has_secret_exit)
-            {
+            if current == "MAP31" && info_map.get("MAP31").is_some_and(|m| m.has_secret_exit) {
                 queue.push_back("MAP32".to_string());
             }
         }
@@ -1943,8 +1940,7 @@ MAP MAP01
             }
         }
 
-        let lump_refs: Vec<(&str, &[u8])> =
-            lumps.iter().map(|(n, d)| (n.as_ref(), d.as_slice())).collect();
+        let lump_refs: Vec<(&str, &[u8])> = lumps.iter().map(|(n, d)| (*n, d.as_slice())).collect();
         let wad = build_wad(&lump_refs);
 
         let analysis = analyze_wad(&wad).unwrap();
@@ -2175,11 +2171,19 @@ MAP MAP04
             eprintln!("\n=== {} ===", path.file_name().unwrap().to_string_lossy());
             match analyze_pk3(&path) {
                 Some(analysis) => {
-                    let unreachable: Vec<&str> = analysis.maps.iter()
-                        .filter(|m| !m.reachable).map(|m| m.lump.as_str()).collect();
-                    eprintln!("  total={} required={} secret={:?} terminal={:?}",
-                        analysis.total_maps, analysis.required_maps,
-                        analysis.secret_maps, analysis.terminal_map);
+                    let unreachable: Vec<&str> = analysis
+                        .maps
+                        .iter()
+                        .filter(|m| !m.reachable)
+                        .map(|m| m.lump.as_str())
+                        .collect();
+                    eprintln!(
+                        "  total={} required={} secret={:?} terminal={:?}",
+                        analysis.total_maps,
+                        analysis.required_maps,
+                        analysis.secret_maps,
+                        analysis.terminal_map
+                    );
                     if !unreachable.is_empty() {
                         eprintln!("  unreachable={unreachable:?}");
                     }
@@ -2189,10 +2193,19 @@ MAP MAP04
                             m.is_terminal.then_some("terminal"),
                             m.is_dead_end.then_some("dead_end"),
                             (!m.reachable).then_some("UNREACHABLE"),
-                        ].into_iter().flatten().collect();
-                        let flag_str = if flags.is_empty() { String::new() } else { format!(" [{}]", flags.join(", ")) };
-                        eprintln!("  {:10} exit={} secret_exit={}{}",
-                            m.lump, m.has_normal_exit, m.has_secret_exit, flag_str);
+                        ]
+                        .into_iter()
+                        .flatten()
+                        .collect();
+                        let flag_str = if flags.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" [{}]", flags.join(", "))
+                        };
+                        eprintln!(
+                            "  {:10} exit={} secret_exit={}{}",
+                            m.lump, m.has_normal_exit, m.has_secret_exit, flag_str
+                        );
                     }
                 }
                 None => eprintln!("  analysis returned None"),

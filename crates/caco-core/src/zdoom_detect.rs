@@ -189,11 +189,7 @@ mod tests {
 
     #[test]
     fn test_detect_standard_maps() {
-        let (_dir, path) = write_wad(&[
-            ("MAP01", &[]),
-            ("THINGS", &[1, 2]),
-            ("LINEDEFS", &[3, 4]),
-        ]);
+        let (_dir, path) = write_wad(&[("MAP01", &[]), ("THINGS", &[1, 2]), ("LINEDEFS", &[3, 4])]);
         assert_eq!(detect_zdoom_required(&path), Some(false));
     }
 
@@ -249,11 +245,8 @@ mod tests {
 
     #[test]
     fn test_detect_gldefs_not_definitive() {
-        let (_dir, path) = write_wad(&[
-            ("MAP01", &[]),
-            ("THINGS", &[]),
-            ("GLDEFS", b"brightmap {}"),
-        ]);
+        let (_dir, path) =
+            write_wad(&[("MAP01", &[]), ("THINGS", &[]), ("GLDEFS", b"brightmap {}")]);
         assert_eq!(detect_zdoom_required(&path), Some(false));
     }
 
@@ -275,11 +268,7 @@ mod tests {
     #[test]
     fn test_detect_textmap_not_after_map_marker() {
         // TEXTMAP as a standalone lump (not following a map marker) is not UDMF
-        let (_dir, path) = write_wad(&[
-            ("TEXTMAP", b"some data"),
-            ("MAP01", &[]),
-            ("THINGS", &[]),
-        ]);
+        let (_dir, path) = write_wad(&[("TEXTMAP", b"some data"), ("MAP01", &[]), ("THINGS", &[])]);
         assert_eq!(detect_zdoom_required(&path), Some(false));
     }
 

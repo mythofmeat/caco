@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use clap::Subcommand;
 use rusqlite::Connection;
 
-use caco_core::db;
 use crate::output::{self, OutputFormat};
+use caco_core::db;
 
 #[derive(Subcommand)]
 pub enum CollectionCommand {
@@ -46,7 +46,12 @@ pub enum CollectionCommand {
 
 pub fn run(conn: &Connection, cmd: &CollectionCommand) -> Result<(), String> {
     match cmd {
-        CollectionCommand::Add { name, query, sort, desc } => {
+        CollectionCommand::Add {
+            name,
+            query,
+            sort,
+            desc,
+        } => {
             let query_str = crate::parsing::join_query_args(query);
             cmd_add(conn, name, &query_str, sort.as_deref(), *desc)
         }
@@ -56,7 +61,13 @@ pub fn run(conn: &Connection, cmd: &CollectionCommand) -> Result<(), String> {
     }
 }
 
-fn cmd_add(conn: &Connection, name: &str, query: &str, sort: Option<&str>, desc: bool) -> Result<(), String> {
+fn cmd_add(
+    conn: &Connection,
+    name: &str,
+    query: &str,
+    sort: Option<&str>,
+    desc: bool,
+) -> Result<(), String> {
     let id = db::create_collection(conn, name, query, sort, desc)
         .map_err(|e| format!("Failed to create collection: {e}"))?;
     println!("Created collection '{name}' (ID: {id})");
@@ -76,8 +87,8 @@ fn cmd_rm(conn: &Connection, name: &str) -> Result<(), String> {
 
 fn cmd_ls(conn: &Connection, output_str: &str) -> Result<(), String> {
     let format: OutputFormat = output_str.parse()?;
-    let collections = db::get_all_collections(conn)
-        .map_err(|e| format!("Failed to list collections: {e}"))?;
+    let collections =
+        db::get_all_collections(conn).map_err(|e| format!("Failed to list collections: {e}"))?;
 
     match format {
         OutputFormat::Table => {
@@ -113,15 +124,20 @@ fn cmd_ls(conn: &Connection, output_str: &str) -> Result<(), String> {
         OutputFormat::Json => {
             let items: Vec<serde_json::Value> = collections
                 .iter()
-                .map(|c| serde_json::json!({
-                    "name": c.name,
-                    "query": c.query,
-                    "sort_by": c.sort_by,
-                    "sort_desc": c.sort_desc,
-                    "created_at": c.created_at,
-                }))
+                .map(|c| {
+                    serde_json::json!({
+                        "name": c.name,
+                        "query": c.query,
+                        "sort_by": c.sort_by,
+                        "sort_desc": c.sort_desc,
+                        "created_at": c.created_at,
+                    })
+                })
                 .collect();
-            println!("{}", serde_json::to_string_pretty(&items).unwrap_or_default());
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&items).unwrap_or_default()
+            );
         }
     }
     Ok(())
@@ -129,12 +145,12 @@ fn cmd_ls(conn: &Connection, output_str: &str) -> Result<(), String> {
 
 fn cmd_run(conn: &Connection, name: &str, output_str: &str) -> Result<(), String> {
     let format: OutputFormat = output_str.parse()?;
-    let wads = db::run_collection(conn, name)
-        .map_err(|e| format!("Failed to run collection: {e}"))?;
+    let wads =
+        db::run_collection(conn, name).map_err(|e| format!("Failed to run collection: {e}"))?;
 
     let wad_ids: Vec<i64> = wads.iter().map(|w| w.id).collect();
-    let stats: HashMap<i64, db::WadStats> = db::get_wad_stats_batch(conn, &wad_ids)
-        .map_err(|e| e.to_string())?;
+    let stats: HashMap<i64, db::WadStats> =
+        db::get_wad_stats_batch(conn, &wad_ids).map_err(|e| e.to_string())?;
 
     output::render_wad_list(&wads, &stats, format);
     Ok(())

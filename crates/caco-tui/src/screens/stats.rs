@@ -1,11 +1,11 @@
 use caco_core::db::sessions::{StatsSnapshot, get_stats_snapshot};
 use caco_core::player::format_duration;
 use crossterm::event::{KeyCode, KeyEvent};
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
-use ratatui::Frame;
 use rusqlite::Connection;
 
 use crate::message::{AppMessage, ScreenResult};
@@ -74,21 +74,13 @@ impl Screen for StatsScreen {
         ]));
         lines.push(Line::from(vec![
             Span::styled("WADs Played: ", theme::dim_style()),
-            Span::raw(format!(
-                "{}/{}",
-                snap.wads_with_sessions, snap.total_wads
-            )),
+            Span::raw(format!("{}/{}", snap.wads_with_sessions, snap.total_wads)),
         ]));
 
         // By Status
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled("── By Status ──", section_style)));
-        let status_order = [
-            "unplayed",
-            "in-progress",
-            "completed",
-            "abandoned",
-        ];
+        let status_order = ["unplayed", "in-progress", "completed", "abandoned"];
         for status in &status_order {
             let count = snap.wads_by_status.get(*status).copied().unwrap_or(0);
             if count > 0 {
@@ -104,10 +96,7 @@ impl Screen for StatsScreen {
 
         // Completion
         lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            "── Completion ──",
-            section_style,
-        )));
+        lines.push(Line::from(Span::styled("── Completion ──", section_style)));
         lines.push(Line::from(vec![
             Span::styled("Completed: ", theme::dim_style()),
             Span::raw(snap.completed_wads.to_string()),

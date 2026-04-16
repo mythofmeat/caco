@@ -24,10 +24,7 @@ pub enum SourceError {
     /// `api_name` identifies the API ("idgames" or "doomwiki")
     /// and `message` has user-facing details.
     #[error("{message}")]
-    WafBlocked {
-        api_name: String,
-        message: String,
-    },
+    WafBlocked { api_name: String, message: String },
 }
 
 /// Convenience alias used throughout caco-sources.

@@ -21,7 +21,14 @@ pub fn join_query_args(args: &[String]) -> String {
 
 /// Valid sort field names.
 pub const SORT_FIELDS: &[&str] = &[
-    "id", "playtime", "rating", "created", "title", "author", "last_played", "year",
+    "id",
+    "playtime",
+    "rating",
+    "created",
+    "title",
+    "author",
+    "last_played",
+    "year",
 ];
 
 /// Extract inline sort from args (e.g., "title+" or "playtime-").
@@ -73,8 +80,20 @@ pub fn field_to_column(field: &str) -> &str {
 
 /// User-facing modify fields.
 pub const MODIFY_FIELDS: &[&str] = &[
-    "title", "author", "year", "description", "status", "rating", "notes",
-    "iwad", "sourceport", "args", "complevel", "config", "idgames-id", "version",
+    "title",
+    "author",
+    "year",
+    "description",
+    "status",
+    "rating",
+    "notes",
+    "iwad",
+    "sourceport",
+    "args",
+    "complevel",
+    "config",
+    "idgames-id",
+    "version",
 ];
 
 /// A parsed modify action from CLI arguments.
@@ -118,7 +137,9 @@ pub fn parse_modify_args(args: &[String]) -> Result<ModifyParseResult, String> {
             let count = if count_str.is_empty() {
                 1
             } else {
-                count_str.parse::<i64>().map_err(|_| format!("invalid beaten count: {count_str}"))?
+                count_str
+                    .parse::<i64>()
+                    .map_err(|_| format!("invalid beaten count: {count_str}"))?
             };
             actions.push(ModifyAction::BeatenAdd { count });
             continue;
@@ -130,13 +151,17 @@ pub fn parse_modify_args(args: &[String]) -> Result<ModifyParseResult, String> {
                 actions.push(ModifyAction::BeatenRemove { count });
             } else {
                 // Treat as timestamp
-                actions.push(ModifyAction::BeatenRemoveTimestamp { timestamp: val.to_string() });
+                actions.push(ModifyAction::BeatenRemoveTimestamp {
+                    timestamp: val.to_string(),
+                });
             }
             continue;
         }
 
         if let Some(val) = arg.strip_prefix("beaten=") {
-            let count = val.parse::<i64>().map_err(|_| format!("invalid beaten count: {val}"))?;
+            let count = val
+                .parse::<i64>()
+                .map_err(|_| format!("invalid beaten count: {val}"))?;
             actions.push(ModifyAction::BeatenSet { count });
             continue;
         }
@@ -148,13 +173,17 @@ pub fn parse_modify_args(args: &[String]) -> Result<ModifyParseResult, String> {
                 continue;
             }
             if let Some(pattern) = name.strip_prefix("tag:") {
-                actions.push(ModifyAction::RemoveTag { pattern: pattern.to_string() });
+                actions.push(ModifyAction::RemoveTag {
+                    pattern: pattern.to_string(),
+                });
                 continue;
             }
             // Clear a field
             let col = field_to_column(name);
             if caco_core::db::ALLOWED_UPDATE_FIELDS.contains(col) || MODIFY_FIELDS.contains(&name) {
-                actions.push(ModifyAction::ClearField { field: name.to_string() });
+                actions.push(ModifyAction::ClearField {
+                    field: name.to_string(),
+                });
                 continue;
             }
         }
@@ -162,7 +191,9 @@ pub fn parse_modify_args(args: &[String]) -> Result<ModifyParseResult, String> {
         // Check for field=value patterns
         if let Some((field, value)) = arg.split_once('=') {
             if field == "tag" {
-                actions.push(ModifyAction::AddTag { tag: value.to_lowercase() });
+                actions.push(ModifyAction::AddTag {
+                    tag: value.to_lowercase(),
+                });
                 continue;
             }
             if MODIFY_FIELDS.contains(&field) {
@@ -222,10 +253,13 @@ mod tests {
         let args: Vec<String> = vec!["id:1".into(), "status=finished".into()];
         let (query, actions, _) = parse_modify_args(&args).unwrap();
         assert_eq!(query, vec!["id:1"]);
-        assert_eq!(actions, vec![ModifyAction::SetField {
-            field: "status".to_string(),
-            value: "finished".to_string(),
-        }]);
+        assert_eq!(
+            actions,
+            vec![ModifyAction::SetField {
+                field: "status".to_string(),
+                value: "finished".to_string(),
+            }]
+        );
     }
 
     #[test]
@@ -233,14 +267,24 @@ mod tests {
         let args: Vec<String> = vec!["id:1".into(), "!notes".into()];
         let (query, actions, _) = parse_modify_args(&args).unwrap();
         assert_eq!(query, vec!["id:1"]);
-        assert_eq!(actions, vec![ModifyAction::ClearField { field: "notes".to_string() }]);
+        assert_eq!(
+            actions,
+            vec![ModifyAction::ClearField {
+                field: "notes".to_string()
+            }]
+        );
     }
 
     #[test]
     fn test_parse_modify_tag_ops() {
         let args: Vec<String> = vec!["id:1".into(), "tag=megawad".into()];
         let (_, actions, _) = parse_modify_args(&args).unwrap();
-        assert_eq!(actions, vec![ModifyAction::AddTag { tag: "megawad".to_string() }]);
+        assert_eq!(
+            actions,
+            vec![ModifyAction::AddTag {
+                tag: "megawad".to_string()
+            }]
+        );
 
         let args: Vec<String> = vec!["id:1".into(), "!tag".into()];
         let (_, actions, _) = parse_modify_args(&args).unwrap();
@@ -248,7 +292,12 @@ mod tests {
 
         let args: Vec<String> = vec!["id:1".into(), "!tag:caco*".into()];
         let (_, actions, _) = parse_modify_args(&args).unwrap();
-        assert_eq!(actions, vec![ModifyAction::RemoveTag { pattern: "caco*".to_string() }]);
+        assert_eq!(
+            actions,
+            vec![ModifyAction::RemoveTag {
+                pattern: "caco*".to_string()
+            }]
+        );
     }
 
     #[test]
@@ -271,9 +320,12 @@ mod tests {
 
         let args: Vec<String> = vec!["id:1".into(), "beaten-2024-06-15".into()];
         let (_, actions, _) = parse_modify_args(&args).unwrap();
-        assert_eq!(actions, vec![ModifyAction::BeatenRemoveTimestamp {
-            timestamp: "2024-06-15".to_string(),
-        }]);
+        assert_eq!(
+            actions,
+            vec![ModifyAction::BeatenRemoveTimestamp {
+                timestamp: "2024-06-15".to_string(),
+            }]
+        );
     }
 
     #[test]

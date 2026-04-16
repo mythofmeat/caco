@@ -1,7 +1,7 @@
 use rusqlite::Connection;
 
-use crate::wad_analysis::{WadAnalysis, ANALYSIS_VERSION};
 use crate::Result;
+use crate::wad_analysis::{ANALYSIS_VERSION, WadAnalysis};
 
 /// Get stored WAD analysis, if any.
 ///
@@ -9,13 +9,12 @@ use crate::Result;
 /// produced by an older version of the detection logic (triggering
 /// automatic re-analysis by the caller).
 pub fn get_analysis(conn: &Connection, wad_id: i64) -> Result<Option<WadAnalysis>> {
-    let mut stmt = conn.prepare(
-        "SELECT analysis_json FROM wad_analysis WHERE wad_id = ?1",
-    )?;
+    let mut stmt = conn.prepare("SELECT analysis_json FROM wad_analysis WHERE wad_id = ?1")?;
     match stmt.query_row([wad_id], |row| row.get::<_, Option<String>>(0)) {
         Ok(Some(json)) => {
-            let analysis: WadAnalysis = serde_json::from_str(&json)
-                .map_err(|e| crate::Error::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+            let analysis: WadAnalysis = serde_json::from_str(&json).map_err(|e| {
+                crate::Error::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+            })?;
             if analysis.version < ANALYSIS_VERSION {
                 // Stale analysis from older detection logic — re-analyze.
                 Ok(None)
@@ -31,8 +30,9 @@ pub fn get_analysis(conn: &Connection, wad_id: i64) -> Result<Option<WadAnalysis
 
 /// Store WAD analysis results.
 pub fn save_analysis(conn: &Connection, wad_id: i64, analysis: &WadAnalysis) -> Result<()> {
-    let json = serde_json::to_string(analysis)
-        .map_err(|e| crate::Error::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let json = serde_json::to_string(analysis).map_err(|e| {
+        crate::Error::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+    })?;
     conn.execute(
         "INSERT OR REPLACE INTO wad_analysis
              (wad_id, total_maps, required_maps, secret_maps, terminal_map,

@@ -94,15 +94,27 @@ static IWAD_PATTERNS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
     vec![
         // Doom II variants (check first)
         (Regex::new(r"(?i)\bdoom\s*(?:ii|2)\b").unwrap(), "doom2"),
-        (Regex::new(r"(?i)\bfor\s+doom\s*(?:ii|2)\b").unwrap(), "doom2"),
-        (Regex::new(r"(?i)\brequires?\s+doom\s*(?:ii|2)\b").unwrap(), "doom2"),
+        (
+            Regex::new(r"(?i)\bfor\s+doom\s*(?:ii|2)\b").unwrap(),
+            "doom2",
+        ),
+        (
+            Regex::new(r"(?i)\brequires?\s+doom\s*(?:ii|2)\b").unwrap(),
+            "doom2",
+        ),
         (Regex::new(r"(?i)\bdoom2\.wad\b").unwrap(), "doom2"),
         // Final Doom
         (Regex::new(r"(?i)\btnt\.wad\b").unwrap(), "tnt"),
         (Regex::new(r"(?i)\btnt[:\s]+evilution\b").unwrap(), "tnt"),
         (Regex::new(r"(?i)\bevilution\b").unwrap(), "tnt"),
-        (Regex::new(r"(?i)\bpluton(?:ia)?\.wad\b").unwrap(), "plutonia"),
-        (Regex::new(r"(?i)\bpluton(?:ia)?\s*(?:experiment)?\b").unwrap(), "plutonia"),
+        (
+            Regex::new(r"(?i)\bpluton(?:ia)?\.wad\b").unwrap(),
+            "plutonia",
+        ),
+        (
+            Regex::new(r"(?i)\bpluton(?:ia)?\s*(?:experiment)?\b").unwrap(),
+            "plutonia",
+        ),
         (Regex::new(r"(?i)\bfinal\s*doom\b").unwrap(), "finaldoom"),
         // Ultimate Doom / Doom 1
         (Regex::new(r"(?i)\bultimate\s*doom\b").unwrap(), "doom"),
@@ -153,11 +165,17 @@ static SOURCEPORT_PATTERNS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new
         (Regex::new(r"(?i)\bglboom\+?\b").unwrap(), "glboom+"),
         (Regex::new(r"(?i)\bumapinfo\b").unwrap(), "dsda-doom"),
         // Eternity
-        (Regex::new(r"(?i)\beternity\s*(?:engine)?\b").unwrap(), "eternity"),
+        (
+            Regex::new(r"(?i)\beternity\s*(?:engine)?\b").unwrap(),
+            "eternity",
+        ),
         // Crispy Doom
         (Regex::new(r"(?i)\bcrispy\s*doom\b").unwrap(), "crispy-doom"),
         // Chocolate Doom
-        (Regex::new(r"(?i)\bchocolate\s*doom\b").unwrap(), "chocolate-doom"),
+        (
+            Regex::new(r"(?i)\bchocolate\s*doom\b").unwrap(),
+            "chocolate-doom",
+        ),
         // Woof!
         (Regex::new(r"(?i)\bwoof!?\b").unwrap(), "woof"),
         // Nugget Doom
@@ -173,7 +191,10 @@ static SOURCEPORT_PATTERNS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new
         // 3DGE
         (Regex::new(r"(?i)\b3dge\b").unwrap(), "3dge"),
         // Limit-removing (generic)
-        (Regex::new(r"(?i)\blimit[- ]?removing\b").unwrap(), "limit-removing"),
+        (
+            Regex::new(r"(?i)\blimit[- ]?removing\b").unwrap(),
+            "limit-removing",
+        ),
     ]
 });
 
@@ -210,7 +231,8 @@ static DOWNLOAD_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         // itch.io
         Regex::new(r#"(?i)https?://[^\s<>"'\)\]]+\.itch\.io/[^\s<>"'\)\]]+"#).unwrap(),
         // ModDB
-        Regex::new(r#"(?i)https?://(?:www\.)?moddb\.com/[^\s<>"'\)\]]+/downloads/[^\s<>"'\)\]]+"#).unwrap(),
+        Regex::new(r#"(?i)https?://(?:www\.)?moddb\.com/[^\s<>"'\)\]]+/downloads/[^\s<>"'\)\]]+"#)
+            .unwrap(),
         // Doomworld idgames
         Regex::new(r#"(?i)https?://(?:www\.)?doomworld\.com/idgames/[^\s<>"'\)\]]+"#).unwrap(),
         // idgames mirror
@@ -255,7 +277,9 @@ fn extract_download_links(text: &str) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut unique = Vec::new();
     for url in all_urls {
-        let cleaned = url.trim_end_matches(['.', ',', ';', ':', '!', '?']).to_string();
+        let cleaned = url
+            .trim_end_matches(['.', ',', ';', ':', '!', '?'])
+            .to_string();
         let key = cleaned.to_lowercase();
         if seen.insert(key) {
             unique.push(cleaned);
@@ -294,20 +318,13 @@ static THREAD_ID_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"/(?:forum/topic|vb/thread)/(\d+)").unwrap());
 
 // HTML-to-text patterns
-static BR_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)<br\s*/?\s*>").unwrap());
-static P_CLOSE_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)</p>").unwrap());
-static DIV_CLOSE_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)</div>").unwrap());
-static LI_CLOSE_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)</li>").unwrap());
-static ALL_TAGS_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"<[^>]+>").unwrap());
-static MULTI_NEWLINE_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\n\s*\n").unwrap());
-static MULTI_SPACE_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r" +").unwrap());
+static BR_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)<br\s*/?\s*>").unwrap());
+static P_CLOSE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)</p>").unwrap());
+static DIV_CLOSE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)</div>").unwrap());
+static LI_CLOSE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)</li>").unwrap());
+static ALL_TAGS_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<[^>]+>").unwrap());
+static MULTI_NEWLINE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\n\s*\n").unwrap());
+static MULTI_SPACE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r" +").unwrap());
 
 // =============================================================================
 // Main Parser
@@ -440,7 +457,11 @@ impl DoomworldParser {
             Some(c) => c,
             None => return String::new(),
         };
-        let mut title = caps.get(1).map(|m| m.as_str().trim()).unwrap_or("").to_string();
+        let mut title = caps
+            .get(1)
+            .map(|m| m.as_str().trim())
+            .unwrap_or("")
+            .to_string();
 
         // Remove common suffixes
         for suffix in [" - Doomworld", " - WADs & Mods", " - Everything Else"] {
@@ -456,12 +477,20 @@ impl DoomworldParser {
     fn extract_first_post(&self, html_content: &str) -> String {
         // Try data-role attribute first (Invision Community 4.x)
         if let Some(caps) = FIRST_POST_PATTERN.captures(html_content) {
-            return caps.get(1).map(|m| m.as_str().trim()).unwrap_or("").to_string();
+            return caps
+                .get(1)
+                .map(|m| m.as_str().trim())
+                .unwrap_or("")
+                .to_string();
         }
 
         // Fallback: ipsType_richText inside first article
         if let Some(caps) = FIRST_POST_FALLBACK.captures(html_content) {
-            return caps.get(1).map(|m| m.as_str().trim()).unwrap_or("").to_string();
+            return caps
+                .get(1)
+                .map(|m| m.as_str().trim())
+                .unwrap_or("")
+                .to_string();
         }
 
         String::new()
@@ -724,7 +753,11 @@ mod tests {
     #[test]
     fn test_extract_json_ld_none() {
         let parser = DoomworldParser::new();
-        assert!(parser.extract_json_ld("<html><body>no json</body></html>").is_none());
+        assert!(
+            parser
+                .extract_json_ld("<html><body>no json</body></html>")
+                .is_none()
+        );
     }
 
     // -------------------------------------------------------------------------
@@ -747,7 +780,10 @@ mod tests {
     #[test]
     fn test_extract_html_title_missing() {
         let parser = DoomworldParser::new();
-        assert_eq!(parser.extract_html_title("<html><body>no title</body></html>"), "");
+        assert_eq!(
+            parser.extract_html_title("<html><body>no title</body></html>"),
+            ""
+        );
     }
 
     // -------------------------------------------------------------------------
@@ -809,7 +845,10 @@ mod tests {
             </html>
         "#;
 
-        let thread = parser.parse(html, "https://www.doomworld.com/forum/topic/99999-test-wad-v2/");
+        let thread = parser.parse(
+            html,
+            "https://www.doomworld.com/forum/topic/99999-test-wad-v2/",
+        );
         assert_eq!(thread.thread_id, 99999);
         assert_eq!(thread.title, "Test WAD v2");
         assert_eq!(thread.author, "TestMapper");

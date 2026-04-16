@@ -7,13 +7,13 @@ use std::path::Path;
 
 use rusqlite::Connection;
 
+use crate::Result;
 use crate::config::{get_companion_dir, get_companion_orphan_cleanup};
 use crate::db::{
     add_companion, find_companion_by_md5, is_orphan, link_companion_to_wad,
     remove_companion_with_path, unlink_companion_from_wad,
 };
 use crate::utils::compute_md5;
-use crate::Result;
 
 /// DEH/BEX file extensions.
 const DEH_EXTENSIONS: &[&str] = &["deh", "bex"];
@@ -129,11 +129,9 @@ pub fn unregister_companion(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::{
-        find_companion_by_md5, get_companions_for_wad, open_memory, init_db,
-    };
-    use crate::db::wads::{add_wad, NewWad};
     use crate::db::models::SourceType;
+    use crate::db::wads::{NewWad, add_wad};
+    use crate::db::{find_companion_by_md5, get_companions_for_wad, init_db, open_memory};
     use std::io::Write;
 
     fn setup() -> Connection {
@@ -226,13 +224,22 @@ mod tests {
         let w2 = add_wad(&conn, &NewWad::new("WAD 2", SourceType::Local)).unwrap();
 
         // Add one companion
-        let c_id = add_companion(&conn, "abc123def456", "shared.deh", "/managed/shared.deh", 100).unwrap();
+        let c_id = add_companion(
+            &conn,
+            "abc123def456",
+            "shared.deh",
+            "/managed/shared.deh",
+            100,
+        )
+        .unwrap();
 
         // Link to first WAD
         link_companion_to_wad(&conn, w1, c_id).unwrap();
 
         // "Register" to second WAD — dedup means same companion_id
-        let existing = find_companion_by_md5(&conn, "abc123def456").unwrap().unwrap();
+        let existing = find_companion_by_md5(&conn, "abc123def456")
+            .unwrap()
+            .unwrap();
         assert_eq!(existing.id, c_id);
         link_companion_to_wad(&conn, w2, existing.id).unwrap();
 

@@ -293,7 +293,12 @@ impl CacheArgs {
                 push_flag(&mut argv, "--orphans", *orphans);
                 argv
             }
-            CacheArgs::Clear { query, all, dry_run, yes } => {
+            CacheArgs::Clear {
+                query,
+                all,
+                dry_run,
+                yes,
+            } => {
                 let mut argv = vec!["clear".into()];
                 push_flag(&mut argv, "--all", *all);
                 push_flag(&mut argv, "--dry-run", *dry_run);
@@ -451,7 +456,11 @@ impl SavesArgs {
                 argv.extend(query.clone());
                 argv
             }
-            SavesArgs::Clean { query, dry_run, yes } => {
+            SavesArgs::Clean {
+                query,
+                dry_run,
+                yes,
+            } => {
                 let mut argv = vec!["clean".into()];
                 push_flag(&mut argv, "--dry-run", *dry_run);
                 push_flag(&mut argv, "--yes", *yes);
@@ -519,7 +528,12 @@ impl DemosArgs {
                 argv.extend(query.clone());
                 argv
             }
-            DemosArgs::Play { query, demo, sourceport, yes } => {
+            DemosArgs::Play {
+                query,
+                demo,
+                sourceport,
+                yes,
+            } => {
                 let mut argv = vec!["play".into()];
                 push_opt(&mut argv, "--demo", demo.as_ref());
                 push_opt(&mut argv, "--sourceport", sourceport.as_ref());
@@ -527,7 +541,11 @@ impl DemosArgs {
                 argv.extend(query.clone());
                 argv
             }
-            DemosArgs::Clean { query, dry_run, yes } => {
+            DemosArgs::Clean {
+                query,
+                dry_run,
+                yes,
+            } => {
                 let mut argv = vec!["clean".into()];
                 push_flag(&mut argv, "--dry-run", *dry_run);
                 push_flag(&mut argv, "--yes", *yes);
@@ -596,21 +614,33 @@ impl ProfileArgs {
                 push_opt(&mut argv, "--sourceport", sourceport.as_ref());
                 argv
             }
-            ProfileArgs::Create { name, sourceport, from } => {
+            ProfileArgs::Create {
+                name,
+                sourceport,
+                from,
+            } => {
                 let mut argv = vec!["create".into()];
                 push_opt(&mut argv, "--sourceport", sourceport.as_ref());
                 push_opt(&mut argv, "--from", from.as_ref());
                 argv.push(name.clone());
                 argv
             }
-            ProfileArgs::Cp { source, dest, sourceport } => {
+            ProfileArgs::Cp {
+                source,
+                dest,
+                sourceport,
+            } => {
                 let mut argv = vec!["cp".into()];
                 push_opt(&mut argv, "--sourceport", sourceport.as_ref());
                 argv.push(source.clone());
                 argv.push(dest.clone());
                 argv
             }
-            ProfileArgs::Rm { name, sourceport, yes } => {
+            ProfileArgs::Rm {
+                name,
+                sourceport,
+                yes,
+            } => {
                 let mut argv = vec!["rm".into()];
                 push_opt(&mut argv, "--sourceport", sourceport.as_ref());
                 push_flag(&mut argv, "--yes", *yes);
@@ -733,9 +763,7 @@ pub enum CollectionArgs {
         desc: bool,
     },
     /// Delete a smart collection.
-    Rm {
-        name: String,
-    },
+    Rm { name: String },
     /// List all smart collections.
     Ls {
         /// Output format: "table", "plain", or "json". Defaults to "json"
@@ -757,7 +785,12 @@ pub enum CollectionArgs {
 impl CollectionArgs {
     fn to_argv(&self) -> Vec<String> {
         match self {
-            CollectionArgs::Add { name, query, sort, desc } => {
+            CollectionArgs::Add {
+                name,
+                query,
+                sort,
+                desc,
+            } => {
                 let mut argv = vec!["add".into()];
                 push_opt(&mut argv, "--sort", sort.as_ref());
                 push_flag(&mut argv, "--desc", *desc);
@@ -955,7 +988,10 @@ impl CacoMcpServer {
     ) -> Result<Json<CliResult>, rmcp::ErrorData> {
         let mut argv = vec!["ls".into()];
         argv.extend(args.to_argv());
-        let runner = CliRunner { bin: &self.caco_bin, paths: &self.paths };
+        let runner = CliRunner {
+            bin: &self.caco_bin,
+            paths: &self.paths,
+        };
         let result = runner.run(argv).await.map_err(|e| e.into_mcp_error())?;
         Ok(Json(result))
     }
@@ -973,7 +1009,10 @@ impl CacoMcpServer {
     ) -> Result<Json<CliResult>, rmcp::ErrorData> {
         let mut argv = vec!["info".into()];
         argv.extend(args.to_argv());
-        let runner = CliRunner { bin: &self.caco_bin, paths: &self.paths };
+        let runner = CliRunner {
+            bin: &self.caco_bin,
+            paths: &self.paths,
+        };
         let result = runner.run(argv).await.map_err(|e| e.into_mcp_error())?;
         Ok(Json(result))
     }
@@ -991,7 +1030,10 @@ impl CacoMcpServer {
     ) -> Result<Json<CliResult>, rmcp::ErrorData> {
         let mut argv = vec!["random".into()];
         argv.extend(args.to_argv());
-        let runner = CliRunner { bin: &self.caco_bin, paths: &self.paths };
+        let runner = CliRunner {
+            bin: &self.caco_bin,
+            paths: &self.paths,
+        };
         let result = runner.run(argv).await.map_err(|e| e.into_mcp_error())?;
         Ok(Json(result))
     }
@@ -1008,7 +1050,10 @@ impl CacoMcpServer {
     ) -> Result<Json<CliResult>, rmcp::ErrorData> {
         let mut argv = vec!["trash".into()];
         argv.extend(args.to_argv());
-        let runner = CliRunner { bin: &self.caco_bin, paths: &self.paths };
+        let runner = CliRunner {
+            bin: &self.caco_bin,
+            paths: &self.paths,
+        };
         let result = runner.run(argv).await.map_err(|e| e.into_mcp_error())?;
         Ok(Json(result))
     }
@@ -1024,7 +1069,10 @@ impl CacoMcpServer {
     ) -> Result<Json<CliResult>, rmcp::ErrorData> {
         let mut argv = vec!["enrich".into()];
         argv.extend(args.to_argv());
-        let runner = CliRunner { bin: &self.caco_bin, paths: &self.paths };
+        let runner = CliRunner {
+            bin: &self.caco_bin,
+            paths: &self.paths,
+        };
         let result = runner.run(argv).await.map_err(|e| e.into_mcp_error())?;
         Ok(Json(result))
     }
@@ -1043,7 +1091,10 @@ impl CacoMcpServer {
     ) -> Result<Json<CliResult>, rmcp::ErrorData> {
         let mut argv = vec!["modify".into()];
         argv.extend(args.to_argv());
-        let runner = CliRunner { bin: &self.caco_bin, paths: &self.paths };
+        let runner = CliRunner {
+            bin: &self.caco_bin,
+            paths: &self.paths,
+        };
         let result = runner.run(argv).await.map_err(|e| e.into_mcp_error())?;
         Ok(Json(result))
     }
@@ -1061,7 +1112,10 @@ impl CacoMcpServer {
     ) -> Result<Json<CliResult>, rmcp::ErrorData> {
         let mut argv = vec!["cache".into()];
         argv.extend(args.to_argv());
-        let runner = CliRunner { bin: &self.caco_bin, paths: &self.paths };
+        let runner = CliRunner {
+            bin: &self.caco_bin,
+            paths: &self.paths,
+        };
         let result = runner.run(argv).await.map_err(|e| e.into_mcp_error())?;
         Ok(Json(result))
     }
@@ -1078,7 +1132,10 @@ impl CacoMcpServer {
     ) -> Result<Json<CliResult>, rmcp::ErrorData> {
         let mut argv = vec!["stats".into()];
         argv.extend(args.to_argv());
-        let runner = CliRunner { bin: &self.caco_bin, paths: &self.paths };
+        let runner = CliRunner {
+            bin: &self.caco_bin,
+            paths: &self.paths,
+        };
         let result = runner.run(argv).await.map_err(|e| e.into_mcp_error())?;
         Ok(Json(result))
     }
@@ -1097,7 +1154,10 @@ impl CacoMcpServer {
     ) -> Result<Json<CliResult>, rmcp::ErrorData> {
         let mut argv = vec!["sessions".into()];
         argv.extend(args.to_argv());
-        let runner = CliRunner { bin: &self.caco_bin, paths: &self.paths };
+        let runner = CliRunner {
+            bin: &self.caco_bin,
+            paths: &self.paths,
+        };
         let result = runner.run(argv).await.map_err(|e| e.into_mcp_error())?;
         Ok(Json(result))
     }
@@ -1115,7 +1175,10 @@ impl CacoMcpServer {
     ) -> Result<Json<CliResult>, rmcp::ErrorData> {
         let mut argv = vec!["config".into()];
         argv.extend(args.to_argv());
-        let runner = CliRunner { bin: &self.caco_bin, paths: &self.paths };
+        let runner = CliRunner {
+            bin: &self.caco_bin,
+            paths: &self.paths,
+        };
         let result = runner.run(argv).await.map_err(|e| e.into_mcp_error())?;
         Ok(Json(result))
     }
@@ -1135,7 +1198,10 @@ impl CacoMcpServer {
     ) -> Result<Json<CliResult>, rmcp::ErrorData> {
         let mut argv = vec!["saves".into()];
         argv.extend(args.to_argv());
-        let runner = CliRunner { bin: &self.caco_bin, paths: &self.paths };
+        let runner = CliRunner {
+            bin: &self.caco_bin,
+            paths: &self.paths,
+        };
         let result = runner.run(argv).await.map_err(|e| e.into_mcp_error())?;
         Ok(Json(result))
     }
@@ -1155,7 +1221,10 @@ impl CacoMcpServer {
     ) -> Result<Json<CliResult>, rmcp::ErrorData> {
         let mut argv = vec!["demos".into()];
         argv.extend(args.to_argv());
-        let runner = CliRunner { bin: &self.caco_bin, paths: &self.paths };
+        let runner = CliRunner {
+            bin: &self.caco_bin,
+            paths: &self.paths,
+        };
         let result = runner.run(argv).await.map_err(|e| e.into_mcp_error())?;
         Ok(Json(result))
     }
@@ -1175,7 +1244,10 @@ impl CacoMcpServer {
     ) -> Result<Json<CliResult>, rmcp::ErrorData> {
         let mut argv = vec!["profile".into()];
         argv.extend(args.to_argv());
-        let runner = CliRunner { bin: &self.caco_bin, paths: &self.paths };
+        let runner = CliRunner {
+            bin: &self.caco_bin,
+            paths: &self.paths,
+        };
         let result = runner.run(argv).await.map_err(|e| e.into_mcp_error())?;
         Ok(Json(result))
     }
@@ -1198,7 +1270,10 @@ impl CacoMcpServer {
     ) -> Result<Json<CliResult>, rmcp::ErrorData> {
         let mut argv = vec!["companion".into()];
         argv.extend(args.to_argv());
-        let runner = CliRunner { bin: &self.caco_bin, paths: &self.paths };
+        let runner = CliRunner {
+            bin: &self.caco_bin,
+            paths: &self.paths,
+        };
         let result = runner.run(argv).await.map_err(|e| e.into_mcp_error())?;
         Ok(Json(result))
     }
@@ -1216,7 +1291,10 @@ impl CacoMcpServer {
     ) -> Result<Json<CliResult>, rmcp::ErrorData> {
         let mut argv = vec!["collection".into()];
         argv.extend(args.to_argv());
-        let runner = CliRunner { bin: &self.caco_bin, paths: &self.paths };
+        let runner = CliRunner {
+            bin: &self.caco_bin,
+            paths: &self.paths,
+        };
         let result = runner.run(argv).await.map_err(|e| e.into_mcp_error())?;
         Ok(Json(result))
     }
@@ -1245,7 +1323,10 @@ impl CacoMcpServer {
     ) -> Result<Json<CliResult>, rmcp::ErrorData> {
         let mut argv = vec!["import".into()];
         argv.extend(args.to_argv());
-        let runner = CliRunner { bin: &self.caco_bin, paths: &self.paths };
+        let runner = CliRunner {
+            bin: &self.caco_bin,
+            paths: &self.paths,
+        };
         let result = runner.run(argv).await.map_err(|e| e.into_mcp_error())?;
         Ok(Json(result))
     }
@@ -1268,7 +1349,10 @@ impl CacoMcpServer {
     ) -> Result<Json<CliResult>, rmcp::ErrorData> {
         let mut argv = vec!["gc".into()];
         argv.extend(args.to_argv());
-        let runner = CliRunner { bin: &self.caco_bin, paths: &self.paths };
+        let runner = CliRunner {
+            bin: &self.caco_bin,
+            paths: &self.paths,
+        };
         let result = runner.run(argv).await.map_err(|e| e.into_mcp_error())?;
         Ok(Json(result))
     }
@@ -1282,7 +1366,10 @@ mod tests {
     fn ls_default_uses_json_output() {
         let args = LsArgs::default();
         let argv = args.to_argv();
-        assert!(argv.windows(2).any(|w| w[0] == "--output" && w[1] == "json"));
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--output" && w[1] == "json")
+        );
     }
 
     #[test]
@@ -1301,14 +1388,20 @@ mod tests {
         assert!(argv.contains(&"--id24".to_string()));
         assert!(argv.contains(&"--deleted".to_string()));
         assert!(argv.contains(&"status:completed".to_string()));
-        assert!(argv.windows(2).any(|w| w[0] == "--output" && w[1] == "plain"));
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--output" && w[1] == "plain")
+        );
     }
 
     #[test]
     fn info_default_uses_json_output() {
         let args = InfoArgs::default();
         let argv = args.to_argv();
-        assert!(argv.windows(2).any(|w| w[0] == "--output" && w[1] == "json"));
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--output" && w[1] == "json")
+        );
         assert!(!argv.contains(&"--levelstats".to_string()));
         assert!(!argv.contains(&"--live".to_string()));
         assert!(!argv.contains(&"--plain".to_string()));
@@ -1328,7 +1421,10 @@ mod tests {
         assert!(argv.contains(&"--levelstats".to_string()));
         assert!(argv.contains(&"--live".to_string()));
         assert!(argv.contains(&"--plain".to_string()));
-        assert!(argv.windows(2).any(|w| w[0] == "--beaten" && w[1] == "2025-01"));
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--beaten" && w[1] == "2025-01")
+        );
         assert!(argv.contains(&"id:7".to_string()));
     }
 
@@ -1336,7 +1432,11 @@ mod tests {
     fn random_default_renders_empty() {
         let args = RandomArgs::default();
         let argv = args.to_argv();
-        assert!(argv.is_empty(), "default random args should produce empty argv, got {:?}", argv);
+        assert!(
+            argv.is_empty(),
+            "default random args should produce empty argv, got {:?}",
+            argv
+        );
     }
 
     #[test]
@@ -1354,7 +1454,10 @@ mod tests {
     fn trash_default_uses_json_output() {
         let args = TrashArgs::default();
         let argv = args.to_argv();
-        assert!(argv.windows(2).any(|w| w[0] == "--output" && w[1] == "json"));
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--output" && w[1] == "json")
+        );
         assert!(!argv.contains(&"--dry-run".to_string()));
         assert!(!argv.contains(&"--yes".to_string()));
     }
@@ -1381,7 +1484,10 @@ mod tests {
         assert!(argv.contains(&"--dry-run".to_string()));
         assert!(argv.contains(&"--yes".to_string()));
         assert!(argv.contains(&"id:3".to_string()));
-        assert!(argv.windows(2).any(|w| w[0] == "--output" && w[1] == "plain"));
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--output" && w[1] == "plain")
+        );
     }
 
     #[test]
@@ -1421,10 +1527,18 @@ mod tests {
         };
         let argv = args.to_argv();
         // push_opt
-        assert!(argv.windows(2).any(|w| w[0] == "--notes" && w[1] == "fun wad"));
-        assert!(argv.windows(2).any(|w| w[0] == "--stats-file" && w[1] == "/tmp/stats.txt"));
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--notes" && w[1] == "fun wad")
+        );
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--stats-file" && w[1] == "/tmp/stats.txt")
+        );
         // push_multi: two --add-file pairs
-        let add_file_positions: Vec<_> = argv.iter().enumerate()
+        let add_file_positions: Vec<_> = argv
+            .iter()
+            .enumerate()
             .filter(|(_, v)| v.as_str() == "--add-file")
             .map(|(i, _)| i)
             .collect();
@@ -1432,7 +1546,10 @@ mod tests {
         assert_eq!(argv[add_file_positions[0] + 1], "brutal.deh");
         assert_eq!(argv[add_file_positions[1] + 1], "fix.wad");
         // push_multi: one --remove-file pair
-        assert!(argv.windows(2).any(|w| w[0] == "--remove-file" && w[1] == "old.deh"));
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--remove-file" && w[1] == "old.deh")
+        );
         // dry_run renders with hyphen
         assert!(argv.contains(&"--dry-run".to_string()));
         assert!(argv.contains(&"--yes".to_string()));
@@ -1446,7 +1563,10 @@ mod tests {
 
     #[test]
     fn cache_list_default_renders() {
-        let args = CacheArgs::List { plain: false, orphans: false };
+        let args = CacheArgs::List {
+            plain: false,
+            orphans: false,
+        };
         let argv = args.to_argv();
         assert_eq!(argv[0], "list");
         assert!(!argv.contains(&"--plain".to_string()));
@@ -1455,7 +1575,10 @@ mod tests {
 
     #[test]
     fn cache_list_flags_render() {
-        let args = CacheArgs::List { plain: true, orphans: true };
+        let args = CacheArgs::List {
+            plain: true,
+            orphans: true,
+        };
         let argv = args.to_argv();
         assert_eq!(argv[0], "list");
         assert!(argv.contains(&"--plain".to_string()));
@@ -1480,7 +1603,10 @@ mod tests {
 
     #[test]
     fn cache_prune_renders() {
-        let args = CacheArgs::Prune { dry_run: true, yes: false };
+        let args = CacheArgs::Prune {
+            dry_run: true,
+            yes: false,
+        };
         let argv = args.to_argv();
         assert_eq!(argv[0], "prune");
         assert!(argv.contains(&"--dry-run".to_string()));
@@ -1491,7 +1617,11 @@ mod tests {
     fn stats_defaults_empty() {
         let args = StatsArgs::default();
         let argv = args.to_argv();
-        assert!(argv.is_empty(), "default stats args should produce empty argv, got {:?}", argv);
+        assert!(
+            argv.is_empty(),
+            "default stats args should produce empty argv, got {:?}",
+            argv
+        );
     }
 
     #[test]
@@ -1502,7 +1632,10 @@ mod tests {
             plain: true,
         };
         let argv = args.to_argv();
-        assert!(argv.windows(2).any(|w| w[0] == "--period" && w[1] == "year"));
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--period" && w[1] == "year")
+        );
         assert!(argv.windows(2).any(|w| w[0] == "--limit" && w[1] == "6"));
         assert!(argv.contains(&"--plain".to_string()));
     }
@@ -1529,7 +1662,11 @@ mod tests {
 
     #[test]
     fn saves_list_default_renders() {
-        let args = SavesArgs::List { query: vec![], plain: false, yes: false };
+        let args = SavesArgs::List {
+            query: vec![],
+            plain: false,
+            yes: false,
+        };
         let argv = args.to_argv();
         assert_eq!(argv[0], "list");
         assert!(!argv.contains(&"--plain".to_string()));
@@ -1571,9 +1708,10 @@ mod tests {
         };
         let argv = args.to_argv();
         assert_eq!(argv[0], "restore");
-        assert!(argv
-            .windows(2)
-            .any(|w| w[0] == "--backup" && w[1] == "backup_2025.tar.gz"));
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--backup" && w[1] == "backup_2025.tar.gz")
+        );
         assert!(argv.contains(&"--yes".to_string()));
         assert!(argv.contains(&"id:9".to_string()));
     }
@@ -1643,12 +1781,14 @@ mod tests {
         };
         let argv = args.to_argv();
         assert_eq!(argv[0], "play");
-        assert!(argv
-            .windows(2)
-            .any(|w| w[0] == "--demo" && w[1] == "run1.lmp"));
-        assert!(argv
-            .windows(2)
-            .any(|w| w[0] == "--sourceport" && w[1] == "dsda-doom"));
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--demo" && w[1] == "run1.lmp")
+        );
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--sourceport" && w[1] == "dsda-doom")
+        );
         assert!(argv.contains(&"--yes".to_string()));
         assert!(argv.contains(&"id:4".to_string()));
     }
@@ -1698,9 +1838,10 @@ mod tests {
         };
         let argv = args.to_argv();
         assert_eq!(argv[0], "ls");
-        assert!(argv
-            .windows(2)
-            .any(|w| w[0] == "--sourceport" && w[1] == "dsda-doom"));
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--sourceport" && w[1] == "dsda-doom")
+        );
     }
 
     #[test]
@@ -1712,12 +1853,14 @@ mod tests {
         };
         let argv = args.to_argv();
         assert_eq!(argv[0], "create");
-        assert!(argv
-            .windows(2)
-            .any(|w| w[0] == "--sourceport" && w[1] == "dsda-doom"));
-        assert!(argv
-            .windows(2)
-            .any(|w| w[0] == "--from" && w[1] == "default"));
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--sourceport" && w[1] == "dsda-doom")
+        );
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--from" && w[1] == "default")
+        );
         // positional name appears AFTER the flags
         assert_eq!(argv.last().unwrap(), "speedrun");
     }
@@ -1744,9 +1887,10 @@ mod tests {
         };
         let argv = args.to_argv();
         assert_eq!(argv[0], "cp");
-        assert!(argv
-            .windows(2)
-            .any(|w| w[0] == "--sourceport" && w[1] == "zdoom"));
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--sourceport" && w[1] == "zdoom")
+        );
         // src and dst preserved in order at the end
         let tail: Vec<&str> = argv.iter().rev().take(2).map(String::as_str).collect();
         assert_eq!(tail, vec!["dst", "src"]);
@@ -1762,9 +1906,10 @@ mod tests {
         let argv = args.to_argv();
         assert_eq!(argv[0], "rm");
         assert!(argv.contains(&"--yes".to_string()));
-        assert!(argv
-            .windows(2)
-            .any(|w| w[0] == "--sourceport" && w[1] == "woof"));
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--sourceport" && w[1] == "woof")
+        );
         assert_eq!(argv.last().unwrap(), "old");
     }
 
@@ -1803,9 +1948,10 @@ mod tests {
         };
         let argv = args.to_argv();
         assert_eq!(argv[0], "add");
-        assert!(argv
-            .windows(2)
-            .any(|w| w[0] == "--file" && w[1] == "/tmp/brutal.deh"));
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--file" && w[1] == "/tmp/brutal.deh")
+        );
         assert!(argv.contains(&"id:1".to_string()));
     }
 
@@ -1818,9 +1964,10 @@ mod tests {
         };
         let argv = args.to_argv();
         assert_eq!(argv[0], "rm");
-        assert!(argv
-            .windows(2)
-            .any(|w| w[0] == "--file" && w[1] == "old.deh"));
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--file" && w[1] == "old.deh")
+        );
         assert!(argv.contains(&"--yes".to_string()));
         assert!(argv.contains(&"id:2".to_string()));
     }
@@ -1833,9 +1980,10 @@ mod tests {
         };
         let argv = args.to_argv();
         assert_eq!(argv[0], "enable");
-        assert!(argv
-            .windows(2)
-            .any(|w| w[0] == "--file" && w[1] == "fix.wad"));
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--file" && w[1] == "fix.wad")
+        );
         assert!(argv.contains(&"id:3".to_string()));
     }
 
@@ -1847,9 +1995,10 @@ mod tests {
         };
         let argv = args.to_argv();
         assert_eq!(argv[0], "disable");
-        assert!(argv
-            .windows(2)
-            .any(|w| w[0] == "--file" && w[1] == "fix.wad"));
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--file" && w[1] == "fix.wad")
+        );
         assert!(argv.contains(&"id:4".to_string()));
     }
 
@@ -1867,7 +2016,10 @@ mod tests {
 
     #[test]
     fn companion_ls_default_no_plain() {
-        let args = CompanionArgs::Ls { query: vec![], plain: false };
+        let args = CompanionArgs::Ls {
+            query: vec![],
+            plain: false,
+        };
         let argv = args.to_argv();
         assert_eq!(argv[0], "ls");
         assert!(!argv.contains(&"--plain".to_string()));
@@ -1886,9 +2038,10 @@ mod tests {
         let argv = args.to_argv();
         assert_eq!(argv[0], "add");
         // --sort and --desc render BEFORE the positional name
-        assert!(argv
-            .windows(2)
-            .any(|w| w[0] == "--sort" && w[1] == "playtime"));
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--sort" && w[1] == "playtime")
+        );
         assert!(argv.contains(&"--desc".to_string()));
         // name precedes query terms
         let name_pos = argv.iter().position(|s| s == "favs").unwrap();
@@ -1912,7 +2065,9 @@ mod tests {
 
     #[test]
     fn collection_rm_renders() {
-        let args = CollectionArgs::Rm { name: "favs".into() };
+        let args = CollectionArgs::Rm {
+            name: "favs".into(),
+        };
         let argv = args.to_argv();
         assert_eq!(argv, vec!["rm", "favs"]);
     }
@@ -1922,7 +2077,10 @@ mod tests {
         let args = CollectionArgs::Ls { output: None };
         let argv = args.to_argv();
         assert_eq!(argv[0], "ls");
-        assert!(argv.windows(2).any(|w| w[0] == "--output" && w[1] == "json"));
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--output" && w[1] == "json")
+        );
     }
 
     #[test]
@@ -1931,7 +2089,10 @@ mod tests {
             output: Some("plain".into()),
         };
         let argv = args.to_argv();
-        assert!(argv.windows(2).any(|w| w[0] == "--output" && w[1] == "plain"));
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--output" && w[1] == "plain")
+        );
     }
 
     #[test]
@@ -1942,7 +2103,10 @@ mod tests {
         };
         let argv = args.to_argv();
         assert_eq!(argv[0], "run");
-        assert!(argv.windows(2).any(|w| w[0] == "--output" && w[1] == "json"));
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--output" && w[1] == "json")
+        );
         // positional name at the end
         assert_eq!(argv.last().unwrap(), "favs");
     }
@@ -1954,7 +2118,10 @@ mod tests {
             output: Some("table".into()),
         };
         let argv = args.to_argv();
-        assert!(argv.windows(2).any(|w| w[0] == "--output" && w[1] == "table"));
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--output" && w[1] == "table")
+        );
         assert_eq!(argv.last().unwrap(), "favs");
     }
 
@@ -1983,9 +2150,10 @@ mod tests {
             query: "18184".into(),
         });
         let argv = args.to_argv();
-        assert!(argv
-            .windows(2)
-            .any(|w| w[0] == "--idgames" && w[1] == "18184"));
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--idgames" && w[1] == "18184")
+        );
         // No other source flags
         assert!(!argv.contains(&"--doomwiki".to_string()));
         assert!(!argv.contains(&"--doomworld".to_string()));
@@ -2006,9 +2174,10 @@ mod tests {
             query: "Sunder".into(),
         });
         let argv = args.to_argv();
-        assert!(argv
-            .windows(2)
-            .any(|w| w[0] == "--doomwiki" && w[1] == "Sunder"));
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--doomwiki" && w[1] == "Sunder")
+        );
         assert!(!argv.contains(&"--idgames".to_string()));
     }
 
@@ -2019,8 +2188,7 @@ mod tests {
         });
         let argv = args.to_argv();
         assert!(argv.windows(2).any(|w| {
-            w[0] == "--doomworld"
-                && w[1] == "https://www.doomworld.com/forum/topic/12345/"
+            w[0] == "--doomworld" && w[1] == "https://www.doomworld.com/forum/topic/12345/"
         }));
     }
 
@@ -2046,9 +2214,10 @@ mod tests {
             path: "/tmp/cool.wad".into(),
         });
         let argv = args.to_argv();
-        assert!(argv
-            .windows(2)
-            .any(|w| w[0] == "--local" && w[1] == "/tmp/cool.wad"));
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--local" && w[1] == "/tmp/cool.wad")
+        );
     }
 
     #[test]
@@ -2070,28 +2239,31 @@ mod tests {
             llm_model: Some("claude-3-5".into()),
         };
         let argv = args.to_argv();
-        assert!(argv
-            .windows(2)
-            .any(|w| w[0] == "--title" && w[1] == "Cool WAD"));
-        assert!(argv
-            .windows(2)
-            .any(|w| w[0] == "--author" && w[1] == "DoomGuy"));
-        assert!(argv
-            .windows(2)
-            .any(|w| w[0] == "--year" && w[1] == "1994"));
-        assert!(argv
-            .windows(2)
-            .any(|w| w[0] == "--description" && w[1] == "A great wad"));
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--title" && w[1] == "Cool WAD")
+        );
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--author" && w[1] == "DoomGuy")
+        );
+        assert!(argv.windows(2).any(|w| w[0] == "--year" && w[1] == "1994"));
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--description" && w[1] == "A great wad")
+        );
         assert!(argv.contains(&"--force".to_string()));
         assert!(argv.contains(&"--multi".to_string()));
         assert!(argv.contains(&"--smart".to_string()));
         assert!(!argv.contains(&"--no-smart".to_string()));
-        assert!(argv
-            .windows(2)
-            .any(|w| w[0] == "--llm-backend" && w[1] == "anthropic"));
-        assert!(argv
-            .windows(2)
-            .any(|w| w[0] == "--llm-model" && w[1] == "claude-3-5"));
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--llm-backend" && w[1] == "anthropic")
+        );
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "--llm-model" && w[1] == "claude-3-5")
+        );
         // Two --tag pairs in argv
         let tag_positions: Vec<_> = argv
             .iter()

@@ -4,80 +4,184 @@ use std::sync::LazyLock;
 
 use rusqlite::Connection;
 
-use crate::utils::compute_md5;
 use crate::Result;
+use crate::utils::compute_md5;
 
 // =============================================================================
 // Known IWAD MD5 checksums -> (family, variant, display_title)
 // =============================================================================
 
-pub static KNOWN_IWADS: LazyLock<HashMap<&'static str, (&'static str, &'static str, &'static str)>> =
-    LazyLock::new(|| {
-        HashMap::from([
-            // doom family
-            ("1cd63c5ddff1bf8ce844237f580e9cf3", ("doom", "v1.9", "Doom (Registered)")),
-            ("c4fe9fd920207691a9f493668e0a2083", ("doom", "v1.9ud", "The Ultimate Doom")),
-            ("fb35c4a5a9fd49ec29ab6e900572c524", ("doom", "bfg", "The Ultimate Doom (BFG Edition)")),
-            ("8517c4e8f0eef90b82852667d345eb86", ("doom", "enhanced", "The Ultimate Doom (Enhanced)")),
-            ("4461d4511386518e784c647e3128e7bc", ("doom", "kex", "The Ultimate Doom (KEX)")),
-            ("3b37188f6337f15718b617c16e6e7a9c", ("doom", "kex", "The Ultimate Doom (KEX)")),
-            // doom1 (shareware)
-            ("f0cefca49926d00903cf57551d901abe", ("doom1", "v1.0", "Doom (Shareware)")),
-            // doom2 family
-            ("25e1459ca71d321525f84628f45ca8cd", ("doom2", "v1.9", "Doom II: Hell on Earth")),
-            ("c3bea40570c23e511a7ed3ebcd9865f7", ("doom2", "bfg", "Doom II: Hell on Earth (BFG Edition)")),
-            ("8ab6d0527a29efdc1ef200e5687b5cae", ("doom2", "enhanced", "Doom II: Hell on Earth (Enhanced)")),
-            ("9aa3cbf65b961d0bdac98ec403b832e1", ("doom2", "kex", "Doom II: Hell on Earth (KEX)")),
-            ("64a4c88a871da67492aaa2020a068cd8", ("doom2", "kex", "Doom II: Hell on Earth (KEX)")),
-            // plutonia family
-            ("75c8cf89566741fa9d22447604053bd7", ("plutonia", "v1.9", "The Plutonia Experiment")),
-            ("3493be7e1e2588bc9c8b31eab2587a04", ("plutonia", "v1.9alt", "The Plutonia Experiment")),
-            ("0b381ff7bae93bde6496f9547463619d", ("plutonia", "unity", "The Plutonia Experiment (Unity)")),
-            ("ae76c20366ff685d3bb9fab11b148b84", ("plutonia", "unity", "The Plutonia Experiment (Unity)")),
-            ("24037397056e919961005e08611623f4", ("plutonia", "kex", "The Plutonia Experiment (KEX)")),
-            ("e47cf6d82a0ccedf8c1c16a284bb5937", ("plutonia", "kex", "The Plutonia Experiment (KEX)")),
-            // tnt family
-            ("4e158d9953c79ccf97bd0663244cc6b6", ("tnt", "v1.9", "TNT: Evilution")),
-            ("1d39e405bf6ee3df69a8d2646c8d5c49", ("tnt", "v1.9alt", "TNT: Evilution")),
-            ("a6685de59ddf2c07f45deeec95296d98", ("tnt", "unity", "TNT: Evilution (Unity)")),
-            ("f5528f6fd55cf9629141d79eda169630", ("tnt", "unity", "TNT: Evilution (Unity)")),
-            ("8974e3117ed4a1839c752d5e11ab1b7b", ("tnt", "kex", "TNT: Evilution (KEX)")),
-            ("ad7885c17a6b9b79b09d7a7634dd7e2c", ("tnt", "kex", "TNT: Evilution (KEX)")),
-            // other families
-            ("66d686b1ed6d35ff103f15dbd30e0341", ("heretic", "v1.3", "Heretic")),
-            ("ae779722390ec32fa37b0d361f7d82f8", ("heretic1", "v1.0", "Heretic (Shareware)")),
-            ("abb033caf81e26f12a2103e1fa25453f", ("hexen", "v1.1", "Hexen")),
-            ("78d5898e99e220e4de64edaa0e479593", ("hexdd", "v1.0", "Hexen: Deathkings")),
-            ("2fed2031a5b03892106e0f117f17901f", ("strife", "v1.2", "Strife")),
-            ("25485721882b050afa96a56e5758dd52", ("chex", "v1.0", "Chex Quest")),
-            ("bce163d06521f9d15f9686786e64df13", ("chex3", "v1.0", "Chex Quest 3")),
-        ])
-    });
+pub static KNOWN_IWADS: LazyLock<
+    HashMap<&'static str, (&'static str, &'static str, &'static str)>,
+> = LazyLock::new(|| {
+    HashMap::from([
+        // doom family
+        (
+            "1cd63c5ddff1bf8ce844237f580e9cf3",
+            ("doom", "v1.9", "Doom (Registered)"),
+        ),
+        (
+            "c4fe9fd920207691a9f493668e0a2083",
+            ("doom", "v1.9ud", "The Ultimate Doom"),
+        ),
+        (
+            "fb35c4a5a9fd49ec29ab6e900572c524",
+            ("doom", "bfg", "The Ultimate Doom (BFG Edition)"),
+        ),
+        (
+            "8517c4e8f0eef90b82852667d345eb86",
+            ("doom", "enhanced", "The Ultimate Doom (Enhanced)"),
+        ),
+        (
+            "4461d4511386518e784c647e3128e7bc",
+            ("doom", "kex", "The Ultimate Doom (KEX)"),
+        ),
+        (
+            "3b37188f6337f15718b617c16e6e7a9c",
+            ("doom", "kex", "The Ultimate Doom (KEX)"),
+        ),
+        // doom1 (shareware)
+        (
+            "f0cefca49926d00903cf57551d901abe",
+            ("doom1", "v1.0", "Doom (Shareware)"),
+        ),
+        // doom2 family
+        (
+            "25e1459ca71d321525f84628f45ca8cd",
+            ("doom2", "v1.9", "Doom II: Hell on Earth"),
+        ),
+        (
+            "c3bea40570c23e511a7ed3ebcd9865f7",
+            ("doom2", "bfg", "Doom II: Hell on Earth (BFG Edition)"),
+        ),
+        (
+            "8ab6d0527a29efdc1ef200e5687b5cae",
+            ("doom2", "enhanced", "Doom II: Hell on Earth (Enhanced)"),
+        ),
+        (
+            "9aa3cbf65b961d0bdac98ec403b832e1",
+            ("doom2", "kex", "Doom II: Hell on Earth (KEX)"),
+        ),
+        (
+            "64a4c88a871da67492aaa2020a068cd8",
+            ("doom2", "kex", "Doom II: Hell on Earth (KEX)"),
+        ),
+        // plutonia family
+        (
+            "75c8cf89566741fa9d22447604053bd7",
+            ("plutonia", "v1.9", "The Plutonia Experiment"),
+        ),
+        (
+            "3493be7e1e2588bc9c8b31eab2587a04",
+            ("plutonia", "v1.9alt", "The Plutonia Experiment"),
+        ),
+        (
+            "0b381ff7bae93bde6496f9547463619d",
+            ("plutonia", "unity", "The Plutonia Experiment (Unity)"),
+        ),
+        (
+            "ae76c20366ff685d3bb9fab11b148b84",
+            ("plutonia", "unity", "The Plutonia Experiment (Unity)"),
+        ),
+        (
+            "24037397056e919961005e08611623f4",
+            ("plutonia", "kex", "The Plutonia Experiment (KEX)"),
+        ),
+        (
+            "e47cf6d82a0ccedf8c1c16a284bb5937",
+            ("plutonia", "kex", "The Plutonia Experiment (KEX)"),
+        ),
+        // tnt family
+        (
+            "4e158d9953c79ccf97bd0663244cc6b6",
+            ("tnt", "v1.9", "TNT: Evilution"),
+        ),
+        (
+            "1d39e405bf6ee3df69a8d2646c8d5c49",
+            ("tnt", "v1.9alt", "TNT: Evilution"),
+        ),
+        (
+            "a6685de59ddf2c07f45deeec95296d98",
+            ("tnt", "unity", "TNT: Evilution (Unity)"),
+        ),
+        (
+            "f5528f6fd55cf9629141d79eda169630",
+            ("tnt", "unity", "TNT: Evilution (Unity)"),
+        ),
+        (
+            "8974e3117ed4a1839c752d5e11ab1b7b",
+            ("tnt", "kex", "TNT: Evilution (KEX)"),
+        ),
+        (
+            "ad7885c17a6b9b79b09d7a7634dd7e2c",
+            ("tnt", "kex", "TNT: Evilution (KEX)"),
+        ),
+        // other families
+        (
+            "66d686b1ed6d35ff103f15dbd30e0341",
+            ("heretic", "v1.3", "Heretic"),
+        ),
+        (
+            "ae779722390ec32fa37b0d361f7d82f8",
+            ("heretic1", "v1.0", "Heretic (Shareware)"),
+        ),
+        (
+            "abb033caf81e26f12a2103e1fa25453f",
+            ("hexen", "v1.1", "Hexen"),
+        ),
+        (
+            "78d5898e99e220e4de64edaa0e479593",
+            ("hexdd", "v1.0", "Hexen: Deathkings"),
+        ),
+        (
+            "2fed2031a5b03892106e0f117f17901f",
+            ("strife", "v1.2", "Strife"),
+        ),
+        (
+            "25485721882b050afa96a56e5758dd52",
+            ("chex", "v1.0", "Chex Quest"),
+        ),
+        (
+            "bce163d06521f9d15f9686786e64df13",
+            ("chex3", "v1.0", "Chex Quest 3"),
+        ),
+    ])
+});
 
 // =============================================================================
 // Filename fallback for when MD5 doesn't match
 // =============================================================================
 
-pub static KNOWN_IWAD_FILENAMES: LazyLock<HashMap<&'static str, (&'static str, &'static str, &'static str)>> =
-    LazyLock::new(|| {
-        HashMap::from([
-            ("doom2.wad", ("doom2", "unknown", "Doom II: Hell on Earth")),
-            ("doom.wad", ("doom", "unknown", "The Ultimate Doom")),
-            ("doomu.wad", ("doom", "unknown", "The Ultimate Doom")),
-            ("doom1.wad", ("doom1", "unknown", "Doom (Shareware)")),
-            ("plutonia.wad", ("plutonia", "unknown", "The Plutonia Experiment")),
-            ("tnt.wad", ("tnt", "unknown", "TNT: Evilution")),
-            ("heretic.wad", ("heretic", "unknown", "Heretic")),
-            ("hexen.wad", ("hexen", "unknown", "Hexen")),
-            ("hexdd.wad", ("hexdd", "unknown", "Hexen: Deathkings")),
-            ("strife1.wad", ("strife", "unknown", "Strife")),
-            ("chex.wad", ("chex", "unknown", "Chex Quest")),
-            ("chex3.wad", ("chex3", "unknown", "Chex Quest 3")),
-            ("freedoom2.wad", ("freedoom2", "unknown", "Freedoom: Phase 2")),
-            ("freedoom1.wad", ("freedoom1", "unknown", "Freedoom: Phase 1")),
-            ("hacx.wad", ("hacx", "unknown", "HacX")),
-        ])
-    });
+pub static KNOWN_IWAD_FILENAMES: LazyLock<
+    HashMap<&'static str, (&'static str, &'static str, &'static str)>,
+> = LazyLock::new(|| {
+    HashMap::from([
+        ("doom2.wad", ("doom2", "unknown", "Doom II: Hell on Earth")),
+        ("doom.wad", ("doom", "unknown", "The Ultimate Doom")),
+        ("doomu.wad", ("doom", "unknown", "The Ultimate Doom")),
+        ("doom1.wad", ("doom1", "unknown", "Doom (Shareware)")),
+        (
+            "plutonia.wad",
+            ("plutonia", "unknown", "The Plutonia Experiment"),
+        ),
+        ("tnt.wad", ("tnt", "unknown", "TNT: Evilution")),
+        ("heretic.wad", ("heretic", "unknown", "Heretic")),
+        ("hexen.wad", ("hexen", "unknown", "Hexen")),
+        ("hexdd.wad", ("hexdd", "unknown", "Hexen: Deathkings")),
+        ("strife1.wad", ("strife", "unknown", "Strife")),
+        ("chex.wad", ("chex", "unknown", "Chex Quest")),
+        ("chex3.wad", ("chex3", "unknown", "Chex Quest 3")),
+        (
+            "freedoom2.wad",
+            ("freedoom2", "unknown", "Freedoom: Phase 2"),
+        ),
+        (
+            "freedoom1.wad",
+            ("freedoom1", "unknown", "Freedoom: Phase 1"),
+        ),
+        ("hacx.wad", ("hacx", "unknown", "HacX")),
+    ])
+});
 
 // =============================================================================
 // Alias mapping: free-text IWAD strings -> family names
@@ -313,9 +417,7 @@ pub fn get_iwad_variant(
     family: &str,
     variant: &str,
 ) -> Result<Option<IwadRecord>> {
-    let mut stmt = conn.prepare(
-        "SELECT * FROM iwads WHERE family = ? AND variant = ?",
-    )?;
+    let mut stmt = conn.prepare("SELECT * FROM iwads WHERE family = ? AND variant = ?")?;
     match stmt.query_row(rusqlite::params![family, variant], IwadRecord::from_row) {
         Ok(record) => Ok(Some(record)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -370,11 +472,7 @@ pub fn get_all_iwads(conn: &Connection) -> Result<Vec<IwadRecord>> {
 }
 
 /// Remove registered IWAD(s). Returns number of rows removed.
-pub fn remove_iwad(
-    conn: &Connection,
-    family: &str,
-    variant: Option<&str>,
-) -> Result<usize> {
+pub fn remove_iwad(conn: &Connection, family: &str, variant: Option<&str>) -> Result<usize> {
     let count = if let Some(v) = variant {
         conn.execute(
             "DELETE FROM iwads WHERE family = ? AND variant = ?",
@@ -398,9 +496,7 @@ pub fn remove_iwad_with_paths(
     variant: Option<&str>,
 ) -> Result<Vec<String>> {
     let paths: Vec<String> = if let Some(v) = variant {
-        let mut stmt = conn.prepare(
-            "SELECT path FROM iwads WHERE family = ? AND variant = ?",
-        )?;
+        let mut stmt = conn.prepare("SELECT path FROM iwads WHERE family = ? AND variant = ?")?;
         stmt.query_map(rusqlite::params![family, v], |row| row.get(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?
     } else {
@@ -451,7 +547,15 @@ mod tests {
     #[test]
     fn test_add_and_get_iwad() {
         let conn = setup();
-        let id = add_iwad(&conn, "doom2", "v1.9", "/path/doom2.wad", Some("Doom II"), Some("abc123")).unwrap();
+        let id = add_iwad(
+            &conn,
+            "doom2",
+            "v1.9",
+            "/path/doom2.wad",
+            Some("Doom II"),
+            Some("abc123"),
+        )
+        .unwrap();
         assert!(id > 0);
 
         let iwad = get_iwad(&conn, "doom2", None).unwrap().unwrap();
@@ -481,7 +585,10 @@ mod tests {
 
         // Override priority to prefer BFG
         let mut user_prio = HashMap::new();
-        user_prio.insert("doom2".to_string(), vec!["bfg".to_string(), "v1.9".to_string()]);
+        user_prio.insert(
+            "doom2".to_string(),
+            vec!["bfg".to_string(), "v1.9".to_string()],
+        );
 
         let iwad = get_iwad(&conn, "doom2", Some(&user_prio)).unwrap().unwrap();
         assert_eq!(iwad.variant, "bfg");
@@ -645,13 +752,7 @@ mod tests {
 
     #[test]
     fn test_family_fallbacks() {
-        assert_eq!(
-            FAMILY_FALLBACKS.get("doom2"),
-            Some(&vec!["freedoom2"])
-        );
-        assert_eq!(
-            FAMILY_FALLBACKS.get("doom"),
-            Some(&vec!["freedoom1"])
-        );
+        assert_eq!(FAMILY_FALLBACKS.get("doom2"), Some(&vec!["freedoom2"]));
+        assert_eq!(FAMILY_FALLBACKS.get("doom"), Some(&vec!["freedoom1"]));
     }
 }

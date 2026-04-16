@@ -58,7 +58,12 @@ fn fzf_select(wads: &[WadRecord], multi: bool) -> Vec<usize> {
         .lines()
         .filter_map(|line| {
             // Parse the index from the "N: Title..." format
-            line.split(':').next()?.trim().parse::<usize>().ok().map(|n| n - 1)
+            line.split(':')
+                .next()?
+                .trim()
+                .parse::<usize>()
+                .ok()
+                .map(|n| n - 1)
         })
         .filter(|&idx| idx < wads.len())
         .collect()

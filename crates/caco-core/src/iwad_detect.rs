@@ -24,53 +24,44 @@ static DOOM2_MAP_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^MAP[0-9][0
 // 197 patch names present in TNT.WAD but not in DOOM2.WAD
 static TNT_ONLY_PATCHES: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     HashSet::from([
-        "ALTAQUA", "ASPHALT", "BCRAT16", "BCRAT32", "BIGMURAL", "BIGWALL",
-        "BLOD128A", "BLOD128B", "BLOD64A", "BLOD64B", "BLUTNT", "BRNOPEN",
-        "BTNTCRAT", "BUL64A", "BUL64B", "BUL64C", "BUL64D", "CARLLF1",
-        "CARLLF2", "CARLRT1", "CARLRT2", "CAVERN1", "CAVERN4", "CAVERN5",
-        "CAVERN6", "CAVERN7", "CLWDVS3", "CRLWDH6", "CRLWDH6B", "CRLWDL12",
-        "CRLWDL6", "CRLWDL6B", "CRLWDL6C", "CRLWDL6D", "CRLWDL6E", "CRLWDS6",
-        "CRLWDT3", "CRWDH6", "CRWDH6B", "CRWDL12", "CRWDL6B", "CRWDL6C",
-        "CRWDL6D", "CRWDS6", "CRWDT3", "CRWDVS3", "CYAN", "DISASTER",
-        "DOBIGTVA", "DOBIGTVB", "DOBIGTVC", "DOBIGTVD", "DOBLIP1A", "DOBLIP2A",
-        "DOBLIP3A", "DOBLIP4A", "DOBWIRE", "DOBWIRE2", "DOEDAY", "DOEHELL",
-        "DOENITE", "DOGLDIR", "DOGLPANL", "DOGRID", "DOGRMSC", "DOGRNMEN",
-        "DOKGRIR", "DOKODO1B", "DOKODO2B", "DONDAY", "DONHELL", "DONNITE",
-        "DOPUNK4", "DORED", "DOSDAY", "DOSHA1", "DOSHB1", "DOSHC1", "DOSHD1",
-        "DOSHE1", "DOSHELL", "DOSHF1", "DOSLVR11", "DOSLVR12", "DOSLVR13",
-        "DOSLVR14", "DOSLVR21", "DOSLVR22", "DOSLVR23", "DOSLVR24", "DOSNITE",
-        "DOSPI1B", "DOSPI2B", "DOSPI3B", "DOSPI4B", "DOSW1", "DOSW1C", "DOSW2",
-        "DOSW2C", "DOSW3", "DOSW3C", "DOSW4", "DOSW4C", "DOSWX1", "DOSWX1C",
-        "DOSWX2", "DOSWX2C", "DOSWX3", "DOSWX3C", "DOSWX4", "DOSWX4C",
-        "DOTNTDR", "DOTV1B", "DOTV2B", "DOTV3B", "DOTV4B", "DOWDAY", "DOWEBL",
-        "DOWEBR", "DOWHELL", "DOWINDOW", "DOWNITE", "DRFRONT", "DRSIDE1",
-        "DRSIDE2", "DRTOPFR", "DRTOPSID", "EGGREENI", "EGREDI", "FENCE4",
-        "FENCE5", "GRNLIT1", "GRNOPEN", "LONGWALL", "MTNT2", "MURAL1", "MURAL2",
-        "PBLAK", "PCWINL", "PILLAR", "PIVY3", "PL_01", "PL_05", "PL_10",
-        "PL_18", "PL_19", "PL_20", "PL_25", "PL_31", "PL_A", "PL_C", "PL_N",
-        "PL_T", "PL_U", "PREEL1", "PREEL2", "PREEL3", "PREEL4", "PREEL5",
-        "PREEL6", "PREEL7", "PSTON2", "REDLITE1", "REDLITE2", "REDOPEN",
-        "REDTNT2", "ROMERO1", "SAW1", "SAW1SD", "SAW2", "SAW2SD", "SAW3",
-        "SAW3SD", "SAW4", "SAW4SD", "SAW5", "SAW5SD", "SAW6", "SAW6SD",
-        "SKIRTING", "SMCRATG", "SMFILLER", "STONEW1", "STONEW5", "STWALL",
-        "TFOGF0", "TFOGI0", "TYUNDER1", "TYWFALL1", "TYWFALL2", "TYWFALL3",
-        "TYWFALL4", "TYWHEEL1", "YELLITE1", "YELLITE2", "YELLITE3", "YELTNT",
+        "ALTAQUA", "ASPHALT", "BCRAT16", "BCRAT32", "BIGMURAL", "BIGWALL", "BLOD128A", "BLOD128B",
+        "BLOD64A", "BLOD64B", "BLUTNT", "BRNOPEN", "BTNTCRAT", "BUL64A", "BUL64B", "BUL64C",
+        "BUL64D", "CARLLF1", "CARLLF2", "CARLRT1", "CARLRT2", "CAVERN1", "CAVERN4", "CAVERN5",
+        "CAVERN6", "CAVERN7", "CLWDVS3", "CRLWDH6", "CRLWDH6B", "CRLWDL12", "CRLWDL6", "CRLWDL6B",
+        "CRLWDL6C", "CRLWDL6D", "CRLWDL6E", "CRLWDS6", "CRLWDT3", "CRWDH6", "CRWDH6B", "CRWDL12",
+        "CRWDL6B", "CRWDL6C", "CRWDL6D", "CRWDS6", "CRWDT3", "CRWDVS3", "CYAN", "DISASTER",
+        "DOBIGTVA", "DOBIGTVB", "DOBIGTVC", "DOBIGTVD", "DOBLIP1A", "DOBLIP2A", "DOBLIP3A",
+        "DOBLIP4A", "DOBWIRE", "DOBWIRE2", "DOEDAY", "DOEHELL", "DOENITE", "DOGLDIR", "DOGLPANL",
+        "DOGRID", "DOGRMSC", "DOGRNMEN", "DOKGRIR", "DOKODO1B", "DOKODO2B", "DONDAY", "DONHELL",
+        "DONNITE", "DOPUNK4", "DORED", "DOSDAY", "DOSHA1", "DOSHB1", "DOSHC1", "DOSHD1", "DOSHE1",
+        "DOSHELL", "DOSHF1", "DOSLVR11", "DOSLVR12", "DOSLVR13", "DOSLVR14", "DOSLVR21",
+        "DOSLVR22", "DOSLVR23", "DOSLVR24", "DOSNITE", "DOSPI1B", "DOSPI2B", "DOSPI3B", "DOSPI4B",
+        "DOSW1", "DOSW1C", "DOSW2", "DOSW2C", "DOSW3", "DOSW3C", "DOSW4", "DOSW4C", "DOSWX1",
+        "DOSWX1C", "DOSWX2", "DOSWX2C", "DOSWX3", "DOSWX3C", "DOSWX4", "DOSWX4C", "DOTNTDR",
+        "DOTV1B", "DOTV2B", "DOTV3B", "DOTV4B", "DOWDAY", "DOWEBL", "DOWEBR", "DOWHELL",
+        "DOWINDOW", "DOWNITE", "DRFRONT", "DRSIDE1", "DRSIDE2", "DRTOPFR", "DRTOPSID", "EGGREENI",
+        "EGREDI", "FENCE4", "FENCE5", "GRNLIT1", "GRNOPEN", "LONGWALL", "MTNT2", "MURAL1",
+        "MURAL2", "PBLAK", "PCWINL", "PILLAR", "PIVY3", "PL_01", "PL_05", "PL_10", "PL_18",
+        "PL_19", "PL_20", "PL_25", "PL_31", "PL_A", "PL_C", "PL_N", "PL_T", "PL_U", "PREEL1",
+        "PREEL2", "PREEL3", "PREEL4", "PREEL5", "PREEL6", "PREEL7", "PSTON2", "REDLITE1",
+        "REDLITE2", "REDOPEN", "REDTNT2", "ROMERO1", "SAW1", "SAW1SD", "SAW2", "SAW2SD", "SAW3",
+        "SAW3SD", "SAW4", "SAW4SD", "SAW5", "SAW5SD", "SAW6", "SAW6SD", "SKIRTING", "SMCRATG",
+        "SMFILLER", "STONEW1", "STONEW5", "STWALL", "TFOGF0", "TFOGI0", "TYUNDER1", "TYWFALL1",
+        "TYWFALL2", "TYWFALL3", "TYWFALL4", "TYWHEEL1", "YELLITE1", "YELLITE2", "YELLITE3",
+        "YELTNT",
     ])
 });
 
 // 72 patch names present in Plutonia but not in DOOM.WAD, DOOM2.WAD, or TNT.WAD
 static PLUTONIA_ONLY_PATCHES: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     HashSet::from([
-        "AROCK2", "AROCK3", "AROCK4", "AROCK5", "BOSFA0", "BRBRICK",
-        "BRBRICK2", "BRICK", "BRICK1", "BRICK2", "BROCK2", "BROWN1", "BROWN2",
-        "BROWN3", "BROWN5", "CAMO1", "CAMO4", "CAMO5", "CONCRETE", "DARKROCK",
-        "DIRBRI1", "DIRBRI2", "FIREBLU1", "FIREBLU2", "GRATE",
-        "MARBLE1", "MC1", "MC10", "MC11", "MC12", "MC13", "MC14",
-        "MC15", "MC16", "MC17", "MC18", "MC19", "MC2", "MC20", "MC3", "MC4",
-        "MC5", "MC6", "MC7", "MC8", "MOSROK2", "MOSSBRIK", "MOSSROCK", "MOULD",
-        "MUD", "MYWOOD", "NATROCK", "POISON", "RAILING", "REDROCK", "ROCK",
-        "SKY2A", "SKY2B", "SKY2C", "SKY2D", "SKY3A", "SKY3B",
-        "SW1SKULL", "SW2SKULL", "TILE", "VINES1",
+        "AROCK2", "AROCK3", "AROCK4", "AROCK5", "BOSFA0", "BRBRICK", "BRBRICK2", "BRICK", "BRICK1",
+        "BRICK2", "BROCK2", "BROWN1", "BROWN2", "BROWN3", "BROWN5", "CAMO1", "CAMO4", "CAMO5",
+        "CONCRETE", "DARKROCK", "DIRBRI1", "DIRBRI2", "FIREBLU1", "FIREBLU2", "GRATE", "MARBLE1",
+        "MC1", "MC10", "MC11", "MC12", "MC13", "MC14", "MC15", "MC16", "MC17", "MC18", "MC19",
+        "MC2", "MC20", "MC3", "MC4", "MC5", "MC6", "MC7", "MC8", "MOSROK2", "MOSSBRIK", "MOSSROCK",
+        "MOULD", "MUD", "MYWOOD", "NATROCK", "POISON", "RAILING", "REDROCK", "ROCK", "SKY2A",
+        "SKY2B", "SKY2C", "SKY2D", "SKY3A", "SKY3B", "SW1SKULL", "SW2SKULL", "TILE", "VINES1",
         "WFALL1", "WFALL2", "WFALL3", "WFALL4", "WOOD", "YELLOW",
     ])
 });
@@ -90,9 +81,10 @@ pub fn detect_iwad(wad_path: &Path) -> Option<&'static str> {
 
     // Priority 1: PNAMES analysis (strongest signal for TNT/Plutonia vs Doom 2)
     if let Some(pnames) = parse_pnames(&wad_data, &directory)
-        && let Some(result) = detect_from_pnames(&pnames, &lump_names) {
-            return Some(result);
-        }
+        && let Some(result) = detect_from_pnames(&pnames, &lump_names)
+    {
+        return Some(result);
+    }
 
     // Priority 2: Map name format (Doom 1 vs Doom 2 family)
     detect_from_maps(&lump_names)
@@ -163,9 +155,7 @@ fn detect_from_pnames(
         .count();
     let needed_plutonia: usize = pnames
         .iter()
-        .filter(|p| {
-            PLUTONIA_ONLY_PATCHES.contains(p.as_str()) && !lump_names.contains(p.as_str())
-        })
+        .filter(|p| PLUTONIA_ONLY_PATCHES.contains(p.as_str()) && !lump_names.contains(p.as_str()))
         .count();
 
     if needed_tnt > 0 && needed_plutonia == 0 {
@@ -533,10 +523,7 @@ mod tests {
         pnames_data.extend_from_slice(b"ALTAQUA\0");
         pnames_data.extend_from_slice(b"BIGMURAL");
 
-        let wad = build_wad(&[
-            ("MAP01", &[]),
-            ("PNAMES", &pnames_data),
-        ]);
+        let wad = build_wad(&[("MAP01", &[]), ("PNAMES", &pnames_data)]);
         std::fs::write(&wad_path, &wad).unwrap();
 
         assert_eq!(detect_iwad(&wad_path), Some("tnt"));
@@ -552,10 +539,7 @@ mod tests {
         pnames_data.extend_from_slice(&1_i32.to_le_bytes());
         pnames_data.extend_from_slice(b"AROCK2\0\0");
 
-        let wad = build_wad(&[
-            ("MAP01", &[]),
-            ("PNAMES", &pnames_data),
-        ]);
+        let wad = build_wad(&[("MAP01", &[]), ("PNAMES", &pnames_data)]);
         std::fs::write(&wad_path, &wad).unwrap();
 
         // Should detect plutonia from PNAMES, not doom2 from MAPxx

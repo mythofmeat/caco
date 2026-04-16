@@ -5,15 +5,15 @@ use std::path::Path;
 use clap::Args;
 use rusqlite::Connection;
 
+use crate::picker;
 use caco_core::db;
 use caco_core::resource_service;
-use caco_sources::idgames::IdgamesClient;
 use caco_sources::doomwiki::DoomwikiClient;
 use caco_sources::doomworld::DoomworldClient;
 use caco_sources::doomworld::llm;
+use caco_sources::idgames::IdgamesClient;
 use caco_sources::import_service::{ImportResult, ImportService};
 use caco_sources::json_import::{self, JsonSource};
-use crate::picker;
 
 #[derive(Args)]
 pub struct ImportArgs {
@@ -116,7 +116,12 @@ pub fn run(conn: &Connection, args: &ImportArgs) -> Result<(), String> {
     let tags = if args.tag.is_empty() {
         None
     } else {
-        Some(args.tag.iter().map(|t| t.to_lowercase()).collect::<Vec<_>>())
+        Some(
+            args.tag
+                .iter()
+                .map(|t| t.to_lowercase())
+                .collect::<Vec<_>>(),
+        )
     };
 
     match source_type {
@@ -151,7 +156,10 @@ fn detect_source(args: &ImportArgs, source_str: &str) -> Result<SourceKind, Stri
     // route to JSON import with the appropriate source hint.
     if args.idgames {
         if is_json_file {
-            return Ok(SourceKind::JsonFile(source_str.to_string(), Some(JsonSource::Idgames)));
+            return Ok(SourceKind::JsonFile(
+                source_str.to_string(),
+                Some(JsonSource::Idgames),
+            ));
         }
         if let Ok(id) = source_str.parse::<i64>() {
             return Ok(SourceKind::IdgamesId(id));
@@ -160,7 +168,10 @@ fn detect_source(args: &ImportArgs, source_str: &str) -> Result<SourceKind, Stri
     }
     if args.doomwiki {
         if is_json_file {
-            return Ok(SourceKind::JsonFile(source_str.to_string(), Some(JsonSource::Doomwiki)));
+            return Ok(SourceKind::JsonFile(
+                source_str.to_string(),
+                Some(JsonSource::Doomwiki),
+            ));
         }
         return Ok(SourceKind::Doomwiki(source_str.to_string()));
     }
@@ -241,17 +252,23 @@ fn import_idgames_search(
     let wad_records: Vec<db::WadRecord> = results
         .iter()
         .enumerate()
-        .map(|(i, entry)| picker_wad_record(
-            i,
-            entry.title.clone(),
-            Some(entry.author.clone()),
-            caco_core::utils::extract_year(&entry.date),
-            if entry.description.is_empty() { None } else { Some(entry.description.clone()) },
-            "idgames",
-            Some(entry.id.to_string()),
-            None,
-            Some(entry.filename.clone()),
-        ))
+        .map(|(i, entry)| {
+            picker_wad_record(
+                i,
+                entry.title.clone(),
+                Some(entry.author.clone()),
+                caco_core::utils::extract_year(&entry.date),
+                if entry.description.is_empty() {
+                    None
+                } else {
+                    Some(entry.description.clone())
+                },
+                "idgames",
+                Some(entry.id.to_string()),
+                None,
+                Some(entry.filename.clone()),
+            )
+        })
         .collect();
 
     let selected = picker::pick_wads(&wad_records, args.multi);
@@ -332,17 +349,27 @@ fn import_doomwiki_search(
     let wad_records: Vec<db::WadRecord> = results
         .iter()
         .enumerate()
-        .map(|(i, entry)| picker_wad_record(
-            i,
-            entry.display_name().to_string(),
-            if entry.author.is_empty() { None } else { Some(entry.author.clone()) },
-            entry.year,
-            if entry.description.is_empty() { None } else { Some(entry.description.clone()) },
-            "doomwiki",
-            Some(entry.page_id.to_string()),
-            Some(entry.wiki_url.clone()),
-            None,
-        ))
+        .map(|(i, entry)| {
+            picker_wad_record(
+                i,
+                entry.display_name().to_string(),
+                if entry.author.is_empty() {
+                    None
+                } else {
+                    Some(entry.author.clone())
+                },
+                entry.year,
+                if entry.description.is_empty() {
+                    None
+                } else {
+                    Some(entry.description.clone())
+                },
+                "doomwiki",
+                Some(entry.page_id.to_string()),
+                Some(entry.wiki_url.clone()),
+                None,
+            )
+        })
         .collect();
 
     let selected = picker::pick_wads(&wad_records, args.multi);
@@ -407,10 +434,7 @@ fn import_url(
     tags: Option<Vec<String>>,
     args: &ImportArgs,
 ) -> Result<(), String> {
-    let title = args
-        .title
-        .as_deref()
-        .unwrap_or(source_str);
+    let title = args.title.as_deref().unwrap_or(source_str);
 
     let svc = ImportService;
     let result = svc.import_url(
@@ -451,9 +475,13 @@ fn import_doomworld(
     let llm_metadata = resolve_llm_metadata(&thread, args);
 
     // Merge: CLI flags > LLM extraction > regex extraction (thread fields)
-    let final_title = args.title.as_deref()
+    let final_title = args
+        .title
+        .as_deref()
         .or(llm_metadata.as_ref().and_then(|m| m.title.as_deref()));
-    let final_author = args.author.as_deref()
+    let final_author = args
+        .author
+        .as_deref()
         .or(llm_metadata.as_ref().and_then(|m| m.author.as_deref()));
     let final_year = args.year;
     let final_version = llm_metadata.as_ref().and_then(|m| m.version.as_deref());
@@ -479,12 +507,19 @@ fn import_doomworld(
             result.duplicate_id.unwrap_or(0),
         );
     } else if let Some(wad_id) = result.wad_id {
-        println!("Imported '{}' (ID: {wad_id})", final_title.unwrap_or(&thread.title));
+        println!(
+            "Imported '{}' (ID: {wad_id})",
+            final_title.unwrap_or(&thread.title)
+        );
 
         // Show extracted metadata (prefer LLM values, fall back to regex)
-        let iwad = llm_metadata.as_ref().and_then(|m| m.iwad.as_deref())
+        let iwad = llm_metadata
+            .as_ref()
+            .and_then(|m| m.iwad.as_deref())
             .or(thread.iwad.as_deref());
-        let port = llm_metadata.as_ref().and_then(|m| m.sourceport.as_deref())
+        let port = llm_metadata
+            .as_ref()
+            .and_then(|m| m.sourceport.as_deref())
             .or(thread.sourceport.as_deref());
         let cl = final_complevel.or(thread.complevel);
 
@@ -543,9 +578,13 @@ fn resolve_llm_metadata(
     }
 
     // Resolve backend/model/api_key: CLI flags > config values > auto-detect
-    let backend = args.llm_backend.as_deref()
+    let backend = args
+        .llm_backend
+        .as_deref()
         .or_else(|| Some(cfg.llm.backend.as_str()).filter(|s| !s.is_empty()));
-    let model = args.llm_model.as_deref()
+    let model = args
+        .llm_model
+        .as_deref()
         .or_else(|| Some(cfg.llm.model.as_str()).filter(|s| !s.is_empty()));
     let api_key = Some(cfg.llm.api_key.as_str()).filter(|s| !s.is_empty());
 
@@ -609,17 +648,23 @@ fn import_json_idgames(
     let wad_records: Vec<db::WadRecord> = entries
         .iter()
         .enumerate()
-        .map(|(i, entry)| picker_wad_record(
-            i,
-            entry.title.clone(),
-            Some(entry.author.clone()),
-            caco_core::utils::extract_year(&entry.date),
-            if entry.description.is_empty() { None } else { Some(entry.description.clone()) },
-            "idgames",
-            Some(entry.id.to_string()),
-            None,
-            Some(entry.filename.clone()),
-        ))
+        .map(|(i, entry)| {
+            picker_wad_record(
+                i,
+                entry.title.clone(),
+                Some(entry.author.clone()),
+                caco_core::utils::extract_year(&entry.date),
+                if entry.description.is_empty() {
+                    None
+                } else {
+                    Some(entry.description.clone())
+                },
+                "idgames",
+                Some(entry.id.to_string()),
+                None,
+                Some(entry.filename.clone()),
+            )
+        })
         .collect();
 
     let selected = picker::pick_wads(&wad_records, args.multi);
@@ -651,24 +696,37 @@ fn import_json_doomwiki(
 ) -> Result<(), String> {
     let entries = json_import::parse_doomwiki_json(path).map_err(|e| e.to_string())?;
     if entries.is_empty() {
-        return Err("No WAD pages found in JSON (only pages with {{Wad}} infobox are imported).".to_string());
+        return Err(
+            "No WAD pages found in JSON (only pages with {{Wad}} infobox are imported)."
+                .to_string(),
+        );
     }
 
     // Convert to WadRecords for picker
     let wad_records: Vec<db::WadRecord> = entries
         .iter()
         .enumerate()
-        .map(|(i, entry)| picker_wad_record(
-            i,
-            entry.display_name().to_string(),
-            if entry.author.is_empty() { None } else { Some(entry.author.clone()) },
-            entry.year,
-            if entry.description.is_empty() { None } else { Some(entry.description.clone()) },
-            "doomwiki",
-            Some(entry.page_id.to_string()),
-            Some(entry.wiki_url.clone()),
-            None,
-        ))
+        .map(|(i, entry)| {
+            picker_wad_record(
+                i,
+                entry.display_name().to_string(),
+                if entry.author.is_empty() {
+                    None
+                } else {
+                    Some(entry.author.clone())
+                },
+                entry.year,
+                if entry.description.is_empty() {
+                    None
+                } else {
+                    Some(entry.description.clone())
+                },
+                "doomwiki",
+                Some(entry.page_id.to_string()),
+                Some(entry.wiki_url.clone()),
+                None,
+            )
+        })
         .collect();
 
     let selected = picker::pick_wads(&wad_records, args.multi);
@@ -704,7 +762,9 @@ fn import_local(
     }
 
     // Check for IWAD first
-    let resolved = path.canonicalize().map_err(|e| format!("Cannot resolve path: {e}"))?;
+    let resolved = path
+        .canonicalize()
+        .map_err(|e| format!("Cannot resolve path: {e}"))?;
     if let Ok(Some((family, variant, title))) = try_register_iwad(conn, &resolved) {
         println!("Registered IWAD: {title} ({family}/{variant})");
         return Ok(());
@@ -720,10 +780,7 @@ fn import_local(
     let title = args
         .title
         .as_deref()
-        .or_else(|| {
-            path.file_stem()
-                .and_then(|s| s.to_str())
-        })
+        .or_else(|| path.file_stem().and_then(|s| s.to_str()))
         .unwrap_or("Unknown WAD");
 
     let svc = ImportService;

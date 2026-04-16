@@ -5,10 +5,10 @@ use caco_core::db::models::WadRecord;
 use caco_core::db::query::search_wads;
 use caco_core::db::sessions::{WadStats, get_wad_stats_batch};
 use caco_core::player::format_duration;
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::widgets::{Cell, Row, Table, TableState};
-use ratatui::Frame;
 use rusqlite::Connection;
 
 use crate::theme;
@@ -53,11 +53,7 @@ impl WadTableState {
             Ok(wads) => {
                 let ids: Vec<i64> = wads.iter().map(|w| w.id).collect();
                 self.stats_map = get_wad_stats_batch(conn, &ids).unwrap_or_default();
-                self.id_to_index = ids
-                    .iter()
-                    .enumerate()
-                    .map(|(i, &id)| (id, i))
-                    .collect();
+                self.id_to_index = ids.iter().enumerate().map(|(i, &id)| (id, i)).collect();
                 let count = wads.len();
                 self.wads = wads;
 
@@ -112,9 +108,7 @@ impl WadTableState {
 
     /// Get the currently selected WAD record.
     pub fn selected_wad(&self) -> Option<&WadRecord> {
-        self.table_state
-            .selected()
-            .and_then(|i| self.wads.get(i))
+        self.table_state.selected().and_then(|i| self.wads.get(i))
     }
 
     /// Get stats for the currently selected WAD.

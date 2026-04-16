@@ -3,15 +3,17 @@ use std::thread;
 
 use caco_sources::import_service::ImportService;
 
-use crate::import::state::{
-    FormKind, SearchResultEntry, SearchSource, SearchSourceData,
-};
+use crate::import::state::{FormKind, SearchResultEntry, SearchSource, SearchSourceData};
 use crate::message::AppMessage;
 use crate::workers::BackgroundSender;
 
 /// Convert an empty string to None, non-empty to Some(String).
 fn non_empty(s: &str) -> Option<String> {
-    if s.is_empty() { None } else { Some(s.to_string()) }
+    if s.is_empty() {
+        None
+    } else {
+        Some(s.to_string())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -78,8 +80,7 @@ fn search_doomwiki(query: &str) -> Vec<SearchResultEntry> {
 pub fn spawn_import_idgames(sender: BackgroundSender, db_path: PathBuf, source_id: String) {
     thread::spawn(move || {
         let result: Result<_, String> = (|| {
-            let conn =
-                caco_core::db::open_connection(&db_path).map_err(|e| e.to_string())?;
+            let conn = caco_core::db::open_connection(&db_path).map_err(|e| e.to_string())?;
             let client = caco_sources::idgames::IdgamesClient::new();
             let id: i64 = source_id
                 .parse()
@@ -99,8 +100,7 @@ pub fn spawn_import_idgames(sender: BackgroundSender, db_path: PathBuf, source_i
 pub fn spawn_import_doomwiki(sender: BackgroundSender, db_path: PathBuf, source_id: String) {
     thread::spawn(move || {
         let result: Result<_, String> = (|| {
-            let conn =
-                caco_core::db::open_connection(&db_path).map_err(|e| e.to_string())?;
+            let conn = caco_core::db::open_connection(&db_path).map_err(|e| e.to_string())?;
             let client = caco_sources::doomwiki::DoomwikiClient::new();
             let wiki_entry = client
                 .get_entry(&source_id)
@@ -125,8 +125,7 @@ pub fn spawn_import_form(
 ) {
     thread::spawn(move || {
         let result: Result<_, String> = (|| {
-            let conn =
-                caco_core::db::open_connection(&db_path).map_err(|e| e.to_string())?;
+            let conn = caco_core::db::open_connection(&db_path).map_err(|e| e.to_string())?;
             let service = ImportService;
 
             let get = |name: &str| -> String {
@@ -143,21 +142,17 @@ pub fn spawn_import_form(
                     .map(|(_, v)| v.clone())
                     .filter(|v| !v.is_empty())
             };
-            let tags_opt = caco_sources::import_service::normalize_tags(
-                get_opt("tags").as_deref(),
-            );
+            let tags_opt = caco_sources::import_service::normalize_tags(get_opt("tags").as_deref());
 
             let result = match kind {
                 FormKind::Doomworld => {
                     let url = get("url");
                     let title_override = get_opt("title");
                     let author_override = get_opt("author");
-                    let year_override =
-                        get_opt("year").and_then(|y| y.parse::<i32>().ok());
+                    let year_override = get_opt("year").and_then(|y| y.parse::<i32>().ok());
 
                     let client = caco_sources::doomworld::DoomworldClient::new();
-                    let thread =
-                        client.get_thread(&url).map_err(|e| e.to_string())?;
+                    let thread = client.get_thread(&url).map_err(|e| e.to_string())?;
                     service.import_doomworld(
                         &conn,
                         &thread,

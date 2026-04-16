@@ -51,8 +51,7 @@ pub fn render(
             if ui.input(|i| i.key_pressed(egui::Key::H) || i.key_pressed(egui::Key::ArrowLeft)) {
                 state.select_left(columns);
             }
-            if ui.input(|i| i.key_pressed(egui::Key::L) || i.key_pressed(egui::Key::ArrowRight))
-            {
+            if ui.input(|i| i.key_pressed(egui::Key::L) || i.key_pressed(egui::Key::ArrowRight)) {
                 state.select_right(columns);
             }
             if ui.input(|i| i.key_pressed(egui::Key::Home)) {
@@ -98,8 +97,8 @@ pub fn render(
                     let stats = state.stats_map.get(&wad_id);
 
                     // Allocate card space
-                    let (rect, response) =
-                        ui.allocate_exact_size(Vec2::new(card_w, card_height), egui::Sense::click());
+                    let (rect, response) = ui
+                        .allocate_exact_size(Vec2::new(card_w, card_height), egui::Sense::click());
 
                     // Handle clicks
                     if response.clicked() || response.secondary_clicked() {
@@ -140,10 +139,8 @@ pub fn render(
                     }
 
                     // Thumbnail area
-                    let thumb_rect = Rect::from_min_size(
-                        rect.min,
-                        Vec2::new(thumb_width, thumb_height),
-                    );
+                    let thumb_rect =
+                        Rect::from_min_size(rect.min, Vec2::new(thumb_width, thumb_height));
 
                     // Clip thumbnail to card's top rounding
                     let thumb_rounding = CornerRadius {
@@ -337,30 +334,26 @@ pub fn render(
                         && let Ok(wad_stats) = serde_json::from_str::<StatsData>(snapshot_json)
                         && !wad_stats.maps.is_empty()
                     {
-                            let total = wad_stats.maps.len();
-                            let played = wad_stats.played_maps().len();
-                            let pct = if total > 0 {
-                                (played as f32 / total as f32).min(1.0)
-                            } else {
-                                0.0
-                            };
+                        let total = wad_stats.maps.len();
+                        let played = wad_stats.played_maps().len();
+                        let pct = if total > 0 {
+                            (played as f32 / total as f32).min(1.0)
+                        } else {
+                            0.0
+                        };
 
-                            let bar_y = footer_y + 22.0;
-                            let bar_h = 4.0;
-                            let bar_x = body_x;
-                            let bar_w = rect.right() - 14.0 - bar_x;
-                            let bar_rect = Rect::from_min_size(
-                                egui::pos2(bar_x, bar_y),
-                                Vec2::new(bar_w, bar_h),
-                            );
-                            painter.rect_filled(bar_rect, 2.0, theme::BG_LIGHT);
-                            if pct > 0.0 {
-                                let fill_rect = Rect::from_min_size(
-                                    bar_rect.min,
-                                    Vec2::new(bar_w * pct, bar_h),
-                                );
-                                painter.rect_filled(fill_rect, 2.0, theme::TEXT_ACCENT);
-                            }
+                        let bar_y = footer_y + 22.0;
+                        let bar_h = 4.0;
+                        let bar_x = body_x;
+                        let bar_w = rect.right() - 14.0 - bar_x;
+                        let bar_rect =
+                            Rect::from_min_size(egui::pos2(bar_x, bar_y), Vec2::new(bar_w, bar_h));
+                        painter.rect_filled(bar_rect, 2.0, theme::BG_LIGHT);
+                        if pct > 0.0 {
+                            let fill_rect =
+                                Rect::from_min_size(bar_rect.min, Vec2::new(bar_w * pct, bar_h));
+                            painter.rect_filled(fill_rect, 2.0, theme::TEXT_ACCENT);
+                        }
                     }
                 }
             });

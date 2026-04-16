@@ -54,7 +54,9 @@ pub fn resolve(explicit: Option<PathBuf>) -> Result<CacoBin> {
     // Fallback: cargo run from workspace root. We find the workspace root by
     // walking up from current_exe() or CARGO_MANIFEST_DIR at compile time.
     if let Some(root) = locate_workspace_root() {
-        return Ok(CacoBin::CargoRun { workspace_root: root });
+        return Ok(CacoBin::CargoRun {
+            workspace_root: root,
+        });
     }
 
     Err(CacoMcpError::CacoBinNotFound { tried })

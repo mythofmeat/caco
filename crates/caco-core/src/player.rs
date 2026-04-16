@@ -68,8 +68,7 @@ pub enum RecordOption {
 /// and clears the live stats snapshot so progress tracks fresh.
 /// The prior playthrough's stats are preserved on its own record.
 pub fn start_new_playthrough(conn: &Connection, wad_id: i64) -> crate::Result<i64> {
-    db::get_wad(conn, wad_id, false)?
-        .ok_or(crate::Error::WadNotFound(wad_id))?;
+    db::get_wad(conn, wad_id, false)?.ok_or(crate::Error::WadNotFound(wad_id))?;
 
     // Guard: must not already have an active playthrough
     if db::get_active_playthrough(conn, wad_id)?.is_some() {
@@ -82,8 +81,7 @@ pub fn start_new_playthrough(conn: &Connection, wad_id: i64) -> crate::Result<i6
     let pt_id = db::start_playthrough(conn, wad_id)?;
 
     // Clear live stats snapshot so auto-completion tracks fresh
-    let update = db::WadUpdate::new()
-        .set_text("stats_snapshot", None)?;
+    let update = db::WadUpdate::new().set_text("stats_snapshot", None)?;
     db::update_wad(conn, wad_id, &update)?;
 
     Ok(pt_id)
@@ -93,8 +91,7 @@ pub fn start_new_playthrough(conn: &Connection, wad_id: i64) -> crate::Result<i6
 ///
 /// Returns a `PlayResult` with duration and exit code.
 pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result<PlayResult> {
-    let wad = db::get_wad(conn, wad_id, false)?
-        .ok_or(crate::Error::WadNotFound(wad_id))?;
+    let wad = db::get_wad(conn, wad_id, false)?.ok_or(crate::Error::WadNotFound(wad_id))?;
 
     // Get WAD file path (must already be cached/linked)
     let wad_path = wad.cached_path.as_deref().and_then(|p| {
@@ -131,8 +128,8 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
         Some(v) => v != 0,
         None => {
             if let Some(detected) = zdoom_detect::detect_zdoom_required(&wad_path) {
-                let update = db::WadUpdate::new()
-                    .set_int("zdoom_required", Some(i64::from(detected)))?;
+                let update =
+                    db::WadUpdate::new().set_int("zdoom_required", Some(i64::from(detected)))?;
                 db::update_wad(conn, wad_id, &update)?;
                 detected
             } else {
@@ -143,15 +140,12 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
 
     // If zdoom required but current port isn't zdoom-family, force to zdoom sourceport
     let port = if zdoom_required {
-        let is_zdoom_family = sourceports::family_name(&port)
-            .is_some_and(|name| name == "zdoom");
+        let is_zdoom_family = sourceports::family_name(&port).is_some_and(|name| name == "zdoom");
         if is_zdoom_family {
             port
         } else {
             let zdoom_port = config::get_zdoom_sourceport();
-            eprintln!(
-                "WAD requires ZDoom-family sourceport, using {zdoom_port} instead of {port}"
-            );
+            eprintln!("WAD requires ZDoom-family sourceport, using {zdoom_port} instead of {port}");
             zdoom_port
         }
     } else {
@@ -163,26 +157,25 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
 
     // Auto-detect IWAD if not explicitly set
     let mut custom_iwad = wad.custom_iwad.clone();
-    if custom_iwad.is_none() && config::get_auto_detect_iwad()
-        && let Some(detected) = iwad_detect::detect_iwad(&wad_path) {
-            let update = db::WadUpdate::new()
-                .set_text("custom_iwad", Some(detected.to_string()))?;
-            db::update_wad(conn, wad_id, &update)?;
-            custom_iwad = Some(detected.to_string());
-        }
+    if custom_iwad.is_none()
+        && config::get_auto_detect_iwad()
+        && let Some(detected) = iwad_detect::detect_iwad(&wad_path)
+    {
+        let update = db::WadUpdate::new().set_text("custom_iwad", Some(detected.to_string()))?;
+        db::update_wad(conn, wad_id, &update)?;
+        custom_iwad = Some(detected.to_string());
+    }
 
     // Auto-detect complevel if not explicitly set
     let mut complevel = wad.complevel;
     if complevel.is_none() && config::get_auto_detect_complevel() {
         // Try COMPLVL lump first (id24 signal)
         if let Some(cl) = iwad_detect::detect_complvl(&wad_path) {
-            let update = db::WadUpdate::new()
-                .set_int("complevel", Some(cl as i64))?;
+            let update = db::WadUpdate::new().set_int("complevel", Some(cl as i64))?;
             db::update_wad(conn, wad_id, &update)?;
             complevel = Some(cl);
         } else if let Some(cl) = complevel_detect::detect_complevel(&wad_path) {
-            let update = db::WadUpdate::new()
-                .set_int("complevel", Some(cl as i64))?;
+            let update = db::WadUpdate::new().set_int("complevel", Some(cl as i64))?;
             db::update_wad(conn, wad_id, &update)?;
             complevel = Some(cl);
         }
@@ -221,9 +214,10 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
 
     // Add per-WAD custom args
     if let Some(ref custom_args) = wad.custom_args
-        && let Ok(args) = serde_json::from_str::<Vec<String>>(custom_args) {
-            cmd.args(&args);
-        }
+        && let Ok(args) = serde_json::from_str::<Vec<String>>(custom_args)
+    {
+        cmd.args(&args);
+    }
 
     // Inject managed config profile
     let profile_name = opts
@@ -328,7 +322,8 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
 
     // For zdoom-family ports, inject the stats reporter PK3 mod
     let is_zdoom = sourceports::family_name(&port) == Some("zdoom");
-    if is_zdoom && config::get_auto_stats()
+    if is_zdoom
+        && config::get_auto_stats()
         && let Ok(pk3_path) = stats_watcher::ensure_stats_mod()
     {
         file_args.push(pk3_path.to_string_lossy().into_owned());
@@ -350,7 +345,8 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
     }
 
     // For zdoom-family ports, set up logfile for stats collection
-    if is_zdoom && config::get_auto_stats()
+    if is_zdoom
+        && config::get_auto_stats()
         && let Some(ref data_dir) = wad_data_dir
     {
         let log_path = data_dir.join(stats_watcher::LOG_FILENAME);
@@ -389,7 +385,8 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
     db::end_session(conn, session_id, None, status.code())?;
 
     // For zdoom-family ports, parse the log and write levelstat.txt
-    if is_zdoom && config::get_auto_stats()
+    if is_zdoom
+        && config::get_auto_stats()
         && let Some(ref data_dir) = wad_data_dir
     {
         stats_watcher::collect_zdoom_stats(data_dir);
@@ -535,9 +532,10 @@ fn get_id24_resource_args(conn: &Connection, wad_path: Option<&Path>) -> Vec<Str
 
     // Load id24res.wad for any id24 WAD
     if let Ok(Some(id24res)) = db::get_id24(conn, "id24res")
-        && Path::new(&id24res.path).exists() {
-            file_args.push(id24res.path);
-        }
+        && Path::new(&id24res.path).exists()
+    {
+        file_args.push(id24res.path);
+    }
 
     // Check if this is id1.wad (Legacy of Rust)
     let is_id1 = wad_path
@@ -548,9 +546,10 @@ fn get_id24_resource_args(conn: &Connection, wad_path: Option<&Path>) -> Vec<Str
     if is_id1 {
         for name in &["id1-res", "id1-tex", "id1-weap", "id1-mus"] {
             if let Ok(Some(entry)) = db::get_id24(conn, name)
-                && Path::new(&entry.path).exists() {
-                    file_args.push(entry.path);
-                }
+                && Path::new(&entry.path).exists()
+            {
+                file_args.push(entry.path);
+            }
         }
     }
 
@@ -681,9 +680,7 @@ fn check_auto_completion(
     };
 
     // Get current stats (prefer fresh stats_json, fall back to DB)
-    let stats_str = stats_json
-        .map(|s| s.to_string())
-        .or(wad.stats_snapshot);
+    let stats_str = stats_json.map(|s| s.to_string()).or(wad.stats_snapshot);
     let stats_str = match stats_str {
         Some(s) => s,
         None => return AutoCompleteResult::Unknown,
@@ -715,24 +712,30 @@ mod tests {
 
     #[test]
     fn test_play_result_crashed() {
-        assert!(PlayResult {
-            duration: Some(60),
-            exit_code: Some(1),
-            auto_complete: AutoCompleteResult::Unknown,
-        }
-        .crashed());
-        assert!(!PlayResult {
-            duration: Some(60),
-            exit_code: Some(0),
-            auto_complete: AutoCompleteResult::Unknown,
-        }
-        .crashed());
-        assert!(!PlayResult {
-            duration: Some(60),
-            exit_code: None,
-            auto_complete: AutoCompleteResult::Unknown,
-        }
-        .crashed());
+        assert!(
+            PlayResult {
+                duration: Some(60),
+                exit_code: Some(1),
+                auto_complete: AutoCompleteResult::Unknown,
+            }
+            .crashed()
+        );
+        assert!(
+            !PlayResult {
+                duration: Some(60),
+                exit_code: Some(0),
+                auto_complete: AutoCompleteResult::Unknown,
+            }
+            .crashed()
+        );
+        assert!(
+            !PlayResult {
+                duration: Some(60),
+                exit_code: None,
+                auto_complete: AutoCompleteResult::Unknown,
+            }
+            .crashed()
+        );
     }
 
     #[test]
@@ -771,8 +774,18 @@ mod tests {
     #[test]
     fn test_find_all_stats_files_multiple() {
         let dir = tempfile::tempdir().unwrap();
-        let dir_a = dir.path().join("nyan_doom_data").join("tnt").join("100_tnt2").join("tnt2bmus");
-        let dir_b = dir.path().join("nyan_doom_data").join("tnt").join("tnt2_1_2").join("tnt2bmus");
+        let dir_a = dir
+            .path()
+            .join("nyan_doom_data")
+            .join("tnt")
+            .join("100_tnt2")
+            .join("tnt2bmus");
+        let dir_b = dir
+            .path()
+            .join("nyan_doom_data")
+            .join("tnt")
+            .join("tnt2_1_2")
+            .join("tnt2bmus");
         std::fs::create_dir_all(&dir_a).unwrap();
         std::fs::create_dir_all(&dir_b).unwrap();
         std::fs::write(dir_a.join("stats.txt"), "1\n0\n").unwrap();
@@ -784,17 +797,14 @@ mod tests {
 
     #[test]
     fn test_new_playthrough_clears_stats_snapshot() {
-        use crate::db::{self, init_db, open_memory};
         use crate::db::SourceType;
+        use crate::db::{self, init_db, open_memory};
 
         let conn = open_memory().unwrap();
         init_db(&conn).unwrap();
 
         // Create a WAD and complete a playthrough
-        let wad_id = db::add_wad(
-            &conn,
-            &db::NewWad::new("Test WAD", SourceType::Local),
-        ).unwrap();
+        let wad_id = db::add_wad(&conn, &db::NewWad::new("Test WAD", SourceType::Local)).unwrap();
         let pt_id = db::start_playthrough(&conn, wad_id).unwrap();
 
         // Set a stats snapshot on the WAD
@@ -827,16 +837,13 @@ mod tests {
 
     #[test]
     fn test_new_playthrough_rejects_active() {
-        use crate::db::{self, init_db, open_memory};
         use crate::db::SourceType;
+        use crate::db::{self, init_db, open_memory};
 
         let conn = open_memory().unwrap();
         init_db(&conn).unwrap();
 
-        let wad_id = db::add_wad(
-            &conn,
-            &db::NewWad::new("Test WAD", SourceType::Local),
-        ).unwrap();
+        let wad_id = db::add_wad(&conn, &db::NewWad::new("Test WAD", SourceType::Local)).unwrap();
         db::start_playthrough(&conn, wad_id).unwrap();
 
         // Should fail — already has an active playthrough

@@ -5,8 +5,8 @@ use caco_core::db::models::Status;
 use caco_core::db::sessions;
 use caco_core::db::wads;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::Frame;
+use ratatui::layout::{Constraint, Layout, Rect};
 use rusqlite::Connection;
 
 use crate::message::{AppMessage, ScreenId, Severity};
@@ -32,11 +32,7 @@ pub struct LibraryPaneState {
 }
 
 impl LibraryPaneState {
-    pub fn new(
-        tab_query: Option<String>,
-        sort_field: &str,
-        sort_desc: bool,
-    ) -> Self {
+    pub fn new(tab_query: Option<String>, sort_field: &str, sort_desc: bool) -> Self {
         Self {
             table: WadTableState::new(),
             filter: FilterInputState::new(),
@@ -141,18 +137,22 @@ impl LibraryPaneState {
             }
 
             // Actions
-            (KeyCode::Char('i'), KeyModifiers::NONE) => {
-                self.table.selected_wad_id().map(|id| AppMessage::PushScreen(ScreenId::WadDetail(id)))
-            }
-            (KeyCode::Char('h'), KeyModifiers::NONE) => {
-                self.table.selected_wad_id().map(|id| AppMessage::PushScreen(ScreenId::Sessions(id)))
-            }
-            (KeyCode::Char('e'), KeyModifiers::NONE) => {
-                self.table.selected_wad_id().map(|id| AppMessage::PushScreen(ScreenId::WadEdit(id)))
-            }
-            (KeyCode::Char('d'), KeyModifiers::NONE) => {
-                self.table.selected_wad_id().map(|id| AppMessage::PushScreen(ScreenId::ConfirmDelete(id)))
-            }
+            (KeyCode::Char('i'), KeyModifiers::NONE) => self
+                .table
+                .selected_wad_id()
+                .map(|id| AppMessage::PushScreen(ScreenId::WadDetail(id))),
+            (KeyCode::Char('h'), KeyModifiers::NONE) => self
+                .table
+                .selected_wad_id()
+                .map(|id| AppMessage::PushScreen(ScreenId::Sessions(id))),
+            (KeyCode::Char('e'), KeyModifiers::NONE) => self
+                .table
+                .selected_wad_id()
+                .map(|id| AppMessage::PushScreen(ScreenId::WadEdit(id))),
+            (KeyCode::Char('d'), KeyModifiers::NONE) => self
+                .table
+                .selected_wad_id()
+                .map(|id| AppMessage::PushScreen(ScreenId::ConfirmDelete(id))),
 
             // Status mode
             (KeyCode::Char('s'), KeyModifiers::NONE) => {
@@ -195,9 +195,10 @@ impl LibraryPaneState {
             }
 
             // Map stats
-            (KeyCode::Char('M'), KeyModifiers::SHIFT | KeyModifiers::NONE) => {
-                self.table.selected_wad_id().map(|id| AppMessage::PushScreen(ScreenId::WadStats(id)))
-            }
+            (KeyCode::Char('M'), KeyModifiers::SHIFT | KeyModifiers::NONE) => self
+                .table
+                .selected_wad_id()
+                .map(|id| AppMessage::PushScreen(ScreenId::WadStats(id))),
 
             // Trash
             (KeyCode::Char('T'), KeyModifiers::SHIFT | KeyModifiers::NONE) => {
@@ -245,11 +246,7 @@ impl LibraryPaneState {
         }
     }
 
-    fn handle_status_mode_key(
-        &mut self,
-        key: KeyEvent,
-        conn: &Connection,
-    ) -> Option<AppMessage> {
+    fn handle_status_mode_key(&mut self, key: KeyEvent, conn: &Connection) -> Option<AppMessage> {
         self.status_mode = false;
 
         let status = match key.code {
@@ -340,9 +337,9 @@ pub fn render_library_pane(
     let bottom_height = 1;
 
     let layout = Layout::vertical([
-        Constraint::Length(1), // filter + sort
-        Constraint::Min(1),   // content
-        Constraint::Length(bottom_height),  // status/hints
+        Constraint::Length(1),             // filter + sort
+        Constraint::Min(1),                // content
+        Constraint::Length(bottom_height), // status/hints
     ])
     .split(area);
 
@@ -351,11 +348,8 @@ pub fn render_library_pane(
     let bottom_area = layout[2];
 
     // Header: filter (left) + sort (right)
-    let header_layout = Layout::horizontal([
-        Constraint::Min(20),
-        Constraint::Length(25),
-    ])
-    .split(header_area);
+    let header_layout =
+        Layout::horizontal([Constraint::Min(20), Constraint::Length(25)]).split(header_area);
 
     filter_input::render_filter_input(&state.filter, frame, header_layout[0]);
     sort_select::render_sort_select(&state.sort, frame, header_layout[1]);
@@ -363,11 +357,9 @@ pub fn render_library_pane(
     // Content: table (left) + info panel (right)
     let show_panel = state.show_panel && terminal_width >= 100;
     if show_panel {
-        let content_layout = Layout::horizontal([
-            Constraint::Percentage(65),
-            Constraint::Percentage(35),
-        ])
-        .split(content_area);
+        let content_layout =
+            Layout::horizontal([Constraint::Percentage(65), Constraint::Percentage(35)])
+                .split(content_area);
 
         wad_table::render_wad_table(&mut state.table, frame, content_layout[0]);
 

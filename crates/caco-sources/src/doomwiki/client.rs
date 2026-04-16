@@ -80,10 +80,7 @@ impl DoomwikiClient {
         {
             for item in search_arr {
                 results.push(SearchResult {
-                    page_id: item
-                        .get("pageid")
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(0),
+                    page_id: item.get("pageid").and_then(|v| v.as_i64()).unwrap_or(0),
                     title: item
                         .get("title")
                         .and_then(|v| v.as_str())
@@ -127,7 +124,11 @@ impl DoomwikiClient {
             ("rvprop", "content"),
         ])?;
 
-        if let Some(pages) = data.get("query").and_then(|q| q.get("pages")).and_then(|p| p.as_object()) {
+        if let Some(pages) = data
+            .get("query")
+            .and_then(|q| q.get("pages"))
+            .and_then(|p| p.as_object())
+        {
             let page_data = match pages.get(&id_str) {
                 Some(p) => p,
                 None => return Ok(None),
@@ -155,9 +156,7 @@ impl DoomwikiClient {
     pub fn get_entry(&self, title: &str) -> Result<Option<WikiEntry>> {
         let result = self.get_page_content(title)?;
         match result {
-            Some((page_id, wikitext)) => {
-                Ok(Some(self.parser.parse(&wikitext, title, page_id)))
-            }
+            Some((page_id, wikitext)) => Ok(Some(self.parser.parse(&wikitext, title, page_id))),
             None => Ok(None),
         }
     }
@@ -166,9 +165,7 @@ impl DoomwikiClient {
     pub fn get_entry_by_id(&self, page_id: i64) -> Result<Option<WikiEntry>> {
         let result = self.get_page_content_by_id(page_id)?;
         match result {
-            Some((title, wikitext)) => {
-                Ok(Some(self.parser.parse(&wikitext, &title, page_id)))
-            }
+            Some((title, wikitext)) => Ok(Some(self.parser.parse(&wikitext, &title, page_id))),
             None => Ok(None),
         }
     }
@@ -210,9 +207,10 @@ impl DoomwikiClient {
                         .unwrap_or("")
                         .to_string();
                     if let Some(content) = extract_revision_content(page_data)
-                        && let Ok(pid) = page_id_str.parse::<i64>() {
-                            results.insert(title, (pid, content));
-                        }
+                        && let Ok(pid) = page_id_str.parse::<i64>()
+                    {
+                        results.insert(title, (pid, content));
+                    }
                 }
             }
         }
@@ -236,9 +234,10 @@ impl DoomwikiClient {
         let mut entries = Vec::new();
         for result in &search_results {
             if let Some((page_id, wikitext)) = pages.get(&result.title)
-                && self.parser.has_wad_template(wikitext) {
-                    entries.push(self.parser.parse(wikitext, &result.title, *page_id));
-                }
+                && self.parser.has_wad_template(wikitext)
+            {
+                entries.push(self.parser.parse(wikitext, &result.title, *page_id));
+            }
         }
 
         Ok(entries)

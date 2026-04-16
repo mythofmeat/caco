@@ -13,10 +13,11 @@ use crate::server::CacoMcpServer;
 fn open_ro(paths: &SandboxPaths) -> Result<Connection> {
     let db = paths.db_path();
     if !db.is_file() {
-        return Err(CacoMcpError::SandboxMissing { path: paths.sandbox.clone() });
+        return Err(CacoMcpError::SandboxMissing {
+            path: paths.sandbox.clone(),
+        });
     }
-    Connection::open_with_flags(&db, OpenFlags::SQLITE_OPEN_READ_ONLY)
-        .map_err(CacoMcpError::from)
+    Connection::open_with_flags(&db, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(CacoMcpError::from)
 }
 
 #[derive(Deserialize, schemars::JsonSchema, Default)]
@@ -280,8 +281,7 @@ pub fn execute_run_sql(paths: &SandboxPaths, sql: &str) -> Result<RunSqlResult> 
             reason: "multiple statements not allowed".into(),
         });
     }
-    let conn =
-        Connection::open_with_flags(paths.db_path(), OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let conn = Connection::open_with_flags(paths.db_path(), OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     let stmt = conn.prepare(sql)?;
     if !stmt.readonly() {
         return Err(CacoMcpError::SqlRejected {
@@ -312,7 +312,11 @@ pub fn execute_run_sql(paths: &SandboxPaths, sql: &str) -> Result<RunSqlResult> 
         }
         rows.push(vals);
     }
-    Ok(RunSqlResult { columns, rows, truncated })
+    Ok(RunSqlResult {
+        columns,
+        rows,
+        truncated,
+    })
 }
 
 /// Returns true if `sql` contains a `;` that is not at end-of-string
@@ -378,8 +382,7 @@ mod run_sql_tests {
     #[test]
     fn rejects_insert() {
         let (_d, paths) = seed_sandbox();
-        let err =
-            execute_run_sql(&paths, "INSERT INTO wads VALUES (3, 'Final Doom')").unwrap_err();
+        let err = execute_run_sql(&paths, "INSERT INTO wads VALUES (3, 'Final Doom')").unwrap_err();
         assert!(matches!(
             err,
             CacoMcpError::SqlRejected { .. } | CacoMcpError::Database(_)
@@ -399,8 +402,7 @@ mod run_sql_tests {
     #[test]
     fn rejects_update() {
         let (_d, paths) = seed_sandbox();
-        let err =
-            execute_run_sql(&paths, "UPDATE wads SET title = 'x' WHERE id = 1").unwrap_err();
+        let err = execute_run_sql(&paths, "UPDATE wads SET title = 'x' WHERE id = 1").unwrap_err();
         assert!(matches!(
             err,
             CacoMcpError::SqlRejected { .. } | CacoMcpError::Database(_)

@@ -1,11 +1,11 @@
 use caco_core::db::models::WadRecord;
 use caco_core::db::sessions::WadStats;
 use caco_core::player::format_duration;
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
-use ratatui::Frame;
 
 use crate::theme;
 
@@ -46,8 +46,7 @@ pub fn render_wad_info(
     frame.render_widget(block, area);
 
     let Some(wad) = wad else {
-        let msg = Paragraph::new("No WAD selected")
-            .style(theme::dim_style());
+        let msg = Paragraph::new("No WAD selected").style(theme::dim_style());
         frame.render_widget(msg, inner);
         return;
     };
@@ -57,10 +56,7 @@ pub fn render_wad_info(
     let mut lines = Vec::new();
 
     // Title
-    lines.push(Line::from(Span::styled(
-        &wad.title,
-        theme::title_style(),
-    )));
+    lines.push(Line::from(Span::styled(&wad.title, theme::title_style())));
     lines.push(Line::from(""));
 
     // Author / Year
@@ -163,10 +159,7 @@ pub fn render_wad_info(
         let snippet: String = desc.chars().take(200).collect();
         if !snippet.is_empty() {
             lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                snippet,
-                theme::dim_style(),
-            )));
+            lines.push(Line::from(Span::styled(snippet, theme::dim_style())));
         }
     }
 

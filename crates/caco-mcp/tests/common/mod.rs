@@ -32,11 +32,9 @@ where
             let source = TempDir::new().expect("source tempdir");
             seed_source_home(source.path());
 
-            let paths = SandboxPaths::new(
-                sandbox.path().to_path_buf(),
-                source.path().to_path_buf(),
-            )
-            .expect("sandbox path valid");
+            let paths =
+                SandboxPaths::new(sandbox.path().to_path_buf(), source.path().to_path_buf())
+                    .expect("sandbox path valid");
 
             // Use the cargo-run fallback — integration tests don't need a
             // prebuilt caco binary, and resolve() handles that case.

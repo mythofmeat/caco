@@ -391,8 +391,8 @@ mod tests {
         assert_eq!(img.width, 1);
         assert_eq!(img.height, 1);
         assert_eq!(img.pixels[0], 255); // R
-        assert_eq!(img.pixels[1], 0);   // G
-        assert_eq!(img.pixels[2], 0);   // B
+        assert_eq!(img.pixels[1], 0); // G
+        assert_eq!(img.pixels[2], 0); // B
         assert_eq!(img.pixels[3], 255); // A
     }
 
@@ -414,21 +414,21 @@ mod tests {
         data.extend_from_slice(&(col1_off as u32).to_le_bytes());
 
         // Column 0: one post covering rows 0-1
-        data.push(0);  // top_delta
-        data.push(2);  // length
-        data.push(0);  // pad
+        data.push(0); // top_delta
+        data.push(2); // length
+        data.push(0); // pad
         data.push(10); // pixel 0
         data.push(20); // pixel 1
-        data.push(0);  // pad
+        data.push(0); // pad
         data.push(0xFF); // end
 
         // Column 1: one post covering rows 0-1
-        data.push(0);  // top_delta
-        data.push(2);  // length
-        data.push(0);  // pad
+        data.push(0); // top_delta
+        data.push(2); // length
+        data.push(0); // pad
         data.push(30); // pixel 0
         data.push(40); // pixel 1
-        data.push(0);  // pad
+        data.push(0); // pad
         data.push(0xFF); // end
 
         let wad = build_wad(&[("TITLEPIC", &data)]);
@@ -441,10 +441,10 @@ mod tests {
         assert_eq!(img.pixels.len(), 2 * 2 * 4);
 
         // Row 0: Doom palette fallback — indices 10, 30
-        assert_eq!(img.pixels[0], DOOM_PALETTE[10 * 3]);   // [0,0].r
-        assert_eq!(img.pixels[4], DOOM_PALETTE[30 * 3]);   // [0,1].r
+        assert_eq!(img.pixels[0], DOOM_PALETTE[10 * 3]); // [0,0].r
+        assert_eq!(img.pixels[4], DOOM_PALETTE[30 * 3]); // [0,1].r
         // Row 1: indices 20, 40
-        assert_eq!(img.pixels[8], DOOM_PALETTE[20 * 3]);   // [1,0].r
-        assert_eq!(img.pixels[12], DOOM_PALETTE[40 * 3]);  // [1,1].r
+        assert_eq!(img.pixels[8], DOOM_PALETTE[20 * 3]); // [1,0].r
+        assert_eq!(img.pixels[12], DOOM_PALETTE[40 * 3]); // [1,1].r
     }
 }

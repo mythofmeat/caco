@@ -5,9 +5,9 @@ use std::path::Path;
 use clap::Args;
 use rusqlite::Connection;
 
-use caco_core::db;
 use crate::output::{self, OutputFormat};
 use crate::resolve::{self, ResolveMode};
+use caco_core::db;
 
 #[derive(Args)]
 pub struct TrashArgs {
@@ -62,8 +62,7 @@ pub fn run(conn: &Connection, args: &TrashArgs) -> Result<(), String> {
 
     // List trash
     if args.list {
-        let wads = db::search_wads(conn, None, None, true, true, 0)
-            .map_err(|e| e.to_string())?;
+        let wads = db::search_wads(conn, None, None, true, true, 0).map_err(|e| e.to_string())?;
         let wad_ids: Vec<i64> = wads.iter().map(|w| w.id).collect();
         let stats = db::get_wad_stats_batch(conn, &wad_ids).map_err(|e| e.to_string())?;
         output::render_wad_list(&wads, &stats, format);
@@ -101,8 +100,8 @@ pub fn run(conn: &Connection, args: &TrashArgs) -> Result<(), String> {
     // Purge all deleted
     if args.purge {
         if args.dry_run {
-            let wads = db::search_wads(conn, None, None, true, true, 0)
-                .map_err(|e| e.to_string())?;
+            let wads =
+                db::search_wads(conn, None, None, true, true, 0).map_err(|e| e.to_string())?;
             println!("Would permanently delete {} WAD(s).", wads.len());
             return Ok(());
         }
@@ -152,8 +151,8 @@ fn remove_iwad(conn: &Connection, spec: &str, yes: bool, dry_run: bool) -> Resul
             println!("Would remove IWAD {family}/{var}.");
             return Ok(());
         }
-        let removed = db::remove_iwad_with_paths(conn, &family, Some(var))
-            .map_err(|e| e.to_string())?;
+        let removed =
+            db::remove_iwad_with_paths(conn, &family, Some(var)).map_err(|e| e.to_string())?;
         for path in &removed {
             let p = Path::new(path);
             if p.exists() {
@@ -168,7 +167,11 @@ fn remove_iwad(conn: &Connection, spec: &str, yes: bool, dry_run: bool) -> Resul
             return Err(format!("No IWAD registered with family '{family}'."));
         }
         if variants.len() > 1 && !yes {
-            eprintln!("Warning: {} variants of '{}' will be removed:", variants.len(), family);
+            eprintln!(
+                "Warning: {} variants of '{}' will be removed:",
+                variants.len(),
+                family
+            );
             for v in &variants {
                 eprintln!("  {}/{}", v.family, v.variant);
             }
@@ -177,11 +180,13 @@ fn remove_iwad(conn: &Connection, spec: &str, yes: bool, dry_run: bool) -> Resul
             }
         }
         if dry_run {
-            println!("Would remove {} variant(s) of IWAD '{family}'.", variants.len());
+            println!(
+                "Would remove {} variant(s) of IWAD '{family}'.",
+                variants.len()
+            );
             return Ok(());
         }
-        let removed = db::remove_iwad_with_paths(conn, &family, None)
-            .map_err(|e| e.to_string())?;
+        let removed = db::remove_iwad_with_paths(conn, &family, None).map_err(|e| e.to_string())?;
         for path in &removed {
             let p = Path::new(path);
             if p.exists() {

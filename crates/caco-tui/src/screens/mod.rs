@@ -9,8 +9,8 @@ pub mod wad_edit;
 pub mod wad_stats;
 
 use crossterm::event::KeyEvent;
-use ratatui::layout::Rect;
 use ratatui::Frame;
+use ratatui::layout::Rect;
 use rusqlite::Connection;
 
 use crate::message::{AppMessage, ScreenResult};

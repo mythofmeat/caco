@@ -1,9 +1,9 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use ratatui::Frame;
 
 use crate::input::TextInput;
 
@@ -169,8 +169,8 @@ pub fn render_form_pane(state: &FormPaneState, frame: &mut Frame, area: Rect) {
 
     for (i, field) in state.fields.iter().enumerate() {
         let field_area = layout[i];
-        let rows = Layout::vertical([Constraint::Length(1), Constraint::Length(1)])
-            .split(field_area);
+        let rows =
+            Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).split(field_area);
 
         // Label
         let label_style = if field.required {
@@ -191,9 +191,7 @@ pub fn render_form_pane(state: &FormPaneState, frame: &mut Frame, area: Rect) {
 
         // Input
         let is_active = i == state.active_field;
-        field
-            .input
-            .render(frame, rows[1], is_active, "  ");
+        field.input.render(frame, rows[1], is_active, "  ");
     }
 
     // Status line

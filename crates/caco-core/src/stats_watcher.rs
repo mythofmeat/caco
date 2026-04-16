@@ -18,7 +18,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 
 use crate::config;
-use crate::wad_stats::{self, MapStats, WadStats, TICS_PER_SECOND};
+use crate::wad_stats::{self, MapStats, TICS_PER_SECOND, WadStats};
 
 // ---------------------------------------------------------------------------
 // PK3 mod management
@@ -103,8 +103,7 @@ pub fn ensure_stats_mod() -> crate::Result<PathBuf> {
         .map_err(std::io::Error::other)?;
     zip.write_all(MAPINFO.as_bytes())?;
 
-    zip.finish()
-        .map_err(std::io::Error::other)?;
+    zip.finish().map_err(std::io::Error::other)?;
 
     Ok(pk3_path)
 }
@@ -157,10 +156,7 @@ struct MapLogEntry {
 
 // CACOSTATS|MAP01|3|1234|50/100|10/20|3/5
 static CACOSTATS_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"CACOSTATS\|([^|]+)\|(\d+)\|(\d+)\|(\d+)/(\d+)\|(\d+)/(\d+)\|(\d+)/(\d+)",
-    )
-    .unwrap()
+    Regex::new(r"CACOSTATS\|([^|]+)\|(\d+)\|(\d+)\|(\d+)/(\d+)\|(\d+)/(\d+)\|(\d+)/(\d+)").unwrap()
 });
 
 /// Parse a ZDoom log file for CACOSTATS lines.
@@ -426,7 +422,10 @@ mod tests {
         let stats = entries_to_wad_stats(&entries);
         let output = wad_stats::format_stats(&stats);
         let parsed = wad_stats::parse_stats_text(&output);
-        assert!(parsed.is_ok(), "formatted output should be parseable: {output}");
+        assert!(
+            parsed.is_ok(),
+            "formatted output should be parseable: {output}"
+        );
         let parsed = parsed.unwrap();
         assert_eq!(parsed.format, "levelstat_txt");
         assert_eq!(parsed.maps.len(), 1);

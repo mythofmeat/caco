@@ -3,10 +3,10 @@
 use clap::Args;
 use rusqlite::Connection;
 
-use caco_core::db;
-use caco_core::wad_stats;
 use crate::output;
 use crate::resolve;
+use caco_core::db;
+use caco_core::wad_stats;
 
 #[derive(Args)]
 pub struct StatsArgs {

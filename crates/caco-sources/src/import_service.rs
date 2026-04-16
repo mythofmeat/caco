@@ -5,19 +5,15 @@ use regex::Regex;
 use rusqlite::Connection;
 use unicode_normalization::UnicodeNormalization;
 
-static PUNCTUATION_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"[^a-z0-9\s]").unwrap());
+static PUNCTUATION_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[^a-z0-9\s]").unwrap());
 
 use crate::doomwiki::DoomwikiClient;
 use crate::doomworld::ForumThread;
 use crate::idgames::{
-    FileEntry, IdgamesClient, extract_idgames_file_path_from_url,
-    extract_idgames_id_from_url,
+    FileEntry, IdgamesClient, extract_idgames_file_path_from_url, extract_idgames_id_from_url,
 };
 
-use caco_core::db::{
-    self, NewWad, SourceType, WadUpdate,
-};
+use caco_core::db::{self, NewWad, SourceType, WadUpdate};
 
 /// Result of an import attempt.
 ///
@@ -114,22 +110,23 @@ impl ImportService {
             None,
             Some(&entry.filename),
             Some(&entry.author),
-        )
-            && !force {
-                return ImportResult::duplicate(existing.id, &existing.title);
-            }
+        ) && !force
+        {
+            return ImportResult::duplicate(existing.id, &existing.title);
+        }
 
         // Build and insert the WAD
-        let mut wad = NewWad::new(&entry.title, SourceType::Idgames)
-            .source_id(entry.id.to_string());
+        let mut wad =
+            NewWad::new(&entry.title, SourceType::Idgames).source_id(entry.id.to_string());
 
         if !entry.author.is_empty() {
             wad = wad.author(&entry.author);
         }
         if !entry.date.is_empty()
-            && let Some(y) = caco_core::utils::extract_year(&entry.date) {
-                wad = wad.year(y);
-            }
+            && let Some(y) = caco_core::utils::extract_year(&entry.date)
+        {
+            wad = wad.year(y);
+        }
         if !entry.description.is_empty() {
             wad = wad.description(&entry.description);
         }
@@ -182,14 +179,14 @@ impl ImportService {
             None,
             None,
             None,
-        )
-            && !force {
-                return ImportResult::duplicate(existing.id, &existing.title);
-            }
+        ) && !force
+        {
+            return ImportResult::duplicate(existing.id, &existing.title);
+        }
 
         let display = entry.display_name().to_string();
-        let mut wad = NewWad::new(&display, SourceType::Doomwiki)
-            .source_id(entry.page_id.to_string());
+        let mut wad =
+            NewWad::new(&display, SourceType::Doomwiki).source_id(entry.page_id.to_string());
 
         if !entry.author.is_empty() {
             wad = wad.author(&entry.author);
@@ -253,10 +250,10 @@ impl ImportService {
             None,
             None,
             None,
-        )
-            && !force {
-                return ImportResult::duplicate(existing.id, &existing.title);
-            }
+        ) && !force
+        {
+            return ImportResult::duplicate(existing.id, &existing.title);
+        }
 
         // Use provided values or fall back to thread data
         let final_title = title.unwrap_or(&thread.title);
@@ -279,8 +276,8 @@ impl ImportService {
             Some(thread.first_post_text.clone())
         };
 
-        let mut wad = NewWad::new(final_title, SourceType::Doomworld)
-            .source_id(thread.thread_id.to_string());
+        let mut wad =
+            NewWad::new(final_title, SourceType::Doomworld).source_id(thread.thread_id.to_string());
 
         if let Some(a) = final_author {
             wad = wad.author(a);
@@ -337,9 +334,10 @@ impl ImportService {
     ) -> ImportResult {
         if let Ok(Some(existing)) =
             db::find_duplicate(conn, SourceType::Url, None, Some(url), None, None)
-            && !force {
-                return ImportResult::duplicate(existing.id, &existing.title);
-            }
+            && !force
+        {
+            return ImportResult::duplicate(existing.id, &existing.title);
+        }
 
         let mut wad = NewWad::new(title, SourceType::Url).source_url(url);
         if let Some(a) = author {
@@ -387,16 +385,18 @@ impl ImportService {
 
         if let Ok(Some(existing)) =
             db::find_duplicate(conn, SourceType::Local, None, Some(&source_url), None, None)
-            && !force {
-                return ImportResult::duplicate(existing.id, &existing.title);
-            }
+            && !force
+        {
+            return ImportResult::duplicate(existing.id, &existing.title);
+        }
 
         let mut wad = NewWad::new(title, SourceType::Local).source_url(&source_url);
 
         if let Some(filename) = resolved.file_name().and_then(|f| f.to_str())
-            && resolved.extension().is_some() {
-                wad = wad.filename(filename);
-            }
+            && resolved.extension().is_some()
+        {
+            wad = wad.filename(filename);
+        }
         if resolved.exists() {
             wad = wad.cached_path(source_url.clone());
         }
@@ -538,7 +538,14 @@ pub fn port_to_complevel(port_text: &str) -> Option<i32> {
 pub fn port_to_zdoom_required(port_text: &str) -> Option<bool> {
     let text = port_text.to_lowercase();
     let zdoom_keywords = [
-        "zdoom", "gzdoom", "uzdoom", "lzdoom", "vkdoom", "qzdoom", "zandronum", "skulltag",
+        "zdoom",
+        "gzdoom",
+        "uzdoom",
+        "lzdoom",
+        "vkdoom",
+        "qzdoom",
+        "zandronum",
+        "skulltag",
     ];
     for kw in &zdoom_keywords {
         if text.contains(kw) {
@@ -554,9 +561,7 @@ fn auto_link_zdoom_required(conn: &Connection, wad_id: i64, port_text: &str) {
         && let Ok(Some(wad)) = db::get_wad(conn, wad_id, false)
         && wad.zdoom_required.is_none()
     {
-        let update = WadUpdate::new()
-            .set_int("zdoom_required", Some(1))
-            .unwrap();
+        let update = WadUpdate::new().set_int("zdoom_required", Some(1)).unwrap();
         let _ = db::update_wad(conn, wad_id, &update);
     }
 }
@@ -578,12 +583,7 @@ fn auto_link_complevel(conn: &Connection, wad_id: i64, port_text: &str) {
 ///
 /// Skips the update when the WAD already carries an `idgames_id`. Backfills
 /// the `filename` column only when it's currently empty.
-fn apply_idgames_link(
-    conn: &Connection,
-    wad_id: i64,
-    idgames_id: i64,
-    filename: Option<&str>,
-) {
+fn apply_idgames_link(conn: &Connection, wad_id: i64, idgames_id: i64, filename: Option<&str>) {
     let Ok(Some(wad)) = db::get_wad(conn, wad_id, false) else {
         return;
     };
@@ -591,9 +591,7 @@ fn apply_idgames_link(
         return;
     }
 
-    let mut update = match WadUpdate::new()
-        .set_text("idgames_id", Some(idgames_id.to_string()))
-    {
+    let mut update = match WadUpdate::new().set_text("idgames_id", Some(idgames_id.to_string())) {
         Ok(u) => u,
         Err(_) => return,
     };
@@ -648,24 +646,29 @@ fn auto_link_iwad(conn: &Connection, wad_id: i64, iwad_text: &str) {
     };
 
     // Only set if the IWAD is registered in the database
-    if db::get_iwad(conn, short_name, None).ok().flatten().is_none() {
+    if db::get_iwad(conn, short_name, None)
+        .ok()
+        .flatten()
+        .is_none()
+    {
         return;
     }
 
     // Only set if the WAD doesn't already have a custom_iwad
     if let Ok(Some(wad)) = db::get_wad(conn, wad_id, false)
-        && wad.custom_iwad.is_none() {
-            let update = WadUpdate::new()
-                .set_text("custom_iwad", Some(short_name.to_string()))
-                .unwrap();
-            let _ = db::update_wad(conn, wad_id, &update);
-        }
+        && wad.custom_iwad.is_none()
+    {
+        let update = WadUpdate::new()
+            .set_text("custom_iwad", Some(short_name.to_string()))
+            .unwrap();
+        let _ = db::update_wad(conn, wad_id, &update);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use caco_core::db::{open_memory, init_db};
+    use caco_core::db::{init_db, open_memory};
 
     fn setup() -> Connection {
         let conn = open_memory().unwrap();
@@ -710,7 +713,10 @@ mod tests {
 
     #[test]
     fn test_normalize_title_punctuation() {
-        assert_eq!(normalize_title("Doom II: Hell on Earth"), "doom ii hell on earth");
+        assert_eq!(
+            normalize_title("Doom II: Hell on Earth"),
+            "doom ii hell on earth"
+        );
         assert_eq!(normalize_title("TNT: Evilution"), "tnt evilution");
     }
 
@@ -722,7 +728,10 @@ mod tests {
     #[test]
     fn test_titles_match() {
         assert!(titles_match("Scythe", "scythe"));
-        assert!(titles_match("Doom II: Hell on Earth", "doom ii hell on earth"));
+        assert!(titles_match(
+            "Doom II: Hell on Earth",
+            "doom ii hell on earth"
+        ));
         assert!(!titles_match("Scythe", "Scythe 2"));
     }
 
@@ -746,7 +755,9 @@ mod tests {
         assert!(result.wad_id.is_some());
 
         // Verify it was inserted
-        let wad = db::get_wad(&conn, result.wad_id.unwrap(), false).unwrap().unwrap();
+        let wad = db::get_wad(&conn, result.wad_id.unwrap(), false)
+            .unwrap()
+            .unwrap();
         assert_eq!(wad.title, "Test WAD");
         assert_eq!(wad.author.as_deref(), Some("Author"));
         assert_eq!(wad.year, Some(2023));
@@ -760,15 +771,27 @@ mod tests {
         let svc = ImportService;
 
         let r1 = svc.import_url(
-            &conn, "Test", "https://example.com/test.zip",
-            None, None, None, None, false,
+            &conn,
+            "Test",
+            "https://example.com/test.zip",
+            None,
+            None,
+            None,
+            None,
+            false,
         );
         assert!(r1.ok());
 
         // Second import of same URL should be duplicate
         let r2 = svc.import_url(
-            &conn, "Test", "https://example.com/test.zip",
-            None, None, None, None, false,
+            &conn,
+            "Test",
+            "https://example.com/test.zip",
+            None,
+            None,
+            None,
+            None,
+            false,
         );
         assert!(r2.is_duplicate);
         assert_eq!(r2.duplicate_id, r1.wad_id);
@@ -780,14 +803,26 @@ mod tests {
         let svc = ImportService;
 
         svc.import_url(
-            &conn, "Test", "https://example.com/test.zip",
-            None, None, None, None, false,
+            &conn,
+            "Test",
+            "https://example.com/test.zip",
+            None,
+            None,
+            None,
+            None,
+            false,
         );
 
         // Force should bypass duplicate check
         let r2 = svc.import_url(
-            &conn, "Test 2", "https://example.com/test.zip",
-            None, None, None, None, true,
+            &conn,
+            "Test 2",
+            "https://example.com/test.zip",
+            None,
+            None,
+            None,
+            None,
+            true,
         );
         assert!(r2.ok());
     }
@@ -816,7 +851,8 @@ mod tests {
             textfile: String::new(),
             rating: 4.7,
             votes: 19,
-            url: "https://www.doomworld.com/idgames/levels/doom2/Ports/megawads/sunlust".to_string(),
+            url: "https://www.doomworld.com/idgames/levels/doom2/Ports/megawads/sunlust"
+                .to_string(),
             idgamesurl: String::new(),
             reviews: Vec::new(),
         };
@@ -824,7 +860,9 @@ mod tests {
         let result = svc.import_idgames(&conn, &entry, None, false);
         assert!(result.ok());
 
-        let wad = db::get_wad(&conn, result.wad_id.unwrap(), false).unwrap().unwrap();
+        let wad = db::get_wad(&conn, result.wad_id.unwrap(), false)
+            .unwrap()
+            .unwrap();
         assert_eq!(wad.title, "Sunlust");
         assert_eq!(wad.author.as_deref(), Some("Ribbiks & Dannebubinga"));
         assert_eq!(wad.year, Some(2015));
@@ -842,7 +880,8 @@ mod tests {
             title: "Test".to_string(),
             dir: "levels/".to_string(),
             filename: "test.wad".to_string(),
-            size: 0, age: 0,
+            size: 0,
+            age: 0,
             date: String::new(),
             author: "Me".to_string(),
             email: String::new(),
@@ -853,7 +892,8 @@ mod tests {
             editors: String::new(),
             bugs: String::new(),
             textfile: String::new(),
-            rating: 0.0, votes: 0,
+            rating: 0.0,
+            votes: 0,
             url: String::new(),
             idgamesurl: String::new(),
             reviews: Vec::new(),
@@ -887,7 +927,9 @@ mod tests {
         let result = svc.import_doomwiki(&conn, &entry, None, false);
         assert!(result.ok());
 
-        let wad = db::get_wad(&conn, result.wad_id.unwrap(), false).unwrap().unwrap();
+        let wad = db::get_wad(&conn, result.wad_id.unwrap(), false)
+            .unwrap()
+            .unwrap();
         assert_eq!(wad.title, "Scythe");
         assert_eq!(wad.author.as_deref(), Some("Erik Alm"));
         assert_eq!(wad.year, Some(2003));
@@ -988,11 +1030,7 @@ mod tests {
         let new = NewWad::new("Test", SourceType::Doomwiki);
         let wad_id = db::add_wad(&conn, &new).unwrap();
 
-        auto_link_idgames_from_url(
-            &conn,
-            wad_id,
-            "https://www.doomworld.com/idgames/?id=18184",
-        );
+        auto_link_idgames_from_url(&conn, wad_id, "https://www.doomworld.com/idgames/?id=18184");
 
         let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
         assert_eq!(wad.idgames_id.as_deref(), Some("18184"));
@@ -1004,11 +1042,7 @@ mod tests {
         let new = NewWad::new("Test", SourceType::Doomwiki);
         let wad_id = db::add_wad(&conn, &new).unwrap();
 
-        auto_link_idgames_from_url(
-            &conn,
-            wad_id,
-            "https://example.com/downloads/scythe.zip",
-        );
+        auto_link_idgames_from_url(&conn, wad_id, "https://example.com/downloads/scythe.zip");
 
         let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
         assert!(wad.idgames_id.is_none());
@@ -1062,12 +1096,13 @@ mod tests {
             sourceport: Some("gzdoom".to_string()),
         };
 
-        let result = svc.import_doomworld(
-            &conn, &thread, None, None, None, None, None, None, false,
-        );
+        let result =
+            svc.import_doomworld(&conn, &thread, None, None, None, None, None, None, false);
         assert!(result.ok());
 
-        let wad = db::get_wad(&conn, result.wad_id.unwrap(), false).unwrap().unwrap();
+        let wad = db::get_wad(&conn, result.wad_id.unwrap(), false)
+            .unwrap()
+            .unwrap();
         assert_eq!(wad.title, "MyHouse.wad");
         assert_eq!(wad.author.as_deref(), Some("MyHouseMapper"));
         assert_eq!(wad.year, Some(2023));
@@ -1109,7 +1144,9 @@ mod tests {
         );
         assert!(result.ok());
 
-        let wad = db::get_wad(&conn, result.wad_id.unwrap(), false).unwrap().unwrap();
+        let wad = db::get_wad(&conn, result.wad_id.unwrap(), false)
+            .unwrap()
+            .unwrap();
         assert_eq!(wad.title, "Override Title");
         assert_eq!(wad.author.as_deref(), Some("Override Author"));
         assert_eq!(wad.year, Some(2024));
@@ -1190,10 +1227,13 @@ mod tests {
             sourceport: None,
         };
 
-        let result = svc.import_doomworld(&conn, &thread, None, None, None, None, None, None, false);
+        let result =
+            svc.import_doomworld(&conn, &thread, None, None, None, None, None, None, false);
         assert!(result.ok());
 
-        let wad = db::get_wad(&conn, result.wad_id.unwrap(), false).unwrap().unwrap();
+        let wad = db::get_wad(&conn, result.wad_id.unwrap(), false)
+            .unwrap()
+            .unwrap();
         let desc = wad.description.unwrap();
         assert!(desc.len() <= 2003); // 1997 + "..."
         assert!(desc.ends_with("..."));

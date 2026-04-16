@@ -67,7 +67,11 @@ impl ResourcesDialogState {
             .iter()
             .filter_map(|iwad| {
                 let priority = iwads::get_iwad_priority(&iwad.family, Some(&cfg.iwad_priority));
-                if priority.first().map(|v| v == &iwad.variant).unwrap_or(false) {
+                if priority
+                    .first()
+                    .map(|v| v == &iwad.variant)
+                    .unwrap_or(false)
+                {
                     Some(format!("{}/{}", iwad.family, iwad.variant))
                 } else {
                     None
@@ -159,11 +163,10 @@ impl ResourcesDialogState {
                             .desired_width(ui.available_width() - 120.0)
                             .hint_text("Path to IWAD or id24 WAD file..."),
                     );
-                    let enter_pressed = response.lost_focus()
-                        && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    let enter_pressed =
+                        response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                     if ui.button("Browse…").clicked() {
-                        let mut dialog = rfd::FileDialog::new()
-                            .add_filter("WAD files", &["wad"]);
+                        let mut dialog = rfd::FileDialog::new().add_filter("WAD files", &["wad"]);
                         if let Some(dir) = dirs::home_dir() {
                             dialog = dialog.set_directory(dir);
                         }
@@ -193,12 +196,8 @@ impl ResourcesDialogState {
                 // Button row
                 ui.horizontal(|ui| {
                     let has_selection = match self.active_tab {
-                        ResourceTab::Iwad => {
-                            self.selected_iwad.is_some() && !self.iwads.is_empty()
-                        }
-                        ResourceTab::Id24 => {
-                            self.selected_id24.is_some() && !self.id24s.is_empty()
-                        }
+                        ResourceTab::Iwad => self.selected_iwad.is_some() && !self.iwads.is_empty(),
+                        ResourceTab::Id24 => self.selected_id24.is_some() && !self.id24s.is_empty(),
                     };
 
                     if ui
@@ -208,14 +207,11 @@ impl ResourcesDialogState {
                         self.do_delete(conn);
                     }
 
-                    ui.with_layout(
-                        egui::Layout::right_to_left(egui::Align::Center),
-                        |ui| {
-                            if ui.button("Close").clicked() {
-                                result = ResourcesResult::Closed;
-                            }
-                        },
-                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Close").clicked() {
+                            result = ResourcesResult::Closed;
+                        }
+                    });
                 });
             });
 
@@ -396,12 +392,9 @@ impl ResourcesDialogState {
                 if let Some(idx) = self.selected_iwad
                     && let Some(iwad) = self.iwads.get(idx)
                 {
-                    let paths = iwads::remove_iwad_with_paths(
-                        conn,
-                        &iwad.family,
-                        Some(&iwad.variant),
-                    )
-                    .unwrap_or_default();
+                    let paths =
+                        iwads::remove_iwad_with_paths(conn, &iwad.family, Some(&iwad.variant))
+                            .unwrap_or_default();
                     let iwad_dir = config::get_iwad_dir();
                     for p in &paths {
                         if PathBuf::from(p).starts_with(&iwad_dir) {

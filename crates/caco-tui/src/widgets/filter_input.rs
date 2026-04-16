@@ -1,11 +1,11 @@
 use std::time::Instant;
 
 use crossterm::event::{KeyCode, KeyEvent};
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use ratatui::Frame;
 
 use crate::input::TextInput;
 
@@ -95,10 +95,7 @@ pub fn render_filter_input(state: &FilterInputState, frame: &mut Frame, area: Re
     let prefix = "/ ";
     let count_str = format!(" ({} WADs)", state.wad_count);
 
-    let mut spans = vec![Span::styled(
-        prefix,
-        Style::default().fg(Color::DarkGray),
-    )];
+    let mut spans = vec![Span::styled(prefix, Style::default().fg(Color::DarkGray))];
 
     let value = state.input.value();
     if state.focused {
@@ -135,7 +132,10 @@ pub fn render_filter_input(state: &FilterInputState, frame: &mut Frame, area: Re
         ));
     }
 
-    spans.push(Span::styled(count_str, Style::default().fg(Color::DarkGray)));
+    spans.push(Span::styled(
+        count_str,
+        Style::default().fg(Color::DarkGray),
+    ));
 
     let paragraph = Paragraph::new(Line::from(spans));
     frame.render_widget(paragraph, area);

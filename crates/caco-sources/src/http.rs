@@ -35,9 +35,7 @@ where
     use serde::Deserialize;
     let opt = Option::<serde_json::Value>::deserialize(deserializer)?;
     match opt {
-        Some(serde_json::Value::Number(n)) => {
-            Ok(n.as_i64().unwrap_or(0))
-        }
+        Some(serde_json::Value::Number(n)) => Ok(n.as_i64().unwrap_or(0)),
         Some(serde_json::Value::String(s)) => Ok(s.parse::<i64>().unwrap_or(0)),
         _ => Ok(0),
     }
@@ -52,9 +50,7 @@ where
     use serde::Deserialize;
     let opt = Option::<serde_json::Value>::deserialize(deserializer)?;
     match opt {
-        Some(serde_json::Value::Number(n)) => {
-            Ok(n.as_f64().unwrap_or(0.0))
-        }
+        Some(serde_json::Value::Number(n)) => Ok(n.as_f64().unwrap_or(0.0)),
         Some(serde_json::Value::String(s)) => Ok(s.parse::<f64>().unwrap_or(0.0)),
         _ => Ok(0.0),
     }

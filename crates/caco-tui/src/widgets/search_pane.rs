@@ -1,12 +1,10 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use super::table_nav::{table_nav_next, table_nav_prev};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{
-    Block, BorderType, Borders, Cell, Paragraph, Row, Table, TableState, Wrap,
-};
-use ratatui::Frame;
+use ratatui::widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table, TableState, Wrap};
 
 use crate::input::TextInput;
 use crate::message::SearchResultEntry;
@@ -133,14 +131,17 @@ pub fn render_search_pane(
     let layout = Layout::vertical([
         Constraint::Length(1), // search bar
         Constraint::Length(1), // status
-        Constraint::Min(1),   // content: results + preview
+        Constraint::Min(1),    // content: results + preview
     ])
     .split(area);
 
     // Search bar
-    state
-        .search_input
-        .render(frame, layout[0], state.search_focused, &format!("{source_name}> "));
+    state.search_input.render(
+        frame,
+        layout[0],
+        state.search_focused,
+        &format!("{source_name}> "),
+    );
 
     // Status
     let status_style = if state.is_searching {
@@ -154,11 +155,9 @@ pub fn render_search_pane(
     );
 
     // Content: results table + preview
-    let content_layout = Layout::horizontal([
-        Constraint::Percentage(60),
-        Constraint::Percentage(40),
-    ])
-    .split(layout[2]);
+    let content_layout =
+        Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
+            .split(layout[2]);
 
     // Results table
     let header_cells: Vec<Cell> = columns
@@ -208,10 +207,7 @@ pub fn render_search_pane(
             ]));
         }
         if !entry.extra.is_empty() {
-            lines.push(Line::from(Span::styled(
-                &entry.extra,
-                theme::dim_style(),
-            )));
+            lines.push(Line::from(Span::styled(&entry.extra, theme::dim_style())));
         }
         if let Some(ref desc) = entry.description {
             lines.push(Line::from(""));

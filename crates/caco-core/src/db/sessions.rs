@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use chrono::Utc;
 use rusqlite::Connection;
 
-use super::connection::{attach_tags, batch_query_i64, batch_query_string, SQLITE_MAX_VARS};
+use super::connection::{SQLITE_MAX_VARS, attach_tags, batch_query_i64, batch_query_string};
 use super::models::WadRecord;
 use crate::Result;
 
@@ -16,18 +16,16 @@ const MIN_SESSION_SECONDS: i64 = 300;
 // =============================================================================
 
 /// Start a play session. Returns the session ID.
-pub fn start_session(
-    conn: &Connection,
-    wad_id: i64,
-    sourceport: Option<&str>,
-) -> Result<i64> {
+pub fn start_session(conn: &Connection, wad_id: i64, sourceport: Option<&str>) -> Result<i64> {
     conn.execute(
         "INSERT INTO sessions (wad_id, started_at, sourceport) VALUES (?1, ?2, ?3)",
         rusqlite::params![wad_id, Utc::now().to_rfc3339(), sourceport],
     )?;
     let session_id = conn.last_insert_rowid();
     if session_id <= 0 {
-        return Err(crate::Error::Database(rusqlite::Error::StatementChangedRows(0)));
+        return Err(crate::Error::Database(
+            rusqlite::Error::StatementChangedRows(0),
+        ));
     }
     Ok(session_id)
 }
@@ -50,14 +48,11 @@ pub fn end_session(
         .ok();
 
     if let Some(start_str) = started_at {
-        let started = chrono::DateTime::parse_from_rfc3339(&start_str)
-            .unwrap_or_else(|_| {
-                // Fall back to parsing ISO format without timezone
-                chrono::DateTime::parse_from_rfc3339(
-                    &format!("{start_str}+00:00"),
-                )
+        let started = chrono::DateTime::parse_from_rfc3339(&start_str).unwrap_or_else(|_| {
+            // Fall back to parsing ISO format without timezone
+            chrono::DateTime::parse_from_rfc3339(&format!("{start_str}+00:00"))
                 .unwrap_or(ended_at.into())
-            });
+        });
         let duration = (ended_at - started.with_timezone(&chrono::Utc)).num_seconds();
 
         conn.execute(
@@ -134,7 +129,10 @@ pub fn get_sessions(conn: &Connection, wad_id: i64) -> Result<Vec<SessionRecord>
          ORDER BY started_at DESC",
     )?;
     let rows = stmt
-        .query_map(rusqlite::params![wad_id, MIN_SESSION_SECONDS], SessionRecord::from_row)?
+        .query_map(
+            rusqlite::params![wad_id, MIN_SESSION_SECONDS],
+            SessionRecord::from_row,
+        )?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     Ok(rows)
 }
@@ -155,10 +153,7 @@ pub fn get_total_playtime(conn: &Connection, wad_id: i64) -> Result<i64> {
 // =============================================================================
 
 /// Get total playtime for multiple WADs efficiently. Returns `{wad_id: seconds}`.
-pub fn get_total_playtime_batch(
-    conn: &Connection,
-    wad_ids: &[i64],
-) -> Result<HashMap<i64, i64>> {
+pub fn get_total_playtime_batch(conn: &Connection, wad_ids: &[i64]) -> Result<HashMap<i64, i64>> {
     let result = batch_query_i64(
         conn,
         wad_ids,
@@ -169,7 +164,10 @@ pub fn get_total_playtime_batch(
         ),
         "total",
     )?;
-    Ok(wad_ids.iter().map(|&id| (id, *result.get(&id).unwrap_or(&0))).collect())
+    Ok(wad_ids
+        .iter()
+        .map(|&id| (id, *result.get(&id).unwrap_or(&0)))
+        .collect())
 }
 
 /// Get the last played timestamp for a WAD.
@@ -187,10 +185,7 @@ pub fn get_last_played(conn: &Connection, wad_id: i64) -> Result<Option<String>>
 }
 
 /// Get last played timestamp for multiple WADs efficiently.
-pub fn get_last_played_batch(
-    conn: &Connection,
-    wad_ids: &[i64],
-) -> Result<HashMap<i64, String>> {
+pub fn get_last_played_batch(conn: &Connection, wad_ids: &[i64]) -> Result<HashMap<i64, String>> {
     batch_query_string(
         conn,
         wad_ids,
@@ -224,10 +219,7 @@ pub fn get_most_recently_played(conn: &Connection) -> Result<Option<WadRecord>> 
 }
 
 /// Get session count for multiple WADs efficiently.
-pub fn get_session_count_batch(
-    conn: &Connection,
-    wad_ids: &[i64],
-) -> Result<HashMap<i64, i64>> {
+pub fn get_session_count_batch(conn: &Connection, wad_ids: &[i64]) -> Result<HashMap<i64, i64>> {
     batch_query_i64(
         conn,
         wad_ids,
@@ -252,10 +244,7 @@ pub struct WadStats {
 /// Get all stats for multiple WADs in 2 queries on 1 connection.
 ///
 /// Replaces 4 separate batch functions for list view loading.
-pub fn get_wad_stats_batch(
-    conn: &Connection,
-    wad_ids: &[i64],
-) -> Result<HashMap<i64, WadStats>> {
+pub fn get_wad_stats_batch(conn: &Connection, wad_ids: &[i64]) -> Result<HashMap<i64, WadStats>> {
     if wad_ids.is_empty() {
         return Ok(HashMap::new());
     }
@@ -264,7 +253,9 @@ pub fn get_wad_stats_batch(
     let mut beaten_map: HashMap<i64, i64> = HashMap::new();
 
     for chunk in wad_ids.chunks(SQLITE_MAX_VARS) {
-        let placeholders: String = (0..chunk.len()).map(|i| if i > 0 { ",?" } else { "?" }).collect();
+        let placeholders: String = (0..chunk.len())
+            .map(|i| if i > 0 { ",?" } else { "?" })
+            .collect();
 
         // Query 1: session aggregates (playtime + last_played + count)
         {
@@ -278,8 +269,10 @@ pub fn get_wad_stats_batch(
                  GROUP BY wad_id"
             );
             let mut stmt = conn.prepare(&sql)?;
-            let params: Vec<&dyn rusqlite::types::ToSql> =
-                chunk.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+            let params: Vec<&dyn rusqlite::types::ToSql> = chunk
+                .iter()
+                .map(|id| id as &dyn rusqlite::types::ToSql)
+                .collect();
             let rows = stmt.query_map(params.as_slice(), |row| {
                 Ok((
                     row.get::<_, i64>("wad_id")?,
@@ -301,8 +294,10 @@ pub fn get_wad_stats_batch(
                  FROM wad_completions WHERE wad_id IN ({placeholders}) GROUP BY wad_id"
             );
             let mut stmt = conn.prepare(&sql)?;
-            let params: Vec<&dyn rusqlite::types::ToSql> =
-                chunk.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+            let params: Vec<&dyn rusqlite::types::ToSql> = chunk
+                .iter()
+                .map(|id| id as &dyn rusqlite::types::ToSql)
+                .collect();
             let rows = stmt.query_map(params.as_slice(), |row| {
                 Ok((
                     row.get::<_, i64>("wad_id")?,
@@ -318,15 +313,17 @@ pub fn get_wad_stats_batch(
 
     let mut result = HashMap::new();
     for &wid in wad_ids {
-        let (playtime, last_played, session_count) = session_stats
-            .remove(&wid)
-            .unwrap_or((0, None, 0));
-        result.insert(wid, WadStats {
-            playtime,
-            last_played,
-            session_count,
-            times_beaten: beaten_map.get(&wid).copied().unwrap_or(0),
-        });
+        let (playtime, last_played, session_count) =
+            session_stats.remove(&wid).unwrap_or((0, None, 0));
+        result.insert(
+            wid,
+            WadStats {
+                playtime,
+                last_played,
+                session_count,
+                times_beaten: beaten_map.get(&wid).copied().unwrap_or(0),
+            },
+        );
     }
     Ok(result)
 }
@@ -396,16 +393,17 @@ pub fn add_wad_completion(
     }
     let id = conn.last_insert_rowid();
     if id <= 0 {
-        return Err(crate::Error::Database(rusqlite::Error::StatementChangedRows(0)));
+        return Err(crate::Error::Database(
+            rusqlite::Error::StatementChangedRows(0),
+        ));
     }
     Ok(id)
 }
 
 /// Get all completion records for a WAD.
 pub fn get_wad_completions(conn: &Connection, wad_id: i64) -> Result<Vec<CompletionRecord>> {
-    let mut stmt = conn.prepare(
-        "SELECT * FROM wad_completions WHERE wad_id = ? ORDER BY completed_at DESC",
-    )?;
+    let mut stmt =
+        conn.prepare("SELECT * FROM wad_completions WHERE wad_id = ? ORDER BY completed_at DESC")?;
     let rows = stmt
         .query_map([wad_id], CompletionRecord::from_row)?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -446,10 +444,7 @@ pub fn update_wad_completion(
 
 /// Delete a specific completion record. Returns true if deleted.
 pub fn delete_wad_completion(conn: &Connection, completion_id: i64) -> Result<bool> {
-    let count = conn.execute(
-        "DELETE FROM wad_completions WHERE id = ?",
-        [completion_id],
-    )?;
+    let count = conn.execute("DELETE FROM wad_completions WHERE id = ?", [completion_id])?;
     Ok(count > 0)
 }
 
@@ -477,7 +472,10 @@ pub fn find_completion_by_timestamp(
          WHERE wad_id = ? AND completed_at LIKE ? || '%' \
          ORDER BY completed_at DESC LIMIT 1",
     )?;
-    match stmt.query_row(rusqlite::params![wad_id, timestamp], CompletionRecord::from_row) {
+    match stmt.query_row(
+        rusqlite::params![wad_id, timestamp],
+        CompletionRecord::from_row,
+    ) {
         Ok(rec) => Ok(Some(rec)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(e.into()),
@@ -503,9 +501,7 @@ pub fn set_wad_completion_count(conn: &Connection, wad_id: i64, count: i64) -> R
         )?;
     } else if count > current {
         let to_add = count - current;
-        let mut stmt = conn.prepare(
-            "INSERT INTO wad_completions (wad_id, notes) VALUES (?, ?)",
-        )?;
+        let mut stmt = conn.prepare("INSERT INTO wad_completions (wad_id, notes) VALUES (?, ?)")?;
         for _ in 0..to_add {
             stmt.execute(rusqlite::params![wad_id, "Manually added"])?;
         }
@@ -525,10 +521,7 @@ pub fn get_times_beaten(conn: &Connection, wad_id: i64) -> Result<i64> {
 }
 
 /// Get times beaten for multiple WADs efficiently.
-pub fn get_times_beaten_batch(
-    conn: &Connection,
-    wad_ids: &[i64],
-) -> Result<HashMap<i64, i64>> {
+pub fn get_times_beaten_batch(conn: &Connection, wad_ids: &[i64]) -> Result<HashMap<i64, i64>> {
     let result = batch_query_i64(
         conn,
         wad_ids,
@@ -536,7 +529,10 @@ pub fn get_times_beaten_batch(
          FROM wad_completions WHERE wad_id IN ({placeholders}) GROUP BY wad_id",
         "times_beaten",
     )?;
-    Ok(wad_ids.iter().map(|&id| (id, *result.get(&id).unwrap_or(&0))).collect())
+    Ok(wad_ids
+        .iter()
+        .map(|&id| (id, *result.get(&id).unwrap_or(&0)))
+        .collect())
 }
 
 // =============================================================================
@@ -559,10 +555,7 @@ pub fn get_cached_wads(conn: &Connection) -> Result<Vec<WadRecord>> {
 
 /// Clear the cached_path for a WAD. Returns true if updated.
 pub fn clear_cached_path(conn: &Connection, wad_id: i64) -> Result<bool> {
-    let count = conn.execute(
-        "UPDATE wads SET cached_path = NULL WHERE id = ?",
-        [wad_id],
-    )?;
+    let count = conn.execute("UPDATE wads SET cached_path = NULL WHERE id = ?", [wad_id])?;
     Ok(count > 0)
 }
 
@@ -577,9 +570,8 @@ pub fn clear_all_cached_paths(conn: &Connection) -> Result<usize> {
 
 /// Find a WAD by the filename portion of its cached_path.
 pub fn get_wad_by_cached_filename(conn: &Connection, filename: &str) -> Result<Option<WadRecord>> {
-    let mut stmt = conn.prepare(
-        "SELECT * FROM wads WHERE cached_path LIKE ? AND deleted_at IS NULL",
-    )?;
+    let mut stmt =
+        conn.prepare("SELECT * FROM wads WHERE cached_path LIKE ? AND deleted_at IS NULL")?;
     match stmt.query_row(
         rusqlite::params![format!("%/{filename}")],
         WadRecord::from_row,
@@ -686,14 +678,17 @@ fn get_library_stats(conn: &Connection) -> Result<LibraryOverview> {
         wads_by_status.insert(status, count);
     }
 
-    Ok((total_wads, total_sessions, total_playtime, wads_with_sessions, wads_by_status))
+    Ok((
+        total_wads,
+        total_sessions,
+        total_playtime,
+        wads_with_sessions,
+        wads_by_status,
+    ))
 }
 
 /// Get activity grouped by time period.
-pub fn get_wads_played_by_period(
-    conn: &Connection,
-    period: &str,
-) -> Result<Vec<ActivityPeriod>> {
+pub fn get_wads_played_by_period(conn: &Connection, period: &str) -> Result<Vec<ActivityPeriod>> {
     let strftime = match period {
         "year" => "'%Y'",
         _ => "'%Y-%m'",
@@ -744,11 +739,8 @@ fn get_completion_rate(conn: &Connection) -> Result<(i64, i64, f64, i64)> {
         |row| row.get(0),
     )?;
 
-    let total_completions: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM wad_completions",
-        [],
-        |row| row.get(0),
-    )?;
+    let total_completions: i64 =
+        conn.query_row("SELECT COUNT(*) FROM wad_completions", [], |row| row.get(0))?;
 
     let completion_rate = if played_wads > 0 {
         completed_wads as f64 / played_wads as f64
@@ -756,7 +748,12 @@ fn get_completion_rate(conn: &Connection) -> Result<(i64, i64, f64, i64)> {
         0.0
     };
 
-    Ok((played_wads, completed_wads, completion_rate, total_completions))
+    Ok((
+        played_wads,
+        completed_wads,
+        completion_rate,
+        total_completions,
+    ))
 }
 
 #[cfg(test)]
@@ -765,7 +762,7 @@ mod tests {
     use crate::db::connection::open_memory;
     use crate::db::models::SourceType;
     use crate::db::schema::init_db;
-    use crate::db::wads::{add_wad, NewWad};
+    use crate::db::wads::{NewWad, add_wad};
 
     fn setup() -> Connection {
         let conn = open_memory().unwrap();
@@ -793,7 +790,9 @@ mod tests {
 
         // Query directly to test session mechanics (get_sessions filters short sessions)
         let mut stmt = conn.prepare("SELECT * FROM sessions WHERE id = ?").unwrap();
-        let session = stmt.query_row([session_id], SessionRecord::from_row).unwrap();
+        let session = stmt
+            .query_row([session_id], SessionRecord::from_row)
+            .unwrap();
         assert_eq!(session.sourceport.as_deref(), Some("dsda-doom"));
         assert_eq!(session.notes.as_deref(), Some("Test notes"));
         assert!(session.duration_seconds.is_some());
@@ -883,10 +882,18 @@ mod tests {
         let wad_id = add_test_wad(&conn);
         let session_id = start_session(&conn, wad_id, None).unwrap();
 
-        update_session_stats(&conn, session_id, Some("{\"before\": true}"), Some("{\"after\": true}")).unwrap();
+        update_session_stats(
+            &conn,
+            session_id,
+            Some("{\"before\": true}"),
+            Some("{\"after\": true}"),
+        )
+        .unwrap();
 
         let mut stmt = conn.prepare("SELECT * FROM sessions WHERE id = ?").unwrap();
-        let session = stmt.query_row([session_id], SessionRecord::from_row).unwrap();
+        let session = stmt
+            .query_row([session_id], SessionRecord::from_row)
+            .unwrap();
         assert_eq!(session.stats_before.as_deref(), Some("{\"before\": true}"));
         assert_eq!(session.stats_after.as_deref(), Some("{\"after\": true}"));
     }
@@ -900,7 +907,9 @@ mod tests {
         update_session_demo(&conn, session_id, "/path/to/demo.lmp").unwrap();
 
         let mut stmt = conn.prepare("SELECT * FROM sessions WHERE id = ?").unwrap();
-        let session = stmt.query_row([session_id], SessionRecord::from_row).unwrap();
+        let session = stmt
+            .query_row([session_id], SessionRecord::from_row)
+            .unwrap();
         assert_eq!(session.demo_file.as_deref(), Some("/path/to/demo.lmp"));
     }
 
@@ -947,8 +956,7 @@ mod tests {
         let conn = setup();
         let id = add_wad(
             &conn,
-            &NewWad::new("Cached WAD", SourceType::Idgames)
-                .cached_path("/cache/test.wad"),
+            &NewWad::new("Cached WAD", SourceType::Idgames).cached_path("/cache/test.wad"),
         )
         .unwrap();
 
@@ -962,8 +970,16 @@ mod tests {
     #[test]
     fn test_clear_all_cached_paths() {
         let conn = setup();
-        add_wad(&conn, &NewWad::new("A", SourceType::Local).cached_path("/a")).unwrap();
-        add_wad(&conn, &NewWad::new("B", SourceType::Local).cached_path("/b")).unwrap();
+        add_wad(
+            &conn,
+            &NewWad::new("A", SourceType::Local).cached_path("/a"),
+        )
+        .unwrap();
+        add_wad(
+            &conn,
+            &NewWad::new("B", SourceType::Local).cached_path("/b"),
+        )
+        .unwrap();
 
         let count = clear_all_cached_paths(&conn).unwrap();
         assert_eq!(count, 2);
@@ -1025,11 +1041,7 @@ mod tests {
     fn test_most_recently_played() {
         let conn = setup();
         let id1 = add_test_wad(&conn);
-        let id2 = add_wad(
-            &conn,
-            &NewWad::new("Second WAD", SourceType::Local),
-        )
-        .unwrap();
+        let id2 = add_wad(&conn, &NewWad::new("Second WAD", SourceType::Local)).unwrap();
 
         conn.execute(
             "INSERT INTO sessions (wad_id, started_at, duration_seconds) VALUES (?1, '2024-01-01T00:00:00', 300)",
@@ -1051,10 +1063,16 @@ mod tests {
         let wad_id = add_test_wad(&conn);
         let comp_id = add_wad_completion(&conn, wad_id, None, None, None).unwrap();
 
-        assert!(update_wad_completion(&conn, comp_id, Some("{\"stats\": true}"), Some("Updated")).unwrap());
+        assert!(
+            update_wad_completion(&conn, comp_id, Some("{\"stats\": true}"), Some("Updated"))
+                .unwrap()
+        );
 
         let completions = get_wad_completions(&conn, wad_id).unwrap();
-        assert_eq!(completions[0].stats_snapshot.as_deref(), Some("{\"stats\": true}"));
+        assert_eq!(
+            completions[0].stats_snapshot.as_deref(),
+            Some("{\"stats\": true}")
+        );
         assert_eq!(completions[0].notes.as_deref(), Some("Updated"));
     }
 
@@ -1067,7 +1085,9 @@ mod tests {
         end_session(&conn, session_id, None, Some(139)).unwrap();
 
         let mut stmt = conn.prepare("SELECT * FROM sessions WHERE id = ?").unwrap();
-        let session = stmt.query_row([session_id], SessionRecord::from_row).unwrap();
+        let session = stmt
+            .query_row([session_id], SessionRecord::from_row)
+            .unwrap();
         assert_eq!(session.exit_code, Some(139));
     }
 }

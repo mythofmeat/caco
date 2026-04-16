@@ -1,11 +1,11 @@
 use crossterm::event::KeyEvent;
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use ratatui::Frame;
-use tui_input::backend::crossterm::EventHandler;
 use tui_input::Input;
+use tui_input::backend::crossterm::EventHandler;
 
 /// Wrapper around tui-input's Input for text editing in the TUI.
 pub struct TextInput {

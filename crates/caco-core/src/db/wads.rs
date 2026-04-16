@@ -4,9 +4,7 @@ use chrono::Utc;
 use rusqlite::Connection;
 
 use super::connection::attach_tags;
-use super::models::{
-    Availability, WadRecord, ALLOWED_UPDATE_FIELDS, SourceType, Status,
-};
+use super::models::{ALLOWED_UPDATE_FIELDS, Availability, SourceType, Status, WadRecord};
 use crate::Result;
 
 /// Compute availability from WAD fields.
@@ -181,10 +179,7 @@ impl WadUpdate {
 
 /// Add a WAD to the library. Returns the new WAD ID.
 pub fn add_wad(conn: &Connection, wad: &NewWad) -> Result<i64> {
-    let avail = compute_availability(
-        wad.cached_path.as_deref(),
-        wad.source_url.as_deref(),
-    );
+    let avail = compute_availability(wad.cached_path.as_deref(), wad.source_url.as_deref());
     conn.execute(
         "INSERT INTO wads (title, author, year, description, source_type,
                           source_id, source_url, filename, cached_path, status, version,
@@ -250,9 +245,9 @@ pub fn update_wad(conn: &Connection, wad_id: i64, update: &WadUpdate) -> Result<
 
     // Check if setting status to finished
     let recording_completion = update.record_completion
-        && update.fields.get("status").is_some_and(|v| {
-            matches!(v, FieldValue::Text(Some(s)) if s == Status::Completed.as_str())
-        });
+        && update.fields.get("status").is_some_and(
+            |v| matches!(v, FieldValue::Text(Some(s)) if s == Status::Completed.as_str()),
+        );
 
     // Auto-maintain availability when cached_path or source_url change.
     // We need to figure out the effective values after this update.
@@ -280,7 +275,10 @@ pub fn update_wad(conn: &Connection, wad_id: i64, update: &WadUpdate) -> Result<
         };
 
         let avail = compute_availability(eff_cached, eff_source);
-        extra_fields.push(("availability", FieldValue::Text(Some(avail.as_str().to_string()))));
+        extra_fields.push((
+            "availability",
+            FieldValue::Text(Some(avail.as_str().to_string())),
+        ));
     }
 
     // Build SET clause
@@ -310,10 +308,7 @@ pub fn update_wad(conn: &Connection, wad_id: i64, update: &WadUpdate) -> Result<
     // Add wad_id as final param
     params.push(Box::new(wad_id));
 
-    let sql = format!(
-        "UPDATE wads SET {} WHERE id = ?",
-        set_parts.join(", ")
-    );
+    let sql = format!("UPDATE wads SET {} WHERE id = ?", set_parts.join(", "));
 
     let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
     let count = conn.execute(&sql, param_refs.as_slice())?;
@@ -416,7 +411,9 @@ pub fn get_tag_counts(conn: &Connection) -> Result<Vec<(String, i64)>> {
          ORDER BY t.tag",
     )?;
     let counts = stmt
-        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))?
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     Ok(counts)
 }
@@ -639,7 +636,10 @@ mod tests {
         add_tag(&conn, id1, "megawad").unwrap();
 
         let counts = get_tag_counts(&conn).unwrap();
-        assert_eq!(counts, vec![("doom".to_string(), 2), ("megawad".to_string(), 1)]);
+        assert_eq!(
+            counts,
+            vec![("doom".to_string(), 2), ("megawad".to_string(), 1)]
+        );
     }
 
     #[test]
@@ -660,11 +660,7 @@ mod tests {
     #[test]
     fn test_new_wad_defaults_to_unplayed() {
         let conn = setup();
-        let id = add_wad(
-            &conn,
-            &NewWad::new("Test", SourceType::Local),
-        )
-        .unwrap();
+        let id = add_wad(&conn, &NewWad::new("Test", SourceType::Local)).unwrap();
 
         let wad = get_wad(&conn, id, false).unwrap().unwrap();
         assert_eq!(wad.status, "unplayed");
@@ -682,7 +678,10 @@ mod tests {
         assert_eq!(wad.status, "in-progress");
 
         // Set to completed
-        let update = WadUpdate::new().set_status(Status::Completed).unwrap().no_completion();
+        let update = WadUpdate::new()
+            .set_status(Status::Completed)
+            .unwrap()
+            .no_completion();
         update_wad(&conn, id, &update).unwrap();
         let wad = get_wad(&conn, id, false).unwrap().unwrap();
         assert_eq!(wad.status, "completed");
@@ -739,9 +738,7 @@ mod tests {
         assert_eq!(wad.availability, "cached");
 
         // Clear cached_path → should auto-update back to downloadable
-        let update = WadUpdate::new()
-            .set_text("cached_path", None)
-            .unwrap();
+        let update = WadUpdate::new().set_text("cached_path", None).unwrap();
         update_wad(&conn, id, &update).unwrap();
 
         let wad = get_wad(&conn, id, false).unwrap().unwrap();

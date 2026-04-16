@@ -37,10 +37,7 @@ impl WikitextParser {
 
     /// Parse wikitext to extract WAD metadata.
     pub fn parse(&self, wikitext: &str, page_title: &str, page_id: i64) -> WikiEntry {
-        let wiki_url = format!(
-            "https://doomwiki.org/wiki/{}",
-            page_title.replace(' ', "_")
-        );
+        let wiki_url = format!("https://doomwiki.org/wiki/{}", page_title.replace(' ', "_"));
 
         let mut name = String::new();
         let mut author = String::new();
@@ -180,10 +177,7 @@ impl WikitextParser {
 
         for part in parts {
             if let Some((name, value)) = part.split_once('=') {
-                params.insert(
-                    name.trim().to_lowercase(),
-                    value.trim().to_string(),
-                );
+                params.insert(name.trim().to_lowercase(), value.trim().to_string());
             }
         }
 
@@ -392,17 +386,17 @@ mod tests {
     #[test]
     fn test_clean_value_html() {
         let p = parser();
-        assert_eq!(
-            p.clean_value("Text<ref>citation</ref> more"),
-            "Text more"
-        );
+        assert_eq!(p.clean_value("Text<ref>citation</ref> more"), "Text more");
         assert_eq!(p.clean_value("<br/>hello"), "hello");
     }
 
     #[test]
     fn test_clean_value_bold_italic() {
         let p = parser();
-        assert_eq!(p.clean_value("'''bold''' and ''italic''"), "bold and italic");
+        assert_eq!(
+            p.clean_value("'''bold''' and ''italic''"),
+            "bold and italic"
+        );
     }
 
     #[test]
@@ -490,10 +484,7 @@ mod tests {
     #[test]
     fn test_extract_first_paragraph_truncation() {
         let p = parser();
-        let long_text = format!(
-            "{{{{Wad|name=T}}}}\n\n{}",
-            "word ".repeat(200)
-        );
+        let long_text = format!("{{{{Wad|name=T}}}}\n\n{}", "word ".repeat(200));
         let para = p.extract_first_paragraph(&long_text);
         assert!(para.len() <= 503); // 500 + "..."
     }
@@ -525,10 +516,7 @@ MAP01: "Entryway"
         assert_eq!(entry.port, "Boom-compatible");
         assert!(entry.link.contains("doomworld.com/idgames/"));
         assert!(entry.description.contains("Scythe"));
-        assert_eq!(
-            entry.wiki_url,
-            "https://doomwiki.org/wiki/Scythe"
-        );
+        assert_eq!(entry.wiki_url, "https://doomwiki.org/wiki/Scythe");
     }
 
     #[test]
@@ -546,10 +534,7 @@ MAP01: "Entryway"
     fn test_parse_wiki_url_spaces() {
         let p = parser();
         let entry = p.parse("{{Wad|name=T}}", "Speed of Doom", 1);
-        assert_eq!(
-            entry.wiki_url,
-            "https://doomwiki.org/wiki/Speed_of_Doom"
-        );
+        assert_eq!(entry.wiki_url, "https://doomwiki.org/wiki/Speed_of_Doom");
     }
 
     #[test]

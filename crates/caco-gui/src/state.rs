@@ -84,7 +84,6 @@ pub enum PlayState {
     Playing { wad_id: i64, wad_title: String },
 }
 
-
 // ---------------------------------------------------------------------------
 // Sort definitions
 // ---------------------------------------------------------------------------
@@ -208,9 +207,7 @@ impl AppState {
     pub fn refresh_status_counts(&mut self, conn: &Connection) {
         self.status_counts.clear();
         self.total_wad_count = 0;
-        if let Ok(all_wads) =
-            caco_core::db::search_wads(conn, None, Some("id"), false, false, 0)
-        {
+        if let Ok(all_wads) = caco_core::db::search_wads(conn, None, Some("id"), false, false, 0) {
             self.total_wad_count = all_wads.len();
             for wad in &all_wads {
                 *self.status_counts.entry(wad.status.clone()).or_insert(0) += 1;
@@ -435,8 +432,7 @@ impl AppState {
 
     /// Get stats for the currently selected WAD.
     pub fn selected_stats(&self) -> Option<&WadStats> {
-        self.selected_wad_id
-            .and_then(|id| self.stats_map.get(&id))
+        self.selected_wad_id.and_then(|id| self.stats_map.get(&id))
     }
 
     /// Produce a snapshot of persistent GUI state for saving.

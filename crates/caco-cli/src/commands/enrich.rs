@@ -96,11 +96,7 @@ pub fn run(conn: &Connection, args: &EnrichArgs) -> Result<(), String> {
         }
         println!();
         let suffix = if args.dry_run { " (dry run)" } else { "" };
-        println!(
-            "{}/{} WAD(s) enriched{suffix}",
-            results.len(),
-            wads.len(),
-        );
+        println!("{}/{} WAD(s) enriched{suffix}", results.len(), wads.len(),);
     }
 
     if wiki_lookups > 0 {
@@ -138,26 +134,22 @@ fn enrich_wad(
         let path = Path::new(cached_path);
         if path.exists() {
             // Try complevel detection from file
-            if needs_complevel
-                && let Some(cl) = caco_core::complevel_detect::detect_complevel(path)
+            if needs_complevel && let Some(cl) = caco_core::complevel_detect::detect_complevel(path)
             {
                 result.complevel = Some(cl);
                 if !dry_run
-                    && let Ok(update) = WadUpdate::new()
-                        .set_int("complevel", Some(cl as i64))
+                    && let Ok(update) = WadUpdate::new().set_int("complevel", Some(cl as i64))
                 {
                     let _ = db::update_wad(conn, wad.id, &update);
                 }
             }
 
             // Try IWAD detection from file
-            if needs_iwad
-                && let Some(family) = caco_core::iwad_detect::detect_iwad(path)
-            {
+            if needs_iwad && let Some(family) = caco_core::iwad_detect::detect_iwad(path) {
                 result.iwad = Some(family.to_string());
                 if !dry_run
-                    && let Ok(update) = WadUpdate::new()
-                        .set_text("custom_iwad", Some(family.to_string()))
+                    && let Ok(update) =
+                        WadUpdate::new().set_text("custom_iwad", Some(family.to_string()))
                 {
                     let _ = db::update_wad(conn, wad.id, &update);
                 }
@@ -169,8 +161,8 @@ fn enrich_wad(
             {
                 result.zdoom_required = Some(required);
                 if !dry_run
-                    && let Ok(update) = WadUpdate::new()
-                        .set_int("zdoom_required", Some(i64::from(required)))
+                    && let Ok(update) =
+                        WadUpdate::new().set_int("zdoom_required", Some(i64::from(required)))
                 {
                     let _ = db::update_wad(conn, wad.id, &update);
                 }
@@ -185,25 +177,24 @@ fn enrich_wad(
         let wiki_entry = wiki_lookup_port(wad, wiki_lookups);
 
         if let Some(ref port_text) = wiki_entry {
-            if result.complevel.is_none() && needs_complevel
+            if result.complevel.is_none()
+                && needs_complevel
                 && let Some(cl) = port_to_complevel(port_text)
             {
                 result.complevel = Some(cl);
                 if !dry_run
-                    && let Ok(update) = WadUpdate::new()
-                        .set_int("complevel", Some(cl as i64))
+                    && let Ok(update) = WadUpdate::new().set_int("complevel", Some(cl as i64))
                 {
                     let _ = db::update_wad(conn, wad.id, &update);
                 }
             }
 
-            if result.zdoom_required.is_none() && needs_zdoom
+            if result.zdoom_required.is_none()
+                && needs_zdoom
                 && let Some(true) = port_to_zdoom_required(port_text)
             {
                 result.zdoom_required = Some(true);
-                if !dry_run
-                    && let Ok(update) = WadUpdate::new()
-                        .set_int("zdoom_required", Some(1))
+                if !dry_run && let Ok(update) = WadUpdate::new().set_int("zdoom_required", Some(1))
                 {
                     let _ = db::update_wad(conn, wad.id, &update);
                 }
@@ -241,9 +232,9 @@ fn wiki_lookup_port(wad: &WadRecord, wiki_lookups: &mut u32) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use caco_core::db::{self, init_db, open_memory};
-    use caco_core::db::wads::{add_wad, NewWad};
     use caco_core::db::models::SourceType;
+    use caco_core::db::wads::{NewWad, add_wad};
+    use caco_core::db::{self, init_db, open_memory};
 
     fn setup() -> Connection {
         let conn = open_memory().unwrap();
@@ -537,9 +528,7 @@ mod tests {
     fn test_run_complevel_filter_all_set() {
         let conn = setup();
         let wad_id = add_test_wad(&conn, "Has Complevel");
-        let update = db::WadUpdate::new()
-            .set_int("complevel", Some(9))
-            .unwrap();
+        let update = db::WadUpdate::new().set_int("complevel", Some(9)).unwrap();
         db::update_wad(&conn, wad_id, &update).unwrap();
 
         let args = EnrichArgs {
@@ -556,9 +545,7 @@ mod tests {
     fn test_run_complevel_filter_retains_missing() {
         let conn = setup();
         let _w1 = add_test_wad(&conn, "Has Complevel");
-        let update = db::WadUpdate::new()
-            .set_int("complevel", Some(9))
-            .unwrap();
+        let update = db::WadUpdate::new().set_int("complevel", Some(9)).unwrap();
         db::update_wad(&conn, _w1, &update).unwrap();
 
         let w2 = add_test_wad(&conn, "No Complevel");

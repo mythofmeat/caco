@@ -1,8 +1,8 @@
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use ratatui::Frame;
 
 use crate::theme;
 
@@ -12,7 +12,10 @@ pub fn render_status_bar(hints: &[(&str, &str)], frame: &mut Frame, area: Rect) 
 
     for (i, (key, desc)) in hints.iter().enumerate() {
         if i > 0 {
-            spans.push(Span::styled(" │ ", Style::default().fg(ratatui::style::Color::DarkGray)));
+            spans.push(Span::styled(
+                " │ ",
+                Style::default().fg(ratatui::style::Color::DarkGray),
+            ));
         }
         spans.push(Span::styled(*key, theme::key_style()));
         spans.push(Span::styled(format!(" {desc}"), theme::desc_style()));
@@ -48,8 +51,7 @@ pub fn render_status_mode_bar(frame: &mut Frame, area: Rect) {
     }
 
     let line = Line::from(spans);
-    let paragraph = Paragraph::new(line).style(
-        Style::default().bg(ratatui::style::Color::DarkGray),
-    );
+    let paragraph =
+        Paragraph::new(line).style(Style::default().bg(ratatui::style::Color::DarkGray));
     frame.render_widget(paragraph, area);
 }

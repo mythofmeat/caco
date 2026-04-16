@@ -22,7 +22,8 @@ pub fn run(args: &ConfigArgs) -> Result<(), String> {
                     .map_err(|e| format!("Failed to create config directory: {e}"))?;
             }
             let cfg = config::Config::default();
-            let content = toml::to_string_pretty(&cfg).map_err(|e| format!("Failed to serialize config: {e}"))?;
+            let content = toml::to_string_pretty(&cfg)
+                .map_err(|e| format!("Failed to serialize config: {e}"))?;
             std::fs::write(&config_path, content)
                 .map_err(|e| format!("Failed to write config: {e}"))?;
         }
@@ -37,7 +38,10 @@ pub fn run(args: &ConfigArgs) -> Result<(), String> {
             .map_err(|e| format!("Failed to open editor '{editor}': {e}"))?;
 
         if !status.success() {
-            return Err(format!("Editor exited with code {}", status.code().unwrap_or(-1)));
+            return Err(format!(
+                "Editor exited with code {}",
+                status.code().unwrap_or(-1)
+            ));
         }
         Ok(())
     } else {

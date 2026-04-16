@@ -2,11 +2,11 @@ use caco_core::db::sessions;
 use caco_core::db::wads;
 use caco_core::player::format_duration;
 use crossterm::event::{KeyCode, KeyEvent};
+use ratatui::Frame;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
-use ratatui::Frame;
 use rusqlite::Connection;
 
 use crate::message::{AppMessage, ScreenResult};
@@ -60,9 +60,7 @@ impl Screen for ConfirmDeleteScreen {
             Line::from(""),
             Line::from(Span::styled(
                 "Delete this WAD?",
-                Style::default()
-                    .fg(Color::Red)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
             Line::from(vec![

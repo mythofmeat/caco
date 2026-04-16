@@ -103,8 +103,7 @@ pub fn find_companion_by_md5(conn: &Connection, md5: &str) -> Result<Option<Comp
 
 /// Get all companion files in the registry.
 pub fn get_all_companions(conn: &Connection) -> Result<Vec<CompanionRecord>> {
-    let mut stmt =
-        conn.prepare("SELECT * FROM companion_files_registry ORDER BY filename")?;
+    let mut stmt = conn.prepare("SELECT * FROM companion_files_registry ORDER BY filename")?;
     let rows = stmt
         .query_map([], CompanionRecord::from_row)?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -119,11 +118,7 @@ pub fn get_all_companions(conn: &Connection) -> Result<Vec<CompanionRecord>> {
 ///
 /// The load_order defaults to one past the current max for that WAD.
 /// Uses INSERT OR IGNORE so re-linking the same pair is a no-op.
-pub fn link_companion_to_wad(
-    conn: &Connection,
-    wad_id: i64,
-    companion_id: i64,
-) -> Result<bool> {
+pub fn link_companion_to_wad(conn: &Connection, wad_id: i64, companion_id: i64) -> Result<bool> {
     let next_order: i64 = conn
         .query_row(
             "SELECT COALESCE(MAX(load_order), -1) + 1 FROM wad_companions WHERE wad_id = ?",
@@ -167,10 +162,7 @@ pub fn set_companion_enabled(
 }
 
 /// Get all companion files linked to a WAD, ordered by load_order.
-pub fn get_companions_for_wad(
-    conn: &Connection,
-    wad_id: i64,
-) -> Result<Vec<WadCompanionRecord>> {
+pub fn get_companions_for_wad(conn: &Connection, wad_id: i64) -> Result<Vec<WadCompanionRecord>> {
     let mut stmt = conn.prepare(
         "SELECT r.id, r.md5, r.filename, r.path, r.size, wc.enabled, wc.load_order
          FROM wad_companions wc
@@ -202,10 +194,7 @@ pub fn is_orphan(conn: &Connection, companion_id: i64) -> Result<bool> {
 ///
 /// Returns `Some(path)` if found, `None` if the companion didn't exist.
 /// Also removes all junction-table links (ON DELETE CASCADE).
-pub fn remove_companion_with_path(
-    conn: &Connection,
-    companion_id: i64,
-) -> Result<Option<String>> {
+pub fn remove_companion_with_path(conn: &Connection, companion_id: i64) -> Result<Option<String>> {
     let path: Option<String> = conn
         .query_row(
             "SELECT path FROM companion_files_registry WHERE id = ?",
@@ -325,7 +314,7 @@ mod tests {
     use crate::db::connection::open_memory;
     use crate::db::models::SourceType;
     use crate::db::schema::init_db;
-    use crate::db::wads::{add_wad, NewWad};
+    use crate::db::wads::{NewWad, add_wad};
 
     fn setup() -> Connection {
         let conn = open_memory().unwrap();
@@ -354,7 +343,11 @@ mod tests {
     #[test]
     fn test_find_companion_not_found() {
         let conn = setup();
-        assert!(find_companion_by_md5(&conn, "nonexistent").unwrap().is_none());
+        assert!(
+            find_companion_by_md5(&conn, "nonexistent")
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -491,7 +484,8 @@ mod tests {
         link_companion_to_wad(&conn, wad_id, c_id).unwrap();
 
         // Deleting the WAD should cascade to wad_companions
-        conn.execute("DELETE FROM wads WHERE id = ?", [wad_id]).unwrap();
+        conn.execute("DELETE FROM wads WHERE id = ?", [wad_id])
+            .unwrap();
 
         // Companion should now be orphaned, not deleted
         let orphans = get_orphaned_companions(&conn).unwrap();
@@ -517,7 +511,7 @@ mod tests {
         let batch = get_companions_batch(&conn, &[w1, w2, w3]).unwrap();
         assert_eq!(batch.get(&w1).map(|v| v.len()), Some(2));
         assert_eq!(batch.get(&w2).map(|v| v.len()), Some(1));
-        assert!(batch.get(&w3).is_none()); // Not in map
+        assert!(!batch.contains_key(&w3)); // Not in map
     }
 
     #[test]

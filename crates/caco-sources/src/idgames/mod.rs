@@ -69,9 +69,7 @@ mod tests {
     #[test]
     fn extracts_id_from_index_php_url() {
         assert_eq!(
-            extract_idgames_id_from_url(
-                "https://www.doomworld.com/idgames/index.php?id=18184"
-            ),
+            extract_idgames_id_from_url("https://www.doomworld.com/idgames/index.php?id=18184"),
             Some(18184),
         );
     }
@@ -87,9 +85,7 @@ mod tests {
     #[test]
     fn extracts_id_with_extra_query_params() {
         assert_eq!(
-            extract_idgames_id_from_url(
-                "https://www.doomworld.com/idgames/?foo=bar&id=42&baz=qux"
-            ),
+            extract_idgames_id_from_url("https://www.doomworld.com/idgames/?foo=bar&id=42&baz=qux"),
             Some(42),
         );
     }
@@ -97,9 +93,7 @@ mod tests {
     #[test]
     fn returns_none_for_forum_url() {
         assert_eq!(
-            extract_idgames_id_from_url(
-                "https://www.doomworld.com/forum/topic/123-something/"
-            ),
+            extract_idgames_id_from_url("https://www.doomworld.com/forum/topic/123-something/"),
             None,
         );
     }
@@ -161,9 +155,7 @@ mod tests {
     #[test]
     fn file_path_returns_none_for_query_url() {
         assert_eq!(
-            extract_idgames_file_path_from_url(
-                "https://www.doomworld.com/idgames/?id=18184"
-            ),
+            extract_idgames_file_path_from_url("https://www.doomworld.com/idgames/?id=18184"),
             None,
         );
     }

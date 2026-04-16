@@ -106,9 +106,7 @@ impl CacoApp {
                 self.state.active_dialog = Some(ActiveDialog::Collections(dialog));
             }
             ActionRequest::DeleteCollection(name) => {
-                if let Ok(true) =
-                    caco_core::db::collections::delete_collection(&self.conn, &name)
-                {
+                if let Ok(true) = caco_core::db::collections::delete_collection(&self.conn, &name) {
                     // Clear active collection if we just deleted it
                     if self.state.active_collection.as_deref() == Some(&name) {
                         self.state.active_collection = None;
@@ -132,12 +130,14 @@ impl CacoApp {
                 match caco_core::player::start_new_playthrough(&self.conn, wad_id) {
                     Ok(_) => {
                         self.state.needs_reload = true;
-                        self.state.notification =
-                            Some(Notification::info("New playthrough started — stats reset".to_string()));
+                        self.state.notification = Some(Notification::info(
+                            "New playthrough started — stats reset".to_string(),
+                        ));
                     }
                     Err(e) => {
-                        self.state.notification =
-                            Some(Notification::error(format!("Failed to start playthrough: {e}")));
+                        self.state.notification = Some(Notification::error(format!(
+                            "Failed to start playthrough: {e}"
+                        )));
                     }
                 }
             }
@@ -202,8 +202,7 @@ impl CacoApp {
                             let cache_dir = caco_core::config::get_cache_dir();
                             std::fs::create_dir_all(&cache_dir)
                                 .map_err(|e| format!("Failed to create cache dir: {e}"))?;
-                            let mirror =
-                                caco_core::config::load_config().download_mirror as usize;
+                            let mirror = caco_core::config::load_config().download_mirror as usize;
 
                             let idgames_id = wad
                                 .idgames_id
@@ -216,21 +215,15 @@ impl CacoApp {
                                         .download(&entry, Some(&cache_dir), mirror, None)
                                         .map_err(|e| format!("Download failed: {e}"))?,
                                     Err(caco_sources::SourceError::WafBlocked { .. }) => {
-                                        let source_url =
-                                            wad.source_url.as_deref().unwrap_or("");
+                                        let source_url = wad.source_url.as_deref().unwrap_or("");
                                         let filename = wad.filename.as_deref().unwrap_or("");
-                                        if filename.is_empty()
-                                            || !source_url.contains("/idgames/")
+                                        if filename.is_empty() || !source_url.contains("/idgames/")
                                         {
                                             return Err(PlayError::Unavailable);
                                         }
                                         client
                                             .download_direct(
-                                                source_url,
-                                                filename,
-                                                &cache_dir,
-                                                mirror,
-                                                None,
+                                                source_url, filename, &cache_dir, mirror, None,
                                             )
                                             .map_err(|_| PlayError::Unavailable)?
                                     }
@@ -240,30 +233,18 @@ impl CacoApp {
                                 }
                             } else {
                                 // No numeric ID — try direct mirror via source_url
-                                let source_url =
-                                    wad.source_url.as_deref().unwrap_or("");
+                                let source_url = wad.source_url.as_deref().unwrap_or("");
                                 let filename = wad.filename.as_deref().unwrap_or("");
-                                if filename.is_empty()
-                                    || !source_url.contains("/idgames/")
-                                {
+                                if filename.is_empty() || !source_url.contains("/idgames/") {
                                     return Err(PlayError::Unavailable);
                                 }
                                 client
-                                    .download_direct(
-                                        source_url,
-                                        filename,
-                                        &cache_dir,
-                                        mirror,
-                                        None,
-                                    )
+                                    .download_direct(source_url, filename, &cache_dir, mirror, None)
                                     .map_err(|_| PlayError::Unavailable)?
                             };
 
                             let update = caco_core::db::WadUpdate::new()
-                                .set_text(
-                                    "cached_path",
-                                    Some(dest.to_string_lossy().to_string()),
-                                )
+                                .set_text("cached_path", Some(dest.to_string_lossy().to_string()))
                                 .map_err(|e| format!("Failed to build update: {e}"))?;
                             caco_core::db::update_wad(&conn, wad_id, &update)
                                 .map_err(|e| format!("Failed to update WAD record: {e}"))?;
@@ -283,12 +264,10 @@ impl CacoApp {
                             wad_id,
                             outcome: Ok(pr),
                         }),
-                        Err(PlayError::Message(msg)) => {
-                            sender.send(AppMessage::PlayFinished {
-                                wad_id,
-                                outcome: Err(msg),
-                            })
-                        }
+                        Err(PlayError::Message(msg)) => sender.send(AppMessage::PlayFinished {
+                            wad_id,
+                            outcome: Err(msg),
+                        }),
                         Err(PlayError::Unavailable) => {
                             sender.send(AppMessage::PlayUnavailable { wad_id })
                         }
@@ -333,11 +312,8 @@ impl eframe::App for CacoApp {
                             // link dialog. All other string errors surface as a
                             // toast; explicit unavailability uses PlayUnavailable.
                             if err.starts_with("file not found:") {
-                                if let Some(dialog) =
-                                    LinkDialogState::new(&self.conn, wad_id)
-                                {
-                                    self.state.active_dialog =
-                                        Some(ActiveDialog::Link(dialog));
+                                if let Some(dialog) = LinkDialogState::new(&self.conn, wad_id) {
+                                    self.state.active_dialog = Some(ActiveDialog::Link(dialog));
                                 } else {
                                     self.state.notification =
                                         Some(Notification::error(format!("Play failed: {err}")));
@@ -349,11 +325,10 @@ impl eframe::App for CacoApp {
                         }
                         Ok(pr) => {
                             if pr.crashed() {
-                                self.state.notification =
-                                    Some(Notification::warning(format!(
-                                        "Sourceport crashed (exit code {})",
-                                        pr.exit_code.unwrap_or(-1)
-                                    )));
+                                self.state.notification = Some(Notification::warning(format!(
+                                    "Sourceport crashed (exit code {})",
+                                    pr.exit_code.unwrap_or(-1)
+                                )));
                             } else if pr.auto_complete
                                 == caco_core::player::AutoCompleteResult::Completed
                             {
@@ -370,7 +345,10 @@ impl eframe::App for CacoApp {
                     }
                 }
                 AppMessage::SearchComplete(source, results) => {
-                    self.state.import.search_state_mut(source).set_results(results);
+                    self.state
+                        .import
+                        .search_state_mut(source)
+                        .set_results(results);
                 }
                 AppMessage::ThumbnailReady {
                     wad_id,
@@ -378,7 +356,8 @@ impl eframe::App for CacoApp {
                     height,
                     pixels,
                 } => {
-                    self.thumbnails.on_ready(ctx, wad_id, width, height, &pixels);
+                    self.thumbnails
+                        .on_ready(ctx, wad_id, width, height, &pixels);
                 }
                 AppMessage::ThumbnailFailed { wad_id } => {
                     self.thumbnails.mark_failed(wad_id);
@@ -396,13 +375,12 @@ impl eframe::App for CacoApp {
                     match result {
                         Ok(ir) => {
                             if ir.is_duplicate {
-                                let title = ir
-                                    .duplicate_title
-                                    .unwrap_or_else(|| "unknown".to_string());
+                                let title =
+                                    ir.duplicate_title.unwrap_or_else(|| "unknown".to_string());
                                 let id = ir.duplicate_id.unwrap_or(0);
-                                self.state.notification = Some(Notification::warning(
-                                    format!("Already imported as {title} (#{id})"),
-                                ));
+                                self.state.notification = Some(Notification::warning(format!(
+                                    "Already imported as {title} (#{id})"
+                                )));
                             } else {
                                 self.state.notification = Some(Notification::info(
                                     "WAD imported successfully".to_string(),
@@ -454,49 +432,40 @@ impl eframe::App for CacoApp {
                     }
                     EditResult::Open => {}
                 },
-                ActiveDialog::Delete(delete_state) => {
-                    match delete_state.render(ctx, &self.conn) {
-                        DeleteResult::Confirmed => {
-                            close_dialog = true;
-                            self.state.needs_reload = true;
-                            self.state.notification =
-                                Some(Notification::info("WAD deleted".to_string()));
-                        }
-                        DeleteResult::Error(msg) => {
-                            close_dialog = true;
-                            self.state.notification =
-                                Some(Notification::error(msg));
-                        }
-                        DeleteResult::Cancelled => {
-                            close_dialog = true;
-                        }
-                        DeleteResult::Open => {}
+                ActiveDialog::Delete(delete_state) => match delete_state.render(ctx, &self.conn) {
+                    DeleteResult::Confirmed => {
+                        close_dialog = true;
+                        self.state.needs_reload = true;
+                        self.state.notification =
+                            Some(Notification::info("WAD deleted".to_string()));
                     }
-                }
-                ActiveDialog::Sessions(sessions_state) => {
-                    match sessions_state.render(ctx) {
-                        SessionsResult::Closed => {
-                            close_dialog = true;
-                        }
-                        SessionsResult::Open => {}
+                    DeleteResult::Error(msg) => {
+                        close_dialog = true;
+                        self.state.notification = Some(Notification::error(msg));
                     }
-                }
-                ActiveDialog::Stats(stats_state) => {
-                    match stats_state.render(ctx) {
-                        StatsResult::Closed => {
-                            close_dialog = true;
-                        }
-                        StatsResult::Open => {}
+                    DeleteResult::Cancelled => {
+                        close_dialog = true;
                     }
-                }
-                ActiveDialog::Cache(cache_state) => {
-                    match cache_state.render(ctx, &self.conn) {
-                        CacheResult::Closed => {
-                            close_dialog = true;
-                        }
-                        CacheResult::Open => {}
+                    DeleteResult::Open => {}
+                },
+                ActiveDialog::Sessions(sessions_state) => match sessions_state.render(ctx) {
+                    SessionsResult::Closed => {
+                        close_dialog = true;
                     }
-                }
+                    SessionsResult::Open => {}
+                },
+                ActiveDialog::Stats(stats_state) => match stats_state.render(ctx) {
+                    StatsResult::Closed => {
+                        close_dialog = true;
+                    }
+                    StatsResult::Open => {}
+                },
+                ActiveDialog::Cache(cache_state) => match cache_state.render(ctx, &self.conn) {
+                    CacheResult::Closed => {
+                        close_dialog = true;
+                    }
+                    CacheResult::Open => {}
+                },
                 ActiveDialog::Collections(collections_state) => {
                     let modified = collections_state.modified;
                     match collections_state.render(ctx, &self.conn) {
@@ -511,8 +480,7 @@ impl eframe::App for CacoApp {
                             self.state.refresh_collections(&self.conn);
                             self.state.active_collection = None;
                             self.state.filter_text = query;
-                            self.state.filter_changed_at =
-                                Some(std::time::Instant::now());
+                            self.state.filter_changed_at = Some(std::time::Instant::now());
                         }
                         CollectionsResult::Open => {}
                     }
@@ -537,20 +505,18 @@ impl eframe::App for CacoApp {
                         WadStatsResult::Open => {}
                     }
                 }
-                ActiveDialog::Link(link_state) => {
-                    match link_state.render(ctx, &self.conn) {
-                        LinkResult::Linked => {
-                            close_dialog = true;
-                            self.state.needs_reload = true;
-                            self.state.notification =
-                                Some(Notification::info("WAD file linked".to_string()));
-                        }
-                        LinkResult::Cancelled => {
-                            close_dialog = true;
-                        }
-                        LinkResult::Open => {}
+                ActiveDialog::Link(link_state) => match link_state.render(ctx, &self.conn) {
+                    LinkResult::Linked => {
+                        close_dialog = true;
+                        self.state.needs_reload = true;
+                        self.state.notification =
+                            Some(Notification::info("WAD file linked".to_string()));
                     }
-                }
+                    LinkResult::Cancelled => {
+                        close_dialog = true;
+                    }
+                    LinkResult::Open => {}
+                },
                 ActiveDialog::Help => {
                     if render_help_dialog(ctx) {
                         close_dialog = true;
@@ -643,7 +609,12 @@ impl eframe::App for CacoApp {
                                 ui.set_min_width(ui.available_width());
 
                                 // Now-playing hero
-                                if let Some(a) = render_now_playing_hero(ui, &self.state, &self.thumbnails, &self.conn) {
+                                if let Some(a) = render_now_playing_hero(
+                                    ui,
+                                    &self.state,
+                                    &self.thumbnails,
+                                    &self.conn,
+                                ) {
                                     actions.push(a);
                                 }
 
@@ -669,9 +640,7 @@ impl eframe::App for CacoApp {
                             });
                     }
                     ViewMode::Import => {
-                        if let Some(import_action) =
-                            import::render(ui, &mut self.state.import)
-                        {
+                        if let Some(import_action) = import::render(ui, &mut self.state.import) {
                             self.dispatch_import_action(import_action);
                         }
                     }
@@ -683,7 +652,11 @@ impl eframe::App for CacoApp {
             let sender = self.bg.sender();
 
             // Request thumbnails for all visible WADs
-            if self.state.wads.iter().any(|w| self.thumbnails.needs_request(w.id))
+            if self
+                .state
+                .wads
+                .iter()
+                .any(|w| self.thumbnails.needs_request(w.id))
             {
                 for wad in &self.state.wads {
                     if self.thumbnails.needs_request(wad.id) {
@@ -760,10 +733,8 @@ fn render_sidebar(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Act
             ui.add_space(16.0);
             if ui
                 .add(
-                    egui::Button::new(
-                        egui::RichText::new("+").size(13.0).color(theme::TEXT_MUTED),
-                    )
-                    .frame(false),
+                    egui::Button::new(egui::RichText::new("+").size(13.0).color(theme::TEXT_MUTED))
+                        .frame(false),
                 )
                 .on_hover_text("Manage collections")
                 .clicked()
@@ -796,11 +767,7 @@ fn render_sidebar(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Act
 
             if resp.clicked() {
                 // Find the collection and load its query + sort
-                if let Some(coll) = state
-                    .sidebar_collections
-                    .iter()
-                    .find(|c| c.name == *name)
-                {
+                if let Some(coll) = state.sidebar_collections.iter().find(|c| c.name == *name) {
                     state.active_collection = Some(name.clone());
                     state.filter_text = coll.query.clone();
                     state.applied_filter = coll.query.clone();
@@ -843,8 +810,7 @@ fn render_sidebar(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Act
             ui.add_space(20.0);
             ui.colored_label(
                 theme::TEXT_MUTED,
-                egui::RichText::new(format!("v{}", env!("CARGO_PKG_VERSION")))
-                    .size(11.0),
+                egui::RichText::new(format!("v{}", env!("CARGO_PKG_VERSION"))).size(11.0),
             );
         });
         ui.add_space(4.0);
@@ -866,7 +832,9 @@ fn render_sidebar(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Act
             if ui
                 .add(
                     egui::Button::new(
-                        egui::RichText::new("Stats").size(11.0).color(theme::TEXT_MUTED),
+                        egui::RichText::new("Stats")
+                            .size(11.0)
+                            .color(theme::TEXT_MUTED),
                     )
                     .frame(false),
                 )
@@ -877,7 +845,9 @@ fn render_sidebar(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Act
             if ui
                 .add(
                     egui::Button::new(
-                        egui::RichText::new("Cache").size(11.0).color(theme::TEXT_MUTED),
+                        egui::RichText::new("Cache")
+                            .size(11.0)
+                            .color(theme::TEXT_MUTED),
                     )
                     .frame(false),
                 )
@@ -888,7 +858,9 @@ fn render_sidebar(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Act
             if ui
                 .add(
                     egui::Button::new(
-                        egui::RichText::new("IWADs").size(11.0).color(theme::TEXT_MUTED),
+                        egui::RichText::new("IWADs")
+                            .size(11.0)
+                            .color(theme::TEXT_MUTED),
                     )
                     .frame(false),
                 )
@@ -935,10 +907,7 @@ fn render_breadcrumbs(ui: &mut egui::Ui, state: &AppState) {
         if has_detail {
             ui.colored_label(theme::TEXT_SECONDARY, base);
         } else {
-            ui.colored_label(
-                theme::TEXT_PRIMARY,
-                egui::RichText::new(base).strong(),
-            );
+            ui.colored_label(theme::TEXT_PRIMARY, egui::RichText::new(base).strong());
         }
 
         // WAD name crumb (when edit/sessions/etc dialog is open)
@@ -951,10 +920,7 @@ fn render_breadcrumbs(ui: &mut egui::Ui, state: &AppState) {
                 ui.colored_label(theme::TEXT_MUTED, "  /  ");
                 ui.colored_label(theme::TEXT_SECONDARY, title);
                 ui.colored_label(theme::TEXT_MUTED, "  /  ");
-                ui.colored_label(
-                    theme::TEXT_ACCENT,
-                    egui::RichText::new("Edit").strong(),
-                );
+                ui.colored_label(theme::TEXT_ACCENT, egui::RichText::new("Edit").strong());
             }
         }
     });
@@ -1237,12 +1203,9 @@ fn render_section_header(ui: &mut egui::Ui, state: &mut AppState) {
         ui.horizontal(|ui| {
             ui.colored_label(
                 theme::TEXT_MUTED,
-                egui::RichText::new(format!(
-                    "ALL WADS \u{00b7} {}",
-                    state.wads.len()
-                ))
-                .size(13.0)
-                .strong(),
+                egui::RichText::new(format!("ALL WADS \u{00b7} {}", state.wads.len()))
+                    .size(13.0)
+                    .strong(),
             );
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1252,9 +1215,13 @@ fn render_section_header(ui: &mut egui::Ui, state: &mut AppState) {
 
                 // List button
                 let list_text = if list_selected {
-                    egui::RichText::new("List").size(12.0).color(theme::TEXT_PRIMARY)
+                    egui::RichText::new("List")
+                        .size(12.0)
+                        .color(theme::TEXT_PRIMARY)
                 } else {
-                    egui::RichText::new("List").size(12.0).color(theme::TEXT_SECONDARY)
+                    egui::RichText::new("List")
+                        .size(12.0)
+                        .color(theme::TEXT_SECONDARY)
                 };
                 let list_btn = ui.add(
                     egui::Button::new(list_text)
@@ -1276,9 +1243,13 @@ fn render_section_header(ui: &mut egui::Ui, state: &mut AppState) {
 
                 // Grid button
                 let grid_text = if grid_selected {
-                    egui::RichText::new("Grid").size(12.0).color(theme::TEXT_PRIMARY)
+                    egui::RichText::new("Grid")
+                        .size(12.0)
+                        .color(theme::TEXT_PRIMARY)
                 } else {
-                    egui::RichText::new("Grid").size(12.0).color(theme::TEXT_SECONDARY)
+                    egui::RichText::new("Grid")
+                        .size(12.0)
+                        .color(theme::TEXT_SECONDARY)
                 };
                 let grid_btn = ui.add(
                     egui::Button::new(grid_text)
@@ -1297,7 +1268,6 @@ fn render_section_header(ui: &mut egui::Ui, state: &mut AppState) {
                 if grid_btn.clicked() {
                     state.view_layout = ViewLayout::Grid;
                 }
-
             });
         });
 
@@ -1317,7 +1287,13 @@ fn render_section_header(ui: &mut egui::Ui, state: &mut AppState) {
                 let is_active = state.status_filters.contains(status);
                 let count = state.status_count(Some(status));
                 let color = theme::status_color(status);
-                if theme::filter_pill(ui, theme::status_display(status), is_active, Some(color), count) {
+                if theme::filter_pill(
+                    ui,
+                    theme::status_display(status),
+                    is_active,
+                    Some(color),
+                    count,
+                ) {
                     if is_active {
                         state.status_filters.remove(status);
                     } else {
@@ -1338,10 +1314,7 @@ fn render_status_bar(ui: &mut egui::Ui, state: &mut AppState) {
     ui.horizontal(|ui| {
         // Play state indicator
         if let PlayState::Playing { wad_title, .. } = &state.play_state {
-            ui.colored_label(
-                theme::COLOR_SUCCESS,
-                format!("Playing: {wad_title}..."),
-            );
+            ui.colored_label(theme::COLOR_SUCCESS, format!("Playing: {wad_title}..."));
             ui.separator();
         }
 
@@ -1371,31 +1344,42 @@ fn render_help_dialog(ctx: &egui::Context) -> bool {
             egui::ScrollArea::vertical()
                 .max_height(ui.available_height() - 30.0)
                 .show(ui, |ui| {
-                    shortcut_section(ui, "Library Navigation", &[
-                        ("\u{2191}\u{2193} / j k", "Navigate up/down"),
-                        ("\u{2190}\u{2192} / h l", "Navigate left/right (grid)"),
-                        ("Home / g g", "Jump to first WAD"),
-                        ("End / Shift+G", "Jump to last WAD"),
-                        ("Ctrl+F", "Focus search/filter"),
-                    ]);
-                    shortcut_section(ui, "Library Actions", &[
-                        ("Enter / p", "Play selected WAD"),
-                        ("e", "Edit selected WAD"),
-                        ("d", "Delete selected WAD"),
-                        ("s", "View sessions"),
-                        ("m", "Map stats"),
-                    ]);
-                    shortcut_section(ui, "Import", &[
-                        ("1\u{2013}5", "Switch source"),
-                    ]);
-                    shortcut_section(ui, "Dialogs", &[
-                        ("Escape", "Close / cancel"),
-                        ("Enter", "Confirm / default action"),
-                    ]);
-                    shortcut_section(ui, "Global", &[
-                        ("Ctrl+Q", "Quit"),
-                        ("F5", "Refresh library"),
-                    ]);
+                    shortcut_section(
+                        ui,
+                        "Library Navigation",
+                        &[
+                            ("\u{2191}\u{2193} / j k", "Navigate up/down"),
+                            ("\u{2190}\u{2192} / h l", "Navigate left/right (grid)"),
+                            ("Home / g g", "Jump to first WAD"),
+                            ("End / Shift+G", "Jump to last WAD"),
+                            ("Ctrl+F", "Focus search/filter"),
+                        ],
+                    );
+                    shortcut_section(
+                        ui,
+                        "Library Actions",
+                        &[
+                            ("Enter / p", "Play selected WAD"),
+                            ("e", "Edit selected WAD"),
+                            ("d", "Delete selected WAD"),
+                            ("s", "View sessions"),
+                            ("m", "Map stats"),
+                        ],
+                    );
+                    shortcut_section(ui, "Import", &[("1\u{2013}5", "Switch source")]);
+                    shortcut_section(
+                        ui,
+                        "Dialogs",
+                        &[
+                            ("Escape", "Close / cancel"),
+                            ("Enter", "Confirm / default action"),
+                        ],
+                    );
+                    shortcut_section(
+                        ui,
+                        "Global",
+                        &[("Ctrl+Q", "Quit"), ("F5", "Refresh library")],
+                    );
                 });
             ui.add_space(8.0);
             if ui.button("Close").clicked() || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {

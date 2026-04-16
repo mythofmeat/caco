@@ -16,7 +16,10 @@ pub struct SandboxPaths {
 impl SandboxPaths {
     pub fn new(sandbox: PathBuf, source_home: PathBuf) -> Result<Self> {
         validate_sandbox_path(&sandbox)?;
-        Ok(Self { sandbox, source_home })
+        Ok(Self {
+            sandbox,
+            source_home,
+        })
     }
 
     pub fn db_path(&self) -> PathBuf {
@@ -102,10 +105,14 @@ mod tests {
         let fake_caco = fake_home.path().join("caco");
         std::fs::create_dir_all(&fake_caco).unwrap();
         // Simulate what dirs::data_dir() would normally give us.
-        temp_env::with_var("XDG_DATA_HOME", Some(fake_home.path().to_str().unwrap()), || {
-            let err = validate_sandbox_path(&fake_caco).unwrap_err();
-            assert!(matches!(err, CacoMcpError::SandboxPathUnsafe { .. }));
-        });
+        temp_env::with_var(
+            "XDG_DATA_HOME",
+            Some(fake_home.path().to_str().unwrap()),
+            || {
+                let err = validate_sandbox_path(&fake_caco).unwrap_err();
+                assert!(matches!(err, CacoMcpError::SandboxPathUnsafe { .. }));
+            },
+        );
     }
 
     #[test]
@@ -114,10 +121,14 @@ mod tests {
         let fake_caco = fake_home.path().join("caco");
         std::fs::create_dir_all(&fake_caco).unwrap();
         let inside = fake_caco.join("foo");
-        temp_env::with_var("XDG_DATA_HOME", Some(fake_home.path().to_str().unwrap()), || {
-            let err = validate_sandbox_path(&inside).unwrap_err();
-            assert!(matches!(err, CacoMcpError::SandboxPathUnsafe { .. }));
-        });
+        temp_env::with_var(
+            "XDG_DATA_HOME",
+            Some(fake_home.path().to_str().unwrap()),
+            || {
+                let err = validate_sandbox_path(&inside).unwrap_err();
+                assert!(matches!(err, CacoMcpError::SandboxPathUnsafe { .. }));
+            },
+        );
     }
 
     #[test]
@@ -125,10 +136,14 @@ mod tests {
         let fake_home = TempDir::new().unwrap();
         let fake_caco = fake_home.path().join("caco");
         std::fs::create_dir_all(&fake_caco).unwrap();
-        temp_env::with_var("XDG_DATA_HOME", Some(fake_home.path().to_str().unwrap()), || {
-            let err = validate_sandbox_path(fake_home.path()).unwrap_err();
-            assert!(matches!(err, CacoMcpError::SandboxPathUnsafe { .. }));
-        });
+        temp_env::with_var(
+            "XDG_DATA_HOME",
+            Some(fake_home.path().to_str().unwrap()),
+            || {
+                let err = validate_sandbox_path(fake_home.path()).unwrap_err();
+                assert!(matches!(err, CacoMcpError::SandboxPathUnsafe { .. }));
+            },
+        );
     }
 
     #[test]

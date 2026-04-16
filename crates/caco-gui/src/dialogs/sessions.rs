@@ -59,7 +59,15 @@ impl SessionsDialogState {
                     None => ("\u{2014}".to_string(), false),
                 };
 
-                SessionRow { date, time, duration, sourceport, maps, status_text, crashed }
+                SessionRow {
+                    date,
+                    time,
+                    duration,
+                    sourceport,
+                    maps,
+                    status_text,
+                    crashed,
+                }
             })
             .collect();
 
@@ -90,7 +98,11 @@ impl SessionsDialogState {
 
                 ui.colored_label(
                     theme::TEXT_SECONDARY,
-                    format!("{} session{}", self.sessions.len(), if self.sessions.len() == 1 { "" } else { "s" }),
+                    format!(
+                        "{} session{}",
+                        self.sessions.len(),
+                        if self.sessions.len() == 1 { "" } else { "s" }
+                    ),
                 );
                 ui.add_space(4.0);
 
@@ -101,27 +113,39 @@ impl SessionsDialogState {
                     .striped(true)
                     .resizable(true)
                     .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                    .column(Column::initial(90.0).at_least(70.0))   // Date
-                    .column(Column::initial(55.0).at_least(45.0))   // Time
-                    .column(Column::initial(75.0).at_least(50.0))   // Duration
-                    .column(Column::initial(100.0).at_least(60.0))  // Sourceport
-                    .column(Column::remainder().at_least(100.0))    // Maps
-                    .column(Column::initial(80.0).at_least(50.0));  // Status
+                    .column(Column::initial(90.0).at_least(70.0)) // Date
+                    .column(Column::initial(55.0).at_least(45.0)) // Time
+                    .column(Column::initial(75.0).at_least(50.0)) // Duration
+                    .column(Column::initial(100.0).at_least(60.0)) // Sourceport
+                    .column(Column::remainder().at_least(100.0)) // Maps
+                    .column(Column::initial(80.0).at_least(50.0)); // Status
 
                 table
                     .header(row_height + 2.0, |mut header| {
                         for label in ["Date", "Time", "Duration", "Sourceport", "Maps", "Status"] {
-                            header.col(|ui| { ui.strong(label); });
+                            header.col(|ui| {
+                                ui.strong(label);
+                            });
                         }
                     })
                     .body(|body| {
                         body.rows(row_height, self.sessions.len(), |mut row| {
                             let s = &self.sessions[row.index()];
-                            row.col(|ui| { ui.label(&s.date); });
-                            row.col(|ui| { ui.label(&s.time); });
-                            row.col(|ui| { ui.label(&s.duration); });
-                            row.col(|ui| { ui.label(&s.sourceport); });
-                            row.col(|ui| { ui.colored_label(theme::TEXT_SECONDARY, &s.maps); });
+                            row.col(|ui| {
+                                ui.label(&s.date);
+                            });
+                            row.col(|ui| {
+                                ui.label(&s.time);
+                            });
+                            row.col(|ui| {
+                                ui.label(&s.duration);
+                            });
+                            row.col(|ui| {
+                                ui.label(&s.sourceport);
+                            });
+                            row.col(|ui| {
+                                ui.colored_label(theme::TEXT_SECONDARY, &s.maps);
+                            });
                             row.col(|ui| {
                                 let color = if s.crashed {
                                     theme::COLOR_ERROR

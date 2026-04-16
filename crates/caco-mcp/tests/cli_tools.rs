@@ -5,7 +5,7 @@
 mod common;
 
 use caco_mcp::cli_runner::CliRunner;
-use caco_mcp::reset::{reset_sandbox, ResetOptions};
+use caco_mcp::reset::{ResetOptions, reset_sandbox};
 use common::with_test_server;
 use tokio::runtime::Runtime;
 
@@ -57,11 +57,7 @@ fn caco_modify_adds_tag_visible_in_db() {
         let id = ls.parsed_json.unwrap()[0]["id"].as_i64().expect("id");
 
         let m = rt
-            .block_on(runner.run(vec![
-                "modify".into(),
-                format!("id:{id}"),
-                "tag=hard".into(),
-            ]))
+            .block_on(runner.run(vec!["modify".into(), format!("id:{id}"), "tag=hard".into()]))
             .unwrap();
         assert_eq!(m.exit_code, 0, "modify failed: {}", m.stderr);
 

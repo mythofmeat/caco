@@ -94,7 +94,11 @@ type Migration = (i64, &'static str, fn(&Connection) -> Result<()>);
 static MIGRATIONS: &[Migration] = &[
     (1, "add_custom_play_config", migrate_add_custom_play_config),
     (2, "add_wad_completions", migrate_add_wad_completions),
-    (3, "rename_wishlist_to_toplay", migrate_rename_wishlist_to_toplay),
+    (
+        3,
+        "rename_wishlist_to_toplay",
+        migrate_rename_wishlist_to_toplay,
+    ),
     (4, "add_deleted_at", migrate_add_deleted_at),
     (5, "add_version", migrate_add_version),
     (6, "add_idgames_id", migrate_add_idgames_id),
@@ -117,8 +121,16 @@ static MIGRATIONS: &[Migration] = &[
     (19, "add_complevel", migrate_add_complevel),
     (20, "add_session_exit_code", migrate_add_session_exit_code),
     (21, "add_custom_config", migrate_add_custom_config),
-    (22, "merge_custom_complevel_to_complevel", migrate_merge_custom_complevel),
-    (23, "add_companion_tables_and_gc_ignore", migrate_add_companion_tables_and_gc_ignore),
+    (
+        22,
+        "merge_custom_complevel_to_complevel",
+        migrate_merge_custom_complevel,
+    ),
+    (
+        23,
+        "add_companion_tables_and_gc_ignore",
+        migrate_add_companion_tables_and_gc_ignore,
+    ),
     // Python uses migration 24 for add_gc_ignore (split from Rust's migration 23).
     // Our new migrations start at 25 to avoid collisions with Python-migrated databases.
     (24, "add_gc_ignore_compat_noop", migrate_noop),
@@ -126,8 +138,16 @@ static MIGRATIONS: &[Migration] = &[
     (26, "add_playthroughs_table", migrate_add_playthroughs_table),
     (27, "add_smart_collections", migrate_add_smart_collections),
     (28, "add_wad_analysis_table", migrate_add_wad_analysis_table),
-    (29, "fix_started_dropped_conflict", migrate_fix_started_dropped),
-    (30, "fix_started_queued_conflict", migrate_fix_started_queued),
+    (
+        29,
+        "fix_started_dropped_conflict",
+        migrate_fix_started_dropped,
+    ),
+    (
+        30,
+        "fix_started_queued_conflict",
+        migrate_fix_started_queued,
+    ),
     (31, "add_zdoom_required", migrate_add_zdoom_required),
     (32, "consolidate_status_columns", migrate_consolidate_status),
 ];
@@ -142,9 +162,11 @@ pub fn init_db(conn: &Connection) -> Result<()> {
 
     // Determine which migrations have already been applied
     let current_version: i64 = conn
-        .query_row("SELECT COALESCE(MAX(version), 0) FROM schema_migrations", [], |row| {
-            row.get(0)
-        })
+        .query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+            [],
+            |row| row.get(0),
+        )
         .unwrap_or(0);
 
     // Run only pending migrations
@@ -191,9 +213,16 @@ fn table_exists(conn: &Connection, table: &str) -> Result<bool> {
 }
 
 /// Add a column if it doesn't already exist.
-fn add_column_if_missing(conn: &Connection, table: &str, column: &str, col_type: &str) -> Result<()> {
+fn add_column_if_missing(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    col_type: &str,
+) -> Result<()> {
     if !has_column(conn, table, column)? {
-        conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {col_type}"))?;
+        conn.execute_batch(&format!(
+            "ALTER TABLE {table} ADD COLUMN {column} {col_type}"
+        ))?;
     }
     Ok(())
 }
@@ -230,7 +259,10 @@ fn migrate_add_wad_completions(conn: &Connection) -> Result<()> {
 }
 
 fn migrate_rename_wishlist_to_toplay(conn: &Connection) -> Result<()> {
-    conn.execute("UPDATE wads SET status = 'to-play' WHERE status = 'wishlist'", [])?;
+    conn.execute(
+        "UPDATE wads SET status = 'to-play' WHERE status = 'wishlist'",
+        [],
+    )?;
     Ok(())
 }
 
@@ -281,7 +313,14 @@ fn migrate_iwads_family_variant(conn: &Connection) -> Result<()> {
     }
     // Read old rows, drop table, recreate with new schema, re-insert.
     // For the Rust port we don't import KNOWN_IWADS here — just set variant to "unknown".
-    type OldIwadRow = (i64, String, Option<String>, String, Option<String>, Option<String>);
+    type OldIwadRow = (
+        i64,
+        String,
+        Option<String>,
+        String,
+        Option<String>,
+        Option<String>,
+    );
     let old_rows: Vec<OldIwadRow> = {
         let mut stmt = conn.prepare("SELECT id, name, title, path, md5, created_at FROM iwads")?;
         stmt.query_map([], |row| {
@@ -315,7 +354,9 @@ fn migrate_iwads_family_variant(conn: &Connection) -> Result<()> {
         "INSERT OR IGNORE INTO iwads (family, variant, title, path, md5, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
     )?;
     for (_, family, title, path, md5, created_at) in &old_rows {
-        insert.execute(rusqlite::params![family, "unknown", title, path, md5, created_at])?;
+        insert.execute(rusqlite::params![
+            family, "unknown", title, path, md5, created_at
+        ])?;
     }
 
     Ok(())
@@ -506,7 +547,12 @@ fn migrate_add_playthroughs_table(conn: &Connection) -> Result<()> {
     }
 
     // Add playthrough_id column to sessions
-    add_column_if_missing(conn, "sessions", "playthrough_id", "INTEGER REFERENCES playthroughs(id)")?;
+    add_column_if_missing(
+        conn,
+        "sessions",
+        "playthrough_id",
+        "INTEGER REFERENCES playthroughs(id)",
+    )?;
 
     // Synthesize playthroughs from existing wad_completions
     // For each completion, create a completed playthrough.
@@ -649,7 +695,9 @@ mod tests {
 
         // All migrations should be recorded
         let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert_eq!(count, MIGRATIONS.len() as i64);
     }
@@ -661,12 +709,34 @@ mod tests {
 
         // Check all expected columns after migrations
         let expected_columns = [
-            "id", "title", "author", "year", "description", "status", "rating",
-            "notes", "source_type", "source_id", "source_url", "idgames_id",
-            "filename", "cached_path", "custom_iwad", "custom_sourceport",
-            "custom_args", "created_at", "updated_at", "deleted_at", "version",
-            "stats_snapshot", "companion_files", "custom_complevel", "complevel",
-            "custom_config", "gc_ignore", "availability",
+            "id",
+            "title",
+            "author",
+            "year",
+            "description",
+            "status",
+            "rating",
+            "notes",
+            "source_type",
+            "source_id",
+            "source_url",
+            "idgames_id",
+            "filename",
+            "cached_path",
+            "custom_iwad",
+            "custom_sourceport",
+            "custom_args",
+            "created_at",
+            "updated_at",
+            "deleted_at",
+            "version",
+            "stats_snapshot",
+            "companion_files",
+            "custom_complevel",
+            "complevel",
+            "custom_config",
+            "gc_ignore",
+            "availability",
         ];
         for col in &expected_columns {
             assert!(
@@ -682,9 +752,18 @@ mod tests {
         init_db(&conn).unwrap();
 
         let expected = [
-            "id", "wad_id", "started_at", "ended_at", "duration_seconds",
-            "sourceport", "notes", "stats_before", "stats_after", "demo_file",
-            "exit_code", "playthrough_id",
+            "id",
+            "wad_id",
+            "started_at",
+            "ended_at",
+            "duration_seconds",
+            "sourceport",
+            "notes",
+            "stats_before",
+            "stats_after",
+            "demo_file",
+            "exit_code",
+            "playthrough_id",
         ];
         for col in &expected {
             assert!(

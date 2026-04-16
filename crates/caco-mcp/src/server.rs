@@ -18,9 +18,8 @@ impl CacoMcpServer {
     pub fn new(paths: SandboxPaths, caco_bin: CacoBin) -> Self {
         // Compose all sub-routers. The three `*_router` functions are generated
         // by `#[tool_router(router = ..., vis = "pub")]` in the respective modules.
-        let router = Self::sandbox_tools_router()
-            + Self::cli_tools_router()
-            + Self::introspect_router();
+        let router =
+            Self::sandbox_tools_router() + Self::cli_tools_router() + Self::introspect_router();
         Self {
             paths,
             caco_bin,
@@ -55,11 +54,9 @@ fn read_schema_version(db: &std::path::Path) -> Option<i64> {
     if !db.is_file() {
         return None;
     }
-    let conn = rusqlite::Connection::open_with_flags(
-        db,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .ok()?;
+    let conn =
+        rusqlite::Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .ok()?;
     conn.query_row(
         "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
         [],

@@ -59,8 +59,14 @@ impl LlmExtractedMetadata {
             description: json_opt_str(data, "description"),
             iwad: json_opt_str(data, "iwad"),
             sourceport: json_opt_str(data, "sourceport"),
-            complevel: data.get("complevel").and_then(|v| v.as_i64()).map(|v| v as i32),
-            map_count: data.get("map_count").and_then(|v| v.as_i64()).map(|v| v as i32),
+            complevel: data
+                .get("complevel")
+                .and_then(|v| v.as_i64())
+                .map(|v| v as i32),
+            map_count: data
+                .get("map_count")
+                .and_then(|v| v.as_i64())
+                .map(|v| v as i32),
             difficulty: json_opt_str(data, "difficulty"),
             themes: data
                 .get("themes")
@@ -294,9 +300,8 @@ impl ApiParser {
     ) -> Result<Self, LlmError> {
         let key = match api_key.filter(|k| !k.is_empty()) {
             Some(k) => k.to_string(),
-            None => std::env::var(provider.env_var()).map_err(|_| {
-                LlmError::NotAvailable(format!("{} not set", provider.env_var()))
-            })?,
+            None => std::env::var(provider.env_var())
+                .map_err(|_| LlmError::NotAvailable(format!("{} not set", provider.env_var())))?,
         };
 
         Ok(Self {
@@ -395,10 +400,9 @@ impl LlmParser for ApiParser {
             }
         }
 
-        let response = request
-            .json(&body)
-            .send()
-            .map_err(|e| LlmError::ExtractionFailed(format!("{} API error: {e}", self.provider.label())))?;
+        let response = request.json(&body).send().map_err(|e| {
+            LlmError::ExtractionFailed(format!("{} API error: {e}", self.provider.label()))
+        })?;
 
         if !response.status().is_success() {
             return Err(LlmError::ExtractionFailed(format!(
@@ -408,9 +412,9 @@ impl LlmParser for ApiParser {
             )));
         }
 
-        let response_json: Value = response
-            .json()
-            .map_err(|e| LlmError::ExtractionFailed(format!("Failed to parse API response: {e}")))?;
+        let response_json: Value = response.json().map_err(|e| {
+            LlmError::ExtractionFailed(format!("Failed to parse API response: {e}"))
+        })?;
 
         let content = self.extract_content(&response_json)?;
         let data = parse_json_response(&content)?;
@@ -445,7 +449,11 @@ pub fn get_parser(
     }
 
     // Auto-detect: env vars
-    for provider in [ApiProvider::OpenRouter, ApiProvider::Anthropic, ApiProvider::OpenAi] {
+    for provider in [
+        ApiProvider::OpenRouter,
+        ApiProvider::Anthropic,
+        ApiProvider::OpenAi,
+    ] {
         if std::env::var(provider.env_var()).is_ok() {
             return Ok(Box::new(ApiParser::new(provider, model, api_key)?));
         }
@@ -470,9 +478,21 @@ fn create_parser(
 ) -> Result<Box<dyn LlmParser>, LlmError> {
     match backend {
         "claude-code" => Ok(Box::new(ClaudeCodeParser)),
-        "openrouter" => Ok(Box::new(ApiParser::new(ApiProvider::OpenRouter, model, api_key)?)),
-        "anthropic" => Ok(Box::new(ApiParser::new(ApiProvider::Anthropic, model, api_key)?)),
-        "openai" => Ok(Box::new(ApiParser::new(ApiProvider::OpenAi, model, api_key)?)),
+        "openrouter" => Ok(Box::new(ApiParser::new(
+            ApiProvider::OpenRouter,
+            model,
+            api_key,
+        )?)),
+        "anthropic" => Ok(Box::new(ApiParser::new(
+            ApiProvider::Anthropic,
+            model,
+            api_key,
+        )?)),
+        "openai" => Ok(Box::new(ApiParser::new(
+            ApiProvider::OpenAi,
+            model,
+            api_key,
+        )?)),
         other => Err(LlmError::NotAvailable(format!(
             "Unknown backend: {other}. Available: claude-code, openrouter, anthropic, openai"
         ))),
@@ -604,8 +624,14 @@ mod tests {
 
     #[test]
     fn test_api_provider_defaults() {
-        assert_eq!(ApiProvider::OpenRouter.default_model(), "anthropic/claude-3-haiku");
-        assert_eq!(ApiProvider::Anthropic.default_model(), "claude-3-haiku-20240307");
+        assert_eq!(
+            ApiProvider::OpenRouter.default_model(),
+            "anthropic/claude-3-haiku"
+        );
+        assert_eq!(
+            ApiProvider::Anthropic.default_model(),
+            "claude-3-haiku-20240307"
+        );
         assert_eq!(ApiProvider::OpenAi.default_model(), "gpt-3.5-turbo");
     }
 

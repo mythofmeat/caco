@@ -4,18 +4,21 @@
 mod common;
 
 use caco_mcp::introspect::execute_run_sql;
-use caco_mcp::reset::{reset_sandbox, ResetOptions};
+use caco_mcp::reset::{ResetOptions, reset_sandbox};
 use common::with_test_server;
 
 #[test]
 fn run_sql_selects_fixture_wad() {
     with_test_server(|server, _sb, _src| {
         reset_sandbox(&server.paths, &ResetOptions { skip_wads: true }).unwrap();
-        let res =
-            execute_run_sql(&server.paths, "SELECT id, title FROM wads ORDER BY id").unwrap();
+        let res = execute_run_sql(&server.paths, "SELECT id, title FROM wads ORDER BY id").unwrap();
         assert_eq!(res.columns, vec!["id", "title"]);
         assert!(!res.rows.is_empty(), "fixture DB should contain rows");
-        assert!(res.rows.iter().any(|r| r[1] == serde_json::json!("Fixture WAD")));
+        assert!(
+            res.rows
+                .iter()
+                .any(|r| r[1] == serde_json::json!("Fixture WAD"))
+        );
         assert!(!res.truncated);
     });
 }

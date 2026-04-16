@@ -3,11 +3,11 @@ use std::thread;
 
 use caco_sources::import_service::ImportService;
 use crossterm::event::{KeyCode, KeyEvent};
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use ratatui::Frame;
 use rusqlite::Connection;
 
 use crate::message::{AppMessage, SearchResultEntry, SearchSource, SearchSourceData};
@@ -148,10 +148,10 @@ impl ImportPaneState {
                         let conn =
                             caco_core::db::open_connection(&db_path).map_err(|e| e.to_string())?;
                         let client = caco_sources::idgames::IdgamesClient::new();
-                        let id: i64 = source_id.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
-                        let file_entry = client
-                            .get(Some(id), None)
-                            .map_err(|e| e.to_string())?;
+                        let id: i64 = source_id
+                            .parse()
+                            .map_err(|e: std::num::ParseIntError| e.to_string())?;
+                        let file_entry = client.get(Some(id), None).map_err(|e| e.to_string())?;
                         let service = ImportService;
                         let result = service.import_idgames(&conn, &file_entry, None, false);
                         if let Some(err) = &result.error {
@@ -268,9 +268,7 @@ impl ImportPaneState {
                                 let conn = caco_core::db::open_connection(&db_path)
                                     .map_err(|e| e.to_string())?;
                                 let client = caco_sources::doomworld::DoomworldClient::new();
-                                let thread = client
-                                    .get_thread(&url)
-                                    .map_err(|e| e.to_string())?;
+                                let thread = client.get_thread(&url).map_err(|e| e.to_string())?;
                                 let service = ImportService;
                                 let result = service.import_doomworld(
                                     &conn,
@@ -307,8 +305,7 @@ impl ImportPaneState {
 
 /// Render the import pane.
 pub fn render_import_pane(state: &mut ImportPaneState, frame: &mut Frame, area: Rect) {
-    let layout =
-        Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(area);
+    let layout = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(area);
 
     // Source selector tabs
     let mut tab_spans: Vec<Span> = Vec::new();

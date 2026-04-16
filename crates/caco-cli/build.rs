@@ -16,11 +16,7 @@ fn main() {
         .map(|s| !s.success())
         .unwrap_or(false);
 
-    let version = if dirty {
-        format!("{hash}-dirty")
-    } else {
-        hash
-    };
+    let version = if dirty { format!("{hash}-dirty") } else { hash };
 
     println!("cargo:rustc-env=CACO_GIT_HASH={version}");
     // Rebuild when git HEAD changes

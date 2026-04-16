@@ -29,12 +29,10 @@ pub fn render(ui: &mut egui::Ui, state: &mut FormState) -> Option<FormPanelActio
                         .monospace(),
                 );
                 let text_width = if is_path_field { 330.0 } else { 400.0 };
-                ui.add(
-                    egui::TextEdit::singleline(&mut field.value).desired_width(text_width),
-                );
+                ui.add(egui::TextEdit::singleline(&mut field.value).desired_width(text_width));
                 if is_path_field && ui.button("Browse…").clicked() {
-                    let mut dialog = rfd::FileDialog::new()
-                        .add_filter("WAD/ZIP files", &["wad", "zip"]);
+                    let mut dialog =
+                        rfd::FileDialog::new().add_filter("WAD/ZIP files", &["wad", "zip"]);
                     if let Some(dir) = dirs::home_dir() {
                         dialog = dialog.set_directory(dir);
                     }

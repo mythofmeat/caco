@@ -3,9 +3,9 @@
 use clap::Subcommand;
 use rusqlite::Connection;
 
+use crate::resolve;
 use caco_core::demos;
 use caco_core::utils::format_size;
-use crate::resolve;
 
 #[derive(Subcommand)]
 pub enum DemosCommand {
@@ -50,10 +50,17 @@ pub enum DemosCommand {
 pub fn run(conn: &Connection, cmd: &DemosCommand) -> Result<(), String> {
     match cmd {
         DemosCommand::List { query, plain, yes } => list_demos(conn, query, *plain, *yes),
-        DemosCommand::Play { query, demo, sourceport, yes } => {
-            play_demo(conn, query, demo.as_deref(), sourceport.as_deref(), *yes)
-        }
-        DemosCommand::Clean { query, dry_run, yes } => clean_demos(conn, query, *dry_run, *yes),
+        DemosCommand::Play {
+            query,
+            demo,
+            sourceport,
+            yes,
+        } => play_demo(conn, query, demo.as_deref(), sourceport.as_deref(), *yes),
+        DemosCommand::Clean {
+            query,
+            dry_run,
+            yes,
+        } => clean_demos(conn, query, *dry_run, *yes),
     }
 }
 
@@ -72,7 +79,7 @@ fn list_demos(conn: &Connection, query: &[String], plain: bool, yes: bool) -> Re
             println!("{}\t{}\t{}", f.name, format_size(f.size), f.mtime_iso);
         }
     } else {
-        use comfy_table::{presets, Table, Cell, CellAlignment};
+        use comfy_table::{Cell, CellAlignment, Table, presets};
         let mut table = Table::new();
         table
             .load_preset(presets::UTF8_FULL_CONDENSED)
@@ -120,7 +127,9 @@ fn play_demo(
         }
     } else {
         // Most recent demo
-        files.first().map(|f| f.path.clone())
+        files
+            .first()
+            .map(|f| f.path.clone())
             .ok_or_else(|| "No demos found.".to_string())?
     };
 
@@ -139,9 +148,11 @@ fn play_demo(
 
     // Add IWAD
     let default_iwad = caco_core::config::get_iwad();
-    let iwad_name = wad.custom_iwad.as_deref().or(
-        if default_iwad.is_empty() { None } else { Some(default_iwad.as_str()) }
-    );
+    let iwad_name = wad.custom_iwad.as_deref().or(if default_iwad.is_empty() {
+        None
+    } else {
+        Some(default_iwad.as_str())
+    });
     if let Some(iwad) = iwad_name {
         let db_resolved = caco_core::db::resolve_iwad_from_db(conn, iwad, None);
         let resolved = caco_core::config::resolve_iwad_path(iwad, db_resolved.as_deref());
@@ -157,19 +168,28 @@ fn play_demo(
 
     eprintln!("Playing demo: {}", demo_path.display());
     cmd.stdin(std::process::Stdio::null());
-    let status = cmd.spawn()
+    let status = cmd
+        .spawn()
         .map_err(|e| format!("Failed to launch sourceport: {e}"))?
         .wait()
         .map_err(|e| format!("Failed to wait for sourceport: {e}"))?;
 
     if !status.success() {
-        eprintln!("Warning: Sourceport exited with code {}", status.code().unwrap_or(-1));
+        eprintln!(
+            "Warning: Sourceport exited with code {}",
+            status.code().unwrap_or(-1)
+        );
     }
 
     Ok(())
 }
 
-fn clean_demos(conn: &Connection, query: &[String], dry_run: bool, yes: bool) -> Result<(), String> {
+fn clean_demos(
+    conn: &Connection,
+    query: &[String],
+    dry_run: bool,
+    yes: bool,
+) -> Result<(), String> {
     let (wad, data_dir) = resolve::resolve_data_dir(conn, query, yes)?;
 
     let files = demos::find_demo_files(&data_dir);
@@ -186,7 +206,13 @@ fn clean_demos(conn: &Connection, query: &[String], dry_run: bool, yes: bool) ->
         return Ok(());
     }
 
-    if !yes && !resolve::confirm(&format!("Delete {} demo file(s) for '{}'?", files.len(), wad.title)) {
+    if !yes
+        && !resolve::confirm(&format!(
+            "Delete {} demo file(s) for '{}'?",
+            files.len(),
+            wad.title
+        ))
+    {
         return Err("Aborted.".to_string());
     }
 

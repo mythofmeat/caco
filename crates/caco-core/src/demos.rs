@@ -51,7 +51,8 @@ pub fn find_demo_files(data_dir: &Path) -> Vec<DemoFile> {
         for entry in paths {
             let path = entry.path();
             if let Ok(meta) = path.metadata() {
-                let mtime = meta.modified()
+                let mtime = meta
+                    .modified()
                     .map(system_time_to_rfc3339)
                     .unwrap_or_default();
 

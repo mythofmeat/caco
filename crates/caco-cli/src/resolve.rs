@@ -47,7 +47,9 @@ fn parse_id_range(value: &str) -> Option<Vec<i64>> {
 
 /// Check if a string looks like an ID range (digits, commas, hyphens only).
 fn looks_like_id_range(s: &str) -> bool {
-    !s.is_empty() && s.chars().all(|c| c.is_ascii_digit() || c == ',' || c == '-' || c == ' ')
+    !s.is_empty()
+        && s.chars()
+            .all(|c| c.is_ascii_digit() || c == ',' || c == '-' || c == ' ')
 }
 
 /// Resolve a query (args) into WAD records.
@@ -82,7 +84,8 @@ pub fn resolve_wads(
     }
 
     // Check for ID range
-    if query.len() == 1 && looks_like_id_range(&query[0])
+    if query.len() == 1
+        && looks_like_id_range(&query[0])
         && let Some(ids) = parse_id_range(&query[0])
     {
         let mut wads = Vec::new();
@@ -126,7 +129,10 @@ pub fn resolve_wads(
                 ));
             }
             if results.len() > preview_count {
-                msg.push_str(&format!("  ... and {} more\n", results.len() - preview_count));
+                msg.push_str(&format!(
+                    "  ... and {} more\n",
+                    results.len() - preview_count
+                ));
             }
             msg.push_str("Use a more specific query or an ID.");
             Err(msg)
@@ -171,7 +177,9 @@ pub fn resolve_one_wad(
     yes: bool,
 ) -> Result<WadRecord, String> {
     let wads = resolve_wads(conn, query, ResolveMode::Pick, yes, false)?;
-    wads.into_iter().next().ok_or_else(|| "No WAD selected.".to_string())
+    wads.into_iter()
+        .next()
+        .ok_or_else(|| "No WAD selected.".to_string())
 }
 
 /// Prompt for y/N confirmation on stderr. Returns true if user confirms.
@@ -179,8 +187,7 @@ pub fn confirm(prompt: &str) -> bool {
     eprint!("{prompt} [y/N] ");
     let _ = io::stderr().flush();
     let mut response = String::new();
-    io::stdin().read_line(&mut response).is_ok()
-        && response.trim().to_lowercase().starts_with('y')
+    io::stdin().read_line(&mut response).is_ok() && response.trim().to_lowercase().starts_with('y')
 }
 
 /// Resolve a WAD and its data directory from a query.

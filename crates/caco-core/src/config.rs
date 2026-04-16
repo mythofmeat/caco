@@ -574,7 +574,9 @@ pub fn get_profile_path(sourceport: &str, profile: &str) -> PathBuf {
         .and_then(|s| s.to_str())
         .unwrap_or(sourceport);
     let ext = crate::sourceports::config_ext(sourceport);
-    get_sourceport_dir().join(basename).join(format!("{profile}.{ext}"))
+    get_sourceport_dir()
+        .join(basename)
+        .join(format!("{profile}.{ext}"))
 }
 
 /// Scan the sourceport config directory for profiles.
@@ -636,9 +638,10 @@ pub fn resolve_iwad_path(name: &str, db_resolved: Option<&str>) -> String {
 
     // Check DB-resolved path
     if let Some(path) = db_resolved
-        && Path::new(path).exists() {
-            return path.to_string();
-        }
+        && Path::new(path).exists()
+    {
+        return path.to_string();
+    }
 
     // Search iwad_dirs
     for dir in get_iwad_dirs() {
@@ -732,7 +735,10 @@ mod tests {
         let home = home_dir();
         assert_eq!(expand_tilde("~/foo/bar"), home.join("foo/bar"));
         assert_eq!(expand_tilde("~"), home);
-        assert_eq!(expand_tilde("/absolute/path"), PathBuf::from("/absolute/path"));
+        assert_eq!(
+            expand_tilde("/absolute/path"),
+            PathBuf::from("/absolute/path")
+        );
     }
 
     #[test]
@@ -834,16 +840,16 @@ mod tests {
         let tui = table.get("tui").unwrap().as_table().unwrap();
 
         // Existing key preserved
-        assert_eq!(tui.get("default_tab").and_then(|v| v.as_str()), Some("playing"));
+        assert_eq!(
+            tui.get("default_tab").and_then(|v| v.as_str()),
+            Some("playing")
+        );
         // Missing key added
         assert_eq!(
             tui.get("default_sort_desc").and_then(|v| v.as_bool()),
             Some(false)
         );
-        assert_eq!(
-            tui.get("default_sort").and_then(|v| v.as_str()),
-            Some("id")
-        );
+        assert_eq!(tui.get("default_sort").and_then(|v| v.as_str()), Some("id"));
     }
 
     #[test]
@@ -1005,10 +1011,12 @@ window_width = 1600
         let orig_config_dir = dir.path().join("config");
         fs::create_dir_all(&orig_config_dir).unwrap();
 
-        let mut cfg = Config::default();
-        cfg.sourceport = "gzdoom".to_string();
-        cfg.download_mirror = 2;
-        cfg.iwad_dirs = vec!["/opt/doom".into(), "/home/user/iwads".into()];
+        let cfg = Config {
+            sourceport: "gzdoom".to_string(),
+            download_mirror: 2,
+            iwad_dirs: vec!["/opt/doom".into(), "/home/user/iwads".into()],
+            ..Config::default()
+        };
 
         let toml_str = toml::to_string_pretty(&cfg).unwrap();
         let parsed: Config = toml::from_str(&toml_str).unwrap();

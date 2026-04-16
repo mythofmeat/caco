@@ -265,10 +265,7 @@ mod tests {
 
     #[test]
     fn test_identify_family_with_path() {
-        assert_eq!(
-            identify_family("/usr/bin/dsda-doom").unwrap().name,
-            "dsda"
-        );
+        assert_eq!(identify_family("/usr/bin/dsda-doom").unwrap().name, "dsda");
         assert_eq!(
             identify_family("/usr/local/bin/gzdoom").unwrap().name,
             "zdoom"
@@ -285,14 +282,8 @@ mod tests {
 
     #[test]
     fn test_get_complevel_args() {
-        assert_eq!(
-            get_complevel_args("dsda-doom", 9),
-            vec!["-complevel", "9"]
-        );
-        assert_eq!(
-            get_complevel_args("woof", 21),
-            vec!["-complevel", "21"]
-        );
+        assert_eq!(get_complevel_args("dsda-doom", 9), vec!["-complevel", "9"]);
+        assert_eq!(get_complevel_args("woof", 21), vec!["-complevel", "21"]);
         assert!(get_complevel_args("gzdoom", 9).is_empty());
         assert!(get_complevel_args("unknown", 9).is_empty());
     }
@@ -358,7 +349,15 @@ mod tests {
 
     #[test]
     fn test_identify_all_dsda_executables() {
-        for exe in &["dsda-doom", "nyan-doom", "nugget-doom", "prboom+", "prboom-plus", "glboom+", "glboom-plus"] {
+        for exe in &[
+            "dsda-doom",
+            "nyan-doom",
+            "nugget-doom",
+            "prboom+",
+            "prboom-plus",
+            "glboom+",
+            "glboom-plus",
+        ] {
             let family = identify_family(exe);
             assert!(family.is_some(), "should identify {}", exe);
             assert_eq!(family.unwrap().name, "dsda");

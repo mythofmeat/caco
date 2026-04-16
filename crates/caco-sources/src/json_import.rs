@@ -50,8 +50,7 @@ fn detect_json_source_from_value(data: &serde_json::Value) -> Option<JsonSource>
 ///
 /// Handles both single-file (`action=get`) and search (`action=search`) responses.
 pub fn parse_idgames_json(path: &Path) -> Result<Vec<FileEntry>> {
-    let text = std::fs::read_to_string(path)
-        .map_err(SourceError::Io)?;
+    let text = std::fs::read_to_string(path).map_err(SourceError::Io)?;
     let data: serde_json::Value = serde_json::from_str(&text)?;
     parse_idgames_json_value(&data)
 }
@@ -119,8 +118,7 @@ fn parse_reviews_from_value(file_val: &serde_json::Value) -> Vec<crate::idgames:
 ///
 /// Only returns pages containing a `{{Wad}}` infobox template.
 pub fn parse_doomwiki_json(path: &Path) -> Result<Vec<WikiEntry>> {
-    let text = std::fs::read_to_string(path)
-        .map_err(SourceError::Io)?;
+    let text = std::fs::read_to_string(path).map_err(SourceError::Io)?;
     let data: serde_json::Value = serde_json::from_str(&text)?;
     parse_doomwiki_json_value(&data)
 }
@@ -149,7 +147,11 @@ fn parse_doomwiki_json_value(data: &serde_json::Value) -> Result<Vec<WikiEntry>>
             None => continue,
         };
 
-        let wikitext = match revisions.first().and_then(|r| r.get("*")).and_then(|v| v.as_str()) {
+        let wikitext = match revisions
+            .first()
+            .and_then(|r| r.get("*"))
+            .and_then(|v| v.as_str())
+        {
             Some(t) => t,
             None => continue,
         };

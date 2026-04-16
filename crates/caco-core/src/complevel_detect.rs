@@ -83,8 +83,7 @@ static DOOM_VERSION_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)DOOM\s+VERSION\s*=\s*(\d+)").unwrap());
 
 /// Regex for MBF21 BITS field in DEHACKED.
-static MBF21_BITS_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)MBF21\s+BITS").unwrap());
+static MBF21_BITS_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)MBF21\s+BITS").unwrap());
 
 /// Detect complevel from the COMPLVL lump only (id24 single byte or text).
 ///
@@ -212,12 +211,7 @@ fn read_lump_text(
             let off = *offset as usize;
             let sz = *size as usize;
             if off + sz <= wad_data.len() {
-                return Some(
-                    wad_data[off..off + sz]
-                        .iter()
-                        .map(|&b| b as char)
-                        .collect(),
-                );
+                return Some(wad_data[off..off + sz].iter().map(|&b| b as char).collect());
             }
         }
     }
@@ -497,11 +491,7 @@ mod tests {
     fn test_complvl_takes_priority_over_dehacked() {
         // COMPLVL lump should take priority over DEHACKED analysis
         let deh = b"Frame 100\nAction A_Mushroom\n"; // Would be MBF (11)
-        let (_dir, wad_path) = write_wad(&[
-            ("COMPLVL", &[21]),
-            ("DEHACKED", deh),
-            ("MAP01", &[]),
-        ]);
+        let (_dir, wad_path) = write_wad(&[("COMPLVL", &[21]), ("DEHACKED", deh), ("MAP01", &[])]);
         assert_eq!(detect_complevel(&wad_path), Some(21));
     }
 }

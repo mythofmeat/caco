@@ -2,14 +2,14 @@ use std::sync::mpsc;
 
 use caco_core::config;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use ratatui::Frame;
 use rusqlite::Connection;
 
-use crate::message::{AppMessage, ScreenResult, SearchSource, SearchResultEntry};
+use crate::message::{AppMessage, ScreenResult, SearchResultEntry, SearchSource};
 use crate::screens::Screen;
 use crate::widgets::import_pane::{self, ImportPaneState};
 use crate::widgets::library_pane::{self, LibraryPaneState};
@@ -17,12 +17,12 @@ use crate::widgets::library_pane::{self, LibraryPaneState};
 /// Tab definitions: (name, display, query_filter)
 /// The third element is a complete query string (or None for All/Import).
 const TABS: &[(&str, &str, Option<&str>)] = &[
-    ("all",         "All",         None),
-    ("unplayed",    "Unplayed",    Some("status:unplayed")),
+    ("all", "All", None),
+    ("unplayed", "Unplayed", Some("status:unplayed")),
     ("in-progress", "In Progress", Some("status:in-progress")),
-    ("completed",   "Completed",   Some("status:completed")),
-    ("abandoned",   "Abandoned",   Some("status:abandoned")),
-    ("import",      "Import",      None),
+    ("completed", "Completed", Some("status:completed")),
+    ("abandoned", "Abandoned", Some("status:abandoned")),
+    ("import", "Import", None),
 ];
 
 /// Main screen with tabbed library views.
@@ -93,7 +93,7 @@ impl Screen for TabbedLibraryScreen {
 
         let layout = Layout::vertical([
             Constraint::Length(1), // tab bar
-            Constraint::Min(1),   // content
+            Constraint::Min(1),    // content
         ])
         .split(area);
 

@@ -46,7 +46,11 @@ impl StatsDialogState {
                     section_header(ui, "Overview");
                     stat_row(ui, "Total WADs", &snap.total_wads.to_string());
                     stat_row(ui, "Total Sessions", &snap.total_sessions.to_string());
-                    stat_row(ui, "Total Playtime", &caco_core::player::format_duration(snap.total_playtime));
+                    stat_row(
+                        ui,
+                        "Total Playtime",
+                        &caco_core::player::format_duration(snap.total_playtime),
+                    );
                     if snap.total_wads > 0 {
                         stat_row(
                             ui,
@@ -69,7 +73,8 @@ impl StatsDialogState {
                     // By Status section
                     section_header(ui, "By Status");
                     for &status in theme::STATUSES {
-                        let count = snap.wads_by_status
+                        let count = snap
+                            .wads_by_status
                             .iter()
                             .find(|(s, _)| s.as_str() == status)
                             .map(|(_, c)| *c)

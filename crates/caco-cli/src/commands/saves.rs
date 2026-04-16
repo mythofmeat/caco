@@ -3,9 +3,9 @@
 use clap::Subcommand;
 use rusqlite::Connection;
 
+use crate::resolve;
 use caco_core::saves;
 use caco_core::utils::format_size;
-use crate::resolve;
 
 #[derive(Subcommand)]
 pub enum SavesCommand {
@@ -67,8 +67,14 @@ pub fn run(conn: &Connection, cmd: &SavesCommand) -> Result<(), String> {
     match cmd {
         SavesCommand::List { query, plain, yes } => list_saves(conn, query, *plain, *yes),
         SavesCommand::Backup { query, yes } => backup(conn, query, *yes),
-        SavesCommand::Restore { query, backup, yes } => restore(conn, query, backup.as_deref(), *yes),
-        SavesCommand::Clean { query, dry_run, yes } => clean(conn, query, *dry_run, *yes),
+        SavesCommand::Restore { query, backup, yes } => {
+            restore(conn, query, backup.as_deref(), *yes)
+        }
+        SavesCommand::Clean {
+            query,
+            dry_run,
+            yes,
+        } => clean(conn, query, *dry_run, *yes),
         SavesCommand::Backups { query, plain, yes } => list_backups(conn, query, *plain, *yes),
     }
 }
@@ -88,7 +94,7 @@ fn list_saves(conn: &Connection, query: &[String], plain: bool, yes: bool) -> Re
             println!("{}\t{}\t{}", f.name, format_size(f.size), f.mtime_iso);
         }
     } else {
-        use comfy_table::{presets, Table, Cell, CellAlignment};
+        use comfy_table::{Cell, CellAlignment, Table, presets};
         let mut table = Table::new();
         table
             .load_preset(presets::UTF8_FULL_CONDENSED)
@@ -118,15 +124,29 @@ fn backup(conn: &Connection, query: &[String], yes: bool) -> Result<(), String> 
     Ok(())
 }
 
-fn restore(conn: &Connection, query: &[String], backup_arg: Option<&str>, yes: bool) -> Result<(), String> {
+fn restore(
+    conn: &Connection,
+    query: &[String],
+    backup_arg: Option<&str>,
+    yes: bool,
+) -> Result<(), String> {
     let (wad, data_dir) = resolve::resolve_data_dir(conn, query, yes)?;
 
-    let backup_path = saves::resolve_backup_path(wad.id, backup_arg)
-        .ok_or_else(|| format!("No backup found for '{}'. Create one with: caco saves backup {}", wad.title, wad.id))?;
+    let backup_path = saves::resolve_backup_path(wad.id, backup_arg).ok_or_else(|| {
+        format!(
+            "No backup found for '{}'. Create one with: caco saves backup {}",
+            wad.title, wad.id
+        )
+    })?;
 
     if !yes {
-        let name = backup_path.file_name().and_then(|n| n.to_str()).unwrap_or("backup");
-        if !resolve::confirm(&format!("Restore from {name}? This will overwrite existing data.")) {
+        let name = backup_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("backup");
+        if !resolve::confirm(&format!(
+            "Restore from {name}? This will overwrite existing data."
+        )) {
             return Err("Aborted.".to_string());
         }
     }
@@ -153,7 +173,13 @@ fn clean(conn: &Connection, query: &[String], dry_run: bool, yes: bool) -> Resul
         return Ok(());
     }
 
-    if !yes && !resolve::confirm(&format!("Delete {} save file(s) for '{}'?", files.len(), wad.title)) {
+    if !yes
+        && !resolve::confirm(&format!(
+            "Delete {} save file(s) for '{}'?",
+            files.len(),
+            wad.title
+        ))
+    {
         return Err("Aborted.".to_string());
     }
 
@@ -179,10 +205,16 @@ fn list_backups(conn: &Connection, query: &[String], plain: bool, yes: bool) -> 
         println!("Name\tWadID\tSize\tCreated");
         for b in &backups {
             let wad_id_str = b.wad_id.map(|id| id.to_string()).unwrap_or_default();
-            println!("{}\t{}\t{}\t{}", b.name, wad_id_str, format_size(b.size), b.created_iso);
+            println!(
+                "{}\t{}\t{}\t{}",
+                b.name,
+                wad_id_str,
+                format_size(b.size),
+                b.created_iso
+            );
         }
     } else {
-        use comfy_table::{presets, Table, Cell, CellAlignment};
+        use comfy_table::{Cell, CellAlignment, Table, presets};
         let mut table = Table::new();
         table
             .load_preset(presets::UTF8_FULL_CONDENSED)
@@ -190,7 +222,8 @@ fn list_backups(conn: &Connection, query: &[String], plain: bool, yes: bool) -> 
         for b in &backups {
             table.add_row(vec![
                 Cell::new(&b.name),
-                Cell::new(b.wad_id.map(|id| id.to_string()).unwrap_or_default()).set_alignment(CellAlignment::Right),
+                Cell::new(b.wad_id.map(|id| id.to_string()).unwrap_or_default())
+                    .set_alignment(CellAlignment::Right),
                 Cell::new(format_size(b.size)).set_alignment(CellAlignment::Right),
                 Cell::new(&b.created_iso),
             ]);

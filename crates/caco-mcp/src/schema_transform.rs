@@ -46,7 +46,9 @@ pub fn flatten_action_enum(schema: &mut Schema) {
     let mut action_values: Vec<Value> = Vec::new();
 
     for variant in &variants {
-        let Some(variant_obj) = variant.as_object() else { continue };
+        let Some(variant_obj) = variant.as_object() else {
+            continue;
+        };
         let Some(props) = variant_obj.get("properties").and_then(Value::as_object) else {
             continue;
         };

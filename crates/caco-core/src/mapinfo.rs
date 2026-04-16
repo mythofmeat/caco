@@ -238,11 +238,15 @@ map MAP05 "Test"
 
     #[test]
     fn test_parse_endgame_variants() {
-        for keyword in &["endgame", "endpic", "endcast", "endbunny", "endtitle", "endsequence"] {
-            let text = format!(
-                "map MAP30 \"End\"\n{{\n    {} = true\n}}\n",
-                keyword
-            );
+        for keyword in &[
+            "endgame",
+            "endpic",
+            "endcast",
+            "endbunny",
+            "endtitle",
+            "endsequence",
+        ] {
+            let text = format!("map MAP30 \"End\"\n{{\n    {} = true\n}}\n", keyword);
             let entries = parse_mapinfo(&text);
             assert!(entries["MAP30"].has_endgame, "failed for {keyword}");
         }

@@ -58,7 +58,11 @@ impl CacheDialogState {
             .collect();
 
         self.total_size = self.entries.iter().filter_map(|e| e.size).sum();
-        self.selected_row = if self.entries.is_empty() { None } else { Some(0) };
+        self.selected_row = if self.entries.is_empty() {
+            None
+        } else {
+            Some(0)
+        };
     }
 
     /// Render the cache dialog. Returns the dialog result.
@@ -96,15 +100,17 @@ impl CacheDialogState {
                         .resizable(true)
                         .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
                         .sense(egui::Sense::click())
-                        .column(Column::exact(50.0))                     // ID
-                        .column(Column::initial(200.0).at_least(100.0))  // Title
-                        .column(Column::remainder().at_least(150.0))     // Path
-                        .column(Column::initial(80.0).at_least(60.0));   // Size
+                        .column(Column::exact(50.0)) // ID
+                        .column(Column::initial(200.0).at_least(100.0)) // Title
+                        .column(Column::remainder().at_least(150.0)) // Path
+                        .column(Column::initial(80.0).at_least(60.0)); // Size
 
                     table
                         .header(row_height + 2.0, |mut header| {
                             for label in ["ID", "Title", "Path", "Size"] {
-                                header.col(|ui| { ui.strong(label); });
+                                header.col(|ui| {
+                                    ui.strong(label);
+                                });
                             }
                         })
                         .body(|body| {
@@ -152,7 +158,9 @@ impl CacheDialogState {
                 // Button row
                 ui.horizontal(|ui| {
                     let has_selection = self.selected_row.is_some() && !self.entries.is_empty();
-                    if ui.add_enabled(has_selection, egui::Button::new("Delete Selected")).clicked()
+                    if ui
+                        .add_enabled(has_selection, egui::Button::new("Delete Selected"))
+                        .clicked()
                         && let Some(idx) = self.selected_row
                         && idx < self.entries.len()
                     {
@@ -163,7 +171,10 @@ impl CacheDialogState {
                         self.load(conn);
                     }
 
-                    if ui.add_enabled(!self.entries.is_empty(), egui::Button::new("Clear All")).clicked() {
+                    if ui
+                        .add_enabled(!self.entries.is_empty(), egui::Button::new("Clear All"))
+                        .clicked()
+                    {
                         for entry in &self.entries {
                             let _ = fs::remove_file(&entry.path);
                         }

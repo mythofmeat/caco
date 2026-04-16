@@ -2,11 +2,11 @@ use caco_core::complevel::parse_complevel;
 use caco_core::db::models::Status;
 use caco_core::db::wads::{self, WadUpdate, get_wad};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
-use ratatui::Frame;
 use rusqlite::Connection;
 
 use crate::input::TextInput;
@@ -89,11 +89,7 @@ impl WadEditScreen {
                 "Description",
                 wad.description.as_deref().unwrap_or(""),
             ),
-            field_text(
-                "iwad",
-                "IWAD",
-                wad.custom_iwad.as_deref().unwrap_or(""),
-            ),
+            field_text("iwad", "IWAD", wad.custom_iwad.as_deref().unwrap_or("")),
             field_text(
                 "sourceport",
                 "Sourceport",
@@ -102,9 +98,7 @@ impl WadEditScreen {
             field_text(
                 "complevel",
                 "Complevel",
-                &wad.complevel
-                    .map(|c| c.to_string())
-                    .unwrap_or_default(),
+                &wad.complevel.map(|c| c.to_string()).unwrap_or_default(),
             ),
             field_text(
                 "config",
@@ -116,11 +110,7 @@ impl WadEditScreen {
                 "Custom Args (JSON array)",
                 wad.custom_args.as_deref().unwrap_or(""),
             ),
-            field_text(
-                "version",
-                "Version",
-                wad.version.as_deref().unwrap_or(""),
-            ),
+            field_text("version", "Version", wad.version.as_deref().unwrap_or("")),
         ];
     }
 
@@ -187,10 +177,7 @@ impl WadEditScreen {
             .set_text("notes", opt_str(&self.get_field_value("notes")))
             .unwrap();
         update = update
-            .set_text(
-                "description",
-                opt_str(&self.get_field_value("description")),
-            )
+            .set_text("description", opt_str(&self.get_field_value("description")))
             .unwrap();
         update = update
             .set_text("custom_iwad", opt_str(&self.get_field_value("iwad")))
@@ -258,7 +245,11 @@ impl WadEditScreen {
             let new_idx = if forward {
                 (idx + 1) % statuses.len()
             } else {
-                if idx == 0 { statuses.len() - 1 } else { idx - 1 }
+                if idx == 0 {
+                    statuses.len() - 1
+                } else {
+                    idx - 1
+                }
             };
             field.input.set_value(statuses[new_idx]);
         }
@@ -294,7 +285,7 @@ impl Screen for WadEditScreen {
         frame.render_widget(block, area);
 
         let layout = Layout::vertical([
-            Constraint::Min(1),   // fields
+            Constraint::Min(1),    // fields
             Constraint::Length(1), // error / hint
         ])
         .split(inner);
@@ -366,10 +357,7 @@ impl Screen for WadEditScreen {
                             Span::styled(" ▸", theme::dim_style()),
                         ])
                     } else {
-                        Line::from(Span::styled(
-                            display,
-                            Style::default().fg(Color::Yellow),
-                        ))
+                        Line::from(Span::styled(display, Style::default().fg(Color::Yellow)))
                     };
                     frame.render_widget(Paragraph::new(line), value_area);
                 }
@@ -382,10 +370,7 @@ impl Screen for WadEditScreen {
 
         // Error / hint line
         if let Some(ref err) = self.error_message {
-            let line = Line::from(Span::styled(
-                err.as_str(),
-                Style::default().fg(Color::Red),
-            ));
+            let line = Line::from(Span::styled(err.as_str(), Style::default().fg(Color::Red)));
             frame.render_widget(Paragraph::new(line), layout[1]);
         } else {
             let hints = Line::from(vec![
@@ -486,5 +471,9 @@ fn field_text(name: &'static str, label: &'static str, value: &str) -> EditField
 }
 
 fn opt_str(s: &str) -> Option<String> {
-    if s.is_empty() { None } else { Some(s.to_string()) }
+    if s.is_empty() {
+        None
+    } else {
+        Some(s.to_string())
+    }
 }

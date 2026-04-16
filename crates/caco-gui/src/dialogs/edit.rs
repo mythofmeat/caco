@@ -1,8 +1,8 @@
+use crate::theme::STATUSES;
 use caco_core::companion_service;
 use caco_core::complevel::parse_complevel;
 use caco_core::db::companions;
 use caco_core::db::models::Status;
-use crate::theme::STATUSES;
 use caco_core::db::wads::{self, WadUpdate};
 use rusqlite::Connection;
 
@@ -52,7 +52,6 @@ enum CompanionAction {
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-
 
 // ---------------------------------------------------------------------------
 // EditDialogState
@@ -193,12 +192,9 @@ impl EditDialogState {
                         ui.horizontal(|ui| {
                             // Thumbnail placeholder
                             let (c1, _c2, ci) = theme::thumb_colors(self.wad_id);
-                            let (thumb_rect, _) = ui.allocate_exact_size(
-                                egui::vec2(56.0, 42.0),
-                                egui::Sense::hover(),
-                            );
-                            ui.painter()
-                                .rect_filled(thumb_rect, 6.0, c1);
+                            let (thumb_rect, _) = ui
+                                .allocate_exact_size(egui::vec2(56.0, 42.0), egui::Sense::hover());
+                            ui.painter().rect_filled(thumb_rect, 6.0, c1);
                             let initials: String = self
                                 .title_field
                                 .chars()
@@ -219,14 +215,16 @@ impl EditDialogState {
                             ui.vertical(|ui| {
                                 ui.colored_label(
                                     theme::TEXT_PRIMARY,
-                                    egui::RichText::new(&self.title_field)
-                                        .size(16.0)
-                                        .strong(),
+                                    egui::RichText::new(&self.title_field).size(16.0).strong(),
                                 );
                                 let meta = format!(
                                     "{}{}{}",
                                     &self.author,
-                                    if !self.year.is_empty() { " \u{00b7} " } else { "" },
+                                    if !self.year.is_empty() {
+                                        " \u{00b7} "
+                                    } else {
+                                        ""
+                                    },
                                     &self.year
                                 );
                                 if !meta.trim().is_empty() {
@@ -275,7 +273,12 @@ impl EditDialogState {
                     .stroke(egui::Stroke::new(1.0, theme::BORDER))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            render_edit_tab(ui, "Metadata", EditTab::Metadata, &mut self.active_tab);
+                            render_edit_tab(
+                                ui,
+                                "Metadata",
+                                EditTab::Metadata,
+                                &mut self.active_tab,
+                            );
                             render_edit_tab(
                                 ui,
                                 "Sourceport",
@@ -333,8 +336,7 @@ impl EditDialogState {
                             if ui
                                 .add(
                                     egui::Button::new(
-                                        egui::RichText::new("Delete WAD")
-                                            .color(theme::COLOR_ERROR),
+                                        egui::RichText::new("Delete WAD").color(theme::COLOR_ERROR),
                                     )
                                     .fill(egui::Color32::from_rgb(0x2a, 0x0d, 0x0d))
                                     .stroke(egui::Stroke::new(
@@ -670,8 +672,7 @@ impl EditDialogState {
         form_label(ui, "Source Type");
         ui.add_enabled(
             false,
-            egui::TextEdit::singleline(&mut self.source_type_display)
-                .desired_width(f32::INFINITY),
+            egui::TextEdit::singleline(&mut self.source_type_display).desired_width(f32::INFINITY),
         );
 
         form_label(ui, "Source URL");
@@ -693,7 +694,10 @@ impl EditDialogState {
         let mut action = None;
 
         if self.companions.is_empty() {
-            ui.colored_label(theme::TEXT_SECONDARY, "No companion files linked to this WAD.");
+            ui.colored_label(
+                theme::TEXT_SECONDARY,
+                "No companion files linked to this WAD.",
+            );
             ui.add_space(8.0);
         } else {
             for entry in &mut self.companions {
@@ -727,8 +731,7 @@ impl EditDialogState {
 
                                     // Toggle
                                     if ui.checkbox(&mut entry.enabled, "").changed() {
-                                        action =
-                                            Some(CompanionAction::Toggle(cid, entry.enabled));
+                                        action = Some(CompanionAction::Toggle(cid, entry.enabled));
                                     }
                                 },
                             );
@@ -772,42 +775,30 @@ impl EditDialogState {
                             self.reload_companions(conn);
                         }
                         Err(e) => {
-                            self.error_message =
-                                Some(format!("Failed to add companion: {e}"));
+                            self.error_message = Some(format!("Failed to add companion: {e}"));
                         }
                     }
                 }
             }
             CompanionAction::Remove(companion_id) => {
-                match companion_service::unregister_companion(
-                    conn,
-                    self.wad_id,
-                    companion_id,
-                    None,
-                ) {
+                match companion_service::unregister_companion(conn, self.wad_id, companion_id, None)
+                {
                     Ok(_) => {
                         self.companions_modified = true;
                         self.reload_companions(conn);
                     }
                     Err(e) => {
-                        self.error_message =
-                            Some(format!("Failed to remove companion: {e}"));
+                        self.error_message = Some(format!("Failed to remove companion: {e}"));
                     }
                 }
             }
             CompanionAction::Toggle(companion_id, enabled) => {
-                match companions::set_companion_enabled(
-                    conn,
-                    self.wad_id,
-                    companion_id,
-                    enabled,
-                ) {
+                match companions::set_companion_enabled(conn, self.wad_id, companion_id, enabled) {
                     Ok(_) => {
                         self.companions_modified = true;
                     }
                     Err(e) => {
-                        self.error_message =
-                            Some(format!("Failed to toggle companion: {e}"));
+                        self.error_message = Some(format!("Failed to toggle companion: {e}"));
                     }
                 }
             }
@@ -815,8 +806,7 @@ impl EditDialogState {
     }
 
     fn reload_companions(&mut self, conn: &Connection) {
-        let records =
-            companions::get_companions_for_wad(conn, self.wad_id).unwrap_or_default();
+        let records = companions::get_companions_for_wad(conn, self.wad_id).unwrap_or_default();
         self.companions = records.iter().map(CompanionEntry::from_record).collect();
     }
 
@@ -865,9 +855,7 @@ impl EditDialogState {
         update = update
             .set_text("title", Some(self.title_field.clone()))
             .unwrap();
-        update = update
-            .set_text("author", opt_str(&self.author))
-            .unwrap();
+        update = update.set_text("author", opt_str(&self.author)).unwrap();
         update = update.set_int("year", year).unwrap();
 
         update = update.set_status(status).unwrap();
@@ -885,9 +873,7 @@ impl EditDialogState {
             .unwrap();
 
         // Sourceport tab fields
-        update = update
-            .set_text("custom_iwad", opt_str(&self.iwad))
-            .unwrap();
+        update = update.set_text("custom_iwad", opt_str(&self.iwad)).unwrap();
         update = update
             .set_text("custom_sourceport", opt_str(&self.sourceport))
             .unwrap();
@@ -895,12 +881,8 @@ impl EditDialogState {
         update = update
             .set_text("custom_config", opt_str(&self.config))
             .unwrap();
-        update = update
-            .set_text("custom_args", opt_str(&self.args))
-            .unwrap();
-        update = update
-            .set_text("version", opt_str(&self.version))
-            .unwrap();
+        update = update.set_text("custom_args", opt_str(&self.args)).unwrap();
+        update = update.set_text("version", opt_str(&self.version)).unwrap();
 
         // Sources tab fields
         update = update
@@ -949,12 +931,7 @@ fn form_label(ui: &mut egui::Ui, label: &str) {
     );
 }
 
-fn render_edit_tab(
-    ui: &mut egui::Ui,
-    label: &str,
-    tab: EditTab,
-    active: &mut EditTab,
-) {
+fn render_edit_tab(ui: &mut egui::Ui, label: &str, tab: EditTab, active: &mut EditTab) {
     let is_active = *active == tab;
     let text_color = if is_active {
         theme::TEXT_ACCENT
@@ -963,8 +940,7 @@ fn render_edit_tab(
     };
 
     let response = ui.add(
-        egui::Button::new(egui::RichText::new(label).size(13.0).color(text_color))
-            .frame(false),
+        egui::Button::new(egui::RichText::new(label).size(13.0).color(text_color)).frame(false),
     );
 
     if is_active {

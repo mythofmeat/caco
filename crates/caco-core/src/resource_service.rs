@@ -3,13 +3,13 @@ use std::path::Path;
 
 use rusqlite::Connection;
 
+use crate::Result;
 use crate::config::{get_id24_dir, get_iwad_dir};
 use crate::db::{
     add_id24, add_iwad, get_id24, get_iwad_variant, identify_id24, identify_iwad,
     managed_iwad_filename,
 };
 use crate::utils::compute_md5;
-use crate::Result;
 
 /// Identify and register an IWAD file.
 ///
@@ -18,10 +18,7 @@ use crate::Result;
 ///
 /// Returns `(family, variant, title)` on success, or `None` if the file
 /// is not a recognized IWAD or is already registered.
-pub fn register_iwad(
-    conn: &Connection,
-    path: &Path,
-) -> Result<Option<(String, String, String)>> {
+pub fn register_iwad(conn: &Connection, path: &Path) -> Result<Option<(String, String, String)>> {
     let info = identify_iwad(path)?;
     let (family, variant, title) = match info {
         Some(i) => i,
@@ -61,10 +58,7 @@ pub fn register_iwad(
 ///
 /// Returns `(name, version, title)` on success, or `None` if the file
 /// is not a recognized id24 WAD or is already registered.
-pub fn register_id24(
-    conn: &Connection,
-    path: &Path,
-) -> Result<Option<(String, String, String)>> {
+pub fn register_id24(conn: &Connection, path: &Path) -> Result<Option<(String, String, String)>> {
     let info = identify_id24(path)?;
     let (name, version, title) = match info {
         Some(i) => i,
@@ -85,7 +79,14 @@ pub fn register_id24(
     // Register in DB
     let md5 = compute_md5(path)?;
     let dest_str = dest.to_string_lossy();
-    add_id24(conn, name, &dest_str, Some(version), Some(title), Some(&md5))?;
+    add_id24(
+        conn,
+        name,
+        &dest_str,
+        Some(version),
+        Some(title),
+        Some(&md5),
+    )?;
 
     Ok(Some((
         name.to_string(),
@@ -97,7 +98,7 @@ pub fn register_id24(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::{get_all_id24, get_all_iwads, open_memory, init_db};
+    use crate::db::{get_all_id24, get_all_iwads, init_db, open_memory};
     use std::io::Write;
 
     fn setup() -> Connection {

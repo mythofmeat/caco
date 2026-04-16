@@ -4,52 +4,96 @@ use std::sync::LazyLock;
 
 use rusqlite::Connection;
 
-use crate::utils::compute_md5;
 use crate::Result;
+use crate::utils::compute_md5;
 
 // =============================================================================
 // Known id24 MD5 checksums -> (name, version, title)
 // =============================================================================
 
-pub static KNOWN_ID24_WADS: LazyLock<HashMap<&'static str, (&'static str, &'static str, &'static str)>> =
-    LazyLock::new(|| {
-        HashMap::from([
-            // id1.wad — Legacy of Rust
-            ("713c5a3c1734b1d55b2813a3dd0136d9", ("id1", "update2", "Legacy of Rust")),
-            ("681bcea18c1286e8b9986c335034bdd1", ("id1", "initial", "Legacy of Rust")),
-            // id24res.wad — id24 resource WAD
-            ("4f0651accebc007b853943ac12aa95b8", ("id24res", "all", "id24 Resource WAD")),
-            // id1-res.wad — Legacy of Rust resources
-            ("f8fbab472230bfa090d6a9234d65fae6", ("id1-res", "update2", "Legacy of Rust Resources")),
-            ("b6b2370ae8733aaf1377b0ef12351572", ("id1-res", "initial", "Legacy of Rust Resources")),
-            // id1-tex.wad — Legacy of Rust textures
-            ("187bfe543f8328b379e46957976e800d", ("id1-tex", "update2", "Legacy of Rust Textures")),
-            // id1-weap.wad — Legacy of Rust weapons
-            ("85d25c8c3d06a05a1283ae4afe749c9f", ("id1-weap", "update2", "Legacy of Rust Weapons")),
-            ("b50da800b17db51fa06b5191becad82d", ("id1-weap", "initial", "Legacy of Rust Weapons")),
-            // id1-mus.wad — Legacy of Rust music
-            ("436c83dd83a47f8dd251ba15108e9459", ("id1-mus", "update2", "Legacy of Rust Music")),
-            // iddm1.wad — id Deathmatch 1
-            ("5670fd8fe8eb6910ec28f9e27969d84f", ("iddm1", "initial", "id Deathmatch 1")),
-        ])
-    });
+pub static KNOWN_ID24_WADS: LazyLock<
+    HashMap<&'static str, (&'static str, &'static str, &'static str)>,
+> = LazyLock::new(|| {
+    HashMap::from([
+        // id1.wad — Legacy of Rust
+        (
+            "713c5a3c1734b1d55b2813a3dd0136d9",
+            ("id1", "update2", "Legacy of Rust"),
+        ),
+        (
+            "681bcea18c1286e8b9986c335034bdd1",
+            ("id1", "initial", "Legacy of Rust"),
+        ),
+        // id24res.wad — id24 resource WAD
+        (
+            "4f0651accebc007b853943ac12aa95b8",
+            ("id24res", "all", "id24 Resource WAD"),
+        ),
+        // id1-res.wad — Legacy of Rust resources
+        (
+            "f8fbab472230bfa090d6a9234d65fae6",
+            ("id1-res", "update2", "Legacy of Rust Resources"),
+        ),
+        (
+            "b6b2370ae8733aaf1377b0ef12351572",
+            ("id1-res", "initial", "Legacy of Rust Resources"),
+        ),
+        // id1-tex.wad — Legacy of Rust textures
+        (
+            "187bfe543f8328b379e46957976e800d",
+            ("id1-tex", "update2", "Legacy of Rust Textures"),
+        ),
+        // id1-weap.wad — Legacy of Rust weapons
+        (
+            "85d25c8c3d06a05a1283ae4afe749c9f",
+            ("id1-weap", "update2", "Legacy of Rust Weapons"),
+        ),
+        (
+            "b50da800b17db51fa06b5191becad82d",
+            ("id1-weap", "initial", "Legacy of Rust Weapons"),
+        ),
+        // id1-mus.wad — Legacy of Rust music
+        (
+            "436c83dd83a47f8dd251ba15108e9459",
+            ("id1-mus", "update2", "Legacy of Rust Music"),
+        ),
+        // iddm1.wad — id Deathmatch 1
+        (
+            "5670fd8fe8eb6910ec28f9e27969d84f",
+            ("iddm1", "initial", "id Deathmatch 1"),
+        ),
+    ])
+});
 
 // =============================================================================
 // Filename fallback for unrecognized MD5s
 // =============================================================================
 
-pub static KNOWN_ID24_FILENAMES: LazyLock<HashMap<&'static str, (&'static str, &'static str, &'static str)>> =
-    LazyLock::new(|| {
-        HashMap::from([
-            ("id1.wad", ("id1", "unknown", "Legacy of Rust")),
-            ("id24res.wad", ("id24res", "unknown", "id24 Resource WAD")),
-            ("id1-res.wad", ("id1-res", "unknown", "Legacy of Rust Resources")),
-            ("id1-tex.wad", ("id1-tex", "unknown", "Legacy of Rust Textures")),
-            ("id1-weap.wad", ("id1-weap", "unknown", "Legacy of Rust Weapons")),
-            ("id1-mus.wad", ("id1-mus", "unknown", "Legacy of Rust Music")),
-            ("iddm1.wad", ("iddm1", "unknown", "id Deathmatch 1")),
-        ])
-    });
+pub static KNOWN_ID24_FILENAMES: LazyLock<
+    HashMap<&'static str, (&'static str, &'static str, &'static str)>,
+> = LazyLock::new(|| {
+    HashMap::from([
+        ("id1.wad", ("id1", "unknown", "Legacy of Rust")),
+        ("id24res.wad", ("id24res", "unknown", "id24 Resource WAD")),
+        (
+            "id1-res.wad",
+            ("id1-res", "unknown", "Legacy of Rust Resources"),
+        ),
+        (
+            "id1-tex.wad",
+            ("id1-tex", "unknown", "Legacy of Rust Textures"),
+        ),
+        (
+            "id1-weap.wad",
+            ("id1-weap", "unknown", "Legacy of Rust Weapons"),
+        ),
+        (
+            "id1-mus.wad",
+            ("id1-mus", "unknown", "Legacy of Rust Music"),
+        ),
+        ("iddm1.wad", ("iddm1", "unknown", "id Deathmatch 1")),
+    ])
+});
 
 // =============================================================================
 // Identification helpers

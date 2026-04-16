@@ -1,17 +1,17 @@
 use std::fs;
 use std::path::PathBuf;
 
+use crate::widgets::table_nav::{table_nav_next, table_nav_prev};
 use caco_core::config;
 use caco_core::db::id24::{self, Id24Record};
 use caco_core::db::iwads::{self, IwadRecord};
 use caco_core::resource_service;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use crate::widgets::table_nav::{table_nav_next, table_nav_prev};
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table, TableState};
-use ratatui::Frame;
 use rusqlite::Connection;
 
 use crate::input::TextInput;
@@ -65,7 +65,11 @@ impl ResourcesScreen {
             .iter()
             .filter_map(|iwad| {
                 let priority = iwads::get_iwad_priority(&iwad.family, Some(&cfg.iwad_priority));
-                if priority.first().map(|v| v == &iwad.variant).unwrap_or(false) {
+                if priority
+                    .first()
+                    .map(|v| v == &iwad.variant)
+                    .unwrap_or(false)
+                {
                     Some(format!("{}/{}", iwad.family, iwad.variant))
                 } else {
                     None
@@ -94,7 +98,7 @@ impl Screen for ResourcesScreen {
 
         let layout = Layout::vertical([
             Constraint::Length(1), // tab bar
-            Constraint::Min(1),   // table
+            Constraint::Min(1),    // table
             Constraint::Length(1), // import input
             Constraint::Length(1), // hints
         ])
@@ -155,9 +159,7 @@ impl Screen for ResourcesScreen {
                             Row::new(vec![
                                 Cell::from(iwad.family.clone()),
                                 Cell::from(variant_display),
-                                Cell::from(
-                                    iwad.title.clone().unwrap_or_default(),
-                                ),
+                                Cell::from(iwad.title.clone().unwrap_or_default()),
                                 Cell::from(iwad.path.clone()),
                             ])
                         })
@@ -220,12 +222,8 @@ impl Screen for ResourcesScreen {
         }
 
         // Import input
-        self.import_input.render(
-            frame,
-            layout[2],
-            self.import_focused,
-            "Import path: ",
-        );
+        self.import_input
+            .render(frame, layout[2], self.import_focused, "Import path: ");
 
         // Key hints
         let hints = Line::from(vec![

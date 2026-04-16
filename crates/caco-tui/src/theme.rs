@@ -20,7 +20,9 @@ pub fn status_style(status: &str) -> Style {
 
 /// Human-readable display name for a status string.
 pub fn status_display(status: &str) -> &'static str {
-    Status::parse(status).map(|s| s.display_name()).unwrap_or("Unknown")
+    Status::parse(status)
+        .map(|s| s.display_name())
+        .unwrap_or("Unknown")
 }
 
 /// Style for the selected/highlighted row.

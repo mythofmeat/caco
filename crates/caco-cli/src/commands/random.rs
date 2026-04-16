@@ -22,15 +22,8 @@ pub fn run(conn: &Connection, args: &RandomArgs) -> Result<(), String> {
         Some(crate::parsing::join_query_args(&args.query))
     };
 
-    let results = db::search_wads(
-        conn,
-        query_str.as_deref(),
-        Some("random"),
-        true,
-        false,
-        1,
-    )
-    .map_err(|e| e.to_string())?;
+    let results = db::search_wads(conn, query_str.as_deref(), Some("random"), true, false, 1)
+        .map_err(|e| e.to_string())?;
 
     match results.first() {
         Some(wad) => {

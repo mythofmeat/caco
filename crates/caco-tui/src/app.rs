@@ -71,10 +71,7 @@ impl App {
     }
 
     /// Main event loop.
-    pub fn run(
-        &mut self,
-        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    ) -> io::Result<()> {
+    pub fn run(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
         let size = terminal.size()?;
         self.terminal_width = size.width;
         self.terminal_height = size.height;
@@ -125,8 +122,7 @@ impl App {
 
         // Reserve bottom line for notification
         let (content_area, notif_area) = if self.notification.is_some() {
-            let chunks =
-                Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(area);
+            let chunks = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(area);
             (chunks[0], Some(chunks[1]))
         } else {
             (area, None)
@@ -265,31 +261,29 @@ impl App {
                     // Store in the bg channel for the import pane to pick up
                 }
             }
-            AppMessage::ImportComplete(result) => {
-                match result {
-                    Ok(import_result) => {
-                        if let Some(wad_id) = import_result.wad_id {
-                            self.process_message(AppMessage::WadImported(wad_id));
-                        } else if import_result.is_duplicate {
-                            let title = import_result
-                                .duplicate_title
-                                .unwrap_or_else(|| "unknown".to_string());
-                            self.notification = Some(Notification {
-                                message: format!("Duplicate: {title}"),
-                                severity: Severity::Warning,
-                                expires_at: Instant::now() + NOTIFICATION_DURATION,
-                            });
-                        }
-                    }
-                    Err(e) => {
+            AppMessage::ImportComplete(result) => match result {
+                Ok(import_result) => {
+                    if let Some(wad_id) = import_result.wad_id {
+                        self.process_message(AppMessage::WadImported(wad_id));
+                    } else if import_result.is_duplicate {
+                        let title = import_result
+                            .duplicate_title
+                            .unwrap_or_else(|| "unknown".to_string());
                         self.notification = Some(Notification {
-                            message: format!("Import failed: {e}"),
-                            severity: Severity::Error,
+                            message: format!("Duplicate: {title}"),
+                            severity: Severity::Warning,
                             expires_at: Instant::now() + NOTIFICATION_DURATION,
                         });
                     }
                 }
-            }
+                Err(e) => {
+                    self.notification = Some(Notification {
+                        message: format!("Import failed: {e}"),
+                        severity: Severity::Error,
+                        expires_at: Instant::now() + NOTIFICATION_DURATION,
+                    });
+                }
+            },
         }
     }
 

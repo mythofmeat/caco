@@ -5,11 +5,11 @@ use std::path::Path;
 use clap::Args;
 use rusqlite::Connection;
 
+use crate::parsing::{self, ModifyAction};
+use crate::resolve::{self, ResolveMode};
 use caco_core::complevel::parse_complevel;
 use caco_core::db::{self, Status, WadRecord, WadUpdate};
 use caco_core::wad_stats;
-use crate::parsing::{self, ModifyAction};
-use crate::resolve::{self, ResolveMode};
 
 #[derive(Args)]
 #[command(after_long_help = "\
@@ -77,11 +77,14 @@ pub fn run(conn: &Connection, args: &ModifyArgs) -> Result<(), String> {
     // If no query was given but tag-removal actions were, implicitly query by those tags.
     // e.g. `modify !tag:foo` → match WADs with tag:foo, then remove it.
     let query_terms = if query_terms.is_empty() {
-        let implicit: Vec<String> = actions.iter().filter_map(|a| match a {
-            ModifyAction::RemoveTag { pattern } => Some(format!("tag:{pattern}")),
-            ModifyAction::RemoveAllTags => None,
-            _ => None,
-        }).collect();
+        let implicit: Vec<String> = actions
+            .iter()
+            .filter_map(|a| match a {
+                ModifyAction::RemoveTag { pattern } => Some(format!("tag:{pattern}")),
+                ModifyAction::RemoveAllTags => None,
+                _ => None,
+            })
+            .collect();
         if implicit.is_empty() {
             return Err("No query specified.".to_string());
         }
@@ -113,17 +116,23 @@ pub fn run(conn: &Connection, args: &ModifyArgs) -> Result<(), String> {
     let stats_json = if let Some(ref path) = args.stats_file {
         let stats = wad_stats::parse_stats_file(Path::new(path))
             .map_err(|e| format!("Failed to parse stats file: {e}"))?;
-        Some(wad_stats::stats_to_json(&stats).map_err(|e| format!("Failed to serialize stats: {e}"))?)
+        Some(
+            wad_stats::stats_to_json(&stats)
+                .map_err(|e| format!("Failed to serialize stats: {e}"))?,
+        )
     } else {
         None
     };
 
-    let has_beaten_action = actions.iter().any(|a| matches!(a,
-        ModifyAction::BeatenAdd { .. }
-        | ModifyAction::BeatenRemove { .. }
-        | ModifyAction::BeatenRemoveTimestamp { .. }
-        | ModifyAction::BeatenSet { .. }
-    ));
+    let has_beaten_action = actions.iter().any(|a| {
+        matches!(
+            a,
+            ModifyAction::BeatenAdd { .. }
+                | ModifyAction::BeatenRemove { .. }
+                | ModifyAction::BeatenRemoveTimestamp { .. }
+                | ModifyAction::BeatenSet { .. }
+        )
+    });
 
     let mut modified = 0;
 
@@ -178,7 +187,9 @@ fn apply_modifications(
                     other => return Err(format!("Unknown field: {other}")),
                 };
                 if col == "complevel" {
-                    update = update.set_int("complevel", None).map_err(|e| e.to_string())?;
+                    update = update
+                        .set_int("complevel", None)
+                        .map_err(|e| e.to_string())?;
                 } else {
                     update = update.set_text(col, None).map_err(|e| e.to_string())?;
                 }
@@ -216,7 +227,8 @@ fn apply_modifications(
                 any_change = true;
             }
             ModifyAction::BeatenRemove { count } => {
-                let completions = db::get_wad_completions(conn, wad.id).map_err(|e| e.to_string())?;
+                let completions =
+                    db::get_wad_completions(conn, wad.id).map_err(|e| e.to_string())?;
                 for comp in completions.iter().take(*count as usize) {
                     db::delete_wad_completion(conn, comp.id).map_err(|e| e.to_string())?;
                 }
@@ -226,7 +238,10 @@ fn apply_modifications(
                 let deleted = db::delete_wad_completion_by_timestamp(conn, wad.id, timestamp)
                     .map_err(|e| e.to_string())?;
                 if !deleted {
-                    eprintln!("Warning: no completion found with timestamp '{timestamp}' for WAD {}", wad.id);
+                    eprintln!(
+                        "Warning: no completion found with timestamp '{timestamp}' for WAD {}",
+                        wad.id
+                    );
                 }
                 any_change = true;
             }
@@ -243,7 +258,9 @@ fn apply_modifications(
         if !path.exists() {
             return Err(format!("File not found: {link_path}"));
         }
-        let resolved = path.canonicalize().map_err(|e| format!("Cannot resolve path: {e}"))?;
+        let resolved = path
+            .canonicalize()
+            .map_err(|e| format!("Cannot resolve path: {e}"))?;
 
         // Copy to cache
         let cache_dir = caco_core::config::get_cache_dir();
@@ -283,8 +300,7 @@ fn apply_modifications(
 
     // Handle --remove-file (via companion service)
     if !args.remove_files.is_empty() {
-        let companions =
-            db::get_companions_for_wad(conn, wad.id).map_err(|e| e.to_string())?;
+        let companions = db::get_companions_for_wad(conn, wad.id).map_err(|e| e.to_string())?;
 
         for name in &args.remove_files {
             if let Some(comp) = companions.iter().find(|c| c.filename == *name) {
@@ -297,7 +313,10 @@ fn apply_modifications(
                 .map_err(|e| format!("Failed to remove companion '{name}': {e}"))?;
                 eprintln!("  Removed companion '{name}'.");
             } else {
-                eprintln!("  Warning: companion '{name}' not found for '{}'.", wad.title);
+                eprintln!(
+                    "  Warning: companion '{name}' not found for '{}'.",
+                    wad.title
+                );
             }
         }
         any_change = true;
@@ -312,7 +331,10 @@ fn apply_modifications(
                     .map_err(|e| e.to_string())?;
                 any_change = true;
             } else {
-                return Err(format!("No completion found with timestamp '{ts}' for WAD {}", wad.id));
+                return Err(format!(
+                    "No completion found with timestamp '{ts}' for WAD {}",
+                    wad.id
+                ));
             }
         } else {
             // Attach to most recent completion
@@ -322,7 +344,10 @@ fn apply_modifications(
                     .map_err(|e| e.to_string())?;
                 any_change = true;
             } else {
-                return Err(format!("No completions to attach stats to for WAD {}", wad.id));
+                return Err(format!(
+                    "No completions to attach stats to for WAD {}",
+                    wad.id
+                ));
             }
         }
     }
@@ -334,7 +359,12 @@ fn apply_modifications(
     Ok(any_change)
 }
 
-fn apply_field_update(update: WadUpdate, field: &str, value: &str, _wad: &WadRecord) -> Result<WadUpdate, String> {
+fn apply_field_update(
+    update: WadUpdate,
+    field: &str,
+    value: &str,
+    _wad: &WadRecord,
+) -> Result<WadUpdate, String> {
     // Map CLI field names to DB column names (using 'static str to avoid lifetime issues)
     let col: &'static str = match field {
         "iwad" => "custom_iwad",
@@ -356,25 +386,33 @@ fn apply_field_update(update: WadUpdate, field: &str, value: &str, _wad: &WadRec
 
     match field {
         "status" => {
-            let status = Status::parse(value)
-                .ok_or_else(|| format!("Invalid status: {value}"))?;
+            let status = Status::parse(value).ok_or_else(|| format!("Invalid status: {value}"))?;
             update.set_status(status).map_err(|e| e.to_string())
         }
         "rating" => {
-            let rating: i32 = value.parse().map_err(|_| format!("Invalid rating: {value}"))?;
+            let rating: i32 = value
+                .parse()
+                .map_err(|_| format!("Invalid rating: {value}"))?;
             if !(1..=5).contains(&rating) {
                 return Err(format!("Rating must be 1-5, got {rating}"));
             }
-            update.set_int(col, Some(rating as i64)).map_err(|e| e.to_string())
+            update
+                .set_int(col, Some(rating as i64))
+                .map_err(|e| e.to_string())
         }
         "year" => {
-            let year: i32 = value.parse().map_err(|_| format!("Invalid year: {value}"))?;
-            update.set_int(col, Some(year as i64)).map_err(|e| e.to_string())
+            let year: i32 = value
+                .parse()
+                .map_err(|_| format!("Invalid year: {value}"))?;
+            update
+                .set_int(col, Some(year as i64))
+                .map_err(|e| e.to_string())
         }
         "complevel" => {
-            let cl = parse_complevel(value)
-                .ok_or_else(|| format!("Invalid complevel: {value}"))?;
-            update.set_int("complevel", Some(cl as i64)).map_err(|e| e.to_string())
+            let cl = parse_complevel(value).ok_or_else(|| format!("Invalid complevel: {value}"))?;
+            update
+                .set_int("complevel", Some(cl as i64))
+                .map_err(|e| e.to_string())
         }
         "args" => {
             // Accept JSON array or space-separated args
@@ -389,9 +427,9 @@ fn apply_field_update(update: WadUpdate, field: &str, value: &str, _wad: &WadRec
             };
             update.set_text(col, Some(json)).map_err(|e| e.to_string())
         }
-        _ => {
-            update.set_text(col, Some(value.to_string())).map_err(|e| e.to_string())
-        }
+        _ => update
+            .set_text(col, Some(value.to_string()))
+            .map_err(|e| e.to_string()),
     }
 }
 

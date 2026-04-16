@@ -3,10 +3,10 @@
 use clap::Args;
 use rusqlite::Connection;
 
-use caco_core::db::{self, WadStats};
-use caco_core::wad_stats;
 use crate::output::{self, OutputFormat};
 use crate::resolve;
+use caco_core::db::{self, WadStats};
+use caco_core::wad_stats;
 
 #[derive(Args)]
 pub struct InfoArgs {
@@ -37,13 +37,7 @@ pub struct InfoArgs {
 pub fn run(conn: &Connection, args: &InfoArgs) -> Result<(), String> {
     let format: OutputFormat = args.output.parse()?;
 
-    let wads = resolve::resolve_wads(
-        conn,
-        &args.query,
-        resolve::ResolveMode::Pick,
-        false,
-        false,
-    )?;
+    let wads = resolve::resolve_wads(conn, &args.query, resolve::ResolveMode::Pick, false, false)?;
 
     for wad in &wads {
         if args.levelstats {
@@ -136,10 +130,11 @@ fn render_levelstats(
 }
 
 fn render_stats_table(label: &str, stats: &wad_stats::WadStats) {
-    use comfy_table::{presets, Table, Cell, CellAlignment};
+    use comfy_table::{Cell, CellAlignment, Table, presets};
 
     println!("  {label}");
-    println!("  Maps: {}, Total time: {}",
+    println!(
+        "  Maps: {}, Total time: {}",
         stats.played_maps().len(),
         stats.total_time_display(),
     );
@@ -186,9 +181,14 @@ fn render_stats_plain(label: &str, stats: &wad_stats::WadStats) {
         };
         println!(
             "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
-            map.lump, map.kills, map.total_kills,
-            map.items, map.total_items,
-            map.secrets, map.total_secrets, time,
+            map.lump,
+            map.kills,
+            map.total_kills,
+            map.items,
+            map.total_items,
+            map.secrets,
+            map.total_secrets,
+            time,
         );
     }
 }

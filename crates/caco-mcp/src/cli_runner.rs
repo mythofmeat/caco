@@ -72,7 +72,10 @@ mod tests {
             sandbox: sandbox_dir.path().to_path_buf(),
             source_home: sandbox_dir.path().to_path_buf(),
         };
-        let runner = CliRunner { bin: &bin, paths: &paths };
+        let runner = CliRunner {
+            bin: &bin,
+            paths: &paths,
+        };
         // /bin/sh -c 'echo hello; exit 3'
         let result = runner
             .run(vec!["-c".into(), "echo hello; exit 3".into()])
@@ -90,7 +93,10 @@ mod tests {
             sandbox: sandbox_dir.path().to_path_buf(),
             source_home: sandbox_dir.path().to_path_buf(),
         };
-        let runner = CliRunner { bin: &bin, paths: &paths };
+        let runner = CliRunner {
+            bin: &bin,
+            paths: &paths,
+        };
         let result = runner
             .run(vec!["-c".into(), r#"echo '{"ok":true}'"#.into()])
             .await
@@ -106,7 +112,10 @@ mod tests {
             sandbox: sandbox_dir.path().to_path_buf(),
             source_home: sandbox_dir.path().to_path_buf(),
         };
-        let runner = CliRunner { bin: &bin, paths: &paths };
+        let runner = CliRunner {
+            bin: &bin,
+            paths: &paths,
+        };
         let result = runner
             .run(vec!["-c".into(), "echo 'not json'".into()])
             .await

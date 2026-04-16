@@ -125,9 +125,8 @@ pub fn get_active_playthrough(conn: &Connection, wad_id: i64) -> Result<Option<P
 
 /// Get all playthroughs for a WAD, ordered by most recent first.
 pub fn get_playthroughs(conn: &Connection, wad_id: i64) -> Result<Vec<PlaythroughRecord>> {
-    let mut stmt = conn.prepare(
-        "SELECT * FROM playthroughs WHERE wad_id = ?1 ORDER BY started_at DESC",
-    )?;
+    let mut stmt =
+        conn.prepare("SELECT * FROM playthroughs WHERE wad_id = ?1 ORDER BY started_at DESC")?;
     let rows = stmt
         .query_map([wad_id], PlaythroughRecord::from_row)?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -171,10 +170,7 @@ pub fn get_times_completed(conn: &Connection, wad_id: i64) -> Result<i64> {
 }
 
 /// Count completed playthroughs for multiple WADs efficiently.
-pub fn get_times_completed_batch(
-    conn: &Connection,
-    wad_ids: &[i64],
-) -> Result<HashMap<i64, i64>> {
+pub fn get_times_completed_batch(conn: &Connection, wad_ids: &[i64]) -> Result<HashMap<i64, i64>> {
     let result = batch_query_i64(
         conn,
         wad_ids,
@@ -225,7 +221,7 @@ mod tests {
     use crate::db::models::SourceType;
     use crate::db::schema::init_db;
     use crate::db::sessions::start_session;
-    use crate::db::wads::{add_wad, get_wad, NewWad};
+    use crate::db::wads::{NewWad, add_wad, get_wad};
 
     fn setup() -> Connection {
         let conn = open_memory().unwrap();
@@ -264,7 +260,8 @@ mod tests {
         let wad_id = add_test_wad(&conn);
 
         let pt_id = start_playthrough(&conn, wad_id).unwrap();
-        let completed = complete_playthrough(&conn, pt_id, Some("{\"stats\":1}"), Some("GG")).unwrap();
+        let completed =
+            complete_playthrough(&conn, pt_id, Some("{\"stats\":1}"), Some("GG")).unwrap();
         assert!(completed);
 
         let pt = get_playthrough(&conn, pt_id).unwrap().unwrap();
