@@ -395,16 +395,19 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
         crate::Error::FileNotFound(format!("Failed to launch sourceport '{}': {}", port, e))
     })?;
 
-    // Ensure a playthrough exists (sets status → in-progress on first play), start
-    // a session, and link the session to the playthrough — all atomically so we
-    // never persist an unlinked session.
+    // Start a session and link it to the active playthrough if one already
+    // exists. We deliberately do NOT eagerly create a playthrough here — a
+    // new one is only created post-play if this session actually produced
+    // level progress. This prevents an unplayed WAD from being marked
+    // in-progress just because the user launched-and-exited.
     let session_id = db::with_transaction(conn, |tx| {
-        let playthrough_id = db::ensure_playthrough(tx, wad_id)?;
         let session_id = db::start_session(tx, wad_id, Some(&port))?;
-        tx.execute(
-            "UPDATE sessions SET playthrough_id = ?1 WHERE id = ?2",
-            rusqlite::params![playthrough_id, session_id],
-        )?;
+        if let Some(pt) = db::get_active_playthrough(tx, wad_id)? {
+            tx.execute(
+                "UPDATE sessions SET playthrough_id = ?1 WHERE id = ?2",
+                rusqlite::params![pt.id, session_id],
+            )?;
+        }
         Ok(session_id)
     })?;
 
@@ -433,6 +436,20 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
             session_id,
             stats_before.as_deref(),
             stats_after.as_deref(),
+        )?;
+    }
+
+    // If this session produced actual level progress and no playthrough is
+    // active yet, create one now — this flips the WAD status to in-progress.
+    // Skipped if an active playthrough already exists (linked above) or if
+    // the session made no measurable progress.
+    if session_made_progress(stats_before.as_deref(), stats_after.as_deref())
+        && db::get_active_playthrough(conn, wad_id)?.is_none()
+    {
+        let pt_id = db::start_playthrough(conn, wad_id)?;
+        conn.execute(
+            "UPDATE sessions SET playthrough_id = ?1 WHERE id = ?2",
+            rusqlite::params![pt_id, session_id],
         )?;
     }
 
@@ -652,6 +669,34 @@ fn read_stats_snapshot(wad_id: i64) -> Option<String> {
 
     let merged = wad_stats::merge_stats(&parsed);
     wad_stats::stats_to_json(&merged).ok()
+}
+
+/// Whether a play session produced measurable level progress.
+///
+/// Used to decide whether to auto-create a playthrough (flipping WAD status
+/// from `unplayed` → `in-progress`). We require evidence of progress — a
+/// sourceport write to the stats file — rather than assuming any launch
+/// counts as progress.
+///
+/// - No `stats_after`: cannot detect progress (sourceport doesn't emit
+///   stats, or auto-stats is disabled). Returns `false`.
+/// - First stats ever (`stats_before` is `None`): progress if any map in
+///   `stats_after` has been exited at least once.
+/// - Both snapshots present: progress if the serialised content differs —
+///   i.e. the sourceport wrote something to the stats file during this
+///   session.
+fn session_made_progress(stats_before: Option<&str>, stats_after: Option<&str>) -> bool {
+    match (stats_before, stats_after) {
+        (_, None) => false,
+        (None, Some(after)) => serde_json::from_str::<wad_stats::WadStats>(after)
+            .map(|s| {
+                s.maps
+                    .iter()
+                    .any(|m| m.total_exits > 0 || m.time_secs >= 0.0)
+            })
+            .unwrap_or(false),
+        (Some(before), Some(after)) => before != after,
+    }
 }
 
 /// Read stats and store on the WAD record.
@@ -911,5 +956,51 @@ mod tests {
         // Should fail — already has an active playthrough
         let result = start_new_playthrough(&conn, wad_id);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_session_made_progress_no_after() {
+        // No stats_after → can't detect progress.
+        assert!(!session_made_progress(None, None));
+        assert!(!session_made_progress(
+            Some(r#"{"format":"stats_txt","maps":[]}"#),
+            None
+        ));
+    }
+
+    #[test]
+    fn test_session_made_progress_first_stats_empty() {
+        // stats_after exists but contains no completed maps → no progress.
+        let after = r#"{"format":"stats_txt","maps":[]}"#;
+        assert!(!session_made_progress(None, Some(after)));
+    }
+
+    #[test]
+    fn test_session_made_progress_first_stats_with_exit() {
+        // stats_after has a map with total_exits > 0 → progress.
+        let after = r#"{"format":"stats_txt","maps":[{"lump":"MAP01","total_exits":1}]}"#;
+        assert!(session_made_progress(None, Some(after)));
+    }
+
+    #[test]
+    fn test_session_made_progress_first_stats_levelstat() {
+        // levelstat: any completed map entry counts as progress.
+        let after = r#"{"format":"levelstat_txt","maps":[{"lump":"MAP01","time_secs":32.5}]}"#;
+        assert!(session_made_progress(None, Some(after)));
+    }
+
+    #[test]
+    fn test_session_made_progress_unchanged() {
+        // stats_before == stats_after → no progress (sourceport didn't write).
+        let same = r#"{"format":"stats_txt","maps":[{"lump":"MAP01","total_exits":1}]}"#;
+        assert!(!session_made_progress(Some(same), Some(same)));
+    }
+
+    #[test]
+    fn test_session_made_progress_changed() {
+        // Content differs between before and after → progress.
+        let before = r#"{"format":"stats_txt","maps":[{"lump":"MAP01","total_exits":1}]}"#;
+        let after = r#"{"format":"stats_txt","maps":[{"lump":"MAP01","total_exits":2}]}"#;
+        assert!(session_made_progress(Some(before), Some(after)));
     }
 }
