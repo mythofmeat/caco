@@ -140,3 +140,92 @@ pub fn render_filter_input(state: &FilterInputState, frame: &mut Frame, area: Re
     let paragraph = Paragraph::new(Line::from(spans));
     frame.render_widget(paragraph, area);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use std::thread::sleep;
+    use std::time::Duration;
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn type_str(state: &mut FilterInputState, s: &str) {
+        for c in s.chars() {
+            state.handle_key(key(KeyCode::Char(c)));
+        }
+    }
+
+    #[test]
+    fn enter_applies_immediately() {
+        let mut state = FilterInputState::new();
+        state.focused = true;
+        type_str(&mut state, "abc");
+
+        let result = state.handle_key(key(KeyCode::Enter));
+        assert_eq!(result.as_deref(), Some("abc"));
+        assert!(!state.focused);
+        assert!(state.debounce_at.is_none());
+    }
+
+    #[test]
+    fn esc_clears_non_empty_input() {
+        let mut state = FilterInputState::new();
+        state.focused = true;
+        type_str(&mut state, "xyz");
+
+        let result = state.handle_key(key(KeyCode::Esc));
+        assert_eq!(result.as_deref(), Some(""));
+        assert_eq!(state.query(), "");
+        assert!(!state.focused);
+    }
+
+    #[test]
+    fn esc_on_empty_blurs_without_emitting() {
+        let mut state = FilterInputState::new();
+        state.focused = true;
+
+        let result = state.handle_key(key(KeyCode::Esc));
+        assert!(result.is_none());
+        assert!(!state.focused);
+    }
+
+    #[test]
+    fn tick_returns_query_after_debounce() {
+        let mut state = FilterInputState::new();
+        state.focused = true;
+        type_str(&mut state, "ab");
+
+        assert!(state.tick().is_none());
+
+        sleep(Duration::from_millis(DEBOUNCE_MS as u64 + 20));
+        let result = state.tick();
+        assert_eq!(result.as_deref(), Some("ab"));
+
+        assert!(state.tick().is_none());
+    }
+
+    #[test]
+    fn tick_does_not_emit_when_value_unchanged() {
+        let mut state = FilterInputState::new();
+        state.focused = true;
+        type_str(&mut state, "hi");
+        sleep(Duration::from_millis(DEBOUNCE_MS as u64 + 20));
+        assert_eq!(state.tick().as_deref(), Some("hi"));
+
+        state.debounce_at = Some(Instant::now() - Duration::from_millis(DEBOUNCE_MS as u64 + 10));
+        assert!(state.tick().is_none());
+    }
+
+    #[test]
+    fn typing_arms_debounce() {
+        let mut state = FilterInputState::new();
+        state.focused = true;
+        assert!(state.debounce_at.is_none());
+
+        state.handle_key(key(KeyCode::Char('a')));
+        assert!(state.debounce_at.is_some());
+    }
+}

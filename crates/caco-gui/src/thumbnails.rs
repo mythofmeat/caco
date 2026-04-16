@@ -230,3 +230,51 @@ fn save_thumbnail_cache(path: &Path, width: u32, height: u32, pixels: &[u8]) {
         let _ = img.save(path);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn needs_request_defaults_true() {
+        let tm = ThumbnailManager::new();
+        assert!(tm.needs_request(1));
+    }
+
+    #[test]
+    fn needs_request_false_when_pending() {
+        let mut tm = ThumbnailManager::new();
+        tm.pending.insert(7);
+        assert!(!tm.needs_request(7));
+        assert!(tm.needs_request(8));
+    }
+
+    #[test]
+    fn needs_request_false_when_failed() {
+        let mut tm = ThumbnailManager::new();
+        tm.failed.insert(9);
+        assert!(!tm.needs_request(9));
+    }
+
+    #[test]
+    fn mark_failed_transitions_pending_to_failed() {
+        let mut tm = ThumbnailManager::new();
+        tm.pending.insert(3);
+        tm.mark_failed(3);
+        assert!(!tm.pending.contains(&3));
+        assert!(tm.failed.contains(&3));
+        assert!(!tm.needs_request(3));
+    }
+
+    #[test]
+    fn clear_resets_all_state() {
+        let mut tm = ThumbnailManager::new();
+        tm.pending.insert(1);
+        tm.failed.insert(2);
+        tm.clear();
+        assert!(tm.pending.is_empty());
+        assert!(tm.failed.is_empty());
+        assert!(tm.needs_request(1));
+        assert!(tm.needs_request(2));
+    }
+}

@@ -395,3 +395,48 @@ pub fn render_library_pane(
         status_bar::render_status_bar(&hints, frame, bottom_area);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pane(tab: Option<&str>) -> LibraryPaneState {
+        LibraryPaneState::new(tab.map(String::from), "title", false)
+    }
+
+    #[test]
+    fn effective_query_returns_none_when_empty() {
+        let state = pane(None);
+        assert!(state.effective_query().is_none());
+    }
+
+    #[test]
+    fn effective_query_uses_tab_query_alone() {
+        let state = pane(Some("status:unplayed"));
+        assert_eq!(state.effective_query().as_deref(), Some("status:unplayed"));
+    }
+
+    #[test]
+    fn effective_query_uses_user_query_alone() {
+        let mut state = pane(None);
+        state.filter.input.set_value("doom");
+        assert_eq!(state.effective_query().as_deref(), Some("doom"));
+    }
+
+    #[test]
+    fn effective_query_combines_tab_and_user() {
+        let mut state = pane(Some("status:unplayed"));
+        state.filter.input.set_value("hell");
+        assert_eq!(
+            state.effective_query().as_deref(),
+            Some("status:unplayed hell")
+        );
+    }
+
+    #[test]
+    fn effective_query_ignores_empty_user_query() {
+        let mut state = pane(Some("tag:caco"));
+        state.filter.input.set_value("");
+        assert_eq!(state.effective_query().as_deref(), Some("tag:caco"));
+    }
+}

@@ -236,3 +236,124 @@ pub enum SearchSource {
     Idgames,
     Doomwiki,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn idgames_entry(id: i64, title: &str) -> SearchResultEntry {
+        SearchResultEntry {
+            title: title.to_string(),
+            author: None,
+            description: None,
+            source_data: SearchSourceData::Idgames {
+                id,
+                rating: None,
+                date: None,
+                filename: None,
+            },
+        }
+    }
+
+    #[test]
+    fn set_results_selects_first_when_non_empty() {
+        let mut s = SearchState::default();
+        s.set_results(vec![idgames_entry(1, "a"), idgames_entry(2, "b")]);
+        assert_eq!(s.selected_row, Some(0));
+        assert!(!s.is_searching);
+        assert_eq!(s.status_text, "2 results");
+        assert_eq!(s.results.len(), 2);
+    }
+
+    #[test]
+    fn set_results_clears_selection_when_empty() {
+        let mut s = SearchState {
+            selected_row: Some(3),
+            is_searching: true,
+            ..SearchState::default()
+        };
+        s.set_results(vec![]);
+        assert_eq!(s.selected_row, None);
+        assert!(!s.is_searching);
+        assert_eq!(s.status_text, "0 results");
+    }
+
+    #[test]
+    fn set_results_singular_status() {
+        let mut s = SearchState::default();
+        s.set_results(vec![idgames_entry(1, "solo")]);
+        assert_eq!(s.status_text, "1 result");
+    }
+
+    #[test]
+    fn form_validate_rejects_missing_required() {
+        let form = FormState::new(FormKind::Doomworld);
+        let err = form.validate().unwrap_err();
+        assert!(err.contains("Forum URL"));
+    }
+
+    #[test]
+    fn form_validate_accepts_required_filled() {
+        let mut form = FormState::new(FormKind::Doomworld);
+        for f in &mut form.fields {
+            if f.required {
+                f.value = "x".into();
+            }
+        }
+        assert!(form.validate().is_ok());
+    }
+
+    #[test]
+    fn form_reset_clears_fields_and_status() {
+        let mut form = FormState::new(FormKind::Url);
+        for f in &mut form.fields {
+            f.value = "populated".into();
+        }
+        form.status_text = "boom".into();
+        form.is_submitting = true;
+        form.reset();
+        assert!(form.fields.iter().all(|f| f.value.is_empty()));
+        assert!(form.status_text.is_empty());
+        assert!(!form.is_submitting);
+    }
+
+    #[test]
+    fn form_collect_values_returns_all_fields() {
+        let mut form = FormState::new(FormKind::Local);
+        form.fields[0].value = "/tmp/a.wad".into();
+        form.fields[1].value = "Title".into();
+        let vals = form.collect_values();
+        assert_eq!(vals[0], ("path".to_string(), "/tmp/a.wad".to_string()));
+        assert_eq!(vals[1], ("title".to_string(), "Title".to_string()));
+    }
+
+    #[test]
+    fn result_source_id_uses_idgames_id() {
+        let e = idgames_entry(42, "wad");
+        assert_eq!(e.source_id(), "42");
+    }
+
+    #[test]
+    fn result_source_id_uses_doomwiki_title() {
+        let e = SearchResultEntry {
+            title: "Scythe".into(),
+            author: None,
+            description: None,
+            source_data: SearchSourceData::Doomwiki {
+                year: Some(2003),
+                iwad: Some("doom2".into()),
+                port: None,
+            },
+        };
+        assert_eq!(e.source_id(), "Scythe");
+    }
+
+    #[test]
+    fn active_source_state_mut_routes_correctly() {
+        let mut state = ImportState::default();
+        state.search_state_mut(SearchSource::Idgames).query = "ig".into();
+        state.search_state_mut(SearchSource::Doomwiki).query = "dw".into();
+        assert_eq!(state.idgames.query, "ig");
+        assert_eq!(state.doomwiki.query, "dw");
+    }
+}
