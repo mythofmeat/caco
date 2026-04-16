@@ -329,9 +329,7 @@ impl ImportService {
             // Set complevel (override > thread-extracted)
             let final_complevel = complevel.or(thread.complevel);
             if let Some(cl) = final_complevel {
-                let update = WadUpdate::new()
-                    .set_int("complevel", Some(cl as i64))
-                    .unwrap();
+                let update = WadUpdate::new().set_int("complevel", Some(cl as i64));
                 db::update_wad(tx, wad_id, &update)?;
             }
 
@@ -494,15 +492,11 @@ impl ImportService {
 
             // Fill missing fields (never overwrite)
             if wad.author.is_none() && !entry.author.is_empty() {
-                update = update
-                    .set_text("author", Some(entry.author.clone()))
-                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+                update = update.set_text("author", Some(entry.author.clone()));
                 has_changes = true;
             }
             if wad.year.is_none() && entry.year.is_some() {
-                update = update
-                    .set_int("year", entry.year.map(|y| y as i64))
-                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+                update = update.set_int("year", entry.year.map(|y| y as i64));
                 has_changes = true;
             }
 
@@ -514,9 +508,7 @@ impl ImportService {
                 } else {
                     format!("{existing}\n\n---\nFrom Doom Wiki:\n{}", entry.description)
                 };
-                update = update
-                    .set_text("description", Some(new_desc))
-                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+                update = update.set_text("description", Some(new_desc));
                 has_changes = true;
             }
 
@@ -595,7 +587,7 @@ fn auto_link_zdoom_required(conn: &Connection, wad_id: i64, port_text: &str) {
         && let Ok(Some(wad)) = db::get_wad(conn, wad_id, false)
         && wad.zdoom_required.is_none()
     {
-        let update = WadUpdate::new().set_int("zdoom_required", Some(1)).unwrap();
+        let update = WadUpdate::new().set_int("zdoom_required", Some(1));
         let _ = db::update_wad(conn, wad_id, &update);
     }
 }
@@ -606,9 +598,7 @@ fn auto_link_complevel(conn: &Connection, wad_id: i64, port_text: &str) {
         && let Ok(Some(wad)) = db::get_wad(conn, wad_id, false)
         && wad.complevel.is_none()
     {
-        let update = WadUpdate::new()
-            .set_int("complevel", Some(cl as i64))
-            .unwrap();
+        let update = WadUpdate::new().set_int("complevel", Some(cl as i64));
         let _ = db::update_wad(conn, wad_id, &update);
     }
 }
@@ -625,19 +615,13 @@ fn apply_idgames_link(conn: &Connection, wad_id: i64, idgames_id: i64, filename:
         return;
     }
 
-    let mut update = match WadUpdate::new().set_text("idgames_id", Some(idgames_id.to_string())) {
-        Ok(u) => u,
-        Err(_) => return,
-    };
+    let mut update = WadUpdate::new().set_text("idgames_id", Some(idgames_id.to_string()));
 
     if let Some(name) = filename
         && !name.is_empty()
         && wad.filename.is_none()
     {
-        update = match update.set_text("filename", Some(name.to_string())) {
-            Ok(u) => u,
-            Err(_) => return,
-        };
+        update = update.set_text("filename", Some(name.to_string()));
     }
 
     let _ = db::update_wad(conn, wad_id, &update);
@@ -693,9 +677,7 @@ fn auto_link_iwad(conn: &Connection, wad_id: i64, iwad_text: &str) {
     if let Ok(Some(wad)) = db::get_wad(conn, wad_id, false)
         && wad.custom_iwad.is_none()
     {
-        let update = WadUpdate::new()
-            .set_text("custom_iwad", Some(short_name.to_string()))
-            .unwrap();
+        let update = WadUpdate::new().set_text("custom_iwad", Some(short_name.to_string()));
         let _ = db::update_wad(conn, wad_id, &update);
     }
 }
@@ -1003,7 +985,7 @@ mod tests {
         let wad_id = db::add_wad(&conn, &wad).unwrap();
 
         // Set complevel manually first
-        let update = WadUpdate::new().set_int("complevel", Some(2)).unwrap();
+        let update = WadUpdate::new().set_int("complevel", Some(2));
         db::update_wad(&conn, wad_id, &update).unwrap();
 
         // Should NOT overwrite
@@ -1033,9 +1015,7 @@ mod tests {
         let wad_id = db::add_wad(&conn, &new).unwrap();
 
         // Pre-populate idgames_id
-        let update = WadUpdate::new()
-            .set_text("idgames_id", Some("99999".to_string()))
-            .unwrap();
+        let update = WadUpdate::new().set_text("idgames_id", Some("99999".to_string()));
         db::update_wad(&conn, wad_id, &update).unwrap();
 
         apply_idgames_link(&conn, wad_id, 18184, Some("other.zip"));

@@ -137,9 +137,8 @@ fn enrich_wad(
             if needs_complevel && let Some(cl) = caco_core::complevel_detect::detect_complevel(path)
             {
                 result.complevel = Some(cl);
-                if !dry_run
-                    && let Ok(update) = WadUpdate::new().set_int("complevel", Some(cl as i64))
-                {
+                if !dry_run {
+                    let update = WadUpdate::new().set_int("complevel", Some(cl as i64));
                     let _ = db::update_wad(conn, wad.id, &update);
                 }
             }
@@ -147,10 +146,8 @@ fn enrich_wad(
             // Try IWAD detection from file
             if needs_iwad && let Some(family) = caco_core::iwad_detect::detect_iwad(path) {
                 result.iwad = Some(family.to_string());
-                if !dry_run
-                    && let Ok(update) =
-                        WadUpdate::new().set_text("custom_iwad", Some(family.to_string()))
-                {
+                if !dry_run {
+                    let update = WadUpdate::new().set_text("custom_iwad", Some(family.to_string()));
                     let _ = db::update_wad(conn, wad.id, &update);
                 }
             }
@@ -160,10 +157,9 @@ fn enrich_wad(
                 && let Some(required) = caco_core::zdoom_detect::detect_zdoom_required(path)
             {
                 result.zdoom_required = Some(required);
-                if !dry_run
-                    && let Ok(update) =
-                        WadUpdate::new().set_int("zdoom_required", Some(i64::from(required)))
-                {
+                if !dry_run {
+                    let update =
+                        WadUpdate::new().set_int("zdoom_required", Some(i64::from(required)));
                     let _ = db::update_wad(conn, wad.id, &update);
                 }
             }
@@ -182,9 +178,8 @@ fn enrich_wad(
                 && let Some(cl) = port_to_complevel(port_text)
             {
                 result.complevel = Some(cl);
-                if !dry_run
-                    && let Ok(update) = WadUpdate::new().set_int("complevel", Some(cl as i64))
-                {
+                if !dry_run {
+                    let update = WadUpdate::new().set_int("complevel", Some(cl as i64));
                     let _ = db::update_wad(conn, wad.id, &update);
                 }
             }
@@ -194,8 +189,8 @@ fn enrich_wad(
                 && let Some(true) = port_to_zdoom_required(port_text)
             {
                 result.zdoom_required = Some(true);
-                if !dry_run && let Ok(update) = WadUpdate::new().set_int("zdoom_required", Some(1))
-                {
+                if !dry_run {
+                    let update = WadUpdate::new().set_int("zdoom_required", Some(1));
                     let _ = db::update_wad(conn, wad.id, &update);
                 }
             }
@@ -352,8 +347,7 @@ mod tests {
 
         // Set cached_path on WAD
         let update = db::WadUpdate::new()
-            .set_text("cached_path", Some(wad_path.to_string_lossy().to_string()))
-            .unwrap();
+            .set_text("cached_path", Some(wad_path.to_string_lossy().to_string()));
         db::update_wad(&conn, wad_id, &update).unwrap();
 
         let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
@@ -379,8 +373,7 @@ mod tests {
         std::fs::write(&wad_path, &wad_data).unwrap();
 
         let update = db::WadUpdate::new()
-            .set_text("cached_path", Some(wad_path.to_string_lossy().to_string()))
-            .unwrap();
+            .set_text("cached_path", Some(wad_path.to_string_lossy().to_string()));
         db::update_wad(&conn, wad_id, &update).unwrap();
 
         let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
@@ -402,8 +395,7 @@ mod tests {
         std::fs::write(&wad_path, &wad_data).unwrap();
 
         let update = db::WadUpdate::new()
-            .set_text("cached_path", Some(wad_path.to_string_lossy().to_string()))
-            .unwrap();
+            .set_text("cached_path", Some(wad_path.to_string_lossy().to_string()));
         db::update_wad(&conn, wad_id, &update).unwrap();
 
         let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
@@ -428,8 +420,7 @@ mod tests {
         std::fs::write(&wad_path, &wad_data).unwrap();
 
         let update = db::WadUpdate::new()
-            .set_text("cached_path", Some(wad_path.to_string_lossy().to_string()))
-            .unwrap();
+            .set_text("cached_path", Some(wad_path.to_string_lossy().to_string()));
         db::update_wad(&conn, wad_id, &update).unwrap();
 
         let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
@@ -455,13 +446,9 @@ mod tests {
         // Set complevel, custom_iwad, and zdoom_required
         let update = db::WadUpdate::new()
             .set_text("cached_path", Some(wad_path.to_string_lossy().to_string()))
-            .unwrap()
             .set_int("complevel", Some(9))
-            .unwrap()
             .set_text("custom_iwad", Some("doom2".to_string()))
-            .unwrap()
-            .set_int("zdoom_required", Some(0))
-            .unwrap();
+            .set_int("zdoom_required", Some(0));
         db::update_wad(&conn, wad_id, &update).unwrap();
 
         let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
@@ -495,9 +482,8 @@ mod tests {
         let wad_id = add_test_wad(&conn, "Missing File");
 
         // Set cached_path to nonexistent file
-        let update = db::WadUpdate::new()
-            .set_text("cached_path", Some("/nonexistent/test.wad".to_string()))
-            .unwrap();
+        let update =
+            db::WadUpdate::new().set_text("cached_path", Some("/nonexistent/test.wad".to_string()));
         db::update_wad(&conn, wad_id, &update).unwrap();
 
         let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
@@ -528,7 +514,7 @@ mod tests {
     fn test_run_complevel_filter_all_set() {
         let conn = setup();
         let wad_id = add_test_wad(&conn, "Has Complevel");
-        let update = db::WadUpdate::new().set_int("complevel", Some(9)).unwrap();
+        let update = db::WadUpdate::new().set_int("complevel", Some(9));
         db::update_wad(&conn, wad_id, &update).unwrap();
 
         let args = EnrichArgs {
@@ -545,7 +531,7 @@ mod tests {
     fn test_run_complevel_filter_retains_missing() {
         let conn = setup();
         let _w1 = add_test_wad(&conn, "Has Complevel");
-        let update = db::WadUpdate::new().set_int("complevel", Some(9)).unwrap();
+        let update = db::WadUpdate::new().set_int("complevel", Some(9));
         db::update_wad(&conn, _w1, &update).unwrap();
 
         let w2 = add_test_wad(&conn, "No Complevel");
@@ -557,8 +543,7 @@ mod tests {
         std::fs::write(&wad_path, &wad_data).unwrap();
 
         let update = db::WadUpdate::new()
-            .set_text("cached_path", Some(wad_path.to_string_lossy().to_string()))
-            .unwrap();
+            .set_text("cached_path", Some(wad_path.to_string_lossy().to_string()));
         db::update_wad(&conn, w2, &update).unwrap();
 
         let args = EnrichArgs {
@@ -615,8 +600,7 @@ mod tests {
         std::fs::write(&wad_path, &wad_data).unwrap();
 
         let update = db::WadUpdate::new()
-            .set_text("cached_path", Some(wad_path.to_string_lossy().to_string()))
-            .unwrap();
+            .set_text("cached_path", Some(wad_path.to_string_lossy().to_string()));
         db::update_wad(&conn, wad_id, &update).unwrap();
 
         let args = EnrichArgs {
@@ -645,8 +629,7 @@ mod tests {
         std::fs::write(&wad_path, &wad_data).unwrap();
 
         let update = db::WadUpdate::new()
-            .set_text("cached_path", Some(wad_path.to_string_lossy().to_string()))
-            .unwrap();
+            .set_text("cached_path", Some(wad_path.to_string_lossy().to_string()));
         db::update_wad(&conn, wad_id, &update).unwrap();
 
         let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();

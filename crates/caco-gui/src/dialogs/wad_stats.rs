@@ -234,11 +234,8 @@ impl WadStatsDialogState {
         }
 
         // Also update the WAD's stats_snapshot
-        if let Ok(update) =
-            caco_core::db::wads::WadUpdate::new().set_text("stats_snapshot", Some(json))
-        {
-            let _ = caco_core::db::wads::update_wad(conn, self.wad_id, &update);
-        }
+        let update = caco_core::db::wads::WadUpdate::new().set_text("stats_snapshot", Some(json));
+        let _ = caco_core::db::wads::update_wad(conn, self.wad_id, &update);
 
         // Rebuild entries from DB
         self.reload_entries(conn);

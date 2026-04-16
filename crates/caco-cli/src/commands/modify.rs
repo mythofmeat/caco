@@ -187,11 +187,9 @@ fn apply_modifications(
                     other => return Err(format!("Unknown field: {other}")),
                 };
                 if col == "complevel" {
-                    update = update
-                        .set_int("complevel", None)
-                        .map_err(|e| e.to_string())?;
+                    update = update.set_int("complevel", None);
                 } else {
-                    update = update.set_text(col, None).map_err(|e| e.to_string())?;
+                    update = update.set_text(col, None);
                 }
                 any_change = true;
             }
@@ -280,9 +278,7 @@ fn apply_modifications(
 
         update = update
             .set_text("cached_path", Some(dest.to_string_lossy().to_string()))
-            .map_err(|e| e.to_string())?
-            .set_text("filename", Some(filename.to_string()))
-            .map_err(|e| e.to_string())?;
+            .set_text("filename", Some(filename.to_string()));
         any_change = true;
     }
 
@@ -387,7 +383,7 @@ fn apply_field_update(
     match field {
         "status" => {
             let status = Status::parse(value).ok_or_else(|| format!("Invalid status: {value}"))?;
-            update.set_status(status).map_err(|e| e.to_string())
+            Ok(update.set_status(status))
         }
         "rating" => {
             let rating: i32 = value
@@ -396,31 +392,23 @@ fn apply_field_update(
             if !(1..=5).contains(&rating) {
                 return Err(format!("Rating must be 1-5, got {rating}"));
             }
-            update
-                .set_int(col, Some(rating as i64))
-                .map_err(|e| e.to_string())
+            Ok(update.set_int(col, Some(rating as i64)))
         }
         "year" => {
             let year: i32 = value
                 .parse()
                 .map_err(|_| format!("Invalid year: {value}"))?;
-            update
-                .set_int(col, Some(year as i64))
-                .map_err(|e| e.to_string())
+            Ok(update.set_int(col, Some(year as i64)))
         }
         "complevel" => {
             let cl = parse_complevel(value).ok_or_else(|| format!("Invalid complevel: {value}"))?;
-            update
-                .set_int("complevel", Some(cl as i64))
-                .map_err(|e| e.to_string())
+            Ok(update.set_int("complevel", Some(cl as i64)))
         }
         "args" => {
             let json = caco_core::player::normalize_custom_args(value)?;
-            update.set_text(col, Some(json)).map_err(|e| e.to_string())
+            Ok(update.set_text(col, Some(json)))
         }
-        _ => update
-            .set_text(col, Some(value.to_string()))
-            .map_err(|e| e.to_string()),
+        _ => Ok(update.set_text(col, Some(value.to_string()))),
     }
 }
 

@@ -243,8 +243,7 @@ impl CacoApp {
                             };
 
                             let update = caco_core::db::WadUpdate::new()
-                                .set_text("cached_path", Some(dest.to_string_lossy().to_string()))
-                                .map_err(|e| format!("Failed to build update: {e}"))?;
+                                .set_text("cached_path", Some(dest.to_string_lossy().to_string()));
                             caco_core::db::update_wad(&conn, wad_id, &update)
                                 .map_err(|e| format!("Failed to update WAD record: {e}"))?;
                         }

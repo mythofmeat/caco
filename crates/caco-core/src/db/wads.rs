@@ -112,11 +112,20 @@ impl NewWad {
 // ---------------------------------------------------------------------------
 
 /// Builder for updating WAD fields. Only fields in `ALLOWED_UPDATE_FIELDS` are accepted.
+///
+/// Setter methods consume `self` and return `Self` — validation errors are
+/// accumulated in `errors` and surfaced when the update is applied
+/// (see [`WadUpdate::validate`] and [`update_wad`]). This lets callers chain
+/// setters fluently without bailing out on the first bad field, and preserves
+/// any valid state built up before an error.
 #[derive(Default)]
 pub struct WadUpdate {
     fields: HashMap<&'static str, FieldValue>,
     /// Whether to record a completion when status is set to finished.
     pub record_completion: bool,
+    /// Field names that were rejected by a setter. Surfaced by
+    /// [`validate`](Self::validate).
+    errors: Vec<String>,
 }
 
 /// A dynamically-typed field value for SQL binding.
@@ -131,34 +140,37 @@ impl WadUpdate {
         Self {
             fields: HashMap::new(),
             record_completion: true,
+            errors: Vec::new(),
         }
     }
 
     /// Set a text field.
-    pub fn set_text(mut self, field: &'static str, value: Option<String>) -> crate::Result<Self> {
+    pub fn set_text(mut self, field: &'static str, value: Option<String>) -> Self {
         if !ALLOWED_UPDATE_FIELDS.contains(field) {
-            return Err(crate::Error::InvalidField(field.to_string()));
+            self.errors.push(field.to_string());
+            return self;
         }
         self.fields.insert(field, FieldValue::Text(value));
-        Ok(self)
+        self
     }
 
     /// Set an integer field.
-    pub fn set_int(mut self, field: &'static str, value: Option<i64>) -> crate::Result<Self> {
+    pub fn set_int(mut self, field: &'static str, value: Option<i64>) -> Self {
         if !ALLOWED_UPDATE_FIELDS.contains(field) {
-            return Err(crate::Error::InvalidField(field.to_string()));
+            self.errors.push(field.to_string());
+            return self;
         }
         self.fields.insert(field, FieldValue::Int(value));
-        Ok(self)
+        self
     }
 
     /// Set the status field (convenience).
-    pub fn set_status(self, status: Status) -> crate::Result<Self> {
+    pub fn set_status(self, status: Status) -> Self {
         self.set_text("status", Some(status.as_str().to_string()))
     }
 
     /// Set the availability.
-    pub fn set_availability(self, avail: Availability) -> crate::Result<Self> {
+    pub fn set_availability(self, avail: Availability) -> Self {
         self.set_text("availability", Some(avail.as_str().to_string()))
     }
 
@@ -170,6 +182,15 @@ impl WadUpdate {
 
     pub fn is_empty(&self) -> bool {
         self.fields.is_empty()
+    }
+
+    /// Return `Err` if any setter call rejected a field name.
+    pub fn validate(&self) -> crate::Result<()> {
+        if self.errors.is_empty() {
+            Ok(())
+        } else {
+            Err(crate::Error::InvalidFields(self.errors.clone()))
+        }
     }
 }
 
@@ -239,6 +260,7 @@ pub fn get_wad(conn: &Connection, wad_id: i64, include_deleted: bool) -> Result<
 /// If status is set to "finished", automatically records a completion
 /// (unless `record_completion` is false on the `WadUpdate`).
 pub fn update_wad(conn: &Connection, wad_id: i64, update: &WadUpdate) -> Result<bool> {
+    update.validate()?;
     if update.is_empty() {
         return Ok(false);
     }
@@ -518,9 +540,7 @@ mod tests {
 
         let update = WadUpdate::new()
             .set_text("title", Some("Updated Title".to_string()))
-            .unwrap()
-            .set_status(Status::InProgress)
-            .unwrap();
+            .set_status(Status::InProgress);
         assert!(update_wad(&conn, id, &update).unwrap());
 
         let wad = get_wad(&conn, id, false).unwrap().unwrap();
@@ -530,8 +550,24 @@ mod tests {
 
     #[test]
     fn test_update_invalid_field() {
-        let result = WadUpdate::new().set_text("invalid_field", Some("value".to_string()));
-        assert!(result.is_err());
+        let update = WadUpdate::new().set_text("invalid_field", Some("value".to_string()));
+        assert!(update.validate().is_err());
+    }
+
+    #[test]
+    fn test_update_accumulates_multiple_invalid_fields() {
+        let update = WadUpdate::new()
+            .set_text("bogus_one", Some("a".to_string()))
+            .set_int("bogus_two", Some(1))
+            .set_text("title", Some("ok".to_string()));
+        match update.validate() {
+            Err(crate::Error::InvalidFields(fields)) => {
+                assert!(fields.iter().any(|f| f == "bogus_one"));
+                assert!(fields.iter().any(|f| f == "bogus_two"));
+                assert_eq!(fields.len(), 2);
+            }
+            other => panic!("expected InvalidFields, got {other:?}"),
+        }
     }
 
     #[test]
@@ -539,7 +575,7 @@ mod tests {
         let conn = setup();
         let id = add_test_wad(&conn);
 
-        let update = WadUpdate::new().set_status(Status::Completed).unwrap();
+        let update = WadUpdate::new().set_status(Status::Completed);
         update_wad(&conn, id, &update).unwrap();
 
         let count: i64 = conn
@@ -559,7 +595,6 @@ mod tests {
 
         let update = WadUpdate::new()
             .set_status(Status::Completed)
-            .unwrap()
             .no_completion();
         update_wad(&conn, id, &update).unwrap();
 
@@ -711,7 +746,7 @@ mod tests {
         let id = add_test_wad(&conn);
 
         // Set to in-progress
-        let update = WadUpdate::new().set_status(Status::InProgress).unwrap();
+        let update = WadUpdate::new().set_status(Status::InProgress);
         update_wad(&conn, id, &update).unwrap();
         let wad = get_wad(&conn, id, false).unwrap().unwrap();
         assert_eq!(wad.status, "in-progress");
@@ -719,7 +754,6 @@ mod tests {
         // Set to completed
         let update = WadUpdate::new()
             .set_status(Status::Completed)
-            .unwrap()
             .no_completion();
         update_wad(&conn, id, &update).unwrap();
         let wad = get_wad(&conn, id, false).unwrap().unwrap();
@@ -768,16 +802,14 @@ mod tests {
         assert_eq!(wad.availability, "downloadable");
 
         // Set cached_path → should auto-update to cached
-        let update = WadUpdate::new()
-            .set_text("cached_path", Some("/tmp/test.wad".to_string()))
-            .unwrap();
+        let update = WadUpdate::new().set_text("cached_path", Some("/tmp/test.wad".to_string()));
         update_wad(&conn, id, &update).unwrap();
 
         let wad = get_wad(&conn, id, false).unwrap().unwrap();
         assert_eq!(wad.availability, "cached");
 
         // Clear cached_path → should auto-update back to downloadable
-        let update = WadUpdate::new().set_text("cached_path", None).unwrap();
+        let update = WadUpdate::new().set_text("cached_path", None);
         update_wad(&conn, id, &update).unwrap();
 
         let wad = get_wad(&conn, id, false).unwrap().unwrap();

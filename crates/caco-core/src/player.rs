@@ -99,7 +99,7 @@ pub fn start_new_playthrough(conn: &Connection, wad_id: i64) -> crate::Result<i6
     let pt_id = db::start_playthrough(conn, wad_id)?;
 
     // Clear live stats snapshot so auto-completion tracks fresh
-    let update = db::WadUpdate::new().set_text("stats_snapshot", None)?;
+    let update = db::WadUpdate::new().set_text("stats_snapshot", None);
     db::update_wad(conn, wad_id, &update)?;
 
     Ok(pt_id)
@@ -147,7 +147,7 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
         None => {
             if let Some(detected) = zdoom_detect::detect_zdoom_required(&wad_path) {
                 let update =
-                    db::WadUpdate::new().set_int("zdoom_required", Some(i64::from(detected)))?;
+                    db::WadUpdate::new().set_int("zdoom_required", Some(i64::from(detected)));
                 db::update_wad(conn, wad_id, &update)?;
                 detected
             } else {
@@ -179,7 +179,7 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
         && config::get_auto_detect_iwad()
         && let Some(detected) = iwad_detect::detect_iwad(&wad_path)
     {
-        let update = db::WadUpdate::new().set_text("custom_iwad", Some(detected.to_string()))?;
+        let update = db::WadUpdate::new().set_text("custom_iwad", Some(detected.to_string()));
         db::update_wad(conn, wad_id, &update)?;
         custom_iwad = Some(detected.to_string());
     }
@@ -189,11 +189,11 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
     if complevel.is_none() && config::get_auto_detect_complevel() {
         // Try COMPLVL lump first (id24 signal)
         if let Some(cl) = iwad_detect::detect_complvl(&wad_path) {
-            let update = db::WadUpdate::new().set_int("complevel", Some(cl as i64))?;
+            let update = db::WadUpdate::new().set_int("complevel", Some(cl as i64));
             db::update_wad(conn, wad_id, &update)?;
             complevel = Some(cl);
         } else if let Some(cl) = complevel_detect::detect_complevel(&wad_path) {
-            let update = db::WadUpdate::new().set_int("complevel", Some(cl as i64))?;
+            let update = db::WadUpdate::new().set_int("complevel", Some(cl as i64));
             db::update_wad(conn, wad_id, &update)?;
             complevel = Some(cl);
         }
@@ -657,9 +657,7 @@ fn read_stats_snapshot(wad_id: i64) -> Option<String> {
 /// Read stats and store on the WAD record.
 fn auto_track_stats(conn: &Connection, wad_id: i64) -> Option<String> {
     let json_str = read_stats_snapshot(wad_id)?;
-    let update = db::WadUpdate::new()
-        .set_text("stats_snapshot", Some(json_str.clone()))
-        .ok()?;
+    let update = db::WadUpdate::new().set_text("stats_snapshot", Some(json_str.clone()));
     if let Err(e) = db::update_wad(conn, wad_id, &update) {
         tracing::warn!("failed to persist stats snapshot for wad {wad_id}: {e}");
     }
@@ -873,9 +871,8 @@ mod tests {
         let pt_id = db::start_playthrough(&conn, wad_id).unwrap();
 
         // Set a stats snapshot on the WAD
-        let update = db::WadUpdate::new()
-            .set_text("stats_snapshot", Some(r#"{"maps":{}}"#.to_string()))
-            .unwrap();
+        let update =
+            db::WadUpdate::new().set_text("stats_snapshot", Some(r#"{"maps":{}}"#.to_string()));
         db::update_wad(&conn, wad_id, &update).unwrap();
 
         // Complete the playthrough

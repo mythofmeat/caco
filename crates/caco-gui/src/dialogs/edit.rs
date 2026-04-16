@@ -851,36 +851,12 @@ impl EditDialogState {
 
         let status = Status::parse(&self.status).unwrap_or(Status::Unplayed);
 
-        let mut update = WadUpdate::new();
-        update = update
-            .set_text("title", Some(self.title_field.clone()))
-            .unwrap();
-        update = update.set_text("author", opt_str(&self.author)).unwrap();
-        update = update.set_int("year", year).unwrap();
-
-        update = update.set_status(status).unwrap();
-
         let rating: Option<i64> = if self.rating.is_empty() {
             None
         } else {
             self.rating.parse().ok()
         };
-        update = update.set_int("rating", rating).unwrap();
 
-        update = update.set_text("notes", opt_str(&self.notes)).unwrap();
-        update = update
-            .set_text("description", opt_str(&self.description))
-            .unwrap();
-
-        // Sourceport tab fields
-        update = update.set_text("custom_iwad", opt_str(&self.iwad)).unwrap();
-        update = update
-            .set_text("custom_sourceport", opt_str(&self.sourceport))
-            .unwrap();
-        update = update.set_int("complevel", complevel).unwrap();
-        update = update
-            .set_text("custom_config", opt_str(&self.config))
-            .unwrap();
         let custom_args = if self.args.trim().is_empty() {
             None
         } else {
@@ -892,16 +868,25 @@ impl EditDialogState {
                 }
             }
         };
-        update = update.set_text("custom_args", custom_args).unwrap();
-        update = update.set_text("version", opt_str(&self.version)).unwrap();
 
-        // Sources tab fields
-        update = update
+        let update = WadUpdate::new()
+            .set_text("title", Some(self.title_field.clone()))
+            .set_text("author", opt_str(&self.author))
+            .set_int("year", year)
+            .set_status(status)
+            .set_int("rating", rating)
+            .set_text("notes", opt_str(&self.notes))
+            .set_text("description", opt_str(&self.description))
+            // Sourceport tab fields
+            .set_text("custom_iwad", opt_str(&self.iwad))
+            .set_text("custom_sourceport", opt_str(&self.sourceport))
+            .set_int("complevel", complevel)
+            .set_text("custom_config", opt_str(&self.config))
+            .set_text("custom_args", custom_args)
+            .set_text("version", opt_str(&self.version))
+            // Sources tab fields
             .set_text("source_url", opt_str(&self.source_url))
-            .unwrap();
-        update = update
-            .set_text("idgames_id", opt_str(&self.idgames_id))
-            .unwrap();
+            .set_text("idgames_id", opt_str(&self.idgames_id));
 
         if let Err(e) = wads::update_wad(conn, self.wad_id, &update) {
             self.error_message = Some(format!("Save failed: {e}"));

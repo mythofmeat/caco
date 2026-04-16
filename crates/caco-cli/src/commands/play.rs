@@ -235,9 +235,8 @@ fn ensure_wad_path(conn: &Connection, wad: &WadRecord) -> Result<(), String> {
         pb.finish_and_clear();
         eprintln!("Downloaded (via mirror): {filename}");
 
-        let update = db::WadUpdate::new()
-            .set_text("cached_path", Some(dest.to_string_lossy().to_string()))
-            .map_err(|e| format!("Failed to update cached_path: {e}"))?;
+        let update =
+            db::WadUpdate::new().set_text("cached_path", Some(dest.to_string_lossy().to_string()));
         db::update_wad(conn, wad.id, &update)
             .map_err(|e| format!("Failed to update WAD record: {e}"))?;
 
@@ -274,9 +273,8 @@ fn ensure_wad_path(conn: &Connection, wad: &WadRecord) -> Result<(), String> {
         pb.finish_and_clear();
         eprintln!("Downloaded: {}", entry.filename);
 
-        let update = db::WadUpdate::new()
-            .set_text("cached_path", Some(dest.to_string_lossy().to_string()))
-            .map_err(|e| format!("Failed to update cached_path: {e}"))?;
+        let update =
+            db::WadUpdate::new().set_text("cached_path", Some(dest.to_string_lossy().to_string()));
         db::update_wad(conn, wad.id, &update)
             .map_err(|e| format!("Failed to update WAD record: {e}"))?;
     } else {
@@ -301,9 +299,8 @@ fn ensure_wad_path(conn: &Connection, wad: &WadRecord) -> Result<(), String> {
         pb.finish_and_clear();
         eprintln!("Downloaded (via mirror): {filename}");
 
-        let update = db::WadUpdate::new()
-            .set_text("cached_path", Some(dest.to_string_lossy().to_string()))
-            .map_err(|e| format!("Failed to update cached_path: {e}"))?;
+        let update =
+            db::WadUpdate::new().set_text("cached_path", Some(dest.to_string_lossy().to_string()));
         db::update_wad(conn, wad.id, &update)
             .map_err(|e| format!("Failed to update WAD record: {e}"))?;
     }

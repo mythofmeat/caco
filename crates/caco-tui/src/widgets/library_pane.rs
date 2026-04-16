@@ -259,16 +259,14 @@ impl LibraryPaneState {
         };
 
         if let Some(id) = self.table.selected_wad_id() {
-            if let Ok(update) = db::wads::WadUpdate::new()
-                .set_status(Status::parse(status).unwrap_or(Status::Unplayed))
-            {
-                let _ = wads::update_wad(conn, id, &update);
-                self.table.update_row(conn, id);
-                return Some(AppMessage::Notify(
-                    format!("Status → {}", crate::theme::status_display(status)),
-                    Severity::Info,
-                ));
-            }
+            let update = db::wads::WadUpdate::new()
+                .set_status(Status::parse(status).unwrap_or(Status::Unplayed));
+            let _ = wads::update_wad(conn, id, &update);
+            self.table.update_row(conn, id);
+            return Some(AppMessage::Notify(
+                format!("Status → {}", crate::theme::status_display(status)),
+                Severity::Info,
+            ));
         }
         None
     }
@@ -282,19 +280,17 @@ impl LibraryPaneState {
             } else {
                 Some(new_rating as i64)
             };
-            if let Ok(update) = db::wads::WadUpdate::new().set_int("rating", value) {
-                let _ = wads::update_wad(conn, wad.id, &update);
-                self.table.update_row(conn, wad.id);
-            }
+            let update = db::wads::WadUpdate::new().set_int("rating", value);
+            let _ = wads::update_wad(conn, wad.id, &update);
+            self.table.update_row(conn, wad.id);
         }
     }
 
     fn clear_rating(&mut self, conn: &Connection) {
         if let Some(wad) = self.table.selected_wad() {
-            if let Ok(update) = db::wads::WadUpdate::new().set_int("rating", None) {
-                let _ = wads::update_wad(conn, wad.id, &update);
-                self.table.update_row(conn, wad.id);
-            }
+            let update = db::wads::WadUpdate::new().set_int("rating", None);
+            let _ = wads::update_wad(conn, wad.id, &update);
+            self.table.update_row(conn, wad.id);
         }
     }
 

@@ -185,9 +185,7 @@ fn handle_ignore(conn: &Connection, query: &[String], ignore: bool) -> Result<()
     let label = if ignore { "ignored" } else { "un-ignored" };
 
     for wad in &wads {
-        let update = db::WadUpdate::new()
-            .set_int("gc_ignore", Some(flag))
-            .map_err(|e| format!("Failed to build update: {e}"))?;
+        let update = db::WadUpdate::new().set_int("gc_ignore", Some(flag));
         db::update_wad(conn, wad.id, &update).map_err(|e| format!("Failed to update WAD: {e}"))?;
         println!("GC {label}: {} (id:{})", wad.title, wad.id);
     }
@@ -454,9 +452,7 @@ fn clean_wad_data(conn: &Connection, entry: &GcEntry, opts: &GcOptions) -> Resul
 
     // Clear stats snapshot (unless keep_data)
     if !opts.keep_data && entry.wad.stats_snapshot.is_some() {
-        let update = db::WadUpdate::new()
-            .set_text("stats_snapshot", None)
-            .map_err(|e| format!("Failed to build update: {e}"))?;
+        let update = db::WadUpdate::new().set_text("stats_snapshot", None);
         db::update_wad(conn, entry.wad.id, &update)
             .map_err(|e| format!("Failed to clear stats: {e}"))?;
     }
@@ -907,7 +903,7 @@ mod tests {
     fn test_gc_candidates_excludes_gc_ignore() {
         let conn = setup();
         let wad_id = add_wad_with_status(&conn, "Ignored WAD", Status::Completed);
-        let update = db::WadUpdate::new().set_int("gc_ignore", Some(1)).unwrap();
+        let update = db::WadUpdate::new().set_int("gc_ignore", Some(1));
         db::update_wad(&conn, wad_id, &update).unwrap();
 
         add_wad_with_status(&conn, "Not Ignored", Status::Completed);

@@ -152,17 +152,13 @@ impl WadEditScreen {
         let status_str = self.get_field_value("status");
         let status = Status::parse(&status_str);
 
-        let mut update = WadUpdate::new();
-
-        // These unwrap the Result — if field name is invalid, it'd be a bug
-        update = update.set_text("title", Some(title)).unwrap();
-        update = update
+        let mut update = WadUpdate::new()
+            .set_text("title", Some(title))
             .set_text("author", opt_str(&self.get_field_value("author")))
-            .unwrap();
-        update = update.set_int("year", year).unwrap();
+            .set_int("year", year);
 
         if let Some(s) = status {
-            update = update.set_status(s).unwrap();
+            update = update.set_status(s);
         }
 
         let rating_str = self.get_field_value("rating");
@@ -171,27 +167,18 @@ impl WadEditScreen {
         } else {
             rating_str.parse().ok()
         };
-        update = update.set_int("rating", rating).unwrap();
-
         update = update
+            .set_int("rating", rating)
             .set_text("notes", opt_str(&self.get_field_value("notes")))
-            .unwrap();
-        update = update
             .set_text("description", opt_str(&self.get_field_value("description")))
-            .unwrap();
-        update = update
             .set_text("custom_iwad", opt_str(&self.get_field_value("iwad")))
-            .unwrap();
-        update = update
             .set_text(
                 "custom_sourceport",
                 opt_str(&self.get_field_value("sourceport")),
             )
-            .unwrap();
-        update = update.set_int("complevel", complevel).unwrap();
-        update = update
-            .set_text("custom_config", opt_str(&self.get_field_value("config")))
-            .unwrap();
+            .set_int("complevel", complevel)
+            .set_text("custom_config", opt_str(&self.get_field_value("config")));
+
         let args_raw = self.get_field_value("args");
         let custom_args = if args_raw.trim().is_empty() {
             None
@@ -204,10 +191,9 @@ impl WadEditScreen {
                 }
             }
         };
-        update = update.set_text("custom_args", custom_args).unwrap();
         update = update
-            .set_text("version", opt_str(&self.get_field_value("version")))
-            .unwrap();
+            .set_text("custom_args", custom_args)
+            .set_text("version", opt_str(&self.get_field_value("version")));
 
         // Apply update
         if let Err(e) = wads::update_wad(conn, self.wad_id, &update) {

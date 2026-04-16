@@ -27,6 +27,9 @@ pub enum Error {
     #[error("invalid field: {0}")]
     InvalidField(String),
 
+    #[error("invalid fields: {}", .0.join(", "))]
+    InvalidFields(Vec<String>),
+
     #[error("invalid status: {0}")]
     InvalidStatus(String),
 

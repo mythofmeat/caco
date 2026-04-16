@@ -128,19 +128,11 @@ fn pick_and_link_file(conn: &Connection, wad_id: i64) -> Option<bool> {
     let dest_str = dest.to_string_lossy().to_string();
     let update = caco_core::db::wads::WadUpdate::new()
         .set_text("cached_path", Some(dest_str))
-        .and_then(|u| u.set_text("filename", Some(filename)));
+        .set_text("filename", Some(filename));
 
-    match update {
-        Ok(u) => {
-            if let Err(e) = caco_core::db::wads::update_wad(conn, wad_id, &u) {
-                eprintln!("Failed to update WAD: {e}");
-                return Some(false);
-            }
-        }
-        Err(e) => {
-            eprintln!("Failed to build update: {e}");
-            return Some(false);
-        }
+    if let Err(e) = caco_core::db::wads::update_wad(conn, wad_id, &update) {
+        eprintln!("Failed to update WAD: {e}");
+        return Some(false);
     }
 
     Some(true)
