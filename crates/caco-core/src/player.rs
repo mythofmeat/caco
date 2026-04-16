@@ -228,11 +228,15 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
     let profile_path = config::get_profile_path(&port, profile_name);
     let config_args = sourceports::get_config_args(&port, &profile_path.to_string_lossy());
     if !config_args.is_empty() {
-        if let Some(parent) = profile_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
+        if let Some(parent) = profile_path.parent()
+            && let Err(e) = std::fs::create_dir_all(parent)
+        {
+            tracing::warn!("failed to create sourceport config dir {parent:?}: {e}");
         }
-        if !profile_path.exists() {
-            let _ = std::fs::File::create(&profile_path);
+        if !profile_path.exists()
+            && let Err(e) = std::fs::File::create(&profile_path)
+        {
+            tracing::warn!("failed to create sourceport config file {profile_path:?}: {e}");
         }
         cmd.args(&config_args);
     }
@@ -242,7 +246,9 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
     if config::get_manage_data_dirs() {
         let data_dir = config::find_wad_data_dir(wad_id)
             .unwrap_or_else(|| config::get_wad_data_dir(wad_id, &wad.title));
-        let _ = std::fs::create_dir_all(&data_dir);
+        if let Err(e) = std::fs::create_dir_all(&data_dir) {
+            tracing::warn!("failed to create WAD data dir {data_dir:?}: {e}");
+        }
         let iwad_for_data = iwad_name.as_deref();
         // For dsda-family ports, ensure the nested save directory exists
         if let (Some(iw), Some(family)) = (iwad_for_data, sourceports::identify_family(&port))
@@ -254,7 +260,9 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
                 iw,
                 &wad_path.to_string_lossy(),
             );
-            let _ = std::fs::create_dir_all(&save_dir);
+            if let Err(e) = std::fs::create_dir_all(&save_dir) {
+                tracing::warn!("failed to create dsda save dir {save_dir:?}: {e}");
+            }
         }
         let data_args = sourceports::get_data_dir_args(
             &port,
@@ -276,7 +284,9 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
                 .unwrap_or_else(|| config::get_wad_data_dir(wad_id, &wad.title))
         });
         let demos_dir = demos::get_demos_dir(&data_dir);
-        let _ = std::fs::create_dir_all(&demos_dir);
+        if let Err(e) = std::fs::create_dir_all(&demos_dir) {
+            tracing::warn!("failed to create demos dir {demos_dir:?}: {e}");
+        }
 
         let demo_name = match record {
             RecordOption::Named(name) => name.clone(),
@@ -367,15 +377,18 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
         crate::Error::FileNotFound(format!("Failed to launch sourceport '{}': {}", port, e))
     })?;
 
-    // Ensure a playthrough exists (sets status → in-progress on first play)
-    let playthrough_id = db::ensure_playthrough(conn, wad_id)?;
-
-    // Start session tracking and link to the active playthrough
-    let session_id = db::start_session(conn, wad_id, Some(&port))?;
-    let _ = conn.execute(
-        "UPDATE sessions SET playthrough_id = ?1 WHERE id = ?2",
-        rusqlite::params![playthrough_id, session_id],
-    );
+    // Ensure a playthrough exists (sets status → in-progress on first play), start
+    // a session, and link the session to the playthrough — all atomically so we
+    // never persist an unlinked session.
+    let session_id = db::with_transaction(conn, |tx| {
+        let playthrough_id = db::ensure_playthrough(tx, wad_id)?;
+        let session_id = db::start_session(tx, wad_id, Some(&port))?;
+        tx.execute(
+            "UPDATE sessions SET playthrough_id = ?1 WHERE id = ?2",
+            rusqlite::params![playthrough_id, session_id],
+        )?;
+        Ok(session_id)
+    })?;
 
     let start = Instant::now();
     let status = child.wait()?;
@@ -397,12 +410,12 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
 
     // Attach before/after snapshots
     if stats_before.is_some() || stats_after.is_some() {
-        let _ = db::update_session_stats(
+        db::update_session_stats(
             conn,
             session_id,
             stats_before.as_deref(),
             stats_after.as_deref(),
-        );
+        )?;
     }
 
     // Link recorded demo
@@ -413,7 +426,7 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
             format!("{path}.lmp")
         };
         if Path::new(&lmp_path).exists() {
-            let _ = db::update_session_demo(conn, session_id, &lmp_path);
+            db::update_session_demo(conn, session_id, &lmp_path)?;
         }
     }
 
@@ -469,11 +482,15 @@ pub fn play_iwad(
     let profile_path = config::get_profile_path(&port, profile_name);
     let config_args = sourceports::get_config_args(&port, &profile_path.to_string_lossy());
     if !config_args.is_empty() {
-        if let Some(parent) = profile_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
+        if let Some(parent) = profile_path.parent()
+            && let Err(e) = std::fs::create_dir_all(parent)
+        {
+            tracing::warn!("failed to create sourceport config dir {parent:?}: {e}");
         }
-        if !profile_path.exists() {
-            let _ = std::fs::File::create(&profile_path);
+        if !profile_path.exists()
+            && let Err(e) = std::fs::File::create(&profile_path)
+        {
+            tracing::warn!("failed to create sourceport config file {profile_path:?}: {e}");
         }
         cmd.args(&config_args);
     }
@@ -625,7 +642,9 @@ fn auto_track_stats(conn: &Connection, wad_id: i64) -> Option<String> {
     let update = db::WadUpdate::new()
         .set_text("stats_snapshot", Some(json_str.clone()))
         .ok()?;
-    let _ = db::update_wad(conn, wad_id, &update);
+    if let Err(e) = db::update_wad(conn, wad_id, &update) {
+        tracing::warn!("failed to persist stats snapshot for wad {wad_id}: {e}");
+    }
     Some(json_str)
 }
 
@@ -673,7 +692,9 @@ fn check_auto_completion(
                 Some(a) => a,
                 None => return AutoCompleteResult::Unknown,
             };
-            let _ = db::save_analysis(conn, wad_id, &analysis);
+            if let Err(e) = db::save_analysis(conn, wad_id, &analysis) {
+                tracing::warn!("failed to save wad analysis for wad {wad_id}: {e}");
+            }
             analysis
         }
         Err(_) => return AutoCompleteResult::Unknown,
@@ -694,8 +715,10 @@ fn check_auto_completion(
     match completion_detect::check_completion(&analysis, &stats) {
         CompletionVerdict::Complete => {
             // Auto-complete the active playthrough
-            if let Ok(Some(pt)) = db::get_active_playthrough(conn, wad_id) {
-                let _ = db::complete_playthrough(conn, pt.id, Some(&stats_str), None);
+            if let Ok(Some(pt)) = db::get_active_playthrough(conn, wad_id)
+                && let Err(e) = db::complete_playthrough(conn, pt.id, Some(&stats_str), None)
+            {
+                tracing::warn!("failed to auto-complete playthrough {}: {e}", pt.id);
             }
             AutoCompleteResult::Completed
         }

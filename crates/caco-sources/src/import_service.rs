@@ -152,12 +152,16 @@ impl ImportService {
             wad = wad.tags(t);
         }
 
-        match db::add_wad(conn, &wad) {
-            Ok(wad_id) => {
-                // Auto-enrich with Doom Wiki metadata
-                self.auto_enrich_doomwiki(conn, wad_id, &entry.title);
-                ImportResult::success(wad_id)
-            }
+        let result = db::with_transaction(conn, |tx| {
+            let wad_id = db::add_wad(tx, &wad)?;
+            // Auto-enrich with Doom Wiki metadata inside the same transaction
+            // so a mid-enrich failure rolls the WAD insert back.
+            self.auto_enrich_doomwiki(tx, wad_id, &entry.title);
+            Ok(wad_id)
+        });
+
+        match result {
+            Ok(wad_id) => ImportResult::success(wad_id),
             Err(e) => ImportResult::error(e.to_string()),
         }
     }
@@ -204,24 +208,23 @@ impl ImportService {
             wad = wad.tags(t);
         }
 
-        match db::add_wad(conn, &wad) {
-            Ok(wad_id) => {
-                // Auto-link to registered IWAD
-                if !entry.iwad.is_empty() {
-                    auto_link_iwad(conn, wad_id, &entry.iwad);
-                }
-                // Auto-set complevel and zdoom_required from port requirement
-                if !entry.port.is_empty() {
-                    auto_link_complevel(conn, wad_id, &entry.port);
-                    auto_link_zdoom_required(conn, wad_id, &entry.port);
-                }
-                // If the wiki page links to an idgames archive entry, look up
-                // the numeric id so the WAD is downloadable via `caco play`.
-                if !entry.link.is_empty() {
-                    auto_link_idgames_from_url(conn, wad_id, &entry.link);
-                }
-                ImportResult::success(wad_id)
+        let result = db::with_transaction(conn, |tx| {
+            let wad_id = db::add_wad(tx, &wad)?;
+            if !entry.iwad.is_empty() {
+                auto_link_iwad(tx, wad_id, &entry.iwad);
             }
+            if !entry.port.is_empty() {
+                auto_link_complevel(tx, wad_id, &entry.port);
+                auto_link_zdoom_required(tx, wad_id, &entry.port);
+            }
+            if !entry.link.is_empty() {
+                auto_link_idgames_from_url(tx, wad_id, &entry.link);
+            }
+            Ok(wad_id)
+        });
+
+        match result {
+            Ok(wad_id) => ImportResult::success(wad_id),
             Err(e) => ImportResult::error(e.to_string()),
         }
     }
@@ -298,21 +301,25 @@ impl ImportService {
             wad = wad.tags(t);
         }
 
-        match db::add_wad(conn, &wad) {
-            Ok(wad_id) => {
-                // Set complevel (override > thread-extracted)
-                let final_complevel = complevel.or(thread.complevel);
-                if let Some(cl) = final_complevel {
-                    let update = WadUpdate::new()
-                        .set_int("complevel", Some(cl as i64))
-                        .unwrap();
-                    let _ = db::update_wad(conn, wad_id, &update);
-                }
+        let result = db::with_transaction(conn, |tx| {
+            let wad_id = db::add_wad(tx, &wad)?;
 
-                // Auto-enrich with Doom Wiki metadata
-                self.auto_enrich_doomwiki(conn, wad_id, final_title);
-                ImportResult::success(wad_id)
+            // Set complevel (override > thread-extracted)
+            let final_complevel = complevel.or(thread.complevel);
+            if let Some(cl) = final_complevel {
+                let update = WadUpdate::new()
+                    .set_int("complevel", Some(cl as i64))
+                    .unwrap();
+                db::update_wad(tx, wad_id, &update)?;
             }
+
+            // Auto-enrich with Doom Wiki metadata
+            self.auto_enrich_doomwiki(tx, wad_id, final_title);
+            Ok(wad_id)
+        });
+
+        match result {
+            Ok(wad_id) => ImportResult::success(wad_id),
             Err(e) => ImportResult::error(e.to_string()),
         }
     }
@@ -353,11 +360,14 @@ impl ImportService {
             wad = wad.tags(t);
         }
 
-        match db::add_wad(conn, &wad) {
-            Ok(wad_id) => {
-                self.auto_enrich_doomwiki(conn, wad_id, title);
-                ImportResult::success(wad_id)
-            }
+        let result = db::with_transaction(conn, |tx| {
+            let wad_id = db::add_wad(tx, &wad)?;
+            self.auto_enrich_doomwiki(tx, wad_id, title);
+            Ok(wad_id)
+        });
+
+        match result {
+            Ok(wad_id) => ImportResult::success(wad_id),
             Err(e) => ImportResult::error(e.to_string()),
         }
     }
@@ -413,11 +423,14 @@ impl ImportService {
             wad = wad.tags(t);
         }
 
-        match db::add_wad(conn, &wad) {
-            Ok(wad_id) => {
-                self.auto_enrich_doomwiki(conn, wad_id, title);
-                ImportResult::success(wad_id)
-            }
+        let result = db::with_transaction(conn, |tx| {
+            let wad_id = db::add_wad(tx, &wad)?;
+            self.auto_enrich_doomwiki(tx, wad_id, title);
+            Ok(wad_id)
+        });
+
+        match result {
+            Ok(wad_id) => ImportResult::success(wad_id),
             Err(e) => ImportResult::error(e.to_string()),
         }
     }

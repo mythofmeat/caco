@@ -25,7 +25,7 @@ pub use companions::{
 };
 pub use connection::{
     SQLITE_MAX_VARS, attach_tags, batch_query_i64, batch_query_string, fetch_tags,
-    fetch_tags_batch, open_connection, open_memory,
+    fetch_tags_batch, open_connection, open_memory, with_transaction,
 };
 pub use id24::{
     Id24Record, KNOWN_ID24_FILENAMES, KNOWN_ID24_WADS, add_id24, get_all_id24, get_id24,

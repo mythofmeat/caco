@@ -16,6 +16,7 @@ md-5.workspace = true
 byteorder.workspace = true
 image.workspace = true
 zip.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
