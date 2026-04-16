@@ -7,7 +7,9 @@ use super::models::WikiEntry;
 /// Parser for extracting structured data from Doom Wiki wikitext.
 pub struct WikitextParser {
     /// Pattern to match `{{ig|file=...}}` idgames template.
-    idgames_re: Regex,
+    idgames_file_re: Regex,
+    /// Pattern to match `{{ig|id=N}}` idgames template.
+    idgames_id_re: Regex,
     /// Pattern to match `[[link|text]]` or `[[text]]`.
     link_re: Regex,
     /// Pattern to match `{{template}}` (non-nested only).
@@ -23,7 +25,8 @@ pub struct WikitextParser {
 impl WikitextParser {
     pub fn new() -> Self {
         Self {
-            idgames_re: Regex::new(r"(?i)\{\{ig\s*\|\s*file\s*=\s*([^}|]+)").unwrap(),
+            idgames_file_re: Regex::new(r"(?i)\{\{ig\s*\|\s*file\s*=\s*([^}|]+)").unwrap(),
+            idgames_id_re: Regex::new(r"(?i)\{\{ig\s*\|\s*id\s*=\s*(\d+)").unwrap(),
             link_re: Regex::new(r"\[\[(?:[^|\]]*\|)?([^\]]+)\]\]").unwrap(),
             template_re: Regex::new(r"\{\{[^{}]*\}\}").unwrap(),
             html_tag_re: Regex::new(r"<[^>]+>").unwrap(),
@@ -226,10 +229,16 @@ impl WikitextParser {
             return String::new();
         }
 
-        // Check for {{ig|file=...}} template
-        if let Some(caps) = self.idgames_re.captures(link) {
+        // Check for {{ig|file=...}} template (path-style mirror URL).
+        if let Some(caps) = self.idgames_file_re.captures(link) {
             let path = caps[1].trim();
             return format!("https://www.doomworld.com/idgames/{path}");
+        }
+
+        // Check for {{ig|id=N}} template (numeric idgames id).
+        if let Some(caps) = self.idgames_id_re.captures(link) {
+            let id = caps[1].trim();
+            return format!("https://www.doomworld.com/idgames/?id={id}");
         }
 
         // Check for direct URL
@@ -432,6 +441,13 @@ mod tests {
             result,
             "https://www.doomworld.com/idgames/levels/doom2/megawads/scythe.zip"
         );
+    }
+
+    #[test]
+    fn test_parse_link_idgames_id_template() {
+        let p = parser();
+        let result = p.parse_link("{{ig|id=19805}}");
+        assert_eq!(result, "https://www.doomworld.com/idgames/?id=19805");
     }
 
     #[test]

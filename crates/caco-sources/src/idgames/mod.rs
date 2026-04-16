@@ -26,6 +26,34 @@ pub fn extract_idgames_id_from_url(url: &str) -> Option<i64> {
     None
 }
 
+/// Extract the idgames archive file path from a path-style mirror URL.
+///
+/// The Doom Wiki's `{{ig|file=...}}` template is rendered by our parser as
+/// `https://www.doomworld.com/idgames/<path>` — these URLs don't have a
+/// numeric `?id=N`, but the path can be passed to the idgames API as the
+/// `file` parameter to look up the entry.
+///
+/// Accepts forms such as:
+/// - `https://www.doomworld.com/idgames/levels/doom2/megawads/scythe.zip`
+/// - `https://www.doomworld.com/idgames/levels/doom2/megawads/scythe`
+///
+/// Returns `None` for URLs that already carry a query string (those should
+/// use [`extract_idgames_id_from_url`] instead) or that don't sit under the
+/// `/idgames/` archive prefix.
+pub fn extract_idgames_file_path_from_url(url: &str) -> Option<String> {
+    if !url.contains("doomworld.com/idgames") {
+        return None;
+    }
+    if url.contains('?') {
+        return None;
+    }
+    let after = url.split("/idgames/").nth(1)?.trim_matches('/');
+    if after.is_empty() {
+        return None;
+    }
+    Some(after.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -96,6 +124,62 @@ mod tests {
     fn returns_none_for_non_numeric_id() {
         assert_eq!(
             extract_idgames_id_from_url("https://www.doomworld.com/idgames/?id=abc"),
+            None,
+        );
+    }
+
+    #[test]
+    fn extracts_file_path_from_zip_url() {
+        assert_eq!(
+            extract_idgames_file_path_from_url(
+                "https://www.doomworld.com/idgames/levels/doom2/megawads/scythe.zip"
+            ),
+            Some("levels/doom2/megawads/scythe.zip".to_string()),
+        );
+    }
+
+    #[test]
+    fn extracts_file_path_from_slug_url() {
+        assert_eq!(
+            extract_idgames_file_path_from_url(
+                "https://www.doomworld.com/idgames/levels/doom2/Ports/megawads/sunlust"
+            ),
+            Some("levels/doom2/Ports/megawads/sunlust".to_string()),
+        );
+    }
+
+    #[test]
+    fn extracts_file_path_without_www() {
+        assert_eq!(
+            extract_idgames_file_path_from_url(
+                "https://doomworld.com/idgames/levels/doom2/megawads/scythe.zip"
+            ),
+            Some("levels/doom2/megawads/scythe.zip".to_string()),
+        );
+    }
+
+    #[test]
+    fn file_path_returns_none_for_query_url() {
+        assert_eq!(
+            extract_idgames_file_path_from_url(
+                "https://www.doomworld.com/idgames/?id=18184"
+            ),
+            None,
+        );
+    }
+
+    #[test]
+    fn file_path_returns_none_for_non_idgames_url() {
+        assert_eq!(
+            extract_idgames_file_path_from_url("https://example.com/idgames/foo.zip"),
+            None,
+        );
+    }
+
+    #[test]
+    fn file_path_returns_none_for_archive_root() {
+        assert_eq!(
+            extract_idgames_file_path_from_url("https://www.doomworld.com/idgames/"),
             None,
         );
     }

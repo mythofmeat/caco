@@ -10,7 +10,10 @@ static PUNCTUATION_RE: LazyLock<Regex> =
 
 use crate::doomwiki::DoomwikiClient;
 use crate::doomworld::ForumThread;
-use crate::idgames::FileEntry;
+use crate::idgames::{
+    FileEntry, IdgamesClient, extract_idgames_file_path_from_url,
+    extract_idgames_id_from_url,
+};
 
 use caco_core::db::{
     self, NewWad, SourceType, WadUpdate,
@@ -214,6 +217,11 @@ impl ImportService {
                 if !entry.port.is_empty() {
                     auto_link_complevel(conn, wad_id, &entry.port);
                     auto_link_zdoom_required(conn, wad_id, &entry.port);
+                }
+                // If the wiki page links to an idgames archive entry, look up
+                // the numeric id so the WAD is downloadable via `caco play`.
+                if !entry.link.is_empty() {
+                    auto_link_idgames_from_url(conn, wad_id, &entry.link);
                 }
                 ImportResult::success(wad_id)
             }
@@ -566,6 +574,72 @@ fn auto_link_complevel(conn: &Connection, wad_id: i64, port_text: &str) {
     }
 }
 
+/// Apply a resolved idgames id (and optional filename) to a WAD record.
+///
+/// Skips the update when the WAD already carries an `idgames_id`. Backfills
+/// the `filename` column only when it's currently empty.
+fn apply_idgames_link(
+    conn: &Connection,
+    wad_id: i64,
+    idgames_id: i64,
+    filename: Option<&str>,
+) {
+    let Ok(Some(wad)) = db::get_wad(conn, wad_id, false) else {
+        return;
+    };
+    if wad.idgames_id.is_some() {
+        return;
+    }
+
+    let mut update = match WadUpdate::new()
+        .set_text("idgames_id", Some(idgames_id.to_string()))
+    {
+        Ok(u) => u,
+        Err(_) => return,
+    };
+
+    if let Some(name) = filename
+        && !name.is_empty()
+        && wad.filename.is_none()
+    {
+        update = match update.set_text("filename", Some(name.to_string())) {
+            Ok(u) => u,
+            Err(_) => return,
+        };
+    }
+
+    let _ = db::update_wad(conn, wad_id, &update);
+}
+
+/// Resolve an idgames link parsed off a Doom Wiki page and stamp it onto a WAD.
+///
+/// Two URL shapes are accepted: query-string ids (`/idgames/?id=N`) yield the
+/// id directly without a network round-trip; path-style URLs (`/idgames/<path>`,
+/// produced by the wiki's `{{ig|file=...}}` template) trigger an idgames API
+/// lookup so the resolved id and filename can be persisted. Network and
+/// parser errors are silently swallowed so a flaky idgames API never blocks
+/// the wiki import.
+fn auto_link_idgames_from_url(conn: &Connection, wad_id: i64, link: &str) {
+    if let Some(id) = extract_idgames_id_from_url(link) {
+        apply_idgames_link(conn, wad_id, id, None);
+        return;
+    }
+
+    let Some(file_path) = extract_idgames_file_path_from_url(link) else {
+        return;
+    };
+
+    let client = IdgamesClient::new();
+    if let Ok(entry) = client.get(None, Some(&file_path)) {
+        let filename = if entry.filename.is_empty() {
+            None
+        } else {
+            Some(entry.filename.as_str())
+        };
+        apply_idgames_link(conn, wad_id, entry.id, filename);
+    }
+}
+
 /// Auto-set custom_iwad on a WAD if the IWAD name is registered.
 fn auto_link_iwad(conn: &Connection, wad_id: i64, iwad_text: &str) {
     let short_name = match db::normalize_iwad_name(iwad_text) {
@@ -860,6 +934,84 @@ mod tests {
 
         let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
         assert_eq!(wad.complevel, Some(2)); // unchanged
+    }
+
+    #[test]
+    fn test_apply_idgames_link_sets_id_and_filename() {
+        let conn = setup();
+        let new = NewWad::new("Test", SourceType::Doomwiki);
+        let wad_id = db::add_wad(&conn, &new).unwrap();
+
+        apply_idgames_link(&conn, wad_id, 18184, Some("scythe.zip"));
+
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        assert_eq!(wad.idgames_id.as_deref(), Some("18184"));
+        assert_eq!(wad.filename.as_deref(), Some("scythe.zip"));
+    }
+
+    #[test]
+    fn test_apply_idgames_link_does_not_overwrite_id() {
+        let conn = setup();
+        let new = NewWad::new("Test", SourceType::Doomwiki);
+        let wad_id = db::add_wad(&conn, &new).unwrap();
+
+        // Pre-populate idgames_id
+        let update = WadUpdate::new()
+            .set_text("idgames_id", Some("99999".to_string()))
+            .unwrap();
+        db::update_wad(&conn, wad_id, &update).unwrap();
+
+        apply_idgames_link(&conn, wad_id, 18184, Some("other.zip"));
+
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        assert_eq!(wad.idgames_id.as_deref(), Some("99999")); // unchanged
+        assert!(wad.filename.is_none()); // also untouched
+    }
+
+    #[test]
+    fn test_apply_idgames_link_preserves_existing_filename() {
+        let conn = setup();
+        let new = NewWad::new("Test", SourceType::Doomwiki).filename("manual.wad");
+        let wad_id = db::add_wad(&conn, &new).unwrap();
+
+        apply_idgames_link(&conn, wad_id, 18184, Some("scythe.zip"));
+
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        assert_eq!(wad.idgames_id.as_deref(), Some("18184"));
+        assert_eq!(wad.filename.as_deref(), Some("manual.wad")); // preserved
+    }
+
+    #[test]
+    fn test_auto_link_idgames_from_query_url() {
+        // `?id=N` URLs are resolved without touching the network.
+        let conn = setup();
+        let new = NewWad::new("Test", SourceType::Doomwiki);
+        let wad_id = db::add_wad(&conn, &new).unwrap();
+
+        auto_link_idgames_from_url(
+            &conn,
+            wad_id,
+            "https://www.doomworld.com/idgames/?id=18184",
+        );
+
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        assert_eq!(wad.idgames_id.as_deref(), Some("18184"));
+    }
+
+    #[test]
+    fn test_auto_link_idgames_ignores_non_idgames_url() {
+        let conn = setup();
+        let new = NewWad::new("Test", SourceType::Doomwiki);
+        let wad_id = db::add_wad(&conn, &new).unwrap();
+
+        auto_link_idgames_from_url(
+            &conn,
+            wad_id,
+            "https://example.com/downloads/scythe.zip",
+        );
+
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        assert!(wad.idgames_id.is_none());
     }
 
     #[test]
