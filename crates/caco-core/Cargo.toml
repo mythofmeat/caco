@@ -11,6 +11,7 @@ toml.workspace = true
 rusqlite.workspace = true
 chrono.workspace = true
 dirs.workspace = true
+arc-swap.workspace = true
 regex.workspace = true
 md-5.workspace = true
 byteorder.workspace = true

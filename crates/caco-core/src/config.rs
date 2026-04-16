@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
+use arc_swap::ArcSwap;
 use serde::{Deserialize, Serialize};
 
 use crate::utils::sanitize_dirname;
@@ -258,37 +259,61 @@ impl LlmConfig {
 // Loading / saving
 // ---------------------------------------------------------------------------
 
-static CONFIG: OnceLock<Config> = OnceLock::new();
+static CONFIG: OnceLock<ArcSwap<Config>> = OnceLock::new();
 
-/// Load configuration from disk. Returns the cached config on subsequent calls.
+/// Read and parse the config file, falling back to defaults if missing or invalid.
 ///
-/// Falls back to defaults if the config file is missing or invalid.
-/// Also ensures the config file on disk has all known keys (auto-update).
-pub fn load_config() -> &'static Config {
-    CONFIG.get_or_init(|| {
-        let path = config_file();
-        if !path.exists() {
-            return Config::default();
-        }
-        match fs::read_to_string(&path) {
-            Ok(contents) => match toml::from_str::<Config>(&contents) {
-                Ok(cfg) => {
-                    ensure_config_keys(&path, &contents);
-                    cfg
-                }
-                Err(e) => {
-                    eprintln!("Warning: Invalid TOML syntax in {}: {e}", path.display());
-                    eprintln!("Warning: Using default configuration.");
-                    Config::default()
-                }
-            },
+/// Does NOT touch the in-memory cache — use [`load_config`] or [`reload_config`]
+/// for that.
+fn read_config_from_disk() -> Config {
+    let path = config_file();
+    if !path.exists() {
+        return Config::default();
+    }
+    match fs::read_to_string(&path) {
+        Ok(contents) => match toml::from_str::<Config>(&contents) {
+            Ok(cfg) => {
+                ensure_config_keys(&path, &contents);
+                cfg
+            }
             Err(e) => {
-                eprintln!("Warning: Failed to load config: {e}");
+                eprintln!("Warning: Invalid TOML syntax in {}: {e}", path.display());
                 eprintln!("Warning: Using default configuration.");
                 Config::default()
             }
+        },
+        Err(e) => {
+            eprintln!("Warning: Failed to load config: {e}");
+            eprintln!("Warning: Using default configuration.");
+            Config::default()
         }
-    })
+    }
+}
+
+fn config_cell() -> &'static ArcSwap<Config> {
+    CONFIG.get_or_init(|| ArcSwap::from_pointee(read_config_from_disk()))
+}
+
+/// Load the current configuration snapshot.
+///
+/// Returns an [`Arc<Config>`] — a lock-free atomic snapshot that may become
+/// stale if [`reload_config`] is called after this returns. Callers that want
+/// a consistent view within a single operation should bind the returned Arc
+/// to a local (rather than re-invoking [`load_config`] repeatedly).
+///
+/// Falls back to defaults if the config file is missing or invalid on first
+/// load. Also ensures the config file on disk has all known keys.
+pub fn load_config() -> Arc<Config> {
+    config_cell().load_full()
+}
+
+/// Re-read the config file from disk and install it as the new snapshot.
+///
+/// Subsequent calls to [`load_config`] return the new values. Existing
+/// [`Arc<Config>`] handles remain valid but point at the previous snapshot
+/// until they are dropped or replaced.
+pub fn reload_config() {
+    config_cell().store(Arc::new(read_config_from_disk()));
 }
 
 /// Ensure the config file on disk has all known keys.
@@ -1073,6 +1098,38 @@ window_width = 1600
         assert_eq!(cfg.cache_max_size_gb, 0.0);
         assert_eq!(cfg.cache_max_age_days, 0);
         assert!(!cfg.cache_auto_clean);
+    }
+
+    #[test]
+    fn test_read_config_from_disk_reflects_file_changes() {
+        // Verifies the reload primitive: writing a new config file and
+        // re-parsing it returns the updated values. Uses `read_config_from_disk`
+        // directly so it doesn't conflict with the process-global CONFIG cell.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+
+        // SAFETY: test-only env mutation; cargo test runs a fresh process.
+        unsafe {
+            std::env::set_var("CACO_CONFIG", &path);
+        }
+
+        fs::write(&path, r#"sourceport = "dsda-doom""#).unwrap();
+        let first = read_config_from_disk();
+        assert_eq!(first.sourceport, "dsda-doom");
+
+        // Swap the snapshot into an ArcSwap — the mechanism reload_config uses.
+        let cell = arc_swap::ArcSwap::from_pointee(first);
+        assert_eq!(cell.load().sourceport, "dsda-doom");
+
+        // Change the file and re-read.
+        fs::write(&path, r#"sourceport = "woof""#).unwrap();
+        cell.store(Arc::new(read_config_from_disk()));
+        assert_eq!(cell.load().sourceport, "woof");
+
+        // SAFETY: clean up env var so we don't leak into other tests.
+        unsafe {
+            std::env::remove_var("CACO_CONFIG");
+        }
     }
 
     #[test]

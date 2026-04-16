@@ -442,6 +442,14 @@ impl eframe::App for CacoApp {
                 let id = egui::Id::new(panels::filter_bar::FILTER_ID_SOURCE);
                 ctx.memory_mut(|m| m.request_focus(id));
             }
+            // Ctrl+R — reload config from disk. Already-cached state (e.g. window
+            // size chosen at startup) does not refresh; subsequent reads pick up
+            // new values.
+            if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::R)) {
+                caco_core::config::reload_config();
+                self.state.notification =
+                    Some(Notification::info("Config reloaded from disk".to_string()));
+            }
         }
         if quit {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);

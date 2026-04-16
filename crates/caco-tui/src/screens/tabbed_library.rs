@@ -125,6 +125,16 @@ impl Screen for TabbedLibraryScreen {
                     }
                 }
             }
+            // Reload config from disk (subsequent `load_config()` calls see new values).
+            // Already-cached in-memory state (e.g. default sort chosen at startup) is
+            // not re-applied — user-visible refresh depends on downstream reads.
+            (KeyCode::Char('r'), KeyModifiers::CONTROL) => {
+                config::reload_config();
+                return Some(AppMessage::Notify(
+                    "Config reloaded from disk".to_string(),
+                    crate::message::Severity::Info,
+                ));
+            }
             // Tab switching
             (KeyCode::Tab, KeyModifiers::NONE) => {
                 let old_tab = self.active_tab;

@@ -46,7 +46,11 @@ pub(super) fn render_help_dialog(ctx: &egui::Context) -> bool {
                     shortcut_section(
                         ui,
                         "Global",
-                        &[("Ctrl+Q", "Quit"), ("F5", "Refresh library")],
+                        &[
+                            ("Ctrl+Q", "Quit"),
+                            ("F5", "Refresh library"),
+                            ("Ctrl+R", "Reload config from disk"),
+                        ],
                     );
                 });
             ui.add_space(8.0);
