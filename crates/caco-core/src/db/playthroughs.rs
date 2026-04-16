@@ -251,7 +251,7 @@ mod tests {
 
         // WAD should now be in-progress
         let wad = get_wad(&conn, wad_id, false).unwrap().unwrap();
-        assert_eq!(wad.status, "in-progress");
+        assert_eq!(wad.status, Status::InProgress);
     }
 
     #[test]
@@ -271,7 +271,7 @@ mod tests {
 
         // WAD should be completed
         let wad = get_wad(&conn, wad_id, false).unwrap().unwrap();
-        assert_eq!(wad.status, "completed");
+        assert_eq!(wad.status, Status::Completed);
 
         // Should also have created a backward-compat wad_completions record
         let comp_count: i64 = conn

@@ -72,10 +72,10 @@ pub fn render_wad_info(
     }
 
     // Status
-    let status_display = theme::status_display(&wad.status);
+    let status_display = theme::status_display(wad.status);
     lines.push(Line::from(Span::styled(
         status_display,
-        theme::status_style(&wad.status).add_modifier(Modifier::BOLD),
+        theme::status_style(wad.status).add_modifier(Modifier::BOLD),
     )));
 
     lines.push(Line::from(""));

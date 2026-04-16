@@ -183,7 +183,10 @@ fn list_orphans(conn: &Connection, plain: bool) -> Result<(), String> {
 fn clear_all(conn: &Connection, dry_run: bool, yes: bool) -> Result<(), String> {
     let wads = db::get_cached_wads(conn).map_err(|e| e.to_string())?;
     // Only clear idgames-sourced WADs (always re-downloadable)
-    let clearable: Vec<_> = wads.iter().filter(|w| w.source_type == "idgames").collect();
+    let clearable: Vec<_> = wads
+        .iter()
+        .filter(|w| w.source_type == db::SourceType::Idgames)
+        .collect();
 
     if clearable.is_empty() {
         println!("No clearable cached files (only idgames sources can be cleared).");

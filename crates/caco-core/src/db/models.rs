@@ -192,11 +192,11 @@ pub struct WadRecord {
     pub author: Option<String>,
     pub year: Option<i32>,
     pub description: Option<String>,
-    pub status: String,
-    pub availability: String,
+    pub status: Status,
+    pub availability: Availability,
     pub rating: Option<i32>,
     pub notes: Option<String>,
-    pub source_type: String,
+    pub source_type: SourceType,
     pub source_id: Option<String>,
     pub source_url: Option<String>,
     pub idgames_id: Option<String>,
@@ -224,19 +224,29 @@ impl WadRecord {
     /// Expects all wad columns to be present (SELECT *). Tags must be
     /// attached separately via `attach_tags`.
     pub fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
+        let status_raw: String = row.get("status")?;
+        let status = status_raw.parse().unwrap_or(Status::Unplayed);
+
+        let availability_raw: Option<String> = row.get("availability")?;
+        let availability = availability_raw
+            .as_deref()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(Availability::Unavailable);
+
+        let source_type_raw: String = row.get("source_type")?;
+        let source_type = source_type_raw.parse().unwrap_or(SourceType::Local);
+
         Ok(WadRecord {
             id: row.get("id")?,
             title: row.get("title")?,
             author: row.get("author")?,
             year: row.get("year")?,
             description: row.get("description")?,
-            status: row.get("status")?,
-            availability: row
-                .get::<_, Option<String>>("availability")?
-                .unwrap_or_else(|| "unavailable".to_string()),
+            status,
+            availability,
             rating: row.get("rating")?,
             notes: row.get("notes")?,
-            source_type: row.get("source_type")?,
+            source_type,
             source_id: row.get("source_id")?,
             source_url: row.get("source_url")?,
             idgames_id: row.get("idgames_id")?,
@@ -257,21 +267,6 @@ impl WadRecord {
             updated_at: row.get("updated_at")?,
             tags: Vec::new(),
         })
-    }
-
-    /// Get the parsed status enum.
-    pub fn status_enum(&self) -> Option<Status> {
-        self.status.parse().ok()
-    }
-
-    /// Get the parsed availability enum.
-    pub fn availability_enum(&self) -> Option<Availability> {
-        self.availability.parse().ok()
-    }
-
-    /// Get the parsed source type enum.
-    pub fn source_type_enum(&self) -> Option<SourceType> {
-        self.source_type.parse().ok()
     }
 }
 

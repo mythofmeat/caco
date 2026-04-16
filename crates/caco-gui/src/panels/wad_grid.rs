@@ -119,7 +119,7 @@ pub fn render(
                     }
 
                     // Context menu on right-click
-                    if let Some(a) = super::wad_context_menu(&response, wad_id, &wad.status) {
+                    if let Some(a) = super::wad_context_menu(&response, wad_id, wad.status) {
                         action = Some(a);
                     }
 
@@ -288,9 +288,9 @@ pub fn render(
                     let footer_y = body_top + text_height * 2.0 + 10.0;
 
                     // Status badge (unified)
-                    let status_label = theme::status_display(&wad.status);
-                    let status_color = theme::status_color(&wad.status);
-                    let status_bg = theme::status_bg(&wad.status);
+                    let status_label = theme::status_display(wad.status);
+                    let status_color = theme::status_color(wad.status);
+                    let status_bg = theme::status_bg(wad.status);
 
                     // Measure status text
                     let status_galley = painter.layout_no_wrap(
@@ -338,7 +338,7 @@ pub fn render(
                     }
 
                     // Progress bar for in-progress WADs with stats
-                    if wad.status == "in-progress"
+                    if wad.status == caco_core::db::Status::InProgress
                         && let Some(ref snapshot_json) = wad.stats_snapshot
                         && let Ok(wad_stats) = serde_json::from_str::<StatsData>(snapshot_json)
                         && !wad_stats.maps.is_empty()

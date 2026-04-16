@@ -84,10 +84,10 @@ impl WadDetailScreen {
             ]));
         }
 
-        let status_display = theme::status_display(&wad.status);
+        let status_display = theme::status_display(wad.status);
         lines.push(Line::from(vec![
             Span::styled("Status: ", theme::dim_style()),
-            Span::styled(status_display, theme::status_style(&wad.status)),
+            Span::styled(status_display, theme::status_style(wad.status)),
         ]));
 
         let stars = theme::rating_stars(wad.rating);

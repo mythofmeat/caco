@@ -199,7 +199,7 @@ fn ensure_wad_path(conn: &Connection, wad: &WadRecord) -> Result<(), String> {
     // Import stores the numeric ID in source_id; idgames_id is a later-added alias.
     // Fall back to source_id when source_type is "idgames" and idgames_id is unset.
     let idgames_id_str = wad.idgames_id.as_deref().or_else(|| {
-        if wad.source_type == "idgames" {
+        if wad.source_type == db::SourceType::Idgames {
             wad.source_id.as_deref()
         } else {
             None

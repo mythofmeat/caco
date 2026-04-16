@@ -1,4 +1,3 @@
-use crate::theme::STATUSES;
 use caco_core::companion_service;
 use caco_core::complevel::parse_complevel;
 use caco_core::db::companions;
@@ -132,7 +131,7 @@ impl EditDialogState {
             title_field: wad.title.clone(),
             author: wad.author.as_deref().unwrap_or("").to_string(),
             year: wad.year.map(|y| y.to_string()).unwrap_or_default(),
-            status: wad.status.clone(),
+            status: wad.status.as_str().to_string(),
             rating: wad.rating.map(|r| r.to_string()).unwrap_or_default(),
             tags: wad.tags.join(", "),
             notes: wad.notes.as_deref().unwrap_or("").to_string(),
@@ -146,7 +145,7 @@ impl EditDialogState {
             args: wad.custom_args.as_deref().unwrap_or("").to_string(),
             version: wad.version.as_deref().unwrap_or("").to_string(),
 
-            source_type_display: wad.source_type.clone(),
+            source_type_display: wad.source_type.as_str().to_string(),
             source_url: wad.source_url.as_deref().unwrap_or("").to_string(),
             idgames_id: wad.idgames_id.as_deref().unwrap_or("").to_string(),
 
@@ -438,10 +437,10 @@ impl EditDialogState {
         form_label(ui, "Status");
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
-            for &status in STATUSES {
+            for &status in Status::ALL {
                 let color = theme::status_color(status);
                 let bg = theme::status_bg(status);
-                let is_selected = self.status == status;
+                let is_selected = self.status == status.as_str();
 
                 let stroke = if is_selected {
                     egui::Stroke::new(1.5, color)
@@ -465,7 +464,7 @@ impl EditDialogState {
                     .response;
 
                 if response.interact(egui::Sense::click()).clicked() {
-                    self.status = status.to_string();
+                    self.status = status.as_str().to_string();
                 }
             }
         });

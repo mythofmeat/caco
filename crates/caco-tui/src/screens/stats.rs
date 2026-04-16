@@ -80,14 +80,17 @@ impl Screen for StatsScreen {
         // By Status
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled("── By Status ──", section_style)));
-        let status_order = ["unplayed", "in-progress", "completed", "abandoned"];
-        for status in &status_order {
-            let count = snap.wads_by_status.get(*status).copied().unwrap_or(0);
+        for status in caco_core::db::models::Status::ALL {
+            let count = snap
+                .wads_by_status
+                .get(status.as_str())
+                .copied()
+                .unwrap_or(0);
             if count > 0 {
                 lines.push(Line::from(vec![
                     Span::styled(
-                        format!("{}: ", theme::status_display(status)),
-                        theme::status_style(status),
+                        format!("{}: ", theme::status_display(*status)),
+                        theme::status_style(*status),
                     ),
                     Span::raw(count.to_string()),
                 ]));

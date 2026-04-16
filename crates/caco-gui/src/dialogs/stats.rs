@@ -1,3 +1,4 @@
+use caco_core::db::Status;
 use caco_core::db::sessions::StatsSnapshot;
 use rusqlite::Connection;
 
@@ -72,12 +73,11 @@ impl StatsDialogState {
 
                     // By Status section
                     section_header(ui, "By Status");
-                    for &status in theme::STATUSES {
+                    for &status in Status::ALL {
                         let count = snap
                             .wads_by_status
-                            .iter()
-                            .find(|(s, _)| s.as_str() == status)
-                            .map(|(_, c)| *c)
+                            .get(status.as_str())
+                            .copied()
                             .unwrap_or(0);
                         if count > 0 {
                             ui.horizontal(|ui| {

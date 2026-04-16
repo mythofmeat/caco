@@ -250,17 +250,16 @@ impl LibraryPaneState {
         self.status_mode = false;
 
         let status = match key.code {
-            KeyCode::Char('u') => "unplayed",
-            KeyCode::Char('p') => "in-progress",
-            KeyCode::Char('c') => "completed",
-            KeyCode::Char('a') => "abandoned",
+            KeyCode::Char('u') => Status::Unplayed,
+            KeyCode::Char('p') => Status::InProgress,
+            KeyCode::Char('c') => Status::Completed,
+            KeyCode::Char('a') => Status::Abandoned,
             KeyCode::Esc => return None,
             _ => return None,
         };
 
         if let Some(id) = self.table.selected_wad_id() {
-            let update = db::wads::WadUpdate::new()
-                .set_status(Status::parse(status).unwrap_or(Status::Unplayed));
+            let update = db::wads::WadUpdate::new().set_status(status);
             let _ = wads::update_wad(conn, id, &update);
             self.table.update_row(conn, id);
             return Some(AppMessage::Notify(

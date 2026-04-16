@@ -71,7 +71,7 @@ impl WadEditScreen {
             EditField {
                 name: "status",
                 label: "Status (←/→ cycle)",
-                input: TextInput::with_value(&wad.status),
+                input: TextInput::with_value(wad.status.as_str()),
                 kind: FieldKind::StatusCycle,
             },
             EditField {
@@ -324,7 +324,9 @@ impl Screen for WadEditScreen {
             let value_area = Rect::new(layout[0].x + 2, y, layout[0].width.saturating_sub(2), 1);
             match field.kind {
                 FieldKind::StatusCycle => {
-                    let status = field.input.value();
+                    let status_str = field.input.value();
+                    let status = caco_core::db::Status::parse(status_str)
+                        .unwrap_or(caco_core::db::Status::Unplayed);
                     let display = theme::status_display(status);
                     let style = theme::status_style(status).add_modifier(Modifier::BOLD);
                     let line = if is_active {

@@ -2,27 +2,24 @@ use ratatui::style::{Color, Modifier, Style};
 
 use caco_core::db::models::Status;
 
-/// Map a status string to its ratatui Color (from STATUS_METADATA hex values).
-pub fn status_color(status: &str) -> Color {
+/// Map a status to its ratatui Color (from STATUS_METADATA hex values).
+pub fn status_color(status: Status) -> Color {
     match status {
-        "unplayed" => Color::Rgb(0x33, 0x66, 0xcc),
-        "in-progress" => Color::Rgb(0x33, 0xcc, 0x33),
-        "completed" => Color::Rgb(0x80, 0x80, 0x80),
-        "abandoned" => Color::Rgb(0xcc, 0x33, 0x33),
-        _ => Color::Reset,
+        Status::Unplayed => Color::Rgb(0x33, 0x66, 0xcc),
+        Status::InProgress => Color::Rgb(0x33, 0xcc, 0x33),
+        Status::Completed => Color::Rgb(0x80, 0x80, 0x80),
+        Status::Abandoned => Color::Rgb(0xcc, 0x33, 0x33),
     }
 }
 
 /// Return a Style with the status foreground color.
-pub fn status_style(status: &str) -> Style {
+pub fn status_style(status: Status) -> Style {
     Style::default().fg(status_color(status))
 }
 
-/// Human-readable display name for a status string.
-pub fn status_display(status: &str) -> &'static str {
-    Status::parse(status)
-        .map(|s| s.display_name())
-        .unwrap_or("Unknown")
+/// Human-readable display name for a status.
+pub fn status_display(status: Status) -> &'static str {
+    status.display_name()
 }
 
 /// Style for the selected/highlighted row.

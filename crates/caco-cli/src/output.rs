@@ -80,9 +80,7 @@ fn render_wad_list_table(wads: &[WadRecord], stats: &HashMap<i64, WadStats>) {
             .map(format_timestamp)
             .unwrap_or_default();
 
-        let status_display = Status::parse(&wad.status)
-            .map(|s| s.display_name().to_string())
-            .unwrap_or_else(|| wad.status.clone());
+        let status_display = wad.status.display_name();
 
         let author = truncate_str(wad.author.as_deref().unwrap_or(""), 30);
 
@@ -90,7 +88,7 @@ fn render_wad_list_table(wads: &[WadRecord], stats: &HashMap<i64, WadStats>) {
             Cell::new(wad.id).set_alignment(CellAlignment::Right),
             Cell::new(&wad.title),
             Cell::new(&author),
-            Cell::new(&status_display),
+            Cell::new(status_display),
             Cell::new(beaten).set_alignment(CellAlignment::Right),
             Cell::new(if playtime > 0 {
                 format_duration(playtime)
@@ -201,10 +199,7 @@ fn render_wad_info_table(
         println!("  Year:        {year}");
     }
 
-    let status_display = Status::parse(&wad.status)
-        .map(|s| s.display_name().to_string())
-        .unwrap_or_else(|| wad.status.clone());
-    println!("  Status:      {status_display}");
+    println!("  Status:      {}", wad.status.display_name());
 
     if let Some(version) = &wad.version {
         println!("  Version:     {version}");

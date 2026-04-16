@@ -263,7 +263,7 @@ fn import_idgames_search(
                 } else {
                     Some(entry.description.clone())
                 },
-                "idgames",
+                db::SourceType::Idgames,
                 Some(entry.id.to_string()),
                 None,
                 Some(entry.filename.clone()),
@@ -364,7 +364,7 @@ fn import_doomwiki_search(
                 } else {
                     Some(entry.description.clone())
                 },
-                "doomwiki",
+                db::SourceType::Doomwiki,
                 Some(entry.page_id.to_string()),
                 Some(entry.wiki_url.clone()),
                 None,
@@ -659,7 +659,7 @@ fn import_json_idgames(
                 } else {
                     Some(entry.description.clone())
                 },
-                "idgames",
+                db::SourceType::Idgames,
                 Some(entry.id.to_string()),
                 None,
                 Some(entry.filename.clone()),
@@ -721,7 +721,7 @@ fn import_json_doomwiki(
                 } else {
                     Some(entry.description.clone())
                 },
-                "doomwiki",
+                db::SourceType::Doomwiki,
                 Some(entry.page_id.to_string()),
                 Some(entry.wiki_url.clone()),
                 None,
@@ -862,7 +862,7 @@ fn picker_wad_record(
     author: Option<String>,
     year: Option<i32>,
     description: Option<String>,
-    source_type: &str,
+    source_type: db::SourceType,
     source_id: Option<String>,
     source_url: Option<String>,
     filename: Option<String>,
@@ -872,10 +872,10 @@ fn picker_wad_record(
         title,
         author,
         year,
-        status: "unplayed".to_string(),
-        source_type: source_type.to_string(),
+        status: db::Status::Unplayed,
+        source_type,
         description,
-        availability: "unavailable".to_string(),
+        availability: db::Availability::Unavailable,
         rating: None,
         notes: None,
         source_id,

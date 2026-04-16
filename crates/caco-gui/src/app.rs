@@ -660,7 +660,7 @@ impl eframe::App for CacoApp {
                     if self.thumbnails.needs_request(wad.id) {
                         let path = wad.cached_path.as_deref().map(std::path::Path::new);
                         let hint = ThumbnailHint {
-                            source_type: wad.source_type.clone(),
+                            source_type: wad.source_type.as_str().to_string(),
                             source_url: wad.source_url.clone(),
                             title: wad.title.clone(),
                         };
@@ -947,7 +947,10 @@ fn render_now_playing_hero(
             (wad_title.clone(), author, *wad_id, true)
         } else {
             // Show the first WAD with in-progress status
-            let playing_wad = state.wads.iter().find(|w| w.status == "in-progress");
+            let playing_wad = state
+                .wads
+                .iter()
+                .find(|w| w.status == caco_core::db::Status::InProgress);
             match playing_wad {
                 Some(w) => (w.title.clone(), w.author.clone(), w.id, false),
                 None => return None, // No hero to show
@@ -1015,7 +1018,12 @@ fn render_now_playing_hero(
             }
 
             // Right-click context menu
-            let wad_status = state.wads.iter().find(|w| w.id == wad_id).map(|w| w.status.as_str()).unwrap_or("");
+            let wad_status = state
+                .wads
+                .iter()
+                .find(|w| w.id == wad_id)
+                .map(|w| w.status)
+                .unwrap_or(caco_core::db::Status::Unplayed);
             if let Some(a) = panels::wad_context_menu(&thumb_resp, wad_id, wad_status) {
                 action = Some(a);
             }
@@ -1280,9 +1288,10 @@ fn render_section_header(ui: &mut egui::Ui, state: &mut AppState) {
                 state.needs_reload = true;
             }
 
-            for &status in theme::STATUSES {
-                let is_active = state.status_filters.contains(status);
-                let count = state.status_count(Some(status));
+            for &status in caco_core::db::Status::ALL {
+                let status_str = status.as_str();
+                let is_active = state.status_filters.contains(status_str);
+                let count = state.status_count(Some(status_str));
                 let color = theme::status_color(status);
                 if theme::filter_pill(
                     ui,
@@ -1292,9 +1301,9 @@ fn render_section_header(ui: &mut egui::Ui, state: &mut AppState) {
                     count,
                 ) {
                     if is_active {
-                        state.status_filters.remove(status);
+                        state.status_filters.remove(status_str);
                     } else {
-                        state.status_filters.insert(status.to_string());
+                        state.status_filters.insert(status_str.to_string());
                     }
                     state.needs_reload = true;
                 }

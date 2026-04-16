@@ -242,10 +242,8 @@ impl AppState {
             let status_q: Vec<&str> = self
                 .status_filters
                 .iter()
-                .filter_map(|s| {
-                    let q = crate::theme::status_query(s);
-                    if q.is_empty() { None } else { Some(q) }
-                })
+                .filter_map(|s| s.parse::<caco_core::db::Status>().ok())
+                .map(crate::theme::status_query)
                 .collect();
             if !status_q.is_empty() {
                 query_parts.push(status_q.join(" , "));

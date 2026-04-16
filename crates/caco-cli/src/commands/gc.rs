@@ -250,12 +250,12 @@ fn gc_batch_clean(
     let mut total_size = 0u64;
     for entry in entries {
         let title = truncate_str(&entry.wad.title, 38);
-        let redownloadable = if entry.wad.source_type == "idgames" || entry.wad.idgames_id.is_some()
-        {
-            "yes"
-        } else {
-            "no"
-        };
+        let redownloadable =
+            if entry.wad.source_type == db::SourceType::Idgames || entry.wad.idgames_id.is_some() {
+                "yes"
+            } else {
+                "no"
+            };
         println!(
             "  {:<6} {:<40} {:<12} {:<6} {:>10} {:>10} {:>10}",
             entry.wad.id,

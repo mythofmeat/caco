@@ -4,6 +4,8 @@ pub mod sort_controls;
 pub mod wad_grid;
 pub mod wad_table;
 
+use caco_core::db::Status;
+
 use crate::state::ActionRequest;
 
 /// Show a right-click context menu for a WAD with standard actions.
@@ -11,7 +13,7 @@ use crate::state::ActionRequest;
 pub fn wad_context_menu(
     response: &egui::Response,
     wad_id: i64,
-    status: &str,
+    status: Status,
 ) -> Option<ActionRequest> {
     let mut action = None;
     response.context_menu(|ui| {
@@ -19,7 +21,7 @@ pub fn wad_context_menu(
             action = Some(ActionRequest::Play(wad_id));
             ui.close_menu();
         }
-        if (status == "completed" || status == "abandoned")
+        if matches!(status, Status::Completed | Status::Abandoned)
             && ui.button("Start New Playthrough").clicked()
         {
             action = Some(ActionRequest::StartNewPlaythrough(wad_id));

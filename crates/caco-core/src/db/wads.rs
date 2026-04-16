@@ -522,8 +522,8 @@ mod tests {
         assert_eq!(wad.title, "Scythe");
         assert_eq!(wad.author.as_deref(), Some("Erik Alm"));
         assert_eq!(wad.year, Some(2003));
-        assert_eq!(wad.source_type, "idgames");
-        assert_eq!(wad.status, "unplayed");
+        assert_eq!(wad.source_type, SourceType::Idgames);
+        assert_eq!(wad.status, Status::Unplayed);
         assert_eq!(wad.tags, vec!["cacoward", "megawad"]);
     }
 
@@ -545,7 +545,7 @@ mod tests {
 
         let wad = get_wad(&conn, id, false).unwrap().unwrap();
         assert_eq!(wad.title, "Updated Title");
-        assert_eq!(wad.status, "in-progress");
+        assert_eq!(wad.status, Status::InProgress);
     }
 
     #[test]
@@ -737,7 +737,7 @@ mod tests {
         let id = add_wad(&conn, &NewWad::new("Test", SourceType::Local)).unwrap();
 
         let wad = get_wad(&conn, id, false).unwrap().unwrap();
-        assert_eq!(wad.status, "unplayed");
+        assert_eq!(wad.status, Status::Unplayed);
     }
 
     #[test]
@@ -749,7 +749,7 @@ mod tests {
         let update = WadUpdate::new().set_status(Status::InProgress);
         update_wad(&conn, id, &update).unwrap();
         let wad = get_wad(&conn, id, false).unwrap().unwrap();
-        assert_eq!(wad.status, "in-progress");
+        assert_eq!(wad.status, Status::InProgress);
 
         // Set to completed
         let update = WadUpdate::new()
@@ -757,7 +757,7 @@ mod tests {
             .no_completion();
         update_wad(&conn, id, &update).unwrap();
         let wad = get_wad(&conn, id, false).unwrap().unwrap();
-        assert_eq!(wad.status, "completed");
+        assert_eq!(wad.status, Status::Completed);
     }
 
     #[test]
@@ -767,7 +767,7 @@ mod tests {
         // No cached_path, no source_url → unavailable
         let id1 = add_wad(&conn, &NewWad::new("No URL", SourceType::Local)).unwrap();
         let w1 = get_wad(&conn, id1, false).unwrap().unwrap();
-        assert_eq!(w1.availability, "unavailable");
+        assert_eq!(w1.availability, Availability::Unavailable);
 
         // With source_url → downloadable
         let id2 = add_wad(
@@ -776,7 +776,7 @@ mod tests {
         )
         .unwrap();
         let w2 = get_wad(&conn, id2, false).unwrap().unwrap();
-        assert_eq!(w2.availability, "downloadable");
+        assert_eq!(w2.availability, Availability::Downloadable);
 
         // With cached_path → cached
         let id3 = add_wad(
@@ -785,7 +785,7 @@ mod tests {
         )
         .unwrap();
         let w3 = get_wad(&conn, id3, false).unwrap().unwrap();
-        assert_eq!(w3.availability, "cached");
+        assert_eq!(w3.availability, Availability::Cached);
     }
 
     #[test]
@@ -799,21 +799,21 @@ mod tests {
 
         // Initially downloadable
         let wad = get_wad(&conn, id, false).unwrap().unwrap();
-        assert_eq!(wad.availability, "downloadable");
+        assert_eq!(wad.availability, Availability::Downloadable);
 
         // Set cached_path → should auto-update to cached
         let update = WadUpdate::new().set_text("cached_path", Some("/tmp/test.wad".to_string()));
         update_wad(&conn, id, &update).unwrap();
 
         let wad = get_wad(&conn, id, false).unwrap().unwrap();
-        assert_eq!(wad.availability, "cached");
+        assert_eq!(wad.availability, Availability::Cached);
 
         // Clear cached_path → should auto-update back to downloadable
         let update = WadUpdate::new().set_text("cached_path", None);
         update_wad(&conn, id, &update).unwrap();
 
         let wad = get_wad(&conn, id, false).unwrap().unwrap();
-        assert_eq!(wad.availability, "downloadable");
+        assert_eq!(wad.availability, Availability::Downloadable);
     }
 
     #[test]

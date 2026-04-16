@@ -220,8 +220,8 @@ pub fn render_wad_table(state: &mut WadTableState, frame: &mut Frame, area: Rect
                 })
                 .unwrap_or_default();
 
-            let status_str = theme::status_display(&wad.status);
-            let status_style = theme::status_style(&wad.status);
+            let status_str = theme::status_display(wad.status);
+            let status_style = theme::status_style(wad.status);
 
             let deleted_style = if wad.deleted_at.is_some() {
                 Style::default().add_modifier(Modifier::DIM)

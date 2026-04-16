@@ -1,3 +1,4 @@
+use caco_core::db::Status;
 use egui::{Color32, Visuals};
 
 // ---------------------------------------------------------------------------
@@ -32,50 +33,39 @@ pub const COLOR_SECRET_FILL: Color32 = Color32::from_rgb(0x99, 0x44, 0x22);
 // Status helpers
 // ---------------------------------------------------------------------------
 
-pub const STATUSES: &[&str] = &["unplayed", "in-progress", "completed", "abandoned"];
-
-pub fn status_color(status: &str) -> Color32 {
+pub fn status_color(status: Status) -> Color32 {
     match status {
-        "unplayed" => Color32::from_rgb(0x33, 0x66, 0xcc),
-        "in-progress" => Color32::from_rgb(0x33, 0xcc, 0x33),
-        "completed" => Color32::from_rgb(0x80, 0x80, 0x80),
-        "abandoned" => Color32::from_rgb(0xcc, 0x33, 0x33),
-        _ => TEXT_PRIMARY,
+        Status::Unplayed => Color32::from_rgb(0x33, 0x66, 0xcc),
+        Status::InProgress => Color32::from_rgb(0x33, 0xcc, 0x33),
+        Status::Completed => Color32::from_rgb(0x80, 0x80, 0x80),
+        Status::Abandoned => Color32::from_rgb(0xcc, 0x33, 0x33),
     }
 }
 
-pub fn status_bg(status: &str) -> Color32 {
+pub fn status_bg(status: Status) -> Color32 {
     match status {
-        "unplayed" => Color32::from_rgb(0x0d, 0x14, 0x2a),
-        "in-progress" => Color32::from_rgb(0x0d, 0x2a, 0x0d),
-        "completed" => Color32::from_rgb(0x1a, 0x1a, 0x1a),
-        "abandoned" => Color32::from_rgb(0x2a, 0x0d, 0x0d),
-        _ => BG_MEDIUM,
+        Status::Unplayed => Color32::from_rgb(0x0d, 0x14, 0x2a),
+        Status::InProgress => Color32::from_rgb(0x0d, 0x2a, 0x0d),
+        Status::Completed => Color32::from_rgb(0x1a, 0x1a, 0x1a),
+        Status::Abandoned => Color32::from_rgb(0x2a, 0x0d, 0x0d),
     }
 }
 
-pub fn status_display(status: &str) -> &str {
-    match status {
-        "unplayed" => "Unplayed",
-        "in-progress" => "In Progress",
-        "completed" => "Completed",
-        "abandoned" => "Abandoned",
-        _ => status,
-    }
+pub fn status_display(status: Status) -> &'static str {
+    status.display_name()
 }
 
-pub fn status_query(status: &str) -> &'static str {
+pub fn status_query(status: Status) -> &'static str {
     match status {
-        "unplayed" => "status:unplayed",
-        "in-progress" => "status:in-progress",
-        "completed" => "status:completed",
-        "abandoned" => "status:abandoned",
-        _ => "",
+        Status::Unplayed => "status:unplayed",
+        Status::InProgress => "status:in-progress",
+        Status::Completed => "status:completed",
+        Status::Abandoned => "status:abandoned",
     }
 }
 
 /// Render a status value as a colored pill badge.
-pub fn status_pill(ui: &mut egui::Ui, status: &str) {
+pub fn status_pill(ui: &mut egui::Ui, status: Status) {
     let color = status_color(status);
     let label = status_display(status);
     let bg = status_bg(status);

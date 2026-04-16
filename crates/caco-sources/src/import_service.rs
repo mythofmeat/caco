@@ -778,7 +778,7 @@ mod tests {
         assert_eq!(wad.title, "Test WAD");
         assert_eq!(wad.author.as_deref(), Some("Author"));
         assert_eq!(wad.year, Some(2023));
-        assert_eq!(wad.source_type, "url");
+        assert_eq!(wad.source_type, SourceType::Url);
         assert_eq!(wad.tags, vec!["test"]);
     }
 
@@ -883,7 +883,7 @@ mod tests {
         assert_eq!(wad.title, "Sunlust");
         assert_eq!(wad.author.as_deref(), Some("Ribbiks & Dannebubinga"));
         assert_eq!(wad.year, Some(2015));
-        assert_eq!(wad.source_type, "idgames");
+        assert_eq!(wad.source_type, SourceType::Idgames);
         assert_eq!(wad.source_id.as_deref(), Some("19312"));
     }
 
@@ -950,7 +950,7 @@ mod tests {
         assert_eq!(wad.title, "Scythe");
         assert_eq!(wad.author.as_deref(), Some("Erik Alm"));
         assert_eq!(wad.year, Some(2003));
-        assert_eq!(wad.source_type, "doomwiki");
+        assert_eq!(wad.source_type, SourceType::Doomwiki);
         assert_eq!(wad.source_id.as_deref(), Some("5678"));
     }
 
@@ -1127,7 +1127,7 @@ mod tests {
         assert_eq!(wad.title, "MyHouse.wad");
         assert_eq!(wad.author.as_deref(), Some("MyHouseMapper"));
         assert_eq!(wad.year, Some(2023));
-        assert_eq!(wad.source_type, "doomworld");
+        assert_eq!(wad.source_type, SourceType::Doomworld);
         assert_eq!(wad.source_id.as_deref(), Some("134292"));
         assert_eq!(wad.complevel, Some(9));
         assert_eq!(wad.description.as_deref(), Some("A spooky Doom 2 map."));

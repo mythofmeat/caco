@@ -680,7 +680,7 @@ fn check_auto_completion(
 
     // Only check WADs that are currently being played
     let wad = match db::get_wad(conn, wad_id, false) {
-        Ok(Some(w)) if w.status == "in-progress" => w,
+        Ok(Some(w)) if w.status == db::Status::InProgress => w,
         _ => return AutoCompleteResult::Unknown,
     };
 
@@ -880,7 +880,7 @@ mod tests {
 
         // Verify WAD is completed with a snapshot
         let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
-        assert_eq!(wad.status, "completed");
+        assert_eq!(wad.status, db::Status::Completed);
         assert!(wad.stats_snapshot.is_some());
 
         // Start a new playthrough (simulating --new-playthrough)
@@ -888,7 +888,7 @@ mod tests {
 
         // Stats snapshot should be cleared
         let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
-        assert_eq!(wad.status, "in-progress");
+        assert_eq!(wad.status, db::Status::InProgress);
         assert!(wad.stats_snapshot.is_none());
 
         // A new active playthrough should exist
