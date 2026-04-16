@@ -52,7 +52,9 @@ pub fn reset_sandbox(paths: &SandboxPaths, opts: &ResetOptions) -> Result<()> {
         copy_entry(&src, &dst_parent)?;
     }
 
-    // Copy user config to <sandbox>/config/config.toml.
+    // Copy user config to <sandbox>/config/config.toml, sanitized so that
+    // absolute path fields (db_path, cache_dir, data_dir, etc.) don't override
+    // the CACO_HOME-derived sandbox defaults at runtime.
     let config_src = dirs::config_dir()
         .map(|d| d.join("caco").join("config.toml"));
     let config_dst = paths.config_path();
@@ -60,10 +62,40 @@ pub fn reset_sandbox(paths: &SandboxPaths, opts: &ResetOptions) -> Result<()> {
         && src.is_file()
     {
         std::fs::create_dir_all(config_dst.parent().unwrap())?;
-        std::fs::copy(&src, &config_dst)?;
+        let raw = std::fs::read_to_string(&src)?;
+        let sanitized = sanitize_sandbox_config(&raw);
+        std::fs::write(&config_dst, sanitized)?;
     }
 
     Ok(())
+}
+
+/// Strip path fields from a config TOML so the sandbox falls back to the
+/// `CACO_HOME`-derived defaults. Without this, an absolute `db_path` (or any
+/// of the other absolute path keys) in the user's real config would point the
+/// sandboxed CLI back at the user's real library.
+///
+/// If parsing fails, return a minimal valid config so the sandbox is still
+/// usable.
+fn sanitize_sandbox_config(raw: &str) -> String {
+    const PATH_KEYS: &[&str] = &[
+        "db_path",
+        "cache_dir",
+        "data_dir",
+        "iwad_dir",
+        "sourceport_dir",
+        "iwad_dirs",
+    ];
+
+    match raw.parse::<toml::Table>() {
+        Ok(mut table) => {
+            for key in PATH_KEYS {
+                table.remove(*key);
+            }
+            toml::to_string_pretty(&table).unwrap_or_default()
+        }
+        Err(_) => String::new(),
+    }
 }
 
 fn copy_entry(src: &Path, dst_parent: &Path) -> Result<()> {
@@ -146,6 +178,91 @@ mod tests {
                 reset_sandbox(&paths, &ResetOptions::default()).unwrap();
                 assert!(!sb.join("stale.txt").exists(), "stale file should be wiped");
                 assert!(sb.join("library.db").is_file());
+            },
+        );
+    }
+
+    #[test]
+    fn sanitize_strips_absolute_path_fields() {
+        let input = r#"
+sourceport = "dsda-doom"
+db_path = "/home/eshen/.local/share/caco/library.db"
+cache_dir = "/home/eshen/.local/share/caco/wads"
+data_dir = "/home/eshen/.local/share/caco/data"
+iwad_dir = "/home/eshen/.local/share/caco/iwads"
+sourceport_dir = "/home/eshen/.local/share/caco/sourceports"
+iwad_dirs = ["/home/eshen/Doom"]
+auto_stats = true
+"#;
+        let out = sanitize_sandbox_config(input);
+        let parsed: toml::Table = out.parse().unwrap();
+        assert!(!parsed.contains_key("db_path"));
+        assert!(!parsed.contains_key("cache_dir"));
+        assert!(!parsed.contains_key("data_dir"));
+        assert!(!parsed.contains_key("iwad_dir"));
+        assert!(!parsed.contains_key("sourceport_dir"));
+        assert!(!parsed.contains_key("iwad_dirs"));
+        // Non-path keys should survive.
+        assert_eq!(
+            parsed.get("sourceport").and_then(|v| v.as_str()),
+            Some("dsda-doom")
+        );
+        assert_eq!(
+            parsed.get("auto_stats").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn sanitize_returns_empty_for_invalid_toml() {
+        assert_eq!(sanitize_sandbox_config("[[[not toml"), "");
+    }
+
+    #[test]
+    fn copies_and_sanitizes_user_config() {
+        let src = TempDir::new().unwrap();
+        let dst = TempDir::new().unwrap();
+        let fake_config_home = TempDir::new().unwrap();
+        seed_source(src.path());
+
+        // Seed a fake user config with absolute paths pointing into the real
+        // user data dir. After reset, the sandbox copy must NOT contain those
+        // path keys.
+        let user_config_dir = fake_config_home.path().join("caco");
+        std::fs::create_dir_all(&user_config_dir).unwrap();
+        std::fs::write(
+            user_config_dir.join("config.toml"),
+            "sourceport = \"dsda-doom\"\n\
+             db_path = \"/home/eshen/.local/share/caco/library.db\"\n\
+             cache_dir = \"/home/eshen/.local/share/caco/wads\"\n",
+        )
+        .unwrap();
+
+        temp_env::with_vars(
+            [
+                ("XDG_CONFIG_HOME", Some(fake_config_home.path().to_str().unwrap())),
+                ("XDG_DATA_HOME", Some("/nonexistent/xdg")),
+                ("CACO_HOME", Some("/nonexistent")),
+            ],
+            || {
+                let paths = SandboxPaths::new(
+                    dst.path().join("sb"),
+                    src.path().to_path_buf(),
+                )
+                .unwrap();
+                reset_sandbox(&paths, &ResetOptions::default()).unwrap();
+
+                let copied = std::fs::read_to_string(paths.config_path()).unwrap();
+                let parsed: toml::Table = copied.parse().unwrap();
+                assert!(
+                    !parsed.contains_key("db_path"),
+                    "db_path must be stripped from sandbox config; got: {copied}"
+                );
+                assert!(!parsed.contains_key("cache_dir"));
+                assert_eq!(
+                    parsed.get("sourceport").and_then(|v| v.as_str()),
+                    Some("dsda-doom")
+                );
             },
         );
     }
