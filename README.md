@@ -296,8 +296,26 @@ idgames WADs are cleaned automatically (re-downloadable). Non-idgames WADs promp
 | `~/.local/share/caco/id24/` | Managed id24 WADs |
 | `~/.local/share/caco/companions/` | Managed companion files |
 | `~/.local/share/caco/sourceports/` | Per-sourceport config profiles |
-| `~/.local/share/caco/backups/` | Save backups |
+| `~/.local/share/caco/backups/` | Save backups + pre-migration DB snapshots |
 | `~/.cache/caco/thumbnails/` | GUI thumbnail cache |
+
+### Recovering from a bad migration
+
+Each time caco starts with pending schema migrations it first copies the live
+library to `~/.local/share/caco/backups/pre-migration-<N>.db`, where `<N>` is
+the schema version before the migration runs. Migrations themselves are
+transactional, so a crash or SQL error rolls back cleanly; the file-level
+snapshot is for the rarer case where a migration commits successfully but
+leaves user data in a bad state. To recover:
+
+```bash
+# stop any running caco instances, then:
+cp ~/.local/share/caco/library.db ~/.local/share/caco/library.db.broken
+cp ~/.local/share/caco/backups/pre-migration-<N>.db ~/.local/share/caco/library.db
+```
+
+You will need a caco binary old enough to read schema version `N`. Please also
+file a bug report with the broken DB attached.
 
 ## Supported Sourceports
 

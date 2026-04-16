@@ -170,6 +170,15 @@ pub fn init_db(conn: &Connection) -> Result<()> {
         )
         .unwrap_or(0);
 
+    // If any migrations are pending, snapshot the DB file to the backup dir
+    // first. Transactions already make migrations atomic, but a file-level
+    // backup provides a manual recovery story for logic-error migrations
+    // that commit successfully yet leave user data in a bad state.
+    let has_pending = MIGRATIONS.iter().any(|&(v, _, _)| v > current_version);
+    if has_pending {
+        backup_before_migration(conn, current_version);
+    }
+
     // Run only pending migrations. Each migration + its version-record INSERT run in
     // one transaction so a failed migration rolls back and is not recorded as applied.
     for &(version, name, func) in MIGRATIONS {
@@ -192,6 +201,29 @@ pub fn init_db(conn: &Connection) -> Result<()> {
     conn.execute_batch(POST_MIGRATION_INDEXES)?;
 
     Ok(())
+}
+
+/// Copy the live DB file to `{backup_dir}/pre-migration-{from_version}.db`.
+/// Best-effort: logs a warning and continues on failure (a missing backup
+/// should not prevent the user from running pending migrations).
+fn backup_before_migration(conn: &Connection, from_version: i64) {
+    let Some(db_path) = conn.path() else {
+        return; // in-memory DB — nothing to back up
+    };
+    let db_path = std::path::Path::new(db_path);
+    if !db_path.exists() {
+        return;
+    }
+    let backup_dir = crate::config::backup_dir();
+    if let Err(e) = std::fs::create_dir_all(&backup_dir) {
+        tracing::warn!("failed to create backup dir {backup_dir:?}: {e}");
+        return;
+    }
+    let backup_path = backup_dir.join(format!("pre-migration-{from_version}.db"));
+    match std::fs::copy(db_path, &backup_path) {
+        Ok(_) => tracing::info!("created pre-migration backup at {backup_path:?}"),
+        Err(e) => tracing::warn!("failed to create pre-migration backup at {backup_path:?}: {e}"),
+    }
 }
 
 // ---------------------------------------------------------------------------
