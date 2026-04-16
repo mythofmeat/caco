@@ -100,6 +100,15 @@ pub fn render(
                     let (rect, response) = ui
                         .allocate_exact_size(Vec2::new(card_w, card_height), egui::Sense::click());
 
+                    // Virtualization: skip painting + event handling for cards
+                    // entirely outside the scroll viewport. Layout (scrollbar
+                    // extents, selection indices) still lines up because
+                    // allocate_exact_size ran.
+                    let clip = ui.clip_rect();
+                    if rect.max.y < clip.min.y || rect.min.y > clip.max.y {
+                        continue;
+                    }
+
                     // Handle clicks
                     if response.clicked() || response.secondary_clicked() {
                         state.selected_row = idx;

@@ -672,8 +672,8 @@ impl eframe::App for CacoApp {
             }
         }
 
-        // 8. Dispatch action requests (only first one)
-        if let Some(action) = actions.into_iter().next() {
+        // 8. Dispatch action requests
+        for action in actions {
             self.dispatch_action(action);
         }
     }
