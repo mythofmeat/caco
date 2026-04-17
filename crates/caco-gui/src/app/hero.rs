@@ -112,34 +112,52 @@ pub(super) fn render_now_playing_hero(
 
             ui.add_space(16.0);
 
-            // Info area
-            ui.vertical(|ui| {
-                let label_color = if is_active {
-                    theme::COLOR_SUCCESS
-                } else {
-                    Color32::from_rgb(0x55, 0x88, 0xdd)
-                };
-                let label_text = if is_active {
-                    "NOW PLAYING"
-                } else {
-                    "CONTINUE PLAYING"
-                };
-                ui.colored_label(
-                    label_color,
-                    egui::RichText::new(label_text).size(11.0).strong(),
-                );
-                ui.add_space(2.0);
-                ui.colored_label(
-                    theme::TEXT_PRIMARY,
-                    egui::RichText::new(&wad_title).size(20.0).strong(),
-                );
-                ui.add_space(2.0);
-                let meta = wad_author.as_deref().unwrap_or("");
-                ui.colored_label(
-                    theme::TEXT_SECONDARY,
-                    egui::RichText::new(meta).size(13.0),
-                );
-            });
+            // Info area. Bound the width so degenerately long titles or
+            // author lists (e.g. community megawads with 10+ collaborators)
+            // truncate with an ellipsis instead of overflowing into the
+            // playtime/progress block on the right.
+            const RIGHT_BLOCK_RESERVE: f32 = 240.0;
+            let info_width = (ui.available_width() - RIGHT_BLOCK_RESERVE).max(120.0);
+            ui.allocate_ui_with_layout(
+                egui::vec2(info_width, ui.available_height()),
+                egui::Layout::top_down(egui::Align::LEFT),
+                |ui| {
+                    let label_color = if is_active {
+                        theme::COLOR_SUCCESS
+                    } else {
+                        Color32::from_rgb(0x55, 0x88, 0xdd)
+                    };
+                    let label_text = if is_active {
+                        "NOW PLAYING"
+                    } else {
+                        "CONTINUE PLAYING"
+                    };
+                    ui.colored_label(
+                        label_color,
+                        egui::RichText::new(label_text).size(11.0).strong(),
+                    );
+                    ui.add_space(2.0);
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(&wad_title)
+                                .size(20.0)
+                                .strong()
+                                .color(theme::TEXT_PRIMARY),
+                        )
+                        .truncate(),
+                    );
+                    ui.add_space(2.0);
+                    let meta = wad_author.as_deref().unwrap_or("");
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(meta)
+                                .size(13.0)
+                                .color(theme::TEXT_SECONDARY),
+                        )
+                        .truncate(),
+                    );
+                },
+            );
 
             // Right side: playtime + progress
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
