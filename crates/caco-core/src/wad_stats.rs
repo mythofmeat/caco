@@ -554,9 +554,12 @@ pub struct StatsDelta {
 
 /// Compute which maps were played in a session by diffing before/after snapshots.
 ///
-/// For stats.txt (persistent/cumulative): a map is "played" if total_exits
-/// increased or the map is new. For levelstat.txt (rewritten each run): all
-/// maps in `after` are this session's maps.
+/// For stats.txt (persistent/cumulative): a map counts as played iff
+/// `total_exits` increased — or, for a brand-new entry, is already > 0.
+/// `best_skill`/`time_secs` alone are not enough because merged levelstat
+/// data can populate them on idclev (entered but not exited). For
+/// levelstat.txt (rewritten each run): all maps in `after` are this session's
+/// maps — dsda only writes a levelstat line on actual exit.
 pub fn compute_stats_delta(before: Option<&WadStats>, after: &WadStats) -> StatsDelta {
     if after.format == "levelstat_txt" {
         // levelstat.txt is rewritten each run — all maps are this session's
@@ -600,7 +603,7 @@ pub fn compute_stats_delta(before: Option<&WadStats>, after: &WadStats) -> Stats
     for m in &after.maps {
         match before_map.get(m.lump.as_str()) {
             None => {
-                if m.played() {
+                if m.total_exits > 0 {
                     maps_played.push(m.lump.clone());
                     deltas.push(MapDelta {
                         lump: m.lump.clone(),
@@ -1270,6 +1273,18 @@ mod tests {
         assert_eq!(delta.maps_played, vec!["MAP01"]);
         assert_eq!(delta.deltas.len(), 1);
         assert!(delta.deltas[0].new_map);
+    }
+
+    #[test]
+    fn test_compute_delta_first_play_idclev_new_map() {
+        // Regression: a new map appears with best_skill/best_time populated
+        // from merged levelstat data, but total_exits == 0 (user idclev'd
+        // through without exiting). Must NOT count as played.
+        let text = "1\n0\nMAP01 1 1 4 314 -1 -1 0 0 0 0 0 -1 -1 -1\n";
+        let after = parse_stats_text(text).unwrap();
+        let delta = compute_stats_delta(None, &after);
+        assert!(delta.maps_played.is_empty());
+        assert!(delta.deltas.is_empty());
     }
 
     #[test]
