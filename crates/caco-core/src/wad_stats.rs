@@ -310,7 +310,11 @@ fn parse_levelstat_txt(lines: &[&str]) -> WadStats {
                 best_time: -1,
                 best_max_time: -1,
                 best_nm_time: -1,
-                total_exits: 0,
+                // Each levelstat line is written only on map exit, so the
+                // presence of the line implies at least one exit. Without this,
+                // completion detection — which keys off `total_exits >= 1` —
+                // would never fire for levelstat-only sourceports (zdoom family).
+                total_exits: 1,
                 cumulative_kills: 0,
             });
         }
@@ -844,8 +848,10 @@ mod tests {
         assert!((stats.maps[0].time_secs - 32.97).abs() < 0.01);
         assert_eq!(stats.maps[0].kills, 100);
         assert_eq!(stats.maps[0].total_kills, 100);
+        assert_eq!(stats.maps[0].total_exits, 1); // every levelstat line implies an exit
         assert_eq!(stats.maps[1].lump, "MAP02");
         assert_eq!(stats.maps[1].items, 30);
+        assert_eq!(stats.maps[1].total_exits, 1);
     }
 
     #[test]

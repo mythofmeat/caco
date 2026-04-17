@@ -439,18 +439,35 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
         )?;
     }
 
-    // If this session produced actual level progress and no playthrough is
-    // active yet, create one now — this flips the WAD status to in-progress.
-    // Skipped if an active playthrough already exists (linked above) or if
-    // the session made no measurable progress.
-    if session_made_progress(stats_before.as_deref(), stats_after.as_deref())
-        && db::get_active_playthrough(conn, wad_id)?.is_none()
-    {
-        let pt_id = db::start_playthrough(conn, wad_id)?;
-        conn.execute(
-            "UPDATE sessions SET playthrough_id = ?1 WHERE id = ?2",
-            rusqlite::params![pt_id, session_id],
-        )?;
+    // If this session produced actual level progress, reconcile the WAD's
+    // status. If no playthrough is active, start one (which sets status to
+    // in-progress). If a playthrough already exists but the wads.status column
+    // has drifted (e.g. a stale playthrough left over from pre-559f6bd play()
+    // that auto-created one on every launch, followed by a status reset),
+    // fix the status directly so auto-completion can run on this and future
+    // sessions.
+    if session_made_progress(stats_before.as_deref(), stats_after.as_deref()) {
+        match db::get_active_playthrough(conn, wad_id)? {
+            None => {
+                let pt_id = db::start_playthrough(conn, wad_id)?;
+                conn.execute(
+                    "UPDATE sessions SET playthrough_id = ?1 WHERE id = ?2",
+                    rusqlite::params![pt_id, session_id],
+                )?;
+            }
+            Some(_) => {
+                if let Ok(Some(w)) = db::get_wad(conn, wad_id, false)
+                    && w.status != db::Status::InProgress
+                    && w.status != db::Status::Completed
+                {
+                    let now = chrono::Utc::now().to_rfc3339();
+                    conn.execute(
+                        "UPDATE wads SET status = 'in-progress', updated_at = ?1 WHERE id = ?2",
+                        rusqlite::params![now, wad_id],
+                    )?;
+                }
+            }
+        }
     }
 
     // Link recorded demo
