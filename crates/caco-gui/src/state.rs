@@ -234,30 +234,27 @@ impl AppState {
 
     /// Reload WAD list and stats from the database.
     pub fn reload(&mut self, conn: &Connection) {
-        // Build combined query from status filters + user filter
-        let mut query_parts: Vec<String> = Vec::new();
+        // Build combined query from status filters + user filter. Both
+        // sides can contain OR-groups (multi-select status pills, or a
+        // collection query that uses `,`), so we compose via
+        // `compose_and` which distributes the Cartesian product — beets
+        // grammar has no parentheses, and a naive space-join would
+        // leave trailing OR clauses unbound and leak to the full
+        // library (see compose_and docs).
+        let status_q: String = self
+            .status_filters
+            .iter()
+            .filter_map(|s| s.parse::<caco_core::db::Status>().ok())
+            .map(crate::theme::status_query)
+            .collect::<Vec<_>>()
+            .join(" , ");
+        let user_q = self.filter.applied.as_str();
 
-        if !self.status_filters.is_empty() {
-            // Multiple statuses use OR syntax: "status:a , status:b"
-            let status_q: Vec<&str> = self
-                .status_filters
-                .iter()
-                .filter_map(|s| s.parse::<caco_core::db::Status>().ok())
-                .map(crate::theme::status_query)
-                .collect();
-            if !status_q.is_empty() {
-                query_parts.push(status_q.join(" , "));
-            }
-        }
-
-        if !self.filter.applied.is_empty() {
-            query_parts.push(self.filter.applied.clone());
-        }
-
-        let query = if query_parts.is_empty() {
+        let combined = caco_core::db::compose_and(&status_q, user_q);
+        let query = if combined.is_empty() {
             None
         } else {
-            Some(query_parts.join(" "))
+            Some(combined)
         };
 
         let sort_field = SORT_FIELDS[self.sort_field_index].0;

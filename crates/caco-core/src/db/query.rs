@@ -1,7 +1,9 @@
 use rusqlite::Connection;
 
 use super::connection::{attach_tags, fetch_tags_batch};
-use super::models::{AndGroup, ParsedQuery, QueryTerm, STATUS_SHORTCUTS, SourceType, WadRecord};
+use super::models::{
+    AndGroup, OR_SEPARATOR, ParsedQuery, QueryTerm, STATUS_SHORTCUTS, SourceType, WadRecord,
+};
 use crate::Result;
 use crate::complevel::parse_complevel;
 
@@ -161,6 +163,75 @@ pub fn parse_query(query: &str) -> ParsedQuery {
     }
 
     ParsedQuery { or_groups }
+}
+
+/// Serialize a single term back to its beets-style string form.
+fn term_to_string(term: &QueryTerm) -> String {
+    let needs_quote = term.value.chars().any(char::is_whitespace);
+    let value = if needs_quote {
+        format!("\"{}\"", term.value)
+    } else {
+        term.value.clone()
+    };
+    let body = match &term.field {
+        Some(f) => format!("{f}:{value}"),
+        None => value,
+    };
+    if term.negated {
+        format!("^{body}")
+    } else {
+        body
+    }
+}
+
+/// Serialize a parsed query back into its string form.
+fn parsed_to_string(parsed: &ParsedQuery) -> String {
+    parsed
+        .or_groups
+        .iter()
+        .filter(|g| !g.terms.is_empty())
+        .map(|g| {
+            g.terms
+                .iter()
+                .map(term_to_string)
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .collect::<Vec<_>>()
+        .join(OR_SEPARATOR)
+}
+
+/// Compose two beets-style queries into their logical AND.
+///
+/// The beets grammar has OR-groups of AND-terms but no explicit
+/// parentheses, so naively space-joining two queries that each contain
+/// OR separators would leave the trailing OR clauses unbound. Example:
+/// `"status:u , status:ip"` AND `"tag:horror"` must become
+/// `"status:u tag:horror , status:ip tag:horror"` — not the broken
+/// `"status:u , status:ip tag:horror"` which parses as
+/// `status:u` OR `(status:ip AND tag:horror)`.
+///
+/// This function parses each side, takes the Cartesian product of their
+/// OR-groups, and re-serialises the result.
+pub fn compose_and(q1: &str, q2: &str) -> String {
+    let p1 = parse_query(q1);
+    let p2 = parse_query(q2);
+    if p1.is_empty() {
+        return q2.trim().to_string();
+    }
+    if p2.is_empty() {
+        return q1.trim().to_string();
+    }
+    let mut combined = ParsedQuery::default();
+    for g1 in &p1.or_groups {
+        for g2 in &p2.or_groups {
+            let mut merged = AndGroup::default();
+            merged.terms.extend(g1.terms.iter().cloned());
+            merged.terms.extend(g2.terms.iter().cloned());
+            combined.or_groups.push(merged);
+        }
+    }
+    parsed_to_string(&combined)
 }
 
 /// Normalize status value, expanding shortcuts.
@@ -961,5 +1032,84 @@ mod tests {
         let results = search_wads(&conn, None, None, true, true, 0).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].title, "Scythe");
+    }
+
+    #[test]
+    fn test_compose_and_both_simple() {
+        assert_eq!(
+            compose_and("status:unplayed", "tag:horror"),
+            "status:unplayed tag:horror"
+        );
+    }
+
+    #[test]
+    fn test_compose_and_empty_left() {
+        assert_eq!(compose_and("", "tag:horror"), "tag:horror");
+        assert_eq!(compose_and("   ", "tag:horror"), "tag:horror");
+    }
+
+    #[test]
+    fn test_compose_and_empty_right() {
+        assert_eq!(compose_and("status:unplayed", ""), "status:unplayed");
+    }
+
+    #[test]
+    fn test_compose_and_distributes_or_on_left() {
+        // Regression: multi-status filter + collection query. Naive
+        // space-join would give `status:unplayed , status:in-progress tag:horror`
+        // which parses as unplayed OR (in-progress AND tag:horror), leaking
+        // every unplayed WAD into the view.
+        assert_eq!(
+            compose_and("status:unplayed , status:in-progress", "tag:horror"),
+            "status:unplayed tag:horror , status:in-progress tag:horror"
+        );
+    }
+
+    #[test]
+    fn test_compose_and_distributes_or_on_right() {
+        assert_eq!(
+            compose_and("status:unplayed", "tag:horror , tag:thriller"),
+            "status:unplayed tag:horror , status:unplayed tag:thriller"
+        );
+    }
+
+    #[test]
+    fn test_compose_and_distributes_both_sides() {
+        // Cartesian product of 2×2 = 4 OR groups.
+        let result = compose_and(
+            "status:unplayed , status:in-progress",
+            "tag:horror , tag:thriller",
+        );
+        let groups: Vec<&str> = result.split(OR_SEPARATOR).collect();
+        assert_eq!(groups.len(), 4);
+        assert!(groups.contains(&"status:unplayed tag:horror"));
+        assert!(groups.contains(&"status:unplayed tag:thriller"));
+        assert!(groups.contains(&"status:in-progress tag:horror"));
+        assert!(groups.contains(&"status:in-progress tag:thriller"));
+    }
+
+    #[test]
+    fn test_compose_and_preserves_negation() {
+        let result = compose_and("^tag:megawad", "author:alm");
+        assert_eq!(result, "^tag:megawad author:alm");
+    }
+
+    #[test]
+    fn test_compose_and_runs_correctly() {
+        // End-to-end: compose_and output produces the expected search
+        // result when run through search_wads.
+        let conn = setup();
+        add_test_wads(&conn);
+
+        // Ancient Aliens is in-progress + cacoward.
+        // Naive join `status:in-progress , status:completed tag:cacoward`
+        // would also include Sunlust (completed + slaughter, no cacoward)
+        // because `status:completed` would run unbound.
+        let q = compose_and("status:in-progress , status:completed", "tag:cacoward");
+        let results = search_wads(&conn, Some(&q), None, true, false, 0).unwrap();
+        // Only Ancient Aliens (in-progress + cacoward). Sunlust is
+        // completed but lacks the cacoward tag.
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "Ancient Aliens");
     }
 }

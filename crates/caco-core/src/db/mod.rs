@@ -46,7 +46,7 @@ pub use playthroughs::{
     get_active_playthrough, get_playthrough, get_playthroughs, get_times_completed,
     get_times_completed_batch, start_playthrough,
 };
-pub use query::{find_duplicate, normalize_status, parse_query, search_wads};
+pub use query::{compose_and, find_duplicate, normalize_status, parse_query, search_wads};
 pub use schema::init_db;
 pub use sessions::{
     ActivityPeriod, CompletionRecord, SessionRecord, StatsSnapshot, WadStats, add_wad_completion,
