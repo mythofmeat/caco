@@ -1,5 +1,8 @@
+use std::collections::HashMap;
+
 use rusqlite::Connection;
 
+use super::connection::SQLITE_MAX_VARS;
 use crate::Result;
 use crate::wad_analysis::{ANALYSIS_VERSION, WadAnalysis};
 
@@ -26,6 +29,40 @@ pub fn get_analysis(conn: &Connection, wad_id: i64) -> Result<Option<WadAnalysis
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(e.into()),
     }
+}
+
+/// Fetch `required_maps` for each WAD in a single query.
+///
+/// Reads directly from the stored column so we avoid deserializing the full
+/// analysis JSON. WADs without analysis are simply absent from the map.
+pub fn get_required_maps_batch(conn: &Connection, wad_ids: &[i64]) -> Result<HashMap<i64, usize>> {
+    let mut out: HashMap<i64, usize> = HashMap::new();
+    if wad_ids.is_empty() {
+        return Ok(out);
+    }
+    for chunk in wad_ids.chunks(SQLITE_MAX_VARS) {
+        let placeholders: String = (0..chunk.len())
+            .map(|i| if i > 0 { ",?" } else { "?" })
+            .collect();
+        let sql = format!(
+            "SELECT wad_id, required_maps FROM wad_analysis WHERE wad_id IN ({placeholders})"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let params: Vec<&dyn rusqlite::types::ToSql> = chunk
+            .iter()
+            .map(|v| v as &dyn rusqlite::types::ToSql)
+            .collect();
+        let rows = stmt.query_map(params.as_slice(), |row| {
+            let wad_id: i64 = row.get(0)?;
+            let required: i64 = row.get(1)?;
+            Ok((wad_id, required.max(0) as usize))
+        })?;
+        for row in rows {
+            let (wad_id, required) = row?;
+            out.insert(wad_id, required);
+        }
+    }
+    Ok(out)
 }
 
 /// Store WAD analysis results.

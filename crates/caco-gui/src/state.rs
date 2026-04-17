@@ -121,6 +121,11 @@ pub struct AppState {
     // WAD data
     pub wads: Vec<WadRecord>,
     pub stats_map: HashMap<i64, WadStats>,
+    /// Required-map counts from `wad_analysis.required_maps`, keyed by wad id.
+    /// Used to compute accurate completion denominators for the grid progress
+    /// bar — a levelstat snapshot only contains played maps, so relying on
+    /// `WadStats::maps.len()` would show every in-progress WAD as 100%.
+    pub required_maps_map: HashMap<i64, usize>,
 
     // Selection
     pub selected_wad_id: Option<i64>,
@@ -174,6 +179,7 @@ impl AppState {
             sort_desc: persisted.sort_desc,
             wads: Vec::new(),
             stats_map: HashMap::new(),
+            required_maps_map: HashMap::new(),
             selected_wad_id: None,
             selected_row: 0,
             notification: None,
@@ -290,6 +296,8 @@ impl AppState {
                 let ids: Vec<i64> = wads.iter().map(|w| w.id).collect();
                 self.stats_map =
                     caco_core::db::sessions::get_wad_stats_batch(conn, &ids).unwrap_or_default();
+                self.required_maps_map =
+                    caco_core::db::get_required_maps_batch(conn, &ids).unwrap_or_default();
 
                 // Preserve selection if still valid
                 if let Some(sel_id) = self.selected_wad_id {

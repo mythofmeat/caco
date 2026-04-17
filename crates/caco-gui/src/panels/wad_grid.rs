@@ -341,16 +341,28 @@ pub fn render(
                         );
                     }
 
-                    // Progress bar for in-progress WADs with stats
+                    // Progress bar for in-progress WADs with stats.
+                    //
+                    // Denominator comes from `wad_analysis.required_maps` when
+                    // available. A levelstat-format snapshot only records maps
+                    // the player has exited, so `wad_stats.maps.len()` would
+                    // always equal `played_maps().len()` and the bar would read
+                    // 100% for every in-progress WAD.
                     if wad.status == caco_core::db::Status::InProgress
                         && let Some(ref snapshot_json) = wad.stats_snapshot
                         && let Ok(wad_stats) = serde_json::from_str::<StatsData>(snapshot_json)
                         && !wad_stats.maps.is_empty()
                     {
-                        let total = wad_stats.maps.len();
                         let played = wad_stats.played_maps().len();
+                        let total = state
+                            .required_maps_map
+                            .get(&wad_id)
+                            .copied()
+                            .filter(|n| *n > 0)
+                            .unwrap_or(wad_stats.maps.len())
+                            .max(played);
                         let pct = if total > 0 {
-                            (played as f32 / total as f32).min(1.0)
+                            (played as f32 / total as f32).clamp(0.0, 1.0)
                         } else {
                             0.0
                         };
