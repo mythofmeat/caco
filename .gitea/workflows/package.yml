@@ -77,11 +77,24 @@ jobs:
             --arg name "$TAG" \
             --argjson body "$BODY" \
             '{tag_name:$tag, name:$name, body:$body, draft:false, prerelease:false}')
-          curl --silent --show-error \
+          HTTP=$(curl -s -o /tmp/release_resp -w '%{http_code}' \
             -H "Authorization: token $TOKEN" \
             -H "Content-Type: application/json" \
             -X POST -d "$PAYLOAD" \
-            "$API/repos/$REPO/releases" >/dev/null || true
+            "$API/repos/$REPO/releases")
+          case "$HTTP" in
+            201)
+              echo "Release created ($HTTP)."
+              ;;
+            409)
+              echo "Release already exists for $TAG ($HTTP) — reusing."
+              ;;
+            *)
+              echo "::error::Release create failed: HTTP $HTTP"
+              cat /tmp/release_resp || true
+              exit 1
+              ;;
+          esac
           RELEASE_ID=$(curl --fail --silent \
             -H "Authorization: token $TOKEN" \
             "$API/repos/$REPO/releases/tags/$TAG" | jq -r .id)

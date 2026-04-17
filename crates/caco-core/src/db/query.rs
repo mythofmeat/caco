@@ -166,8 +166,18 @@ pub fn parse_query(query: &str) -> ParsedQuery {
 }
 
 /// Serialize a single term back to its beets-style string form.
+///
+/// Quoting invariant: the parser in `parse_query` tokenises on whitespace
+/// (`shell_split`) and splits OR-groups on `OR_SEPARATOR` (which requires
+/// surrounding whitespace), and it strips a leading `^`/`-` from free-text
+/// tokens to represent negation. So a value is round-trip-safe without
+/// quoting iff it contains no whitespace and does not start with `^`/`-`.
+/// Anything else must be quoted to prevent the re-parse from splitting,
+/// misreading negation, or treating a value prefix as a field separator.
 fn term_to_string(term: &QueryTerm) -> String {
-    let needs_quote = term.value.chars().any(char::is_whitespace);
+    let starts_with_neg =
+        term.field.is_none() && (term.value.starts_with('^') || term.value.starts_with('-'));
+    let needs_quote = term.value.chars().any(char::is_whitespace) || starts_with_neg;
     let value = if needs_quote {
         format!("\"{}\"", term.value)
     } else {

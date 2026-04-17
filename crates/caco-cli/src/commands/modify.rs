@@ -111,6 +111,17 @@ pub fn run(conn: &Connection, args: &ModifyArgs) -> Result<(), String> {
         return Err("No modifications specified.".to_string());
     }
 
+    // --completion / --beaten only have meaning with --stats-file; without
+    // it they would be silently ignored, which hides a typo from the user.
+    if args.stats_file.is_none() {
+        if args.completion.is_some() {
+            return Err("--completion requires --stats-file".to_string());
+        }
+        if args.beaten.is_some() {
+            return Err("--beaten requires --stats-file".to_string());
+        }
+    }
+
     let wads = resolve::resolve_wads(conn, &query_terms, ResolveMode::Multiple, args.yes, false)?;
 
     if args.dry_run {
@@ -170,6 +181,29 @@ fn apply_modifications(
     if has_beaten_action {
         update = update.no_completion();
     }
+
+    // Cache valid completion IDs once per WAD so repeated
+    // `completion.<id>.*=…` actions don't re-query the DB for each term.
+    let mut valid_completion_ids: Option<Vec<i64>> = None;
+    let mut ensure_completion = |conn: &Connection, id: i64| -> Result<(), String> {
+        if valid_completion_ids.is_none() {
+            valid_completion_ids = Some(
+                db::get_wad_completions(conn, wad.id)
+                    .map_err(|e| e.to_string())?
+                    .into_iter()
+                    .map(|c| c.id)
+                    .collect(),
+            );
+        }
+        if valid_completion_ids.as_ref().unwrap().contains(&id) {
+            Ok(())
+        } else {
+            Err(format!(
+                "completion id {id} does not belong to WAD {}",
+                wad.id
+            ))
+        }
+    };
 
     for action in actions {
         match action {
@@ -257,7 +291,7 @@ fn apply_modifications(
                 any_change = true;
             }
             ModifyAction::CompletionEditNotes { id, value } => {
-                ensure_completion_belongs(conn, *id, wad)?;
+                ensure_completion(conn, *id)?;
                 let updated =
                     db::update_wad_completion(conn, *id, None, Some(value.as_deref()), None)
                         .map_err(|e| e.to_string())?;
@@ -266,7 +300,7 @@ fn apply_modifications(
                 }
             }
             ModifyAction::CompletionEditDate { id, value } => {
-                ensure_completion_belongs(conn, *id, wad)?;
+                ensure_completion(conn, *id)?;
                 let updated = db::update_wad_completion(conn, *id, None, None, Some(value))
                     .map_err(|e| e.to_string())?;
                 if updated {
@@ -274,7 +308,7 @@ fn apply_modifications(
                 }
             }
             ModifyAction::CompletionEditStats { id, path } => {
-                ensure_completion_belongs(conn, *id, wad)?;
+                ensure_completion(conn, *id)?;
                 let snapshot_owned = match path {
                     Some(p) => {
                         let stats = wad_stats::parse_stats_file(Path::new(p))
@@ -472,23 +506,6 @@ fn apply_field_update(
             Ok(update.set_text(col, Some(json)))
         }
         _ => Ok(update.set_text(col, Some(value.to_string()))),
-    }
-}
-
-/// Ensure completion `id` belongs to `wad`; error out otherwise.
-fn ensure_completion_belongs(
-    conn: &Connection,
-    completion_id: i64,
-    wad: &WadRecord,
-) -> Result<(), String> {
-    let completions = db::get_wad_completions(conn, wad.id).map_err(|e| e.to_string())?;
-    if completions.iter().any(|c| c.id == completion_id) {
-        Ok(())
-    } else {
-        Err(format!(
-            "completion id {completion_id} does not belong to WAD {}",
-            wad.id
-        ))
     }
 }
 

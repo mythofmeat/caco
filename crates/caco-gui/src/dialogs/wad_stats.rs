@@ -36,9 +36,12 @@ struct Entry {
     stats: Option<StatsData>,
 }
 
-/// Buffer used while inline-editing a completion's notes + date.
+/// Buffer used while inline-editing (or drafting) a completion's notes + date.
+///
+/// `completion_id == None` is a draft for a not-yet-inserted completion —
+/// Cancel discards it without touching the DB, Save performs the insert.
 struct EditBuffer {
-    completion_id: i64,
+    completion_id: Option<i64>,
     date: String,
     notes: String,
 }
@@ -253,7 +256,7 @@ impl WadStatsDialogState {
 
         ui.horizontal(|ui| {
             if ui.button("+ Add beaten").clicked() {
-                self.handle_add(conn, result);
+                self.handle_add();
             }
             if ui
                 .add_enabled(is_completion && !editing, egui::Button::new("Edit"))
@@ -378,12 +381,34 @@ impl WadStatsDialogState {
             return;
         }
 
+        // During an add-draft, suppress the stats table and per-entry
+        // actions — no entry has been created yet, so showing the
+        // previously-selected entry's stats would be misleading.
+        let is_draft = matches!(
+            &self.edit,
+            Some(EditBuffer {
+                completion_id: None,
+                ..
+            })
+        );
+
         if self.edit.is_some() {
             self.render_edit_panel(ui, conn, result);
             ui.add_space(8.0);
         } else {
             self.render_selected_header(ui);
             ui.add_space(6.0);
+        }
+
+        if is_draft {
+            ui.colored_label(
+                theme::TEXT_MUTED,
+                egui::RichText::new(
+                    "Stats can be attached after saving — use Import for the new entry.",
+                )
+                .small(),
+            );
+            return;
         }
 
         self.render_stats_table(ui);
@@ -485,6 +510,11 @@ impl WadStatsDialogState {
         let Some(buf) = self.edit.as_mut() else {
             return;
         };
+        let header = if buf.completion_id.is_some() {
+            "Editing completion"
+        } else {
+            "Adding completion"
+        };
         egui::Frame::new()
             .fill(theme::BG_MEDIUM)
             .stroke(egui::Stroke::new(1.0, theme::TEXT_ACCENT))
@@ -493,7 +523,7 @@ impl WadStatsDialogState {
             .show(ui, |ui| {
                 ui.colored_label(
                     theme::TEXT_ACCENT,
-                    egui::RichText::new("Editing completion").small().strong(),
+                    egui::RichText::new(header).small().strong(),
                 );
                 ui.add_space(4.0);
                 egui::Grid::new("wad_stats_edit_grid")
@@ -628,7 +658,7 @@ impl WadStatsDialogState {
         };
         if let EntryKind::Completion(id) = entry.kind {
             self.edit = Some(EditBuffer {
-                completion_id: id,
+                completion_id: Some(id),
                 date: entry.raw_date.clone(),
                 notes: entry.notes.clone(),
             });
@@ -637,24 +667,16 @@ impl WadStatsDialogState {
         }
     }
 
-    fn handle_add(&mut self, conn: &Connection, result: &mut WadStatsResult) {
-        let now = Utc::now().to_rfc3339();
-        match caco_core::db::sessions::add_wad_completion(conn, self.wad_id, None, None, Some(&now))
-        {
-            Ok(new_id) => {
-                self.reload_entries(conn);
-                if let Some(idx) = self
-                    .entries
-                    .iter()
-                    .position(|e| matches!(e.kind, EntryKind::Completion(id) if id == new_id))
-                {
-                    self.selected_index = idx;
-                }
-                self.begin_edit();
-                *result = WadStatsResult::Modified;
-            }
-            Err(e) => self.error = Some(format!("Add failed: {e}")),
-        }
+    /// Open an edit draft for a brand-new completion. No DB write happens
+    /// until Save; Cancel discards without side effects.
+    fn handle_add(&mut self) {
+        self.edit = Some(EditBuffer {
+            completion_id: None,
+            date: Utc::now().to_rfc3339(),
+            notes: String::new(),
+        });
+        self.confirm_delete = None;
+        self.error = None;
     }
 
     fn handle_save(&mut self, conn: &Connection, result: &mut WadStatsResult) {
@@ -672,20 +694,45 @@ impl WadStatsDialogState {
         } else {
             Some(buf.notes.as_str())
         };
-        match caco_core::db::sessions::update_wad_completion(
-            conn,
-            buf.completion_id,
-            None,
-            Some(notes_opt),
-            Some(date),
-        ) {
-            Ok(_) => {
-                self.reload_entries(conn);
-                *result = WadStatsResult::Modified;
-            }
-            Err(e) => {
-                self.error = Some(format!("Save failed: {e}"));
-                self.edit = Some(buf);
+        match buf.completion_id {
+            Some(id) => match caco_core::db::sessions::update_wad_completion(
+                conn,
+                id,
+                None,
+                Some(notes_opt),
+                Some(date),
+            ) {
+                Ok(_) => {
+                    self.reload_entries(conn);
+                    *result = WadStatsResult::Modified;
+                }
+                Err(e) => {
+                    self.error = Some(format!("Save failed: {e}"));
+                    self.edit = Some(buf);
+                }
+            },
+            None => {
+                match caco_core::db::sessions::add_wad_completion(
+                    conn,
+                    self.wad_id,
+                    None,
+                    notes_opt,
+                    Some(date),
+                ) {
+                    Ok(new_id) => {
+                        self.reload_entries(conn);
+                        if let Some(idx) = self.entries.iter().position(
+                            |e| matches!(e.kind, EntryKind::Completion(id) if id == new_id),
+                        ) {
+                            self.selected_index = idx;
+                        }
+                        *result = WadStatsResult::Modified;
+                    }
+                    Err(e) => {
+                        self.error = Some(format!("Add failed: {e}"));
+                        self.edit = Some(buf);
+                    }
+                }
             }
         }
     }

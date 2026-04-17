@@ -694,10 +694,10 @@ fn read_stats_snapshot(wad_id: i64) -> Option<String> {
 /// from `unplayed` → `in-progress`). Delegates to [`wad_stats::compute_stats_delta`]
 /// so this predicate stays consistent with the rest of the session-analysis
 /// pipeline — a session counts as progress iff at least one map was actually
-/// played this session (exit count increased, or a new map appears with
-/// `played()` true, or a levelstat entry exists). A bare byte-level diff on
-/// the serialised JSON is not enough: the stats file can be touched without
-/// an exit.
+/// exited this session (stats.txt `total_exits` increased or appeared > 0
+/// on a new entry, or a levelstat.txt line exists — every levelstat line is
+/// written on exit). A bare byte-level diff on the serialised JSON is not
+/// enough: the stats file can be touched without an exit.
 fn session_made_progress(stats_before: Option<&str>, stats_after: Option<&str>) -> bool {
     let Some(after_json) = stats_after else {
         return false;
