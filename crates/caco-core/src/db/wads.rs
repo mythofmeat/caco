@@ -326,6 +326,21 @@ fn update_wad_body(
         ));
     }
 
+    // Only auto-record a completion when status actually transitions *into*
+    // Completed. An idempotent rewrite of an already-completed WAD (e.g. the
+    // GUI edit dialog saving with every field, including unchanged status)
+    // must not spawn duplicate `wad_completions` rows.
+    let is_transition_to_completed = if recording_completion {
+        let prev: Option<String> = tx
+            .query_row("SELECT status FROM wads WHERE id = ?1", [wad_id], |row| {
+                row.get(0)
+            })
+            .ok();
+        prev.as_deref() != Some(Status::Completed.as_str())
+    } else {
+        false
+    };
+
     // Build SET clause
     let mut set_parts = Vec::new();
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -355,7 +370,7 @@ fn update_wad_body(
     let count = tx.execute(&sql, param_refs.as_slice())?;
     let updated = count > 0;
 
-    if updated && recording_completion {
+    if updated && is_transition_to_completed {
         let snapshot: Option<String> = tx
             .query_row(
                 "SELECT stats_snapshot FROM wads WHERE id = ?1",
@@ -586,6 +601,37 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn test_update_already_completed_does_not_duplicate_completion() {
+        // Regression: saving an unchanged status (e.g. the GUI edit dialog
+        // rewriting every field when the user tweaks the rating on an
+        // already-completed WAD) must not spawn a duplicate completion row.
+        let conn = setup();
+        let id = add_test_wad(&conn);
+
+        // First transition into Completed — one completion expected.
+        update_wad(&conn, id, &WadUpdate::new().set_status(Status::Completed)).unwrap();
+
+        // Now rewrite status=completed alongside an unrelated field. This is
+        // exactly what the GUI save does when the WAD is already completed.
+        let update = WadUpdate::new()
+            .set_status(Status::Completed)
+            .set_int("rating", Some(5));
+        update_wad(&conn, id, &update).unwrap();
+
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM wad_completions WHERE wad_id = ?1",
+                [id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            count, 1,
+            "idempotent status rewrite must not add completion"
+        );
     }
 
     #[test]
