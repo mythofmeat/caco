@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Mockup A — Two-pane</title>
+<link rel="stylesheet" href="_shared.css">
+<style>
+  .two-pane {
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    gap: 12px;
+    min-height: 460px;
+  }
+  .left-pane { display: flex; flex-direction: column; gap: 10px; }
+  .right-pane { display: flex; flex-direction: column; gap: 8px; }
+  .stats-card {
+    background: var(--bg-medium);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex: 1;
+  }
+  .selected-header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+</style>
+</head>
+<body class="page">
+
+<nav class="page-nav">
+  <a href="index.html">Overview</a>
+  <a href="a-two-pane.html" class="current">A · Two-pane</a>
+  <a href="b-dropdown-action-row.html">B · Dropdown + actions</a>
+  <a href="c-tabs.html">C · Tabs</a>
+</nav>
+
+<div class="dialog">
+  <div class="dialog-titlebar">
+    <span>Map Stats &mdash; Dark Tartarus</span>
+    <span class="x">&times;</span>
+  </div>
+
+  <div class="dialog-body">
+    <div class="two-pane">
+
+      <!-- LEFT: completions list -->
+      <div class="left-pane">
+        <div class="section-label">Completions · 4</div>
+
+        <div class="side-list">
+          <div class="item live">
+            <span class="date">Current (live)</span>
+            <div class="meta">
+              <span class="pill live">snapshot</span>
+              <span class="label-muted">levelstat.txt</span>
+            </div>
+          </div>
+
+          <div class="item selected">
+            <span class="date">2026-04-15  15:42</span>
+            <span class="note">"pacifist run"</span>
+            <div class="meta">
+              <span class="pill accent">● stats</span>
+            </div>
+          </div>
+
+          <div class="item">
+            <span class="date">2026-03-02  20:11</span>
+            <span class="note">—</span>
+            <div class="meta">
+              <span class="pill">● stats</span>
+            </div>
+          </div>
+
+          <div class="item">
+            <span class="date">2025-12-11  02:04</span>
+            <span class="note">"blind first run"</span>
+            <div class="meta">
+              <span class="pill dot"><span class="dot-off">·</span> no stats</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="row">
+          <button class="btn primary">+ Add beaten</button>
+          <button class="btn">Edit</button>
+          <button class="btn danger">Delete</button>
+        </div>
+        <div class="caption">Actions target the selected entry.</div>
+      </div>
+
+      <!-- RIGHT: selected entry's stats -->
+      <div class="right-pane">
+        <div class="selected-header">
+          <span class="label-strong">2026-04-15  15:42</span>
+          <span class="label-muted">· "pacifist run"</span>
+          <span class="spacer"></span>
+          <span class="label-muted">levelstat.txt</span>
+        </div>
+
+        <div class="stats-card">
+          <table class="data">
+            <thead>
+              <tr>
+                <th>Map</th>
+                <th>Skill</th>
+                <th class="num">Time</th>
+                <th class="num">Kills</th>
+                <th class="num">Items</th>
+                <th class="num">Secrets</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>MAP01</td><td>UV</td><td class="num">1:45</td><td class="num">45/50</td><td class="num">12/15</td><td class="num">3/5</td></tr>
+              <tr><td>MAP02</td><td>UV</td><td class="num">3:21</td><td class="num">60/62</td><td class="num">20/22</td><td class="num">2/4</td></tr>
+              <tr><td>MAP03</td><td>UV</td><td class="num">4:58</td><td class="num">88/92</td><td class="num">14/18</td><td class="num">1/3</td></tr>
+              <tr><td>MAP04</td><td>UV</td><td class="num">6:04</td><td class="num">124/130</td><td class="num">31/34</td><td class="num">4/6</td></tr>
+              <tr><td>MAP05</td><td>UV</td><td class="num">2:18</td><td class="num">50/50</td><td class="num">9/11</td><td class="num">2/2</td></tr>
+            </tbody>
+          </table>
+
+          <div class="row">
+            <span class="summary">Format: levelstat.txt · Maps played: 5 · Total time: 18:26</span>
+          </div>
+        </div>
+
+        <div class="row">
+          <span class="section-label" style="margin:0;">Stats for selected</span>
+          <button class="btn">Import…</button>
+          <button class="btn">Export…</button>
+          <button class="btn danger ghost">Clear</button>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="footer">
+      <button class="btn">Close</button>
+    </div>
+  </div>
+</div>
+
+<div style="max-width: 900px; color: var(--text-secondary); font-size: 12.5px; line-height: 1.55;">
+  <div class="section-label">Notes</div>
+  <ul>
+    <li>Left list is always visible; clicking a row selects it and updates the right pane.</li>
+    <li>The "Current (live)" row reflects <code>wad.stats_snapshot</code> (read-only — it's the snapshot from the sourceport's stats file, not a completion record).</li>
+    <li><strong>+ Add beaten</strong> inserts a new <code>wad_completions</code> row and opens the edit panel for date/notes.</li>
+    <li><strong>Edit</strong> swaps the row into inline edit mode (date picker + notes field + Save/Cancel).</li>
+    <li><strong>Delete</strong> requires confirmation; the live row isn't deletable.</li>
+    <li>Import/Export/Clear act on the selected completion's <code>stats_snapshot</code>. For the live row, Import updates <code>wad.stats_snapshot</code>.</li>
+  </ul>
+</div>
+
+</body>
+</html>

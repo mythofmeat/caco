@@ -14,22 +14,27 @@ use caco_core::wad_stats;
 #[derive(Args)]
 #[command(after_long_help = "\
 ACTIONS:
-  field=value          Set a field (title, author, year, status, iwad, ...)
-  tag=value            Add a tag
-  !tag                 Remove all tags
-  !tag:pattern         Remove matching tags (glob supported)
-  !field               Clear a field
-  beaten+[N]           Add N completions (default 1)
-  beaten-N             Remove last N completions
-  beaten-TIMESTAMP     Remove completion by date
-  beaten=N             Set completion count
+  field=value                      Set a field (title, author, year, status, iwad, ...)
+  tag=value                        Add a tag
+  !tag                             Remove all tags
+  !tag:pattern                     Remove matching tags (glob supported)
+  !field                           Clear a field
+  beaten+[N]                       Add N completions (default 1)
+  beaten-N                         Remove last N completions
+  beaten-TIMESTAMP                 Remove completion by date
+  beaten=N                         Set completion count
+  completion.<id>.notes=<value>    Edit completion notes (empty clears)
+  completion.<id>.date=<value>     Edit completion date
+  completion.<id>.stats=<path>     Attach stats file to completion (empty clears)
 
 EXAMPLES:
   caco modify id:5 status=in-progress
   caco modify id:5 tag=slaughter tag=hard
   caco modify id:5 !tag:slaughter
   caco modify id:5 !tag
-  caco modify id:5 beaten+")]
+  caco modify id:5 beaten+
+  caco modify id:5 completion.42.notes=\"pacifist run\"
+  caco modify id:5 completion.42.stats=stats.txt")]
 pub struct ModifyArgs {
     /// Query + field=value actions
     args: Vec<String>,
@@ -46,9 +51,13 @@ pub struct ModifyArgs {
     #[arg(short = 's', long = "stats-file")]
     stats_file: Option<String>,
 
-    /// Target completion for stats
+    /// Target completion by timestamp prefix (for --stats-file)
     #[arg(short = 'b', long)]
     beaten: Option<String>,
+
+    /// Target completion by id (for --stats-file; overrides --beaten)
+    #[arg(long)]
+    completion: Option<i64>,
 
     /// Link local file to cache
     #[arg(long)]
@@ -247,6 +256,48 @@ fn apply_modifications(
                 db::set_wad_completion_count(conn, wad.id, *count).map_err(|e| e.to_string())?;
                 any_change = true;
             }
+            ModifyAction::CompletionEditNotes { id, value } => {
+                ensure_completion_belongs(conn, *id, wad)?;
+                let updated =
+                    db::update_wad_completion(conn, *id, None, Some(value.as_deref()), None)
+                        .map_err(|e| e.to_string())?;
+                if updated {
+                    any_change = true;
+                }
+            }
+            ModifyAction::CompletionEditDate { id, value } => {
+                ensure_completion_belongs(conn, *id, wad)?;
+                let updated = db::update_wad_completion(conn, *id, None, None, Some(value))
+                    .map_err(|e| e.to_string())?;
+                if updated {
+                    any_change = true;
+                }
+            }
+            ModifyAction::CompletionEditStats { id, path } => {
+                ensure_completion_belongs(conn, *id, wad)?;
+                let snapshot_owned = match path {
+                    Some(p) => {
+                        let stats = wad_stats::parse_stats_file(Path::new(p))
+                            .map_err(|e| format!("Failed to parse stats file '{p}': {e}"))?;
+                        Some(
+                            wad_stats::stats_to_json(&stats)
+                                .map_err(|e| format!("Failed to serialize stats: {e}"))?,
+                        )
+                    }
+                    None => None,
+                };
+                let updated = db::update_wad_completion(
+                    conn,
+                    *id,
+                    Some(snapshot_owned.as_deref()),
+                    None,
+                    None,
+                )
+                .map_err(|e| e.to_string())?;
+                if updated {
+                    any_change = true;
+                }
+            }
         }
     }
 
@@ -320,10 +371,22 @@ fn apply_modifications(
 
     // Handle standalone --stats-file (no beaten action)
     if stats_json.is_some() && !has_beaten_action {
-        if let Some(ref ts) = args.beaten {
-            // Attach to specific completion
+        let snapshot_arg = Some(stats_json.as_deref());
+        if let Some(comp_id) = args.completion {
+            // Attach to specific completion by ID
+            let updated = db::update_wad_completion(conn, comp_id, snapshot_arg, None, None)
+                .map_err(|e| e.to_string())?;
+            if !updated {
+                return Err(format!(
+                    "No completion with id {comp_id} found for WAD {}",
+                    wad.id
+                ));
+            }
+            any_change = true;
+        } else if let Some(ref ts) = args.beaten {
+            // Attach to specific completion by timestamp prefix
             if let Ok(Some(comp)) = db::find_completion_by_timestamp(conn, wad.id, ts) {
-                db::update_wad_completion(conn, comp.id, stats_json.as_deref(), None)
+                db::update_wad_completion(conn, comp.id, snapshot_arg, None, None)
                     .map_err(|e| e.to_string())?;
                 any_change = true;
             } else {
@@ -336,7 +399,7 @@ fn apply_modifications(
             // Attach to most recent completion
             let completions = db::get_wad_completions(conn, wad.id).map_err(|e| e.to_string())?;
             if let Some(comp) = completions.first() {
-                db::update_wad_completion(conn, comp.id, stats_json.as_deref(), None)
+                db::update_wad_completion(conn, comp.id, snapshot_arg, None, None)
                     .map_err(|e| e.to_string())?;
                 any_change = true;
             } else {
@@ -409,6 +472,23 @@ fn apply_field_update(
             Ok(update.set_text(col, Some(json)))
         }
         _ => Ok(update.set_text(col, Some(value.to_string()))),
+    }
+}
+
+/// Ensure completion `id` belongs to `wad`; error out otherwise.
+fn ensure_completion_belongs(
+    conn: &Connection,
+    completion_id: i64,
+    wad: &WadRecord,
+) -> Result<(), String> {
+    let completions = db::get_wad_completions(conn, wad.id).map_err(|e| e.to_string())?;
+    if completions.iter().any(|c| c.id == completion_id) {
+        Ok(())
+    } else {
+        Err(format!(
+            "completion id {completion_id} does not belong to WAD {}",
+            wad.id
+        ))
     }
 }
 

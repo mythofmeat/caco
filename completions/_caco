@@ -98,6 +98,7 @@ _caco_info() {
     _arguments \
         '(-o --output)'{-o,--output}'[Output format]:format:(json plain)' \
         '--levelstats[Show per-map statistics]' \
+        '--completions[List completion records with IDs]' \
         '-b[Target completion by timestamp]:timestamp:' \
         '--live[Show only live stats]' \
         '--plain[TSV output for stats]' \
@@ -114,6 +115,7 @@ _caco_modify() {
         '(-s --stats-file)'{-s,--stats-file}'[Stats file for beaten+N or attach]:file:_files' \
         '--date[Backdate completion (ISO)]:date:' \
         '-b[Target completion by timestamp]:timestamp:' \
+        '--completion[Target completion by ID]:id:' \
         '--help[Show help]' \
         '*:query:__caco_wads_query_modify'
 }

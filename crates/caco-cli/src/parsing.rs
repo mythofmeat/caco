@@ -99,16 +99,50 @@ pub const MODIFY_FIELDS: &[&str] = &[
 /// A parsed modify action from CLI arguments.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ModifyAction {
-    SetField { field: String, value: String },
-    ClearField { field: String },
-    AddTag { tag: String },
+    SetField {
+        field: String,
+        value: String,
+    },
+    ClearField {
+        field: String,
+    },
+    AddTag {
+        tag: String,
+    },
     RemoveAllTags,
-    RemoveTag { pattern: String },
-    BeatenAdd { count: i64 },
-    BeatenRemove { count: i64 },
-    BeatenRemoveTimestamp { timestamp: String },
-    BeatenSet { count: i64 },
+    RemoveTag {
+        pattern: String,
+    },
+    BeatenAdd {
+        count: i64,
+    },
+    BeatenRemove {
+        count: i64,
+    },
+    BeatenRemoveTimestamp {
+        timestamp: String,
+    },
+    BeatenSet {
+        count: i64,
+    },
+    CompletionEditNotes {
+        id: i64,
+        value: Option<String>,
+    },
+    CompletionEditDate {
+        id: i64,
+        value: String,
+    },
+    /// Attach or clear a completion's stats snapshot. `path` is `None` to clear,
+    /// or a filesystem path to parse and attach.
+    CompletionEditStats {
+        id: i64,
+        path: Option<String>,
+    },
 }
+
+/// Valid per-completion field names used with `completion.<id>.<field>=<value>`.
+pub const COMPLETION_FIELDS: &[&str] = &["notes", "date", "stats"];
 
 /// Result of parsing modify arguments.
 pub type ModifyParseResult = (Vec<String>, Vec<ModifyAction>, Option<(String, bool)>);
@@ -201,6 +235,51 @@ pub fn parse_modify_args(args: &[String]) -> Result<ModifyParseResult, String> {
                     field: field.to_string(),
                     value: value.to_string(),
                 });
+                continue;
+            }
+            // completion.<id>.<subfield>=<value>
+            if let Some(rest) = field.strip_prefix("completion.") {
+                let (id_str, subfield) = rest.split_once('.').ok_or_else(|| {
+                    format!("invalid completion action: expected completion.<id>.<field>=<value>, got {arg}")
+                })?;
+                let id = id_str
+                    .parse::<i64>()
+                    .map_err(|_| format!("invalid completion id: {id_str}"))?;
+                match subfield {
+                    "notes" => {
+                        let value = if value.is_empty() {
+                            None
+                        } else {
+                            Some(value.to_string())
+                        };
+                        actions.push(ModifyAction::CompletionEditNotes { id, value });
+                    }
+                    "date" => {
+                        if value.is_empty() {
+                            return Err(format!(
+                                "completion.{id}.date cannot be cleared (date is required)"
+                            ));
+                        }
+                        actions.push(ModifyAction::CompletionEditDate {
+                            id,
+                            value: value.to_string(),
+                        });
+                    }
+                    "stats" => {
+                        let path = if value.is_empty() {
+                            None
+                        } else {
+                            Some(value.to_string())
+                        };
+                        actions.push(ModifyAction::CompletionEditStats { id, path });
+                    }
+                    other => {
+                        return Err(format!(
+                            "unknown completion subfield '{other}' (expected one of {})",
+                            COMPLETION_FIELDS.join(", ")
+                        ));
+                    }
+                }
                 continue;
             }
         }
@@ -326,6 +405,62 @@ mod tests {
                 timestamp: "2024-06-15".to_string(),
             }]
         );
+    }
+
+    #[test]
+    fn test_parse_modify_completion_ops() {
+        let args: Vec<String> = vec!["id:1".into(), "completion.42.notes=foo bar".into()];
+        let (_, actions, _) = parse_modify_args(&args).unwrap();
+        assert_eq!(
+            actions,
+            vec![ModifyAction::CompletionEditNotes {
+                id: 42,
+                value: Some("foo bar".to_string()),
+            }]
+        );
+
+        let args: Vec<String> = vec!["id:1".into(), "completion.42.notes=".into()];
+        let (_, actions, _) = parse_modify_args(&args).unwrap();
+        assert_eq!(
+            actions,
+            vec![ModifyAction::CompletionEditNotes {
+                id: 42,
+                value: None,
+            }]
+        );
+
+        let args: Vec<String> = vec!["id:1".into(), "completion.7.date=2026-01-02".into()];
+        let (_, actions, _) = parse_modify_args(&args).unwrap();
+        assert_eq!(
+            actions,
+            vec![ModifyAction::CompletionEditDate {
+                id: 7,
+                value: "2026-01-02".to_string(),
+            }]
+        );
+
+        let args: Vec<String> = vec!["id:1".into(), "completion.7.stats=/tmp/stats.txt".into()];
+        let (_, actions, _) = parse_modify_args(&args).unwrap();
+        assert_eq!(
+            actions,
+            vec![ModifyAction::CompletionEditStats {
+                id: 7,
+                path: Some("/tmp/stats.txt".to_string()),
+            }]
+        );
+
+        let args: Vec<String> = vec!["id:1".into(), "completion.7.stats=".into()];
+        let (_, actions, _) = parse_modify_args(&args).unwrap();
+        assert_eq!(
+            actions,
+            vec![ModifyAction::CompletionEditStats { id: 7, path: None }]
+        );
+
+        let args: Vec<String> = vec!["id:1".into(), "completion.abc.notes=x".into()];
+        assert!(parse_modify_args(&args).is_err());
+
+        let args: Vec<String> = vec!["id:1".into(), "completion.1.bogus=x".into()];
+        assert!(parse_modify_args(&args).is_err());
     }
 
     #[test]

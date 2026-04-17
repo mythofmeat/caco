@@ -157,8 +157,8 @@ egui = "0.31"
 
 ```
 caco ls [query] [--iwad|--id24] [-o plain|json]
-caco info <query> [--levelstats] [-o plain|json]
-caco modify <query> [field=value...] [beaten±N] [--add-file|--remove-file]
+caco info <query> [--levelstats|--completions] [-o plain|json]
+caco modify <query> [field=value...] [beaten±N] [completion.<id>.notes|date|stats=value] [--add-file|--remove-file] [--stats-file FILE --completion ID]
 caco import <source> [--idgames|--doomwiki|--doomworld|--url|--local]
 caco play <query> [-p PORT] [-c COMPLEVEL] [-C CONFIG] [--iwad] [--record]
 caco trash <query> [--restore|--list] [--iwad FAMILY|--id24 NAME]

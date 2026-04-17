@@ -411,6 +411,81 @@ fn render_wad_info_json(
 }
 
 // ---------------------------------------------------------------------------
+// Completion list rendering
+// ---------------------------------------------------------------------------
+
+pub fn render_completion_list(
+    wad: &WadRecord,
+    completions: &[CompletionRecord],
+    format: OutputFormat,
+) {
+    match format {
+        OutputFormat::Table => {
+            println!("Completions for: {} (ID: {})", wad.title, wad.id);
+            if completions.is_empty() {
+                println!("  (none)");
+                return;
+            }
+            let mut table = Table::new();
+            table.load_preset(presets::NOTHING).set_header(vec![
+                Cell::new("ID").fg(Color::DarkGrey),
+                Cell::new("Date").fg(Color::DarkGrey),
+                Cell::new("Stats").fg(Color::DarkGrey),
+                Cell::new("Notes").fg(Color::DarkGrey),
+            ]);
+            for comp in completions {
+                let has_stats = if comp.stats_snapshot.is_some() {
+                    "yes"
+                } else {
+                    "--"
+                };
+                table.add_row(vec![
+                    Cell::new(comp.id).set_alignment(CellAlignment::Right),
+                    Cell::new(&comp.completed_at),
+                    Cell::new(has_stats),
+                    Cell::new(comp.notes.as_deref().unwrap_or("")),
+                ]);
+            }
+            println!("{table}");
+        }
+        OutputFormat::Plain => {
+            println!("ID\tDate\tHasStats\tNotes");
+            for comp in completions {
+                let has_stats = if comp.stats_snapshot.is_some() {
+                    "1"
+                } else {
+                    "0"
+                };
+                println!(
+                    "{}\t{}\t{has_stats}\t{}",
+                    comp.id,
+                    comp.completed_at,
+                    comp.notes.as_deref().unwrap_or(""),
+                );
+            }
+        }
+        OutputFormat::Json => {
+            let items: Vec<serde_json::Value> = completions
+                .iter()
+                .map(|c| {
+                    serde_json::json!({
+                        "id": c.id,
+                        "wad_id": c.wad_id,
+                        "completed_at": c.completed_at,
+                        "has_stats": c.stats_snapshot.is_some(),
+                        "notes": c.notes,
+                    })
+                })
+                .collect();
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&items).unwrap_or_default()
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tag list rendering
 // ---------------------------------------------------------------------------
 

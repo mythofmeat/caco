@@ -1,313 +1,797 @@
+//! Map-stats & completions manager dialog.
+//!
+//! Two-pane layout: left pane lists the live snapshot + historical completions;
+//! right pane renders the selected entry's per-map stats table. Users can add,
+//! edit (notes + date), or delete completion rows, and import/export/clear the
+//! stats snapshot attached to any entry.
+
+use chrono::Utc;
 use egui_extras::{Column, TableBuilder};
 use rusqlite::Connection;
 
 use crate::theme;
 use crate::workers::{FileDialogReceiver, FileDialogRequest, spawn_file_dialog};
 
-// Use a type alias to disambiguate from db::sessions::WadStats
 type StatsData = caco_core::wad_stats::WadStats;
 
-/// A stats entry: either the current live snapshot or a historical completion.
-struct StatsEntry {
-    label: String,
-    stats: StatsData,
+/// A stats-carrying entry shown in the left pane.
+#[derive(Clone)]
+enum EntryKind {
+    /// The live `wad.stats_snapshot`; not tied to a completion row.
+    Live,
+    /// A historical `wad_completions` row.
+    Completion(i64),
 }
 
-/// State for the WAD map stats dialog.
+#[derive(Clone)]
+struct Entry {
+    kind: EntryKind,
+    /// Primary label ("Current (live)" or formatted date).
+    label: String,
+    /// For completions: raw stored `completed_at`. For live: empty.
+    raw_date: String,
+    /// For completions: notes. For live: empty.
+    notes: String,
+    /// Parsed stats (if any).
+    stats: Option<StatsData>,
+}
+
+/// Buffer used while inline-editing a completion's notes + date.
+struct EditBuffer {
+    completion_id: i64,
+    date: String,
+    notes: String,
+}
+
+/// State for the WAD stats dialog.
 pub struct WadStatsDialogState {
-    wad_title: String,
     wad_id: i64,
-    entries: Vec<StatsEntry>,
+    wad_title: String,
+    entries: Vec<Entry>,
     selected_index: usize,
-    /// Open-picker in flight for the Import button.
-    pending_import: Option<FileDialogReceiver>,
-    /// Save-picker in flight for the Export button, along with the stats
-    /// snapshot captured when the user clicked (so later UI edits don't
-    /// change what gets written).
+    /// Inline editor, if active.
+    edit: Option<EditBuffer>,
+    /// Second click of the Delete button triggers deletion; first click arms
+    /// it. Holds the completion id awaiting confirmation.
+    confirm_delete: Option<i64>,
+    pending_import: Option<(PendingImportTarget, FileDialogReceiver)>,
     pending_export: Option<(StatsData, FileDialogReceiver)>,
+    error: Option<String>,
+}
+
+/// Which entry a pending file-picker import should apply to. Held outside the
+/// receiver so the target can't drift if the user changes the selection while
+/// the picker is open.
+#[derive(Clone, Copy)]
+enum PendingImportTarget {
+    Live,
+    Completion(i64),
 }
 
 /// Result of showing the WAD stats dialog.
 pub enum WadStatsResult {
     Open,
     Closed,
-    /// Stats were imported — caller should reload
+    /// A DB write happened — caller should reload library data. The dialog
+    /// stays open; users typically want to keep managing entries.
     Modified,
 }
 
 impl WadStatsDialogState {
-    /// Create a new WAD stats dialog, loading stats from DB.
     pub fn new(conn: &Connection, wad_id: i64) -> Option<Self> {
         let wad = caco_core::db::wads::get_wad(conn, wad_id, false).ok()??;
+        let mut state = Self {
+            wad_id,
+            wad_title: wad.title.clone(),
+            entries: Vec::new(),
+            selected_index: 0,
+            edit: None,
+            confirm_delete: None,
+            pending_import: None,
+            pending_export: None,
+            error: None,
+        };
+        state.reload_entries(conn);
+        Some(state)
+    }
 
-        let mut entries = Vec::new();
+    /// Rebuild `entries` from DB. Keeps selection on the same entry where
+    /// possible (live stays live; completions match by id).
+    fn reload_entries(&mut self, conn: &Connection) {
+        let prev_key = self
+            .entries
+            .get(self.selected_index)
+            .map(|e| match &e.kind {
+                EntryKind::Live => (true, 0i64),
+                EntryKind::Completion(id) => (false, *id),
+            });
 
-        // Current (live) stats from wad.stats_snapshot
-        if let Some(ref snapshot_json) = wad.stats_snapshot
-            && let Ok(stats) = caco_core::wad_stats::stats_from_json(snapshot_json)
-        {
-            entries.push(StatsEntry {
+        self.entries.clear();
+
+        if let Ok(Some(wad)) = caco_core::db::wads::get_wad(conn, self.wad_id, false) {
+            let stats = wad
+                .stats_snapshot
+                .as_deref()
+                .and_then(|s| caco_core::wad_stats::stats_from_json(s).ok());
+            self.entries.push(Entry {
+                kind: EntryKind::Live,
                 label: "Current (live)".to_string(),
+                raw_date: String::new(),
+                notes: String::new(),
                 stats,
             });
         }
 
-        // Historical completions
-        if let Ok(completions) = caco_core::db::sessions::get_wad_completions(conn, wad_id) {
+        if let Ok(completions) = caco_core::db::sessions::get_wad_completions(conn, self.wad_id) {
             for comp in completions {
-                if let Some(ref snapshot_json) = comp.stats_snapshot
-                    && let Ok(stats) = caco_core::wad_stats::stats_from_json(snapshot_json)
-                {
-                    let date = comp.completed_at.get(..10).unwrap_or(&comp.completed_at);
-                    entries.push(StatsEntry {
-                        label: format!("Completion {date}"),
-                        stats,
-                    });
-                }
+                let stats = comp
+                    .stats_snapshot
+                    .as_deref()
+                    .and_then(|s| caco_core::wad_stats::stats_from_json(s).ok());
+                let date_short = comp
+                    .completed_at
+                    .get(..10)
+                    .unwrap_or(&comp.completed_at)
+                    .to_string();
+                self.entries.push(Entry {
+                    kind: EntryKind::Completion(comp.id),
+                    label: format!("Completion {date_short}"),
+                    raw_date: comp.completed_at,
+                    notes: comp.notes.unwrap_or_default(),
+                    stats,
+                });
             }
         }
 
-        Some(Self {
-            wad_title: wad.title,
-            wad_id,
-            entries,
-            selected_index: 0,
-            pending_import: None,
-            pending_export: None,
-        })
+        self.selected_index = prev_key
+            .and_then(|(is_live, id)| {
+                self.entries.iter().position(|e| match &e.kind {
+                    EntryKind::Live => is_live,
+                    EntryKind::Completion(cid) => !is_live && *cid == id,
+                })
+            })
+            .unwrap_or(0);
     }
 
-    /// Render the WAD stats dialog. Returns the dialog result.
     pub fn render(&mut self, ctx: &egui::Context, conn: &Connection) -> WadStatsResult {
         let mut result = WadStatsResult::Open;
 
-        // Drain any in-flight pickers from prior frames.
-        if let Some(rx) = &self.pending_import
-            && let Ok(picked) = rx.try_recv()
-        {
-            self.pending_import = None;
-            if let Some(path) = picked
-                && self.import_stats_from(conn, &path)
-            {
-                result = WadStatsResult::Modified;
-            }
+        // Drain file pickers from previous frames.
+        if self.drain_import_picker(conn) {
+            result = WadStatsResult::Modified;
         }
-        if let Some((_, rx)) = &self.pending_export
-            && let Ok(picked) = rx.try_recv()
-        {
-            let (stats, _) = self.pending_export.take().unwrap();
-            if let Some(path) = picked {
-                let text = caco_core::wad_stats::format_stats(&stats);
-                let _ = std::fs::write(path, text);
-            }
-        }
+        self.drain_export_picker();
+
+        let mut close_requested = false;
 
         egui::Window::new(format!("Map Stats \u{2014} {}", self.wad_title))
             .collapsible(false)
             .resizable(true)
-            .default_size([650.0, 500.0])
+            .default_size([940.0, 540.0])
+            .min_width(780.0)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
-                if self.entries.is_empty() {
-                    ui.colored_label(theme::TEXT_SECONDARY, "No stats available");
-                    ui.add_space(8.0);
-
+                if let Some(err) = self.error.clone() {
                     ui.horizontal(|ui| {
-                        let busy = self.pending_import.is_some();
-                        if ui.add_enabled(!busy, egui::Button::new("Import")).clicked() {
-                            self.pending_import = Some(spawn_import_picker(ctx));
-                        }
-                        if ui.button("Close").clicked() {
-                            result = WadStatsResult::Closed;
+                        ui.colored_label(theme::COLOR_ERROR, &err);
+                        if ui.small_button("\u{2715}").clicked() {
+                            self.error = None;
                         }
                     });
-                    return;
+                    ui.add_space(4.0);
                 }
 
-                // Dropdown selector
-                ui.horizontal(|ui| {
-                    ui.label("View:");
-                    let current_label = self
-                        .entries
-                        .get(self.selected_index)
-                        .map(|e| e.label.as_str())
-                        .unwrap_or("\u{2014}");
-                    egui::ComboBox::from_id_salt("stats_selector")
-                        .selected_text(current_label)
-                        .show_ui(ui, |ui| {
-                            for (i, entry) in self.entries.iter().enumerate() {
-                                ui.selectable_value(&mut self.selected_index, i, &entry.label);
-                            }
-                        });
-                });
+                // Dialog-level two-pane layout.
+                let avail = ui.available_size();
+                let left_width = (avail.x * 0.36).clamp(260.0, 340.0);
 
-                ui.add_space(4.0);
+                ui.horizontal_top(|ui| {
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(left_width, avail.y - 40.0),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            self.render_left_pane(ui, conn, &mut result);
+                        },
+                    );
 
-                let stats = &self.entries[self.selected_index].stats;
-                let played = stats.played_maps();
+                    ui.separator();
 
-                // Stats table
-                let text_height = ui.text_style_height(&egui::TextStyle::Body);
-                let row_height = text_height + 6.0;
-
-                let table = TableBuilder::new(ui)
-                    .striped(true)
-                    .resizable(true)
-                    .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                    .column(Column::initial(70.0).at_least(50.0)) // Map
-                    .column(Column::initial(50.0).at_least(40.0)) // Skill
-                    .column(Column::initial(70.0).at_least(50.0)) // Time
-                    .column(Column::initial(80.0).at_least(60.0)) // Kills
-                    .column(Column::initial(80.0).at_least(60.0)) // Items
-                    .column(Column::remainder().at_least(60.0)); // Secrets
-
-                table
-                    .header(row_height + 2.0, |mut header| {
-                        for label in ["Map", "Skill", "Time", "Kills", "Items", "Secrets"] {
-                            header.col(|ui| {
-                                ui.strong(label);
-                            });
-                        }
-                    })
-                    .body(|body| {
-                        body.rows(row_height, played.len(), |mut row| {
-                            let m = played[row.index()];
-                            row.col(|ui| {
-                                ui.label(&m.lump);
-                            });
-                            row.col(|ui| {
-                                ui.label(caco_core::wad_stats::skill_name(m.best_skill));
-                            });
-                            row.col(|ui| {
-                                ui.label(format_map_time(m, &stats.format));
-                            });
-                            row.col(|ui| {
-                                ui.label(ratio(m.kills, m.total_kills));
-                            });
-                            row.col(|ui| {
-                                ui.label(ratio(m.items, m.total_items));
-                            });
-                            row.col(|ui| {
-                                ui.label(ratio(m.secrets, m.total_secrets));
-                            });
-                        });
-                    });
-
-                // Summary row
-                ui.add_space(4.0);
-                ui.separator();
-                ui.horizontal(|ui| {
-                    ui.colored_label(
-                        theme::TEXT_SECONDARY,
-                        format!(
-                            "Format: {}  |  Maps played: {}  |  Total time: {}",
-                            format_name(&stats.format),
-                            played.len(),
-                            stats.total_time_display(),
-                        ),
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(ui.available_width(), avail.y - 40.0),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            self.render_right_pane(ui, ctx, conn, &mut result);
+                        },
                     );
                 });
 
-                ui.add_space(8.0);
-
-                // Clone stats for export (avoids borrow conflict with &mut self)
-                let export_stats = stats.clone();
-
-                // Action buttons
+                ui.add_space(6.0);
+                ui.separator();
                 ui.horizontal(|ui| {
-                    let import_busy = self.pending_import.is_some();
-                    if ui
-                        .add_enabled(!import_busy, egui::Button::new("Import"))
-                        .clicked()
-                    {
-                        self.pending_import = Some(spawn_import_picker(ctx));
-                    }
-                    let export_busy = self.pending_export.is_some();
-                    if ui
-                        .add_enabled(!export_busy, egui::Button::new("Export"))
-                        .clicked()
-                    {
-                        let rx = spawn_export_picker(ctx, &export_stats);
-                        self.pending_export = Some((export_stats, rx));
-                    }
+                    ui.add_space(ui.available_width() - 80.0);
                     if ui.button("Close").clicked() {
-                        result = WadStatsResult::Closed;
+                        close_requested = true;
                     }
                 });
             });
 
-        // Escape closes
-        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        if close_requested || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             return WadStatsResult::Closed;
         }
 
         result
     }
 
-    /// Parse a stats file the user picked, write it to the DB, and refresh
-    /// in-memory entries. Returns `true` if DB state changed.
-    fn import_stats_from(&mut self, conn: &Connection, path: &std::path::Path) -> bool {
-        let stats = match caco_core::wad_stats::parse_stats_file(path) {
-            Ok(s) => s,
-            Err(_) => return false,
-        };
+    fn render_left_pane(
+        &mut self,
+        ui: &mut egui::Ui,
+        conn: &Connection,
+        result: &mut WadStatsResult,
+    ) {
+        theme::section_label(ui, &format!("Completions · {}", self.completion_count()));
 
-        let json = match caco_core::wad_stats::stats_to_json(&stats) {
-            Ok(j) => j,
-            Err(_) => return false,
-        };
-
-        // Attach to most recent completion
-        let completions =
-            caco_core::db::sessions::get_wad_completions(conn, self.wad_id).unwrap_or_default();
-
-        if let Some(latest) = completions.first() {
-            let _ =
-                caco_core::db::sessions::update_wad_completion(conn, latest.id, Some(&json), None);
-        }
-
-        // Also update the WAD's stats_snapshot
-        let update = caco_core::db::wads::WadUpdate::new().set_text("stats_snapshot", Some(json));
-        let _ = caco_core::db::wads::update_wad(conn, self.wad_id, &update);
-
-        // Rebuild entries from DB
-        self.reload_entries(conn);
-        true
-    }
-
-    /// Reload entries from the database.
-    fn reload_entries(&mut self, conn: &Connection) {
-        self.entries.clear();
-
-        if let Ok(Some(wad)) = caco_core::db::wads::get_wad(conn, self.wad_id, false)
-            && let Some(ref sj) = wad.stats_snapshot
-            && let Ok(s) = caco_core::wad_stats::stats_from_json(sj)
-        {
-            self.entries.push(StatsEntry {
-                label: "Current (live)".to_string(),
-                stats: s,
+        egui::ScrollArea::vertical()
+            .id_salt("completions_list")
+            .max_height(ui.available_height() - 96.0)
+            .show(ui, |ui| {
+                for idx in 0..self.entries.len() {
+                    self.render_entry_row(ui, idx);
+                }
             });
-        }
 
-        if let Ok(comps) = caco_core::db::sessions::get_wad_completions(conn, self.wad_id) {
-            for comp in comps {
-                if let Some(ref sj) = comp.stats_snapshot
-                    && let Ok(s) = caco_core::wad_stats::stats_from_json(sj)
-                {
-                    let d = comp.completed_at.get(..10).unwrap_or(&comp.completed_at);
-                    self.entries.push(StatsEntry {
-                        label: format!("Completion {d}"),
-                        stats: s,
-                    });
+        ui.add_space(8.0);
+
+        // Snapshot selection-dependent data up-front so the button row can
+        // freely borrow `self` mutably.
+        let (is_completion, del_id) = match self.entries.get(self.selected_index).map(|e| &e.kind) {
+            Some(EntryKind::Completion(id)) => (true, Some(*id)),
+            _ => (false, None),
+        };
+        let editing = self.edit.is_some();
+        let pending = self.confirm_delete;
+        let armed = pending.is_some() && pending == del_id;
+
+        ui.horizontal(|ui| {
+            if ui.button("+ Add beaten").clicked() {
+                self.handle_add(conn, result);
+            }
+            if ui
+                .add_enabled(is_completion && !editing, egui::Button::new("Edit"))
+                .clicked()
+            {
+                self.begin_edit();
+            }
+            let label = if armed { "Confirm?" } else { "Delete" };
+            let btn = egui::Button::new(egui::RichText::new(label).color(if armed {
+                theme::COLOR_ERROR
+            } else {
+                theme::TEXT_PRIMARY
+            }));
+            if ui.add_enabled(del_id.is_some() && !editing, btn).clicked()
+                && let Some(id) = del_id
+            {
+                if armed {
+                    self.handle_delete(conn, id, result);
+                } else {
+                    self.confirm_delete = Some(id);
                 }
             }
+        });
+        ui.colored_label(
+            theme::TEXT_MUTED,
+            egui::RichText::new("Actions target the selected entry.").small(),
+        );
+    }
+
+    fn render_entry_row(&mut self, ui: &mut egui::Ui, idx: usize) {
+        let is_selected = idx == self.selected_index;
+        let entry = self.entries[idx].clone();
+
+        let bg = if is_selected {
+            theme::BG_SELECTED
+        } else {
+            theme::BG_MEDIUM
+        };
+
+        let frame = egui::Frame::new()
+            .fill(bg)
+            .inner_margin(egui::Margin::symmetric(10, 8))
+            .corner_radius(4);
+
+        let resp = frame
+            .show(ui, |ui| {
+                ui.allocate_ui_with_layout(
+                    egui::vec2(ui.available_width(), 0.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        match &entry.kind {
+                            EntryKind::Live => {
+                                ui.colored_label(
+                                    theme::COLOR_SUCCESS,
+                                    egui::RichText::new(&entry.label).strong(),
+                                );
+                            }
+                            EntryKind::Completion(_) => {
+                                let date_display = if entry.raw_date.len() >= 16 {
+                                    &entry.raw_date[..16]
+                                } else {
+                                    &entry.raw_date
+                                };
+                                ui.label(egui::RichText::new(date_display).strong());
+                            }
+                        }
+
+                        let note_text = if entry.notes.is_empty() {
+                            "\u{2014}".to_string()
+                        } else {
+                            format!("\u{201c}{}\u{201d}", entry.notes)
+                        };
+                        if !matches!(entry.kind, EntryKind::Live) {
+                            ui.colored_label(
+                                theme::TEXT_SECONDARY,
+                                egui::RichText::new(note_text).small(),
+                            );
+                        }
+
+                        ui.horizontal(|ui| {
+                            if entry.stats.is_some() {
+                                ui.colored_label(theme::TEXT_ACCENT, "\u{25cf}");
+                                ui.colored_label(
+                                    theme::TEXT_SECONDARY,
+                                    egui::RichText::new("stats").small(),
+                                );
+                            } else {
+                                ui.colored_label(theme::TEXT_MUTED, "\u{00b7}");
+                                ui.colored_label(
+                                    theme::TEXT_MUTED,
+                                    egui::RichText::new("no stats").small(),
+                                );
+                            }
+                        });
+                    },
+                );
+            })
+            .response
+            .interact(egui::Sense::click());
+
+        if resp.clicked() && idx != self.selected_index {
+            self.selected_index = idx;
+            self.edit = None;
+            self.confirm_delete = None;
         }
 
-        self.selected_index = 0;
+        ui.add_space(4.0);
+    }
+
+    fn render_right_pane(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        conn: &Connection,
+        result: &mut WadStatsResult,
+    ) {
+        if self.entries.is_empty() {
+            ui.colored_label(
+                theme::TEXT_SECONDARY,
+                "No stats available. Use \u{201c}+ Add beaten\u{201d} to record a completion.",
+            );
+            return;
+        }
+
+        if self.edit.is_some() {
+            self.render_edit_panel(ui, conn, result);
+            ui.add_space(8.0);
+        } else {
+            self.render_selected_header(ui);
+            ui.add_space(6.0);
+        }
+
+        self.render_stats_table(ui);
+
+        ui.add_space(8.0);
+        ui.separator();
+
+        // Per-entry stats actions.
+        ui.horizontal(|ui| {
+            ui.colored_label(
+                theme::TEXT_MUTED,
+                egui::RichText::new("Stats for selected").small().strong(),
+            );
+            ui.add_space(8.0);
+
+            let import_busy = self.pending_import.is_some();
+            if ui
+                .add_enabled(!import_busy, egui::Button::new("Import\u{2026}"))
+                .clicked()
+                && let Some(target) = self.current_import_target()
+            {
+                self.pending_import = Some((target, spawn_import_picker(ctx)));
+            }
+
+            let selected_stats = self
+                .entries
+                .get(self.selected_index)
+                .and_then(|e| e.stats.clone());
+            let export_busy = self.pending_export.is_some();
+            if ui
+                .add_enabled(
+                    selected_stats.is_some() && !export_busy,
+                    egui::Button::new("Export\u{2026}"),
+                )
+                .clicked()
+                && let Some(stats) = selected_stats
+            {
+                let rx = spawn_export_picker(ctx, &stats);
+                self.pending_export = Some((stats, rx));
+            }
+
+            let can_clear = matches!(
+                self.entries.get(self.selected_index).map(|e| &e.kind),
+                Some(EntryKind::Completion(_))
+            ) && self
+                .entries
+                .get(self.selected_index)
+                .and_then(|e| e.stats.as_ref())
+                .is_some();
+            if ui
+                .add_enabled(can_clear, egui::Button::new("Clear"))
+                .clicked()
+            {
+                self.handle_clear(conn, result);
+            }
+        });
+    }
+
+    fn render_selected_header(&self, ui: &mut egui::Ui) {
+        let Some(entry) = self.entries.get(self.selected_index) else {
+            return;
+        };
+        ui.horizontal(|ui| match &entry.kind {
+            EntryKind::Live => {
+                ui.colored_label(
+                    theme::COLOR_SUCCESS,
+                    egui::RichText::new(&entry.label).strong(),
+                );
+                if let Some(s) = &entry.stats {
+                    ui.add_space(8.0);
+                    ui.colored_label(
+                        theme::TEXT_SECONDARY,
+                        egui::RichText::new(format_name(&s.format)).small(),
+                    );
+                }
+            }
+            EntryKind::Completion(_) => {
+                ui.label(egui::RichText::new(&entry.raw_date).strong());
+                if !entry.notes.is_empty() {
+                    ui.colored_label(theme::TEXT_SECONDARY, format!("\u{00b7} {}", entry.notes));
+                }
+                if let Some(s) = &entry.stats {
+                    ui.add_space(8.0);
+                    ui.colored_label(
+                        theme::TEXT_SECONDARY,
+                        egui::RichText::new(format_name(&s.format)).small(),
+                    );
+                }
+            }
+        });
+    }
+
+    fn render_edit_panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        conn: &Connection,
+        result: &mut WadStatsResult,
+    ) {
+        let Some(buf) = self.edit.as_mut() else {
+            return;
+        };
+        egui::Frame::new()
+            .fill(theme::BG_MEDIUM)
+            .stroke(egui::Stroke::new(1.0, theme::TEXT_ACCENT))
+            .corner_radius(4)
+            .inner_margin(egui::Margin::symmetric(12, 10))
+            .show(ui, |ui| {
+                ui.colored_label(
+                    theme::TEXT_ACCENT,
+                    egui::RichText::new("Editing completion").small().strong(),
+                );
+                ui.add_space(4.0);
+                egui::Grid::new("wad_stats_edit_grid")
+                    .num_columns(2)
+                    .spacing([10.0, 6.0])
+                    .show(ui, |ui| {
+                        ui.colored_label(theme::TEXT_MUTED, "Date");
+                        ui.text_edit_singleline(&mut buf.date);
+                        ui.end_row();
+                        ui.colored_label(theme::TEXT_MUTED, "Notes");
+                        ui.text_edit_singleline(&mut buf.notes);
+                        ui.end_row();
+                    });
+            });
+
+        ui.add_space(6.0);
+        let save_clicked;
+        let cancel_clicked;
+        {
+            let resp = ui.horizontal(|ui| {
+                let save = ui.button("Save").clicked();
+                let cancel = ui.button("Cancel").clicked();
+                (save, cancel)
+            });
+            (save_clicked, cancel_clicked) = resp.inner;
+        }
+
+        if cancel_clicked {
+            self.edit = None;
+        } else if save_clicked {
+            self.handle_save(conn, result);
+        }
+    }
+
+    fn render_stats_table(&self, ui: &mut egui::Ui) {
+        let Some(entry) = self.entries.get(self.selected_index) else {
+            return;
+        };
+        let Some(stats) = &entry.stats else {
+            ui.add_space(20.0);
+            ui.vertical_centered(|ui| {
+                ui.colored_label(
+                    theme::TEXT_SECONDARY,
+                    "No stats attached to this entry yet.",
+                );
+                ui.colored_label(
+                    theme::TEXT_MUTED,
+                    egui::RichText::new("Import a stats.txt / levelstat.txt file below.").small(),
+                );
+            });
+            return;
+        };
+
+        let played = stats.played_maps();
+
+        let text_height = ui.text_style_height(&egui::TextStyle::Body);
+        let row_height = text_height + 6.0;
+
+        let table = TableBuilder::new(ui)
+            .striped(true)
+            .resizable(true)
+            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+            .column(Column::initial(70.0).at_least(50.0))
+            .column(Column::initial(50.0).at_least(40.0))
+            .column(Column::initial(70.0).at_least(50.0))
+            .column(Column::initial(80.0).at_least(60.0))
+            .column(Column::initial(80.0).at_least(60.0))
+            .column(Column::remainder().at_least(60.0));
+
+        table
+            .header(row_height + 2.0, |mut header| {
+                for label in ["Map", "Skill", "Time", "Kills", "Items", "Secrets"] {
+                    header.col(|ui| {
+                        ui.strong(label);
+                    });
+                }
+            })
+            .body(|body| {
+                body.rows(row_height, played.len(), |mut row| {
+                    let m = played[row.index()];
+                    row.col(|ui| {
+                        ui.label(&m.lump);
+                    });
+                    row.col(|ui| {
+                        ui.label(caco_core::wad_stats::skill_name(m.best_skill));
+                    });
+                    row.col(|ui| {
+                        ui.label(format_map_time(m, &stats.format));
+                    });
+                    row.col(|ui| {
+                        ui.label(ratio(m.kills, m.total_kills));
+                    });
+                    row.col(|ui| {
+                        ui.label(ratio(m.items, m.total_items));
+                    });
+                    row.col(|ui| {
+                        ui.label(ratio(m.secrets, m.total_secrets));
+                    });
+                });
+            });
+
+        ui.add_space(4.0);
+        ui.colored_label(
+            theme::TEXT_SECONDARY,
+            egui::RichText::new(format!(
+                "Format: {}  |  Maps played: {}  |  Total time: {}",
+                format_name(&stats.format),
+                played.len(),
+                stats.total_time_display(),
+            ))
+            .small(),
+        );
+    }
+
+    fn completion_count(&self) -> usize {
+        self.entries
+            .iter()
+            .filter(|e| matches!(e.kind, EntryKind::Completion(_)))
+            .count()
+    }
+
+    fn current_import_target(&self) -> Option<PendingImportTarget> {
+        self.entries.get(self.selected_index).map(|e| match e.kind {
+            EntryKind::Live => PendingImportTarget::Live,
+            EntryKind::Completion(id) => PendingImportTarget::Completion(id),
+        })
+    }
+
+    fn begin_edit(&mut self) {
+        let Some(entry) = self.entries.get(self.selected_index) else {
+            return;
+        };
+        if let EntryKind::Completion(id) = entry.kind {
+            self.edit = Some(EditBuffer {
+                completion_id: id,
+                date: entry.raw_date.clone(),
+                notes: entry.notes.clone(),
+            });
+            self.confirm_delete = None;
+            self.error = None;
+        }
+    }
+
+    fn handle_add(&mut self, conn: &Connection, result: &mut WadStatsResult) {
+        let now = Utc::now().to_rfc3339();
+        match caco_core::db::sessions::add_wad_completion(conn, self.wad_id, None, None, Some(&now))
+        {
+            Ok(new_id) => {
+                self.reload_entries(conn);
+                if let Some(idx) = self
+                    .entries
+                    .iter()
+                    .position(|e| matches!(e.kind, EntryKind::Completion(id) if id == new_id))
+                {
+                    self.selected_index = idx;
+                }
+                self.begin_edit();
+                *result = WadStatsResult::Modified;
+            }
+            Err(e) => self.error = Some(format!("Add failed: {e}")),
+        }
+    }
+
+    fn handle_save(&mut self, conn: &Connection, result: &mut WadStatsResult) {
+        let Some(buf) = self.edit.take() else {
+            return;
+        };
+        let date = buf.date.trim();
+        if date.is_empty() {
+            self.error = Some("Date cannot be empty.".to_string());
+            self.edit = Some(buf);
+            return;
+        }
+        let notes_opt = if buf.notes.trim().is_empty() {
+            None
+        } else {
+            Some(buf.notes.as_str())
+        };
+        match caco_core::db::sessions::update_wad_completion(
+            conn,
+            buf.completion_id,
+            None,
+            Some(notes_opt),
+            Some(date),
+        ) {
+            Ok(_) => {
+                self.reload_entries(conn);
+                *result = WadStatsResult::Modified;
+            }
+            Err(e) => {
+                self.error = Some(format!("Save failed: {e}"));
+                self.edit = Some(buf);
+            }
+        }
+    }
+
+    fn handle_delete(&mut self, conn: &Connection, id: i64, result: &mut WadStatsResult) {
+        match caco_core::db::sessions::delete_wad_completion(conn, id) {
+            Ok(_) => {
+                self.confirm_delete = None;
+                self.reload_entries(conn);
+                *result = WadStatsResult::Modified;
+            }
+            Err(e) => self.error = Some(format!("Delete failed: {e}")),
+        }
+    }
+
+    fn handle_clear(&mut self, conn: &Connection, result: &mut WadStatsResult) {
+        let Some(entry) = self.entries.get(self.selected_index) else {
+            return;
+        };
+        let EntryKind::Completion(id) = entry.kind else {
+            return;
+        };
+        match caco_core::db::sessions::update_wad_completion(conn, id, Some(None), None, None) {
+            Ok(_) => {
+                self.reload_entries(conn);
+                *result = WadStatsResult::Modified;
+            }
+            Err(e) => self.error = Some(format!("Clear failed: {e}")),
+        }
+    }
+
+    /// Returns `true` if DB state changed.
+    fn drain_import_picker(&mut self, conn: &Connection) -> bool {
+        let Some((target, rx)) = &self.pending_import else {
+            return false;
+        };
+        let picked = match rx.try_recv() {
+            Ok(p) => p,
+            Err(_) => return false,
+        };
+        let target = *target;
+        self.pending_import = None;
+
+        let Some(path) = picked else {
+            return false;
+        };
+
+        let stats = match caco_core::wad_stats::parse_stats_file(&path) {
+            Ok(s) => s,
+            Err(e) => {
+                self.error = Some(format!("Parse failed: {e}"));
+                return false;
+            }
+        };
+        let json = match caco_core::wad_stats::stats_to_json(&stats) {
+            Ok(j) => j,
+            Err(e) => {
+                self.error = Some(format!("Serialize failed: {e}"));
+                return false;
+            }
+        };
+
+        let ok = match target {
+            PendingImportTarget::Live => {
+                let update =
+                    caco_core::db::wads::WadUpdate::new().set_text("stats_snapshot", Some(json));
+                caco_core::db::wads::update_wad(conn, self.wad_id, &update).is_ok()
+            }
+            PendingImportTarget::Completion(id) => caco_core::db::sessions::update_wad_completion(
+                conn,
+                id,
+                Some(Some(&json)),
+                None,
+                None,
+            )
+            .is_ok(),
+        };
+
+        if ok {
+            self.reload_entries(conn);
+        } else {
+            self.error = Some("Import failed writing to DB.".to_string());
+        }
+        ok
+    }
+
+    fn drain_export_picker(&mut self) {
+        let Some((_, rx)) = &self.pending_export else {
+            return;
+        };
+        let picked = match rx.try_recv() {
+            Ok(p) => p,
+            Err(_) => return,
+        };
+        let Some((stats, _)) = self.pending_export.take() else {
+            return;
+        };
+        if let Some(path) = picked {
+            let text = caco_core::wad_stats::format_stats(&stats);
+            if let Err(e) = std::fs::write(&path, text) {
+                self.error = Some(format!("Export failed: {e}"));
+            }
+        }
     }
 }
 
-/// Spawn the import file picker off the egui loop.
 fn spawn_import_picker(ctx: &egui::Context) -> FileDialogReceiver {
     let req = FileDialogRequest::open()
         .add_filter("Stats files", &["txt"])
@@ -315,8 +799,6 @@ fn spawn_import_picker(ctx: &egui::Context) -> FileDialogReceiver {
     spawn_file_dialog(Some(ctx.clone()), req)
 }
 
-/// Spawn the export save-picker off the egui loop. The default filename is
-/// chosen based on the selected stats format.
 fn spawn_export_picker(ctx: &egui::Context, stats: &StatsData) -> FileDialogReceiver {
     let default_name = if stats.format == "levelstat_txt" {
         "levelstat.txt"
@@ -330,7 +812,6 @@ fn spawn_export_picker(ctx: &egui::Context, stats: &StatsData) -> FileDialogRece
     spawn_file_dialog(Some(ctx.clone()), req)
 }
 
-/// Format a ratio like "45/50" or just the value if total is unknown.
 fn ratio(value: i32, total: i32) -> String {
     if total >= 0 {
         format!("{value}/{total}")
@@ -339,7 +820,6 @@ fn ratio(value: i32, total: i32) -> String {
     }
 }
 
-/// Format map time depending on stats format.
 fn format_map_time(m: &caco_core::wad_stats::MapStats, format: &str) -> String {
     if format == "stats_txt" {
         caco_core::wad_stats::format_time_tics(m.best_time)
@@ -348,7 +828,6 @@ fn format_map_time(m: &caco_core::wad_stats::MapStats, format: &str) -> String {
     }
 }
 
-/// Human-readable format name.
 fn format_name(format: &str) -> &str {
     match format {
         "stats_txt" => "stats.txt",

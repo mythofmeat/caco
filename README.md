@@ -160,6 +160,11 @@ caco modify id:1 !rating              # Clear a field
 # Completion tracking
 caco modify id:1 beaten+1             # Mark beaten
 caco modify id:1 beaten+1 --notes "UV max" --date 2024-06-15
+caco info id:1 --completions          # List completion records with IDs
+caco modify id:1 completion.42.notes="pacifist run"
+caco modify id:1 completion.42.date=2026-04-15T15:42:00+00:00
+caco modify id:1 completion.42.stats=/path/to/levelstat.txt
+caco modify id:1 completion.42.stats= # Clear the attached stats
 
 # Per-WAD launch config
 caco modify id:1 iwad=tnt sourceport=dsda-doom complevel=boom

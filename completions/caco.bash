@@ -114,7 +114,7 @@ _caco() {
             ;;
         info)
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "-o --output --levelstats -b --live --plain --help" -- "$cur"))
+                COMPREPLY=($(compgen -W "-o --output --levelstats --completions -b --live --plain --help" -- "$cur"))
             elif [[ "$prev" == -o || "$prev" == --output ]]; then
                 COMPREPLY=($(compgen -W "json plain" -- "$cur"))
             else
@@ -124,7 +124,7 @@ _caco() {
             ;;
         modify)
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "-y --yes --dry-run --link --notes -s --stats-file --date -b --help" -- "$cur"))
+                COMPREPLY=($(compgen -W "-y --yes --dry-run --link --notes -s --stats-file --date -b --completion --help" -- "$cur"))
             elif [[ "$prev" == --link || "$prev" == -s || "$prev" == --stats-file ]]; then
                 _caco_filedir
             else

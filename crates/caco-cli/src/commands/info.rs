@@ -21,6 +21,10 @@ pub struct InfoArgs {
     #[arg(long)]
     levelstats: bool,
 
+    /// List completion records with IDs
+    #[arg(long)]
+    completions: bool,
+
     /// Show only live stats (with --levelstats)
     #[arg(long)]
     live: bool,
@@ -40,7 +44,10 @@ pub fn run(conn: &Connection, args: &InfoArgs) -> Result<(), String> {
     let wads = resolve::resolve_wads(conn, &args.query, resolve::ResolveMode::Pick, false, false)?;
 
     for wad in &wads {
-        if args.levelstats {
+        if args.completions {
+            let completions = db::get_wad_completions(conn, wad.id).map_err(|e| e.to_string())?;
+            output::render_completion_list(wad, &completions, format);
+        } else if args.levelstats {
             render_levelstats(conn, wad, &args.beaten, args.live, args.plain)?;
         } else {
             let stats = single_wad_stats(conn, wad.id)?;

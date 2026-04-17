@@ -102,7 +102,8 @@ pub(super) fn render_active_dialog(state: &mut AppState, conn: &Connection, ctx:
                     close_dialog = true;
                 }
                 WadStatsResult::Modified => {
-                    close_dialog = true;
+                    // Stay open so the user can keep managing entries; just
+                    // ask the parent to refresh library data.
                     state.needs_reload = true;
                 }
                 WadStatsResult::Open => {}

@@ -95,6 +95,7 @@ complete -c caco -n "__fish_seen_subcommand_from ls" -a "id+ id- playtime+ playt
 # =============================================================================
 complete -c caco -n "__fish_seen_subcommand_from info" -s o -l output -d "Output format" -xa "json plain"
 complete -c caco -n "__fish_seen_subcommand_from info" -l levelstats -d "Show per-map statistics"
+complete -c caco -n "__fish_seen_subcommand_from info" -l completions -d "List completion records with IDs"
 complete -c caco -n "__fish_seen_subcommand_from info" -s b -d "Target completion by timestamp"
 complete -c caco -n "__fish_seen_subcommand_from info" -l live -d "Show only live stats"
 complete -c caco -n "__fish_seen_subcommand_from info" -l plain -d "TSV output for stats"
@@ -117,6 +118,7 @@ complete -c caco -n "__fish_seen_subcommand_from modify" -l notes -d "Notes for 
 complete -c caco -n "__fish_seen_subcommand_from modify" -s s -l stats-file -d "Stats file for beaten+N or attach" -rF
 complete -c caco -n "__fish_seen_subcommand_from modify" -l date -d "Backdate completion (ISO)"
 complete -c caco -n "__fish_seen_subcommand_from modify" -s b -d "Target completion by timestamp"
+complete -c caco -n "__fish_seen_subcommand_from modify" -l completion -d "Target completion by ID"
 complete -c caco -n "__fish_seen_subcommand_from modify" -xa "(__caco_wads)"
 
 # modify field=value completions
@@ -151,6 +153,9 @@ complete -c caco -n "__fish_seen_subcommand_from modify" -a "!tag:" -d "Remove t
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "beaten+" -d "Add completion(s)"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "beaten-" -d "Remove completion(s)"
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "beaten=" -d "Set completion count"
+
+# modify per-completion edits — use `completion.<id>.<field>=<value>`
+complete -c caco -n "__fish_seen_subcommand_from modify" -a "completion." -d "Edit a completion (completion.<id>.notes/date/stats=...)"
 
 # modify query fields
 complete -c caco -n "__fish_seen_subcommand_from modify" -a "id:" -d "Filter by ID"

@@ -410,23 +410,33 @@ pub fn get_wad_completions(conn: &Connection, wad_id: i64) -> Result<Vec<Complet
     Ok(rows)
 }
 
-/// Update a completion record's stats_snapshot and/or notes.
+/// Update a completion record's fields.
+///
+/// Each `Option<Option<&str>>` argument follows the same tri-state convention:
+/// `None` leaves the column untouched, `Some(None)` writes SQL NULL, and
+/// `Some(Some(v))` writes the value. `completed_at` is `Option<&str>` because
+/// NULL is not a valid value for that column.
 pub fn update_wad_completion(
     conn: &Connection,
     completion_id: i64,
-    stats_snapshot: Option<&str>,
-    notes: Option<&str>,
+    stats_snapshot: Option<Option<&str>>,
+    notes: Option<Option<&str>>,
+    completed_at: Option<&str>,
 ) -> Result<bool> {
     let mut updates = Vec::new();
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
     if let Some(ss) = stats_snapshot {
         updates.push("stats_snapshot = ?");
-        params.push(Box::new(ss.to_string()));
+        params.push(Box::new(ss.map(|s| s.to_string())));
     }
     if let Some(n) = notes {
         updates.push("notes = ?");
-        params.push(Box::new(n.to_string()));
+        params.push(Box::new(n.map(|s| s.to_string())));
+    }
+    if let Some(ts) = completed_at {
+        updates.push("completed_at = ?");
+        params.push(Box::new(ts.to_string()));
     }
     if updates.is_empty() {
         return Ok(false);
@@ -1064,8 +1074,14 @@ mod tests {
         let comp_id = add_wad_completion(&conn, wad_id, None, None, None).unwrap();
 
         assert!(
-            update_wad_completion(&conn, comp_id, Some("{\"stats\": true}"), Some("Updated"))
-                .unwrap()
+            update_wad_completion(
+                &conn,
+                comp_id,
+                Some(Some("{\"stats\": true}")),
+                Some(Some("Updated")),
+                None,
+            )
+            .unwrap()
         );
 
         let completions = get_wad_completions(&conn, wad_id).unwrap();
@@ -1074,6 +1090,22 @@ mod tests {
             Some("{\"stats\": true}")
         );
         assert_eq!(completions[0].notes.as_deref(), Some("Updated"));
+
+        // Clear stats snapshot; leave notes untouched; change date.
+        assert!(
+            update_wad_completion(
+                &conn,
+                comp_id,
+                Some(None),
+                None,
+                Some("2025-01-02T03:04:05+00:00"),
+            )
+            .unwrap()
+        );
+        let completions = get_wad_completions(&conn, wad_id).unwrap();
+        assert_eq!(completions[0].stats_snapshot, None);
+        assert_eq!(completions[0].notes.as_deref(), Some("Updated"));
+        assert_eq!(completions[0].completed_at, "2025-01-02T03:04:05+00:00");
     }
 
     #[test]
