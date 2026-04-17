@@ -229,11 +229,15 @@ pub fn render(
                             badge_size / 2.0,
                             Color32::from_black_alpha(178),
                         );
+                        // Heavy check mark (U+2714) instead of plain check (U+2713).
+                        // Noto Sans Symbols 2 renders plain U+2713 quite thin,
+                        // and its visual centre sits low inside the circle.
+                        // The heavy variant reads better at badge size.
                         painter.text(
                             badge_center,
                             egui::Align2::CENTER_CENTER,
-                            "✓",
-                            egui::FontId::proportional(14.0),
+                            "\u{2714}",
+                            egui::FontId::proportional(16.0),
                             Color32::from_rgb(0x80, 0x80, 0x80),
                         );
 
