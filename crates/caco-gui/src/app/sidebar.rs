@@ -21,14 +21,24 @@ pub(super) fn render_sidebar(
 
     ui.add_space(24.0);
 
-    // Navigation items
-    if theme::sidebar_nav_item(ui, "Library", state.view_mode == ViewMode::Library) {
+    // Navigation items. Library/Import/Collections are mutually exclusive
+    // sidebar selections: clicking Library or Import clears any active
+    // collection (and its filter) so the highlight matches the actual
+    // scope being viewed. Library is highlighted only when no collection
+    // is active — when a collection is selected, the collection row owns
+    // the highlight instead.
+    let library_active = state.view_mode == ViewMode::Library && state.active_collection.is_none();
+    if theme::sidebar_nav_item(ui, "Library", library_active) {
+        let cleared = state.clear_active_collection();
         state.view_mode = ViewMode::Library;
-        if state.needs_reload || state.wads.is_empty() {
+        if cleared || state.wads.is_empty() {
             state.needs_reload = true;
         }
     }
     if theme::sidebar_nav_item(ui, "Import", state.view_mode == ViewMode::Import) {
+        if state.clear_active_collection() {
+            state.needs_reload = true;
+        }
         state.view_mode = ViewMode::Import;
     }
 
@@ -84,7 +94,10 @@ pub(super) fn render_sidebar(
             .collect();
 
         for name in &collection_names {
-            let is_active = state.active_collection.as_deref() == Some(name.as_str());
+            // Only highlight while in Library view — collections are
+            // mutually exclusive with the Import nav item.
+            let is_active = state.view_mode == ViewMode::Library
+                && state.active_collection.as_deref() == Some(name.as_str());
             let resp = theme::sidebar_collection_item(ui, name, is_active);
 
             if resp.clicked() {

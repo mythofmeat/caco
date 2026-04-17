@@ -213,6 +213,24 @@ impl AppState {
         }
     }
 
+    /// Exit the currently active collection: drop both the collection
+    /// state and the query that was loaded from it. Library/Import nav
+    /// items use this so navigating away from a collection cleanly
+    /// undoes its filter rather than leaving a stale collection scope
+    /// applied with no visual indicator.
+    ///
+    /// Returns `true` if a collection was actually cleared, so callers
+    /// can decide whether a reload is warranted.
+    pub fn clear_active_collection(&mut self) -> bool {
+        if self.active_collection.is_some() {
+            self.active_collection = None;
+            self.filter.set_both(String::new());
+            true
+        } else {
+            false
+        }
+    }
+
     /// Refresh the sidebar collections list from the database.
     pub fn refresh_collections(&mut self, conn: &Connection) {
         self.sidebar_collections = collections::get_all_collections(conn).unwrap_or_default();
