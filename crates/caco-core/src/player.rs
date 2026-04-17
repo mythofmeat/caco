@@ -674,29 +674,24 @@ fn read_stats_snapshot(wad_id: i64) -> Option<String> {
 /// Whether a play session produced measurable level progress.
 ///
 /// Used to decide whether to auto-create a playthrough (flipping WAD status
-/// from `unplayed` → `in-progress`). We require evidence of progress — a
-/// sourceport write to the stats file — rather than assuming any launch
-/// counts as progress.
-///
-/// - No `stats_after`: cannot detect progress (sourceport doesn't emit
-///   stats, or auto-stats is disabled). Returns `false`.
-/// - First stats ever (`stats_before` is `None`): progress if any map in
-///   `stats_after` has been exited at least once.
-/// - Both snapshots present: progress if the serialised content differs —
-///   i.e. the sourceport wrote something to the stats file during this
-///   session.
+/// from `unplayed` → `in-progress`). Delegates to [`wad_stats::compute_stats_delta`]
+/// so this predicate stays consistent with the rest of the session-analysis
+/// pipeline — a session counts as progress iff at least one map was actually
+/// played this session (exit count increased, or a new map appears with
+/// `played()` true, or a levelstat entry exists). A bare byte-level diff on
+/// the serialised JSON is not enough: the stats file can be touched without
+/// an exit.
 fn session_made_progress(stats_before: Option<&str>, stats_after: Option<&str>) -> bool {
-    match (stats_before, stats_after) {
-        (_, None) => false,
-        (None, Some(after)) => serde_json::from_str::<wad_stats::WadStats>(after)
-            .map(|s| {
-                s.maps
-                    .iter()
-                    .any(|m| m.total_exits > 0 || m.time_secs >= 0.0)
-            })
-            .unwrap_or(false),
-        (Some(before), Some(after)) => before != after,
-    }
+    let Some(after_json) = stats_after else {
+        return false;
+    };
+    let Ok(after) = wad_stats::stats_from_json(after_json) else {
+        return false;
+    };
+    let before = stats_before.and_then(|s| wad_stats::stats_from_json(s).ok());
+    !wad_stats::compute_stats_delta(before.as_ref(), &after)
+        .maps_played
+        .is_empty()
 }
 
 /// Read stats and store on the WAD record.
@@ -976,31 +971,66 @@ mod tests {
     }
 
     #[test]
-    fn test_session_made_progress_first_stats_with_exit() {
-        // stats_after has a map with total_exits > 0 → progress.
-        let after = r#"{"format":"stats_txt","maps":[{"lump":"MAP01","total_exits":1}]}"#;
+    fn test_session_made_progress_first_stats_with_played_map() {
+        // stats_after has a map that was actually played (best_skill > 0) → progress.
+        let after = r#"{"format":"stats_txt","maps":[{"lump":"MAP01","best_skill":3,"total_exits":1,"time_secs":-1.0}]}"#;
         assert!(session_made_progress(None, Some(after)));
     }
 
     #[test]
     fn test_session_made_progress_first_stats_levelstat() {
         // levelstat: any completed map entry counts as progress.
-        let after = r#"{"format":"levelstat_txt","maps":[{"lump":"MAP01","time_secs":32.5}]}"#;
+        let after = r#"{"format":"levelstat_txt","maps":[{"lump":"MAP01","best_skill":4,"time_secs":32.5}]}"#;
         assert!(session_made_progress(None, Some(after)));
     }
 
     #[test]
     fn test_session_made_progress_unchanged() {
-        // stats_before == stats_after → no progress (sourceport didn't write).
-        let same = r#"{"format":"stats_txt","maps":[{"lump":"MAP01","total_exits":1}]}"#;
+        // stats_before == stats_after → no progress (no exits_delta).
+        let same = r#"{"format":"stats_txt","maps":[{"lump":"MAP01","best_skill":3,"total_exits":1,"time_secs":-1.0}]}"#;
         assert!(!session_made_progress(Some(same), Some(same)));
     }
 
     #[test]
     fn test_session_made_progress_changed() {
-        // Content differs between before and after → progress.
-        let before = r#"{"format":"stats_txt","maps":[{"lump":"MAP01","total_exits":1}]}"#;
-        let after = r#"{"format":"stats_txt","maps":[{"lump":"MAP01","total_exits":2}]}"#;
+        // total_exits increased between before and after → progress.
+        let before = r#"{"format":"stats_txt","maps":[{"lump":"MAP01","best_skill":3,"total_exits":1,"time_secs":-1.0}]}"#;
+        let after = r#"{"format":"stats_txt","maps":[{"lump":"MAP01","best_skill":3,"total_exits":2,"time_secs":-1.0}]}"#;
         assert!(session_made_progress(Some(before), Some(after)));
+    }
+
+    #[test]
+    fn test_session_made_progress_first_stats_entered_not_exited() {
+        // Regression: dsda-doom wrote a stats entry on first launch with no
+        // exit recorded (total_exits == 0, best_skill == 0). This must NOT
+        // count as progress, otherwise the WAD is incorrectly flipped to
+        // in-progress.
+        let after = r#"{"format":"stats_txt","maps":[{"lump":"MAP01","best_skill":0,"total_exits":0,"time_secs":-1.0}]}"#;
+        assert!(!session_made_progress(None, Some(after)));
+    }
+
+    #[test]
+    fn test_session_made_progress_noise_no_exits() {
+        // Regression: before/after differ only in header fields with no exit
+        // recorded. Must NOT count as progress.
+        let before = r#"{"format":"stats_txt","maps":[{"lump":"MAP01","best_skill":0,"total_exits":0,"time_secs":-1.0}]}"#;
+        let after = r#"{"format":"stats_txt","header_total_kills":5,"maps":[{"lump":"MAP01","best_skill":0,"total_exits":0,"time_secs":-1.0}]}"#;
+        assert!(!session_made_progress(Some(before), Some(after)));
+    }
+
+    #[test]
+    fn test_session_made_progress_new_map_played() {
+        // A map appears in after that wasn't in before, and it's played → progress.
+        let before = r#"{"format":"stats_txt","maps":[]}"#;
+        let after = r#"{"format":"stats_txt","maps":[{"lump":"MAP01","best_skill":3,"total_exits":1,"time_secs":-1.0}]}"#;
+        assert!(session_made_progress(Some(before), Some(after)));
+    }
+
+    #[test]
+    fn test_session_made_progress_new_map_unplayed() {
+        // A map appears in after but wasn't played (all zeros) → no progress.
+        let before = r#"{"format":"stats_txt","maps":[]}"#;
+        let after = r#"{"format":"stats_txt","maps":[{"lump":"MAP01","best_skill":0,"total_exits":0,"time_secs":-1.0}]}"#;
+        assert!(!session_made_progress(Some(before), Some(after)));
     }
 }
