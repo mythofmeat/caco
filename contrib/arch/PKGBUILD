@@ -5,11 +5,11 @@ pkgver=3.0.0
 pkgrel=2
 pkgdesc="Doom WAD library manager"
 arch=('x86_64')
-url="http://localhost:3000/eshen/caco"
+url="https://github.com/mythofmeat/caco"
 license=('custom')
 makedepends=('cargo' 'gcc' 'git')
 options=(!lto)
-source=("$pkgbase::git+$url.git")
+source=("$pkgbase::git+ssh://git@github.com/mythofmeat/caco.git")
 sha256sums=('SKIP')
 
 prepare() {

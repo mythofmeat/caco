@@ -1,0 +1,15 @@
+name: Build and publish Arch packages
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  publish:
+    permissions:
+      contents: write
+    uses: mythofmeat/repo-arch/.github/workflows/publish-arch-rust.yml@main
+    with:
+      pkgbuild_dir: contrib/arch
+      extra_pacman_packages: "wayland libxkbcommon fontconfig"
+    secrets: inherit
