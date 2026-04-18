@@ -6,6 +6,7 @@ use rusqlite::Connection;
 use crate::output::{self, OutputFormat};
 use crate::resolve;
 use caco_core::db::{self, WadStats};
+use caco_core::player;
 use caco_core::wad_stats;
 
 #[derive(Args)]
@@ -41,7 +42,20 @@ pub struct InfoArgs {
 pub fn run(conn: &Connection, args: &InfoArgs) -> Result<(), String> {
     let format: OutputFormat = args.output.parse()?;
 
-    let wads = resolve::resolve_wads(conn, &args.query, resolve::ResolveMode::Pick, false, false)?;
+    let resolved =
+        resolve::resolve_wads(conn, &args.query, resolve::ResolveMode::Pick, false, false)?;
+
+    // Pick up any on-disk stats the DB hasn't absorbed yet (e.g. from an
+    // orphaned play session). Silent no-op when disk and DB agree. Then
+    // re-fetch each WAD so rendered state reflects status/stats changes.
+    let mut wads = Vec::with_capacity(resolved.len());
+    for w in &resolved {
+        player::reconcile_stats(conn, w.id);
+        let refreshed = db::get_wad(conn, w.id, false)
+            .map_err(|e| e.to_string())?
+            .unwrap_or_else(|| w.clone());
+        wads.push(refreshed);
+    }
 
     for wad in &wads {
         if args.completions {

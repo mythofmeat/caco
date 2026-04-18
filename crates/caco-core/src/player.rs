@@ -386,6 +386,13 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
         start_new_playthrough(conn, wad_id)?;
     }
 
+    // Absorb any on-disk stats progress the DB doesn't yet know about
+    // (e.g. from an orphaned session where caco exited before the
+    // sourceport did, or a manual sourceport launch). Must run before
+    // stats_before is captured so this session's delta is measured
+    // against the reconciled baseline rather than stale DB state.
+    reconcile_stats(conn, wad_id);
+
     // Capture stats snapshot before play
     let stats_before = read_stats_snapshot(wad_id);
 
@@ -440,34 +447,14 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
     }
 
     // If this session produced actual level progress, reconcile the WAD's
-    // status. If no playthrough is active, start one (which sets status to
-    // in-progress). If a playthrough already exists but the wads.status column
-    // has drifted (e.g. a stale playthrough left over from pre-559f6bd play()
-    // that auto-created one on every launch, followed by a status reset),
-    // fix the status directly so auto-completion can run on this and future
-    // sessions.
-    if session_made_progress(stats_before.as_deref(), stats_after.as_deref()) {
-        match db::get_active_playthrough(conn, wad_id)? {
-            None => {
-                let pt_id = db::start_playthrough(conn, wad_id)?;
-                conn.execute(
-                    "UPDATE sessions SET playthrough_id = ?1 WHERE id = ?2",
-                    rusqlite::params![pt_id, session_id],
-                )?;
-            }
-            Some(_) => {
-                if let Ok(Some(w)) = db::get_wad(conn, wad_id, false)
-                    && w.status != db::Status::InProgress
-                    && w.status != db::Status::Completed
-                {
-                    let now = chrono::Utc::now().to_rfc3339();
-                    conn.execute(
-                        "UPDATE wads SET status = 'in-progress', updated_at = ?1 WHERE id = ?2",
-                        rusqlite::params![now, wad_id],
-                    )?;
-                }
-            }
-        }
+    // status. If a new playthrough is created here, link this session to it.
+    if session_made_progress(stats_before.as_deref(), stats_after.as_deref())
+        && let Some(pt_id) = ensure_in_progress(conn, wad_id)?
+    {
+        conn.execute(
+            "UPDATE sessions SET playthrough_id = ?1 WHERE id = ?2",
+            rusqlite::params![pt_id, session_id],
+        )?;
     }
 
     // Link recorded demo
@@ -802,6 +789,118 @@ fn check_auto_completion(
     }
 }
 
+/// Promote a WAD to `in-progress`, starting a playthrough if none is active.
+///
+/// Returns `Some(pt_id)` when a new playthrough was created, so the caller
+/// can attach the current session to it. Returns `None` when a playthrough
+/// already existed (status is also patched if it drifted to a non-active
+/// state while a playthrough was still open).
+fn ensure_in_progress(conn: &Connection, wad_id: i64) -> crate::Result<Option<i64>> {
+    match db::get_active_playthrough(conn, wad_id)? {
+        None => {
+            let pt_id = db::start_playthrough(conn, wad_id)?;
+            Ok(Some(pt_id))
+        }
+        Some(_) => {
+            if let Some(w) = db::get_wad(conn, wad_id, false)?
+                && w.status != db::Status::InProgress
+                && w.status != db::Status::Completed
+            {
+                let now = chrono::Utc::now().to_rfc3339();
+                conn.execute(
+                    "UPDATE wads SET status = 'in-progress', updated_at = ?1 WHERE id = ?2",
+                    rusqlite::params![now, wad_id],
+                )?;
+            }
+            Ok(None)
+        }
+    }
+}
+
+/// Sync on-disk stats back into DB state.
+///
+/// Reads the sourceport's current `stats.txt` for this WAD. If it shows
+/// progress beyond the DB snapshot, persists the fresh snapshot, promotes
+/// the WAD to in-progress (starting a playthrough if needed), and runs
+/// auto-completion.
+///
+/// Called at the start of [`play`] to catch orphaned on-disk state (sessions
+/// where caco exited before the sourceport did, or sourceport launches
+/// outside caco entirely). Safe to call opportunistically from read paths
+/// — it's a no-op when disk and DB already agree.
+pub fn reconcile_stats(conn: &Connection, wad_id: i64) -> AutoCompleteResult {
+    let wad = match db::get_wad(conn, wad_id, false) {
+        Ok(Some(w)) => w,
+        _ => return AutoCompleteResult::Unknown,
+    };
+
+    let disk_json = match read_stats_snapshot(wad_id) {
+        Some(s) => s,
+        None => return AutoCompleteResult::Unknown,
+    };
+
+    let wad_path = wad.cached_path.as_deref().and_then(|p| {
+        let path = PathBuf::from(p);
+        if path.exists() { Some(path) } else { None }
+    });
+
+    reconcile_stats_with(conn, wad_id, &wad, &disk_json, wad_path.as_deref())
+}
+
+/// Inner logic for [`reconcile_stats`] without filesystem dependencies.
+///
+/// If the on-disk snapshot shows any played map and the WAD's status hasn't
+/// caught up (still `unplayed`), the WAD is promoted to `in-progress` and
+/// auto-completion is evaluated. The DB snapshot is also resynced when it
+/// drifts from disk, regardless of progress, so later calls don't re-fire.
+fn reconcile_stats_with(
+    conn: &Connection,
+    wad_id: i64,
+    wad: &db::WadRecord,
+    disk_json: &str,
+    wad_path: Option<&Path>,
+) -> AutoCompleteResult {
+    let snapshot_changed = wad.stats_snapshot.as_deref() != Some(disk_json);
+
+    let disk_has_exits = match wad_stats::stats_from_json(disk_json) {
+        Ok(s) => s
+            .maps
+            .iter()
+            .any(|m| m.total_exits > 0 || m.time_secs >= 0.0),
+        Err(_) => false,
+    };
+
+    let needs_promotion = disk_has_exits && wad.status == db::Status::Unplayed;
+
+    // Quick out: nothing to do and nothing to promote.
+    if !snapshot_changed && !needs_promotion {
+        return AutoCompleteResult::Unknown;
+    }
+
+    if snapshot_changed {
+        let update = db::WadUpdate::new().set_text("stats_snapshot", Some(disk_json.to_string()));
+        if let Err(e) = db::update_wad(conn, wad_id, &update) {
+            tracing::warn!("reconcile: failed to persist stats snapshot for wad {wad_id}: {e}");
+            return AutoCompleteResult::Unknown;
+        }
+    }
+
+    // Promote unplayed → in-progress whenever disk shows the sourceport has
+    // actually exited a map. This catches orphan sessions even if the DB
+    // snapshot was already resynced by some other path.
+    if needs_promotion && let Err(e) = ensure_in_progress(conn, wad_id) {
+        tracing::warn!("reconcile: failed to promote wad {wad_id} to in-progress: {e}");
+    }
+
+    // check_auto_completion needs the WAD file to cache analysis on first
+    // call. Without a cached file we still detect completion if analysis
+    // was previously saved, otherwise it returns Unknown.
+    match wad_path {
+        Some(path) => check_auto_completion(conn, wad_id, path, Some(disk_json)),
+        None => AutoCompleteResult::Unknown,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1049,5 +1148,212 @@ mod tests {
         let before = r#"{"format":"stats_txt","maps":[]}"#;
         let after = r#"{"format":"stats_txt","maps":[{"lump":"MAP01","best_skill":0,"total_exits":0,"time_secs":-1.0}]}"#;
         assert!(!session_made_progress(Some(before), Some(after)));
+    }
+
+    // -----------------------------------------------------------------------
+    // ensure_in_progress / reconcile_stats
+    // -----------------------------------------------------------------------
+
+    fn fresh_db_with_wad() -> (rusqlite::Connection, i64) {
+        use crate::db::{self, SourceType, init_db, open_memory};
+        let conn = open_memory().unwrap();
+        init_db(&conn).unwrap();
+        let wad_id = db::add_wad(&conn, &db::NewWad::new("Test WAD", SourceType::Local)).unwrap();
+        (conn, wad_id)
+    }
+
+    #[test]
+    fn test_ensure_in_progress_creates_playthrough_when_none() {
+        use crate::db;
+        let (conn, wad_id) = fresh_db_with_wad();
+
+        let created = ensure_in_progress(&conn, wad_id).unwrap();
+        assert!(created.is_some(), "should create a new playthrough");
+
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        assert_eq!(wad.status, db::Status::InProgress);
+        assert!(db::get_active_playthrough(&conn, wad_id).unwrap().is_some());
+    }
+
+    #[test]
+    fn test_ensure_in_progress_no_new_playthrough_when_one_exists() {
+        use crate::db;
+        let (conn, wad_id) = fresh_db_with_wad();
+        let pt_id = db::start_playthrough(&conn, wad_id).unwrap();
+
+        let created = ensure_in_progress(&conn, wad_id).unwrap();
+        assert!(created.is_none(), "should not create a second playthrough");
+
+        let active = db::get_active_playthrough(&conn, wad_id).unwrap().unwrap();
+        assert_eq!(active.id, pt_id);
+    }
+
+    #[test]
+    fn test_ensure_in_progress_promotes_drifted_status() {
+        use crate::db;
+        let (conn, wad_id) = fresh_db_with_wad();
+
+        // Simulate a drifted state: an active playthrough exists but the
+        // wads.status column has been reset to unplayed. This mirrors the
+        // recovery path described in play().
+        db::start_playthrough(&conn, wad_id).unwrap();
+        conn.execute(
+            "UPDATE wads SET status = 'unplayed' WHERE id = ?1",
+            rusqlite::params![wad_id],
+        )
+        .unwrap();
+
+        ensure_in_progress(&conn, wad_id).unwrap();
+
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        assert_eq!(wad.status, db::Status::InProgress);
+    }
+
+    #[test]
+    fn test_ensure_in_progress_preserves_completed_status() {
+        use crate::db;
+        let (conn, wad_id) = fresh_db_with_wad();
+        let pt_id = db::start_playthrough(&conn, wad_id).unwrap();
+        db::complete_playthrough(&conn, pt_id, None, None).unwrap();
+        // Re-open a playthrough (simulating a post-completion replay) but
+        // leave the wad status at completed. ensure_in_progress must not
+        // demote a completed WAD.
+        conn.execute(
+            "UPDATE playthroughs SET completed_at = NULL WHERE id = ?1",
+            rusqlite::params![pt_id],
+        )
+        .unwrap();
+
+        ensure_in_progress(&conn, wad_id).unwrap();
+
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        assert_eq!(wad.status, db::Status::Completed);
+    }
+
+    /// Minimal stats.txt snapshot with one map at the given exit count.
+    fn stats_json_one_map(lump: &str, exits: i32, skill: i32) -> String {
+        format!(
+            r#"{{"format":"stats_txt","version":1,"header_total_kills":0,"maps":[{{"lump":"{lump}","kills":0,"total_kills":-1,"items":0,"total_items":-1,"secrets":0,"total_secrets":-1,"episode":1,"map_num":1,"best_skill":{skill},"best_time":-1,"best_max_time":-1,"best_nm_time":-1,"total_exits":{exits},"cumulative_kills":0,"time_secs":-1.0,"total_time_secs":-1.0}}]}}"#
+        )
+    }
+
+    #[test]
+    fn test_reconcile_stats_with_no_op_when_disk_matches_db() {
+        use crate::db;
+        let (conn, wad_id) = fresh_db_with_wad();
+
+        let snapshot = stats_json_one_map("MAP01", 0, 0);
+        let update = db::WadUpdate::new().set_text("stats_snapshot", Some(snapshot.clone()));
+        db::update_wad(&conn, wad_id, &update).unwrap();
+
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        let result = reconcile_stats_with(&conn, wad_id, &wad, &snapshot, None);
+        assert_eq!(result, AutoCompleteResult::Unknown);
+
+        // Still unplayed, no playthrough created.
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        assert_eq!(wad.status, db::Status::Unplayed);
+        assert!(db::get_active_playthrough(&conn, wad_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_reconcile_stats_with_promotes_on_fresh_exit() {
+        use crate::db;
+        let (conn, wad_id) = fresh_db_with_wad();
+
+        // DB has a stale "launched but no exits" snapshot — the exact shape
+        // that the orphan-session bug leaves behind.
+        let stale = stats_json_one_map("MAP01", 0, 0);
+        let update = db::WadUpdate::new().set_text("stats_snapshot", Some(stale.clone()));
+        db::update_wad(&conn, wad_id, &update).unwrap();
+
+        // Disk has the post-exit version (skill=4, one exit).
+        let fresh = stats_json_one_map("MAP01", 1, 4);
+
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        reconcile_stats_with(&conn, wad_id, &wad, &fresh, None);
+
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        assert_eq!(wad.status, db::Status::InProgress);
+        assert_eq!(wad.stats_snapshot.as_deref(), Some(fresh.as_str()));
+        assert!(db::get_active_playthrough(&conn, wad_id).unwrap().is_some());
+    }
+
+    #[test]
+    fn test_reconcile_stats_with_syncs_snapshot_without_progress() {
+        use crate::db;
+        let (conn, wad_id) = fresh_db_with_wad();
+
+        // DB and disk differ only in a header field — no real exit.
+        let before = r#"{"format":"stats_txt","version":1,"header_total_kills":0,"maps":[]}"#;
+        let after = r#"{"format":"stats_txt","version":1,"header_total_kills":5,"maps":[]}"#;
+
+        let update = db::WadUpdate::new().set_text("stats_snapshot", Some(before.to_string()));
+        db::update_wad(&conn, wad_id, &update).unwrap();
+
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        reconcile_stats_with(&conn, wad_id, &wad, after, None);
+
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        // Snapshot synced (so we don't re-trigger on the same drift)...
+        assert_eq!(wad.stats_snapshot.as_deref(), Some(after));
+        // ...but status stays unplayed (no real progress).
+        assert_eq!(wad.status, db::Status::Unplayed);
+        assert!(db::get_active_playthrough(&conn, wad_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_reconcile_stats_with_empty_db_snapshot_and_fresh_exit() {
+        use crate::db;
+        let (conn, wad_id) = fresh_db_with_wad();
+
+        // No prior snapshot at all — first reconciliation picks up fresh exit.
+        let fresh = stats_json_one_map("MAP01", 1, 4);
+
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        assert!(wad.stats_snapshot.is_none());
+
+        reconcile_stats_with(&conn, wad_id, &wad, &fresh, None);
+
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        assert_eq!(wad.status, db::Status::InProgress);
+        assert_eq!(wad.stats_snapshot.as_deref(), Some(fresh.as_str()));
+    }
+
+    #[test]
+    fn test_reconcile_stats_with_promotes_when_snapshot_already_synced() {
+        use crate::db;
+        let (conn, wad_id) = fresh_db_with_wad();
+
+        // Snapshot was synced by some other path, but status never caught up.
+        // This reproduces a production race where reconciling on byte-equal
+        // snapshots must still promote status for a WAD with real on-disk
+        // exits.
+        let synced = stats_json_one_map("MAP01", 1, 4);
+        let update = db::WadUpdate::new().set_text("stats_snapshot", Some(synced.clone()));
+        db::update_wad(&conn, wad_id, &update).unwrap();
+
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        assert_eq!(wad.status, db::Status::Unplayed);
+
+        reconcile_stats_with(&conn, wad_id, &wad, &synced, None);
+
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        assert_eq!(wad.status, db::Status::InProgress);
+        assert!(db::get_active_playthrough(&conn, wad_id).unwrap().is_some());
+    }
+
+    #[test]
+    fn test_reconcile_stats_with_no_second_playthrough_when_in_progress() {
+        use crate::db;
+        let (conn, wad_id) = fresh_db_with_wad();
+        let pt_id = db::start_playthrough(&conn, wad_id).unwrap();
+
+        let fresh = stats_json_one_map("MAP01", 1, 4);
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        reconcile_stats_with(&conn, wad_id, &wad, &fresh, None);
+
+        let active = db::get_active_playthrough(&conn, wad_id).unwrap().unwrap();
+        assert_eq!(active.id, pt_id, "must not create a second playthrough");
     }
 }
