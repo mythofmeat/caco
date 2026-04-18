@@ -1,5 +1,5 @@
-# git-cliff config. Drives the Gitea Release body written by
-# .gitea/workflows/package.yml on each `v*` tag push.
+# git-cliff config. Drives the GitHub Release body written by
+# .github/workflows/package.yml on each `v*` tag push.
 
 [changelog]
 header = ""
