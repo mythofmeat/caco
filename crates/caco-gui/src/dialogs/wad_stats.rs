@@ -167,11 +167,26 @@ impl WadStatsDialogState {
 
         let mut close_requested = false;
 
+        // Fully fixed geometry. `default_size` + `resizable(true)` interacts
+        // badly with our anchor-centered layout: egui's Resize grows
+        // `desired_size` to match `last_content_size` every frame and never
+        // shrinks, so any transient oversize gets locked in and subsequent
+        // user drags fight the anchor. Fixed sizing gives a predictable
+        // dialog that sits inside the viewport on any display. Widths and
+        // pane heights are also constants so nothing depends on
+        // `ui.available_*`, which returns unbounded values during egui's
+        // sizing pass.
+        const LEFT_PANE_W: f32 = 300.0;
+        const RIGHT_PANE_W: f32 = 620.0;
+        const DIALOG_W: f32 = 960.0;
+        let screen_h = ctx.screen_rect().height();
+        let dialog_h = 580.0f32.min((screen_h - 60.0).max(400.0));
+        let pane_h = (dialog_h - 90.0).max(240.0);
+
         egui::Window::new(format!("Map Stats \u{2014} {}", self.wad_title))
+            .id(egui::Id::new("wad_stats_dialog"))
             .collapsible(false)
-            .resizable(true)
-            .default_size([940.0, 540.0])
-            .min_width(780.0)
+            .fixed_size([DIALOG_W, dialog_h])
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
                 if let Some(err) = self.error.clone() {
@@ -184,13 +199,9 @@ impl WadStatsDialogState {
                     ui.add_space(4.0);
                 }
 
-                // Dialog-level two-pane layout.
-                let avail = ui.available_size();
-                let left_width = (avail.x * 0.36).clamp(260.0, 340.0);
-
                 ui.horizontal_top(|ui| {
                     ui.allocate_ui_with_layout(
-                        egui::vec2(left_width, avail.y - 40.0),
+                        egui::vec2(LEFT_PANE_W, pane_h),
                         egui::Layout::top_down(egui::Align::Min),
                         |ui| {
                             self.render_left_pane(ui, conn, &mut result);
@@ -200,7 +211,7 @@ impl WadStatsDialogState {
                     ui.separator();
 
                     ui.allocate_ui_with_layout(
-                        egui::vec2(ui.available_width(), avail.y - 40.0),
+                        egui::vec2(RIGHT_PANE_W, pane_h),
                         egui::Layout::top_down(egui::Align::Min),
                         |ui| {
                             self.render_right_pane(ui, ctx, conn, &mut result);
@@ -210,8 +221,7 @@ impl WadStatsDialogState {
 
                 ui.add_space(6.0);
                 ui.separator();
-                ui.horizontal(|ui| {
-                    ui.add_space(ui.available_width() - 80.0);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("Close").clicked() {
                         close_requested = true;
                     }
