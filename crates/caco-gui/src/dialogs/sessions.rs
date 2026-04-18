@@ -79,7 +79,7 @@ impl SessionsDialogState {
 
     /// Render the sessions dialog. Returns the dialog result.
     pub fn render(&self, ctx: &egui::Context) -> SessionsResult {
-        let mut result = SessionsResult::Open;
+        let mut close_requested = false;
 
         egui::Window::new(format!("Sessions \u{2014} {}", self.wad_title))
             .collapsible(false)
@@ -87,85 +87,99 @@ impl SessionsDialogState {
             .default_size([700.0, 450.0])
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
-                if self.sessions.is_empty() {
-                    ui.colored_label(theme::TEXT_SECONDARY, "No play sessions recorded.");
-                    ui.add_space(8.0);
-                    if ui.button("Close").clicked() {
-                        result = SessionsResult::Closed;
+                // Reserve space at the bottom of the window so the Close
+                // button always lands inside the viewport, even when the
+                // sessions table is long.
+                const FOOTER_H: f32 = 40.0;
+                let body_h = (ui.available_height() - FOOTER_H).max(80.0);
+
+                ui.allocate_ui(egui::vec2(ui.available_width(), body_h), |ui| {
+                    if self.sessions.is_empty() {
+                        ui.colored_label(theme::TEXT_SECONDARY, "No play sessions recorded.");
+                        return;
                     }
-                    return;
-                }
 
-                ui.colored_label(
-                    theme::TEXT_SECONDARY,
-                    format!(
-                        "{} session{}",
-                        self.sessions.len(),
-                        if self.sessions.len() == 1 { "" } else { "s" }
-                    ),
-                );
-                ui.add_space(4.0);
+                    ui.colored_label(
+                        theme::TEXT_SECONDARY,
+                        format!(
+                            "{} session{}",
+                            self.sessions.len(),
+                            if self.sessions.len() == 1 { "" } else { "s" }
+                        ),
+                    );
+                    ui.add_space(4.0);
 
-                let text_height = ui.text_style_height(&egui::TextStyle::Body);
-                let row_height = text_height + 6.0;
+                    let text_height = ui.text_style_height(&egui::TextStyle::Body);
+                    let row_height = text_height + 6.0;
 
-                let table = TableBuilder::new(ui)
-                    .striped(true)
-                    .resizable(true)
-                    .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                    .column(Column::initial(90.0).at_least(70.0)) // Date
-                    .column(Column::initial(55.0).at_least(45.0)) // Time
-                    .column(Column::initial(75.0).at_least(50.0)) // Duration
-                    .column(Column::initial(100.0).at_least(60.0)) // Sourceport
-                    .column(Column::remainder().at_least(100.0)) // Maps
-                    .column(Column::initial(80.0).at_least(50.0)); // Status
+                    let table = TableBuilder::new(ui)
+                        .striped(true)
+                        .resizable(true)
+                        .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                        .max_scroll_height((body_h - 30.0).max(60.0))
+                        .column(Column::initial(90.0).at_least(70.0)) // Date
+                        .column(Column::initial(55.0).at_least(45.0)) // Time
+                        .column(Column::initial(75.0).at_least(50.0)) // Duration
+                        .column(Column::initial(100.0).at_least(60.0)) // Sourceport
+                        .column(Column::remainder().at_least(100.0)) // Maps
+                        .column(Column::initial(80.0).at_least(50.0)); // Status
 
-                table
-                    .header(row_height + 2.0, |mut header| {
-                        for label in ["Date", "Time", "Duration", "Sourceport", "Maps", "Status"] {
-                            header.col(|ui| {
-                                ui.strong(label);
-                            });
-                        }
-                    })
-                    .body(|body| {
-                        body.rows(row_height, self.sessions.len(), |mut row| {
-                            let s = &self.sessions[row.index()];
-                            row.col(|ui| {
-                                ui.label(&s.date);
-                            });
-                            row.col(|ui| {
-                                ui.label(&s.time);
-                            });
-                            row.col(|ui| {
-                                ui.label(&s.duration);
-                            });
-                            row.col(|ui| {
-                                ui.label(&s.sourceport);
-                            });
-                            row.col(|ui| {
-                                ui.colored_label(theme::TEXT_SECONDARY, &s.maps);
-                            });
-                            row.col(|ui| {
-                                let color = if s.crashed {
-                                    theme::COLOR_ERROR
-                                } else if s.status_text == "OK" {
-                                    theme::COLOR_SUCCESS
-                                } else {
-                                    theme::TEXT_SECONDARY
-                                };
-                                ui.colored_label(color, &s.status_text);
+                    table
+                        .header(row_height + 2.0, |mut header| {
+                            for label in
+                                ["Date", "Time", "Duration", "Sourceport", "Maps", "Status"]
+                            {
+                                header.col(|ui| {
+                                    ui.strong(label);
+                                });
+                            }
+                        })
+                        .body(|body| {
+                            body.rows(row_height, self.sessions.len(), |mut row| {
+                                let s = &self.sessions[row.index()];
+                                row.col(|ui| {
+                                    ui.label(&s.date);
+                                });
+                                row.col(|ui| {
+                                    ui.label(&s.time);
+                                });
+                                row.col(|ui| {
+                                    ui.label(&s.duration);
+                                });
+                                row.col(|ui| {
+                                    ui.label(&s.sourceport);
+                                });
+                                row.col(|ui| {
+                                    ui.colored_label(theme::TEXT_SECONDARY, &s.maps);
+                                });
+                                row.col(|ui| {
+                                    let color = if s.crashed {
+                                        theme::COLOR_ERROR
+                                    } else if s.status_text == "OK" {
+                                        theme::COLOR_SUCCESS
+                                    } else {
+                                        theme::TEXT_SECONDARY
+                                    };
+                                    ui.colored_label(color, &s.status_text);
+                                });
                             });
                         });
-                    });
+                });
+
+                ui.add_space(6.0);
+                ui.separator();
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("Close").clicked() {
+                        close_requested = true;
+                    }
+                });
             });
 
-        // Escape closes
-        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        if close_requested || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             return SessionsResult::Closed;
         }
 
-        result
+        SessionsResult::Open
     }
 }
 
