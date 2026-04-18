@@ -26,7 +26,13 @@ fn main() -> eframe::Result<()> {
 
     let db_path = db_path.unwrap_or_else(caco_core::config::get_db_path);
 
+    // `app_id` must match the `.desktop` file basename so Wayland
+    // compositors map the window to caco.desktop and show its icon.
+    // Without this, Wayland ignores `with_icon()` and falls back to a
+    // generic icon because the eframe app name (`caco-gui`) doesn't
+    // match `caco.desktop`.
     let mut viewport = egui::ViewportBuilder::default()
+        .with_app_id("caco")
         .with_title("Caco")
         .with_inner_size([1200.0, 800.0])
         .with_min_inner_size([800.0, 400.0]);
