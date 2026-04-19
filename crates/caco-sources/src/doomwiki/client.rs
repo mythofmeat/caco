@@ -153,21 +153,45 @@ impl DoomwikiClient {
     }
 
     /// Get parsed WAD entry for a wiki page by title.
+    ///
+    /// Returns `Ok(None)` both when the page is missing *and* when it exists
+    /// but has no `{{Wad}}` infobox — matches the filter `search_wads`
+    /// applies. Use [`get_entry_permissive`](Self::get_entry_permissive) to
+    /// distinguish missing from non-WAD (needed by the CLI's `--force` path).
     pub fn get_entry(&self, title: &str) -> Result<Option<WikiEntry>> {
-        let result = self.get_page_content(title)?;
-        match result {
-            Some((page_id, wikitext)) => Ok(Some(self.parser.parse(&wikitext, title, page_id))),
-            None => Ok(None),
-        }
+        Ok(self
+            .get_entry_permissive(title)?
+            .filter(|(_, has_infobox)| *has_infobox)
+            .map(|(entry, _)| entry))
     }
 
     /// Get parsed WAD entry for a wiki page by ID.
+    ///
+    /// Same `{{Wad}}`-infobox filter as [`get_entry`](Self::get_entry).
     pub fn get_entry_by_id(&self, page_id: i64) -> Result<Option<WikiEntry>> {
-        let result = self.get_page_content_by_id(page_id)?;
-        match result {
-            Some((title, wikitext)) => Ok(Some(self.parser.parse(&wikitext, &title, page_id))),
-            None => Ok(None),
+        let Some((title, wikitext)) = self.get_page_content_by_id(page_id)? else {
+            return Ok(None);
+        };
+        if !self.parser.has_wad_template(&wikitext) {
+            return Ok(None);
         }
+        Ok(Some(self.parser.parse(&wikitext, &title, page_id)))
+    }
+
+    /// Parse a wiki page regardless of whether it carries a `{{Wad}}` infobox.
+    ///
+    /// Returns `Ok(None)` only when the page is missing. When the page exists,
+    /// returns the parsed entry and a flag indicating whether the infobox
+    /// was present — callers can decide whether to accept non-WAD pages.
+    pub fn get_entry_permissive(&self, title: &str) -> Result<Option<(WikiEntry, bool)>> {
+        let Some((page_id, wikitext)) = self.get_page_content(title)? else {
+            return Ok(None);
+        };
+        let has_infobox = self.parser.has_wad_template(&wikitext);
+        Ok(Some((
+            self.parser.parse(&wikitext, title, page_id),
+            has_infobox,
+        )))
     }
 
     /// Fetch multiple page contents in a single API request.

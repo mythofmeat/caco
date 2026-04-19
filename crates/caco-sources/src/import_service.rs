@@ -605,22 +605,26 @@ fn truncate_description(text: &str, max_len: usize) -> String {
 /// Uses substring matching against known port requirement keywords.
 /// Returns `None` if the port text doesn't match any known pattern.
 pub fn port_to_complevel(port_text: &str) -> Option<i32> {
+    // When a wiki infobox lists multiple ports (e.g. Ancient Aliens'
+    // `port=Boom-compatible, port2=MBF21-compatible`), prefer the highest
+    // compat level — running MBF21 content at Boom complevel loses features.
     let mapping = [
-        ("boom", 9),
         ("mbf21", 21),
         ("mbf", 11),
+        ("boom", 9),
         ("vanilla", 2),
         ("limit-removing", 2),
         ("limit removing", 2),
     ];
 
     let text = port_text.to_lowercase();
+    let mut best: Option<i32> = None;
     for (key, cl) in &mapping {
         if text.contains(key) {
-            return Some(*cl);
+            best = Some(best.map_or(*cl, |b: i32| b.max(*cl)));
         }
     }
-    None
+    best
 }
 
 /// Map a Doom Wiki "port" field string to a zdoom_required boolean.
@@ -704,7 +708,16 @@ impl ImportService {
     /// the wiki import.
     fn auto_link_idgames_from_url(&self, conn: &Connection, wad_id: i64, link: &str) {
         if let Some(id) = extract_idgames_id_from_url(link) {
-            apply_idgames_link(conn, wad_id, id, None);
+            // Pull the full idgames entry so we can backfill filename too —
+            // otherwise `{{ig|id=N}}` wiki links leave `filename` null even
+            // though the archive knows it. On API error, persist id only.
+            let filename = self
+                .idgames
+                .get(Some(id), None)
+                .ok()
+                .filter(|e| !e.filename.is_empty())
+                .map(|e| e.filename);
+            apply_idgames_link(conn, wad_id, id, filename.as_deref());
             return;
         }
 
@@ -763,6 +776,33 @@ mod tests {
     fn test_normalize_tags_comma_separated() {
         let result = normalize_tags(Some("cacoward, megawad, doom")).unwrap();
         assert_eq!(result, vec!["cacoward", "megawad", "doom"]);
+    }
+
+    #[test]
+    fn test_port_to_complevel_single_keyword() {
+        assert_eq!(port_to_complevel("Boom-compatible"), Some(9));
+        assert_eq!(port_to_complevel("MBF-compatible"), Some(11));
+        assert_eq!(port_to_complevel("MBF21-compatible"), Some(21));
+        assert_eq!(port_to_complevel("vanilla"), Some(2));
+        assert_eq!(port_to_complevel("limit-removing"), Some(2));
+        assert_eq!(port_to_complevel("limit removing"), Some(2));
+        assert_eq!(port_to_complevel("GZDoom"), None);
+    }
+
+    #[test]
+    fn test_port_to_complevel_picks_highest() {
+        // Combined port+port2 string. The higher compat level wins so
+        // content requiring MBF21 features still plays correctly.
+        assert_eq!(
+            port_to_complevel("Boom-compatible, MBF21-compatible"),
+            Some(21)
+        );
+        assert_eq!(
+            port_to_complevel("Boom-compatible, MBF-compatible"),
+            Some(11)
+        );
+        // "mbf21" is a superstring of "mbf"; make sure we return 21, not 11.
+        assert_eq!(port_to_complevel("MBF21-compatible"), Some(21));
     }
 
     #[test]

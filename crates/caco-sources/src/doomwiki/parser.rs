@@ -14,6 +14,9 @@ pub struct WikitextParser {
     link_re: Regex,
     /// Pattern to match `{{template}}` (non-nested only).
     template_re: Regex,
+    /// Pattern to match content-bearing templates whose last pipe-separated
+    /// argument is visible prose (`{{wp|target|display}}`, `{{c|text}}`, ...).
+    content_template_re: Regex,
     /// Pattern to match `<tag>`.
     html_tag_re: Regex,
     /// Pattern to match `<ref>...</ref>`.
@@ -29,6 +32,7 @@ impl WikitextParser {
             idgames_id_re: Regex::new(r"(?i)\{\{ig\s*\|\s*id\s*=\s*(\d+)").unwrap(),
             link_re: Regex::new(r"\[\[(?:[^|\]]*\|)?([^\]]+)\]\]").unwrap(),
             template_re: Regex::new(r"\{\{[^{}]*\}\}").unwrap(),
+            content_template_re: Regex::new(r"(?i)\{\{(wp|c|m|nowrap)\s*\|([^{}]*)\}\}").unwrap(),
             html_tag_re: Regex::new(r"<[^>]+>").unwrap(),
             ref_re: Regex::new(r"(?is)<ref[^>]*>.*?</ref>").unwrap(),
             year_re: Regex::new(r"\b(19|20)\d{2}\b").unwrap(),
@@ -71,13 +75,17 @@ impl WikitextParser {
                     .map(|s| s.as_str())
                     .unwrap_or(""),
             );
-            port = self.clean_value(
-                params
-                    .get("port")
-                    .or(params.get("port2"))
-                    .map(|s| s.as_str())
-                    .unwrap_or(""),
-            );
+            // Combine port + port2 so callers see every supported compat
+            // level. Ancient Aliens ships as `port=Boom-compatible,
+            // port2=MBF21-compatible`; picking the first loses MBF21 and
+            // downgrades complevel detection.
+            let port_parts: Vec<String> = ["port", "port2"]
+                .iter()
+                .filter_map(|k| params.get(*k))
+                .map(|s| self.clean_value(s))
+                .filter(|s| !s.is_empty())
+                .collect();
+            port = port_parts.join(", ");
 
             if let Some(year_str) = params.get("year") {
                 year = self.parse_year(year_str);
@@ -199,11 +207,29 @@ impl WikitextParser {
         // Convert [[link|text]] to text, [[text]] to text
         let value = self.link_re.replace_all(&value, "$1");
 
-        // Remove remaining templates
-        let value = self.template_re.replace_all(&value, "");
+        // Unwrap content-bearing templates, then strip the rest. Both passes
+        // iterate: `replace_all` only finds non-nested matches in one sweep,
+        // and the wiki happily nests (e.g. `{{cite web|url={{dwforums|1}}|...}}`
+        // — the outer template only matches after the inner is gone).
+        // Bound prevents runaway input from locking the parser up.
+        let mut current = value.into_owned();
+        for _ in 0..8 {
+            let unwrapped = self
+                .content_template_re
+                .replace_all(&current, |caps: &regex::Captures<'_>| {
+                    let body = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+                    body.rsplit('|').next().unwrap_or("").trim().to_string()
+                })
+                .into_owned();
+            let stripped = self.template_re.replace_all(&unwrapped, "").into_owned();
+            if stripped == current {
+                break;
+            }
+            current = stripped;
+        }
 
         // Remove bold/italic wiki markup
-        let value = value.replace("'''", "").replace("''", "");
+        let value = current.replace("'''", "").replace("''", "");
 
         // Collapse whitespace
         value.split_whitespace().collect::<Vec<_>>().join(" ")
@@ -406,6 +432,65 @@ mod tests {
     }
 
     #[test]
+    fn test_clean_value_unwraps_wp_two_arg() {
+        let p = parser();
+        assert_eq!(
+            p.clean_value("features an {{wp|Australia (continent)|Australian}} theme"),
+            "features an Australian theme"
+        );
+    }
+
+    #[test]
+    fn test_clean_value_unwraps_wp_one_arg() {
+        let p = parser();
+        assert_eq!(
+            p.clean_value("a {{wp|Christmas}} theme"),
+            "a Christmas theme"
+        );
+    }
+
+    #[test]
+    fn test_clean_value_unwraps_short_templates() {
+        let p = parser();
+        assert_eq!(p.clean_value("a {{c|DEHACKED}} lump"), "a DEHACKED lump");
+        assert_eq!(p.clean_value("see {{m|foo}}"), "see foo");
+        assert_eq!(p.clean_value("{{nowrap|Doom II}}"), "Doom II");
+    }
+
+    #[test]
+    fn test_clean_value_strips_nested_cite() {
+        // Outer template wraps an inner template. Single-pass replace_all
+        // can't reach the outer until the inner is stripped, so we iterate.
+        let p = parser();
+        let input = "Text.{{cite web|author=mouldy|url={{dwforums|65955}}|date=2013}} More.";
+        assert_eq!(p.clean_value(input), "Text. More.");
+    }
+
+    #[test]
+    fn test_clean_value_preserves_prose_order() {
+        // DBP31's sentence: two adjacent {{wp|...}} unwrap into prose.
+        let p = parser();
+        let input = "features an {{wp|Australia|Australian}} {{wp|Christmas}} theme.";
+        assert_eq!(
+            p.clean_value(input),
+            "features an Australian Christmas theme."
+        );
+    }
+
+    #[test]
+    fn test_clean_value_unwrap_then_strip() {
+        // Citation template wrapping an unwrappable template: the inner wp
+        // unwraps to "Creative Wave Blaster", but it's still inside a cite
+        // template that must then be stripped. Realistic combination.
+        let p = parser();
+        let input = "on a {{wp|Creative Wave Blaster}} and three AWE32s";
+        assert_eq!(
+            p.clean_value(input),
+            "on a Creative Wave Blaster and three AWE32s"
+        );
+    }
+
+    #[test]
     fn test_clean_value_whitespace() {
         let p = parser();
         assert_eq!(p.clean_value("  too   much   space  "), "too much space");
@@ -552,5 +637,62 @@ MAP01: "Entryway"
         let wikitext = "{{Wad\n| authors = A, B, C\n}}";
         let entry = p.parse(wikitext, "Page", 1);
         assert_eq!(entry.author, "A, B, C");
+    }
+
+    #[test]
+    fn test_parse_combines_port_and_port2() {
+        // Ancient Aliens pattern: both fields set. The parsed `port` string
+        // must mention the higher compat level so downstream complevel
+        // detection can see it.
+        let p = parser();
+        let wikitext = "{{Wad\n| port = Boom-compatible\n| port2 = MBF21-compatible\n}}";
+        let entry = p.parse(wikitext, "Page", 1);
+        assert!(
+            entry.port.contains("Boom") && entry.port.contains("MBF21"),
+            "expected combined port string, got {:?}",
+            entry.port
+        );
+    }
+
+    #[test]
+    fn test_parse_port_single_field_unchanged() {
+        // Single port field still renders cleanly (regression for fix 5).
+        let p = parser();
+        let wikitext = "{{Wad\n| port = Boom-compatible\n}}";
+        let entry = p.parse(wikitext, "Page", 1);
+        assert_eq!(entry.port, "Boom-compatible");
+    }
+
+    #[test]
+    fn test_parse_port2_only_falls_through() {
+        let p = parser();
+        let wikitext = "{{Wad\n| port2 = MBF-compatible\n}}";
+        let entry = p.parse(wikitext, "Page", 1);
+        assert_eq!(entry.port, "MBF-compatible");
+    }
+
+    #[test]
+    fn test_parse_description_has_no_raw_templates() {
+        // Regression: the wiki's first paragraph for "Going Down" has inline
+        // `{{cite web|...{{dwforums|N}}...}}` templates. Both the outer cite
+        // and the inner dwforums must be gone from the final description —
+        // otherwise raw `{{...}}` text leaks into the DB.
+        let p = parser();
+        let wikitext = "{{Wad\n| author = Cyriak Harris\n}}\n\n\
+            '''Going Down''' is a 32-level megawad, released on October 22, 2013.\
+            {{cite web|author=mouldy|url={{dwforums|65955}}|date=22 October 2013}}\
+            The final version was uploaded on November 2, 2014.";
+        let entry = p.parse(wikitext, "Going Down", 1);
+        assert!(
+            !entry.description.contains("{{"),
+            "description should not contain raw template text: {}",
+            entry.description
+        );
+        assert!(
+            !entry.description.contains("}}"),
+            "description should not contain raw template text: {}",
+            entry.description
+        );
+        assert!(entry.description.contains("Going Down"));
     }
 }

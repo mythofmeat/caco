@@ -429,8 +429,8 @@ fn import_doomwiki_page(
     force: bool,
 ) -> Result<(), String> {
     let client = DoomwikiClient::new();
-    let entry = match client.get_entry(title) {
-        Ok(Some(e)) => e,
+    let (entry, has_infobox) = match client.get_entry_permissive(title) {
+        Ok(Some(pair)) => pair,
         Ok(None) => return Err(format!("Doom Wiki page not found: '{title}'")),
         Err(caco_sources::SourceError::WafBlocked { .. }) => {
             print_api_hint("doomwiki", title);
@@ -438,6 +438,16 @@ fn import_doomwiki_page(
         }
         Err(e) => return Err(e.to_string()),
     };
+
+    // Refuse pages without a {{Wad}} infobox (IWAD articles, disambigs, etc.)
+    // unless the user explicitly overrides with --force.
+    if !has_infobox && !force {
+        return Err(format!(
+            "'{title}' has no {{{{Wad}}}} infobox — this looks like an IWAD \
+             article or non-WAD page, not a WAD release. Retry with --force \
+             to import anyway."
+        ));
+    }
 
     let svc = ImportService::new();
     let result = svc.import_doomwiki(conn, &entry, tags, force);
