@@ -860,18 +860,6 @@ pub struct ImportArgs {
     /// Multi-select from search results — REQUIRES fzf, non-functional over MCP.
     #[serde(default)]
     pub multi: bool,
-    /// Force LLM-powered metadata extraction (Doomworld only).
-    #[serde(default)]
-    pub smart: bool,
-    /// Disable auto-LLM extraction (when `[llm]` is configured).
-    #[serde(default)]
-    pub no_smart: bool,
-    /// LLM backend override.
-    #[serde(default)]
-    pub llm_backend: Option<String>,
-    /// LLM model override.
-    #[serde(default)]
-    pub llm_model: Option<String>,
 }
 
 impl ImportArgs {
@@ -910,10 +898,6 @@ impl ImportArgs {
         push_opt(&mut argv, "--description", self.description.as_ref());
         push_flag(&mut argv, "--force", self.force);
         push_flag(&mut argv, "--multi", self.multi);
-        push_flag(&mut argv, "--smart", self.smart);
-        push_flag(&mut argv, "--no-smart", self.no_smart);
-        push_opt(&mut argv, "--llm-backend", self.llm_backend.as_ref());
-        push_opt(&mut argv, "--llm-model", self.llm_model.as_ref());
         argv
     }
 }
@@ -2137,10 +2121,6 @@ mod tests {
             description: None,
             force: false,
             multi: false,
-            smart: false,
-            no_smart: false,
-            llm_backend: None,
-            llm_model: None,
         }
     }
 
@@ -2162,8 +2142,6 @@ mod tests {
         // Default ImportArgs should not render any metadata flags.
         assert!(!argv.contains(&"--force".to_string()));
         assert!(!argv.contains(&"--multi".to_string()));
-        assert!(!argv.contains(&"--smart".to_string()));
-        assert!(!argv.contains(&"--no-smart".to_string()));
         assert!(!argv.contains(&"--title".to_string()));
         assert!(!argv.contains(&"--author".to_string()));
     }
@@ -2233,10 +2211,6 @@ mod tests {
             description: Some("A great wad".into()),
             force: true,
             multi: true,
-            smart: true,
-            no_smart: false,
-            llm_backend: Some("anthropic".into()),
-            llm_model: Some("claude-3-5".into()),
         };
         let argv = args.to_argv();
         assert!(
@@ -2254,16 +2228,6 @@ mod tests {
         );
         assert!(argv.contains(&"--force".to_string()));
         assert!(argv.contains(&"--multi".to_string()));
-        assert!(argv.contains(&"--smart".to_string()));
-        assert!(!argv.contains(&"--no-smart".to_string()));
-        assert!(
-            argv.windows(2)
-                .any(|w| w[0] == "--llm-backend" && w[1] == "anthropic")
-        );
-        assert!(
-            argv.windows(2)
-                .any(|w| w[0] == "--llm-model" && w[1] == "claude-3-5")
-        );
         // Two --tag pairs in argv
         let tag_positions: Vec<_> = argv
             .iter()
@@ -2290,10 +2254,6 @@ mod tests {
             "--description",
             "--force",
             "--multi",
-            "--smart",
-            "--no-smart",
-            "--llm-backend",
-            "--llm-model",
             "--tag",
         ] {
             assert!(
@@ -2301,19 +2261,6 @@ mod tests {
                 "default ImportArgs should not render {flag}, got {argv:?}"
             );
         }
-    }
-
-    #[test]
-    fn import_no_smart_renders() {
-        let args = ImportArgs {
-            no_smart: true,
-            ..import_args(ImportSource::Doomworld {
-                url: "https://www.doomworld.com/forum/topic/1/".into(),
-            })
-        };
-        let argv = args.to_argv();
-        assert!(argv.contains(&"--no-smart".to_string()));
-        assert!(!argv.contains(&"--smart".to_string()));
     }
 
     // ---------- caco_gc tests ----------

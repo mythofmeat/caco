@@ -20,7 +20,6 @@ Key features:
 - Automatic playtime tracking via a sourceport wrapper
 - Tag-based organization and beets-style query syntax
 - On-demand downloading (WADs are cached, not stored permanently)
-- Optional LLM-powered metadata extraction (used by Doomworld imports)
 - Completion tracking with per-map stats import/export and auto-tracking
 - Companion file management with MD5 deduplication
 - IWAD / id24 registry with auto-detection from WAD contents

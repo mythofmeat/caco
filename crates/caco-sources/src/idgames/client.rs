@@ -97,6 +97,55 @@ impl IdgamesClient {
         Ok(info)
     }
 
+    /// Look up an entry by archive path, with a filename-search fallback.
+    ///
+    /// The idgames API's `get(file=...)` endpoint has been observed to return
+    /// `Bad File: No file associated with that path` transiently even for
+    /// entries that plainly exist (the backend's file-index is not always
+    /// in sync with the DB, and different mirrors may disagree). A
+    /// `search(type=filename)` lookup of the same basename reliably returns
+    /// the entry. This method tries `get` first and, on any non-WAF API
+    /// error, falls back to a filename search filtered to the same archive
+    /// directory so we don't pick up unrelated same-named files.
+    ///
+    /// WAF/network errors short-circuit — no point retrying through the
+    /// same cloudflare.
+    pub fn get_by_path(&self, file_path: &str) -> Result<FileEntry> {
+        let get_err = match self.get(None, Some(file_path)) {
+            Ok(entry) => return Ok(entry),
+            Err(e @ SourceError::WafBlocked { .. }) => return Err(e),
+            Err(e) => e,
+        };
+
+        // Fallback: search by the filename stem (without extension), then
+        // match by the dir+filename of the original path.
+        let basename = Path::new(file_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+        if basename.is_empty() {
+            return Err(get_err);
+        }
+
+        let Ok(results) = self.search(basename, Some("filename"), None, None) else {
+            return Err(get_err);
+        };
+
+        let want = file_path.to_lowercase();
+        for entry in results {
+            let got = format!(
+                "{}/{}",
+                entry.dir.trim_matches('/').to_lowercase(),
+                entry.filename.to_lowercase(),
+            );
+            if got == want {
+                return Ok(entry);
+            }
+        }
+
+        Err(get_err)
+    }
+
     /// Get file details by ID or filename.
     pub fn get(&self, id: Option<i64>, file: Option<&str>) -> Result<FileEntry> {
         if id.is_none() && file.is_none() {

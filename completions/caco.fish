@@ -213,9 +213,6 @@ complete -c caco -n "__fish_seen_subcommand_from import" -l tag -d "Add tag" -xa
 complete -c caco -n "__fish_seen_subcommand_from import" -s f -l force -d "Import even if duplicate exists"
 complete -c caco -n "__fish_seen_subcommand_from import" -s m -l multi -d "Allow multi-select (requires fzf)"
 complete -c caco -n "__fish_seen_subcommand_from import" -s d -l description -d "Description (for --url imports)"
-complete -c caco -n "__fish_seen_subcommand_from import" -s s -l smart -d "Use LLM for metadata extraction"
-complete -c caco -n "__fish_seen_subcommand_from import" -l llm-backend -d "LLM backend" -xa "claude-code openrouter anthropic openai"
-complete -c caco -n "__fish_seen_subcommand_from import" -l llm-model -d "Model override for API backends"
 
 # =============================================================================
 # config command

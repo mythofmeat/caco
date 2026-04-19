@@ -263,8 +263,6 @@ impl ImportService {
         title: Option<&str>,
         author: Option<&str>,
         year: Option<i32>,
-        version: Option<&str>,
-        complevel: Option<i32>,
         force: bool,
     ) -> ImportResult {
         // Check for duplicates
@@ -291,12 +289,12 @@ impl ImportService {
             });
         let final_year = year.or_else(|| caco_core::utils::extract_year(&thread.posted_date));
 
-        // Use first post text as description, truncated if too long
+        // Use first post text as description, truncated on a paragraph break
+        // (or word boundary) so we don't cut mid-sentence.
         let description = if thread.first_post_text.is_empty() {
             None
         } else if thread.first_post_text.len() > 2000 {
-            let boundary = thread.first_post_text.floor_char_boundary(1997);
-            Some(format!("{}...", &thread.first_post_text[..boundary]))
+            Some(truncate_description(&thread.first_post_text, 2000))
         } else {
             Some(thread.first_post_text.clone())
         };
@@ -316,7 +314,7 @@ impl ImportService {
         if !thread.thread_url.is_empty() {
             wad = wad.source_url(&thread.thread_url);
         }
-        if let Some(v) = version {
+        if let Some(v) = thread.version.as_deref() {
             wad = wad.version(v);
         }
         if let Some(t) = tags {
@@ -326,10 +324,32 @@ impl ImportService {
         let result = db::with_transaction(conn, |tx| {
             let wad_id = db::add_wad(tx, &wad)?;
 
-            // Set complevel (override > thread-extracted)
-            let final_complevel = complevel.or(thread.complevel);
-            if let Some(cl) = final_complevel {
+            if let Some(cl) = thread.complevel {
                 let update = WadUpdate::new().set_int("complevel", Some(cl as i64));
+                db::update_wad(tx, wad_id, &update)?;
+            }
+
+            // Persist thread-extracted IWAD and sourceport. Previously these
+            // were printed on the CLI then discarded — importing a WAD with a
+            // known IWAD/port but never recording them is surprising.
+            if let Some(iwad) = thread.iwad.as_deref() {
+                auto_link_iwad(tx, wad_id, iwad);
+            }
+            if let Some(port) = thread.sourceport.as_deref()
+                && is_persistable_port(port)
+            {
+                let update = WadUpdate::new().set_text("custom_sourceport", Some(port.to_string()));
+                db::update_wad(tx, wad_id, &update)?;
+                auto_link_zdoom_required(tx, wad_id, port);
+            }
+
+            // Persist download links. Previously these were counted in the
+            // CLI output and thrown away, leaving the user no way to recover
+            // them if auto-caching wasn't wired up.
+            if !thread.download_links.is_empty()
+                && let Ok(json) = serde_json::to_string(&thread.download_links)
+            {
+                let update = WadUpdate::new().set_text("download_urls", Some(json));
                 db::update_wad(tx, wad_id, &update)?;
             }
 
@@ -534,6 +554,52 @@ impl ImportService {
     }
 }
 
+/// Whether a detected sourceport string names a real port we can store in
+/// `custom_sourceport`. Detector tokens like `"limit-removing"` describe a
+/// compat target, not a port, and should not be persisted as one.
+fn is_persistable_port(port: &str) -> bool {
+    matches!(
+        port,
+        "gzdoom"
+            | "lzdoom"
+            | "vkdoom"
+            | "qzdoom"
+            | "zdoom"
+            | "uzdoom"
+            | "dsda-doom"
+            | "prboom+"
+            | "glboom+"
+            | "eternity"
+            | "crispy-doom"
+            | "chocolate-doom"
+            | "woof"
+            | "nugget-doom"
+            | "cherry-doom"
+            | "edge"
+            | "doomsday"
+            | "zandronum"
+            | "odamex"
+            | "3dge"
+    )
+}
+
+/// Truncate description text on the nearest paragraph/word boundary at or
+/// before `max_len` bytes, suffixed with `...` when content is trimmed.
+fn truncate_description(text: &str, max_len: usize) -> String {
+    if text.len() <= max_len {
+        return text.to_string();
+    }
+    let budget = max_len.saturating_sub(3); // reserve room for the ellipsis
+    let slice = &text[..text.floor_char_boundary(budget)];
+    let cut = slice
+        .rfind("\n\n")
+        .or_else(|| slice.rfind('\n'))
+        .or_else(|| slice.rfind(". "))
+        .or_else(|| slice.rfind(' '))
+        .unwrap_or(slice.len());
+    format!("{}...", slice[..cut].trim_end())
+}
+
 /// Map a Doom Wiki "port" field string to a complevel integer.
 ///
 /// Uses substring matching against known port requirement keywords.
@@ -646,7 +712,7 @@ impl ImportService {
             return;
         };
 
-        if let Ok(entry) = self.idgames.get(None, Some(&file_path)) {
+        if let Ok(entry) = self.idgames.get_by_path(&file_path) {
             let filename = if entry.filename.is_empty() {
                 None
             } else {
@@ -1115,10 +1181,10 @@ mod tests {
             complevel: Some(9),
             iwad: Some("doom2".to_string()),
             sourceport: Some("gzdoom".to_string()),
+            version: None,
         };
 
-        let result =
-            svc.import_doomworld(&conn, &thread, None, None, None, None, None, None, false);
+        let result = svc.import_doomworld(&conn, &thread, None, None, None, None, false);
         assert!(result.ok());
 
         let wad = db::get_wad(&conn, result.wad_id.unwrap(), false)
@@ -1147,9 +1213,10 @@ mod tests {
             first_post_text: "Post text.".to_string(),
             thread_url: "https://www.doomworld.com/forum/topic/99999-test/".to_string(),
             download_links: Vec::new(),
-            complevel: Some(2),
+            complevel: Some(21),
             iwad: None,
             sourceport: None,
+            version: Some("v1.5".to_string()),
         };
 
         let result = svc.import_doomworld(
@@ -1159,8 +1226,6 @@ mod tests {
             Some("Override Title"),
             Some("Override Author"),
             Some(2024),
-            Some("v1.5"),
-            Some(21), // override complevel
             false,
         );
         assert!(result.ok());
@@ -1168,11 +1233,13 @@ mod tests {
         let wad = db::get_wad(&conn, result.wad_id.unwrap(), false)
             .unwrap()
             .unwrap();
+        // CLI overrides win for title/author/year.
         assert_eq!(wad.title, "Override Title");
         assert_eq!(wad.author.as_deref(), Some("Override Author"));
         assert_eq!(wad.year, Some(2024));
+        // Version/complevel come straight from the parsed thread.
         assert_eq!(wad.version.as_deref(), Some("v1.5"));
-        assert_eq!(wad.complevel, Some(21)); // override wins over thread's 2
+        assert_eq!(wad.complevel, Some(21));
         assert_eq!(wad.tags, vec!["cacoward"]);
     }
 
@@ -1193,12 +1260,13 @@ mod tests {
             complevel: None,
             iwad: None,
             sourceport: None,
+            version: None,
         };
 
-        let r1 = svc.import_doomworld(&conn, &thread, None, None, None, None, None, None, false);
+        let r1 = svc.import_doomworld(&conn, &thread, None, None, None, None, false);
         assert!(r1.ok());
 
-        let r2 = svc.import_doomworld(&conn, &thread, None, None, None, None, None, None, false);
+        let r2 = svc.import_doomworld(&conn, &thread, None, None, None, None, false);
         assert!(r2.is_duplicate);
         assert_eq!(r2.duplicate_id, r1.wad_id);
     }
@@ -1220,11 +1288,12 @@ mod tests {
             complevel: None,
             iwad: None,
             sourceport: None,
+            version: None,
         };
 
-        svc.import_doomworld(&conn, &thread, None, None, None, None, None, None, false);
+        svc.import_doomworld(&conn, &thread, None, None, None, None, false);
 
-        let r2 = svc.import_doomworld(&conn, &thread, None, None, None, None, None, None, true);
+        let r2 = svc.import_doomworld(&conn, &thread, None, None, None, None, true);
         assert!(r2.ok()); // force bypasses duplicate check
     }
 
@@ -1246,10 +1315,10 @@ mod tests {
             complevel: None,
             iwad: None,
             sourceport: None,
+            version: None,
         };
 
-        let result =
-            svc.import_doomworld(&conn, &thread, None, None, None, None, None, None, false);
+        let result = svc.import_doomworld(&conn, &thread, None, None, None, None, false);
         assert!(result.ok());
 
         let wad = db::get_wad(&conn, result.wad_id.unwrap(), false)

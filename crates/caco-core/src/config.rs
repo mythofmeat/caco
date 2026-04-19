@@ -125,8 +125,6 @@ pub struct Config {
     #[serde(default)]
     pub list: ListConfig,
     #[serde(default)]
-    pub llm: LlmConfig,
-    #[serde(default)]
     pub iwad_priority: HashMap<String, Vec<String>>,
 }
 
@@ -157,7 +155,6 @@ impl Default for Config {
             tui: TuiConfig::default(),
             gui: GuiConfig::default(),
             list: ListConfig::default(),
-            llm: LlmConfig::default(),
             iwad_priority: HashMap::new(),
         }
     }
@@ -234,24 +231,6 @@ impl Default for ListConfig {
             sort: None,
             default_status: Vec::new(),
         }
-    }
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default)]
-pub struct LlmConfig {
-    /// LLM backend: "claude-code", "openrouter", "anthropic", "openai", or ""
-    pub backend: String,
-    /// Model override (e.g., "claude-3-haiku-20240307"), or ""
-    pub model: String,
-    /// API key for openrouter/anthropic/openai backends, or ""
-    pub api_key: String,
-}
-
-impl LlmConfig {
-    /// Whether a backend is explicitly configured.
-    pub fn is_configured(&self) -> bool {
-        !self.backend.is_empty()
     }
 }
 
@@ -1061,19 +1040,6 @@ window_width = 1600
         let parsed: Config = toml::from_str(&toml_str).unwrap();
         assert_eq!(parsed.tui.default_tab, "playing");
         assert_eq!(parsed.tui.default_sort, "playtime");
-    }
-
-    #[test]
-    fn test_llm_config_is_configured() {
-        let llm = LlmConfig::default();
-        assert!(!llm.is_configured());
-
-        let llm = LlmConfig {
-            backend: "anthropic".to_string(),
-            model: String::new(),
-            api_key: String::new(),
-        };
-        assert!(llm.is_configured());
     }
 
     #[test]

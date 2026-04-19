@@ -28,14 +28,20 @@ pub fn extract_idgames_id_from_url(url: &str) -> Option<i64> {
 
 /// Extract the idgames archive file path from a path-style mirror URL.
 ///
-/// The Doom Wiki's `{{ig|file=...}}` template is rendered by our parser as
-/// `https://www.doomworld.com/idgames/<path>` — these URLs don't have a
-/// numeric `?id=N`, but the path can be passed to the idgames API as the
-/// `file` parameter to look up the entry.
+/// The Doom Wiki's `{{ig|file=...}}` template and doomworld's own idgames
+/// frontend both render paths like `https://www.doomworld.com/idgames/<path>`.
+/// These URLs don't carry a numeric `?id=N`, but the path can be passed to
+/// the idgames API as the `file` parameter to look up the entry.
+///
+/// The idgames API's `file=` lookup requires an actual filename, not a
+/// directory/slug path — so if the final segment has no extension we append
+/// `.zip`, which is the universal archive format used by the idgames archive.
 ///
 /// Accepts forms such as:
 /// - `https://www.doomworld.com/idgames/levels/doom2/megawads/scythe.zip`
-/// - `https://www.doomworld.com/idgames/levels/doom2/megawads/scythe`
+///   → `levels/doom2/megawads/scythe.zip`
+/// - `https://www.doomworld.com/idgames/levels/doom2/Ports/v-z/witchinghour`
+///   → `levels/doom2/Ports/v-z/witchinghour.zip`
 ///
 /// Returns `None` for URLs that already carry a query string (those should
 /// use [`extract_idgames_id_from_url`] instead) or that don't sit under the
@@ -51,7 +57,12 @@ pub fn extract_idgames_file_path_from_url(url: &str) -> Option<String> {
     if after.is_empty() {
         return None;
     }
-    Some(after.to_string())
+    let last_segment = after.rsplit('/').next().unwrap_or("");
+    if last_segment.contains('.') {
+        Some(after.to_string())
+    } else {
+        Some(format!("{after}.zip"))
+    }
 }
 
 #[cfg(test)]
@@ -134,11 +145,27 @@ mod tests {
 
     #[test]
     fn extracts_file_path_from_slug_url() {
+        // Slug URLs from doomworld's frontend have no extension; the idgames
+        // API's `file=` param requires an actual filename, so we append
+        // `.zip` (the universal archive format).
         assert_eq!(
             extract_idgames_file_path_from_url(
                 "https://www.doomworld.com/idgames/levels/doom2/Ports/megawads/sunlust"
             ),
-            Some("levels/doom2/Ports/megawads/sunlust".to_string()),
+            Some("levels/doom2/Ports/megawads/sunlust.zip".to_string()),
+        );
+    }
+
+    #[test]
+    fn extracts_file_path_appends_zip_for_slug_with_dotted_dir() {
+        // Dots may appear in directory names (`v-z` has none, but `Level-1.2`
+        // would) — we only look at the final segment to decide whether to
+        // append `.zip`.
+        assert_eq!(
+            extract_idgames_file_path_from_url(
+                "https://www.doomworld.com/idgames/levels/doom2/Ports/v-z/witchinghour"
+            ),
+            Some("levels/doom2/Ports/v-z/witchinghour.zip".to_string()),
         );
     }
 

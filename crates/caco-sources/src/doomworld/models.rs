@@ -25,6 +25,8 @@ pub struct ForumThread {
     pub iwad: Option<String>,
     /// Required sourceport (e.g., "gzdoom", "dsda-doom").
     pub sourceport: Option<String>,
+    /// Version string scraped from the title or post body (e.g., "v1.0", "RC3").
+    pub version: Option<String>,
 }
 
 impl ForumThread {
@@ -59,6 +61,7 @@ mod tests {
             complevel: None,
             iwad: None,
             sourceport: None,
+            version: None,
         }
     }
 

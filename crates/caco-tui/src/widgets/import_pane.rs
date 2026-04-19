@@ -277,8 +277,6 @@ impl ImportPaneState {
                                     title_override.as_deref(),
                                     author_override.as_deref(),
                                     year_override,
-                                    None,
-                                    None,
                                     false,
                                 );
                                 if let Some(err) = &result.error {

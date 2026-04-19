@@ -156,9 +156,6 @@ _caco_import() {
         '(-f --force)'{-f,--force}'[Import even if duplicate exists]' \
         '(-m --multi)'{-m,--multi}'[Allow multi-select]' \
         '(-d --description)'{-d,--description}'[Description]:description:' \
-        '(-s --smart)'{-s,--smart}'[Use LLM for metadata extraction]' \
-        '--llm-backend[LLM backend]:backend:(claude-code openrouter anthropic openai)' \
-        '--llm-model[Model override]:model:' \
         '--help[Show help]' \
         '*:source:'
 }

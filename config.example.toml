@@ -80,15 +80,6 @@
 # [iwad_priority]
 # doom2 = ["doom2-bfg", "doom2"]
 
-# LLM-assisted metadata extraction (optional, used by Doomworld imports).
-# backend: "claude-code", "openrouter", "anthropic", "openai", or "" to disable.
-# model:   backend-specific model name override, or "" for the default.
-# api_key: required for openrouter/anthropic/openai backends.
-# [llm]
-# backend = ""
-# model = ""
-# api_key = ""
-
 # List display configuration
 # [list]
 

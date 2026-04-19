@@ -151,6 +151,7 @@ static MIGRATIONS: &[Migration] = &[
     (31, "add_zdoom_required", migrate_add_zdoom_required),
     (32, "consolidate_status_columns", migrate_consolidate_status),
     (33, "drop_custom_complevel", migrate_drop_custom_complevel),
+    (34, "add_download_urls", migrate_add_download_urls),
 ];
 
 // ---------------------------------------------------------------------------
@@ -660,6 +661,14 @@ fn migrate_fix_started_queued(conn: &Connection) -> Result<()> {
 
 fn migrate_add_zdoom_required(conn: &Connection) -> Result<()> {
     add_column_if_missing(conn, "wads", "zdoom_required", "INTEGER")
+}
+
+/// Add `download_urls` — a JSON-encoded array of candidate download URLs
+/// scraped from Doomworld threads (or anywhere else we find them). Lets the
+/// player / cache retry against the next URL when a host goes down, and gives
+/// the user somewhere to copy from if auto-download isn't wired up.
+fn migrate_add_download_urls(conn: &Connection) -> Result<()> {
+    add_column_if_missing(conn, "wads", "download_urls", "TEXT")
 }
 
 fn migrate_consolidate_status(conn: &Connection) -> Result<()> {

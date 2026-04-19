@@ -10,7 +10,6 @@ use caco_core::db;
 use caco_core::resource_service;
 use caco_sources::doomwiki::DoomwikiClient;
 use caco_sources::doomworld::DoomworldClient;
-use caco_sources::doomworld::llm;
 use caco_sources::idgames::IdgamesClient;
 use caco_sources::import_service::{ImportResult, ImportService};
 use caco_sources::json_import::{self, JsonSource};
@@ -68,23 +67,6 @@ pub struct ImportArgs {
     /// Multi-select from search results (requires fzf)
     #[arg(short = 'm', long)]
     multi: bool,
-
-    // Doomworld LLM
-    /// LLM-powered metadata extraction (Doomworld only)
-    #[arg(long, conflicts_with = "no_smart")]
-    smart: bool,
-
-    /// Disable auto-LLM extraction (when [llm] is configured)
-    #[arg(long)]
-    no_smart: bool,
-
-    /// LLM backend
-    #[arg(long)]
-    llm_backend: Option<String>,
-
-    /// LLM model override
-    #[arg(long)]
-    llm_model: Option<String>,
 }
 
 /// Print the outcome of a batch import. Returns true if the WAD was imported.
@@ -127,6 +109,7 @@ pub fn run(conn: &Connection, args: &ImportArgs) -> Result<(), String> {
     match source_type {
         SourceKind::IdgamesSearch(query) => import_idgames_search(conn, &query, tags, args),
         SourceKind::IdgamesId(id) => import_idgames_id(conn, id, tags, args.force),
+        SourceKind::IdgamesPath(path) => import_idgames_path(conn, &path, tags, args.force),
         SourceKind::Doomwiki(query) => import_doomwiki_search(conn, &query, tags, args),
         SourceKind::DoomwikiPage(title) => import_doomwiki_page(conn, &title, tags, args.force),
         SourceKind::Doomworld(url) => import_doomworld(conn, &url, tags, args),
@@ -139,6 +122,9 @@ pub fn run(conn: &Connection, args: &ImportArgs) -> Result<(), String> {
 enum SourceKind {
     IdgamesSearch(String),
     IdgamesId(i64),
+    /// Archive-path lookup (e.g. `levels/doom2/Ports/v-z/witchinghour`) —
+    /// resolved against the idgames API's `file=` parameter.
+    IdgamesPath(String),
     Doomwiki(String),
     /// Direct Doom Wiki page fetch by title (no picker).
     DoomwikiPage(String),
@@ -163,6 +149,9 @@ fn detect_source(args: &ImportArgs, source_str: &str) -> Result<SourceKind, Stri
         }
         if let Ok(id) = source_str.parse::<i64>() {
             return Ok(SourceKind::IdgamesId(id));
+        }
+        if source_str.contains("doomworld.com/idgames") {
+            return resolve_idgames_url(source_str);
         }
         return Ok(SourceKind::IdgamesSearch(source_str.to_string()));
     }
@@ -204,12 +193,7 @@ fn detect_source(args: &ImportArgs, source_str: &str) -> Result<SourceKind, Stri
     // to idgames before the generic doomworld forum match so they don't
     // get rejected as invalid forum URLs.
     if source_str.contains("doomworld.com/idgames") {
-        return match caco_sources::idgames::extract_idgames_id_from_url(source_str) {
-            Some(id) => Ok(SourceKind::IdgamesId(id)),
-            None => Err(format!(
-                "Could not extract idgames ID from URL: {source_str}"
-            )),
-        };
+        return resolve_idgames_url(source_str);
     }
     if source_str.contains("doomworld.com") {
         return Ok(SourceKind::Doomworld(source_str.to_string()));
@@ -226,6 +210,18 @@ fn detect_source(args: &ImportArgs, source_str: &str) -> Result<SourceKind, Stri
 
     // Default to idgames search
     Ok(SourceKind::IdgamesSearch(source_str.to_string()))
+}
+
+/// Classify a `doomworld.com/idgames/...` URL as either an id lookup
+/// (`?id=N`) or an archive-path lookup (`/idgames/<path>`).
+fn resolve_idgames_url(url: &str) -> Result<SourceKind, String> {
+    if let Some(id) = caco_sources::idgames::extract_idgames_id_from_url(url) {
+        return Ok(SourceKind::IdgamesId(id));
+    }
+    if let Some(path) = caco_sources::idgames::extract_idgames_file_path_from_url(url) {
+        return Ok(SourceKind::IdgamesPath(path));
+    }
+    Err(format!("Unrecognized idgames URL: {url}"))
 }
 
 fn import_idgames_search(
@@ -306,6 +302,39 @@ fn import_idgames_id(
             return Err("idgames API blocked by Cloudflare challenge.".to_string());
         }
         Err(e) => return Err(e.to_string()),
+    };
+
+    let svc = ImportService::new();
+    let result = svc.import_idgames(conn, &entry, tags, force);
+
+    if result.is_duplicate {
+        println!(
+            "Already in library: '{}' (ID: {})",
+            result.duplicate_title.as_deref().unwrap_or("?"),
+            result.duplicate_id.unwrap_or(0),
+        );
+    } else if let Some(wad_id) = result.wad_id {
+        println!("Imported '{}' (ID: {wad_id})", entry.title);
+    } else if let Some(ref err) = result.error {
+        return Err(format!("Import error: {err}"));
+    }
+    Ok(())
+}
+
+fn import_idgames_path(
+    conn: &Connection,
+    file_path: &str,
+    tags: Option<Vec<String>>,
+    force: bool,
+) -> Result<(), String> {
+    let client = IdgamesClient::new();
+    let entry = match client.get_by_path(file_path) {
+        Ok(e) => e,
+        Err(caco_sources::SourceError::WafBlocked { .. }) => {
+            print_api_hint("idgames", file_path);
+            return Err("idgames API blocked by Cloudflare challenge.".to_string());
+        }
+        Err(e) => return Err(format!("idgames lookup failed for '{file_path}': {e}")),
     };
 
     let svc = ImportService::new();
@@ -471,21 +500,11 @@ fn import_doomworld(
     let client = DoomworldClient::new();
     let thread = client.get_thread(url).map_err(|e| e.to_string())?;
 
-    // Determine if LLM extraction should run
-    let llm_metadata = resolve_llm_metadata(&thread, args);
-
-    // Merge: CLI flags > LLM extraction > regex extraction (thread fields)
-    let final_title = args
-        .title
-        .as_deref()
-        .or(llm_metadata.as_ref().and_then(|m| m.title.as_deref()));
-    let final_author = args
-        .author
-        .as_deref()
-        .or(llm_metadata.as_ref().and_then(|m| m.author.as_deref()));
+    // CLI flags override the regex-extracted thread fields. Everything else
+    // comes straight from `thread.*`.
+    let final_title = args.title.as_deref();
+    let final_author = args.author.as_deref();
     let final_year = args.year;
-    let final_version = llm_metadata.as_ref().and_then(|m| m.version.as_deref());
-    let final_complevel = llm_metadata.as_ref().and_then(|m| m.complevel);
 
     let svc = ImportService::new();
     let result = svc.import_doomworld(
@@ -495,8 +514,6 @@ fn import_doomworld(
         final_title,
         final_author,
         final_year,
-        final_version,
-        final_complevel,
         args.force,
     );
 
@@ -512,103 +529,28 @@ fn import_doomworld(
             final_title.unwrap_or(&thread.title)
         );
 
-        // Show extracted metadata (prefer LLM values, fall back to regex)
-        let iwad = llm_metadata
-            .as_ref()
-            .and_then(|m| m.iwad.as_deref())
-            .or(thread.iwad.as_deref());
-        let port = llm_metadata
-            .as_ref()
-            .and_then(|m| m.sourceport.as_deref())
-            .or(thread.sourceport.as_deref());
-        let cl = final_complevel.or(thread.complevel);
-
-        if let Some(iwad) = iwad {
+        if let Some(iwad) = thread.iwad.as_deref() {
             println!("  IWAD: {iwad}");
         }
-        if let Some(port) = port {
+        if let Some(port) = thread.sourceport.as_deref() {
             println!("  Sourceport: {port}");
         }
-        if let Some(cl) = cl {
+        if let Some(cl) = thread.complevel {
             println!("  Complevel: {cl}");
+        }
+        if let Some(ref v) = thread.version {
+            println!("  Version: {v}");
         }
         if !thread.download_links.is_empty() {
             println!("  Download links: {}", thread.download_links.len());
-        }
-        if let Some(ref meta) = llm_metadata {
-            if let Some(ref desc) = meta.description {
-                println!("  Description: {desc}");
-            }
-            if !meta.themes.is_empty() {
-                println!("  Themes: {}", meta.themes.join(", "));
+            for link in &thread.download_links {
+                println!("    - {link}");
             }
         }
     } else if let Some(ref err) = result.error {
         return Err(format!("Import error: {err}"));
     }
     Ok(())
-}
-
-/// Determine if LLM extraction should run and execute it.
-///
-/// Logic:
-/// - `--no-smart`: skip LLM entirely
-/// - `--smart`: explicitly enable (error if no backend available)
-/// - Neither flag: auto-enable if config has `[llm]` backend configured
-///
-/// On LLM error: warn and return None (never fail the import).
-fn resolve_llm_metadata(
-    thread: &caco_sources::doomworld::ForumThread,
-    args: &ImportArgs,
-) -> Option<llm::LlmExtractedMetadata> {
-    if args.no_smart {
-        return None;
-    }
-
-    let cfg = caco_core::config::load_config();
-    let should_use_llm = if args.smart {
-        true
-    } else {
-        // Auto-enable if config has LLM backend configured
-        cfg.llm.is_configured()
-    };
-
-    if !should_use_llm {
-        return None;
-    }
-
-    // Resolve backend/model/api_key: CLI flags > config values > auto-detect
-    let backend = args
-        .llm_backend
-        .as_deref()
-        .or_else(|| Some(cfg.llm.backend.as_str()).filter(|s| !s.is_empty()));
-    let model = args
-        .llm_model
-        .as_deref()
-        .or_else(|| Some(cfg.llm.model.as_str()).filter(|s| !s.is_empty()));
-    let api_key = Some(cfg.llm.api_key.as_str()).filter(|s| !s.is_empty());
-
-    let parser = match llm::get_parser(backend, model, api_key) {
-        Ok(p) => p,
-        Err(e) => {
-            if args.smart {
-                // Explicit --smart: show error prominently
-                eprintln!("Warning: {e}");
-            }
-            return None;
-        }
-    };
-
-    eprintln!("Using LLM backend: {}", parser.name());
-
-    match parser.parse(&thread.first_post_text) {
-        Ok(meta) => Some(meta),
-        Err(e) => {
-            eprintln!("Warning: LLM extraction failed: {e}");
-            eprintln!("Falling back to regex-only extraction.");
-            None
-        }
-    }
 }
 
 fn import_json(
@@ -891,6 +833,7 @@ fn picker_wad_record(
         version: None,
         complevel: None,
         zdoom_required: None,
+        download_urls: None,
         stats_snapshot: None,
         gc_ignore: false,
         deleted_at: None,
@@ -919,10 +862,6 @@ mod tests {
             description: None,
             force: false,
             multi: false,
-            smart: false,
-            no_smart: false,
-            llm_backend: None,
-            llm_model: None,
         }
     }
 
@@ -959,8 +898,48 @@ mod tests {
     #[test]
     fn detect_source_rejects_malformed_idgames_url() {
         let args = default_args();
+        // A query-string URL with neither an id= param nor an archive path
+        // portion should still be rejected.
         let url = "https://www.doomworld.com/idgames/?no-id-param=1";
         assert!(detect_source(&args, url).is_err());
+    }
+
+    #[test]
+    fn detect_source_routes_idgames_slug_url_to_path() {
+        let args = default_args();
+        let url = "https://www.doomworld.com/idgames/levels/doom2/Ports/v-z/witchinghour";
+        match detect_source(&args, url).unwrap() {
+            SourceKind::IdgamesPath(path) => {
+                // Extractor normalizes slug → .zip for the idgames API.
+                assert_eq!(path, "levels/doom2/Ports/v-z/witchinghour.zip");
+            }
+            _ => panic!("expected IdgamesPath"),
+        }
+    }
+
+    #[test]
+    fn detect_source_routes_idgames_zip_url_to_path() {
+        let args = default_args();
+        let url = "https://www.doomworld.com/idgames/levels/doom2/megawads/scythe.zip";
+        match detect_source(&args, url).unwrap() {
+            SourceKind::IdgamesPath(path) => {
+                assert_eq!(path, "levels/doom2/megawads/scythe.zip");
+            }
+            _ => panic!("expected IdgamesPath"),
+        }
+    }
+
+    #[test]
+    fn detect_source_idgames_flag_accepts_url() {
+        let mut args = default_args();
+        args.idgames = true;
+        let url = "https://www.doomworld.com/idgames/levels/doom2/Ports/v-z/witchinghour";
+        match detect_source(&args, url).unwrap() {
+            SourceKind::IdgamesPath(path) => {
+                assert_eq!(path, "levels/doom2/Ports/v-z/witchinghour.zip");
+            }
+            _ => panic!("expected IdgamesPath"),
+        }
     }
 
     #[test]

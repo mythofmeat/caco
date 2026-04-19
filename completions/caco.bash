@@ -74,7 +74,7 @@ _caco() {
                 # Skip options that take arguments
                 case "${words[i]}" in
                     -o|--output|-p|--sourceport|--period|-n|--limit|--notes|\
-                    --iwad|--tag|--url|--llm-backend|--llm-model|\
+                    --iwad|--tag|--url|\
                     -t|--title|-a|--author|--year|-d|--description|\
                     -s|--stats-file|--link|-b|--date)
                         ((i++))
@@ -159,11 +159,9 @@ _caco() {
             ;;
         import)
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--idgames --doomwiki --doomworld --local --url -t --title -a --author --year --tag -f --force -m --multi -d --description -s --smart --llm-backend --llm-model --help" -- "$cur"))
+                COMPREPLY=($(compgen -W "--idgames --doomwiki --doomworld --local --url -t --title -a --author --year --tag -f --force -m --multi -d --description --help" -- "$cur"))
             elif [[ "$prev" == --tag ]]; then
                 _caco_tags
-            elif [[ "$prev" == --llm-backend ]]; then
-                COMPREPLY=($(compgen -W "claude-code openrouter anthropic openai" -- "$cur"))
             fi
             ;;
         config)

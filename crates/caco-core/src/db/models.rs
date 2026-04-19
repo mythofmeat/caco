@@ -210,6 +210,9 @@ pub struct WadRecord {
     pub version: Option<String>,
     pub complevel: Option<i32>,
     pub zdoom_required: Option<i32>,
+    /// JSON-encoded array of candidate download URLs scraped from the source
+    /// (primarily Doomworld threads).
+    pub download_urls: Option<String>,
     pub stats_snapshot: Option<String>,
     pub gc_ignore: bool,
     pub deleted_at: Option<String>,
@@ -260,6 +263,7 @@ impl WadRecord {
             version: row.get("version")?,
             complevel: row.get("complevel")?,
             zdoom_required: row.get("zdoom_required")?,
+            download_urls: row.get("download_urls").ok(),
             stats_snapshot: row.get("stats_snapshot")?,
             gc_ignore: row.get::<_, i64>("gc_ignore").unwrap_or(0) != 0,
             deleted_at: row.get("deleted_at")?,
@@ -355,6 +359,7 @@ pub static ALLOWED_UPDATE_FIELDS: LazyLock<std::collections::HashSet<&'static st
             "stats_snapshot",
             "gc_ignore",
             "availability",
+            "download_urls",
         ]
         .into_iter()
         .collect()
