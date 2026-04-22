@@ -391,7 +391,12 @@ mod tests {
         // Create a WAD with E1M1 maps -> IWAD should be "doom"
         let dir = tempfile::tempdir().unwrap();
         let wad_path = dir.path().join("test.wad");
-        let wad_data = build_wad(&[("E1M1", &[]), ("E1M2", &[])]);
+        let wad_data = build_wad(&[
+            ("E1M1", &[]),
+            ("THINGS", &[]),
+            ("E1M2", &[]),
+            ("THINGS", &[]),
+        ]);
         std::fs::write(&wad_path, &wad_data).unwrap();
 
         let update = db::WadUpdate::new()
@@ -625,7 +630,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let wad_path = dir.path().join("test.wad");
         // E1M1 maps -> complevel 2, IWAD "doom"
-        let wad_data = build_wad(&[("E1M1", &[]), ("E1M2", &[])]);
+        let wad_data = build_wad(&[
+            ("E1M1", &[]),
+            ("THINGS", &[]),
+            ("E1M2", &[]),
+            ("THINGS", &[]),
+        ]);
         std::fs::write(&wad_path, &wad_data).unwrap();
 
         let update = db::WadUpdate::new()

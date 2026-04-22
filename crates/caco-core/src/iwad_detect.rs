@@ -99,7 +99,7 @@ pub fn detect_iwad(wad_path: &Path) -> Option<&'static str> {
     }
 
     // Priority 2: Map name format (Doom 1 vs Doom 2 family)
-    detect_from_maps(&lump_names)
+    detect_from_maps(&directory)
 }
 
 /// Detect complevel from a WAD file's COMPLVL lump.
@@ -329,10 +329,31 @@ fn detect_from_used_textures(
     None
 }
 
-/// Detect IWAD family from map lump naming convention.
-fn detect_from_maps(lump_names: &HashSet<&str>) -> Option<&'static str> {
-    let has_doom1 = lump_names.iter().any(|name| DOOM1_MAP_RE.is_match(name));
-    let has_doom2 = lump_names.iter().any(|name| DOOM2_MAP_RE.is_match(name));
+/// Detect IWAD family from verified map markers.
+///
+/// Only counts lumps that match the ExMy / MAPxx pattern *and* are
+/// immediately followed by a known map data lump. This avoids false
+/// positives from non-map lumps (textures, music, custom data) that
+/// happen to use names like "E1M1".
+fn detect_from_maps(directory: &[(String, u32, u32)]) -> Option<&'static str> {
+    let mut has_doom1 = false;
+    let mut has_doom2 = false;
+
+    for i in 0..directory.len() {
+        let name = &directory[i].0;
+        if !is_map_marker(name) {
+            continue;
+        }
+        // Verify this is an actual map marker by checking if the next
+        // entry is a known map data lump.
+        if i + 1 < directory.len() && is_map_lump(&directory[i + 1].0) {
+            if DOOM1_MAP_RE.is_match(name) {
+                has_doom1 = true;
+            } else if DOOM2_MAP_RE.is_match(name) {
+                has_doom2 = true;
+            }
+        }
+    }
 
     if has_doom1 && !has_doom2 {
         return Some("doom");
@@ -470,26 +491,63 @@ mod tests {
 
     #[test]
     fn test_detect_from_maps_doom1() {
-        let names: HashSet<&str> = HashSet::from(["E1M1", "E1M2", "E1M3", "THINGS"]);
-        assert_eq!(detect_from_maps(&names), Some("doom"));
+        let directory = vec![
+            ("E1M1".to_string(), 0, 0),
+            ("THINGS".to_string(), 0, 0),
+            ("E1M2".to_string(), 0, 0),
+            ("THINGS".to_string(), 0, 0),
+            ("E1M3".to_string(), 0, 0),
+            ("THINGS".to_string(), 0, 0),
+        ];
+        assert_eq!(detect_from_maps(&directory), Some("doom"));
     }
 
     #[test]
     fn test_detect_from_maps_doom2() {
-        let names: HashSet<&str> = HashSet::from(["MAP01", "MAP02", "MAP03", "THINGS"]);
-        assert_eq!(detect_from_maps(&names), Some("doom2"));
+        let directory = vec![
+            ("MAP01".to_string(), 0, 0),
+            ("THINGS".to_string(), 0, 0),
+            ("MAP02".to_string(), 0, 0),
+            ("THINGS".to_string(), 0, 0),
+            ("MAP03".to_string(), 0, 0),
+            ("THINGS".to_string(), 0, 0),
+        ];
+        assert_eq!(detect_from_maps(&directory), Some("doom2"));
     }
 
     #[test]
     fn test_detect_from_maps_mixed() {
-        let names: HashSet<&str> = HashSet::from(["E1M1", "MAP01"]);
-        assert_eq!(detect_from_maps(&names), None);
+        let directory = vec![
+            ("E1M1".to_string(), 0, 0),
+            ("THINGS".to_string(), 0, 0),
+            ("MAP01".to_string(), 0, 0),
+            ("THINGS".to_string(), 0, 0),
+        ];
+        assert_eq!(detect_from_maps(&directory), None);
     }
 
     #[test]
     fn test_detect_from_maps_neither() {
-        let names: HashSet<&str> = HashSet::from(["THINGS", "LINEDEFS"]);
-        assert_eq!(detect_from_maps(&names), None);
+        let directory = vec![("THINGS".to_string(), 0, 0), ("LINEDEFS".to_string(), 0, 0)];
+        assert_eq!(detect_from_maps(&directory), None);
+    }
+
+    #[test]
+    fn test_detect_from_maps_ignores_non_map_lumps() {
+        // A non-map lump named "E1M1" should not be counted as a doom1 map.
+        let directory = vec![
+            ("E1M1".to_string(), 0, 10),  // Non-map lump (followed by non-map data)
+            ("MAP01".to_string(), 0, 0),  // Map marker
+            ("THINGS".to_string(), 0, 0), // Map lump
+        ];
+        assert_eq!(detect_from_maps(&directory), Some("doom2"));
+    }
+
+    #[test]
+    fn test_detect_from_maps_non_map_lump_only() {
+        // A WAD with only a non-map lump named "E1M1" (no actual maps).
+        let directory = vec![("E1M1".to_string(), 0, 10)];
+        assert_eq!(detect_from_maps(&directory), None);
     }
 
     #[test]
@@ -753,7 +811,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let zip_path = dir.path().join("test.zip");
 
-        let wad = build_wad(&[("MAP01", &[]), ("MAP02", &[])]);
+        let wad = build_wad(&[("MAP01", &[]), ("MAP02", &[]), ("THINGS", &[])]);
         let file = std::fs::File::create(&zip_path).unwrap();
         let mut zip = zip::ZipWriter::new(file);
         zip.start_file("test.wad", zip::write::SimpleFileOptions::default())
