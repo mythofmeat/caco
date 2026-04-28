@@ -107,12 +107,6 @@ fn choose_family_sourceport(
         .iter()
         .find(|family| family.name == required_family)?;
 
-    if !default_sourceport.trim().is_empty()
-        && sourceport_is_family(default_sourceport, required_family)
-    {
-        return Some(default_sourceport.to_string());
-    }
-
     if let Some(preferred) = sourceport_preferences
         .get(required_family)
         .map(String::as_str)
@@ -124,6 +118,12 @@ fn choose_family_sourceport(
 
     if required_family == "zdoom" && !zdoom_sourceport.trim().is_empty() {
         return Some(zdoom_sourceport.to_string());
+    }
+
+    if !default_sourceport.trim().is_empty()
+        && sourceport_is_family(default_sourceport, required_family)
+    {
+        return Some(default_sourceport.to_string());
     }
 
     if let Some((exe, _)) = installed_sourceports
@@ -1080,9 +1080,23 @@ mod tests {
     }
 
     #[test]
+    fn test_select_sourceport_zdoom_port_beats_same_family_default() {
+        let prefs = HashMap::new();
+        let port = select_sourceport(None, None, Some("zdoom"), "gzdoom", "uzdoom", &prefs, &[]);
+        assert_eq!(port, "uzdoom");
+    }
+
+    #[test]
     fn test_select_sourceport_uses_family_preference() {
         let prefs = HashMap::from([("dsda".to_string(), "nugget-doom".to_string())]);
         let port = select_sourceport(None, None, Some("dsda"), "gzdoom", "uzdoom", &prefs, &[]);
+        assert_eq!(port, "nugget-doom");
+    }
+
+    #[test]
+    fn test_select_sourceport_preference_beats_same_family_default() {
+        let prefs = HashMap::from([("dsda".to_string(), "nugget-doom".to_string())]);
+        let port = select_sourceport(None, None, Some("dsda"), "nyan-doom", "uzdoom", &prefs, &[]);
         assert_eq!(port, "nugget-doom");
     }
 

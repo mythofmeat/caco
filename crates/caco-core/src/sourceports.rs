@@ -38,7 +38,7 @@ pub static FAMILIES: &[SourceportFamily] = &[
     },
     SourceportFamily {
         name: "zdoom",
-        executables: &["gzdoom", "uzdoom", "lzdoom", "vkdoom", "qzdoom", "zdoom"],
+        executables: &["uzdoom", "gzdoom", "lzdoom", "vkdoom", "qzdoom", "zdoom"],
         data_arg: None,
         save_arg: Some("-savedir"),
         complevel_arg: None,
@@ -256,6 +256,7 @@ mod tests {
         assert_eq!(identify_family("dsda-doom").unwrap().name, "dsda");
         assert_eq!(identify_family("nyan-doom").unwrap().name, "dsda");
         assert_eq!(identify_family("gzdoom").unwrap().name, "zdoom");
+        assert_eq!(identify_family("uzdoom").unwrap().name, "zdoom");
         assert_eq!(identify_family("chocolate-doom").unwrap().name, "chocolate");
         assert_eq!(identify_family("woof").unwrap().name, "woof");
         assert_eq!(identify_family("eternity").unwrap().name, "eternity");
@@ -344,6 +345,7 @@ mod tests {
     fn test_family_name() {
         assert_eq!(family_name("dsda-doom"), Some("dsda"));
         assert_eq!(family_name("gzdoom"), Some("zdoom"));
+        assert_eq!(family_name("uzdoom"), Some("zdoom"));
         assert_eq!(family_name("unknown"), None);
     }
 
@@ -366,7 +368,7 @@ mod tests {
 
     #[test]
     fn test_identify_all_zdoom_executables() {
-        for exe in &["gzdoom", "lzdoom", "vkdoom", "qzdoom", "zdoom"] {
+        for exe in &["uzdoom", "gzdoom", "lzdoom", "vkdoom", "qzdoom", "zdoom"] {
             let family = identify_family(exe);
             assert!(family.is_some(), "should identify {}", exe);
             assert_eq!(family.unwrap().name, "zdoom");

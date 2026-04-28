@@ -2,14 +2,14 @@
 # Copy to ~/.config/caco/config.toml
 
 # Default sourceport (full path is also acceptable)
-# sourceport = "gzdoom"
+# sourceport = "dsda-doom"
 
 # Sourceport for WADs that require the ZDoom family (auto-detected).
-# Falls back to uzdoom, then gzdoom if empty.
-# zdoom_sourceport = "gzdoom"
+# Leave empty to prefer uzdoom when available, then gzdoom.
+# zdoom_sourceport = "uzdoom"
 
 # Preferred executable for automatically detected compatibility families.
-# A default sourceport from the same family still takes precedence.
+# Explicit CLI and per-WAD sourceport overrides still take precedence.
 # [sourceport_preferences]
 # dsda = "nyan-doom"
 # zdoom = "uzdoom"

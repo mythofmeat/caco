@@ -330,7 +330,7 @@ Caco recognises six sourceport families. Family membership determines which per-
 |--------|---------|----------|----------|-----------|
 | `dsda` | dsda-doom, nyan-doom, nugget-doom, prboom+, glboom+ | yes | yes | yes |
 | `woof` | woof | yes | yes | yes |
-| `zdoom` | gzdoom, uzdoom, lzdoom, vkdoom, qzdoom, zdoom | no | yes | — |
+| `zdoom` | uzdoom, gzdoom, lzdoom, vkdoom, qzdoom, zdoom | no | yes | — |
 | `chocolate` | chocolate-doom, crispy-doom | no | yes | — |
 | `eternity` | eternity | no | yes | — |
 | `helion` | helion | no | yes | — |

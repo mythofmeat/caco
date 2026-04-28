@@ -1,6 +1,6 @@
 //! `caco play` — play a WAD or IWAD with the configured sourceport.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::Args;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -34,7 +34,9 @@ use crate::resolve;
 use caco_core::db::models::WadRecord;
 use caco_core::player::{self, AutoCompleteResult, PlayOptions, RecordOption, format_duration};
 use caco_core::wad_stats;
-use caco_sources::idgames::IdgamesClient;
+use caco_sources::idgames::{
+    IdgamesClient, extract_idgames_file_path_from_url, extract_idgames_id_from_url,
+};
 
 #[derive(Args)]
 pub struct PlayArgs {
@@ -205,19 +207,18 @@ fn ensure_wad_path(conn: &Connection, wad: &WadRecord) -> Result<(), String> {
             None
         }
     });
-    let idgames_id = idgames_id_str.and_then(|id| id.parse::<i64>().ok());
+    let idgames_id = idgames_id_str
+        .and_then(|id| id.parse::<i64>().ok())
+        .or_else(|| idgames_id_from_download_urls(wad.download_urls.as_deref()));
 
-    // If no numeric ID, try direct mirror download via source_url
+    // If no numeric ID, try direct mirror download via stored idgames links.
     if idgames_id.is_none() {
-        let source_url = wad.source_url.as_deref().unwrap_or("");
-        let filename = wad.filename.as_deref().unwrap_or("");
-
-        if filename.is_empty() || !source_url.contains("/idgames/") {
+        let Some(direct) = direct_idgames_download_from_wad(wad) else {
             return Err(format!(
                 "No WAD file available for '{}'. Link a file with: caco modify id:{} --link /path/to/wad",
                 wad.title, wad.id
             ));
-        }
+        };
 
         let client = IdgamesClient::new();
         let cache_dir = config::get_cache_dir();
@@ -225,15 +226,21 @@ fn ensure_wad_path(conn: &Connection, wad: &WadRecord) -> Result<(), String> {
             .map_err(|e| format!("Failed to create cache directory: {e}"))?;
         let mirror = config::load_config().download_mirror as usize;
 
-        let pb = make_download_progress_bar(filename);
+        let pb = make_download_progress_bar(&direct.filename);
         let cb = progress_callback(&pb);
 
         let dest = client
-            .download_direct(source_url, filename, &cache_dir, mirror, Some(&cb))
+            .download_direct(
+                &direct.source_url,
+                &direct.filename,
+                &cache_dir,
+                mirror,
+                Some(&cb),
+            )
             .map_err(|e| format!("Direct download failed: {e}"))?;
 
         pb.finish_and_clear();
-        eprintln!("Downloaded (via mirror): {filename}");
+        eprintln!("Downloaded (via mirror): {}", direct.filename);
 
         let update =
             db::WadUpdate::new().set_text("cached_path", Some(dest.to_string_lossy().to_string()));
@@ -278,26 +285,29 @@ fn ensure_wad_path(conn: &Connection, wad: &WadRecord) -> Result<(), String> {
         db::update_wad(conn, wad.id, &update)
             .map_err(|e| format!("Failed to update WAD record: {e}"))?;
     } else {
-        // Direct mirror fallback using stored source_url + filename
-        let source_url = wad.source_url.as_deref().unwrap_or("");
-        let filename = wad.filename.as_deref().unwrap_or("");
-
-        if filename.is_empty() || !source_url.contains("/idgames/") {
+        // Direct mirror fallback using stored idgames links.
+        let Some(direct) = direct_idgames_download_from_wad(wad) else {
             return Err(format!(
                 "API blocked and no stored idgames path for '{}'. Download manually and link with: caco modify id:{} --link /path/to/wad",
                 wad.title, wad.id
             ));
-        }
+        };
 
-        let pb = make_download_progress_bar(filename);
+        let pb = make_download_progress_bar(&direct.filename);
         let cb = progress_callback(&pb);
 
         let dest = client
-            .download_direct(source_url, filename, &cache_dir, mirror, Some(&cb))
+            .download_direct(
+                &direct.source_url,
+                &direct.filename,
+                &cache_dir,
+                mirror,
+                Some(&cb),
+            )
             .map_err(|e| format!("Direct download failed: {e}"))?;
 
         pb.finish_and_clear();
-        eprintln!("Downloaded (via mirror): {filename}");
+        eprintln!("Downloaded (via mirror): {}", direct.filename);
 
         let update =
             db::WadUpdate::new().set_text("cached_path", Some(dest.to_string_lossy().to_string()));
@@ -306,4 +316,126 @@ fn ensure_wad_path(conn: &Connection, wad: &WadRecord) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DirectIdgamesDownload {
+    source_url: String,
+    filename: String,
+}
+
+fn non_empty(value: Option<&str>) -> Option<&str> {
+    value.and_then(|s| {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    })
+}
+
+fn parse_download_urls(download_urls_json: Option<&str>) -> Vec<String> {
+    download_urls_json
+        .and_then(|json| serde_json::from_str::<Vec<String>>(json).ok())
+        .unwrap_or_default()
+}
+
+fn idgames_id_from_download_urls(download_urls_json: Option<&str>) -> Option<i64> {
+    parse_download_urls(download_urls_json)
+        .into_iter()
+        .find_map(|url| extract_idgames_id_from_url(&url))
+}
+
+fn idgames_filename_from_url(url: &str) -> Option<String> {
+    let file_path = extract_idgames_file_path_from_url(url)?;
+    Path::new(&file_path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.trim().is_empty())
+        .map(str::to_string)
+}
+
+fn direct_idgames_download_from_fields(
+    source_url: Option<&str>,
+    filename: Option<&str>,
+    download_urls_json: Option<&str>,
+) -> Option<DirectIdgamesDownload> {
+    if let (Some(source_url), Some(filename)) = (non_empty(source_url), non_empty(filename))
+        && source_url.contains("/idgames/")
+    {
+        return Some(DirectIdgamesDownload {
+            source_url: source_url.to_string(),
+            filename: filename.to_string(),
+        });
+    }
+
+    parse_download_urls(download_urls_json)
+        .into_iter()
+        .find_map(|url| {
+            let filename = idgames_filename_from_url(&url)?;
+            Some(DirectIdgamesDownload {
+                source_url: url,
+                filename,
+            })
+        })
+}
+
+fn direct_idgames_download_from_wad(wad: &WadRecord) -> Option<DirectIdgamesDownload> {
+    direct_idgames_download_from_fields(
+        wad.source_url.as_deref(),
+        wad.filename.as_deref(),
+        wad.download_urls.as_deref(),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_idgames_id_from_download_urls() {
+        let urls =
+            r#"["https://example.com/file.zip","https://www.doomworld.com/idgames/?id=18184"]"#;
+        assert_eq!(idgames_id_from_download_urls(Some(urls)), Some(18184));
+    }
+
+    #[test]
+    fn test_direct_idgames_download_uses_stored_idgames_source() {
+        let direct = direct_idgames_download_from_fields(
+            Some("https://www.doomworld.com/idgames/levels/doom2/Ports/megawads/sunlust"),
+            Some("sunlust.zip"),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            direct,
+            DirectIdgamesDownload {
+                source_url: "https://www.doomworld.com/idgames/levels/doom2/Ports/megawads/sunlust"
+                    .to_string(),
+                filename: "sunlust.zip".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn test_direct_idgames_download_uses_download_urls_slug() {
+        let urls = r#"["https://www.doomworld.com/idgames/levels/doom/a-c/butterknife"]"#;
+        let direct = direct_idgames_download_from_fields(
+            Some("https://www.doomworld.com/forum/topic/156390-butterknife-a-vanilla-episode/"),
+            None,
+            Some(urls),
+        )
+        .unwrap();
+
+        assert_eq!(
+            direct,
+            DirectIdgamesDownload {
+                source_url: "https://www.doomworld.com/idgames/levels/doom/a-c/butterknife"
+                    .to_string(),
+                filename: "butterknife.zip".to_string(),
+            }
+        );
+    }
 }

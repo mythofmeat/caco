@@ -1,3 +1,3 @@
-- [ ] wad id:9 (*frozen heart*) was incorrectly marked as being completed despite me being only halfway through the final level when i saved and quit
-- [ ] another sourceport family issue: gzdoom and uzdoom should be in the same family, and it should by default prefer uzdoom (since that is what currently has active development)
-- [ ] wad id:125 (*butterknife*) has a download link to idgames, but it does not use that to automatically download the wad
+- [x] wad id:9 (*frozen heart*) was incorrectly marked as being completed despite me being only halfway through the final level when i saved and quit
+- [x] another sourceport family issue: gzdoom and uzdoom should be in the same family, and it should by default prefer uzdoom (since that is what currently has active development)
+- [x] wad id:125 (*butterknife*) has a download link to idgames, but it does not use that to automatically download the wad
