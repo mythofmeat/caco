@@ -564,6 +564,19 @@ mod tests {
     }
 
     #[test]
+    fn test_required_sourceport_family_roundtrip() {
+        let conn = setup();
+        let id = add_test_wad(&conn);
+
+        let update =
+            WadUpdate::new().set_text("required_sourceport_family", Some("dsda".to_string()));
+        update_wad(&conn, id, &update).unwrap();
+
+        let wad = get_wad(&conn, id, false).unwrap().unwrap();
+        assert_eq!(wad.required_sourceport_family.as_deref(), Some("dsda"));
+    }
+
+    #[test]
     fn test_update_invalid_field() {
         let update = WadUpdate::new().set_text("invalid_field", Some("value".to_string()));
         assert!(update.validate().is_err());

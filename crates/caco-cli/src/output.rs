@@ -271,6 +271,7 @@ fn render_wad_info_table(
     // Custom play config
     let has_custom = wad.custom_iwad.is_some()
         || wad.custom_sourceport.is_some()
+        || wad.required_sourceport_family.is_some()
         || wad.complevel.is_some()
         || wad.custom_config.is_some()
         || wad.custom_args.is_some()
@@ -283,7 +284,10 @@ fn render_wad_info_table(
             println!("    IWAD:       {iwad}");
         }
         if let Some(port) = &wad.custom_sourceport {
-            println!("    Sourceport: {port}");
+            println!("    Sourceport override: {port}");
+        }
+        if let Some(family) = &wad.required_sourceport_family {
+            println!("    Compatibility family: {family}");
         }
         if let Some(cl) = wad.complevel {
             let label = caco_core::complevel::complevel_name(Some(cl));

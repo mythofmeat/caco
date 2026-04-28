@@ -215,6 +215,7 @@ fn apply_modifications(
                 let col: &'static str = match field.as_str() {
                     "iwad" => "custom_iwad",
                     "sourceport" => "custom_sourceport",
+                    "sourceport-family" | "compat-family" => "required_sourceport_family",
                     "args" => "custom_args",
                     "idgames-id" => "idgames_id",
                     "config" => "custom_config",
@@ -462,6 +463,7 @@ fn apply_field_update(
     let col: &'static str = match field {
         "iwad" => "custom_iwad",
         "sourceport" => "custom_sourceport",
+        "sourceport-family" | "compat-family" => "required_sourceport_family",
         "args" => "custom_args",
         "idgames-id" => "idgames_id",
         "config" => "custom_config",

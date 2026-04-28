@@ -166,6 +166,7 @@ impl WadDetailScreen {
         // Config section
         if wad.custom_iwad.is_some()
             || wad.custom_sourceport.is_some()
+            || wad.required_sourceport_family.is_some()
             || wad.complevel.is_some()
             || wad.custom_config.is_some()
         {
@@ -180,8 +181,14 @@ impl WadDetailScreen {
             }
             if let Some(ref sp) = wad.custom_sourceport {
                 lines.push(Line::from(vec![
-                    Span::styled("Sourceport: ", theme::dim_style()),
+                    Span::styled("Sourceport override: ", theme::dim_style()),
                     Span::raw(sp.as_str()),
+                ]));
+            }
+            if let Some(ref family) = wad.required_sourceport_family {
+                lines.push(Line::from(vec![
+                    Span::styled("Compatibility family: ", theme::dim_style()),
+                    Span::raw(family.as_str()),
                 ]));
             }
             if let Some(cl) = wad.complevel {

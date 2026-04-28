@@ -14,6 +14,7 @@ use crate::idgames::{
 };
 
 use caco_core::db::{self, NewWad, SourceType, WadUpdate};
+use caco_core::sourceports;
 
 /// Result of an import attempt.
 ///
@@ -237,6 +238,7 @@ impl ImportService {
             }
             if !entry.port.is_empty() {
                 auto_link_complevel(tx, wad_id, &entry.port);
+                auto_link_sourceport_family(tx, wad_id, &entry.port);
                 auto_link_zdoom_required(tx, wad_id, &entry.port);
             }
             if !entry.link.is_empty() {
@@ -329,17 +331,14 @@ impl ImportService {
                 db::update_wad(tx, wad_id, &update)?;
             }
 
-            // Persist thread-extracted IWAD and sourceport. Previously these
-            // were printed on the CLI then discarded — importing a WAD with a
-            // known IWAD/port but never recording them is surprising.
+            // Persist thread-extracted IWAD and compatibility metadata.
+            // Detected ports describe what family can run the WAD; they are
+            // not user-selected executable overrides.
             if let Some(iwad) = thread.iwad.as_deref() {
                 auto_link_iwad(tx, wad_id, iwad);
             }
-            if let Some(port) = thread.sourceport.as_deref()
-                && is_persistable_port(port)
-            {
-                let update = WadUpdate::new().set_text("custom_sourceport", Some(port.to_string()));
-                db::update_wad(tx, wad_id, &update)?;
+            if let Some(port) = thread.sourceport.as_deref() {
+                auto_link_sourceport_family(tx, wad_id, port);
                 auto_link_zdoom_required(tx, wad_id, port);
             }
 
@@ -541,8 +540,9 @@ impl ImportService {
                 auto_link_iwad(conn, wad_id, &entry.iwad);
             }
 
-            // Auto-set zdoom_required from port field
+            // Auto-set compatibility metadata from port field
             if !entry.port.is_empty() {
+                auto_link_sourceport_family(conn, wad_id, &entry.port);
                 auto_link_zdoom_required(conn, wad_id, &entry.port);
             }
 
@@ -554,33 +554,36 @@ impl ImportService {
     }
 }
 
-/// Whether a detected sourceport string names a real port we can store in
-/// `custom_sourceport`. Detector tokens like `"limit-removing"` describe a
-/// compat target, not a port, and should not be persisted as one.
-fn is_persistable_port(port: &str) -> bool {
-    matches!(
-        port,
-        "gzdoom"
-            | "lzdoom"
-            | "vkdoom"
-            | "qzdoom"
-            | "zdoom"
-            | "uzdoom"
-            | "dsda-doom"
-            | "prboom+"
-            | "glboom+"
-            | "eternity"
-            | "crispy-doom"
-            | "chocolate-doom"
-            | "woof"
-            | "nugget-doom"
-            | "cherry-doom"
-            | "edge"
-            | "doomsday"
-            | "zandronum"
-            | "odamex"
-            | "3dge"
-    )
+/// Map detected sourceport text to a known sourceport family.
+pub fn port_to_sourceport_family(port_text: &str) -> Option<&'static str> {
+    let text = port_text.trim();
+    if text.is_empty() {
+        return None;
+    }
+
+    if let Some(family) = sourceports::family_name(text) {
+        return Some(family);
+    }
+
+    let lower = text.to_lowercase();
+    if let Some(family) = sourceports::family_name(&lower) {
+        return Some(family);
+    }
+
+    for family in sourceports::FAMILIES {
+        if lower == family.name {
+            return Some(family.name);
+        }
+        if family.executables.iter().any(|exe| lower.contains(exe)) {
+            return Some(family.name);
+        }
+    }
+
+    if port_to_zdoom_required(&lower) == Some(true) {
+        return Some("zdoom");
+    }
+
+    None
 }
 
 /// Truncate description text on the nearest paragraph/word boundary at or
@@ -651,14 +654,36 @@ pub fn port_to_zdoom_required(port_text: &str) -> Option<bool> {
     None
 }
 
+/// Auto-set required sourceport family from detected sourceport metadata.
+fn auto_link_sourceport_family(conn: &Connection, wad_id: i64, port_text: &str) {
+    if let Some(family) = port_to_sourceport_family(port_text)
+        && let Ok(Some(wad)) = db::get_wad(conn, wad_id, false)
+        && wad.required_sourceport_family.is_none()
+    {
+        let update =
+            WadUpdate::new().set_text("required_sourceport_family", Some(family.to_string()));
+        let _ = db::update_wad(conn, wad_id, &update);
+    }
+}
+
 /// Auto-set zdoom_required based on Doom Wiki "port" field heuristic.
 fn auto_link_zdoom_required(conn: &Connection, wad_id: i64, port_text: &str) {
     if let Some(true) = port_to_zdoom_required(port_text)
         && let Ok(Some(wad)) = db::get_wad(conn, wad_id, false)
-        && wad.zdoom_required.is_none()
     {
-        let update = WadUpdate::new().set_int("zdoom_required", Some(1));
-        let _ = db::update_wad(conn, wad_id, &update);
+        let mut update = WadUpdate::new();
+        let mut has_changes = false;
+        if wad.zdoom_required.is_none() {
+            update = update.set_int("zdoom_required", Some(1));
+            has_changes = true;
+        }
+        if wad.required_sourceport_family.is_none() {
+            update = update.set_text("required_sourceport_family", Some("zdoom".to_string()));
+            has_changes = true;
+        }
+        if has_changes {
+            let _ = db::update_wad(conn, wad_id, &update);
+        }
     }
 }
 
@@ -776,6 +801,18 @@ mod tests {
     fn test_normalize_tags_comma_separated() {
         let result = normalize_tags(Some("cacoward, megawad, doom")).unwrap();
         assert_eq!(result, vec!["cacoward", "megawad", "doom"]);
+    }
+
+    #[test]
+    fn test_port_to_sourceport_family() {
+        assert_eq!(port_to_sourceport_family("DSDA-Doom"), Some("dsda"));
+        assert_eq!(port_to_sourceport_family("nyan-doom"), Some("dsda"));
+        assert_eq!(port_to_sourceport_family("GZDoom"), Some("zdoom"));
+        assert_eq!(
+            port_to_sourceport_family("UZDoom-compatible"),
+            Some("zdoom")
+        );
+        assert_eq!(port_to_sourceport_family("Boom-compatible"), None);
     }
 
     #[test]
@@ -1236,7 +1273,40 @@ mod tests {
         assert_eq!(wad.source_type, SourceType::Doomworld);
         assert_eq!(wad.source_id.as_deref(), Some("134292"));
         assert_eq!(wad.complevel, Some(9));
+        assert_eq!(wad.custom_sourceport, None);
+        assert_eq!(wad.required_sourceport_family.as_deref(), Some("zdoom"));
+        assert_eq!(wad.zdoom_required, Some(1));
         assert_eq!(wad.description.as_deref(), Some("A spooky Doom 2 map."));
+    }
+
+    #[test]
+    fn test_import_doomworld_detected_dsda_sets_required_family_not_override() {
+        let conn = setup();
+        let svc = ImportService::new();
+
+        let thread = crate::doomworld::ForumThread {
+            thread_id: 134293,
+            title: "DSDA Map".to_string(),
+            author: "Mapper".to_string(),
+            posted_date: "2024-01-01".to_string(),
+            first_post_html: String::new(),
+            first_post_text: String::new(),
+            thread_url: "https://www.doomworld.com/forum/topic/134293-dsda-map/".to_string(),
+            download_links: Vec::new(),
+            complevel: None,
+            iwad: None,
+            sourceport: Some("dsda-doom".to_string()),
+            version: None,
+        };
+
+        let result = svc.import_doomworld(&conn, &thread, None, None, None, None, false);
+        assert!(result.ok());
+
+        let wad = db::get_wad(&conn, result.wad_id.unwrap(), false)
+            .unwrap()
+            .unwrap();
+        assert_eq!(wad.custom_sourceport, None);
+        assert_eq!(wad.required_sourceport_family.as_deref(), Some("dsda"));
     }
 
     #[test]

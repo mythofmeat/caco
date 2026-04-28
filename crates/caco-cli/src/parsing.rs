@@ -71,6 +71,7 @@ pub fn field_to_column(field: &str) -> &str {
     match field {
         "iwad" => "custom_iwad",
         "sourceport" => "custom_sourceport",
+        "sourceport-family" | "compat-family" => "required_sourceport_family",
         "args" => "custom_args",
         "idgames-id" => "idgames_id",
         "config" => "custom_config",
@@ -89,6 +90,8 @@ pub const MODIFY_FIELDS: &[&str] = &[
     "notes",
     "iwad",
     "sourceport",
+    "sourceport-family",
+    "compat-family",
     "args",
     "complevel",
     "config",
@@ -480,6 +483,10 @@ mod tests {
     fn test_field_to_column() {
         assert_eq!(field_to_column("iwad"), "custom_iwad");
         assert_eq!(field_to_column("sourceport"), "custom_sourceport");
+        assert_eq!(
+            field_to_column("sourceport-family"),
+            "required_sourceport_family"
+        );
         assert_eq!(field_to_column("args"), "custom_args");
         assert_eq!(field_to_column("idgames-id"), "idgames_id");
         assert_eq!(field_to_column("config"), "custom_config");

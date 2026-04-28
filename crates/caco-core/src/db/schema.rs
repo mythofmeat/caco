@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS wads (
     -- Per-WAD play config (overrides global config)
     custom_iwad TEXT,
     custom_sourceport TEXT,
+    required_sourceport_family TEXT,
     custom_args TEXT,
 
     -- Metadata
@@ -152,6 +153,11 @@ static MIGRATIONS: &[Migration] = &[
     (32, "consolidate_status_columns", migrate_consolidate_status),
     (33, "drop_custom_complevel", migrate_drop_custom_complevel),
     (34, "add_download_urls", migrate_add_download_urls),
+    (
+        35,
+        "add_required_sourceport_family",
+        migrate_add_required_sourceport_family,
+    ),
 ];
 
 // ---------------------------------------------------------------------------
@@ -671,6 +677,10 @@ fn migrate_add_download_urls(conn: &Connection) -> Result<()> {
     add_column_if_missing(conn, "wads", "download_urls", "TEXT")
 }
 
+fn migrate_add_required_sourceport_family(conn: &Connection) -> Result<()> {
+    add_column_if_missing(conn, "wads", "required_sourceport_family", "TEXT")
+}
+
 fn migrate_consolidate_status(conn: &Connection) -> Result<()> {
     // Step 1: Map old status values to new ones
     conn.execute_batch(
@@ -779,6 +789,7 @@ mod tests {
             "cached_path",
             "custom_iwad",
             "custom_sourceport",
+            "required_sourceport_family",
             "custom_args",
             "created_at",
             "updated_at",
@@ -790,6 +801,8 @@ mod tests {
             "custom_config",
             "gc_ignore",
             "availability",
+            "zdoom_required",
+            "download_urls",
         ];
         for col in &expected_columns {
             assert!(
@@ -797,6 +810,36 @@ mod tests {
                 "missing column: {col}"
             );
         }
+    }
+
+    #[test]
+    fn test_migration_add_required_sourceport_family() {
+        let conn = open_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE wads (
+                id INTEGER PRIMARY KEY,
+                title TEXT NOT NULL,
+                status TEXT DEFAULT 'unplayed',
+                source_type TEXT NOT NULL,
+                cached_path TEXT,
+                deleted_at TEXT
+            );
+            CREATE TABLE schema_migrations (
+                version INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                applied_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+            INSERT INTO schema_migrations (version, name)
+            VALUES (34, 'add_download_urls');",
+        )
+        .unwrap();
+
+        init_db(&conn).unwrap();
+
+        assert!(
+            has_column(&conn, "wads", "required_sourceport_family").unwrap(),
+            "migration should add required_sourceport_family"
+        );
     }
 
     #[test]

@@ -73,6 +73,7 @@ pub struct EditDialogState {
 
     // Sourceport tab
     sourceport: String,
+    sourceport_family: String,
     iwad: String,
     complevel: String,
     config: String,
@@ -141,6 +142,11 @@ impl EditDialogState {
             original_tags,
 
             sourceport: wad.custom_sourceport.as_deref().unwrap_or("").to_string(),
+            sourceport_family: wad
+                .required_sourceport_family
+                .as_deref()
+                .unwrap_or("")
+                .to_string(),
             iwad: wad.custom_iwad.as_deref().unwrap_or("").to_string(),
             complevel: wad.complevel.map(|c| c.to_string()).unwrap_or_default(),
             config: wad.custom_config.as_deref().unwrap_or("").to_string(),
@@ -641,20 +647,31 @@ impl EditDialogState {
 
     fn render_sourceport_tab(&mut self, ui: &mut egui::Ui) {
         ui.columns(2, |cols| {
-            form_label(&mut cols[0], "Sourceport");
+            form_label(&mut cols[0], "Sourceport Override");
             cols[0].add(
                 egui::TextEdit::singleline(&mut self.sourceport)
                     .desired_width(f32::INFINITY)
                     .hint_text("default")
                     .text_color(theme::TEXT_PRIMARY),
             );
-            form_label(&mut cols[1], "IWAD");
+            form_label(&mut cols[1], "Compatibility Family");
             cols[1].add(
+                egui::TextEdit::singleline(&mut self.sourceport_family)
+                    .desired_width(f32::INFINITY)
+                    .hint_text("auto-detect")
+                    .text_color(theme::TEXT_PRIMARY),
+            );
+        });
+
+        ui.columns(2, |cols| {
+            form_label(&mut cols[0], "IWAD");
+            cols[0].add(
                 egui::TextEdit::singleline(&mut self.iwad)
                     .desired_width(f32::INFINITY)
                     .hint_text("auto-detect")
                     .text_color(theme::TEXT_PRIMARY),
             );
+            cols[1].add_space(0.0);
         });
 
         ui.columns(3, |cols| {
@@ -898,6 +915,10 @@ impl EditDialogState {
             // Sourceport tab fields
             .set_text("custom_iwad", opt_str(&self.iwad))
             .set_text("custom_sourceport", opt_str(&self.sourceport))
+            .set_text(
+                "required_sourceport_family",
+                opt_str(&self.sourceport_family),
+            )
             .set_int("complevel", complevel)
             .set_text("custom_config", opt_str(&self.config))
             .set_text("custom_args", custom_args)

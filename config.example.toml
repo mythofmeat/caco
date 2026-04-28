@@ -8,6 +8,13 @@
 # Falls back to uzdoom, then gzdoom if empty.
 # zdoom_sourceport = "gzdoom"
 
+# Preferred executable for automatically detected compatibility families.
+# A default sourceport from the same family still takes precedence.
+# [sourceport_preferences]
+# dsda = "nyan-doom"
+# zdoom = "uzdoom"
+# chocolate = "crispy-doom"
+
 # Default IWAD for playing WADs
 # With iwad_dirs set, you can use short names like "doom2" instead of full paths
 # iwad = "doom2"

@@ -1,5 +1,6 @@
 //! Sourceport launcher and playtime tracking.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
@@ -80,6 +81,90 @@ pub enum RecordOption {
     Named(String),
 }
 
+fn non_empty(value: Option<&str>) -> Option<&str> {
+    value.and_then(|s| {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    })
+}
+
+fn sourceport_is_family(sourceport: &str, family: &str) -> bool {
+    sourceports::family_name(sourceport).is_some_and(|name| name == family)
+}
+
+fn choose_family_sourceport(
+    required_family: &str,
+    default_sourceport: &str,
+    zdoom_sourceport: &str,
+    sourceport_preferences: &HashMap<String, String>,
+    installed_sourceports: &[(String, String)],
+) -> Option<String> {
+    let family = sourceports::FAMILIES
+        .iter()
+        .find(|family| family.name == required_family)?;
+
+    if !default_sourceport.trim().is_empty()
+        && sourceport_is_family(default_sourceport, required_family)
+    {
+        return Some(default_sourceport.to_string());
+    }
+
+    if let Some(preferred) = sourceport_preferences
+        .get(required_family)
+        .map(String::as_str)
+        .filter(|preferred| !preferred.trim().is_empty())
+        && sourceport_is_family(preferred, required_family)
+    {
+        return Some(preferred.to_string());
+    }
+
+    if required_family == "zdoom" && !zdoom_sourceport.trim().is_empty() {
+        return Some(zdoom_sourceport.to_string());
+    }
+
+    if let Some((exe, _)) = installed_sourceports
+        .iter()
+        .find(|(_, family)| family == required_family)
+    {
+        return Some(exe.clone());
+    }
+
+    family.executables.first().map(|exe| (*exe).to_string())
+}
+
+fn select_sourceport(
+    cli_sourceport: Option<&str>,
+    custom_sourceport: Option<&str>,
+    required_sourceport_family: Option<&str>,
+    default_sourceport: &str,
+    zdoom_sourceport: &str,
+    sourceport_preferences: &HashMap<String, String>,
+    installed_sourceports: &[(String, String)],
+) -> String {
+    if let Some(port) = non_empty(cli_sourceport) {
+        return port.to_string();
+    }
+    if let Some(port) = non_empty(custom_sourceport) {
+        return port.to_string();
+    }
+    if let Some(family) = non_empty(required_sourceport_family)
+        && let Some(port) = choose_family_sourceport(
+            family,
+            default_sourceport,
+            zdoom_sourceport,
+            sourceport_preferences,
+            installed_sourceports,
+        )
+    {
+        return port;
+    }
+    default_sourceport.to_string()
+}
+
 /// Start a new playthrough for a completed/abandoned WAD.
 ///
 /// Creates a new playthrough record, sets status to in-progress,
@@ -127,27 +212,20 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
         }
     };
 
-    // Determine sourceport (CLI > WAD-specific > global config)
-    let port = opts
-        .sourceport
-        .as_deref()
-        .or(wad.custom_sourceport.as_deref())
-        .map(|s| s.to_string())
-        .unwrap_or_else(config::get_default_sourceport);
-
-    if port.is_empty() {
-        return Err(crate::Error::Config(
-            "No sourceport specified and no default configured".to_string(),
-        ));
-    }
-
-    // Auto-detect zdoom_required if not already set
+    // Auto-detect zdoom_required if not already set. Legacy zdoom_required
+    // acts as a zdoom family requirement when no explicit family metadata exists.
+    let mut required_sourceport_family = wad.required_sourceport_family.clone();
     let zdoom_required = match wad.zdoom_required {
         Some(v) => v != 0,
         None => {
             if let Some(detected) = zdoom_detect::detect_zdoom_required(&wad_path) {
-                let update =
+                let mut update =
                     db::WadUpdate::new().set_int("zdoom_required", Some(i64::from(detected)));
+                if detected && required_sourceport_family.is_none() {
+                    required_sourceport_family = Some("zdoom".to_string());
+                    update =
+                        update.set_text("required_sourceport_family", Some("zdoom".to_string()));
+                }
                 db::update_wad(conn, wad_id, &update)?;
                 detected
             } else {
@@ -156,19 +234,35 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
         }
     };
 
-    // If zdoom required but current port isn't zdoom-family, force to zdoom sourceport
-    let port = if zdoom_required {
-        let is_zdoom_family = sourceports::family_name(&port).is_some_and(|name| name == "zdoom");
-        if is_zdoom_family {
-            port
-        } else {
-            let zdoom_port = config::get_zdoom_sourceport();
-            eprintln!("WAD requires ZDoom-family sourceport, using {zdoom_port} instead of {port}");
-            zdoom_port
-        }
-    } else {
-        port
-    };
+    if zdoom_required && required_sourceport_family.is_none() {
+        required_sourceport_family = Some("zdoom".to_string());
+        let update =
+            db::WadUpdate::new().set_text("required_sourceport_family", Some("zdoom".to_string()));
+        db::update_wad(conn, wad_id, &update)?;
+    }
+
+    // Determine sourceport (CLI > user override > compatibility family > global default).
+    let cfg = config::load_config();
+    let zdoom_sourceport = config::get_zdoom_sourceport();
+    let installed_sourceports: Vec<(String, String)> = sourceports::detect_sourceports()
+        .into_iter()
+        .map(|(exe, _path, family)| (exe.to_string(), family.to_string()))
+        .collect();
+    let port = select_sourceport(
+        opts.sourceport.as_deref(),
+        wad.custom_sourceport.as_deref(),
+        required_sourceport_family.as_deref(),
+        &cfg.sourceport,
+        &zdoom_sourceport,
+        &cfg.sourceport_preferences,
+        &installed_sourceports,
+    );
+
+    if port.is_empty() {
+        return Err(crate::Error::Config(
+            "No sourceport specified and no default configured".to_string(),
+        ));
+    }
 
     let port = config::resolve_sourceport(&port);
     let mut cmd = Command::new(&port);
@@ -931,6 +1025,81 @@ mod tests {
             }
             .crashed()
         );
+    }
+
+    #[test]
+    fn test_select_sourceport_default_satisfies_required_family() {
+        let prefs = HashMap::new();
+        let port = select_sourceport(None, None, Some("dsda"), "nyan-doom", "gzdoom", &prefs, &[]);
+        assert_eq!(port, "nyan-doom");
+    }
+
+    #[test]
+    fn test_select_sourceport_custom_beats_required_family() {
+        let prefs = HashMap::new();
+        let port = select_sourceport(
+            None,
+            Some("dsda-doom"),
+            Some("zdoom"),
+            "nyan-doom",
+            "gzdoom",
+            &prefs,
+            &[],
+        );
+        assert_eq!(port, "dsda-doom");
+    }
+
+    #[test]
+    fn test_select_sourceport_cli_beats_everything() {
+        let prefs = HashMap::new();
+        let port = select_sourceport(
+            Some("woof"),
+            Some("dsda-doom"),
+            Some("zdoom"),
+            "nyan-doom",
+            "gzdoom",
+            &prefs,
+            &[],
+        );
+        assert_eq!(port, "woof");
+    }
+
+    #[test]
+    fn test_select_sourceport_zdoom_family_uses_configured_zdoom_port() {
+        let prefs = HashMap::new();
+        let port = select_sourceport(
+            None,
+            None,
+            Some("zdoom"),
+            "nyan-doom",
+            "uzdoom",
+            &prefs,
+            &[],
+        );
+        assert_eq!(port, "uzdoom");
+    }
+
+    #[test]
+    fn test_select_sourceport_uses_family_preference() {
+        let prefs = HashMap::from([("dsda".to_string(), "nugget-doom".to_string())]);
+        let port = select_sourceport(None, None, Some("dsda"), "gzdoom", "uzdoom", &prefs, &[]);
+        assert_eq!(port, "nugget-doom");
+    }
+
+    #[test]
+    fn test_select_sourceport_uses_installed_family_port() {
+        let prefs = HashMap::new();
+        let installed = vec![("nugget-doom".to_string(), "dsda".to_string())];
+        let port = select_sourceport(
+            None,
+            None,
+            Some("dsda"),
+            "gzdoom",
+            "uzdoom",
+            &prefs,
+            &installed,
+        );
+        assert_eq!(port, "nugget-doom");
     }
 
     #[test]

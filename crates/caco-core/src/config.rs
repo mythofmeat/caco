@@ -117,6 +117,7 @@ pub struct Config {
     pub sourceport_dir: String,
     pub companion_orphan_cleanup: String,
     pub zdoom_sourceport: String,
+    pub sourceport_preferences: HashMap<String, String>,
 
     #[serde(default)]
     pub tui: TuiConfig,
@@ -152,6 +153,7 @@ impl Default for Config {
             sourceport_dir: String::new(),
             companion_orphan_cleanup: "ask".to_string(),
             zdoom_sourceport: String::new(),
+            sourceport_preferences: HashMap::new(),
             tui: TuiConfig::default(),
             gui: GuiConfig::default(),
             list: ListConfig::default(),
@@ -476,6 +478,11 @@ pub fn get_zdoom_sourceport() -> String {
     "gzdoom".to_string()
 }
 
+/// Get configured preferred sourceports by family.
+pub fn get_sourceport_preferences() -> HashMap<String, String> {
+    load_config().sourceport_preferences.clone()
+}
+
 /// Get the configured default IWAD.
 pub fn get_iwad() -> String {
     load_config().iwad.clone()
@@ -753,6 +760,7 @@ mod tests {
         assert!(cfg.auto_detect_iwad);
         assert_eq!(cfg.link_mode, "move");
         assert_eq!(cfg.download_mirror, 0);
+        assert!(cfg.sourceport_preferences.is_empty());
     }
 
     #[test]
@@ -774,6 +782,24 @@ mod tests {
         assert_eq!(cfg.sourceport, "dsda-doom");
         assert!(cfg.manage_data_dirs); // default
         assert_eq!(cfg.gui.window_width, 1200); // default
+    }
+
+    #[test]
+    fn test_config_sourceport_preferences() {
+        let toml_str = r#"
+[sourceport_preferences]
+dsda = "nyan-doom"
+zdoom = "uzdoom"
+"#;
+        let cfg: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(
+            cfg.sourceport_preferences.get("dsda").map(String::as_str),
+            Some("nyan-doom")
+        );
+        assert_eq!(
+            cfg.sourceport_preferences.get("zdoom").map(String::as_str),
+            Some("uzdoom")
+        );
     }
 
     #[test]

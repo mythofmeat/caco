@@ -837,6 +837,7 @@ fn picker_wad_record(
         cached_path: None,
         custom_iwad: None,
         custom_sourceport: None,
+        required_sourceport_family: None,
         custom_args: None,
         companion_files: None,
         custom_config: None,

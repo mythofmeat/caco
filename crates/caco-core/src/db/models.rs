@@ -204,6 +204,7 @@ pub struct WadRecord {
     pub cached_path: Option<String>,
     pub custom_iwad: Option<String>,
     pub custom_sourceport: Option<String>,
+    pub required_sourceport_family: Option<String>,
     pub custom_args: Option<String>,
     pub companion_files: Option<String>,
     pub custom_config: Option<String>,
@@ -257,6 +258,7 @@ impl WadRecord {
             cached_path: row.get("cached_path")?,
             custom_iwad: row.get("custom_iwad")?,
             custom_sourceport: row.get("custom_sourceport")?,
+            required_sourceport_family: row.get("required_sourceport_family").ok(),
             custom_args: row.get("custom_args")?,
             companion_files: row.get("companion_files")?,
             custom_config: row.get("custom_config")?,
@@ -348,6 +350,7 @@ pub static ALLOWED_UPDATE_FIELDS: LazyLock<std::collections::HashSet<&'static st
             "cached_path",
             "custom_iwad",
             "custom_sourceport",
+            "required_sourceport_family",
             "custom_args",
             "companion_files",
             "custom_config",
@@ -477,6 +480,7 @@ mod tests {
         assert!(ALLOWED_UPDATE_FIELDS.contains("title"));
         assert!(ALLOWED_UPDATE_FIELDS.contains("status"));
         assert!(ALLOWED_UPDATE_FIELDS.contains("availability"));
+        assert!(ALLOWED_UPDATE_FIELDS.contains("required_sourceport_family"));
         assert!(!ALLOWED_UPDATE_FIELDS.contains("play_state"));
         assert!(!ALLOWED_UPDATE_FIELDS.contains("intent"));
         assert!(!ALLOWED_UPDATE_FIELDS.contains("id"));

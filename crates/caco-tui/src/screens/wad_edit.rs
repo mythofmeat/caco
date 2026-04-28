@@ -92,8 +92,13 @@ impl WadEditScreen {
             field_text("iwad", "IWAD", wad.custom_iwad.as_deref().unwrap_or("")),
             field_text(
                 "sourceport",
-                "Sourceport",
+                "Sourceport Override",
                 wad.custom_sourceport.as_deref().unwrap_or(""),
+            ),
+            field_text(
+                "sourceport_family",
+                "Required Sourceport Family",
+                wad.required_sourceport_family.as_deref().unwrap_or(""),
             ),
             field_text(
                 "complevel",
@@ -175,6 +180,10 @@ impl WadEditScreen {
             .set_text(
                 "custom_sourceport",
                 opt_str(&self.get_field_value("sourceport")),
+            )
+            .set_text(
+                "required_sourceport_family",
+                opt_str(&self.get_field_value("sourceport_family")),
             )
             .set_int("complevel", complevel)
             .set_text("custom_config", opt_str(&self.get_field_value("config")));
