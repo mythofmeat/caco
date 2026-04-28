@@ -28,11 +28,10 @@ pub enum CompletionVerdict {
 /// Compares the WAD's structural analysis (required maps) against the player's
 /// per-map statistics (exit counts) to determine completion status.
 ///
-/// **Credits-map heuristic**: If the terminal map has zero exits in stats, the
-/// preceding map has been exited, and the terminal is within 2 map slots of
-/// the player's furthest progress, the terminal map is excluded from the
-/// required set. This handles WADs where the final map is a credits/stopper
-/// map that the player can't actually exit.
+/// Terminal maps need special care: reaching or exiting the preceding map is
+/// not proof that a normal final map has been finished. If the terminal map's
+/// only exit is a secret exit, the secret continuation is part of the required
+/// path rather than optional completion content.
 pub fn check_completion(analysis: &WadAnalysis, stats: &WadStats) -> CompletionVerdict {
     if analysis.maps.is_empty() {
         return CompletionVerdict::NoAnalysis;
@@ -56,6 +55,21 @@ pub fn check_completion(analysis: &WadAnalysis, stats: &WadStats) -> CompletionV
         required_lumps.push(term.clone());
     }
 
+    let terminal_secret_continuations = if let Some(term) = &analysis.terminal_map
+        && !terminal_is_dead_end
+        && terminal_has_secret_exit(analysis, term)
+        && !terminal_has_normal_exit(analysis, term)
+    {
+        secret_continuation_maps(analysis, term)
+    } else {
+        Vec::new()
+    };
+    for lump in &terminal_secret_continuations {
+        if !required_lumps.contains(lump) {
+            required_lumps.push(lump.clone());
+        }
+    }
+
     // Build a lookup from map lump name to exit count
     let stats_map: std::collections::HashMap<&str, i32> = stats
         .maps
@@ -63,30 +77,22 @@ pub fn check_completion(analysis: &WadAnalysis, stats: &WadStats) -> CompletionV
         .map(|m| (m.lump.as_str(), m.total_exits))
         .collect();
 
-    // Apply credits-map heuristic for terminal maps with exits
-    // (dead-end terminals are already excluded from required)
-    if let Some(term) = &analysis.terminal_map
-        && !terminal_is_dead_end
-    {
-        let term_exits = stats_map.get(term.as_str()).copied().unwrap_or(0);
-        if term_exits == 0 && should_exclude_terminal(analysis, &stats_map, term) {
-            required_lumps.retain(|l| l != term);
-        }
-    }
-
     // Bypassed-map heuristic: if the terminal map has been exited, any other
-    // required map with zero exits was bypassed by the WAD's actual play flow.
+    // non-continuation required map with zero exits was bypassed by the WAD's
+    // actual play flow.
     // Static analysis can't always reconstruct DEHACKED-patched progressions or
     // custom exit handling (e.g. Pina Colada 2's MAP27 is an orphan slot that
     // MAP26's patched exit skips over to reach MAP28). Treat reaching the
-    // credits as the authoritative completion signal.
+    // credits as the authoritative completion signal, except when the terminal's
+    // only exit leads into a required secret continuation.
     if let Some(term) = &analysis.terminal_map
         && !terminal_is_dead_end
     {
-        let term_exits = stats_map.get(term.as_str()).copied().unwrap_or(0);
-        if term_exits >= 1 {
+        if map_exited(&stats_map, term) {
             required_lumps.retain(|lump| {
-                lump == term || stats_map.get(lump.as_str()).copied().unwrap_or(0) >= 1
+                lump == term
+                    || terminal_secret_continuations.contains(lump)
+                    || map_exited(&stats_map, lump)
             });
         }
     }
@@ -94,7 +100,7 @@ pub fn check_completion(analysis: &WadAnalysis, stats: &WadStats) -> CompletionV
     // Count how many required maps have been exited
     let exited = required_lumps
         .iter()
-        .filter(|lump| stats_map.get(lump.as_str()).copied().unwrap_or(0) >= 1)
+        .filter(|lump| map_exited(&stats_map, lump))
         .count();
     let required = required_lumps.len();
 
@@ -113,54 +119,38 @@ pub fn check_completion(analysis: &WadAnalysis, stats: &WadStats) -> CompletionV
     }
 }
 
-/// Determine whether the terminal map should be excluded from required maps.
-///
-/// The terminal map is excluded when:
-/// 1. Its exit count is zero in stats
-/// 2. The preceding map has been exited at least once
-/// 3. The terminal map is within 2 map slots of the player's furthest progress
-fn should_exclude_terminal(
-    analysis: &WadAnalysis,
-    stats_map: &std::collections::HashMap<&str, i32>,
-    terminal: &str,
-) -> bool {
-    // Find the map just before the terminal in the WAD's map ordering
-    let map_lumps: Vec<&str> = analysis
+fn map_exited(stats_map: &std::collections::HashMap<&str, i32>, lump: &str) -> bool {
+    stats_map.get(lump).copied().unwrap_or(0) >= 1
+}
+
+fn terminal_has_normal_exit(analysis: &WadAnalysis, terminal: &str) -> bool {
+    analysis
         .maps
         .iter()
-        .filter(|m| !m.is_secret)
-        .map(|m| m.lump.as_str())
-        .collect();
+        .find(|m| m.lump == terminal)
+        .is_some_and(|m| m.has_normal_exit)
+}
 
-    let term_idx = match map_lumps.iter().position(|&m| m == terminal) {
-        Some(idx) => idx,
-        None => return false,
+fn terminal_has_secret_exit(analysis: &WadAnalysis, terminal: &str) -> bool {
+    analysis
+        .maps
+        .iter()
+        .find(|m| m.lump == terminal)
+        .is_some_and(|m| m.has_secret_exit)
+}
+
+fn secret_continuation_maps(analysis: &WadAnalysis, terminal: &str) -> Vec<String> {
+    let Some(term_idx) = analysis.maps.iter().position(|m| m.lump == terminal) else {
+        return Vec::new();
     };
 
-    // Check condition 2: preceding map has been exited
-    if term_idx == 0 {
-        return false;
-    }
-    let preceding = map_lumps[term_idx - 1];
-    let preceding_exits = stats_map.get(preceding).copied().unwrap_or(0);
-    if preceding_exits < 1 {
-        return false;
-    }
-
-    // Check condition 3: terminal is within 2 slots of furthest progress
-    let furthest_idx = map_lumps
+    analysis
+        .maps
         .iter()
-        .enumerate()
-        .rev()
-        .find(|(_, lump)| stats_map.get(*lump).copied().unwrap_or(0) >= 1)
-        .map(|(idx, _)| idx);
-
-    if let Some(furthest) = furthest_idx {
-        // Terminal should be within 2 slots of the furthest exited map
-        term_idx <= furthest + 2
-    } else {
-        false
-    }
+        .skip(term_idx + 1)
+        .filter(|m| m.reachable && m.is_secret && !m.is_dead_end)
+        .map(|m| m.lump.clone())
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -221,8 +211,12 @@ mod tests {
 
     /// Create a WadStats with given (lump, total_exits) pairs.
     fn make_stats(entries: &[(&str, i32)]) -> WadStats {
+        make_stats_with_format("test", entries)
+    }
+
+    fn make_stats_with_format(format: &str, entries: &[(&str, i32)]) -> WadStats {
         WadStats {
-            format: "stats.txt".to_string(),
+            format: format.to_string(),
             version: 1,
             header_total_kills: 0,
             maps: entries
@@ -324,19 +318,30 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Credits-map heuristic tests
+    // Terminal-map tests
     // -----------------------------------------------------------------------
 
     #[test]
-    fn test_credits_map_heuristic_excludes_terminal() {
-        // Terminal map has no exits in stats, preceding map exited,
-        // terminal is within 2 slots of furthest progress.
-        // Terminal map has exits in the linedef analysis (has_normal_exit=true)
-        // but the player never managed to exit it (total_exits=0 in stats).
+    fn test_normal_terminal_not_excluded_when_unexited() {
+        // A normal terminal map with no exit stats is still required. Exiting
+        // the preceding map only proves the player reached the finale, not
+        // that the finale was finished.
         let analysis = make_analysis(&["MAP01", "MAP02", "MAP03"], &[], &[], Some("MAP03"));
         let stats = make_stats(&[("MAP01", 1), ("MAP02", 1), ("MAP03", 0)]);
-        // MAP03 is terminal, player reached it (MAP02 exited), MAP03 within 2 slots
-        // -> credits-map heuristic should exclude MAP03
+        assert_eq!(
+            check_completion(&analysis, &stats),
+            CompletionVerdict::Incomplete {
+                exited: 2,
+                required: 3,
+            }
+        );
+    }
+
+    #[test]
+    fn test_stats_txt_terminal_exit_completes() {
+        let analysis = make_analysis(&["MAP01", "MAP02", "MAP03"], &[], &[], Some("MAP03"));
+        let stats =
+            make_stats_with_format("stats_txt", &[("MAP01", 1), ("MAP02", 1), ("MAP03", 1)]);
         assert_eq!(
             check_completion(&analysis, &stats),
             CompletionVerdict::Complete
@@ -344,7 +349,163 @@ mod tests {
     }
 
     #[test]
-    fn test_credits_map_heuristic_not_applied_when_preceding_not_exited() {
+    fn test_levelstat_terminal_exit_completes() {
+        let analysis = make_analysis(&["MAP01", "MAP02", "MAP03"], &[], &[], Some("MAP03"));
+        let stats =
+            make_stats_with_format("levelstat_txt", &[("MAP01", 1), ("MAP02", 1), ("MAP03", 1)]);
+        assert_eq!(
+            check_completion(&analysis, &stats),
+            CompletionVerdict::Complete
+        );
+    }
+
+    #[test]
+    fn test_frozen_heart_map29_snapshot_stays_incomplete() {
+        let map_names: Vec<String> = (1..=32).map(|i| format!("MAP{i:02}")).collect();
+        let map_refs: Vec<&str> = map_names.iter().map(|s| s.as_str()).collect();
+        let analysis = make_analysis(&map_refs, &["MAP31", "MAP32"], &[], Some("MAP30"));
+
+        let stat_owned: Vec<(String, i32)> = (1..=29)
+            .map(|i| (format!("MAP{i:02}"), 1))
+            .chain((30..=32).map(|i| (format!("MAP{i:02}"), 0)))
+            .collect();
+        let stat_entries: Vec<(&str, i32)> =
+            stat_owned.iter().map(|(l, n)| (l.as_str(), *n)).collect();
+        let stats = make_stats_with_format("stats_txt", &stat_entries);
+
+        assert_eq!(
+            check_completion(&analysis, &stats),
+            CompletionVerdict::Incomplete {
+                exited: 29,
+                required: 30,
+            }
+        );
+    }
+
+    #[test]
+    fn test_frozen_heart_map30_stats_txt_completes() {
+        let map_names: Vec<String> = (1..=32).map(|i| format!("MAP{i:02}")).collect();
+        let map_refs: Vec<&str> = map_names.iter().map(|s| s.as_str()).collect();
+        let analysis = make_analysis(&map_refs, &["MAP31", "MAP32"], &[], Some("MAP30"));
+
+        let stat_owned: Vec<(String, i32)> = (1..=30)
+            .map(|i| (format!("MAP{i:02}"), 1))
+            .chain((31..=32).map(|i| (format!("MAP{i:02}"), 0)))
+            .collect();
+        let stat_entries: Vec<(&str, i32)> =
+            stat_owned.iter().map(|(l, n)| (l.as_str(), *n)).collect();
+        let stats = make_stats_with_format("stats_txt", &stat_entries);
+
+        assert_eq!(
+            check_completion(&analysis, &stats),
+            CompletionVerdict::Complete
+        );
+    }
+
+    #[test]
+    fn test_terminal_secret_continuation_not_complete_after_predecessor() {
+        // Reproduces Formless Mother: MAP04 is a stopper terminal with no
+        // normal exit, but it has a secret exit to MAP31. Because that is the
+        // only continuation, MAP31 is part of the required completion path.
+        let mut analysis = make_analysis(
+            &["MAP01", "MAP02", "MAP03", "MAP04", "MAP31"],
+            &["MAP31"],
+            &["MAP03"],
+            Some("MAP04"),
+        );
+        for map in &mut analysis.maps {
+            if map.lump == "MAP04" {
+                map.has_normal_exit = false;
+                map.has_secret_exit = true;
+                map.is_dead_end = false;
+                map.reachable = true;
+            }
+        }
+
+        let stats = make_stats(&[
+            ("MAP01", 1),
+            ("MAP02", 1),
+            ("MAP03", 1),
+            ("MAP04", 0),
+            ("MAP31", 0),
+        ]);
+
+        assert_eq!(
+            check_completion(&analysis, &stats),
+            CompletionVerdict::Incomplete {
+                exited: 2,
+                required: 4,
+            }
+        );
+    }
+
+    #[test]
+    fn test_terminal_secret_continuation_completes_after_secret_map_exit() {
+        let mut analysis = make_analysis(
+            &["MAP01", "MAP02", "MAP03", "MAP04", "MAP31"],
+            &["MAP31"],
+            &["MAP03"],
+            Some("MAP04"),
+        );
+        for map in &mut analysis.maps {
+            if map.lump == "MAP04" {
+                map.has_normal_exit = false;
+                map.has_secret_exit = true;
+                map.is_dead_end = false;
+                map.reachable = true;
+            }
+        }
+
+        let stats = make_stats(&[
+            ("MAP01", 1),
+            ("MAP02", 1),
+            ("MAP03", 1),
+            ("MAP04", 1),
+            ("MAP31", 1),
+        ]);
+
+        assert_eq!(
+            check_completion(&analysis, &stats),
+            CompletionVerdict::Complete
+        );
+    }
+
+    #[test]
+    fn test_terminal_secret_continuation_not_bypassed_after_terminal_exit() {
+        let mut analysis = make_analysis(
+            &["MAP01", "MAP02", "MAP03", "MAP04", "MAP31"],
+            &["MAP31"],
+            &["MAP03"],
+            Some("MAP04"),
+        );
+        for map in &mut analysis.maps {
+            if map.lump == "MAP04" {
+                map.has_normal_exit = false;
+                map.has_secret_exit = true;
+                map.is_dead_end = false;
+                map.reachable = true;
+            }
+        }
+
+        let stats = make_stats(&[
+            ("MAP01", 1),
+            ("MAP02", 1),
+            ("MAP03", 1),
+            ("MAP04", 1),
+            ("MAP31", 0),
+        ]);
+
+        assert_eq!(
+            check_completion(&analysis, &stats),
+            CompletionVerdict::Incomplete {
+                exited: 3,
+                required: 4,
+            }
+        );
+    }
+
+    #[test]
+    fn test_terminal_incomplete_when_preceding_not_exited() {
         let analysis = make_analysis(&["MAP01", "MAP02", "MAP03"], &[], &[], Some("MAP03"));
         // Player only exited MAP01, not MAP02 (the predecessor to terminal MAP03)
         let stats = make_stats(&[("MAP01", 1)]);
@@ -358,7 +519,7 @@ mod tests {
     }
 
     #[test]
-    fn test_credits_map_heuristic_not_applied_when_far_from_progress() {
+    fn test_terminal_incomplete_when_far_from_progress() {
         // Terminal is MAP30, player only got to MAP10 — too far away
         let map_names: Vec<String> = (1..=30).map(|i| format!("MAP{:02}", i)).collect();
         let map_refs: Vec<&str> = map_names.iter().map(|s| s.as_str()).collect();
@@ -373,8 +534,7 @@ mod tests {
             .collect();
         let stats = make_stats(&stat_entries);
 
-        // MAP30 has 0 exits, MAP29 has 0 exits — preceding not exited
-        // Credits heuristic should NOT apply
+        // MAP30 has 0 exits, MAP29 has 0 exits — preceding not exited.
         let result = check_completion(&analysis, &stats);
         assert!(matches!(result, CompletionVerdict::Incomplete { .. }));
     }

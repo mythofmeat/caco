@@ -43,7 +43,7 @@ const GEN_EXIT_SECRET_BIT: u16 = 0x20;
 
 /// Analysis format version.  Bump this whenever detection logic changes
 /// so that stale cached analyses are automatically invalidated and re-run.
-pub const ANALYSIS_VERSION: u32 = 2;
+pub const ANALYSIS_VERSION: u32 = 3;
 
 /// UDMF normal exit specials.
 const UDMF_NORMAL_EXITS: &[i32] = &[243, 74, 75]; // Exit_Normal, Teleport_NewMap, Teleport_EndGame
@@ -874,7 +874,9 @@ fn classify_secrets_vanilla(all_maps: &[String], is_doom1: bool) -> HashSet<Stri
 ///
 /// A map is secret ONLY IF it is reachable exclusively via `nextsecret`
 /// and NEVER appears in any `next` chain. This avoids the Poogers edge
-/// case where `nextsecret` is used for normal progression.
+/// case where `nextsecret` is used for normal progression. A `nextsecret`
+/// target is also treated as required progression when the source map has no
+/// explicit or vanilla normal continuation.
 fn classify_secrets_umapinfo(
     all_maps: &[String],
     umapinfo: &HashMap<String, UmapinfoEntry>,
@@ -884,26 +886,57 @@ fn classify_secrets_umapinfo(
     // Build sets of maps reachable via `next` and `nextsecret`
     let mut reached_by_next: HashSet<String> = HashSet::new();
     let mut reached_by_nextsecret: HashSet<String> = HashSet::new();
+    let mut required_secret_continuations: HashSet<String> = HashSet::new();
 
-    for entry in umapinfo.values() {
+    for (source, entry) in umapinfo {
         if let Some(ref next) = entry.next {
             reached_by_next.insert(next.clone());
         }
         if let Some(ref ns) = entry.nextsecret {
-            reached_by_nextsecret.insert(ns.clone());
+            if entry.next.is_none() && !entry.has_endgame && !vanilla_next_exists(source, &map_set)
+            {
+                required_secret_continuations.insert(ns.clone());
+            } else {
+                reached_by_nextsecret.insert(ns.clone());
+            }
         }
     }
 
     // A map is secret if it's reachable ONLY via nextsecret, never via next,
-    // AND it actually exists in the WAD
+    // is not the only continuation from its source, AND it actually exists in
+    // the WAD.
     let mut secrets = HashSet::new();
     for map in &reached_by_nextsecret {
-        if !reached_by_next.contains(map) && map_set.contains(map.as_str()) {
+        if !reached_by_next.contains(map)
+            && !required_secret_continuations.contains(map)
+            && map_set.contains(map.as_str())
+        {
             secrets.insert(map.clone());
         }
     }
 
     secrets
+}
+
+fn vanilla_next_exists(map: &str, map_set: &HashSet<&str>) -> bool {
+    if let Some(caps) = DOOM2_MAP_RE.captures(map)
+        && let Ok(num) = caps[1].parse::<u32>()
+        && num < 30
+    {
+        let next = format!("MAP{:02}", num + 1);
+        return map_set.contains(next.as_str());
+    }
+
+    if let Some(caps) = DOOM1_MAP_RE.captures(map)
+        && let Ok(ep) = caps[1].parse::<u32>()
+        && let Ok(map_num) = caps[2].parse::<u32>()
+        && map_num < 8
+    {
+        let next = format!("E{ep}M{}", map_num + 1);
+        return map_set.contains(next.as_str());
+    }
+
+    false
 }
 
 // ---------------------------------------------------------------------------
@@ -1712,6 +1745,41 @@ MAP MAP01
         assert_eq!(secrets.len(), 2);
     }
 
+    #[test]
+    fn test_secrets_umapinfo_nextsecret_only_continuation() {
+        // MAP04 has no explicit `next` and MAP05 does not exist. Its
+        // `nextsecret` to MAP31 is therefore the only continuation, not an
+        // optional secret branch.
+        let mut umi = HashMap::new();
+        umi.insert(
+            "MAP04".into(),
+            UmapinfoEntry {
+                next: None,
+                nextsecret: Some("MAP31".into()),
+                has_endgame: false,
+            },
+        );
+        umi.insert(
+            "MAP31".into(),
+            UmapinfoEntry {
+                next: None,
+                nextsecret: None,
+                has_endgame: true,
+            },
+        );
+
+        let maps: Vec<String> = vec!["MAP01", "MAP02", "MAP03", "MAP04", "MAP31"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        let secrets = classify_secrets_umapinfo(&maps, &umi);
+        assert!(
+            !secrets.contains("MAP31"),
+            "MAP31 is required because MAP04 has no normal continuation"
+        );
+        assert!(secrets.is_empty());
+    }
+
     // -----------------------------------------------------------------------
     // Terminal map identification tests
     // -----------------------------------------------------------------------
@@ -2070,6 +2138,58 @@ MAP MAP04
         assert_eq!(analysis.terminal_map, Some("MAP04".to_string()));
         // All 4 maps are required
         assert_eq!(analysis.required_maps, 4);
+    }
+
+    #[test]
+    fn test_analyze_wad_umapinfo_secret_only_final_continuation() {
+        let ld_normal = build_linedefs(&[11]);
+        let ld_secret = build_linedefs(&[51]);
+        let umapinfo = br#"
+MAP MAP01
+{
+    next = "MAP02"
+}
+
+MAP MAP02
+{
+    next = "MAP03"
+}
+
+MAP MAP03
+{
+    next = "MAP04"
+}
+
+MAP MAP04
+{
+    nextsecret = "MAP31"
+}
+
+MAP MAP31
+{
+    endgame = true
+}
+"#;
+
+        let wad = build_wad(&[
+            ("MAP01", &[]),
+            ("LINEDEFS", &ld_normal),
+            ("MAP02", &[]),
+            ("LINEDEFS", &ld_normal),
+            ("MAP03", &[]),
+            ("LINEDEFS", &ld_normal),
+            ("MAP04", &[]),
+            ("LINEDEFS", &ld_secret),
+            ("MAP31", &[]),
+            ("LINEDEFS", &ld_normal),
+            ("UMAPINFO", umapinfo),
+        ]);
+
+        let analysis = analyze_wad(&wad).unwrap();
+        assert!(analysis.has_umapinfo);
+        assert!(analysis.secret_maps.is_empty());
+        assert_eq!(analysis.terminal_map, Some("MAP31".to_string()));
+        assert_eq!(analysis.required_maps, 5);
     }
 
     #[test]
