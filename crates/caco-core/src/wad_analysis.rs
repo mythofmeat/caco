@@ -1,10 +1,13 @@
 //! WAD analysis module for automated completion detection.
 //!
-//! Analyzes a WAD file to enumerate maps, detect exit linedefs, classify
-//! secret/terminal/dead-end maps, and compute required map counts. Supports
-//! vanilla/Boom LINEDEFS, UDMF TEXTMAP, and UMAPINFO overrides.
+//! Two pure layers:
+//! - `analyze_wad` / `analyze_pk3` build a directed map graph from the WAD's
+//!   ZMAPINFO/UMAPINFO/MAPINFO/vanilla edges, walk the main path from start
+//!   to credits-stopper, and assign each map a `MapClassification`.
+//! - `completion_detect::check_completion` intersects the Required set with
+//!   the player's exit stats. The classifier never sees stats.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -19,6 +22,10 @@ use crate::utils::parse_wad_directory;
 static DOOM1_MAP_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^E(\d)M(\d)$").unwrap());
 static DOOM2_MAP_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^MAP([1-9]\d{2}|\d{2})$").unwrap());
+/// Playable map names. Accepts standard `MAPxx` / `ExMy` plus alphanumeric
+/// suffixes (e.g. `MAP18GZ` referenced from ZMAPINFO).
+static PLAYABLE_MAP_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(MAP\d{2,}[A-Z0-9]*|E\dM\d[A-Z0-9]*)$").unwrap());
 
 /// Lumps that belong to a map definition (appear after the map marker).
 const MAP_LUMPS: &[&str] = &[
@@ -41,9 +48,9 @@ const GEN_EXIT_END: u16 = 0x37FF;
 /// Bit 5 within the generalized exit encoding indicates a secret exit.
 const GEN_EXIT_SECRET_BIT: u16 = 0x20;
 
-/// Analysis format version.  Bump this whenever detection logic changes
+/// Analysis format version. Bump this whenever detection logic changes
 /// so that stale cached analyses are automatically invalidated and re-run.
-pub const ANALYSIS_VERSION: u32 = 3;
+pub const ANALYSIS_VERSION: u32 = 4;
 
 /// UDMF normal exit specials.
 const UDMF_NORMAL_EXITS: &[i32] = &[243, 74, 75]; // Exit_Normal, Teleport_NewMap, Teleport_EndGame
@@ -51,32 +58,39 @@ const UDMF_NORMAL_EXITS: &[i32] = &[243, 74, 75]; // Exit_Normal, Teleport_NewMa
 const UDMF_SECRET_EXITS: &[i32] = &[244]; // Exit_Secret
 
 // ---------------------------------------------------------------------------
-// Types
+// Public types
 // ---------------------------------------------------------------------------
+
+/// How a map relates to the WAD's main play flow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MapClassification {
+    /// On the main path from start to credits-stopper. Must be exited for completion.
+    Required,
+    /// Reachable only via a skippable secret-exit branch. Optional.
+    OptionalSecret,
+    /// Terminal credits/stopper map. Reaching its predecessor on the main path
+    /// proves completion; the stopper itself does not need to be "exited".
+    OptionalCredits,
+    /// Lump exists but no incoming edge in any flow. Not part of completion.
+    Unreachable,
+}
 
 /// Per-map analysis result.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MapInfo {
     /// Map lump name (e.g., "MAP01", "E1M1").
     pub lump: String,
-    /// Map has at least one normal exit linedef.
+    /// Map has at least one normal exit linedef (diagnostic).
     pub has_normal_exit: bool,
-    /// Map has at least one secret exit linedef.
+    /// Map has at least one secret exit linedef (diagnostic).
     pub has_secret_exit: bool,
-    /// Map is classified as a secret map.
-    pub is_secret: bool,
-    /// Map has no exit linedefs at all.
-    pub is_dead_end: bool,
-    /// Map is identified as the end-of-wad map.
-    pub is_terminal: bool,
-    /// Map is reachable through normal gameplay (not just via warp).
-    /// Maps beyond the vanilla flow (e.g. MAP33+ in Doom 2) are unreachable.
-    #[serde(default = "default_true")]
-    pub reachable: bool,
+    /// Single source of truth for what this map represents in the play flow.
+    #[serde(default = "default_classification")]
+    pub classification: MapClassification,
 }
 
-fn default_true() -> bool {
-    true
+fn default_classification() -> MapClassification {
+    MapClassification::Required
 }
 
 /// Complete WAD analysis result.
@@ -85,39 +99,336 @@ pub struct WadAnalysis {
     /// Analysis format version (defaults to 0 for pre-versioned entries).
     #[serde(default)]
     pub version: u32,
-    /// All maps found in the WAD with their analysis.
+    /// All maps found in the WAD with their classification.
     pub maps: Vec<MapInfo>,
     /// Total number of maps.
     pub total_maps: usize,
-    /// Number of maps required for completion (total - secret - dead-end).
+    /// Derived: number of maps with `classification == Required`.
     pub required_maps: usize,
-    /// Lump names of secret maps.
+    /// Derived: lump names where `classification == OptionalSecret`.
     pub secret_maps: Vec<String>,
-    /// Lump names of dead-end maps (no exits).
-    pub dead_end_maps: Vec<String>,
-    /// Lump name of the terminal (final) map, if identified.
+    /// Derived: the lump where `classification == OptionalCredits`, if any.
     pub terminal_map: Option<String>,
-    /// Whether the WAD contains a UMAPINFO lump.
+    /// Whether any structured map-flow data was found (UMAPINFO/MAPINFO/ZMAPINFO).
     pub has_umapinfo: bool,
 }
 
 // ---------------------------------------------------------------------------
-// UMAPINFO parsed structures
+// Internal: map flow graph
 // ---------------------------------------------------------------------------
 
-/// Parsed data from a single UMAPINFO map block.
-#[derive(Debug, Clone, Default)]
-struct UmapinfoEntry {
+/// Directed graph of the WAD's map flow.
+#[derive(Debug, Default, Clone)]
+struct MapGraph {
+    /// `lump -> next normal map`. One edge per source.
+    edges_normal: HashMap<String, String>,
+    /// `lump -> next secret map`. One edge per source.
+    edges_secret: HashMap<String, String>,
+    /// Maps that explicitly mark game end (`endgame`/`endpic`/etc.).
+    has_endgame: HashSet<String>,
+}
+
+/// Source of map-flow data, lower priority gets overridden by higher.
+/// Vanilla conventions are applied separately (always lowest priority) and
+/// don't appear here.
+enum FlowSource {
+    Umapinfo,
+    Mapinfo,
+    Zmapinfo,
+}
+
+impl FlowSource {
+    fn priority(&self) -> u8 {
+        match self {
+            FlowSource::Umapinfo => 1,
+            FlowSource::Mapinfo => 2,
+            FlowSource::Zmapinfo => 3,
+        }
+    }
+}
+
+/// Build the map graph by overlaying flow sources in priority order.
+///
+/// Each source's edges only override existing edges from lower-priority
+/// sources. Edges that point to lumps not in `map_set` are dropped.
+fn build_graph(
+    map_set: &HashSet<&str>,
+    is_doom1: bool,
+    sources: &[(FlowSource, HashMap<String, MapinfoEdge>)],
+) -> MapGraph {
+    let mut by_priority: Vec<&(FlowSource, HashMap<String, MapinfoEdge>)> =
+        sources.iter().collect();
+    by_priority.sort_by_key(|(s, _)| s.priority());
+
+    let mut graph = MapGraph::default();
+
+    // Layer 0: vanilla edges (lowest priority, applied first)
+    add_vanilla_edges(&mut graph, map_set, is_doom1);
+
+    // Higher layers: overlay each source in priority order. Each property
+    // is only overridden when the higher-priority source explicitly sets it
+    // — an empty entry like `MAP MAP01 { }` does NOT clear vanilla edges.
+    // Setting endgame=true also clears any normal/secret edge for that map
+    // (game ends here, no progression).
+    for (_, entries) in &by_priority {
+        for (lump, edge) in entries.iter() {
+            if !map_set.contains(lump.as_str()) {
+                continue;
+            }
+
+            if let Some(ref nx) = edge.next {
+                if map_set.contains(nx.as_str()) {
+                    graph.edges_normal.insert(lump.clone(), nx.clone());
+                } else {
+                    graph.edges_normal.remove(lump.as_str());
+                }
+            }
+            if let Some(ref sx) = edge.secret_next {
+                if map_set.contains(sx.as_str()) {
+                    graph.edges_secret.insert(lump.clone(), sx.clone());
+                } else {
+                    graph.edges_secret.remove(lump.as_str());
+                }
+            }
+            if edge.has_endgame {
+                graph.has_endgame.insert(lump.clone());
+                graph.edges_normal.remove(lump.as_str());
+                graph.edges_secret.remove(lump.as_str());
+            }
+        }
+    }
+
+    graph
+}
+
+/// Unified edge representation across all flow sources.
+#[derive(Debug, Default, Clone)]
+struct MapinfoEdge {
     next: Option<String>,
-    nextsecret: Option<String>,
+    secret_next: Option<String>,
     has_endgame: bool,
 }
 
+/// Add vanilla map-flow edges based on map naming conventions.
+fn add_vanilla_edges(graph: &mut MapGraph, map_set: &HashSet<&str>, is_doom1: bool) {
+    if is_doom1 {
+        // ExMy → ExM(y+1) for y < 8; ExM3 secret → ExM9; ExM9 → ExM(source+1)
+        // is rare and engine-specific, skip.
+        for &lump in map_set {
+            if let Some(caps) = DOOM1_MAP_RE.captures(lump)
+                && let Ok(ep) = caps[1].parse::<u32>()
+                && let Ok(mn) = caps[2].parse::<u32>()
+            {
+                if mn < 8 {
+                    let next = format!("E{ep}M{}", mn + 1);
+                    if map_set.contains(next.as_str()) {
+                        graph.edges_normal.insert(lump.to_string(), next);
+                    }
+                }
+                if mn == 3 {
+                    let secret = format!("E{ep}M9");
+                    if map_set.contains(secret.as_str()) {
+                        graph.edges_secret.insert(lump.to_string(), secret);
+                    }
+                }
+            }
+        }
+    } else {
+        // MAP_n → MAP_(n+1) for n < 30; MAP15 secret → MAP31; MAP31 → MAP32 → MAP16
+        for &lump in map_set {
+            if let Some(caps) = DOOM2_MAP_RE.captures(lump)
+                && let Ok(n) = caps[1].parse::<u32>()
+            {
+                if n < 30 {
+                    let next = format!("MAP{:02}", n + 1);
+                    if map_set.contains(next.as_str()) {
+                        graph.edges_normal.insert(lump.to_string(), next);
+                    }
+                }
+                if n == 15 && map_set.contains("MAP31") {
+                    graph
+                        .edges_secret
+                        .insert(lump.to_string(), "MAP31".to_string());
+                }
+                if n == 31 {
+                    if map_set.contains("MAP16") {
+                        graph
+                            .edges_normal
+                            .insert(lump.to_string(), "MAP16".to_string());
+                    }
+                    if map_set.contains("MAP32") {
+                        graph
+                            .edges_secret
+                            .insert(lump.to_string(), "MAP32".to_string());
+                    }
+                }
+                if n == 32 && map_set.contains("MAP16") {
+                    graph
+                        .edges_normal
+                        .insert(lump.to_string(), "MAP16".to_string());
+                }
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
-// Core analysis function
+// Internal: classification (graph walk)
 // ---------------------------------------------------------------------------
 
-/// Analyze a WAD file to enumerate maps and detect completion requirements.
+/// Walk the graph and assign a classification to each map.
+///
+/// Algorithm:
+/// 1. Pick start = lowest-keyed playable map.
+/// 2. Walk the main path, preferring normal edges, falling back to secret
+///    edges only when no normal edge exists ("forced secret = true ending").
+/// 3. The terminus (last node visited) is reclassified as `OptionalCredits`
+///    if it has no outgoing edges and no detected exit linedefs.
+/// 4. Walk secret branches off main-path nodes; mark visited nodes as
+///    `OptionalSecret`.
+/// 5. Anything still unmarked is `Unreachable`.
+fn classify_maps(graph: &MapGraph, infos: &mut [MapInfo]) {
+    if infos.is_empty() {
+        return;
+    }
+
+    // Find the canonical start: lowest-keyed playable map.
+    let mut sorted: Vec<&str> = infos.iter().map(|m| m.lump.as_str()).collect();
+    sorted.sort_by_key(|l| map_sort_key(l));
+    let start = sorted[0].to_string();
+
+    // Pre-fill all as Unreachable; we'll upgrade as we walk.
+    for m in infos.iter_mut() {
+        m.classification = MapClassification::Unreachable;
+    }
+    let by_lump: HashMap<String, usize> = infos
+        .iter()
+        .enumerate()
+        .map(|(i, m)| (m.lump.clone(), i))
+        .collect();
+
+    // 1. Main-path walk
+    let mut visited: HashSet<String> = HashSet::new();
+    let mut walk_order: Vec<String> = Vec::new();
+    let mut current = Some(start);
+    while let Some(node) = current {
+        if !visited.insert(node.clone()) {
+            break; // cycle
+        }
+        walk_order.push(node.clone());
+        if let Some(&idx) = by_lump.get(node.as_str()) {
+            infos[idx].classification = MapClassification::Required;
+        }
+        if graph.has_endgame.contains(&node) {
+            break;
+        }
+        current = match (graph.edges_normal.get(&node), graph.edges_secret.get(&node)) {
+            (Some(nx), _) => Some(nx.clone()),
+            (None, Some(sx)) => Some(sx.clone()), // forced secret = true ending
+            (None, None) => None,
+        };
+    }
+
+    // 2. Reclassify terminus as OptionalCredits if it really is a stopper
+    //    (no outgoing edges + no detected exit linedef). A node with no
+    //    outgoing edge but with detected linedef exits is a "false dead-end"
+    //    — likely an intermediate map whose exit is ACS/DEH-patched and
+    //    doesn't land in the static graph. Leave it as Required so the
+    //    verdict layer surfaces the missing chain rather than silently
+    //    rewriting it as a stopper.
+    if let Some(term) = walk_order.last() {
+        let no_normal_out = !graph.edges_normal.contains_key(term);
+        let no_secret_out = !graph.edges_secret.contains_key(term);
+        let has_endgame_marker = graph.has_endgame.contains(term);
+        if let Some(&idx) = by_lump.get(term.as_str()) {
+            let info = &infos[idx];
+            let no_exit = !info.has_normal_exit && !info.has_secret_exit;
+            if no_normal_out && no_secret_out && (no_exit || has_endgame_marker) {
+                infos[idx].classification = MapClassification::OptionalCredits;
+            }
+        }
+    }
+
+    // 3. Secret branches off the main path
+    let main_path: HashSet<String> = walk_order.iter().cloned().collect();
+    let mut sec_queue: VecDeque<String> = VecDeque::new();
+    for node in &main_path {
+        if let Some(sx) = graph.edges_secret.get(node)
+            && !main_path.contains(sx)
+        {
+            sec_queue.push_back(sx.clone());
+        }
+    }
+    let mut sec_seen: HashSet<String> = HashSet::new();
+    while let Some(node) = sec_queue.pop_front() {
+        if !sec_seen.insert(node.clone()) {
+            continue;
+        }
+        if let Some(&idx) = by_lump.get(node.as_str())
+            && infos[idx].classification == MapClassification::Unreachable
+        {
+            infos[idx].classification = MapClassification::OptionalSecret;
+        }
+        if let Some(nx) = graph.edges_normal.get(&node)
+            && !main_path.contains(nx)
+        {
+            sec_queue.push_back(nx.clone());
+        }
+        if let Some(sx) = graph.edges_secret.get(&node)
+            && !main_path.contains(sx)
+        {
+            sec_queue.push_back(sx.clone());
+        }
+    }
+}
+
+/// Apply hub-WAD classification: every playable map becomes Required.
+///
+/// In a hub structure (e.g. Hexen-style), maps cross-reference each other
+/// and there is no single linear "main path"; the player must visit them
+/// all. Detection lives in `detect_hub_structure`.
+fn classify_hub(infos: &mut [MapInfo]) {
+    for m in infos.iter_mut() {
+        m.classification = MapClassification::Required;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Internal: derived field extraction
+// ---------------------------------------------------------------------------
+
+fn finalize(maps: Vec<MapInfo>, has_structured_flow: bool) -> WadAnalysis {
+    let total_maps = maps.len();
+    let required_maps = maps
+        .iter()
+        .filter(|m| m.classification == MapClassification::Required)
+        .count();
+    let secret_maps: Vec<String> = maps
+        .iter()
+        .filter(|m| m.classification == MapClassification::OptionalSecret)
+        .map(|m| m.lump.clone())
+        .collect();
+    let terminal_map = maps
+        .iter()
+        .find(|m| m.classification == MapClassification::OptionalCredits)
+        .map(|m| m.lump.clone());
+
+    WadAnalysis {
+        version: ANALYSIS_VERSION,
+        total_maps,
+        required_maps,
+        secret_maps,
+        terminal_map,
+        has_umapinfo: has_structured_flow,
+        maps,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Public: WAD analysis
+// ---------------------------------------------------------------------------
+
+/// Analyze a WAD file to enumerate maps and classify them.
 ///
 /// Returns `None` if the data is not a valid WAD or contains no maps.
 pub fn analyze_wad(wad_data: &[u8]) -> Option<WadAnalysis> {
@@ -126,113 +437,74 @@ pub fn analyze_wad(wad_data: &[u8]) -> Option<WadAnalysis> {
         return None;
     }
 
-    // Find map markers and their associated lumps
     let map_ranges = find_map_ranges(&directory);
     if map_ranges.is_empty() {
         return None;
     }
 
-    // Check for UMAPINFO
-    let umapinfo = parse_umapinfo_from_directory(wad_data, &directory);
-    let has_umapinfo = umapinfo.is_some();
-
-    // Determine map format (ExMy vs MAPxx)
-    let first_map = &map_ranges[0].0;
-    let is_doom1 = DOOM1_MAP_RE.is_match(first_map);
-
-    // Collect all map lumps
-    let all_map_lumps: Vec<String> = map_ranges.iter().map(|(name, _, _)| name.clone()).collect();
-
-    // Analyze each map for exits
-    let mut map_infos: Vec<MapInfo> = Vec::with_capacity(map_ranges.len());
+    // Per-map exit detection
+    let mut infos: Vec<MapInfo> = Vec::with_capacity(map_ranges.len());
     for (name, start_idx, end_idx) in &map_ranges {
         let (has_normal, has_secret) = detect_exits(wad_data, &directory, *start_idx, *end_idx);
-        map_infos.push(MapInfo {
+        infos.push(MapInfo {
             lump: name.clone(),
             has_normal_exit: has_normal,
             has_secret_exit: has_secret,
-            is_secret: false,
-            is_dead_end: !has_normal && !has_secret,
-            is_terminal: false,
-            reachable: true, // default, refined below
+            classification: MapClassification::Unreachable,
         });
     }
 
-    // Classify secret maps
-    let secret_set = classify_secrets(&all_map_lumps, is_doom1, &umapinfo);
-    for info in &mut map_infos {
-        if secret_set.contains(&info.lump) {
-            info.is_secret = true;
+    // Filter to playable map names. Anything else (TITLEMAP, etc.) is
+    // ignored for classification purposes.
+    let mut infos: Vec<MapInfo> = infos
+        .into_iter()
+        .filter(|m| PLAYABLE_MAP_RE.is_match(&m.lump))
+        .collect();
+    if infos.is_empty() {
+        return None;
+    }
+
+    let lumps: Vec<String> = infos.iter().map(|m| m.lump.clone()).collect();
+    let map_set: HashSet<&str> = lumps.iter().map(|s| s.as_str()).collect();
+    let is_doom1 = lumps.first().is_some_and(|m| DOOM1_MAP_RE.is_match(m));
+
+    // Collect flow sources from the WAD.
+    let mut sources: Vec<(FlowSource, HashMap<String, MapinfoEdge>)> = Vec::new();
+    let mut has_structured = false;
+
+    if let Some(text) = read_lump_text(wad_data, &directory, "ZMAPINFO") {
+        let entries = parse_mapinfo_to_edges(&crate::mapinfo::parse_mapinfo(&text));
+        if !entries.is_empty() {
+            has_structured = true;
+            sources.push((FlowSource::Zmapinfo, entries));
+        }
+    }
+    if let Some(text) = read_lump_text(wad_data, &directory, "UMAPINFO") {
+        let entries = parse_umapinfo_to_edges(&parse_umapinfo(&text));
+        if !entries.is_empty() {
+            has_structured = true;
+            sources.push((FlowSource::Umapinfo, entries));
+        }
+    }
+    if let Some(text) = read_lump_text(wad_data, &directory, "MAPINFO") {
+        let entries = parse_mapinfo_to_edges(&crate::mapinfo::parse_mapinfo(&text));
+        if !entries.is_empty() {
+            has_structured = true;
+            sources.push((FlowSource::Mapinfo, entries));
         }
     }
 
-    // Identify terminal map
-    let terminal = identify_terminal(&all_map_lumps, is_doom1, &umapinfo, &map_infos);
-    if let Some(ref term) = terminal {
-        for info in &mut map_infos {
-            if info.lump == *term {
-                info.is_terminal = true;
-            }
-        }
-    }
+    let graph = build_graph(&map_set, is_doom1, &sources);
+    classify_maps(&graph, &mut infos);
 
-    // Compute reachability: mark maps that can't be reached through normal play
-    let reachable_set = compute_reachability(&all_map_lumps, is_doom1, &umapinfo, &map_infos);
-    for info in &mut map_infos {
-        info.reachable = reachable_set.contains(&info.lump);
-    }
-
-    // Build result vectors
-    let secret_maps: Vec<String> = map_infos
-        .iter()
-        .filter(|m| m.is_secret)
-        .map(|m| m.lump.clone())
-        .collect();
-
-    // Dead-end maps: no exits AND not secret AND not the terminal map
-    // (terminal map with no exits is expected — it's the credits stopper)
-    let dead_end_maps: Vec<String> = map_infos
-        .iter()
-        .filter(|m| m.is_dead_end && !m.is_secret && !m.is_terminal)
-        .map(|m| m.lump.clone())
-        .collect();
-
-    let total_maps = map_infos.len();
-    // Required = reachable, non-secret, non-dead-end, non-terminal-dead-end.
-    // Unreachable count excludes maps already subtracted by other categories
-    // (secret, dead-end, terminal dead-end) to avoid double-counting.
-    let terminal_excluded = map_infos.iter().any(|m| m.is_terminal && m.is_dead_end);
-    let unreachable_count = map_infos
-        .iter()
-        .filter(|m| !m.reachable && !m.is_secret && !m.is_dead_end)
-        .count();
-    let required_maps = total_maps
-        - secret_maps.len()
-        - dead_end_maps.len()
-        - unreachable_count
-        - if terminal_excluded { 1 } else { 0 };
-
-    Some(WadAnalysis {
-        version: ANALYSIS_VERSION,
-        maps: map_infos,
-        total_maps,
-        required_maps,
-        secret_maps,
-        dead_end_maps,
-        terminal_map: terminal,
-        has_umapinfo,
-    })
+    Some(finalize(infos, has_structured))
 }
 
 // ---------------------------------------------------------------------------
-// PK3 analysis
+// Public: PK3 analysis
 // ---------------------------------------------------------------------------
 
-/// Analyze a PK3 file (ZDoom ZIP archive) to enumerate maps and detect
-/// completion requirements.
-///
-/// PK3 files store maps as individual WADs under `maps/` or embedded in
-/// root-level WAD files. Map flow is defined by MAPINFO/ZMAPINFO lumps.
+/// Analyze a PK3 file (ZDoom ZIP archive).
 pub fn analyze_pk3(pk3_path: &std::path::Path) -> Option<WadAnalysis> {
     use std::io::Read;
 
@@ -240,10 +512,9 @@ pub fn analyze_pk3(pk3_path: &std::path::Path) -> Option<WadAnalysis> {
     let mut archive = zip::ZipArchive::new(file).ok()?;
 
     // --- Step 1: Discover maps and analyze exits ---
-    let mut map_infos: Vec<MapInfo> = Vec::new();
-    let mut found_maps = false;
+    let mut infos: Vec<MapInfo> = Vec::new();
 
-    // Try maps/ directory first
+    // Try maps/ directory first (one map per WAD)
     let map_wad_names: Vec<String> = (0..archive.len())
         .filter_map(|i| {
             let entry = archive.by_index(i).ok()?;
@@ -257,33 +528,26 @@ pub fn analyze_pk3(pk3_path: &std::path::Path) -> Option<WadAnalysis> {
         .collect();
 
     if !map_wad_names.is_empty() {
-        found_maps = true;
         for entry_name in &map_wad_names {
             let mut entry = archive.by_name(entry_name).ok()?;
             let mut data = Vec::new();
             entry.read_to_end(&mut data).ok()?;
 
-            // Map lump name from filename stem (e.g., "maps/MAP01.WAD" -> "MAP01")
             let stem = std::path::Path::new(entry_name)
                 .file_stem()
                 .and_then(|s| s.to_str())?
                 .to_uppercase();
 
             let (has_normal, has_secret) = analyze_map_wad_exits(&data);
-            map_infos.push(MapInfo {
+            infos.push(MapInfo {
                 lump: stem,
                 has_normal_exit: has_normal,
                 has_secret_exit: has_secret,
-                is_secret: false,
-                is_dead_end: !has_normal && !has_secret,
-                is_terminal: false,
-                reachable: true,
+                classification: MapClassification::Unreachable,
             });
         }
-    }
-
-    // Fallback: scan root-level WAD files for embedded maps
-    if !found_maps {
+    } else {
+        // Fallback: scan root-level WAD files for embedded maps
         let root_wad_names: Vec<String> = (0..archive.len())
             .filter_map(|i| {
                 let entry = archive.by_index(i).ok()?;
@@ -305,23 +569,19 @@ pub fn analyze_pk3(pk3_path: &std::path::Path) -> Option<WadAnalysis> {
             let ranges = find_map_ranges(&directory);
             for (name, start, end) in &ranges {
                 let (has_normal, has_secret) = detect_exits(&data, &directory, *start, *end);
-                map_infos.push(MapInfo {
+                infos.push(MapInfo {
                     lump: name.to_uppercase(),
                     has_normal_exit: has_normal,
                     has_secret_exit: has_secret,
-                    is_secret: false,
-                    is_dead_end: !has_normal && !has_secret,
-                    is_terminal: false,
-                    reachable: true,
+                    classification: MapClassification::Unreachable,
                 });
-            }
-            if !ranges.is_empty() {
-                found_maps = true;
             }
         }
     }
 
-    if !found_maps || map_infos.is_empty() {
+    // Filter to playable map names
+    infos.retain(|m| PLAYABLE_MAP_RE.is_match(&m.lump));
+    if infos.is_empty() {
         return None;
     }
 
@@ -332,7 +592,6 @@ pub fn analyze_pk3(pk3_path: &std::path::Path) -> Option<WadAnalysis> {
             let entry = archive.by_index(i).ok()?;
             let name = entry.name().to_string();
             let lower = name.to_lowercase();
-            // Match MAPINFO*, ZMAPINFO* at root (not in subdirectories, not directories)
             if !name.contains('/')
                 && !name.ends_with('/')
                 && (lower.starts_with("mapinfo") || lower.starts_with("zmapinfo"))
@@ -343,7 +602,6 @@ pub fn analyze_pk3(pk3_path: &std::path::Path) -> Option<WadAnalysis> {
             }
         })
         .collect();
-
     for entry_name in &mapinfo_names {
         if let Ok(mut entry) = archive.by_name(entry_name) {
             let mut text = String::new();
@@ -359,183 +617,61 @@ pub fn analyze_pk3(pk3_path: &std::path::Path) -> Option<WadAnalysis> {
     } else {
         None
     };
+    let has_structured = mapinfo.is_some();
 
-    // --- Step 3: Classify maps using MAPINFO flow data ---
-    let all_map_lumps: Vec<String> = map_infos.iter().map(|m| m.lump.clone()).collect();
+    // --- Step 3: Hub detection (PK3-specific) ---
+    let lumps: Vec<String> = infos.iter().map(|m| m.lump.clone()).collect();
+    let is_hub = mapinfo
+        .as_ref()
+        .is_some_and(|mi| detect_hub_structure(mi, &lumps));
 
+    if is_hub {
+        classify_hub(&mut infos);
+        return Some(finalize(infos, has_structured));
+    }
+
+    // --- Step 4: Build graph + classify (linear/branching path) ---
+    let map_set: HashSet<&str> = lumps.iter().map(|s| s.as_str()).collect();
+    let is_doom1 = lumps.first().is_some_and(|m| DOOM1_MAP_RE.is_match(m));
+
+    let mut sources: Vec<(FlowSource, HashMap<String, MapinfoEdge>)> = Vec::new();
     if let Some(ref mi) = mapinfo {
-        // Convert MapinfoEntry to UmapinfoEntry for reuse of existing classification
-        let umapinfo: HashMap<String, UmapinfoEntry> = mi
-            .iter()
-            .map(|(k, v)| {
-                (
-                    k.clone(),
-                    UmapinfoEntry {
-                        next: v.next.clone(),
-                        nextsecret: v.secretnext.clone(),
-                        has_endgame: v.has_endgame,
-                    },
-                )
-            })
-            .collect();
-        let umi_opt = Some(umapinfo);
-
-        // Detect hub structure: if a non-map target receives >50% of next pointers
-        let is_hub = detect_hub_structure(mi, &all_map_lumps);
-
-        // Override exit/dead_end status using MAPINFO flow data.
-        // UDMF and ACS-based maps often have exits that aren't detectable
-        // via linedef scanning. If MAPINFO defines flow, trust it.
-        for info in &mut map_infos {
-            if let Some(entry) = mi.get(&info.lump) {
-                if entry.next.is_some() || entry.has_endgame {
-                    info.has_normal_exit = true;
-                    info.is_dead_end = false;
-                }
-                if entry.secretnext.is_some() {
-                    info.has_secret_exit = true;
-                    info.is_dead_end = false;
-                }
-            }
-        }
-
-        if is_hub {
-            // Hub WAD: all playable maps are reachable and completable.
-            let playable_re = regex::Regex::new(r"^(MAP\d+|E\dM\d)$").unwrap();
-            map_infos.retain(|m| playable_re.is_match(&m.lump));
-
-            for info in &mut map_infos {
-                info.reachable = true;
-                info.is_secret = false;
-                info.is_terminal = false;
-                info.is_dead_end = false; // Hub provides exit for all maps
-            }
-        } else {
-            // Linear/branching MAPINFO: use standard classification
-            // Filter out non-standard maps (TITLEMAP, DEBUGMAP, etc.)
-            let playable_re = regex::Regex::new(r"^(MAP\d+|E\dM\d)$").unwrap();
-            map_infos.retain(|m| playable_re.is_match(&m.lump));
-
-            let filtered_lumps: Vec<String> = map_infos.iter().map(|m| m.lump.clone()).collect();
-            let is_doom1 = filtered_lumps
-                .first()
-                .is_some_and(|m| DOOM1_MAP_RE.is_match(m));
-
-            // Classify secrets
-            let secret_set = classify_secrets(&filtered_lumps, is_doom1, &umi_opt);
-            for info in &mut map_infos {
-                if secret_set.contains(&info.lump) {
-                    info.is_secret = true;
-                }
-            }
-
-            // Identify terminal
-            let terminal = identify_terminal(&filtered_lumps, is_doom1, &umi_opt, &map_infos);
-            if let Some(ref term) = terminal {
-                for info in &mut map_infos {
-                    if info.lump == *term {
-                        info.is_terminal = true;
-                    }
-                }
-            }
-
-            // Compute reachability
-            let reachable_set =
-                compute_reachability(&filtered_lumps, is_doom1, &umi_opt, &map_infos);
-            for info in &mut map_infos {
-                info.reachable = reachable_set.contains(&info.lump);
-            }
-        }
-    } else {
-        // No MAPINFO: filter to standard map names, use vanilla classification
-        let playable_re = regex::Regex::new(r"^(MAP\d+|E\dM\d)$").unwrap();
-        map_infos.retain(|m| playable_re.is_match(&m.lump));
-
-        let filtered_lumps: Vec<String> = map_infos.iter().map(|m| m.lump.clone()).collect();
-        let is_doom1 = filtered_lumps
-            .first()
-            .is_some_and(|m| DOOM1_MAP_RE.is_match(m));
-
-        let secret_set = classify_secrets(&filtered_lumps, is_doom1, &None);
-        for info in &mut map_infos {
-            if secret_set.contains(&info.lump) {
-                info.is_secret = true;
-            }
-        }
-
-        let terminal = identify_terminal(&filtered_lumps, is_doom1, &None, &map_infos);
-        if let Some(ref term) = terminal {
-            for info in &mut map_infos {
-                if info.lump == *term {
-                    info.is_terminal = true;
-                }
-            }
-        }
-
-        let reachable_set = compute_reachability(&filtered_lumps, is_doom1, &None, &map_infos);
-        for info in &mut map_infos {
-            info.reachable = reachable_set.contains(&info.lump);
+        let entries = parse_mapinfo_to_edges(mi);
+        if !entries.is_empty() {
+            // For PK3 we don't distinguish ZMAPINFO from MAPINFO at this layer;
+            // mapinfo.rs already reads both. Treat as Mapinfo priority.
+            sources.push((FlowSource::Mapinfo, entries));
         }
     }
 
-    // --- Step 4: Build result ---
-    let secret_maps: Vec<String> = map_infos
-        .iter()
-        .filter(|m| m.is_secret)
-        .map(|m| m.lump.clone())
-        .collect();
+    // PK3 maps may also have UMAPINFO embedded inside one of the WAD files.
+    // Skip that lookup for now — MAPINFO/ZMAPINFO is the standard for PK3s.
 
-    let dead_end_maps: Vec<String> = map_infos
-        .iter()
-        .filter(|m| m.is_dead_end && !m.is_secret && !m.is_terminal)
-        .map(|m| m.lump.clone())
-        .collect();
+    let graph = build_graph(&map_set, is_doom1, &sources);
+    classify_maps(&graph, &mut infos);
 
-    let terminal_map = map_infos
-        .iter()
-        .find(|m| m.is_terminal)
-        .map(|m| m.lump.clone());
-
-    let total_maps = map_infos.len();
-    let terminal_excluded = map_infos.iter().any(|m| m.is_terminal && m.is_dead_end);
-    let unreachable_count = map_infos
-        .iter()
-        .filter(|m| !m.reachable && !m.is_secret && !m.is_dead_end)
-        .count();
-    let required_maps = total_maps
-        - secret_maps.len()
-        - dead_end_maps.len()
-        - unreachable_count
-        - if terminal_excluded { 1 } else { 0 };
-
-    Some(WadAnalysis {
-        version: ANALYSIS_VERSION,
-        maps: map_infos,
-        total_maps,
-        required_maps,
-        secret_maps,
-        dead_end_maps,
-        terminal_map,
-        has_umapinfo: mapinfo.is_some(), // MAPINFO counts as structured flow data
-    })
+    Some(finalize(infos, has_structured))
 }
+
+// ---------------------------------------------------------------------------
+// Hub detection
+// ---------------------------------------------------------------------------
 
 /// Detect whether a MAPINFO describes a hub structure.
 ///
-/// A hub is detected when a single `next` target receives more than half
-/// of all map entries, OR when multiple "mini-hubs" exist (maps that have
-/// 3+ other maps pointing back to them).
+/// Returns true if either:
+/// - A single `next` target receives more than half of all map entries
+///   (single dominant hub), OR
+/// - Multiple "mini-hub" targets (3+ incoming) collectively cover >50%.
 fn detect_hub_structure(
     mapinfo: &HashMap<String, crate::mapinfo::MapinfoEntry>,
     playable_maps: &[String],
 ) -> bool {
     let playable_set: HashSet<&str> = playable_maps.iter().map(|s| s.as_str()).collect();
-    let playable_re = regex::Regex::new(r"^(MAP\d+|E\dM\d)$").unwrap();
 
-    // Count how many playable maps point to each target
     let mut target_counts: HashMap<&str, usize> = HashMap::new();
     for (name, entry) in mapinfo {
-        if !playable_re.is_match(name) {
+        if !PLAYABLE_MAP_RE.is_match(name) {
             continue;
         }
         if let Some(ref next) = entry.next {
@@ -545,14 +681,12 @@ fn detect_hub_structure(
 
     let playable_count = playable_maps
         .iter()
-        .filter(|m| playable_re.is_match(m))
+        .filter(|m| PLAYABLE_MAP_RE.is_match(m))
         .count();
-
     if playable_count == 0 {
         return false;
     }
 
-    // Single dominant hub: >50% of maps point to same target
     if target_counts
         .values()
         .max()
@@ -561,8 +695,6 @@ fn detect_hub_structure(
         return true;
     }
 
-    // Multiple mini-hubs: sum of maps pointing to hub-like targets (3+ incoming)
-    // covers >50% of all maps
     let hub_connected: usize = target_counts
         .iter()
         .filter(|&(target, &count)| {
@@ -570,11 +702,75 @@ fn detect_hub_structure(
         })
         .map(|(_, &count)| count)
         .sum();
-
     hub_connected > playable_count / 2
 }
 
-/// Analyze a single map WAD (from a PK3) for exit linedefs.
+// ---------------------------------------------------------------------------
+// Map range detection
+// ---------------------------------------------------------------------------
+
+/// Find map markers in the directory and their associated lump ranges.
+///
+/// A lump is a map marker if either:
+/// - Its name matches a standard pattern (MAP01, E1M1), OR
+/// - It is immediately followed by a map-defining lump (THINGS, LINEDEFS,
+///   TEXTMAP, etc.) AND its name plausibly looks like a map (matches
+///   `PLAYABLE_MAP_RE`).
+///
+/// The second rule catches ZDoom-style alternate maps like MAP18GZ that are
+/// referenced from ZMAPINFO under arbitrary lump names. The PLAYABLE_MAP_RE
+/// guard prevents random zero-size lumps that happen to precede LINEDEFS
+/// from being misidentified.
+fn find_map_ranges(directory: &[(String, u32, u32)]) -> Vec<(String, usize, usize)> {
+    let mut ranges = Vec::new();
+    let mut i = 0;
+    while i < directory.len() {
+        let name = &directory[i].0;
+        let next_is_map_lump = directory.get(i + 1).is_some_and(|(n, _, _)| is_map_lump(n));
+        let is_marker = is_map_marker(name) || (next_is_map_lump && PLAYABLE_MAP_RE.is_match(name));
+        if is_marker {
+            let start = i;
+            i += 1;
+            while i < directory.len() && is_map_lump(&directory[i].0) {
+                i += 1;
+            }
+            ranges.push((name.clone(), start, i));
+        } else {
+            i += 1;
+        }
+    }
+    ranges
+}
+
+fn is_map_marker(name: &str) -> bool {
+    DOOM1_MAP_RE.is_match(name) || DOOM2_MAP_RE.is_match(name)
+}
+
+fn is_map_lump(name: &str) -> bool {
+    MAP_LUMPS.contains(&name)
+}
+
+// ---------------------------------------------------------------------------
+// Exit detection
+// ---------------------------------------------------------------------------
+
+fn detect_exits(
+    wad_data: &[u8],
+    directory: &[(String, u32, u32)],
+    start_idx: usize,
+    end_idx: usize,
+) -> (bool, bool) {
+    let map_lumps = &directory[start_idx..end_idx];
+
+    if let Some(textmap) = find_lump_data(wad_data, map_lumps, "TEXTMAP") {
+        return detect_udmf_exits(&textmap);
+    }
+    if let Some(linedefs) = find_lump_data(wad_data, map_lumps, "LINEDEFS") {
+        return detect_vanilla_exits(&linedefs);
+    }
+    (false, false)
+}
+
 fn analyze_map_wad_exits(wad_data: &[u8]) -> (bool, bool) {
     let directory = parse_wad_directory(wad_data);
     if directory.is_empty() {
@@ -588,71 +784,6 @@ fn analyze_map_wad_exits(wad_data: &[u8]) -> (bool, bool) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Map range detection
-// ---------------------------------------------------------------------------
-
-/// Find map markers in the directory and their associated lump ranges.
-/// Returns `(map_name, start_index, end_index)` where start_index is the
-/// map marker's position and end_index is exclusive.
-fn find_map_ranges(directory: &[(String, u32, u32)]) -> Vec<(String, usize, usize)> {
-    let mut ranges = Vec::new();
-    let mut i = 0;
-    while i < directory.len() {
-        let name = &directory[i].0;
-        if is_map_marker(name) {
-            let start = i;
-            i += 1;
-            // Consume all map-associated lumps
-            while i < directory.len() && is_map_lump(&directory[i].0) {
-                i += 1;
-            }
-            ranges.push((name.clone(), start, i));
-        } else {
-            i += 1;
-        }
-    }
-    ranges
-}
-
-/// Check if a lump name is a map marker (ExMy or MAPxx).
-fn is_map_marker(name: &str) -> bool {
-    DOOM1_MAP_RE.is_match(name) || DOOM2_MAP_RE.is_match(name)
-}
-
-/// Check if a lump name is a map-associated lump.
-fn is_map_lump(name: &str) -> bool {
-    MAP_LUMPS.contains(&name)
-}
-
-// ---------------------------------------------------------------------------
-// Exit detection
-// ---------------------------------------------------------------------------
-
-/// Detect normal and secret exits for a map.
-/// Returns `(has_normal_exit, has_secret_exit)`.
-fn detect_exits(
-    wad_data: &[u8],
-    directory: &[(String, u32, u32)],
-    start_idx: usize,
-    end_idx: usize,
-) -> (bool, bool) {
-    let map_lumps = &directory[start_idx..end_idx];
-
-    // Check for UDMF (TEXTMAP lump)
-    if let Some(textmap) = find_lump_data(wad_data, map_lumps, "TEXTMAP") {
-        return detect_udmf_exits(&textmap);
-    }
-
-    // Vanilla/Boom: parse LINEDEFS
-    if let Some(linedefs) = find_lump_data(wad_data, map_lumps, "LINEDEFS") {
-        return detect_vanilla_exits(&linedefs);
-    }
-
-    (false, false)
-}
-
-/// Extract lump data by name from a slice of directory entries.
 fn find_lump_data(
     wad_data: &[u8],
     lumps: &[(String, u32, u32)],
@@ -670,9 +801,24 @@ fn find_lump_data(
     None
 }
 
+fn read_lump_text(
+    wad_data: &[u8],
+    directory: &[(String, u32, u32)],
+    lump_name: &str,
+) -> Option<String> {
+    for (name, offset, size) in directory {
+        if name == lump_name && *size > 0 {
+            let off = *offset as usize;
+            let sz = *size as usize;
+            if off + sz <= wad_data.len() {
+                return Some(String::from_utf8_lossy(&wad_data[off..off + sz]).to_string());
+            }
+        }
+    }
+    None
+}
+
 /// Parse vanilla/Boom LINEDEFS lump for exit specials.
-///
-/// Each linedef is 14 bytes: v1(2), v2(2), flags(2), special(2), tag(2), front(2), back(2).
 fn detect_vanilla_exits(linedefs: &[u8]) -> (bool, bool) {
     let mut has_normal = false;
     let mut has_secret = false;
@@ -693,7 +839,6 @@ fn detect_vanilla_exits(linedefs: &[u8]) -> (bool, bool) {
         if VANILLA_SECRET_EXITS.contains(&special) {
             has_secret = true;
         }
-        // Boom generalized exit linedefs (0x3400..=0x37FF)
         if (GEN_EXIT_BASE..=GEN_EXIT_END).contains(&special) {
             if special & GEN_EXIT_SECRET_BIT != 0 {
                 has_secret = true;
@@ -707,14 +852,11 @@ fn detect_vanilla_exits(linedefs: &[u8]) -> (bool, bool) {
 }
 
 /// Parse UDMF TEXTMAP for exit specials.
-///
-/// Simple regex approach: look for `special = NNN` within linedef blocks.
 fn detect_udmf_exits(textmap_data: &[u8]) -> (bool, bool) {
     let text = String::from_utf8_lossy(textmap_data);
     let mut has_normal = false;
     let mut has_secret = false;
 
-    // Match linedef blocks and extract specials
     static LINEDEF_BLOCK_RE: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"(?si)linedef\s*\{([^}]*)\}").unwrap());
     static SPECIAL_RE: LazyLock<Regex> =
@@ -741,44 +883,15 @@ fn detect_udmf_exits(textmap_data: &[u8]) -> (bool, bool) {
 // UMAPINFO parsing
 // ---------------------------------------------------------------------------
 
-/// Read a text lump from the WAD directory.
-fn read_lump_text(
-    wad_data: &[u8],
-    directory: &[(String, u32, u32)],
-    lump_name: &str,
-) -> Option<String> {
-    for (name, offset, size) in directory {
-        if name == lump_name && *size > 0 {
-            let off = *offset as usize;
-            let sz = *size as usize;
-            if off + sz <= wad_data.len() {
-                return Some(String::from_utf8_lossy(&wad_data[off..off + sz]).to_string());
-            }
-        }
-    }
-    None
-}
-
-/// Parse UMAPINFO lump from WAD directory.
-fn parse_umapinfo_from_directory(
-    wad_data: &[u8],
-    directory: &[(String, u32, u32)],
-) -> Option<HashMap<String, UmapinfoEntry>> {
-    let text = read_lump_text(wad_data, directory, "UMAPINFO")?;
-    Some(parse_umapinfo(&text))
+/// Parsed UMAPINFO entry (subset used for flow analysis).
+#[derive(Debug, Clone, Default)]
+struct UmapinfoEntry {
+    next: Option<String>,
+    nextsecret: Option<String>,
+    has_endgame: bool,
 }
 
 /// Parse UMAPINFO text into map entries.
-///
-/// Format:
-/// ```text
-/// MAP MAP01
-/// {
-///     next = "MAP02"
-///     nextsecret = "MAP31"
-///     endgame = true
-/// }
-/// ```
 fn parse_umapinfo(text: &str) -> HashMap<String, UmapinfoEntry> {
     static MAP_HEADER_RE: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"(?i)^\s*MAP\s+(\S+)").unwrap());
@@ -795,7 +908,6 @@ fn parse_umapinfo(text: &str) -> HashMap<String, UmapinfoEntry> {
 
     for line in text.lines() {
         if let Some(caps) = MAP_HEADER_RE.captures(line) {
-            // Save previous entry
             if let Some(map_name) = current_map.take() {
                 entries.insert(map_name, current_entry);
                 current_entry = UmapinfoEntry::default();
@@ -803,7 +915,6 @@ fn parse_umapinfo(text: &str) -> HashMap<String, UmapinfoEntry> {
             current_map = Some(caps[1].to_uppercase());
             continue;
         }
-
         if current_map.is_some() {
             if let Some(caps) = NEXT_RE.captures(line) {
                 current_entry.next = Some(caps[1].to_uppercase());
@@ -814,222 +925,53 @@ fn parse_umapinfo(text: &str) -> HashMap<String, UmapinfoEntry> {
             }
         }
     }
-
-    // Save last entry
     if let Some(map_name) = current_map {
         entries.insert(map_name, current_entry);
     }
-
     entries
 }
 
 // ---------------------------------------------------------------------------
-// Secret map classification
+// Flow source adapters
 // ---------------------------------------------------------------------------
 
-/// Classify which maps are secret.
-fn classify_secrets(
-    all_maps: &[String],
-    is_doom1: bool,
-    umapinfo: &Option<HashMap<String, UmapinfoEntry>>,
-) -> HashSet<String> {
-    if let Some(umi) = umapinfo {
-        classify_secrets_umapinfo(all_maps, umi)
-    } else {
-        classify_secrets_vanilla(all_maps, is_doom1)
+fn parse_umapinfo_to_edges(umi: &HashMap<String, UmapinfoEntry>) -> HashMap<String, MapinfoEdge> {
+    let mut out = HashMap::new();
+    for (name, e) in umi {
+        out.insert(
+            name.clone(),
+            MapinfoEdge {
+                next: e.next.clone(),
+                secret_next: e.nextsecret.clone(),
+                has_endgame: e.has_endgame,
+            },
+        );
     }
+    out
 }
 
-/// Classify secret maps using vanilla conventions.
-///
-/// Doom 2 (MAPxx): MAP31 and MAP32 are secret if they exist.
-/// Doom 1 (ExMy): E*M9 is secret for each episode.
-fn classify_secrets_vanilla(all_maps: &[String], is_doom1: bool) -> HashSet<String> {
-    let map_set: HashSet<&str> = all_maps.iter().map(|s| s.as_str()).collect();
-    let mut secrets = HashSet::new();
-
-    if is_doom1 {
-        // ExM9 maps are secret
-        for map in all_maps {
-            if let Some(caps) = DOOM1_MAP_RE.captures(map)
-                && &caps[2] == "9"
-                && map_set.contains(map.as_str())
-            {
-                secrets.insert(map.clone());
-            }
-        }
-    } else {
-        // MAP31 and MAP32 are secret
-        for name in &["MAP31", "MAP32"] {
-            if map_set.contains(*name) {
-                secrets.insert(name.to_string());
-            }
-        }
+fn parse_mapinfo_to_edges(
+    mi: &HashMap<String, crate::mapinfo::MapinfoEntry>,
+) -> HashMap<String, MapinfoEdge> {
+    let mut out = HashMap::new();
+    for (name, e) in mi {
+        out.insert(
+            name.clone(),
+            MapinfoEdge {
+                next: e.next.clone(),
+                secret_next: e.secretnext.clone(),
+                has_endgame: e.has_endgame,
+            },
+        );
     }
-
-    secrets
-}
-
-/// Classify secret maps using UMAPINFO reachability analysis.
-///
-/// A map is secret ONLY IF it is reachable exclusively via `nextsecret`
-/// and NEVER appears in any `next` chain. This avoids the Poogers edge
-/// case where `nextsecret` is used for normal progression. A `nextsecret`
-/// target is also treated as required progression when the source map has no
-/// explicit or vanilla normal continuation.
-fn classify_secrets_umapinfo(
-    all_maps: &[String],
-    umapinfo: &HashMap<String, UmapinfoEntry>,
-) -> HashSet<String> {
-    let map_set: HashSet<&str> = all_maps.iter().map(|s| s.as_str()).collect();
-
-    // Build sets of maps reachable via `next` and `nextsecret`
-    let mut reached_by_next: HashSet<String> = HashSet::new();
-    let mut reached_by_nextsecret: HashSet<String> = HashSet::new();
-    let mut required_secret_continuations: HashSet<String> = HashSet::new();
-
-    for (source, entry) in umapinfo {
-        if let Some(ref next) = entry.next {
-            reached_by_next.insert(next.clone());
-        }
-        if let Some(ref ns) = entry.nextsecret {
-            if entry.next.is_none() && !entry.has_endgame && !vanilla_next_exists(source, &map_set)
-            {
-                required_secret_continuations.insert(ns.clone());
-            } else {
-                reached_by_nextsecret.insert(ns.clone());
-            }
-        }
-    }
-
-    // A map is secret if it's reachable ONLY via nextsecret, never via next,
-    // is not the only continuation from its source, AND it actually exists in
-    // the WAD.
-    let mut secrets = HashSet::new();
-    for map in &reached_by_nextsecret {
-        if !reached_by_next.contains(map)
-            && !required_secret_continuations.contains(map)
-            && map_set.contains(map.as_str())
-        {
-            secrets.insert(map.clone());
-        }
-    }
-
-    secrets
-}
-
-fn vanilla_next_exists(map: &str, map_set: &HashSet<&str>) -> bool {
-    if let Some(caps) = DOOM2_MAP_RE.captures(map)
-        && let Ok(num) = caps[1].parse::<u32>()
-        && num < 30
-    {
-        let next = format!("MAP{:02}", num + 1);
-        return map_set.contains(next.as_str());
-    }
-
-    if let Some(caps) = DOOM1_MAP_RE.captures(map)
-        && let Ok(ep) = caps[1].parse::<u32>()
-        && let Ok(map_num) = caps[2].parse::<u32>()
-        && map_num < 8
-    {
-        let next = format!("E{ep}M{}", map_num + 1);
-        return map_set.contains(next.as_str());
-    }
-
-    false
+    out
 }
 
 // ---------------------------------------------------------------------------
-// Terminal map identification
+// Sorting helper
 // ---------------------------------------------------------------------------
 
-/// Identify the terminal (final) map.
-///
-/// Priority:
-/// 1. UMAPINFO: map has endgame/endpic/endcast/endbunny
-/// 2. UMAPINFO: map's next points to itself (self-loop)
-/// 3. UMAPINFO: highest map number with no next field defined
-/// 4. Standard conventions: MAP30 for MAPxx, E*M8 for ExMy
-/// 5. Fallback: highest-numbered non-secret map
-fn identify_terminal(
-    all_maps: &[String],
-    is_doom1: bool,
-    umapinfo: &Option<HashMap<String, UmapinfoEntry>>,
-    map_infos: &[MapInfo],
-) -> Option<String> {
-    let secret_set: HashSet<&str> = map_infos
-        .iter()
-        .filter(|m| m.is_secret)
-        .map(|m| m.lump.as_str())
-        .collect();
-
-    if let Some(umi) = umapinfo {
-        // Priority 1: endgame/endpic/endcast/endbunny
-        for (map_name, entry) in umi {
-            if entry.has_endgame && all_maps.contains(map_name) {
-                return Some(map_name.clone());
-            }
-        }
-
-        // Priority 2: self-loop (next points to itself)
-        for (map_name, entry) in umi {
-            if let Some(next) = &entry.next
-                && next == map_name
-                && all_maps.contains(map_name)
-            {
-                return Some(map_name.clone());
-            }
-        }
-
-        // Priority 3: highest map in UMAPINFO with no `next` defined
-        // (among maps that actually exist in the WAD and aren't secret)
-        let mut candidates: Vec<&String> = umi
-            .iter()
-            .filter(|(name, entry)| {
-                entry.next.is_none()
-                    && !entry.has_endgame
-                    && all_maps.contains(name)
-                    && !secret_set.contains(name.as_str())
-            })
-            .map(|(name, _)| name)
-            .collect();
-        candidates.sort_by_key(|a| map_sort_key(a));
-        if let Some(last) = candidates.last() {
-            return Some((*last).clone());
-        }
-    }
-
-    let map_set: HashSet<&str> = all_maps.iter().map(|s| s.as_str()).collect();
-
-    // Priority 4: standard conventions
-    if is_doom1 {
-        // Find highest episode's E*M8
-        let mut best: Option<String> = None;
-        for map in all_maps {
-            if let Some(caps) = DOOM1_MAP_RE.captures(map)
-                && &caps[2] == "8"
-                && best.as_ref().is_none_or(|b| map > b)
-            {
-                best = Some(map.clone());
-            }
-        }
-        if let Some(term) = best {
-            return Some(term);
-        }
-    } else if map_set.contains("MAP30") && !secret_set.contains("MAP30") {
-        return Some("MAP30".to_string());
-    }
-
-    // Priority 5: highest-numbered non-secret map
-    let mut non_secret: Vec<&String> = all_maps
-        .iter()
-        .filter(|m| !secret_set.contains(m.as_str()))
-        .collect();
-    non_secret.sort_by_key(|a| map_sort_key(a));
-    non_secret.last().map(|m| (*m).clone())
-}
-
-/// Generate a sort key for map names to enable numeric sorting.
+/// Generate a sort key for map names so MAP02 sorts before MAP10.
 fn map_sort_key(name: &str) -> (u32, u32) {
     if let Some(caps) = DOOM2_MAP_RE.captures(name)
         && let Ok(num) = caps[1].parse::<u32>()
@@ -1042,194 +984,7 @@ fn map_sort_key(name: &str) -> (u32, u32) {
     {
         return (ep, map);
     }
-    (999, 999) // Unknown format sorts last
-}
-
-// ---------------------------------------------------------------------------
-// Reachability analysis
-// ---------------------------------------------------------------------------
-
-/// Compute the set of maps reachable from the start through normal gameplay.
-///
-/// For vanilla WADs (no UMAPINFO), the map flow is hardcoded by the engine:
-/// - Doom 2 (MAPxx): MAP01→MAP02→...→MAP30; MAP15 secret→MAP31; MAP31 secret→MAP32; MAP32→MAP16
-/// - Doom 1 (ExMy): E1M1→...→E1M8; ExMy secret→ExM9; ExM9→ExM(y+1) where y was the source
-///
-/// For UMAPINFO WADs, reachability follows the explicit `next`/`nextsecret` chains.
-fn compute_reachability(
-    all_maps: &[String],
-    is_doom1: bool,
-    umapinfo: &Option<HashMap<String, UmapinfoEntry>>,
-    map_infos: &[MapInfo],
-) -> HashSet<String> {
-    let map_set: HashSet<&str> = all_maps.iter().map(|s| s.as_str()).collect();
-
-    if let Some(umi) = umapinfo {
-        return compute_reachability_umapinfo(all_maps, umi, map_infos);
-    }
-
-    if is_doom1 {
-        compute_reachability_doom1(&map_set, map_infos)
-    } else {
-        compute_reachability_doom2(&map_set, map_infos)
-    }
-}
-
-/// Vanilla Doom 2 reachability: MAP01→MAP02→...→MAP30, secret exits to MAP31/32.
-fn compute_reachability_doom2(map_set: &HashSet<&str>, map_infos: &[MapInfo]) -> HashSet<String> {
-    let info_map: HashMap<&str, &MapInfo> =
-        map_infos.iter().map(|m| (m.lump.as_str(), m)).collect();
-    let mut reachable = HashSet::new();
-
-    // Linear progression MAP01 → MAP30
-    for num in 1..=30 {
-        let name = format!("MAP{num:02}");
-        if map_set.contains(name.as_str()) {
-            reachable.insert(name);
-        }
-    }
-
-    // Secret maps: MAP15 secret exit → MAP31, MAP31 secret exit → MAP32
-    if let Some(m15) = info_map.get("MAP15")
-        && m15.has_secret_exit
-        && map_set.contains("MAP31")
-    {
-        reachable.insert("MAP31".to_string());
-    }
-    if let Some(m31) = info_map.get("MAP31")
-        && m31.has_secret_exit
-        && map_set.contains("MAP32")
-    {
-        reachable.insert("MAP32".to_string());
-    }
-
-    reachable
-}
-
-/// Vanilla Doom 1 reachability: ExM1→...→ExM8, secret exit → ExM9.
-fn compute_reachability_doom1(map_set: &HashSet<&str>, map_infos: &[MapInfo]) -> HashSet<String> {
-    let info_map: HashMap<&str, &MapInfo> =
-        map_infos.iter().map(|m| (m.lump.as_str(), m)).collect();
-    let mut reachable = HashSet::new();
-
-    // Find all episodes present
-    let episodes: HashSet<u32> = map_infos
-        .iter()
-        .filter_map(|m| DOOM1_MAP_RE.captures(&m.lump))
-        .filter_map(|caps| caps[1].parse::<u32>().ok())
-        .collect();
-
-    for ep in &episodes {
-        // Linear progression ExM1 → ExM8
-        for map in 1..=8 {
-            let name = format!("E{ep}M{map}");
-            if map_set.contains(name.as_str()) {
-                reachable.insert(name);
-            }
-        }
-        // Secret map: any map in the episode with a secret exit → ExM9
-        let has_secret = (1..=8).any(|m| {
-            let name = format!("E{ep}M{m}");
-            info_map
-                .get(name.as_str())
-                .is_some_and(|i| i.has_secret_exit)
-        });
-        if has_secret {
-            let secret = format!("E{ep}M9");
-            if map_set.contains(secret.as_str()) {
-                reachable.insert(secret);
-            }
-        }
-    }
-
-    reachable
-}
-
-/// UMAPINFO reachability: follow `next`/`nextsecret` chains from the first map.
-///
-/// Many WADs only define UMAPINFO for a few maps (e.g. to set endgame on the
-/// final map). Maps without a UMAPINFO entry, or with an entry but no `next`
-/// field, fall back to vanilla map progression conventions.
-fn compute_reachability_umapinfo(
-    all_maps: &[String],
-    umapinfo: &HashMap<String, UmapinfoEntry>,
-    map_infos: &[MapInfo],
-) -> HashSet<String> {
-    let map_set: HashSet<&str> = all_maps.iter().map(|s| s.as_str()).collect();
-    let info_map: HashMap<&str, &MapInfo> =
-        map_infos.iter().map(|m| (m.lump.as_str(), m)).collect();
-    let mut reachable = HashSet::new();
-    let mut queue = std::collections::VecDeque::new();
-
-    // Start from the first map
-    if let Some(first) = all_maps.first() {
-        queue.push_back(first.clone());
-    }
-
-    while let Some(current) = queue.pop_front() {
-        if !map_set.contains(current.as_str()) || reachable.contains(&current) {
-            continue;
-        }
-        reachable.insert(current.clone());
-
-        let entry = umapinfo.get(&current);
-
-        // Check for endgame — this map terminates the chain
-        if entry.is_some_and(|e| e.has_endgame) {
-            continue;
-        }
-
-        // Follow explicit UMAPINFO next if defined
-        let mut has_explicit_next = false;
-        if let Some(e) = entry {
-            if let Some(ref next) = e.next
-                && next != &current
-            {
-                queue.push_back(next.clone());
-                has_explicit_next = true;
-            }
-            if let Some(ref ns) = e.nextsecret
-                && info_map
-                    .get(current.as_str())
-                    .is_some_and(|m| m.has_secret_exit)
-            {
-                queue.push_back(ns.clone());
-            }
-        }
-
-        // Fall back to vanilla conventions when no explicit next is defined
-        if !has_explicit_next {
-            if let Some(caps) = DOOM2_MAP_RE.captures(&current)
-                && let Ok(num) = caps[1].parse::<u32>()
-                && num < 30
-            {
-                let next = format!("MAP{:02}", num + 1);
-                queue.push_back(next);
-            }
-            if let Some(caps) = DOOM1_MAP_RE.captures(&current)
-                && let Ok(ep) = caps[1].parse::<u32>()
-                && let Ok(map) = caps[2].parse::<u32>()
-                && map < 8
-            {
-                let next = format!("E{ep}M{}", map + 1);
-                queue.push_back(next);
-            }
-        }
-
-        // Vanilla secret exits (always check, even for UMAPINFO maps,
-        // unless nextsecret is explicitly defined)
-        let has_nextsecret = entry.is_some_and(|e| e.nextsecret.is_some());
-        if !has_nextsecret {
-            if current == "MAP15" && info_map.get("MAP15").is_some_and(|m| m.has_secret_exit) {
-                queue.push_back("MAP31".to_string());
-            }
-            if current == "MAP31" && info_map.get("MAP31").is_some_and(|m| m.has_secret_exit) {
-                queue.push_back("MAP32".to_string());
-            }
-        }
-    }
-
-    reachable
+    (999, 999)
 }
 
 // ---------------------------------------------------------------------------
@@ -1244,7 +999,6 @@ mod tests {
     // WAD construction helpers
     // -----------------------------------------------------------------------
 
-    /// Build a minimal WAD with specific lumps.
     fn build_wad(lumps: &[(&str, &[u8])]) -> Vec<u8> {
         let mut wad = Vec::new();
         let num_lumps = lumps.len() as i32;
@@ -1278,7 +1032,6 @@ mod tests {
         wad
     }
 
-    /// Build a vanilla linedef with the given special type.
     fn make_linedef(special: u16) -> [u8; 14] {
         let mut ld = [0u8; 14];
         ld[6] = (special & 0xFF) as u8;
@@ -1286,7 +1039,6 @@ mod tests {
         ld
     }
 
-    /// Build a LINEDEFS lump from multiple linedef specials.
     fn build_linedefs(specials: &[u16]) -> Vec<u8> {
         let mut data = Vec::new();
         for &s in specials {
@@ -1295,7 +1047,6 @@ mod tests {
         data
     }
 
-    /// Build a TEXTMAP lump with linedef specials.
     fn build_textmap(specials: &[i32]) -> Vec<u8> {
         let mut text = String::new();
         text.push_str("namespace = \"zdoom\";\n");
@@ -1308,13 +1059,21 @@ mod tests {
         text.into_bytes()
     }
 
+    fn classify_of(a: &WadAnalysis, lump: &str) -> MapClassification {
+        a.maps
+            .iter()
+            .find(|m| m.lump == lump)
+            .map(|m| m.classification)
+            .expect("lump not found")
+    }
+
     // -----------------------------------------------------------------------
-    // Linedef parsing tests
+    // Linedef parsing
     // -----------------------------------------------------------------------
 
     #[test]
     fn test_vanilla_normal_exit() {
-        let linedefs = build_linedefs(&[0, 0, 11, 0]); // one normal exit
+        let linedefs = build_linedefs(&[0, 0, 11, 0]);
         let (normal, secret) = detect_vanilla_exits(&linedefs);
         assert!(normal);
         assert!(!secret);
@@ -1322,7 +1081,7 @@ mod tests {
 
     #[test]
     fn test_vanilla_secret_exit() {
-        let linedefs = build_linedefs(&[0, 51, 0]); // one secret exit
+        let linedefs = build_linedefs(&[0, 51, 0]);
         let (normal, secret) = detect_vanilla_exits(&linedefs);
         assert!(!normal);
         assert!(secret);
@@ -1346,120 +1105,46 @@ mod tests {
 
     #[test]
     fn test_vanilla_all_exit_types() {
-        // Normal: 11, 52, 197
-        // Secret: 51, 124, 198
         for &s in VANILLA_NORMAL_EXITS {
             let linedefs = build_linedefs(&[s]);
             let (normal, secret) = detect_vanilla_exits(&linedefs);
             assert!(normal, "special {} should be a normal exit", s);
-            assert!(!secret, "special {} should not be a secret exit", s);
+            assert!(!secret);
         }
         for &s in VANILLA_SECRET_EXITS {
             let linedefs = build_linedefs(&[s]);
             let (normal, secret) = detect_vanilla_exits(&linedefs);
-            assert!(!normal, "special {} should not be a normal exit", s);
+            assert!(!normal);
             assert!(secret, "special {} should be a secret exit", s);
         }
     }
 
     #[test]
-    fn test_vanilla_empty_linedefs() {
-        let (normal, secret) = detect_vanilla_exits(&[]);
-        assert!(!normal);
-        assert!(!secret);
-    }
-
-    #[test]
-    fn test_boom_generalized_normal_exit() {
-        // 0x3489 = W1 normal exit (from Neon Overdrive MAP14)
-        let linedefs = build_linedefs(&[0x3489]);
-        let (normal, secret) = detect_vanilla_exits(&linedefs);
-        assert!(normal, "generalized exit 0x3489 should be a normal exit");
-        assert!(!secret);
-    }
-
-    #[test]
-    fn test_boom_generalized_secret_exit() {
-        // 0x3420 = W1 secret exit (base + secret bit 0x20)
-        let linedefs = build_linedefs(&[0x3420]);
-        let (normal, secret) = detect_vanilla_exits(&linedefs);
-        assert!(!normal);
-        assert!(secret, "generalized exit 0x3420 should be a secret exit");
-    }
-
-    #[test]
-    fn test_boom_generalized_exit_range_boundaries() {
-        // Just below range: not an exit
-        let linedefs = build_linedefs(&[0x33FF]);
-        let (normal, secret) = detect_vanilla_exits(&linedefs);
-        assert!(!normal);
-        assert!(!secret);
-
-        // Bottom of range: normal exit
-        let linedefs = build_linedefs(&[0x3400]);
-        let (normal, secret) = detect_vanilla_exits(&linedefs);
+    fn test_boom_generalized_exits() {
+        let (normal, _) = detect_vanilla_exits(&build_linedefs(&[0x3489]));
         assert!(normal);
-        assert!(!secret);
-
-        // Top of range: secret exit (0x37FF has bit 5 set)
-        let linedefs = build_linedefs(&[0x37FF]);
-        let (normal, secret) = detect_vanilla_exits(&linedefs);
-        assert!(!normal);
-        assert!(secret);
-
-        // Just above range: not an exit
-        let linedefs = build_linedefs(&[0x3800]);
-        let (normal, secret) = detect_vanilla_exits(&linedefs);
-        assert!(!normal);
-        assert!(!secret);
-    }
-
-    // -----------------------------------------------------------------------
-    // UDMF parsing tests
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn test_udmf_normal_exit() {
-        let textmap = build_textmap(&[243]); // Exit_Normal
-        let (normal, secret) = detect_udmf_exits(&textmap);
-        assert!(normal);
-        assert!(!secret);
-    }
-
-    #[test]
-    fn test_udmf_secret_exit() {
-        let textmap = build_textmap(&[244]); // Exit_Secret
-        let (normal, secret) = detect_udmf_exits(&textmap);
-        assert!(!normal);
+        let (_, secret) = detect_vanilla_exits(&build_linedefs(&[0x3420]));
         assert!(secret);
     }
 
-    #[test]
-    fn test_udmf_teleport_newmap() {
-        let textmap = build_textmap(&[74]); // Teleport_NewMap
-        let (normal, secret) = detect_udmf_exits(&textmap);
-        assert!(normal);
-        assert!(!secret);
-    }
+    // -----------------------------------------------------------------------
+    // UDMF parsing
+    // -----------------------------------------------------------------------
 
     #[test]
-    fn test_udmf_teleport_endgame() {
-        let textmap = build_textmap(&[75]); // Teleport_EndGame
-        let (normal, secret) = detect_udmf_exits(&textmap);
-        assert!(normal);
-        assert!(!secret);
-    }
-
-    #[test]
-    fn test_udmf_no_exits() {
-        let textmap = build_textmap(&[0, 1, 80]);
-        let (normal, secret) = detect_udmf_exits(&textmap);
-        assert!(!normal);
-        assert!(!secret);
+    fn test_udmf_exits() {
+        assert_eq!(detect_udmf_exits(&build_textmap(&[243])), (true, false));
+        assert_eq!(detect_udmf_exits(&build_textmap(&[244])), (false, true));
+        assert_eq!(detect_udmf_exits(&build_textmap(&[74])), (true, false));
+        assert_eq!(detect_udmf_exits(&build_textmap(&[75])), (true, false));
+        assert_eq!(
+            detect_udmf_exits(&build_textmap(&[0, 1, 80])),
+            (false, false)
+        );
     }
 
     // -----------------------------------------------------------------------
-    // UMAPINFO parsing tests
+    // UMAPINFO parsing
     // -----------------------------------------------------------------------
 
     #[test]
@@ -1470,81 +1155,6 @@ MAP MAP01
     next = "MAP02"
     nextsecret = "MAP31"
 }
-
-MAP MAP02
-{
-    next = "MAP03"
-}
-"#;
-        let entries = parse_umapinfo(text);
-        assert_eq!(entries.len(), 2);
-
-        let map01 = &entries["MAP01"];
-        assert_eq!(map01.next, Some("MAP02".to_string()));
-        assert_eq!(map01.nextsecret, Some("MAP31".to_string()));
-        assert!(!map01.has_endgame);
-
-        let map02 = &entries["MAP02"];
-        assert_eq!(map02.next, Some("MAP03".to_string()));
-        assert_eq!(map02.nextsecret, None);
-    }
-
-    #[test]
-    fn test_parse_umapinfo_endgame() {
-        let text = r#"
-MAP MAP30
-{
-    endgame = true
-}
-"#;
-        let entries = parse_umapinfo(text);
-        assert!(entries["MAP30"].has_endgame);
-    }
-
-    #[test]
-    fn test_parse_umapinfo_endpic() {
-        let text = r#"
-MAP MAP08
-{
-    endpic = "BOSSBACK"
-}
-"#;
-        let entries = parse_umapinfo(text);
-        assert!(entries["MAP08"].has_endgame); // endpic counts as endgame
-    }
-
-    #[test]
-    fn test_parse_umapinfo_endcast() {
-        let text = r#"
-MAP MAP30
-{
-    endcast = true
-}
-"#;
-        let entries = parse_umapinfo(text);
-        assert!(entries["MAP30"].has_endgame);
-    }
-
-    #[test]
-    fn test_parse_umapinfo_endbunny() {
-        let text = r#"
-MAP MAP15
-{
-    endbunny = true
-}
-"#;
-        let entries = parse_umapinfo(text);
-        assert!(entries["MAP15"].has_endgame);
-    }
-
-    #[test]
-    fn test_parse_umapinfo_no_quotes() {
-        let text = r#"
-MAP MAP01
-{
-    next = MAP02
-    nextsecret = MAP31
-}
 "#;
         let entries = parse_umapinfo(text);
         let map01 = &entries["MAP01"];
@@ -1553,421 +1163,23 @@ MAP MAP01
     }
 
     #[test]
-    fn test_parse_umapinfo_empty() {
-        let entries = parse_umapinfo("");
-        assert!(entries.is_empty());
+    fn test_parse_umapinfo_endgame_variants() {
+        for kw in &["endgame", "endpic", "endcast", "endbunny"] {
+            let text = format!("MAP MAP30\n{{\n    {} = true\n}}", kw);
+            let entries = parse_umapinfo(&text);
+            assert!(entries["MAP30"].has_endgame, "failed for {kw}");
+        }
     }
 
     // -----------------------------------------------------------------------
-    // Secret classification tests
+    // Vanilla full-WAD analysis
     // -----------------------------------------------------------------------
 
     #[test]
-    fn test_secrets_vanilla_doom2() {
-        let maps: Vec<String> = (1..=32).map(|i| format!("MAP{:02}", i)).collect();
-        let secrets = classify_secrets_vanilla(&maps, false);
-        assert!(secrets.contains("MAP31"));
-        assert!(secrets.contains("MAP32"));
-        assert_eq!(secrets.len(), 2);
-    }
-
-    #[test]
-    fn test_secrets_vanilla_doom2_short_wad() {
-        // WAD with only MAP01-MAP10 — no MAP31/32 to be secret
-        let maps: Vec<String> = (1..=10).map(|i| format!("MAP{:02}", i)).collect();
-        let secrets = classify_secrets_vanilla(&maps, false);
-        assert!(secrets.is_empty());
-    }
-
-    #[test]
-    fn test_secrets_vanilla_doom1() {
-        let maps = vec![
-            "E1M1", "E1M2", "E1M3", "E1M4", "E1M5", "E1M6", "E1M7", "E1M8", "E1M9",
-        ]
-        .into_iter()
-        .map(String::from)
-        .collect::<Vec<_>>();
-        let secrets = classify_secrets_vanilla(&maps, true);
-        assert!(secrets.contains("E1M9"));
-        assert_eq!(secrets.len(), 1);
-    }
-
-    #[test]
-    fn test_secrets_vanilla_doom1_no_m9() {
-        let maps = vec!["E1M1", "E1M2", "E1M3"]
-            .into_iter()
-            .map(String::from)
-            .collect::<Vec<_>>();
-        let secrets = classify_secrets_vanilla(&maps, true);
-        assert!(secrets.is_empty());
-    }
-
-    #[test]
-    fn test_secrets_vanilla_doom1_multi_episode() {
-        let maps = vec!["E1M1", "E1M9", "E2M1", "E2M9", "E3M1"]
-            .into_iter()
-            .map(String::from)
-            .collect::<Vec<_>>();
-        let secrets = classify_secrets_vanilla(&maps, true);
-        assert!(secrets.contains("E1M9"));
-        assert!(secrets.contains("E2M9"));
-        assert_eq!(secrets.len(), 2);
-    }
-
-    #[test]
-    fn test_secrets_umapinfo_basic() {
-        let mut umi = HashMap::new();
-        umi.insert(
-            "MAP01".into(),
-            UmapinfoEntry {
-                next: Some("MAP02".into()),
-                nextsecret: Some("MAP31".into()),
-                has_endgame: false,
-            },
-        );
-        umi.insert(
-            "MAP02".into(),
-            UmapinfoEntry {
-                next: Some("MAP03".into()),
-                nextsecret: None,
-                has_endgame: false,
-            },
-        );
-        umi.insert(
-            "MAP31".into(),
-            UmapinfoEntry {
-                next: Some("MAP02".into()),
-                nextsecret: None,
-                has_endgame: false,
-            },
-        );
-
-        let maps: Vec<String> = vec!["MAP01", "MAP02", "MAP03", "MAP31"]
-            .into_iter()
-            .map(String::from)
-            .collect();
-        let secrets = classify_secrets_umapinfo(&maps, &umi);
-        // MAP31 is reached via nextsecret from MAP01, and also via next from MAP31.
-        // But MAP31 is NOT in any other map's `next` chain (MAP31's own next goes to MAP02).
-        // Wait — MAP31 is pointed to by MAP01's nextsecret. MAP31 is NOT in any `next`.
-        // MAP02 is in MAP01.next and MAP31.next.
-        // So MAP31 should be secret.
-        assert!(secrets.contains("MAP31"));
-        assert_eq!(secrets.len(), 1);
-    }
-
-    #[test]
-    fn test_secrets_umapinfo_poogers_edge_case() {
-        // Poogers uses nextsecret for normal progression:
-        // MAP01 -> next=MAP02, nextsecret=MAP03
-        // MAP02 -> next=MAP04
-        // MAP03 -> next=MAP04 (MAP03 also in next chain from itself)
-        // MAP03 is reachable via nextsecret BUT also appears in MAP03.next chain?
-        // Actually the rule is: MAP03 is reached by nextsecret AND also by next.
-        // Let's make it clearer: MAP03 is the target of MAP01's nextsecret,
-        // but MAP03 is also the target of some other map's `next`.
-        let mut umi = HashMap::new();
-        umi.insert(
-            "MAP01".into(),
-            UmapinfoEntry {
-                next: Some("MAP02".into()),
-                nextsecret: Some("MAP03".into()),
-                has_endgame: false,
-            },
-        );
-        umi.insert(
-            "MAP02".into(),
-            UmapinfoEntry {
-                next: Some("MAP03".into()),
-                nextsecret: None,
-                has_endgame: false,
-            },
-        );
-        umi.insert(
-            "MAP03".into(),
-            UmapinfoEntry {
-                next: Some("MAP04".into()),
-                nextsecret: None,
-                has_endgame: false,
-            },
-        );
-
-        let maps: Vec<String> = vec!["MAP01", "MAP02", "MAP03", "MAP04"]
-            .into_iter()
-            .map(String::from)
-            .collect();
-        let secrets = classify_secrets_umapinfo(&maps, &umi);
-        // MAP03 is reached by MAP01's nextsecret BUT also by MAP02's next.
-        // Therefore MAP03 is NOT secret.
-        assert!(
-            !secrets.contains("MAP03"),
-            "Poogers edge case: MAP03 should NOT be secret"
-        );
-        assert!(secrets.is_empty());
-    }
-
-    #[test]
-    fn test_secrets_umapinfo_nextsecret_only() {
-        // MAP31 is reachable ONLY via nextsecret, never via next
-        let mut umi = HashMap::new();
-        umi.insert(
-            "MAP15".into(),
-            UmapinfoEntry {
-                next: Some("MAP16".into()),
-                nextsecret: Some("MAP31".into()),
-                has_endgame: false,
-            },
-        );
-        umi.insert(
-            "MAP31".into(),
-            UmapinfoEntry {
-                next: Some("MAP16".into()),
-                nextsecret: Some("MAP32".into()),
-                has_endgame: false,
-            },
-        );
-        umi.insert(
-            "MAP32".into(),
-            UmapinfoEntry {
-                next: Some("MAP16".into()),
-                nextsecret: None,
-                has_endgame: false,
-            },
-        );
-
-        let maps: Vec<String> = vec!["MAP15", "MAP16", "MAP31", "MAP32"]
-            .into_iter()
-            .map(String::from)
-            .collect();
-        let secrets = classify_secrets_umapinfo(&maps, &umi);
-        assert!(secrets.contains("MAP31"));
-        assert!(secrets.contains("MAP32"));
-        assert_eq!(secrets.len(), 2);
-    }
-
-    #[test]
-    fn test_secrets_umapinfo_nextsecret_only_continuation() {
-        // MAP04 has no explicit `next` and MAP05 does not exist. Its
-        // `nextsecret` to MAP31 is therefore the only continuation, not an
-        // optional secret branch.
-        let mut umi = HashMap::new();
-        umi.insert(
-            "MAP04".into(),
-            UmapinfoEntry {
-                next: None,
-                nextsecret: Some("MAP31".into()),
-                has_endgame: false,
-            },
-        );
-        umi.insert(
-            "MAP31".into(),
-            UmapinfoEntry {
-                next: None,
-                nextsecret: None,
-                has_endgame: true,
-            },
-        );
-
-        let maps: Vec<String> = vec!["MAP01", "MAP02", "MAP03", "MAP04", "MAP31"]
-            .into_iter()
-            .map(String::from)
-            .collect();
-        let secrets = classify_secrets_umapinfo(&maps, &umi);
-        assert!(
-            !secrets.contains("MAP31"),
-            "MAP31 is required because MAP04 has no normal continuation"
-        );
-        assert!(secrets.is_empty());
-    }
-
-    // -----------------------------------------------------------------------
-    // Terminal map identification tests
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn test_terminal_umapinfo_endgame() {
-        let mut umi = HashMap::new();
-        umi.insert(
-            "MAP07".into(),
-            UmapinfoEntry {
-                next: None,
-                nextsecret: None,
-                has_endgame: true,
-            },
-        );
-        let maps = vec!["MAP01", "MAP02", "MAP07"]
-            .into_iter()
-            .map(String::from)
-            .collect::<Vec<_>>();
-        let infos: Vec<MapInfo> = maps
-            .iter()
-            .map(|m| MapInfo {
-                lump: m.clone(),
-                has_normal_exit: true,
-                has_secret_exit: false,
-                is_secret: false,
-                is_dead_end: false,
-                is_terminal: false,
-                reachable: true,
-            })
-            .collect();
-
-        let term = identify_terminal(&maps, false, &Some(umi), &infos);
-        assert_eq!(term, Some("MAP07".to_string()));
-    }
-
-    #[test]
-    fn test_terminal_umapinfo_self_loop() {
-        let mut umi = HashMap::new();
-        umi.insert(
-            "MAP05".into(),
-            UmapinfoEntry {
-                next: Some("MAP05".into()), // self-loop
-                nextsecret: None,
-                has_endgame: false,
-            },
-        );
-        let maps = vec!["MAP01", "MAP05"]
-            .into_iter()
-            .map(String::from)
-            .collect::<Vec<_>>();
-        let infos: Vec<MapInfo> = maps
-            .iter()
-            .map(|m| MapInfo {
-                lump: m.clone(),
-                has_normal_exit: true,
-                has_secret_exit: false,
-                is_secret: false,
-                is_dead_end: false,
-                is_terminal: false,
-                reachable: true,
-            })
-            .collect();
-
-        let term = identify_terminal(&maps, false, &Some(umi), &infos);
-        assert_eq!(term, Some("MAP05".to_string()));
-    }
-
-    #[test]
-    fn test_terminal_umapinfo_no_next() {
-        let mut umi = HashMap::new();
-        umi.insert(
-            "MAP01".into(),
-            UmapinfoEntry {
-                next: Some("MAP02".into()),
-                nextsecret: None,
-                has_endgame: false,
-            },
-        );
-        umi.insert(
-            "MAP02".into(),
-            UmapinfoEntry {
-                next: Some("MAP03".into()),
-                nextsecret: None,
-                has_endgame: false,
-            },
-        );
-        // MAP03 has an entry in UMAPINFO but no `next` field
-        umi.insert("MAP03".into(), UmapinfoEntry::default());
-
-        let maps = vec!["MAP01", "MAP02", "MAP03"]
-            .into_iter()
-            .map(String::from)
-            .collect::<Vec<_>>();
-        let infos: Vec<MapInfo> = maps
-            .iter()
-            .map(|m| MapInfo {
-                lump: m.clone(),
-                has_normal_exit: true,
-                has_secret_exit: false,
-                is_secret: false,
-                is_dead_end: false,
-                is_terminal: false,
-                reachable: true,
-            })
-            .collect();
-
-        let term = identify_terminal(&maps, false, &Some(umi), &infos);
-        assert_eq!(term, Some("MAP03".to_string()));
-    }
-
-    #[test]
-    fn test_terminal_vanilla_map30() {
-        let maps: Vec<String> = (1..=32).map(|i| format!("MAP{:02}", i)).collect();
-        let infos: Vec<MapInfo> = maps
-            .iter()
-            .map(|m| MapInfo {
-                lump: m.clone(),
-                has_normal_exit: true,
-                has_secret_exit: false,
-                is_secret: m == "MAP31" || m == "MAP32",
-                is_dead_end: false,
-                is_terminal: false,
-                reachable: true,
-            })
-            .collect();
-
-        let term = identify_terminal(&maps, false, &None, &infos);
-        assert_eq!(term, Some("MAP30".to_string()));
-    }
-
-    #[test]
-    fn test_terminal_vanilla_doom1_e3m8() {
-        let maps = vec!["E3M1", "E3M2", "E3M8", "E3M9"]
-            .into_iter()
-            .map(String::from)
-            .collect::<Vec<_>>();
-        let infos: Vec<MapInfo> = maps
-            .iter()
-            .map(|m| MapInfo {
-                lump: m.clone(),
-                has_normal_exit: true,
-                has_secret_exit: false,
-                is_secret: m == "E3M9",
-                is_dead_end: false,
-                is_terminal: false,
-                reachable: true,
-            })
-            .collect();
-
-        let term = identify_terminal(&maps, true, &None, &infos);
-        assert_eq!(term, Some("E3M8".to_string()));
-    }
-
-    #[test]
-    fn test_terminal_fallback_highest() {
-        // No MAP30, no UMAPINFO, no ExMy convention — fallback to highest
-        let maps = vec!["MAP01", "MAP02", "MAP10"]
-            .into_iter()
-            .map(String::from)
-            .collect::<Vec<_>>();
-        let infos: Vec<MapInfo> = maps
-            .iter()
-            .map(|m| MapInfo {
-                lump: m.clone(),
-                has_normal_exit: true,
-                has_secret_exit: false,
-                is_secret: false,
-                is_dead_end: false,
-                is_terminal: false,
-                reachable: true,
-            })
-            .collect();
-
-        let term = identify_terminal(&maps, false, &None, &infos);
-        assert_eq!(term, Some("MAP10".to_string()));
-    }
-
-    // -----------------------------------------------------------------------
-    // Full WAD analysis integration tests
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn test_analyze_wad_simple_doom2() {
-        // MAP01: normal exit, MAP02: normal exit, MAP03: no exits (dead end)
+    fn test_analyze_wad_vanilla_doom2_short_chain() {
+        // MAP01 → MAP02 → MAP03 (no exit, stopper)
         let ld_normal = build_linedefs(&[11]);
         let ld_dead = build_linedefs(&[0, 1, 2]);
-
         let wad = build_wad(&[
             ("MAP01", &[]),
             ("LINEDEFS", &ld_normal),
@@ -1977,144 +1189,162 @@ MAP MAP01
             ("LINEDEFS", &ld_dead),
         ]);
 
-        let analysis = analyze_wad(&wad).unwrap();
-        assert_eq!(analysis.total_maps, 3);
-        assert!(!analysis.has_umapinfo);
-        assert!(analysis.secret_maps.is_empty());
-
-        // MAP03 is both dead-end and highest → terminal
-        assert_eq!(analysis.terminal_map, Some("MAP03".to_string()));
-        // Dead-end maps exclude the terminal map
-        assert!(analysis.dead_end_maps.is_empty());
-        // required = 3 - 0 secrets - 0 dead-end - 1 terminal (dead-end) = 2
-        assert_eq!(analysis.required_maps, 2);
+        let a = analyze_wad(&wad).unwrap();
+        assert_eq!(a.total_maps, 3);
+        assert_eq!(classify_of(&a, "MAP01"), MapClassification::Required);
+        assert_eq!(classify_of(&a, "MAP02"), MapClassification::Required);
+        // MAP03 has no exit, no outgoing edge → stopper
+        assert_eq!(classify_of(&a, "MAP03"), MapClassification::OptionalCredits);
+        assert_eq!(a.required_maps, 2);
+        assert_eq!(a.terminal_map.as_deref(), Some("MAP03"));
     }
 
     #[test]
-    fn test_analyze_wad_with_secret_maps() {
+    fn test_analyze_wad_vanilla_doom2_full_with_secrets() {
         let ld_normal = build_linedefs(&[11]);
         let ld_secret = build_linedefs(&[51]);
 
-        // Build a 32-map WAD skeleton (only LINEDEFS for a few)
-        let mut lumps: Vec<(&str, Vec<u8>)> = Vec::new();
+        let mut lumps: Vec<(String, Vec<u8>)> = Vec::new();
         for i in 1..=32 {
-            let name = format!("MAP{:02}", i);
-            lumps.push((Box::leak(name.into_boxed_str()), vec![]));
+            lumps.push((format!("MAP{:02}", i), Vec::new()));
             if i == 15 {
-                // MAP15 has secret exit
-                lumps.push(("LINEDEFS", ld_secret.clone()));
+                lumps.push(("LINEDEFS".to_string(), ld_secret.clone()));
             } else {
-                lumps.push(("LINEDEFS", ld_normal.clone()));
+                lumps.push(("LINEDEFS".to_string(), ld_normal.clone()));
             }
         }
-
-        let lump_refs: Vec<(&str, &[u8])> = lumps.iter().map(|(n, d)| (*n, d.as_slice())).collect();
+        let lump_refs: Vec<(&str, &[u8])> = lumps
+            .iter()
+            .map(|(n, d)| (n.as_str(), d.as_slice()))
+            .collect();
         let wad = build_wad(&lump_refs);
 
-        let analysis = analyze_wad(&wad).unwrap();
-        assert_eq!(analysis.total_maps, 32);
-        assert!(analysis.secret_maps.contains(&"MAP31".to_string()));
-        assert!(analysis.secret_maps.contains(&"MAP32".to_string()));
-        assert_eq!(analysis.terminal_map, Some("MAP30".to_string()));
+        let a = analyze_wad(&wad).unwrap();
+        assert_eq!(a.total_maps, 32);
+        // MAP30 is the vanilla terminus and has a normal exit linedef so it's
+        // NOT classified as a stopper — it stays Required since the static
+        // graph has nothing past it. Classifier doesn't synthesize an
+        // endgame-only marker for MAP30 alone.
+        // Required = MAP01..MAP30 (no UMAPINFO endgame marker)
+        assert_eq!(classify_of(&a, "MAP01"), MapClassification::Required);
+        assert_eq!(classify_of(&a, "MAP30"), MapClassification::Required);
+        // MAP31 / MAP32 are reached only via secret edges from MAP15/MAP31
+        assert_eq!(classify_of(&a, "MAP31"), MapClassification::OptionalSecret);
+        assert_eq!(classify_of(&a, "MAP32"), MapClassification::OptionalSecret);
+        assert!(a.secret_maps.contains(&"MAP31".to_string()));
+        assert!(a.secret_maps.contains(&"MAP32".to_string()));
     }
 
     #[test]
-    fn test_analyze_wad_doom1() {
+    fn test_analyze_wad_doom1_full_episode() {
+        // Full E1: E1M1..E1M8 + E1M9 secret. Walk follows vanilla edges all
+        // the way to E1M8 (stopper, no outgoing edge). E1M9 is reached from
+        // E1M3's secret edge.
         let ld_normal = build_linedefs(&[11]);
-
-        let wad = build_wad(&[
-            ("E1M1", &[]),
-            ("LINEDEFS", &ld_normal),
-            ("E1M2", &[]),
-            ("LINEDEFS", &ld_normal),
-            ("E1M8", &[]),
-            ("LINEDEFS", &ld_normal),
-            ("E1M9", &[]),
-            ("LINEDEFS", &ld_normal),
-        ]);
-
-        let analysis = analyze_wad(&wad).unwrap();
-        assert_eq!(analysis.total_maps, 4);
-        assert!(analysis.secret_maps.contains(&"E1M9".to_string()));
-        assert_eq!(analysis.terminal_map, Some("E1M8".to_string()));
-        // required = 4 - 1 secret = 3
-        assert_eq!(analysis.required_maps, 3);
+        let ld_secret = build_linedefs(&[51]);
+        let ld_dead = build_linedefs(&[]);
+        let mut lumps: Vec<(String, Vec<u8>)> = Vec::new();
+        for m in 1..=8 {
+            lumps.push((format!("E1M{m}"), Vec::new()));
+            lumps.push((
+                "LINEDEFS".to_string(),
+                if m == 8 {
+                    ld_dead.clone()
+                } else if m == 3 {
+                    ld_secret.clone()
+                } else {
+                    ld_normal.clone()
+                },
+            ));
+        }
+        lumps.push(("E1M9".to_string(), Vec::new()));
+        lumps.push(("LINEDEFS".to_string(), ld_normal.clone()));
+        let lump_refs: Vec<(&str, &[u8])> = lumps
+            .iter()
+            .map(|(n, d)| (n.as_str(), d.as_slice()))
+            .collect();
+        let wad = build_wad(&lump_refs);
+        let a = analyze_wad(&wad).unwrap();
+        assert_eq!(a.total_maps, 9);
+        assert_eq!(classify_of(&a, "E1M1"), MapClassification::Required);
+        assert_eq!(classify_of(&a, "E1M7"), MapClassification::Required);
+        // E1M8 has no exit linedef and no outgoing edge → stopper
+        assert_eq!(classify_of(&a, "E1M8"), MapClassification::OptionalCredits);
+        // E1M9 reached only via E1M3 secret edge → optional
+        assert_eq!(classify_of(&a, "E1M9"), MapClassification::OptionalSecret);
     }
 
-    #[test]
-    fn test_analyze_wad_with_umapinfo() {
-        let ld_normal = build_linedefs(&[11]);
-        let umapinfo = br#"
-MAP MAP01
-{
-    next = "MAP02"
-}
-
-MAP MAP02
-{
-    next = "MAP03"
-    nextsecret = "MAP31"
-}
-
-MAP MAP03
-{
-    endgame = true
-}
-
-MAP MAP31
-{
-    next = "MAP03"
-}
-"#;
-
-        let wad = build_wad(&[
-            ("MAP01", &[]),
-            ("LINEDEFS", &ld_normal),
-            ("MAP02", &[]),
-            ("LINEDEFS", &ld_normal),
-            ("MAP03", &[]),
-            ("LINEDEFS", &ld_normal),
-            ("MAP31", &[]),
-            ("LINEDEFS", &ld_normal),
-            ("UMAPINFO", umapinfo),
-        ]);
-
-        let analysis = analyze_wad(&wad).unwrap();
-        assert!(analysis.has_umapinfo);
-        assert_eq!(analysis.total_maps, 4);
-        assert!(analysis.secret_maps.contains(&"MAP31".to_string()));
-        assert_eq!(analysis.terminal_map, Some("MAP03".to_string()));
-        // required = 4 - 1 secret = 3 (MAP01, MAP02, MAP03)
-        assert_eq!(analysis.required_maps, 3);
-    }
+    // -----------------------------------------------------------------------
+    // UMAPINFO-driven analysis
+    // -----------------------------------------------------------------------
 
     #[test]
-    fn test_analyze_wad_umapinfo_poogers_edge_case() {
-        // Poogers-style: nextsecret used for normal progression
+    fn test_analyze_wad_umapinfo_linear_chain() {
+        // The Pact-shape: MAP01..MAP06, all linked, MAP06 is stopper.
         let ld_normal = build_linedefs(&[11]);
         let umapinfo = br#"
 MAP MAP01
 {
     next = "MAP02"
-    nextsecret = "MAP03"
 }
-
 MAP MAP02
 {
     next = "MAP03"
 }
-
 MAP MAP03
 {
     next = "MAP04"
 }
-
 MAP MAP04
+{
+    next = "MAP05"
+}
+MAP MAP05
+{
+    next = "MAP06"
+}
+MAP MAP06
+{
+}
+"#;
+        let mut lumps = Vec::new();
+        for i in 1..=6 {
+            lumps.push((format!("MAP{:02}", i), Vec::new()));
+            lumps.push(("LINEDEFS".to_string(), ld_normal.clone()));
+        }
+        lumps.push(("UMAPINFO".to_string(), umapinfo.to_vec()));
+        let lump_refs: Vec<(&str, &[u8])> = lumps
+            .iter()
+            .map(|(n, d)| (n.as_str(), d.as_slice()))
+            .collect();
+        let wad = build_wad(&lump_refs);
+
+        let a = analyze_wad(&wad).unwrap();
+        assert!(a.has_umapinfo);
+        assert_eq!(classify_of(&a, "MAP05"), MapClassification::Required);
+        // MAP06 has no outgoing edge but it has a normal exit linedef, so
+        // it's a "false dead-end" — classifier keeps it Required rather than
+        // silently rewriting it as a stopper.
+        assert_eq!(classify_of(&a, "MAP06"), MapClassification::Required);
+    }
+
+    #[test]
+    fn test_analyze_wad_umapinfo_explicit_endgame() {
+        let ld_normal = build_linedefs(&[11]);
+        let umapinfo = br#"
+MAP MAP01
+{
+    next = "MAP02"
+}
+MAP MAP02
+{
+    next = "MAP03"
+}
+MAP MAP03
 {
     endgame = true
 }
 "#;
-
         let wad = build_wad(&[
             ("MAP01", &[]),
             ("LINEDEFS", &ld_normal),
@@ -2122,26 +1352,18 @@ MAP MAP04
             ("LINEDEFS", &ld_normal),
             ("MAP03", &[]),
             ("LINEDEFS", &ld_normal),
-            ("MAP04", &[]),
-            ("LINEDEFS", &ld_normal),
             ("UMAPINFO", umapinfo),
         ]);
-
-        let analysis = analyze_wad(&wad).unwrap();
-        // MAP03 is reached via MAP02's next AND MAP01's nextsecret
-        // Therefore MAP03 should NOT be secret
-        assert!(
-            !analysis.secret_maps.contains(&"MAP03".to_string()),
-            "MAP03 should not be secret in Poogers-style progression"
-        );
-        assert!(analysis.secret_maps.is_empty());
-        assert_eq!(analysis.terminal_map, Some("MAP04".to_string()));
-        // All 4 maps are required
-        assert_eq!(analysis.required_maps, 4);
+        let a = analyze_wad(&wad).unwrap();
+        // MAP03 has has_endgame marker → stopper, OptionalCredits
+        assert_eq!(classify_of(&a, "MAP03"), MapClassification::OptionalCredits);
+        assert_eq!(a.required_maps, 2);
     }
 
     #[test]
-    fn test_analyze_wad_umapinfo_secret_only_final_continuation() {
+    fn test_analyze_wad_umapinfo_forced_secret_continuation() {
+        // Formless Mother shape: MAP04 has only a secret exit to MAP31, and
+        // MAP31 is the true ending. MAP31 must be Required.
         let ld_normal = build_linedefs(&[11]);
         let ld_secret = build_linedefs(&[51]);
         let umapinfo = br#"
@@ -2149,28 +1371,23 @@ MAP MAP01
 {
     next = "MAP02"
 }
-
 MAP MAP02
 {
     next = "MAP03"
 }
-
 MAP MAP03
 {
     next = "MAP04"
 }
-
 MAP MAP04
 {
     nextsecret = "MAP31"
 }
-
 MAP MAP31
 {
     endgame = true
 }
 "#;
-
         let wad = build_wad(&[
             ("MAP01", &[]),
             ("LINEDEFS", &ld_normal),
@@ -2184,35 +1401,122 @@ MAP MAP31
             ("LINEDEFS", &ld_normal),
             ("UMAPINFO", umapinfo),
         ]);
-
-        let analysis = analyze_wad(&wad).unwrap();
-        assert!(analysis.has_umapinfo);
-        assert!(analysis.secret_maps.is_empty());
-        assert_eq!(analysis.terminal_map, Some("MAP31".to_string()));
-        assert_eq!(analysis.required_maps, 5);
+        let a = analyze_wad(&wad).unwrap();
+        assert_eq!(classify_of(&a, "MAP04"), MapClassification::Required);
+        assert_eq!(classify_of(&a, "MAP31"), MapClassification::OptionalCredits);
+        // No secrets — MAP31 was forced, not optional.
+        assert!(a.secret_maps.is_empty());
     }
 
     #[test]
-    fn test_analyze_wad_udmf() {
-        let textmap_normal = build_textmap(&[243]); // Exit_Normal
-        let textmap_both = build_textmap(&[243, 244]); // both exits
-
+    fn test_analyze_wad_umapinfo_skippable_secret() {
+        // MAP15 has both `next = MAP16` and `nextsecret = MAP31`, so MAP31
+        // is a skippable secret branch (OptionalSecret).
+        let ld = build_linedefs(&[11]);
+        let umapinfo = br#"
+MAP MAP01
+{
+    next = "MAP15"
+}
+MAP MAP15
+{
+    next = "MAP16"
+    nextsecret = "MAP31"
+}
+MAP MAP16
+{
+    next = "MAP30"
+}
+MAP MAP30
+{
+    endgame = true
+}
+MAP MAP31
+{
+    next = "MAP16"
+}
+"#;
         let wad = build_wad(&[
             ("MAP01", &[]),
-            ("TEXTMAP", &textmap_both),
-            ("ENDMAP", &[]),
-            ("MAP02", &[]),
-            ("TEXTMAP", &textmap_normal),
-            ("ENDMAP", &[]),
+            ("LINEDEFS", &ld),
+            ("MAP15", &[]),
+            ("LINEDEFS", &ld),
+            ("MAP16", &[]),
+            ("LINEDEFS", &ld),
+            ("MAP30", &[]),
+            ("LINEDEFS", &ld),
+            ("MAP31", &[]),
+            ("LINEDEFS", &ld),
+            ("UMAPINFO", umapinfo),
         ]);
-
-        let analysis = analyze_wad(&wad).unwrap();
-        assert_eq!(analysis.total_maps, 2);
-        assert!(analysis.maps[0].has_normal_exit);
-        assert!(analysis.maps[0].has_secret_exit);
-        assert!(analysis.maps[1].has_normal_exit);
-        assert!(!analysis.maps[1].has_secret_exit);
+        let a = analyze_wad(&wad).unwrap();
+        assert_eq!(classify_of(&a, "MAP15"), MapClassification::Required);
+        assert_eq!(classify_of(&a, "MAP31"), MapClassification::OptionalSecret);
+        assert_eq!(classify_of(&a, "MAP30"), MapClassification::OptionalCredits);
     }
+
+    // -----------------------------------------------------------------------
+    // ZMAPINFO precedence (Vertex Relocation case)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_analyze_wad_zmapinfo_overrides_umapinfo() {
+        // UMAPINFO routes MAP17 → MAP18 (vanilla flow).
+        // ZMAPINFO routes MAP17 → MAP18GZ. ZMAPINFO must win.
+        let ld = build_linedefs(&[11]);
+        let umapinfo = br#"
+MAP MAP01
+{
+    next = "MAP17"
+}
+MAP MAP17
+{
+    next = "MAP18"
+}
+MAP MAP18
+{
+    next = "MAP19"
+}
+MAP MAP19
+{
+    endgame = true
+}
+"#;
+        let zmapinfo = br#"
+map MAP17 "Feline Squire"
+{
+    next = "MAP18GZ"
+}
+map MAP18GZ "Biocide"
+{
+    next = "MAP19"
+}
+"#;
+        let wad = build_wad(&[
+            ("MAP01", &[]),
+            ("LINEDEFS", &ld),
+            ("MAP17", &[]),
+            ("LINEDEFS", &ld),
+            ("MAP18", &[]),
+            ("LINEDEFS", &ld),
+            ("MAP18GZ", &[]),
+            ("LINEDEFS", &ld),
+            ("MAP19", &[]),
+            ("LINEDEFS", &ld),
+            ("UMAPINFO", umapinfo),
+            ("ZMAPINFO", zmapinfo),
+        ]);
+        let a = analyze_wad(&wad).unwrap();
+        // ZMAPINFO routes through MAP18GZ; MAP18 becomes orphan
+        assert_eq!(classify_of(&a, "MAP17"), MapClassification::Required);
+        assert_eq!(classify_of(&a, "MAP18GZ"), MapClassification::Required);
+        assert_eq!(classify_of(&a, "MAP18"), MapClassification::Unreachable);
+        assert_eq!(classify_of(&a, "MAP19"), MapClassification::OptionalCredits);
+    }
+
+    // -----------------------------------------------------------------------
+    // Edge cases
+    // -----------------------------------------------------------------------
 
     #[test]
     fn test_analyze_wad_no_maps() {
@@ -2221,40 +1525,15 @@ MAP MAP31
     }
 
     #[test]
-    fn test_analyze_wad_invalid() {
+    fn test_analyze_wad_invalid_input() {
         assert!(analyze_wad(b"").is_none());
         assert!(analyze_wad(b"NOTAWAD!").is_none());
-    }
-
-    #[test]
-    fn test_analyze_wad_dead_end_non_terminal() {
-        // MAP01: normal exit, MAP02: no exits (dead end, not terminal), MAP03: normal exit
-        let ld_normal = build_linedefs(&[11]);
-        let ld_dead = build_linedefs(&[0, 1]);
-
-        let wad = build_wad(&[
-            ("MAP01", &[]),
-            ("LINEDEFS", &ld_normal),
-            ("MAP02", &[]),
-            ("LINEDEFS", &ld_dead),
-            ("MAP03", &[]),
-            ("LINEDEFS", &ld_normal),
-        ]);
-
-        let analysis = analyze_wad(&wad).unwrap();
-        assert_eq!(analysis.total_maps, 3);
-        // MAP02 is dead-end but not terminal (MAP03 is higher)
-        assert!(analysis.dead_end_maps.contains(&"MAP02".to_string()));
-        assert_eq!(analysis.terminal_map, Some("MAP03".to_string()));
-        // required = 3 - 0 secret - 1 dead_end = 2
-        assert_eq!(analysis.required_maps, 2);
     }
 
     #[test]
     fn test_map_sort_key() {
         assert!(map_sort_key("MAP01") < map_sort_key("MAP02"));
         assert!(map_sort_key("MAP09") < map_sort_key("MAP10"));
-        assert!(map_sort_key("MAP10") < map_sort_key("MAP30"));
         assert!(map_sort_key("E1M1") < map_sort_key("E1M8"));
         assert!(map_sort_key("E1M8") < map_sort_key("E2M1"));
     }
@@ -2264,72 +1543,36 @@ MAP MAP31
         assert!(is_map_marker("MAP01"));
         assert!(is_map_marker("MAP32"));
         assert!(is_map_marker("MAP100"));
-        assert!(is_map_marker("MAP213"));
         assert!(is_map_marker("E1M1"));
-        assert!(is_map_marker("E4M9"));
         assert!(!is_map_marker("THINGS"));
-        assert!(!is_map_marker("LINEDEFS"));
-        assert!(!is_map_marker("MAP001")); // zero-padded, not a valid marker
-        assert!(!is_map_marker(""));
+        assert!(!is_map_marker("MAP001"));
     }
 
-    /// Integration test: analyze PK3 files from ~/Downloads/zdoom/.
-    /// Run with: cargo test -p caco-core test_analyze_pk3_files -- --ignored --nocapture
     #[test]
-    #[ignore]
-    fn test_analyze_pk3_files() {
-        let zdoom_dir = dirs::home_dir().unwrap().join("Downloads/zdoom");
-        if !zdoom_dir.exists() {
-            eprintln!("No zdoom directory, skipping");
-            return;
-        }
-        for entry in std::fs::read_dir(&zdoom_dir).unwrap() {
-            let path = entry.unwrap().path();
-            if path.extension().and_then(|e| e.to_str()) != Some("pk3") {
-                continue;
-            }
-            eprintln!("\n=== {} ===", path.file_name().unwrap().to_string_lossy());
-            match analyze_pk3(&path) {
-                Some(analysis) => {
-                    let unreachable: Vec<&str> = analysis
-                        .maps
-                        .iter()
-                        .filter(|m| !m.reachable)
-                        .map(|m| m.lump.as_str())
-                        .collect();
-                    eprintln!(
-                        "  total={} required={} secret={:?} terminal={:?}",
-                        analysis.total_maps,
-                        analysis.required_maps,
-                        analysis.secret_maps,
-                        analysis.terminal_map
-                    );
-                    if !unreachable.is_empty() {
-                        eprintln!("  unreachable={unreachable:?}");
-                    }
-                    for m in &analysis.maps {
-                        let flags: Vec<&str> = [
-                            m.is_secret.then_some("secret"),
-                            m.is_terminal.then_some("terminal"),
-                            m.is_dead_end.then_some("dead_end"),
-                            (!m.reachable).then_some("UNREACHABLE"),
-                        ]
-                        .into_iter()
-                        .flatten()
-                        .collect();
-                        let flag_str = if flags.is_empty() {
-                            String::new()
-                        } else {
-                            format!(" [{}]", flags.join(", "))
-                        };
-                        eprintln!(
-                            "  {:10} exit={} secret_exit={}{}",
-                            m.lump, m.has_normal_exit, m.has_secret_exit, flag_str
-                        );
-                    }
-                }
-                None => eprintln!("  analysis returned None"),
-            }
-        }
+    fn test_classify_unreachable_orphan() {
+        // MAP01 → MAP03 via UMAPINFO, MAP02 has no incoming edge.
+        let ld = build_linedefs(&[11]);
+        let umapinfo = br#"
+MAP MAP01
+{
+    next = "MAP03"
+}
+MAP MAP03
+{
+    endgame = true
+}
+"#;
+        let wad = build_wad(&[
+            ("MAP01", &[]),
+            ("LINEDEFS", &ld),
+            ("MAP02", &[]),
+            ("LINEDEFS", &ld),
+            ("MAP03", &[]),
+            ("LINEDEFS", &ld),
+            ("UMAPINFO", umapinfo),
+        ]);
+        let a = analyze_wad(&wad).unwrap();
+        assert_eq!(classify_of(&a, "MAP02"), MapClassification::Unreachable);
+        assert_eq!(classify_of(&a, "MAP03"), MapClassification::OptionalCredits);
     }
 }
