@@ -13,6 +13,8 @@ use crate::theme;
 use crate::workers::{FileDialogReceiver, FileDialogRequest, spawn_file_dialog};
 
 type StatsData = caco_core::wad_stats::WadStats;
+type AnalysisData = caco_core::wad_analysis::WadAnalysis;
+use caco_core::wad_analysis::MapClassification;
 
 /// A stats-carrying entry shown in the left pane.
 #[derive(Clone)]
@@ -52,6 +54,12 @@ pub struct WadStatsDialogState {
     wad_title: String,
     entries: Vec<Entry>,
     selected_index: usize,
+    /// Cached `WadAnalysis` for this WAD, when one is present and fresh.
+    /// When `None`, the per-map table falls back to "played maps from stats"
+    /// behaviour and shows a banner explaining the gap. Re-loaded by
+    /// `reload_entries` so background re-analysis is reflected on the next
+    /// dialog interaction.
+    analysis: Option<AnalysisData>,
     /// Inline editor, if active.
     edit: Option<EditBuffer>,
     /// Second click of the Delete button triggers deletion; first click arms
@@ -88,6 +96,7 @@ impl WadStatsDialogState {
             wad_title: wad.title.clone(),
             entries: Vec::new(),
             selected_index: 0,
+            analysis: None,
             edit: None,
             confirm_delete: None,
             pending_import: None,
@@ -110,6 +119,9 @@ impl WadStatsDialogState {
             });
 
         self.entries.clear();
+        self.analysis = caco_core::db::get_analysis(conn, self.wad_id)
+            .ok()
+            .flatten();
 
         if let Ok(Some(wad)) = caco_core::db::wads::get_wad(conn, self.wad_id, false) {
             let stats = wad
@@ -572,7 +584,26 @@ impl WadStatsDialogState {
             return;
         };
 
-        let played = stats.played_maps();
+        // Single source of truth for "what counts as a map":
+        //   - With analysis: every classified map (Required + OptionalSecret +
+        //     OptionalCredits), with stats overlaid by lump name. Unplayed
+        //     maps render with "—" placeholders so the user sees what they
+        //     still owe.
+        //   - Without analysis: fall back to "maps the player has actually
+        //     exited" + a banner explaining the gap.
+        let rows = build_table_rows(self.analysis.as_ref(), stats);
+        let has_analysis = self.analysis.is_some();
+        if !has_analysis {
+            ui.colored_label(
+                theme::TEXT_MUTED,
+                egui::RichText::new(
+                    "No structural map analysis cached for this WAD yet — counters reflect played maps only. Re-analysis runs in the background after the dialog opens; reopen to refresh.",
+                )
+                .small()
+                .italics(),
+            );
+            ui.add_space(4.0);
+        }
 
         let text_height = ui.text_style_height(&egui::TextStyle::Body);
         let row_height = text_height + 6.0;
@@ -582,54 +613,65 @@ impl WadStatsDialogState {
             .resizable(true)
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
             .column(Column::initial(70.0).at_least(50.0))
+            .column(Column::initial(75.0).at_least(60.0))
             .column(Column::initial(50.0).at_least(40.0))
             .column(Column::initial(70.0).at_least(50.0))
             .column(Column::initial(80.0).at_least(60.0))
             .column(Column::initial(80.0).at_least(60.0))
             .column(Column::remainder().at_least(60.0));
 
+        let rows_ref = &rows;
+        let stats_format = stats.format.clone();
         table
             .header(row_height + 2.0, |mut header| {
-                for label in ["Map", "Skill", "Time", "Kills", "Items", "Secrets"] {
+                for label in ["Map", "Class", "Skill", "Time", "Kills", "Items", "Secrets"] {
                     header.col(|ui| {
                         ui.strong(label);
                     });
                 }
             })
             .body(|body| {
-                body.rows(row_height, played.len(), |mut row| {
-                    let m = played[row.index()];
+                body.rows(row_height, rows_ref.len(), |mut row| {
+                    let r = &rows_ref[row.index()];
                     row.col(|ui| {
-                        ui.label(&m.lump);
+                        ui.label(&r.lump);
                     });
                     row.col(|ui| {
-                        ui.label(caco_core::wad_stats::skill_name(m.best_skill));
+                        ui.colored_label(class_color(r.class), class_label(r.class));
                     });
-                    row.col(|ui| {
-                        ui.label(format_map_time(m, &stats.format));
-                    });
-                    row.col(|ui| {
-                        ui.label(ratio(m.kills, m.total_kills));
-                    });
-                    row.col(|ui| {
-                        ui.label(ratio(m.items, m.total_items));
-                    });
-                    row.col(|ui| {
-                        ui.label(ratio(m.secrets, m.total_secrets));
-                    });
+                    match r.stats {
+                        Some(m) => {
+                            row.col(|ui| {
+                                ui.label(caco_core::wad_stats::skill_name(m.best_skill));
+                            });
+                            row.col(|ui| {
+                                ui.label(format_map_time(m, &stats_format));
+                            });
+                            row.col(|ui| {
+                                ui.label(ratio(m.kills, m.total_kills));
+                            });
+                            row.col(|ui| {
+                                ui.label(ratio(m.items, m.total_items));
+                            });
+                            row.col(|ui| {
+                                ui.label(ratio(m.secrets, m.total_secrets));
+                            });
+                        }
+                        None => {
+                            for _ in 0..5 {
+                                row.col(|ui| {
+                                    ui.colored_label(theme::TEXT_MUTED, "\u{2014}");
+                                });
+                            }
+                        }
+                    }
                 });
             });
 
         ui.add_space(4.0);
         ui.colored_label(
             theme::TEXT_SECONDARY,
-            egui::RichText::new(format!(
-                "Format: {}  |  Maps played: {}  |  Total time: {}",
-                format_name(&stats.format),
-                played.len(),
-                stats.total_time_display(),
-            ))
-            .small(),
+            egui::RichText::new(format_summary(self.analysis.as_ref(), stats, &rows)).small(),
         );
     }
 
@@ -875,5 +917,142 @@ fn format_name(format: &str) -> &str {
         "stats_txt" => "stats.txt",
         "levelstat_txt" => "levelstat.txt",
         _ => format,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Per-map table model
+//
+// `RowClass::Played` is used in the no-analysis fallback so the dialog can
+// still render meaningfully when a fresh `WadAnalysis` isn't cached yet (and
+// the background re-analysis worker hasn't caught up). Once the analysis
+// arrives, every row carries the classifier's verdict instead.
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Copy)]
+enum RowClass {
+    Required,
+    Secret,
+    Terminal,
+    /// Fallback when no `WadAnalysis` exists yet — we can't classify, so
+    /// just label the row as a "played" map.
+    Played,
+}
+
+struct MapRow<'a> {
+    lump: String,
+    class: RowClass,
+    stats: Option<&'a caco_core::wad_stats::MapStats>,
+}
+
+fn build_table_rows<'a>(analysis: Option<&AnalysisData>, stats: &'a StatsData) -> Vec<MapRow<'a>> {
+    let stats_by_lump: std::collections::HashMap<&str, &caco_core::wad_stats::MapStats> =
+        stats.maps.iter().map(|m| (m.lump.as_str(), m)).collect();
+
+    match analysis {
+        Some(a) => a
+            .maps
+            .iter()
+            .filter_map(|m| {
+                let class = match m.classification {
+                    MapClassification::Required => RowClass::Required,
+                    MapClassification::OptionalSecret => RowClass::Secret,
+                    MapClassification::OptionalCredits => RowClass::Terminal,
+                    MapClassification::Unreachable => return None,
+                };
+                Some(MapRow {
+                    lump: m.lump.clone(),
+                    class,
+                    stats: stats_by_lump.get(m.lump.as_str()).copied(),
+                })
+            })
+            .collect(),
+        None => stats
+            .played_maps()
+            .into_iter()
+            .map(|m| MapRow {
+                lump: m.lump.clone(),
+                class: RowClass::Played,
+                stats: Some(m),
+            })
+            .collect(),
+    }
+}
+
+fn class_label(c: RowClass) -> &'static str {
+    match c {
+        RowClass::Required => "Required",
+        RowClass::Secret => "Secret",
+        RowClass::Terminal => "Terminal",
+        RowClass::Played => "Played",
+    }
+}
+
+fn class_color(c: RowClass) -> egui::Color32 {
+    match c {
+        RowClass::Required => theme::TEXT_PRIMARY,
+        RowClass::Secret => theme::COLOR_SECRET_FILL,
+        RowClass::Terminal => theme::TEXT_ACCENT,
+        RowClass::Played => theme::TEXT_SECONDARY,
+    }
+}
+
+fn format_summary(
+    analysis: Option<&AnalysisData>,
+    stats: &StatsData,
+    rows: &[MapRow<'_>],
+) -> String {
+    let exited: std::collections::HashSet<&str> = stats
+        .maps
+        .iter()
+        .filter(|m| m.total_exits >= 1)
+        .map(|m| m.lump.as_str())
+        .collect();
+
+    match analysis {
+        Some(_) => {
+            let mut req_total = 0usize;
+            let mut req_done = 0usize;
+            let mut sec_total = 0usize;
+            let mut sec_done = 0usize;
+            let mut term_total = 0usize;
+            let mut term_done = 0usize;
+            for r in rows {
+                let done = exited.contains(r.lump.as_str()) as usize;
+                match r.class {
+                    RowClass::Required => {
+                        req_total += 1;
+                        req_done += done;
+                    }
+                    RowClass::Secret => {
+                        sec_total += 1;
+                        sec_done += done;
+                    }
+                    RowClass::Terminal => {
+                        term_total += 1;
+                        term_done += done;
+                    }
+                    RowClass::Played => {}
+                }
+            }
+            let mut summary = format!(
+                "Format: {}  |  Required: {req_done}/{req_total}",
+                format_name(&stats.format)
+            );
+            if sec_total > 0 {
+                summary.push_str(&format!("  |  Secret: {sec_done}/{sec_total}"));
+            }
+            if term_total > 0 {
+                summary.push_str(&format!("  |  Terminal: {term_done}/{term_total}"));
+            }
+            summary.push_str(&format!("  |  Total time: {}", stats.total_time_display()));
+            summary
+        }
+        None => format!(
+            "Format: {}  |  Maps played: {}  |  Total time: {}",
+            format_name(&stats.format),
+            stats.played_maps().len(),
+            stats.total_time_display(),
+        ),
     }
 }

@@ -325,21 +325,7 @@ mod tests {
                 }
             };
             let path = PathBuf::from(cached);
-            let is_pk3 = path
-                .extension()
-                .and_then(|e| e.to_str())
-                .is_some_and(|e| e.eq_ignore_ascii_case("pk3"));
-
-            let analysis = if is_pk3 {
-                crate::wad_analysis::analyze_pk3(&path)
-            } else {
-                let wad_data = match crate::utils::load_wad_data(&path) {
-                    Some(d) => d,
-                    None => continue,
-                };
-                crate::wad_analysis::analyze_wad(&wad_data)
-            };
-            let analysis = match analysis {
+            let analysis = match crate::wad_analysis::analyze_path(&path) {
                 Some(a) => a,
                 None => {
                     eprintln!("[{}] {} — analysis returned None", wad.id, wad.title);

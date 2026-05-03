@@ -341,31 +341,35 @@ pub fn render(
                         );
                     }
 
-                    // Progress bar for in-progress WADs with stats.
+                    // Progress bar for in-progress WADs.
                     //
-                    // Denominator comes from `wad_analysis.required_maps` when
-                    // available. A levelstat-format snapshot only records maps
-                    // the player has exited, so `wad_stats.maps.len()` would
-                    // always equal `played_maps().len()` and the bar would read
-                    // 100% for every in-progress WAD.
+                    // Sourced from `state.analyses_map` (the single source of
+                    // truth shared with the auto-completion verdict). When no
+                    // fresh analysis is cached the bar is hidden — better than
+                    // the old `wad_stats.maps.len()` fallback, which always
+                    // showed 100% because levelstat snapshots only record maps
+                    // the player has exited.
                     if wad.status == caco_core::db::Status::InProgress
+                        && let Some(analysis) = state.analyses_map.get(&wad_id)
+                        && analysis.required_maps > 0
                         && let Some(ref snapshot_json) = wad.stats_snapshot
                         && let Ok(wad_stats) = serde_json::from_str::<StatsData>(snapshot_json)
-                        && !wad_stats.maps.is_empty()
                     {
-                        let played = wad_stats.played_maps().len();
-                        let total = state
-                            .required_maps_map
-                            .get(&wad_id)
-                            .copied()
-                            .filter(|n| *n > 0)
-                            .unwrap_or(wad_stats.maps.len())
-                            .max(played);
-                        let pct = if total > 0 {
-                            (played as f32 / total as f32).clamp(0.0, 1.0)
-                        } else {
-                            0.0
-                        };
+                        use caco_core::wad_analysis::MapClassification;
+                        use std::collections::HashSet;
+                        let required: HashSet<&str> = analysis
+                            .maps
+                            .iter()
+                            .filter(|m| m.classification == MapClassification::Required)
+                            .map(|m| m.lump.as_str())
+                            .collect();
+                        let played = wad_stats
+                            .maps
+                            .iter()
+                            .filter(|m| m.total_exits >= 1 && required.contains(m.lump.as_str()))
+                            .count();
+                        let total = analysis.required_maps;
+                        let pct = (played as f32 / total as f32).clamp(0.0, 1.0);
 
                         let bar_y = footer_y + 22.0;
                         let bar_h = 4.0;

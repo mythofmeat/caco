@@ -50,7 +50,7 @@ const GEN_EXIT_SECRET_BIT: u16 = 0x20;
 
 /// Analysis format version. Bump this whenever detection logic changes
 /// so that stale cached analyses are automatically invalidated and re-run.
-pub const ANALYSIS_VERSION: u32 = 4;
+pub const ANALYSIS_VERSION: u32 = 5;
 
 /// UDMF normal exit specials.
 const UDMF_NORMAL_EXITS: &[i32] = &[243, 74, 75]; // Exit_Normal, Teleport_NewMap, Teleport_EndGame
@@ -169,28 +169,44 @@ fn build_graph(
     // is only overridden when the higher-priority source explicitly sets it
     // — an empty entry like `MAP MAP01 { }` does NOT clear vanilla edges.
     // Setting endgame=true also clears any normal/secret edge for that map
-    // (game ends here, no progression).
+    // (game ends here, no progression). A self-loop in `next`/`nextsecret`
+    // (`map MAP10 { next = "MAP10" }`) is the established UMAPINFO idiom for
+    // "stops here" — treat it as endgame so the terminus reclassification
+    // can promote it to OptionalCredits.
     for (_, entries) in &by_priority {
         for (lump, edge) in entries.iter() {
             if !map_set.contains(lump.as_str()) {
                 continue;
             }
 
+            let normal_self_loop = edge.next.as_deref() == Some(lump.as_str());
+            let secret_self_loop = edge.secret_next.as_deref() == Some(lump.as_str());
+
             if let Some(ref nx) = edge.next {
-                if map_set.contains(nx.as_str()) {
+                if normal_self_loop {
+                    graph.edges_normal.remove(lump.as_str());
+                } else if map_set.contains(nx.as_str()) {
                     graph.edges_normal.insert(lump.clone(), nx.clone());
                 } else {
                     graph.edges_normal.remove(lump.as_str());
                 }
             }
             if let Some(ref sx) = edge.secret_next {
-                if map_set.contains(sx.as_str()) {
+                if secret_self_loop {
+                    graph.edges_secret.remove(lump.as_str());
+                } else if map_set.contains(sx.as_str()) {
                     graph.edges_secret.insert(lump.clone(), sx.clone());
                 } else {
                     graph.edges_secret.remove(lump.as_str());
                 }
             }
-            if edge.has_endgame {
+            // Stopper if explicit endgame, or if `next = self` and the only
+            // alternative (secret_next) is absent or also self-looping.
+            // `next = self` paired with a real `nextsecret = OTHER` is NOT a
+            // stopper — the secret edge is the path forward.
+            let stops_here = edge.has_endgame
+                || (normal_self_loop && (secret_self_loop || edge.secret_next.is_none()));
+            if stops_here {
                 graph.has_endgame.insert(lump.clone());
                 graph.edges_normal.remove(lump.as_str());
                 graph.edges_secret.remove(lump.as_str());
@@ -427,6 +443,27 @@ fn finalize(maps: Vec<MapInfo>, has_structured_flow: bool) -> WadAnalysis {
 // ---------------------------------------------------------------------------
 // Public: WAD analysis
 // ---------------------------------------------------------------------------
+
+/// Analyze whatever's at `wad_path` — `.pk3` archives go through
+/// [`analyze_pk3`]; everything else is loaded as raw WAD bytes (via
+/// [`crate::utils::load_wad_data`], which transparently unwraps a `.zip`
+/// that contains a single `.wad`) and fed to [`analyze_wad`].
+///
+/// Centralises the dispatch so `player.rs`, the GUI's lazy re-analysis
+/// worker, and the diagnostic harness in `completion_detect.rs` agree on
+/// what "analyze the file" means.
+pub fn analyze_path(wad_path: &std::path::Path) -> Option<WadAnalysis> {
+    let is_pk3 = wad_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("pk3"));
+    if is_pk3 {
+        analyze_pk3(wad_path)
+    } else {
+        let wad_data = crate::utils::load_wad_data(wad_path)?;
+        analyze_wad(&wad_data)
+    }
+}
 
 /// Analyze a WAD file to enumerate maps and classify them.
 ///
@@ -1358,6 +1395,80 @@ MAP MAP03
         // MAP03 has has_endgame marker → stopper, OptionalCredits
         assert_eq!(classify_of(&a, "MAP03"), MapClassification::OptionalCredits);
         assert_eq!(a.required_maps, 2);
+    }
+
+    #[test]
+    fn test_analyze_wad_umapinfo_self_loop_is_stopper() {
+        // ][vydotwad shape: the credits map has no exit linedef and uses
+        // `next = SELF` as the established UMAPINFO idiom for "stops here".
+        // MAP10 must classify as OptionalCredits, not as a Required map the
+        // player can never exit.
+        let ld_normal = build_linedefs(&[11]);
+        let umapinfo = br#"
+MAP MAP01
+{
+    next = "MAP02"
+}
+MAP MAP02
+{
+    next = "MAP10"
+}
+MAP MAP10
+{
+    next = "MAP10"
+}
+"#;
+        let wad = build_wad(&[
+            ("MAP01", &[]),
+            ("LINEDEFS", &ld_normal),
+            ("MAP02", &[]),
+            ("LINEDEFS", &ld_normal),
+            ("MAP10", &[]),
+            // No LINEDEFS lump for MAP10 means no exit linedef detected.
+            ("UMAPINFO", umapinfo),
+        ]);
+        let a = analyze_wad(&wad).unwrap();
+        assert_eq!(classify_of(&a, "MAP01"), MapClassification::Required);
+        assert_eq!(classify_of(&a, "MAP02"), MapClassification::Required);
+        assert_eq!(classify_of(&a, "MAP10"), MapClassification::OptionalCredits);
+        assert_eq!(a.required_maps, 2);
+        assert_eq!(a.terminal_map.as_deref(), Some("MAP10"));
+    }
+
+    #[test]
+    fn test_analyze_wad_umapinfo_self_loop_with_real_secret_not_stopper() {
+        // Defensive case: `next = SELF` but a real `nextsecret = OTHER` means
+        // the secret IS the path forward. Don't treat as stopper.
+        let ld_normal = build_linedefs(&[11]);
+        let ld_secret = build_linedefs(&[51]);
+        let umapinfo = br#"
+MAP MAP01
+{
+    next = "MAP02"
+}
+MAP MAP02
+{
+    next = "MAP02"
+    nextsecret = "MAP31"
+}
+MAP MAP31
+{
+    next = "MAP31"
+}
+"#;
+        let wad = build_wad(&[
+            ("MAP01", &[]),
+            ("LINEDEFS", &ld_normal),
+            ("MAP02", &[]),
+            ("LINEDEFS", &ld_secret),
+            ("MAP31", &[]),
+            ("LINEDEFS", &ld_normal),
+            ("UMAPINFO", umapinfo),
+        ]);
+        let a = analyze_wad(&wad).unwrap();
+        // MAP02 → forced secret → MAP31 (which self-loops, so it's the stopper).
+        assert_eq!(classify_of(&a, "MAP02"), MapClassification::Required);
+        assert_eq!(classify_of(&a, "MAP31"), MapClassification::OptionalCredits);
     }
 
     #[test]

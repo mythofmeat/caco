@@ -1,7 +1,6 @@
 //! "Now Playing" / "Continue Playing" hero banner rendered at the top of the library view.
 
 use egui::Color32;
-use rusqlite::Connection;
 
 use crate::panels;
 use crate::state::{ActionRequest, AppState, PlayState};
@@ -13,7 +12,6 @@ pub(super) fn render_now_playing_hero(
     ui: &mut egui::Ui,
     state: &AppState,
     thumbnails: &ThumbnailManager,
-    conn: &Connection,
 ) -> Option<ActionRequest> {
     // Find the first WAD with "playing" status, or show active play state
     let (wad_title, wad_author, wad_id, is_active) =
@@ -180,47 +178,50 @@ pub(super) fn render_now_playing_hero(
                             );
                         }
 
-                        // Progress bar (from stats_snapshot if available)
+                        // Progress bar — sourced from `state.analyses_map`
+                        // (the same Required set the auto-completion verdict
+                        // uses). Hidden when no fresh analysis is cached so
+                        // we never show a misleading number derived from the
+                        // levelstat snapshot's played-only map list.
                         let wad = state.wads.iter().find(|w| w.id == wad_id);
                         if let Some(wad) = wad
+                            && let Some(analysis) = state.analyses_map.get(&wad_id)
+                            && analysis.required_maps > 0
                             && let Some(ref snapshot_json) = wad.stats_snapshot
                             && let Ok(wad_stats) =
                                 serde_json::from_str::<caco_core::wad_stats::WadStats>(
                                     snapshot_json,
                                 )
-                            && !wad_stats.maps.is_empty()
                         {
-                            let analysis = caco_core::db::analysis::get_analysis(conn, wad_id)
-                                .ok()
-                                .flatten();
+                            use caco_core::wad_analysis::MapClassification;
+                            let required_set: std::collections::HashSet<&str> = analysis
+                                .maps
+                                .iter()
+                                .filter(|m| m.classification == MapClassification::Required)
+                                .map(|m| m.lump.as_str())
+                                .collect();
                             let secret_set: std::collections::HashSet<&str> = analysis
-                                .as_ref()
-                                .map(|a| a.secret_maps.iter().map(|s| s.as_str()).collect())
-                                .unwrap_or_default();
+                                .secret_maps
+                                .iter()
+                                .map(|s| s.as_str())
+                                .collect();
 
-                            let total = wad_stats.maps.len();
-                            let played_required = wad_stats
-                                .played_maps()
+                            let exited: std::collections::HashSet<&str> = wad_stats
+                                .maps
                                 .iter()
-                                .filter(|m| !secret_set.contains(m.lump.as_str()))
-                                .count();
-                            let required_total = analysis
-                                .as_ref()
-                                .map(|a| a.required_maps)
-                                .unwrap_or(total);
+                                .filter(|m| m.total_exits >= 1)
+                                .map(|m| m.lump.as_str())
+                                .collect();
+
+                            let played_required =
+                                required_set.iter().filter(|l| exited.contains(*l)).count();
+                            let required_total = analysis.required_maps;
                             let secret_total = secret_set.len();
-                            let played_secret = wad_stats
-                                .played_maps()
-                                .iter()
-                                .filter(|m| secret_set.contains(m.lump.as_str()))
-                                .count();
+                            let played_secret =
+                                secret_set.iter().filter(|l| exited.contains(*l)).count();
 
                             // Bar tracks required maps only
-                            let pct = if required_total > 0 {
-                                played_required as f32 / required_total as f32
-                            } else {
-                                0.0
-                            };
+                            let pct = played_required as f32 / required_total as f32;
 
                             ui.add_space(8.0);
 

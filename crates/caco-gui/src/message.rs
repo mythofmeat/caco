@@ -1,6 +1,7 @@
 use std::time::Instant;
 
 use caco_core::player::PlayResult;
+use caco_core::wad_analysis::WadAnalysis;
 use caco_sources::import_service::ImportResult;
 
 use crate::import::state::{SearchResultEntry, SearchSource};
@@ -83,4 +84,8 @@ pub enum AppMessage {
     ThumbnailFailed {
         wad_id: i64,
     },
+    /// A background re-analysis pass refreshed the cached `wad_analysis` row
+    /// for one or more WADs. Carries the freshly produced analyses so the
+    /// UI doesn't have to re-query the DB on the next frame.
+    AnalysesRefreshed(Vec<(i64, WadAnalysis)>),
 }

@@ -5,6 +5,7 @@ use std::time::Instant;
 use caco_core::db::collections::{self, CollectionRecord};
 use caco_core::db::models::WadRecord;
 use caco_core::db::sessions::WadStats;
+use caco_core::wad_analysis::WadAnalysis;
 use rusqlite::Connection;
 
 use crate::dialogs::cache::CacheDialogState;
@@ -121,11 +122,15 @@ pub struct AppState {
     // WAD data
     pub wads: Vec<WadRecord>,
     pub stats_map: HashMap<i64, WadStats>,
-    /// Required-map counts from `wad_analysis.required_maps`, keyed by wad id.
-    /// Used to compute accurate completion denominators for the grid progress
-    /// bar — a levelstat snapshot only contains played maps, so relying on
-    /// `WadStats::maps.len()` would show every in-progress WAD as 100%.
-    pub required_maps_map: HashMap<i64, usize>,
+    /// Per-WAD `WadAnalysis` keyed by id. Single source of truth for "what
+    /// counts as a map for completion": the hero counter, grid progress bar,
+    /// and Map Stats dialog all pull from here.
+    ///
+    /// Stale rows (`version < ANALYSIS_VERSION`) are filtered out by
+    /// `db::get_analyses_batch` and refreshed in the background by the
+    /// re-analysis worker so the UI converges on the same set the auto-
+    /// completion verdict uses.
+    pub analyses_map: HashMap<i64, WadAnalysis>,
 
     // Selection
     pub selected_wad_id: Option<i64>,
@@ -179,7 +184,7 @@ impl AppState {
             sort_desc: persisted.sort_desc,
             wads: Vec::new(),
             stats_map: HashMap::new(),
-            required_maps_map: HashMap::new(),
+            analyses_map: HashMap::new(),
             selected_wad_id: None,
             selected_row: 0,
             notification: None,
@@ -296,8 +301,8 @@ impl AppState {
                 let ids: Vec<i64> = wads.iter().map(|w| w.id).collect();
                 self.stats_map =
                     caco_core::db::sessions::get_wad_stats_batch(conn, &ids).unwrap_or_default();
-                self.required_maps_map =
-                    caco_core::db::get_required_maps_batch(conn, &ids).unwrap_or_default();
+                self.analyses_map =
+                    caco_core::db::get_analyses_batch(conn, &ids).unwrap_or_default();
 
                 // Preserve selection if still valid
                 if let Some(sel_id) = self.selected_wad_id {

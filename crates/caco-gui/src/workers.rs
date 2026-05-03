@@ -65,6 +65,48 @@ impl BackgroundSender {
 }
 
 // ---------------------------------------------------------------------------
+// Background WAD re-analysis
+// ---------------------------------------------------------------------------
+
+/// One re-analysis target — the path to feed [`caco_core::wad_analysis::analyze_path`].
+#[derive(Clone)]
+pub struct AnalysisJob {
+    pub wad_id: i64,
+    pub wad_path: PathBuf,
+}
+
+/// Spawn a worker that re-analyzes each `(wad_id, path)` pair, persists the
+/// result via [`caco_core::db::save_analysis`], and posts the freshly produced
+/// [`caco_core::wad_analysis::WadAnalysis`] back through `sender`.
+///
+/// Opens its own DB connection so it never contends with the UI thread for
+/// the connection lock, and processes everything in a single batch so the
+/// UI sees one [`AppMessage::AnalysesRefreshed`] per pass instead of N.
+pub fn spawn_reanalysis(sender: BackgroundSender, db_path: PathBuf, jobs: Vec<AnalysisJob>) {
+    if jobs.is_empty() {
+        return;
+    }
+    std::thread::spawn(move || {
+        let Ok(conn) = caco_core::db::open_connection(&db_path) else {
+            return;
+        };
+        let mut refreshed: Vec<(i64, caco_core::wad_analysis::WadAnalysis)> = Vec::new();
+        for job in jobs {
+            let Some(analysis) = caco_core::wad_analysis::analyze_path(&job.wad_path) else {
+                continue;
+            };
+            if caco_core::db::save_analysis(&conn, job.wad_id, &analysis).is_err() {
+                continue;
+            }
+            refreshed.push((job.wad_id, analysis));
+        }
+        if !refreshed.is_empty() {
+            sender.send(crate::message::AppMessage::AnalysesRefreshed(refreshed));
+        }
+    });
+}
+
+// ---------------------------------------------------------------------------
 // File dialog off-thread support
 //
 // `rfd::FileDialog::pick_file()` / `save_file()` blocks until the user

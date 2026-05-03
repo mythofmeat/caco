@@ -814,7 +814,6 @@ fn check_auto_completion(
     stats_json: Option<&str>,
 ) -> AutoCompleteResult {
     use crate::completion_detect::{self, CompletionVerdict};
-    use crate::wad_analysis;
 
     // Only check WADs that are currently being played
     let wad = match db::get_wad(conn, wad_id, false) {
@@ -822,36 +821,8 @@ fn check_auto_completion(
         _ => return AutoCompleteResult::Unknown,
     };
 
-    // Get or create WAD analysis
-    let analysis = match db::get_analysis(conn, wad_id) {
-        Ok(Some(a)) => a,
-        Ok(None) => {
-            // First time: analyze the file (PK3 or WAD)
-            let is_pk3 = wad_path
-                .extension()
-                .and_then(|e| e.to_str())
-                .is_some_and(|e| e.eq_ignore_ascii_case("pk3"));
-
-            let analysis = if is_pk3 {
-                wad_analysis::analyze_pk3(wad_path)
-            } else {
-                let wad_data = match crate::utils::load_wad_data(wad_path) {
-                    Some(d) => d,
-                    None => return AutoCompleteResult::Unknown,
-                };
-                wad_analysis::analyze_wad(&wad_data)
-            };
-
-            let analysis = match analysis {
-                Some(a) => a,
-                None => return AutoCompleteResult::Unknown,
-            };
-            if let Err(e) = db::save_analysis(conn, wad_id, &analysis) {
-                tracing::warn!("failed to save wad analysis for wad {wad_id}: {e}");
-            }
-            analysis
-        }
-        Err(_) => return AutoCompleteResult::Unknown,
+    let Some(analysis) = db::ensure_fresh_analysis(conn, wad_id, wad_path) else {
+        return AutoCompleteResult::Unknown;
     };
 
     // Get current stats (prefer fresh stats_json, fall back to DB)

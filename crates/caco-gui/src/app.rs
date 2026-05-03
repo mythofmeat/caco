@@ -20,7 +20,7 @@ use crate::persist;
 use crate::state::{ActionRequest, ActiveDialog, AppState, PlayState, ViewLayout, ViewMode};
 use crate::theme;
 use crate::thumbnails::{ThumbnailHint, ThumbnailManager};
-use crate::workers::BackgroundChannel;
+use crate::workers::{AnalysisJob, BackgroundChannel, spawn_reanalysis};
 
 mod dialogs;
 mod help;
@@ -81,6 +81,38 @@ impl CacoApp {
                 import::workers::spawn_import_form(sender, db_path, kind, values);
             }
         }
+    }
+
+    /// Spawn a background re-analysis pass for any visible WAD with a cached
+    /// file but no fresh analysis.
+    ///
+    /// Bumping `ANALYSIS_VERSION` (or importing pre-analyzed WADs from a
+    /// snapshot of the library) leaves rows that are silently filtered out
+    /// of `state.analyses_map`. Without this pass the hero/grid/dialog would
+    /// stay blank for those WADs until the user replayed them. The worker
+    /// opens its own DB connection and posts results back via
+    /// `AppMessage::AnalysesRefreshed`.
+    fn kick_reanalysis(&self) {
+        let jobs: Vec<AnalysisJob> = self
+            .state
+            .wads
+            .iter()
+            .filter(|w| !self.state.analyses_map.contains_key(&w.id))
+            .filter_map(|w| {
+                let path = PathBuf::from(w.cached_path.as_deref()?);
+                if !path.exists() {
+                    return None;
+                }
+                Some(AnalysisJob {
+                    wad_id: w.id,
+                    wad_path: path,
+                })
+            })
+            .collect();
+        if jobs.is_empty() {
+            return;
+        }
+        spawn_reanalysis(self.bg.sender(), self.state.db_path.clone(), jobs);
     }
 
     /// Dispatch an action request (from detail panel buttons or table shortcuts).
@@ -376,6 +408,11 @@ impl eframe::App for CacoApp {
                 AppMessage::ThumbnailFailed { wad_id } => {
                     self.thumbnails.mark_failed(wad_id);
                 }
+                AppMessage::AnalysesRefreshed(refreshed) => {
+                    for (wad_id, analysis) in refreshed {
+                        self.state.analyses_map.insert(wad_id, analysis);
+                    }
+                }
                 AppMessage::ImportComplete(result) => {
                     // Reset only the active form's submitting state
                     let active = self.state.import.active_source;
@@ -424,6 +461,7 @@ impl eframe::App for CacoApp {
         // 3. Reload data if needed (defer when on Import view)
         if self.state.needs_reload && self.state.view_mode == ViewMode::Library {
             self.state.reload(&self.conn);
+            self.kick_reanalysis();
         }
 
         // 4. Render active dialog (modal, overlays everything)
@@ -503,12 +541,9 @@ impl eframe::App for CacoApp {
                                 ui.set_min_width(ui.available_width());
 
                                 // Now-playing hero
-                                if let Some(a) = render_now_playing_hero(
-                                    ui,
-                                    &self.state,
-                                    &self.thumbnails,
-                                    &self.conn,
-                                ) {
+                                if let Some(a) =
+                                    render_now_playing_hero(ui, &self.state, &self.thumbnails)
+                                {
                                     actions.push(a);
                                 }
 

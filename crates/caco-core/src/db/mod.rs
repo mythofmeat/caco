@@ -12,7 +12,9 @@ pub mod sessions;
 pub mod wads;
 
 // Re-export commonly used items
-pub use analysis::{get_analysis, get_required_maps_batch, save_analysis};
+pub use analysis::{
+    ensure_fresh_analysis, get_analyses_batch, get_analysis, get_required_maps_batch, save_analysis,
+};
 pub use collections::{
     CollectionRecord, create_collection, delete_collection, get_all_collections, get_collection,
     run_collection, update_collection,
