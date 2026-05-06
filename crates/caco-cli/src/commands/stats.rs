@@ -52,10 +52,15 @@ pub fn run_sessions(conn: &Connection, args: &SessionsArgs) -> Result<(), String
     // Compute per-session map deltas
     let deltas: Vec<Option<Vec<String>>> = sessions
         .iter()
-        .map(|session| {
+        .enumerate()
+        .map(|(idx, session)| {
+            let fallback_before = sessions
+                .get(idx + 1)
+                .and_then(|prev| prev.stats_after.as_deref());
             let before = session
                 .stats_before
                 .as_deref()
+                .or(fallback_before)
                 .and_then(|j| wad_stats::stats_from_json(j).ok());
             let after = session
                 .stats_after

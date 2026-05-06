@@ -489,8 +489,10 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
     // against the reconciled baseline rather than stale DB state.
     reconcile_stats(conn, wad_id);
 
-    // Capture stats snapshot before play
-    let stats_before = read_stats_snapshot(wad_id);
+    // Capture stats snapshot before play. Prefer disk, but fall back to the
+    // DB snapshot when legacy/imported progress has not been materialized as a
+    // sourceport stats file yet.
+    let stats_before = read_session_stats_before(conn, wad_id);
 
     // Launch sourceport
     cmd.stdin(std::process::Stdio::null());
@@ -769,6 +771,15 @@ fn read_stats_snapshot(wad_id: i64) -> Option<String> {
 
     let merged = wad_stats::merge_stats(&parsed);
     wad_stats::stats_to_json(&merged).ok()
+}
+
+fn read_session_stats_before(conn: &Connection, wad_id: i64) -> Option<String> {
+    read_stats_snapshot(wad_id).or_else(|| {
+        db::get_wad(conn, wad_id, false)
+            .ok()
+            .flatten()
+            .and_then(|wad| wad.stats_snapshot)
+    })
 }
 
 /// Whether a play session produced measurable level progress.
@@ -1168,6 +1179,20 @@ mod tests {
 
         let found = find_all_stats_files(dir.path());
         assert_eq!(found.len(), 2);
+    }
+
+    #[test]
+    fn test_read_session_stats_before_falls_back_to_db_snapshot() {
+        use crate::db;
+        let (conn, wad_id) = fresh_db_with_wad();
+        let snapshot = stats_json_one_map("MAP04", 1, 4);
+        let update = db::WadUpdate::new().set_text("stats_snapshot", Some(snapshot.clone()));
+        db::update_wad(&conn, wad_id, &update).unwrap();
+
+        assert_eq!(
+            read_session_stats_before(&conn, wad_id).as_deref(),
+            Some(snapshot.as_str())
+        );
     }
 
     #[test]

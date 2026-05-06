@@ -76,25 +76,9 @@ impl Screen for SessionsScreen {
             let rows: Vec<Row> = self
                 .sessions
                 .iter()
-                .map(|s| {
-                    // Parse date/time from started_at
-                    let (date, time) = if let Some(idx) = s.started_at.find('T') {
-                        (
-                            s.started_at[..idx].to_string(),
-                            s.started_at[idx + 1..]
-                                .split('.')
-                                .next()
-                                .unwrap_or("")
-                                .to_string(),
-                        )
-                    } else if let Some(idx) = s.started_at.find(' ') {
-                        (
-                            s.started_at[..idx].to_string(),
-                            s.started_at[idx + 1..].to_string(),
-                        )
-                    } else {
-                        (s.started_at.clone(), String::new())
-                    };
+                .enumerate()
+                .map(|(idx, s)| {
+                    let (date, time) = format_session_date_time(&s.started_at);
 
                     let duration = s
                         .duration_seconds
@@ -106,9 +90,14 @@ impl Screen for SessionsScreen {
                     // Compute maps played from stats_before/stats_after
                     let maps = match (&s.stats_before, &s.stats_after) {
                         (_, Some(after)) => {
+                            let fallback_before = self
+                                .sessions
+                                .get(idx + 1)
+                                .and_then(|prev| prev.stats_after.as_deref());
                             let before = s
                                 .stats_before
                                 .as_deref()
+                                .or(fallback_before)
                                 .and_then(|s| wad_stats::stats_from_json(s).ok());
                             let after = wad_stats::stats_from_json(after).ok();
                             match (before.as_ref(), after) {
@@ -160,7 +149,7 @@ impl Screen for SessionsScreen {
 
             let widths = [
                 Constraint::Length(12),
-                Constraint::Length(10),
+                Constraint::Length(6),
                 Constraint::Length(10),
                 Constraint::Length(16),
                 Constraint::Min(15),
@@ -199,5 +188,29 @@ impl Screen for SessionsScreen {
             }
             _ => None,
         }
+    }
+}
+
+fn format_session_date_time(ts: &str) -> (String, String) {
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(ts) {
+        let local = dt.with_timezone(&chrono::Local);
+        return (
+            local.format("%Y-%m-%d").to_string(),
+            local.format("%H:%M").to_string(),
+        );
+    }
+
+    if let Some(idx) = ts.find('T') {
+        (
+            ts[..idx].to_string(),
+            ts[idx + 1..].get(..5).unwrap_or("").to_string(),
+        )
+    } else if let Some(idx) = ts.find(' ') {
+        (
+            ts[..idx].to_string(),
+            ts[idx + 1..].get(..5).unwrap_or("").to_string(),
+        )
+    } else {
+        (ts.to_string(), String::new())
     }
 }

@@ -33,12 +33,9 @@ impl SessionsDialogState {
 
         let rows: Vec<SessionRow> = sessions
             .iter()
-            .map(|s| {
-                // Split started_at on 'T' for date/time
-                let (date, time) = match s.started_at.split_once('T') {
-                    Some((d, t)) => (d.to_string(), t.get(..5).unwrap_or(t).to_string()),
-                    None => (s.started_at.clone(), String::new()),
-                };
+            .enumerate()
+            .map(|(idx, s)| {
+                let (date, time) = format_session_date_time(&s.started_at);
 
                 // Duration
                 let duration = match s.duration_seconds {
@@ -49,8 +46,18 @@ impl SessionsDialogState {
                 // Sourceport
                 let sourceport = s.sourceport.clone().unwrap_or_default();
 
-                // Maps played (from stats_before/stats_after delta)
-                let maps = compute_maps_played(s.stats_before.as_deref(), s.stats_after.as_deref());
+                // Maps played (from stats_before/stats_after delta). For older
+                // rows recorded without stats_before, fall back to the next
+                // older session's after snapshot because sessions are loaded
+                // newest-first.
+                let fallback_before = sessions
+                    .get(idx + 1)
+                    .and_then(|prev| prev.stats_after.as_deref());
+                let maps = compute_maps_played(
+                    s.stats_before.as_deref(),
+                    fallback_before,
+                    s.stats_after.as_deref(),
+                );
 
                 // Crash status
                 let (status_text, crashed) = match s.exit_code {
@@ -170,8 +177,27 @@ impl SessionsDialogState {
     }
 }
 
+fn format_session_date_time(ts: &str) -> (String, String) {
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(ts) {
+        let local = dt.with_timezone(&chrono::Local);
+        return (
+            local.format("%Y-%m-%d").to_string(),
+            local.format("%H:%M").to_string(),
+        );
+    }
+
+    match ts.split_once('T') {
+        Some((d, t)) => (d.to_string(), t.get(..5).unwrap_or(t).to_string()),
+        None => (ts.to_string(), String::new()),
+    }
+}
+
 /// Compute a short "maps played" summary from stats_before/stats_after JSON.
-fn compute_maps_played(before: Option<&str>, after: Option<&str>) -> String {
+fn compute_maps_played(
+    before: Option<&str>,
+    fallback_before: Option<&str>,
+    after: Option<&str>,
+) -> String {
     let Some(after_str) = after else {
         return "\u{2014}".to_string();
     };
@@ -181,7 +207,9 @@ fn compute_maps_played(before: Option<&str>, after: Option<&str>) -> String {
         Err(_) => return "\u{2014}".to_string(),
     };
 
-    let before_stats = before.and_then(|b| caco_core::wad_stats::stats_from_json(b).ok());
+    let before_stats = before
+        .or(fallback_before)
+        .and_then(|b| caco_core::wad_stats::stats_from_json(b).ok());
     let delta = caco_core::wad_stats::compute_stats_delta(before_stats.as_ref(), &after_stats);
 
     if delta.maps_played.is_empty() {
@@ -193,5 +221,75 @@ fn compute_maps_played(before: Option<&str>, after: Option<&str>) -> String {
         maps.join(", ")
     } else {
         format!("{}, {} + {} more", maps[0], maps[1], maps.len() - 2)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stats_json(maps: &[(&str, i32)]) -> String {
+        let maps: Vec<caco_core::wad_stats::MapStats> = maps
+            .iter()
+            .map(|(lump, exits)| caco_core::wad_stats::MapStats {
+                lump: (*lump).to_string(),
+                total_exits: *exits,
+                best_skill: if *exits > 0 { 4 } else { 0 },
+                best_time: if *exits > 0 { 3500 } else { -1 },
+                time_secs: if *exits > 0 { 100.0 } else { -1.0 },
+                kills: 0,
+                total_kills: -1,
+                items: 0,
+                total_items: -1,
+                secrets: 0,
+                total_secrets: -1,
+                episode: 0,
+                map_num: 0,
+                best_max_time: -1,
+                best_nm_time: -1,
+                cumulative_kills: 0,
+                total_time_secs: -1.0,
+            })
+            .collect();
+        let stats = caco_core::wad_stats::WadStats {
+            format: "stats_txt".to_string(),
+            maps,
+            version: 1,
+            header_total_kills: 0,
+        };
+        caco_core::wad_stats::stats_to_json(&stats).unwrap()
+    }
+
+    #[test]
+    fn maps_played_uses_fallback_before_when_session_before_missing() {
+        let before = stats_json(&[("MAP01", 1), ("MAP02", 1), ("MAP03", 1), ("MAP04", 1)]);
+        let after = stats_json(&[
+            ("MAP01", 1),
+            ("MAP02", 1),
+            ("MAP03", 1),
+            ("MAP04", 1),
+            ("MAP05", 1),
+        ]);
+
+        assert_eq!(
+            compute_maps_played(None, Some(&before), Some(&after)),
+            "MAP05"
+        );
+    }
+
+    #[test]
+    fn maps_played_still_summarizes_first_cumulative_session_without_before() {
+        let after = stats_json(&[
+            ("MAP01", 1),
+            ("MAP02", 1),
+            ("MAP03", 1),
+            ("MAP04", 1),
+            ("MAP05", 1),
+        ]);
+
+        assert_eq!(
+            compute_maps_played(None, None, Some(&after)),
+            "MAP01, MAP02 + 3 more"
+        );
     }
 }
