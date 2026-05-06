@@ -472,6 +472,8 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
         && let Some(ref data_dir) = wad_data_dir
     {
         let log_path = data_dir.join(stats_watcher::LOG_FILENAME);
+        // Avoid parsing stale lines if the sourceport appends to an existing log.
+        let _ = std::fs::remove_file(&log_path);
         cmd.args(["+logfile", &log_path.to_string_lossy()]);
     }
 
@@ -519,7 +521,7 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
     // End session
     db::end_session(conn, session_id, None, status.code())?;
 
-    // For zdoom-family ports, parse the log and write levelstat.txt
+    // For zdoom-family ports, parse the log and write managed stats.txt
     if is_zdoom
         && config::get_auto_stats()
         && let Some(ref data_dir) = wad_data_dir
