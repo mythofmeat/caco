@@ -121,20 +121,51 @@ impl SessionRecord {
     }
 }
 
-/// Get all play sessions for a WAD (excludes short non-play sessions).
+fn session_has_map_progress(session: &SessionRecord, fallback_before: Option<&str>) -> bool {
+    let Some(after_json) = session.stats_after.as_deref() else {
+        return false;
+    };
+    let Ok(after) = crate::wad_stats::stats_from_json(after_json) else {
+        return false;
+    };
+    let before = session
+        .stats_before
+        .as_deref()
+        .or(fallback_before)
+        .and_then(|json| crate::wad_stats::stats_from_json(json).ok());
+
+    !crate::wad_stats::compute_stats_delta(before.as_ref(), &after)
+        .maps_played
+        .is_empty()
+}
+
+/// Get all play sessions for a WAD.
+///
+/// Excludes short launch/quit sessions, but keeps short sessions when stats
+/// prove actual map progress. Fast ZDoom maps can legitimately complete under
+/// `MIN_SESSION_SECONDS`, and hiding those makes session history look stale.
 pub fn get_sessions(conn: &Connection, wad_id: i64) -> Result<Vec<SessionRecord>> {
-    let mut stmt = conn.prepare(
-        "SELECT * FROM sessions WHERE wad_id = ? \
-         AND COALESCE(duration_seconds, 0) >= ? \
-         ORDER BY started_at DESC",
-    )?;
+    let mut stmt =
+        conn.prepare("SELECT * FROM sessions WHERE wad_id = ? ORDER BY started_at DESC")?;
     let rows = stmt
-        .query_map(
-            rusqlite::params![wad_id, MIN_SESSION_SECONDS],
-            SessionRecord::from_row,
-        )?
+        .query_map([wad_id], SessionRecord::from_row)?
         .collect::<std::result::Result<Vec<_>, _>>()?;
-    Ok(rows)
+    Ok(rows
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, session)| {
+            let fallback_before = rows
+                .get(idx + 1)
+                .and_then(|prev| prev.stats_after.as_deref());
+            if session.duration_seconds.unwrap_or(0) >= MIN_SESSION_SECONDS
+                || session_has_map_progress(session, fallback_before)
+            {
+                Some(session.clone())
+            } else {
+                None
+            }
+        })
+        .collect())
 }
 
 /// Get total playtime in seconds for a WAD.
@@ -788,6 +819,38 @@ mod tests {
         .unwrap()
     }
 
+    fn stats_json(maps: &[(&str, i32)]) -> String {
+        let maps: Vec<crate::wad_stats::MapStats> = maps
+            .iter()
+            .map(|(lump, exits)| crate::wad_stats::MapStats {
+                lump: (*lump).to_string(),
+                total_exits: *exits,
+                best_skill: if *exits > 0 { 4 } else { 0 },
+                best_time: if *exits > 0 { 3500 } else { -1 },
+                time_secs: if *exits > 0 { 100.0 } else { -1.0 },
+                kills: 0,
+                total_kills: -1,
+                items: 0,
+                total_items: -1,
+                secrets: 0,
+                total_secrets: -1,
+                episode: 0,
+                map_num: 0,
+                best_max_time: -1,
+                best_nm_time: -1,
+                cumulative_kills: 0,
+                total_time_secs: -1.0,
+            })
+            .collect();
+        let stats = crate::wad_stats::WadStats {
+            format: "stats_txt".to_string(),
+            maps,
+            version: 1,
+            header_total_kills: 0,
+        };
+        crate::wad_stats::stats_to_json(&stats).unwrap()
+    }
+
     #[test]
     fn test_start_and_end_session() {
         let conn = setup();
@@ -824,6 +887,72 @@ mod tests {
         .unwrap();
 
         assert_eq!(get_total_playtime(&conn, wad_id).unwrap(), 3600);
+    }
+
+    #[test]
+    fn test_get_sessions_excludes_short_session_without_progress() {
+        let conn = setup();
+        let wad_id = add_test_wad(&conn);
+
+        conn.execute(
+            "INSERT INTO sessions (wad_id, started_at, ended_at, duration_seconds) \
+             VALUES (?1, '2024-01-01T00:00:00', '2024-01-01T00:01:00', 60)",
+            [wad_id],
+        )
+        .unwrap();
+
+        assert!(get_sessions(&conn, wad_id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_get_sessions_includes_short_session_with_map_progress() {
+        let conn = setup();
+        let wad_id = add_test_wad(&conn);
+        let before = stats_json(&[("MAP01", 1)]);
+        let after = stats_json(&[("MAP01", 1), ("MAP02", 1)]);
+
+        conn.execute(
+            "INSERT INTO sessions (wad_id, started_at, ended_at, duration_seconds, stats_before, stats_after) \
+             VALUES (?1, '2024-01-01T00:00:00', '2024-01-01T00:01:00', 60, ?2, ?3)",
+            rusqlite::params![wad_id, before, after],
+        )
+        .unwrap();
+
+        let sessions = get_sessions(&conn, wad_id).unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].duration_seconds, Some(60));
+    }
+
+    #[test]
+    fn test_get_sessions_uses_previous_after_for_short_missing_before() {
+        let conn = setup();
+        let wad_id = add_test_wad(&conn);
+        let before = stats_json(&[("MAP01", 1), ("MAP02", 1), ("MAP03", 1), ("MAP04", 1)]);
+        let after = stats_json(&[
+            ("MAP01", 1),
+            ("MAP02", 1),
+            ("MAP03", 1),
+            ("MAP04", 1),
+            ("MAP05", 1),
+        ]);
+
+        conn.execute(
+            "INSERT INTO sessions (wad_id, started_at, ended_at, duration_seconds, stats_after) \
+             VALUES (?1, '2024-01-01T00:00:00', '2024-01-01T00:45:00', 2700, ?2)",
+            rusqlite::params![wad_id, before],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sessions (wad_id, started_at, ended_at, duration_seconds, stats_after) \
+             VALUES (?1, '2024-01-02T00:00:00', '2024-01-02T00:01:00', 60, ?2)",
+            rusqlite::params![wad_id, after],
+        )
+        .unwrap();
+
+        let sessions = get_sessions(&conn, wad_id).unwrap();
+        assert_eq!(sessions.len(), 2);
+        assert_eq!(sessions[0].started_at, "2024-01-02T00:00:00");
+        assert_eq!(sessions[0].duration_seconds, Some(60));
     }
 
     #[test]
