@@ -284,38 +284,63 @@ static SOURCEPORT_PATTERNS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new
     ]
 });
 
-// Intent phrases that promote a port mentioned on the same line.
-const STRONG_INTENT: &[&str] = &[
-    "intended port",
-    "target port",
-    "primary port",
-    "preferred port",
-    "recommended port",
+// Requirement phrases intentionally exclude "tested with" / "works in" style
+// compatibility notes because Doomworld posts often mention the tester's port
+// without making it mandatory.
+const STRICT_PORT_PREFIXES: &[&str] = &[
+    "requires",
+    "require",
+    "needs",
+    "need",
+    "must use",
+    "must run",
+    "only runs",
+    "only run",
+    "only compatible",
+    "compatible only",
     "designed for",
     "built for",
     "made for",
     "specifically for",
+    "intended port",
+    "target port",
+    "primary port",
     "source port:",
     "sourceport:",
     "port:",
-    "port of choice",
-    "only runs",
-    "only compatible",
-    "compatible only",
-    "requires",
-    "needs",
 ];
-const WEAK_INTENT: &[&str] = &[
+const STRICT_PORT_SUFFIXES: &[&str] = &[
+    "required",
+    "is required",
+    "needed",
+    "is needed",
+    "only",
+    "compatible only",
+];
+const WEAK_COMPAT_INTENT: &[&str] = &[
     "tested with",
     "tested in",
     "tested on",
+    "test with",
+    "tested port",
+    "tested source port",
     "works with",
     "works in",
     "plays in",
     "plays on",
     "compatible with",
     "runs on",
+    "runs in",
     "run with",
+];
+const NON_REQUIREMENT_LABELS: &[&str] = &[
+    "recommended port",
+    "recommended source port",
+    "preferred port",
+    "preferred source port",
+    "tested port",
+    "tested source port",
+    "port of choice",
 ];
 
 /// Patterns that capture an explicit port declaration. The capture group is a
@@ -325,23 +350,18 @@ const WEAK_INTENT: &[&str] = &[
 static EXPLICIT_PORT_LABEL_RE: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     vec![
         Regex::new(
-            r"(?i)\b(?:intended|target|primary|preferred|recommended)\s+(?:source\s+)?port\s*[:=-]\s*([^\n.,;()]{2,60})",
-        ).unwrap(),
+            r"(?i)\b(?:intended|target|primary)\s+(?:source\s+)?port\s*[:=-]\s*([^\n.,;()]{2,60})",
+        )
+        .unwrap(),
+        Regex::new(r"(?i)\b(?:source\s*)?port\s*[:=]\s*([A-Za-z][^\n.,;()]{1,60})").unwrap(),
         Regex::new(
-            r"(?i)\b(?:source\s*)?port\s*[:=]\s*([A-Za-z][^\n.,;()]{1,60})",
-        ).unwrap(),
-        Regex::new(
-            r"(?i)\b(?:advanced\s+)?engine\s+needed\s*[:=]\s*([^\n.,;()]{2,60})",
-        ).unwrap(),
-        Regex::new(
-            r"(?i)\b(?:other\s+)?files?\s+required\s*[:=]\s*([^\n.,;()]{2,60})",
-        ).unwrap(),
+            r"(?i)\b(?:advanced\s+)?engine\s+(?:needed|required)\s*[:=]\s*([^\n.,;()]{2,60})",
+        )
+        .unwrap(),
         Regex::new(
             r"(?i)\b(?:designed|built|made|specifically)\s+for\s+([A-Za-z][^\n.,;()]{2,40})",
-        ).unwrap(),
-        Regex::new(
-            r"(?i)\bport\s+of\s+choice\s+(?:is\s+)?([A-Za-z][^\n.,;()]{2,40})",
-        ).unwrap(),
+        )
+        .unwrap(),
     ]
 });
 
@@ -386,22 +406,30 @@ const NEGATION_PHRASES: &[&str] = &[
     "not tested in",
 ];
 
-/// Extract the most-likely-intended sourceport by scoring every mention with
-/// the intent signals in its surrounding line. Lines like
+/// Extract the required sourceport by scoring every mention with requirement
+/// signals in its surrounding line. Lines like
 /// `FOR GZDOOM USERS: ...` get demoted as caveats, while
-/// `INTENDED PORT: Nugget Doom` boosts Nugget to the top even when GZDoom
-/// appears elsewhere in the post.
+/// `TESTED WITH: GZDoom` is ignored because it does not state a strict
+/// requirement.
 fn extract_sourceport(text: &str) -> Option<&'static str> {
     // Preserve SOURCEPORT_PATTERNS order for deterministic tie-breaking.
     let mut scores: Vec<(&'static str, i32)> = Vec::new();
 
-    // First pass: explicit `INTENDED PORT: X` style labels. These get the
-    // strongest boost because the author is telling us directly. A single
-    // capture may list multiple ports ("GZDoom or VKDoom") — boost every one.
+    // First pass: explicit requirement-style labels. These get the strongest
+    // boost because the author is telling us directly. A single capture may
+    // list multiple ports ("GZDoom or VKDoom") — boost every one.
     let explicit: std::collections::HashSet<&'static str> = EXPLICIT_PORT_LABEL_RE
         .iter()
         .flat_map(|re| re.captures_iter(text))
-        .filter_map(|c| c.get(1).map(|m| m.as_str().to_string()))
+        .filter_map(|c| {
+            let whole = c.get(0)?;
+            let line = enclosing_line(text, whole.start(), whole.end()).to_lowercase();
+            if is_non_requirement_sourceport_line(&line) {
+                None
+            } else {
+                c.get(1).map(|m| m.as_str().to_string())
+            }
+        })
         .flat_map(|snippet| {
             SOURCEPORT_PATTERNS
                 .iter()
@@ -428,14 +456,11 @@ fn extract_sourceport(text: &str) -> Option<&'static str> {
             let before_lower = text[window_start..m.start()].to_lowercase();
             let mention_negated = NEGATION_PHRASES.iter().any(|p| before_lower.contains(p));
             let negated = line_negated || mention_negated;
-            let mut score: i32 = 1; // base: any mention
+            let mut score: i32 = 0;
 
-            if !negated {
-                if STRONG_INTENT.iter().any(|k| line_lower.contains(k)) {
-                    score += 10;
-                }
-                if WEAK_INTENT.iter().any(|k| line_lower.contains(k)) {
-                    score += 4;
+            if !negated && !is_non_requirement_sourceport_line(&line_lower) {
+                if mention_has_strict_requirement_context(text, m.start(), m.end()) {
+                    score += 12;
                 }
             } else {
                 // "May not run with X" / "impossible on X" — port is being
@@ -471,6 +496,42 @@ fn extract_sourceport(text: &str) -> Option<&'static str> {
         }
     }
     best.map(|(n, _)| n)
+}
+
+fn is_non_requirement_sourceport_line(line_lower: &str) -> bool {
+    NON_REQUIREMENT_LABELS
+        .iter()
+        .any(|k| line_lower.contains(k))
+}
+
+fn mention_has_strict_requirement_context(text: &str, start: usize, end: usize) -> bool {
+    let before_start = start.saturating_sub(50);
+    let after_end = (end + 50).min(text.len());
+    let before_lower = text[before_start..start].to_lowercase();
+    let after_lower = text[end..after_end].to_lowercase();
+    let after_trimmed = after_lower.trim_start();
+    let strict_prefix = last_index_of_any(&before_lower, STRICT_PORT_PREFIXES);
+    let weak_prefix = last_index_of_any(&before_lower, WEAK_COMPAT_INTENT);
+    let has_strict_prefix = strict_prefix.is_some_and(|s| weak_prefix.map_or(true, |w| s > w));
+    let suffix_negated = ["not required", "not needed", "not mandatory"]
+        .iter()
+        .any(|p| after_lower.contains(p));
+
+    has_strict_prefix
+        || (!suffix_negated
+            && (STRICT_PORT_SUFFIXES
+                .iter()
+                .any(|p| after_trimmed.starts_with(p))
+                || ["required", "needed"]
+                    .iter()
+                    .any(|p| after_lower.contains(p))))
+}
+
+fn last_index_of_any(haystack: &str, needles: &[&str]) -> Option<usize> {
+    needles
+        .iter()
+        .filter_map(|needle| haystack.rfind(needle))
+        .max()
 }
 
 fn enclosing_line(text: &str, start: usize, end: usize) -> &str {
@@ -1504,14 +1565,35 @@ mod tests {
     #[test]
     fn test_extract_sourceport() {
         assert_eq!(extract_sourceport("GZDoom required"), Some("gzdoom"));
-        assert_eq!(extract_sourceport("tested in dsda-doom"), Some("dsda-doom"));
-        assert_eq!(extract_sourceport("Eternity Engine"), Some("eternity"));
-        assert_eq!(extract_sourceport("crispy doom"), Some("crispy-doom"));
+        assert_eq!(extract_sourceport("Requires DSDA-Doom."), Some("dsda-doom"));
+        assert_eq!(
+            extract_sourceport("Requires DSDA-Doom. Tested with GZDoom."),
+            Some("dsda-doom")
+        );
+        assert_eq!(
+            extract_sourceport("Source port: GZDoom (tested with 4.11)"),
+            Some("gzdoom")
+        );
+        assert_eq!(
+            extract_sourceport("Advanced engine required: Eternity Engine"),
+            Some("eternity")
+        );
     }
 
     #[test]
     fn test_extract_sourceport_none() {
         assert_eq!(extract_sourceport("no port mentioned"), None);
+        assert_eq!(extract_sourceport("tested in dsda-doom"), None);
+        assert_eq!(extract_sourceport("Tested with GZDoom v4.11.0"), None);
+        assert_eq!(extract_sourceport("Eternity Engine"), None);
+        assert_eq!(extract_sourceport("crispy doom"), None);
+        assert_eq!(
+            extract_sourceport("Tested with GZDoom, requires Doom II."),
+            None
+        );
+        assert_eq!(extract_sourceport("Recommended source port: GZDoom"), None);
+        assert_eq!(extract_sourceport("GZDoom was only tested."), None);
+        assert_eq!(extract_sourceport("GZDoom was not required."), None);
     }
 
     #[test]
@@ -1537,7 +1619,7 @@ mod tests {
         let text = "\
             May Not Run With: PRBoom+ (DSDHacked is newer).\n\
             Tested with DSDA Doom.\n";
-        assert_eq!(extract_sourceport(text), Some("dsda-doom"));
+        assert_eq!(extract_sourceport(text), None);
     }
 
     #[test]
