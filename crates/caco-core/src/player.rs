@@ -950,8 +950,15 @@ fn reconcile_stats_with(
 
     let needs_promotion = disk_has_exits && wad.status == db::Status::Unplayed;
 
-    // Quick out: nothing to do and nothing to promote.
+    // Quick out: nothing to promote and the stats snapshot is already in
+    // sync. Still run auto-completion for active WADs so an analysis-version
+    // bump can repair a stale required-map set without needing another exit.
     if !snapshot_changed && !needs_promotion {
+        if wad.status == db::Status::InProgress
+            && let Some(path) = wad_path
+        {
+            return check_auto_completion(conn, wad_id, path, Some(disk_json));
+        }
         return AutoCompleteResult::Unknown;
     }
 
@@ -1343,6 +1350,50 @@ mod tests {
         (conn, wad_id)
     }
 
+    fn test_linedefs(specials: &[u16]) -> Vec<u8> {
+        let mut out = Vec::new();
+        for &special in specials {
+            out.extend_from_slice(&0u16.to_le_bytes()); // v1
+            out.extend_from_slice(&0u16.to_le_bytes()); // v2
+            out.extend_from_slice(&0u16.to_le_bytes()); // flags
+            out.extend_from_slice(&special.to_le_bytes());
+            out.extend_from_slice(&0u16.to_le_bytes()); // tag
+            out.extend_from_slice(&0u16.to_le_bytes()); // sidedef 1
+            out.extend_from_slice(&0u16.to_le_bytes()); // sidedef 2
+        }
+        out
+    }
+
+    fn test_wad(lumps: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut wad = Vec::new();
+        let mut data = Vec::new();
+        let mut entries = Vec::new();
+        let mut offset = 12u32;
+
+        for (name, lump_data) in lumps {
+            entries.push((name.to_string(), offset, lump_data.len() as u32));
+            data.extend_from_slice(lump_data);
+            offset += lump_data.len() as u32;
+        }
+
+        wad.extend_from_slice(b"PWAD");
+        wad.extend_from_slice(&(lumps.len() as i32).to_le_bytes());
+        wad.extend_from_slice(&(offset as i32).to_le_bytes());
+        wad.extend_from_slice(&data);
+
+        for (name, lump_offset, size) in entries {
+            wad.extend_from_slice(&lump_offset.to_le_bytes());
+            wad.extend_from_slice(&size.to_le_bytes());
+            let mut name_bytes = [0u8; 8];
+            for (i, b) in name.bytes().take(8).enumerate() {
+                name_bytes[i] = b;
+            }
+            wad.extend_from_slice(&name_bytes);
+        }
+
+        wad
+    }
+
     #[test]
     fn test_ensure_in_progress_creates_playthrough_when_none() {
         use crate::db;
@@ -1435,6 +1486,32 @@ mod tests {
         let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
         assert_eq!(wad.status, db::Status::Unplayed);
         assert!(db::get_active_playthrough(&conn, wad_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_reconcile_stats_with_synced_snapshot_still_checks_completion() {
+        use crate::db;
+        let (conn, wad_id) = fresh_db_with_wad();
+        let dir = tempfile::tempdir().unwrap();
+        let wad_path = dir.path().join("single.wad");
+        let linedefs = test_linedefs(&[11]);
+        std::fs::write(
+            &wad_path,
+            test_wad(&[("MAP01", &[]), ("LINEDEFS", &linedefs)]),
+        )
+        .unwrap();
+
+        db::start_playthrough(&conn, wad_id).unwrap();
+        let snapshot = stats_json_one_map("MAP01", 1, 4);
+        let update = db::WadUpdate::new().set_text("stats_snapshot", Some(snapshot.clone()));
+        db::update_wad(&conn, wad_id, &update).unwrap();
+
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        let result = reconcile_stats_with(&conn, wad_id, &wad, &snapshot, Some(&wad_path));
+        assert_eq!(result, AutoCompleteResult::Completed);
+
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        assert_eq!(wad.status, db::Status::Completed);
     }
 
     #[test]

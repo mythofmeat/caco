@@ -42,15 +42,9 @@ const VANILLA_NORMAL_EXITS: &[u16] = &[11, 52, 197];
 /// Vanilla/Boom secret exit linedef types.
 const VANILLA_SECRET_EXITS: &[u16] = &[51, 124, 198];
 
-/// Boom generalized exit linedef range: 0x3400..=0x37FF.
-const GEN_EXIT_BASE: u16 = 0x3400;
-const GEN_EXIT_END: u16 = 0x37FF;
-/// Bit 5 within the generalized exit encoding indicates a secret exit.
-const GEN_EXIT_SECRET_BIT: u16 = 0x20;
-
 /// Analysis format version. Bump this whenever detection logic changes
 /// so that stale cached analyses are automatically invalidated and re-run.
-pub const ANALYSIS_VERSION: u32 = 5;
+pub const ANALYSIS_VERSION: u32 = 6;
 
 /// UDMF normal exit specials.
 const UDMF_NORMAL_EXITS: &[i32] = &[243, 74, 75]; // Exit_Normal, Teleport_NewMap, Teleport_EndGame
@@ -153,6 +147,7 @@ impl FlowSource {
 /// sources. Edges that point to lumps not in `map_set` are dropped.
 fn build_graph(
     map_set: &HashSet<&str>,
+    map_exits: &HashMap<&str, (bool, bool)>,
     is_doom1: bool,
     sources: &[(FlowSource, HashMap<String, MapinfoEdge>)],
 ) -> MapGraph {
@@ -163,7 +158,7 @@ fn build_graph(
     let mut graph = MapGraph::default();
 
     // Layer 0: vanilla edges (lowest priority, applied first)
-    add_vanilla_edges(&mut graph, map_set, is_doom1);
+    add_vanilla_edges(&mut graph, map_set, map_exits, is_doom1);
 
     // Higher layers: overlay each source in priority order. Each property
     // is only overridden when the higher-priority source explicitly sets it
@@ -226,22 +221,30 @@ struct MapinfoEdge {
 }
 
 /// Add vanilla map-flow edges based on map naming conventions.
-fn add_vanilla_edges(graph: &mut MapGraph, map_set: &HashSet<&str>, is_doom1: bool) {
+fn add_vanilla_edges(
+    graph: &mut MapGraph,
+    map_set: &HashSet<&str>,
+    map_exits: &HashMap<&str, (bool, bool)>,
+    is_doom1: bool,
+) {
     if is_doom1 {
         // ExMy → ExM(y+1) for y < 8; ExM3 secret → ExM9; ExM9 → ExM(source+1)
-        // is rare and engine-specific, skip.
+        // is rare and engine-specific, skip. Only synthesize convention edges
+        // when the source map has the corresponding exit linedef.
         for &lump in map_set {
             if let Some(caps) = DOOM1_MAP_RE.captures(lump)
                 && let Ok(ep) = caps[1].parse::<u32>()
                 && let Ok(mn) = caps[2].parse::<u32>()
             {
-                if mn < 8 {
+                let (has_normal_exit, has_secret_exit) =
+                    map_exits.get(lump).copied().unwrap_or((false, false));
+                if mn < 8 && has_normal_exit {
                     let next = format!("E{ep}M{}", mn + 1);
                     if map_set.contains(next.as_str()) {
                         graph.edges_normal.insert(lump.to_string(), next);
                     }
                 }
-                if mn == 3 {
+                if mn == 3 && has_secret_exit {
                     let secret = format!("E{ep}M9");
                     if map_set.contains(secret.as_str()) {
                         graph.edges_secret.insert(lump.to_string(), secret);
@@ -250,35 +253,40 @@ fn add_vanilla_edges(graph: &mut MapGraph, map_set: &HashSet<&str>, is_doom1: bo
             }
         }
     } else {
-        // MAP_n → MAP_(n+1) for n < 30; MAP15 secret → MAP31; MAP31 → MAP32 → MAP16
+        // MAP_n → MAP_(n+1) for n < 30; MAP15 secret → MAP31; MAP31 → MAP32 → MAP16.
+        // Only synthesize convention edges when the source map has the
+        // corresponding exit linedef; a no-exit credits map named MAP24 must
+        // not imply a playable transition to MAP25.
         for &lump in map_set {
             if let Some(caps) = DOOM2_MAP_RE.captures(lump)
                 && let Ok(n) = caps[1].parse::<u32>()
             {
-                if n < 30 {
+                let (has_normal_exit, has_secret_exit) =
+                    map_exits.get(lump).copied().unwrap_or((false, false));
+                if n < 30 && has_normal_exit {
                     let next = format!("MAP{:02}", n + 1);
                     if map_set.contains(next.as_str()) {
                         graph.edges_normal.insert(lump.to_string(), next);
                     }
                 }
-                if n == 15 && map_set.contains("MAP31") {
+                if n == 15 && has_secret_exit && map_set.contains("MAP31") {
                     graph
                         .edges_secret
                         .insert(lump.to_string(), "MAP31".to_string());
                 }
                 if n == 31 {
-                    if map_set.contains("MAP16") {
+                    if has_normal_exit && map_set.contains("MAP16") {
                         graph
                             .edges_normal
                             .insert(lump.to_string(), "MAP16".to_string());
                     }
-                    if map_set.contains("MAP32") {
+                    if has_secret_exit && map_set.contains("MAP32") {
                         graph
                             .edges_secret
                             .insert(lump.to_string(), "MAP32".to_string());
                     }
                 }
-                if n == 32 && map_set.contains("MAP16") {
+                if n == 32 && has_normal_exit && map_set.contains("MAP16") {
                     graph
                         .edges_normal
                         .insert(lump.to_string(), "MAP16".to_string());
@@ -503,6 +511,10 @@ pub fn analyze_wad(wad_data: &[u8]) -> Option<WadAnalysis> {
 
     let lumps: Vec<String> = infos.iter().map(|m| m.lump.clone()).collect();
     let map_set: HashSet<&str> = lumps.iter().map(|s| s.as_str()).collect();
+    let map_exits: HashMap<&str, (bool, bool)> = infos
+        .iter()
+        .map(|m| (m.lump.as_str(), (m.has_normal_exit, m.has_secret_exit)))
+        .collect();
     let is_doom1 = lumps.first().is_some_and(|m| DOOM1_MAP_RE.is_match(m));
 
     // Collect flow sources from the WAD.
@@ -531,7 +543,7 @@ pub fn analyze_wad(wad_data: &[u8]) -> Option<WadAnalysis> {
         }
     }
 
-    let graph = build_graph(&map_set, is_doom1, &sources);
+    let graph = build_graph(&map_set, &map_exits, is_doom1, &sources);
     classify_maps(&graph, &mut infos);
 
     Some(finalize(infos, has_structured))
@@ -669,6 +681,10 @@ pub fn analyze_pk3(pk3_path: &std::path::Path) -> Option<WadAnalysis> {
 
     // --- Step 4: Build graph + classify (linear/branching path) ---
     let map_set: HashSet<&str> = lumps.iter().map(|s| s.as_str()).collect();
+    let map_exits: HashMap<&str, (bool, bool)> = infos
+        .iter()
+        .map(|m| (m.lump.as_str(), (m.has_normal_exit, m.has_secret_exit)))
+        .collect();
     let is_doom1 = lumps.first().is_some_and(|m| DOOM1_MAP_RE.is_match(m));
 
     let mut sources: Vec<(FlowSource, HashMap<String, MapinfoEdge>)> = Vec::new();
@@ -684,7 +700,7 @@ pub fn analyze_pk3(pk3_path: &std::path::Path) -> Option<WadAnalysis> {
     // PK3 maps may also have UMAPINFO embedded inside one of the WAD files.
     // Skip that lookup for now — MAPINFO/ZMAPINFO is the standard for PK3s.
 
-    let graph = build_graph(&map_set, is_doom1, &sources);
+    let graph = build_graph(&map_set, &map_exits, is_doom1, &sources);
     classify_maps(&graph, &mut infos);
 
     Some(finalize(infos, has_structured))
@@ -875,13 +891,6 @@ fn detect_vanilla_exits(linedefs: &[u8]) -> (bool, bool) {
         }
         if VANILLA_SECRET_EXITS.contains(&special) {
             has_secret = true;
-        }
-        if (GEN_EXIT_BASE..=GEN_EXIT_END).contains(&special) {
-            if special & GEN_EXIT_SECRET_BIT != 0 {
-                has_secret = true;
-            } else {
-                has_normal = true;
-            }
         }
     }
 
@@ -1157,11 +1166,17 @@ mod tests {
     }
 
     #[test]
-    fn test_boom_generalized_exits() {
-        let (normal, _) = detect_vanilla_exits(&build_linedefs(&[0x3489]));
-        assert!(normal);
-        let (_, secret) = detect_vanilla_exits(&build_linedefs(&[0x3420]));
-        assert!(secret);
+    fn test_boom_generalized_linedefs_are_not_exits() {
+        // Boom has no generalized exit family. Generalized ranges start at
+        // crushers/lifts/stairs/etc.; 0x345B (13403) is a lift special seen in
+        // Sewerlust's credits maps and must not keep them required.
+        for &special in &[0x2F80, 0x3000, 0x345B, 0x3489, 0x3800, 0x4000, 0x6000] {
+            let (normal, secret) = detect_vanilla_exits(&build_linedefs(&[special]));
+            assert!(
+                !normal && !secret,
+                "generalized special {special:#06x} should not be an exit"
+            );
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -1237,15 +1252,38 @@ MAP MAP01
     }
 
     #[test]
+    fn test_vanilla_edge_requires_detected_exit() {
+        // Adjacent map numbers alone do not prove progression. Sewerlust has
+        // no-exit credits maps in adjacent slots; MAP24 must stop the walk
+        // instead of inventing MAP24 -> MAP25 from the name.
+        let ld_normal = build_linedefs(&[11]);
+        let ld_dead = build_linedefs(&[]);
+        let wad = build_wad(&[
+            ("MAP23", &[]),
+            ("LINEDEFS", &ld_normal),
+            ("MAP24", &[]),
+            ("LINEDEFS", &ld_dead),
+            ("MAP25", &[]),
+            ("LINEDEFS", &ld_dead),
+        ]);
+
+        let a = analyze_wad(&wad).unwrap();
+        assert_eq!(classify_of(&a, "MAP23"), MapClassification::Required);
+        assert_eq!(classify_of(&a, "MAP24"), MapClassification::OptionalCredits);
+        assert_eq!(classify_of(&a, "MAP25"), MapClassification::Unreachable);
+        assert_eq!(a.required_maps, 1);
+    }
+
+    #[test]
     fn test_analyze_wad_vanilla_doom2_full_with_secrets() {
         let ld_normal = build_linedefs(&[11]);
-        let ld_secret = build_linedefs(&[51]);
+        let ld_normal_and_secret = build_linedefs(&[11, 51]);
 
         let mut lumps: Vec<(String, Vec<u8>)> = Vec::new();
         for i in 1..=32 {
             lumps.push((format!("MAP{:02}", i), Vec::new()));
-            if i == 15 {
-                lumps.push(("LINEDEFS".to_string(), ld_secret.clone()));
+            if i == 15 || i == 31 {
+                lumps.push(("LINEDEFS".to_string(), ld_normal_and_secret.clone()));
             } else {
                 lumps.push(("LINEDEFS".to_string(), ld_normal.clone()));
             }
@@ -1278,7 +1316,7 @@ MAP MAP01
         // the way to E1M8 (stopper, no outgoing edge). E1M9 is reached from
         // E1M3's secret edge.
         let ld_normal = build_linedefs(&[11]);
-        let ld_secret = build_linedefs(&[51]);
+        let ld_normal_and_secret = build_linedefs(&[11, 51]);
         let ld_dead = build_linedefs(&[]);
         let mut lumps: Vec<(String, Vec<u8>)> = Vec::new();
         for m in 1..=8 {
@@ -1288,7 +1326,7 @@ MAP MAP01
                 if m == 8 {
                     ld_dead.clone()
                 } else if m == 3 {
-                    ld_secret.clone()
+                    ld_normal_and_secret.clone()
                 } else {
                     ld_normal.clone()
                 },
