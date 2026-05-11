@@ -165,6 +165,21 @@ fn select_sourceport(
     default_sourceport.to_string()
 }
 
+fn detect_and_persist_zdoom_required_if_missing(
+    conn: &Connection,
+    wad_id: i64,
+    persisted_zdoom_required: Option<i32>,
+    wad_path: &Path,
+) -> crate::Result<()> {
+    if persisted_zdoom_required.is_none()
+        && let Some(detected) = zdoom_detect::detect_zdoom_required(wad_path)
+    {
+        let update = db::WadUpdate::new().set_int("zdoom_required", Some(i64::from(detected)));
+        db::update_wad(conn, wad_id, &update)?;
+    };
+    Ok(())
+}
+
 /// Start a new playthrough for a completed/abandoned WAD.
 ///
 /// Creates a new playthrough record, sets status to in-progress,
@@ -212,34 +227,10 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
         }
     };
 
-    // Auto-detect zdoom_required if not already set. Legacy zdoom_required
-    // acts as a zdoom family requirement when no explicit family metadata exists.
-    let mut required_sourceport_family = wad.required_sourceport_family.clone();
-    let zdoom_required = match wad.zdoom_required {
-        Some(v) => v != 0,
-        None => {
-            if let Some(detected) = zdoom_detect::detect_zdoom_required(&wad_path) {
-                let mut update =
-                    db::WadUpdate::new().set_int("zdoom_required", Some(i64::from(detected)));
-                if detected && required_sourceport_family.is_none() {
-                    required_sourceport_family = Some("zdoom".to_string());
-                    update =
-                        update.set_text("required_sourceport_family", Some("zdoom".to_string()));
-                }
-                db::update_wad(conn, wad_id, &update)?;
-                detected
-            } else {
-                false
-            }
-        }
-    };
-
-    if zdoom_required && required_sourceport_family.is_none() {
-        required_sourceport_family = Some("zdoom".to_string());
-        let update =
-            db::WadUpdate::new().set_text("required_sourceport_family", Some("zdoom".to_string()));
-        db::update_wad(conn, wad_id, &update)?;
-    }
+    // Auto-detect zdoom_required if not already set. This remains metadata only:
+    // the visible compatibility family field is the launch constraint, so a
+    // blank family means "use the default sourceport".
+    detect_and_persist_zdoom_required_if_missing(conn, wad_id, wad.zdoom_required, &wad_path)?;
 
     // Determine sourceport (CLI > user override > compatibility family > global default).
     let cfg = config::load_config();
@@ -251,7 +242,7 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
     let port = select_sourceport(
         opts.sourceport.as_deref(),
         wad.custom_sourceport.as_deref(),
-        required_sourceport_family.as_deref(),
+        wad.required_sourceport_family.as_deref(),
         &cfg.sourceport,
         &zdoom_sourceport,
         &cfg.sourceport_preferences,
@@ -1105,6 +1096,76 @@ mod tests {
             &installed,
         );
         assert_eq!(port, "nugget-doom");
+    }
+
+    #[test]
+    fn test_legacy_zdoom_required_does_not_override_blank_family() {
+        use crate::db;
+        let (conn, wad_id) = fresh_db_with_wad();
+        let update = db::WadUpdate::new().set_int("zdoom_required", Some(1));
+        db::update_wad(&conn, wad_id, &update).unwrap();
+
+        let port = select_sourceport(
+            None,
+            None,
+            None,
+            "nyan-doom",
+            "uzdoom",
+            &HashMap::new(),
+            &[],
+        );
+
+        assert_eq!(port, "nyan-doom");
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        assert!(wad.required_sourceport_family.is_none());
+    }
+
+    #[test]
+    fn test_fresh_zdoom_detection_keeps_blank_family_on_default_sourceport() {
+        use crate::db;
+        let (conn, wad_id) = fresh_db_with_wad();
+        let dir = tempfile::tempdir().unwrap();
+        let wad_path = dir.path().join("zdoom.wad");
+        std::fs::write(
+            &wad_path,
+            test_wad(&[
+                ("MAP01", &[]),
+                ("TEXTMAP", b"namespace = \"zdoom\";"),
+                ("ENDMAP", &[]),
+            ]),
+        )
+        .unwrap();
+
+        detect_and_persist_zdoom_required_if_missing(&conn, wad_id, None, &wad_path).unwrap();
+        let port = select_sourceport(
+            None,
+            None,
+            None,
+            "nyan-doom",
+            "uzdoom",
+            &HashMap::new(),
+            &[],
+        );
+
+        assert_eq!(port, "nyan-doom");
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        assert_eq!(wad.zdoom_required, Some(1));
+        assert!(wad.required_sourceport_family.is_none());
+    }
+
+    #[test]
+    fn test_explicit_family_wins_over_zdoom_required() {
+        let port = select_sourceport(
+            None,
+            None,
+            Some("dsda"),
+            "gzdoom",
+            "uzdoom",
+            &HashMap::new(),
+            &[],
+        );
+
+        assert_eq!(port, "dsda-doom");
     }
 
     #[test]

@@ -465,7 +465,9 @@ impl eframe::App for CacoApp {
         }
 
         // 4. Render active dialog (modal, overlays everything)
-        render_active_dialog(&mut self.state, &self.conn, ctx);
+        if let Some(action) = render_active_dialog(&mut self.state, &self.conn, ctx) {
+            self.dispatch_action(action);
+        }
 
         // 5. Handle keyboard accelerators
         let mut quit = false;

@@ -10,15 +10,17 @@ pub struct LinkDialogState {
     pub wad_id: i64,
     pub wad_title: String,
     pub source_url: Option<String>,
+    error_message: Option<String>,
     /// Active file picker, if the user clicked "Link Local File". Polled
     /// each frame; resolves to `Some(path)` or `None` (cancelled).
     pending_picker: Option<FileDialogReceiver>,
 }
 
 /// Result of showing the link dialog.
+#[derive(Debug, PartialEq, Eq)]
 pub enum LinkResult {
     /// User linked a local file — WAD is now playable.
-    Linked,
+    Linked(i64),
     /// User cancelled.
     Cancelled,
     /// Dialog still open.
@@ -32,8 +34,35 @@ impl LinkDialogState {
             wad_id,
             wad_title: wad.title,
             source_url: wad.source_url,
+            error_message: None,
             pending_picker: None,
         })
+    }
+
+    fn handle_picked_file(&mut self, conn: &Connection, path: &Path) -> LinkResult {
+        match link_picked_file(conn, self.wad_id, path) {
+            Ok(()) => LinkResult::Linked(self.wad_id),
+            Err(e) => {
+                self.error_message = Some(e);
+                LinkResult::Open
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn handle_picked_file_to_cache(
+        &mut self,
+        conn: &Connection,
+        path: &Path,
+        cache_dir: &Path,
+    ) -> LinkResult {
+        match link_picked_file_to_cache(conn, self.wad_id, path, cache_dir) {
+            Ok(()) => LinkResult::Linked(self.wad_id),
+            Err(e) => {
+                self.error_message = Some(e);
+                LinkResult::Open
+            }
+        }
     }
 
     pub fn render(&mut self, ctx: &egui::Context, conn: &Connection) -> LinkResult {
@@ -43,9 +72,9 @@ impl LinkDialogState {
         {
             self.pending_picker = None;
             if let Some(path) = picked {
-                match link_picked_file(conn, self.wad_id, &path) {
-                    Ok(()) => return LinkResult::Linked,
-                    Err(e) => eprintln!("Failed to link file: {e}"),
+                let result = self.handle_picked_file(conn, &path);
+                if result != LinkResult::Open {
+                    return result;
                 }
             }
             // Cancelled picker or failed link: fall through to keep dialog open.
@@ -56,7 +85,7 @@ impl LinkDialogState {
         egui::Window::new("WAD Unavailable")
             .collapsible(false)
             .resizable(false)
-            .fixed_size([400.0, 200.0])
+            .fixed_size([440.0, 240.0])
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing.y = 8.0;
@@ -76,6 +105,10 @@ impl LinkDialogState {
                 );
 
                 ui.add_space(8.0);
+                if let Some(error) = &self.error_message {
+                    ui.colored_label(theme::COLOR_ERROR, error);
+                    ui.add_space(4.0);
+                }
                 ui.separator();
                 ui.add_space(4.0);
 
@@ -98,6 +131,7 @@ impl LinkDialogState {
                         .add_enabled(!picker_busy, egui::Button::new("Link Local File"))
                         .clicked()
                     {
+                        self.error_message = None;
                         let req = FileDialogRequest::open()
                             .add_filter("WAD/ZIP files", &["wad", "zip", "WAD", "ZIP"])
                             .set_directory(dirs::home_dir().unwrap_or_default());
@@ -121,15 +155,23 @@ impl LinkDialogState {
 
 /// Copy the selected file into the cache dir and update the WAD record.
 fn link_picked_file(conn: &Connection, wad_id: i64, path: &Path) -> Result<(), String> {
+    link_picked_file_to_cache(conn, wad_id, path, &caco_core::config::get_cache_dir())
+}
+
+fn link_picked_file_to_cache(
+    conn: &Connection,
+    wad_id: i64,
+    path: &Path,
+    cache_dir: &Path,
+) -> Result<(), String> {
     let filename = path
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "unknown.wad".to_string());
 
-    let cache_dir = caco_core::config::get_cache_dir();
     let dest = cache_dir.join(&filename);
 
-    std::fs::create_dir_all(&cache_dir).map_err(|e| format!("Failed to create cache dir: {e}"))?;
+    std::fs::create_dir_all(cache_dir).map_err(|e| format!("Failed to create cache dir: {e}"))?;
 
     // Only copy if source != destination
     if path != dest {
@@ -145,4 +187,69 @@ fn link_picked_file(conn: &Connection, wad_id: i64, path: &Path) -> Result<(), S
         .map_err(|e| format!("Failed to update WAD: {e}"))?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use caco_core::db::{self, SourceType};
+
+    fn setup_conn() -> (rusqlite::Connection, i64) {
+        let conn = db::open_memory().unwrap();
+        db::init_db(&conn).unwrap();
+        let wad_id = db::add_wad(&conn, &db::NewWad::new("Linked WAD", SourceType::Local)).unwrap();
+        (conn, wad_id)
+    }
+
+    #[test]
+    fn test_link_picked_file_updates_cached_path_and_filename() {
+        let (conn, wad_id) = setup_conn();
+        let source_dir = tempfile::tempdir().unwrap();
+        let cache_dir = tempfile::tempdir().unwrap();
+        let source = source_dir.path().join("example.wad");
+        std::fs::write(&source, b"PWAD").unwrap();
+
+        link_picked_file_to_cache(&conn, wad_id, &source, cache_dir.path()).unwrap();
+
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        let expected_cached_path = cache_dir
+            .path()
+            .join("example.wad")
+            .to_string_lossy()
+            .to_string();
+        assert_eq!(wad.filename.as_deref(), Some("example.wad"));
+        assert_eq!(
+            wad.cached_path.as_deref(),
+            Some(expected_cached_path.as_str())
+        );
+        assert_eq!(
+            std::fs::read(cache_dir.path().join("example.wad")).unwrap(),
+            b"PWAD"
+        );
+    }
+
+    #[test]
+    fn test_failed_link_keeps_dialog_open_with_error_message() {
+        let (conn, wad_id) = setup_conn();
+        let mut state = LinkDialogState {
+            wad_id,
+            wad_title: "Linked WAD".to_string(),
+            source_url: None,
+            error_message: None,
+            pending_picker: None,
+        };
+
+        let cache_dir = tempfile::tempdir().unwrap();
+        let missing_dir = tempfile::tempdir().unwrap();
+        let missing = missing_dir.path().join("missing.wad");
+        let result = state.handle_picked_file_to_cache(&conn, &missing, cache_dir.path());
+
+        assert_eq!(result, LinkResult::Open);
+        assert!(
+            state
+                .error_message
+                .as_deref()
+                .is_some_and(|msg| msg.contains("Failed to copy WAD to cache"))
+        );
+    }
 }

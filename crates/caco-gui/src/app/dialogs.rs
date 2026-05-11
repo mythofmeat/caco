@@ -12,7 +12,7 @@ use crate::dialogs::sessions::SessionsResult;
 use crate::dialogs::stats::StatsResult;
 use crate::dialogs::wad_stats::WadStatsResult;
 use crate::message::Notification;
-use crate::state::{ActiveDialog, AppState};
+use crate::state::{ActionRequest, ActiveDialog, AppState};
 
 use super::help::{render_about_dialog, render_help_dialog};
 
@@ -20,8 +20,13 @@ use super::help::{render_about_dialog, render_help_dialog};
 ///
 /// On dialog close: clears `state.active_dialog` and sets `needs_reload` when
 /// the dialog reports modifications.
-pub(super) fn render_active_dialog(state: &mut AppState, conn: &Connection, ctx: &egui::Context) {
+pub(super) fn render_active_dialog(
+    state: &mut AppState,
+    conn: &Connection,
+    ctx: &egui::Context,
+) -> Option<ActionRequest> {
     let mut close_dialog = false;
+    let mut follow_up_action = None;
     if let Some(dialog) = &mut state.active_dialog {
         match dialog {
             ActiveDialog::Edit(edit_state) => match edit_state.render(ctx, conn) {
@@ -109,10 +114,13 @@ pub(super) fn render_active_dialog(state: &mut AppState, conn: &Connection, ctx:
                 WadStatsResult::Open => {}
             },
             ActiveDialog::Link(link_state) => match link_state.render(ctx, conn) {
-                LinkResult::Linked => {
+                LinkResult::Linked(wad_id) => {
                     close_dialog = true;
                     state.needs_reload = true;
-                    state.notification = Some(Notification::info("WAD file linked".to_string()));
+                    state.notification = Some(Notification::info(
+                        "WAD file linked; launching...".to_string(),
+                    ));
+                    follow_up_action = Some(ActionRequest::Play(wad_id));
                 }
                 LinkResult::Cancelled => {
                     close_dialog = true;
@@ -146,4 +154,5 @@ pub(super) fn render_active_dialog(state: &mut AppState, conn: &Connection, ctx:
         }
         state.active_dialog = None;
     }
+    follow_up_action
 }

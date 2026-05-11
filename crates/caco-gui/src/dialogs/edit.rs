@@ -658,7 +658,7 @@ impl EditDialogState {
             cols[1].add(
                 egui::TextEdit::singleline(&mut self.sourceport_family)
                     .desired_width(f32::INFINITY)
-                    .hint_text("auto-detect")
+                    .hint_text("default")
                     .text_color(theme::TEXT_PRIMARY),
             );
         });
