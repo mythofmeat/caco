@@ -41,10 +41,12 @@ const MAP_LUMPS: &[&str] = &[
 const VANILLA_NORMAL_EXITS: &[u16] = &[11, 52, 197];
 /// Vanilla/Boom secret exit linedef types.
 const VANILLA_SECRET_EXITS: &[u16] = &[51, 124, 198];
+/// Doom II "Boss Brain" thing. Killing it calls the normal level-exit path.
+const DOOM2_BOSS_BRAIN_THING: u16 = 88;
 
 /// Analysis format version. Bump this whenever detection logic changes
 /// so that stale cached analyses are automatically invalidated and re-run.
-pub const ANALYSIS_VERSION: u32 = 6;
+pub const ANALYSIS_VERSION: u32 = 7;
 
 /// UDMF normal exit specials.
 const UDMF_NORMAL_EXITS: &[i32] = &[243, 74, 75]; // Exit_Normal, Teleport_NewMap, Teleport_EndGame
@@ -818,10 +820,21 @@ fn detect_exits(
     if let Some(textmap) = find_lump_data(wad_data, map_lumps, "TEXTMAP") {
         return detect_udmf_exits(&textmap);
     }
-    if let Some(linedefs) = find_lump_data(wad_data, map_lumps, "LINEDEFS") {
-        return detect_vanilla_exits(&linedefs);
+
+    let (mut has_normal, has_secret) =
+        if let Some(linedefs) = find_lump_data(wad_data, map_lumps, "LINEDEFS") {
+            detect_vanilla_exits(&linedefs)
+        } else {
+            (false, false)
+        };
+
+    if let Some(things) = find_lump_data(wad_data, map_lumps, "THINGS")
+        && detect_boss_brain_exit(&things)
+    {
+        has_normal = true;
     }
-    (false, false)
+
+    (has_normal, has_secret)
 }
 
 fn analyze_map_wad_exits(wad_data: &[u8]) -> (bool, bool) {
@@ -895,6 +908,25 @@ fn detect_vanilla_exits(linedefs: &[u8]) -> (bool, bool) {
     }
 
     (has_normal, has_secret)
+}
+
+/// Detect Doom II Boss Brain things, whose death exits the current level.
+fn detect_boss_brain_exit(things: &[u8]) -> bool {
+    let thing_size = 10;
+    let count = things.len() / thing_size;
+
+    for i in 0..count {
+        let base = i * thing_size;
+        if base + 8 > things.len() {
+            break;
+        }
+        let thing_type = u16::from_le_bytes([things[base + 6], things[base + 7]]);
+        if thing_type == DOOM2_BOSS_BRAIN_THING {
+            return true;
+        }
+    }
+
+    false
 }
 
 /// Parse UDMF TEXTMAP for exit specials.
@@ -1093,6 +1125,17 @@ mod tests {
         data
     }
 
+    fn build_things(types: &[u16]) -> Vec<u8> {
+        let mut data = Vec::new();
+        for &thing_type in types {
+            let mut thing = [0u8; 10];
+            thing[6] = (thing_type & 0xFF) as u8;
+            thing[7] = (thing_type >> 8) as u8;
+            data.extend_from_slice(&thing);
+        }
+        data
+    }
+
     fn build_textmap(specials: &[i32]) -> Vec<u8> {
         let mut text = String::new();
         text.push_str("namespace = \"zdoom\";\n");
@@ -1177,6 +1220,14 @@ mod tests {
                 "generalized special {special:#06x} should not be an exit"
             );
         }
+    }
+
+    #[test]
+    fn test_boss_brain_thing_counts_as_normal_exit() {
+        assert!(detect_boss_brain_exit(&build_things(&[
+            DOOM2_BOSS_BRAIN_THING
+        ])));
+        assert!(!detect_boss_brain_exit(&build_things(&[87, 89])));
     }
 
     // -----------------------------------------------------------------------
@@ -1272,6 +1323,57 @@ MAP MAP01
         assert_eq!(classify_of(&a, "MAP24"), MapClassification::OptionalCredits);
         assert_eq!(classify_of(&a, "MAP25"), MapClassification::Unreachable);
         assert_eq!(a.required_maps, 1);
+    }
+
+    #[test]
+    fn test_boss_brain_exit_extends_main_path() {
+        // Abscission shape: MAP20 has no exit linedef, but includes the Doom II
+        // Boss Brain thing whose death exits normally to MAP21.
+        let ld_normal = build_linedefs(&[11]);
+        let ld_dead = build_linedefs(&[]);
+        let boss_brain = build_things(&[DOOM2_BOSS_BRAIN_THING]);
+        let wad = build_wad(&[
+            ("MAP19", &[]),
+            ("LINEDEFS", &ld_normal),
+            ("MAP20", &[]),
+            ("THINGS", &boss_brain),
+            ("LINEDEFS", &ld_dead),
+            ("MAP21", &[]),
+            ("LINEDEFS", &ld_dead),
+        ]);
+
+        let a = analyze_wad(&wad).unwrap();
+        assert_eq!(classify_of(&a, "MAP19"), MapClassification::Required);
+        assert_eq!(classify_of(&a, "MAP20"), MapClassification::Required);
+        assert_eq!(classify_of(&a, "MAP21"), MapClassification::OptionalCredits);
+        assert_eq!(a.required_maps, 2);
+        assert_eq!(a.terminal_map.as_deref(), Some("MAP21"));
+    }
+
+    #[test]
+    fn test_boss_brain_exit_reaches_map30() {
+        // Boss Brain exits before MAP30 are real progression edges; MAP30 also
+        // stays Required because exiting it records actual completion.
+        let ld_normal = build_linedefs(&[11]);
+        let ld_dead = build_linedefs(&[]);
+        let boss_brain = build_things(&[DOOM2_BOSS_BRAIN_THING]);
+        let wad = build_wad(&[
+            ("MAP28", &[]),
+            ("LINEDEFS", &ld_normal),
+            ("MAP29", &[]),
+            ("THINGS", &boss_brain),
+            ("LINEDEFS", &ld_dead),
+            ("MAP30", &[]),
+            ("THINGS", &boss_brain),
+            ("LINEDEFS", &ld_dead),
+        ]);
+
+        let a = analyze_wad(&wad).unwrap();
+        assert_eq!(classify_of(&a, "MAP28"), MapClassification::Required);
+        assert_eq!(classify_of(&a, "MAP29"), MapClassification::Required);
+        assert_eq!(classify_of(&a, "MAP30"), MapClassification::Required);
+        assert_eq!(a.required_maps, 3);
+        assert_eq!(a.terminal_map, None);
     }
 
     #[test]
