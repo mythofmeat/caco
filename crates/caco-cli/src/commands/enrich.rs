@@ -9,7 +9,9 @@ use caco_core::complevel::complevel_name;
 use caco_core::db::{self, WadRecord, WadUpdate};
 use caco_sources::doomwiki::{self, DoomwikiClient};
 use caco_sources::idgames::extract_idgames_id_from_url;
-use caco_sources::import_service::{port_to_complevel, port_to_zdoom_required, titles_match};
+use caco_sources::import_service::{
+    normalize_title, port_to_complevel, port_to_zdoom_required, titles_match,
+};
 
 #[derive(Args, Default)]
 pub struct EnrichArgs {
@@ -256,7 +258,14 @@ fn wiki_lookup_port(wad: &WadRecord, wiki_lookups: &mut u32) -> Option<String> {
 struct CacowardSummary {
     scraped: usize,
     upserted: usize,
-    linked: usize,
+    linked_by_idgames: usize,
+    linked_by_title: usize,
+}
+
+impl CacowardSummary {
+    fn linked_total(&self) -> usize {
+        self.linked_by_idgames + self.linked_by_title
+    }
 }
 
 /// Fetch the Cacowards page for `year` and ingest its entries.
@@ -276,18 +285,30 @@ fn run_cacowards(conn: &Connection, year: i64, dry_run: bool) -> Result<(), Stri
 
     let suffix = if dry_run { " (dry run)" } else { "" };
     println!(
-        "Cacowards {year}: scraped {}, upserted {}, auto-linked {} to library WADs{suffix}",
-        summary.scraped, summary.upserted, summary.linked
+        "Cacowards {year}: scraped {}, upserted {}, auto-linked {} ({} by idgames, {} by title){suffix}",
+        summary.scraped,
+        summary.upserted,
+        summary.linked_total(),
+        summary.linked_by_idgames,
+        summary.linked_by_title,
     );
     Ok(())
 }
 
-/// Upsert scraped Cacoward entries into the DB and auto-link to library WADs
-/// whose `idgames_id` matches an entry's idgames URL.
+/// Upsert scraped Cacoward entries into the DB and auto-link to library WADs.
 ///
-/// Auto-linking does not set `manual_override`, so the user can correct any
-/// false-positive matches later without their fix being overwritten on the
-/// next scrape.
+/// Auto-linking runs two passes per entry:
+/// 1. **idgames URL match** — extract the numeric id from `{{ig|id=N}}` and
+///    look up `wads.idgames_id`. High confidence; works for any WAD imported
+///    from the idgames archive.
+/// 2. **Normalized title fallback** — only when (1) misses. The wad with an
+///    *exactly* matching normalized title (case-folded, diacritic-stripped,
+///    punctuation-collapsed) gets linked, but only if it's the *single* such
+///    match in the library. Multi-match titles are skipped so two unrelated
+///    WADs sharing a name (e.g. "Crusader" 1995 vs 2023) don't collide.
+///
+/// Neither pass sets `manual_override`, so a future `caco modify` can pin
+/// the correct link without it being clobbered on the next scrape.
 fn ingest_cacoward_entries(
     conn: &Connection,
     year: i64,
@@ -306,6 +327,14 @@ fn ingest_cacoward_entries(
         db::clear_year_unpinned(conn, year).map_err(|e| format!("DB cleanup failed: {e}"))?;
     }
 
+    // Build the normalized-title -> wad_id index once. Skipped in dry-run so
+    // we don't pay for the full table scan when nothing will be written.
+    let title_index = if dry_run {
+        TitleIndex::empty()
+    } else {
+        TitleIndex::build(conn)?
+    };
+
     for entry in entries {
         if dry_run {
             println!(
@@ -320,25 +349,75 @@ fn ingest_cacoward_entries(
         let id = db::upsert_cacoward(conn, entry).map_err(|e| format!("DB upsert failed: {e}"))?;
         summary.upserted += 1;
 
-        let Some(ref url) = entry.idgames_url else {
+        // Pass 1: idgames URL → numeric id → wads.idgames_id.
+        let by_idgames = entry
+            .idgames_url
+            .as_deref()
+            .and_then(extract_idgames_id_from_url)
+            .map(|n| n.to_string())
+            .and_then(|key| db::find_wad_by_idgames_id(conn, &key).ok().flatten());
+
+        if let Some(wad_id) = by_idgames {
+            db::link_wad(conn, id, wad_id, false).map_err(|e| format!("DB link failed: {e}"))?;
+            summary.linked_by_idgames += 1;
             continue;
-        };
-        let Some(idgames_id) = extract_idgames_id_from_url(url) else {
-            continue;
-        };
-        let key = idgames_id.to_string();
-        match db::find_wad_by_idgames_id(conn, &key) {
-            Ok(Some(wad_id)) => {
-                db::link_wad(conn, id, wad_id, false)
-                    .map_err(|e| format!("DB link failed: {e}"))?;
-                summary.linked += 1;
-            }
-            Ok(None) => {}
-            Err(e) => return Err(format!("DB lookup failed: {e}")),
+        }
+
+        // Pass 2: strict normalized-title fallback (single-match only).
+        if let Some(wad_id) = title_index.unique_match(&entry.wad_title) {
+            db::link_wad(conn, id, wad_id, false).map_err(|e| format!("DB link failed: {e}"))?;
+            summary.linked_by_title += 1;
         }
     }
 
     Ok(summary)
+}
+
+/// Normalized-title → set of matching WAD ids. Used by the title-fallback
+/// pass of the cacoward auto-linker.
+///
+/// A title's ids vec carries up to N entries; `unique_match` returns `Some`
+/// only when there's exactly one, so two WADs sharing a normalized title
+/// can never silently collide.
+struct TitleIndex {
+    by_title: std::collections::HashMap<String, Vec<i64>>,
+}
+
+impl TitleIndex {
+    fn empty() -> Self {
+        Self {
+            by_title: std::collections::HashMap::new(),
+        }
+    }
+
+    fn build(conn: &Connection) -> Result<Self, String> {
+        // Pull only id+title; the rest of the wads row is dead weight here.
+        let mut stmt = conn
+            .prepare("SELECT id, title FROM wads WHERE deleted_at IS NULL")
+            .map_err(|e| format!("DB prep failed: {e}"))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| format!("DB query failed: {e}"))?;
+        let mut by_title: std::collections::HashMap<String, Vec<i64>> = Default::default();
+        for r in rows {
+            let (id, title) = r.map_err(|e| format!("DB row failed: {e}"))?;
+            let key = normalize_title(&title);
+            if !key.is_empty() {
+                by_title.entry(key).or_default().push(id);
+            }
+        }
+        Ok(Self { by_title })
+    }
+
+    fn unique_match(&self, title: &str) -> Option<i64> {
+        let key = normalize_title(title);
+        match self.by_title.get(&key).map(|v| v.as_slice()) {
+            Some([id]) => Some(*id),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -783,7 +862,8 @@ mod tests {
 
         let summary = super::ingest_cacoward_entries(&conn, 2023, &entries, false).unwrap();
         assert_eq!(summary.upserted, 2);
-        assert_eq!(summary.linked, 1);
+        assert_eq!(summary.linked_by_idgames, 1);
+        assert_eq!(summary.linked_by_title, 0);
 
         let by_year = db::get_cacowards_by_year(&conn, 2023).unwrap();
         assert_eq!(by_year.len(), 2);
@@ -807,8 +887,89 @@ mod tests {
 
         let summary = super::ingest_cacoward_entries(&conn, 2023, &entries, true).unwrap();
         assert_eq!(summary.upserted, 0);
-        assert_eq!(summary.linked, 0);
+        assert_eq!(summary.linked_total(), 0);
         assert!(db::get_cacowards_by_year(&conn, 2023).unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_run_cacowards_title_fallback_links_unique_match() {
+        let conn = setup();
+        // Seed a wad with no idgames_id but a title that, once normalized,
+        // matches the cacoward entry — verifies the Unicode/case fallback.
+        let wad_id = add_test_wad(&conn, "Pina Colada");
+
+        let entries = vec![db::NewCacoward {
+            year: 2023,
+            category: db::CATEGORY_WINNER.to_string(),
+            wad_title: "Piña Colada".to_string(),
+            // No idgames URL → exercises the title fallback.
+            idgames_url: None,
+            ..Default::default()
+        }];
+
+        let summary = super::ingest_cacoward_entries(&conn, 2023, &entries, false).unwrap();
+        assert_eq!(summary.upserted, 1);
+        assert_eq!(summary.linked_by_idgames, 0);
+        assert_eq!(summary.linked_by_title, 1);
+
+        let entry = &db::get_cacowards_by_year(&conn, 2023).unwrap()[0];
+        assert_eq!(entry.wad_id, Some(wad_id));
+        // Manual-override flag stays false — auto-link should never pin.
+        assert!(!entry.manual_override);
+    }
+
+    #[test]
+    fn test_run_cacowards_title_fallback_skips_ambiguous_match() {
+        let conn = setup();
+        // Two wads with the same normalized title; the fallback must NOT
+        // pick one arbitrarily — both stay unlinked.
+        add_test_wad(&conn, "Crusader");
+        add_test_wad(&conn, "crusader");
+
+        let entries = vec![db::NewCacoward {
+            year: 2023,
+            category: db::CATEGORY_WINNER.to_string(),
+            wad_title: "Crusader".to_string(),
+            idgames_url: None,
+            ..Default::default()
+        }];
+
+        let summary = super::ingest_cacoward_entries(&conn, 2023, &entries, false).unwrap();
+        assert_eq!(summary.linked_by_title, 0);
+
+        let entry = &db::get_cacowards_by_year(&conn, 2023).unwrap()[0];
+        assert!(entry.wad_id.is_none());
+    }
+
+    #[test]
+    fn test_run_cacowards_idgames_match_wins_over_title_match() {
+        let conn = setup();
+        // idgames-id holder *and* a title-only match exist — the URL
+        // path must take precedence (it's higher confidence).
+        let title_only = add_test_wad(&conn, "Piña Colada");
+        let idgames_holder = add_test_wad(&conn, "Some Other WAD");
+        db::update_wad(
+            &conn,
+            idgames_holder,
+            &db::WadUpdate::new().set_text("idgames_id", Some("20917".to_string())),
+        )
+        .unwrap();
+
+        let entries = vec![db::NewCacoward {
+            year: 2023,
+            category: db::CATEGORY_WINNER.to_string(),
+            wad_title: "Piña Colada".to_string(),
+            idgames_url: Some("https://www.doomworld.com/idgames/?id=20917".to_string()),
+            ..Default::default()
+        }];
+
+        let summary = super::ingest_cacoward_entries(&conn, 2023, &entries, false).unwrap();
+        assert_eq!(summary.linked_by_idgames, 1);
+        assert_eq!(summary.linked_by_title, 0);
+
+        let entry = &db::get_cacowards_by_year(&conn, 2023).unwrap()[0];
+        assert_eq!(entry.wad_id, Some(idgames_holder));
+        assert_ne!(entry.wad_id, Some(title_only));
     }
 
     #[test]

@@ -71,7 +71,7 @@ pub use caco_core::utils::normalize_tags;
 ///
 /// Lowercase, strip accents/diacritics (NFD decomposition), remove
 /// punctuation, collapse whitespace.
-fn normalize_title(title: &str) -> String {
+pub fn normalize_title(title: &str) -> String {
     let lower = title.to_lowercase();
     // Decompose unicode and strip combining marks (accents)
     let stripped: String = lower
