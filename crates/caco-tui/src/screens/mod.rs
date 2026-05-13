@@ -1,4 +1,5 @@
 pub mod cache;
+pub mod cacowards;
 pub mod confirm_delete;
 pub mod resources;
 pub mod sessions;

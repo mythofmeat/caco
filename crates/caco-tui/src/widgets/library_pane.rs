@@ -230,6 +230,9 @@ impl LibraryPaneState {
             (KeyCode::Char('W'), KeyModifiers::SHIFT | KeyModifiers::NONE) => {
                 Some(AppMessage::PushScreen(ScreenId::Resources))
             }
+            (KeyCode::Char('A'), KeyModifiers::SHIFT | KeyModifiers::NONE) => {
+                Some(AppMessage::PushScreen(ScreenId::Cacowards))
+            }
 
             // Panel toggle
             (KeyCode::Char('P'), KeyModifiers::SHIFT | KeyModifiers::NONE) => {

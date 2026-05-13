@@ -29,6 +29,7 @@ pub enum ScreenId {
     WadStats(i64),
     Cache,
     Resources,
+    Cacowards,
 }
 
 /// Result returned when a screen pops.

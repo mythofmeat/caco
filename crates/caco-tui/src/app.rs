@@ -17,6 +17,7 @@ use crate::event::{self, AppEvent};
 use crate::message::{AppMessage, ScreenId, ScreenResult, Severity};
 use crate::screens::Screen;
 use crate::screens::cache::CacheScreen;
+use crate::screens::cacowards::CacowardsScreen;
 use crate::screens::confirm_delete::ConfirmDeleteScreen;
 use crate::screens::resources::ResourcesScreen;
 use crate::screens::sessions::SessionsScreen;
@@ -298,6 +299,7 @@ impl App {
             ScreenId::WadStats(wad_id) => Box::new(WadStatsScreen::new(wad_id, &self.conn)),
             ScreenId::Cache => Box::new(CacheScreen::new(&self.conn)),
             ScreenId::Resources => Box::new(ResourcesScreen::new(&self.conn)),
+            ScreenId::Cacowards => Box::new(CacowardsScreen::new(&self.conn)),
         };
         self.screen_stack.push(screen);
     }

@@ -78,6 +78,9 @@ caco modify id:1 status=p tag=megawad rating=4
 caco play 1 -- -warp 15 -skill 4   # Play with extra args
 caco sessions "Eviternity"         # Session history
 caco stats                         # Library statistics
+caco enrich --cacowards --year 2023  # Scrape that year's Cacowards from Doom Wiki
+caco stats --cacowards             # Year × category completion grid
+caco stats --cacowards --year 2023 -o json  # Per-entry detail as JSON
 ```
 
 ### TUI
@@ -95,7 +98,7 @@ Key bindings:
 - **Actions:** `Enter` play, `i` info, `e` edit, `d` delete, `h` sessions, `M` map stats
 - **Status:** `s`, then `u` / `p` / `c` / `a`
 - **Rating / beaten:** `r` cycle rating, `R` clear, `+` / `-` adjust beaten count
-- **Screens:** `S` stats, `C` cache, `W` resources, `Tab`/`Shift-Tab` switch tabs
+- **Screens:** `S` stats, `C` cache, `W` resources, `A` Cacowards, `Tab`/`Shift-Tab` switch tabs
 - **Trash view:** `T` toggle, `u` untrash
 - **Help / quit:** `?` help, `q` quit
 

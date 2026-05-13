@@ -152,6 +152,8 @@ egui = "0.31"
 
 **DB migrations**: run on `init_db()`; numbered sequentially; current schema version is 23+.
 
+**Cacowards**: `cacowards` table (year, category, rank, wad_title, idgames_url, doomwiki_url, wad_id, manual_override) tracks Doomworld's annual awards. Core categories: `winner`, `runner-up`, `honorable-mention`, `mordeth`. `caco enrich --cacowards --year YYYY` scrapes the Doom Wiki's `Cacowards_YYYY` page (`caco-sources/src/doomwiki/cacowards.rs`), upserts entries, and auto-links to library WADs by idgames id. Stale non-manual rows for the year are cleared before each re-scrape so the wiki view is canonical; `manual_override = 1` entries survive. `caco stats --cacowards` renders a year × category grid; `--year YYYY` drills into entry-level detail with linked-WAD status. TUI: `Shift+A` opens the Cacowards screen with `[`/`]` for year navigation.
+
 ## CLI Commands Reference
 
 ```
@@ -165,7 +167,9 @@ caco random [query] [--info]
 caco companion add|rm|enable|disable|ls
 caco gc [--dry-run] [-y] [--keep-saves|--keep-demos|--keep-data|--keep-cache|--keep-companions] [--orphans-only] [--ignore|--unignore]
 caco enrich [query] [--complevel] [--dry-run]
+caco enrich --cacowards --year YYYY [--dry-run]
 caco stats [--period month|year] [--limit N] [-o plain|json|table]
+caco stats --cacowards [--year YYYY] [-o plain|json|table]
 caco sessions <query> [--plain]
 caco cache list [-o plain|json|table] [--orphans] | clear | prune
 caco saves list [-o plain|json|table] | backup | restore | clean | backups [-o plain|json|table]
