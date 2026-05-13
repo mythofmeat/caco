@@ -97,6 +97,10 @@ pub const MODIFY_FIELDS: &[&str] = &[
     "config",
     "idgames-id",
     "version",
+    // Not a real wad column — handled as a cacoward-side-effect by
+    // `caco modify`, but listed here so the parser accepts the
+    // `cacoward=…` / `!cacoward` forms.
+    "cacoward",
 ];
 
 /// A parsed modify action from CLI arguments.

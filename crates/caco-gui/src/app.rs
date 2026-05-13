@@ -182,6 +182,43 @@ impl CacoApp {
                 self.state.notification =
                     Some(Notification::info("Importing Cacoward entry…".to_string()));
             }
+            ActionRequest::LinkCacoward(pk) => {
+                if let Some(dialog) =
+                    crate::dialogs::cacoward_link::CacowardLinkDialogState::new(&self.conn, pk)
+                {
+                    self.state.active_dialog = Some(ActiveDialog::CacowardLink(dialog));
+                }
+            }
+            ActionRequest::UnlinkCacoward(pk) => {
+                match caco_core::db::cacowards::unlink_wad(&self.conn, pk) {
+                    Ok(_) => {
+                        self.state.cacowards.needs_reload = true;
+                        self.state.notification =
+                            Some(Notification::info("Cacoward link cleared".to_string()));
+                    }
+                    Err(e) => {
+                        self.state.notification =
+                            Some(Notification::error(format!("Unlink failed: {e}")));
+                    }
+                }
+            }
+            ActionRequest::SetCacowardSupported(pk, supported) => {
+                match caco_core::db::cacowards::set_supported(&self.conn, pk, supported) {
+                    Ok(_) => {
+                        self.state.cacowards.needs_reload = true;
+                        let msg = if supported {
+                            "Cacoward marked supported"
+                        } else {
+                            "Cacoward marked unsupported"
+                        };
+                        self.state.notification = Some(Notification::info(msg.to_string()));
+                    }
+                    Err(e) => {
+                        self.state.notification =
+                            Some(Notification::error(format!("Set supported failed: {e}")));
+                    }
+                }
+            }
             ActionRequest::StartNewPlaythrough(wad_id) => {
                 match caco_core::player::start_new_playthrough(&self.conn, wad_id) {
                     Ok(_) => {

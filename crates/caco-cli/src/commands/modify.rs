@@ -207,9 +207,22 @@ fn apply_modifications(
 
     for action in actions {
         match action {
+            ModifyAction::SetField { field, value } if field == "cacoward" => {
+                // cacoward isn't a wad column — it's a side-effect on the
+                // cacowards table. Sets `manual_override=true` so the
+                // next re-enrich preserves the user's choice.
+                apply_cacoward_link(conn, wad, value)?;
+                any_change = true;
+            }
             ModifyAction::SetField { field, value } => {
                 update = apply_field_update(update, field, value, wad)?;
                 any_change = true;
+            }
+            ModifyAction::ClearField { field } if field == "cacoward" => {
+                let cleared = clear_cacoward_links_for_wad(conn, wad.id)?;
+                if cleared > 0 {
+                    any_change = true;
+                }
             }
             ModifyAction::ClearField { field } => {
                 let col: &'static str = match field.as_str() {
@@ -509,6 +522,43 @@ fn apply_field_update(
         }
         _ => Ok(update.set_text(col, Some(value.to_string()))),
     }
+}
+
+/// Link the WAD to a cacoward entry referenced by its display id
+/// (`c.YEAR.category.RANK` or `c.<pk>`). The link is pinned with
+/// `manual_override=true` so the next re-enrich won't overwrite it.
+fn apply_cacoward_link(conn: &Connection, wad: &WadRecord, id_str: &str) -> Result<(), String> {
+    let id_ref = caco_core::db::cacowards::parse_cacoward_id(id_str).ok_or_else(|| {
+        format!("invalid cacoward id '{id_str}' — expected c.YEAR.CATEGORY.RANK or c.<pk>")
+    })?;
+    let record = caco_core::db::cacowards::resolve_cacoward_ref(conn, &id_ref)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("no cacoward entry matches '{id_str}'"))?;
+    caco_core::db::cacowards::link_wad(conn, record.id, wad.id, true)
+        .map_err(|e| format!("link failed: {e}"))?;
+    println!(
+        "Linked WAD #{} → cacoward {} ({})",
+        wad.id, id_str, record.wad_title
+    );
+    Ok(())
+}
+
+/// Clear any cacoward links pointing at this WAD. Used by the
+/// `cacoward=` (empty) form of `caco modify`.
+fn clear_cacoward_links_for_wad(conn: &Connection, wad_id: i64) -> Result<usize, String> {
+    let linked =
+        caco_core::db::cacowards::get_cacowards_for_wad(conn, wad_id).map_err(|e| e.to_string())?;
+    for record in &linked {
+        caco_core::db::cacowards::unlink_wad(conn, record.id)
+            .map_err(|e| format!("unlink failed: {e}"))?;
+    }
+    if !linked.is_empty() {
+        println!(
+            "Cleared {} cacoward link(s) from WAD #{wad_id}",
+            linked.len()
+        );
+    }
+    Ok(linked.len())
 }
 
 fn remove_matching_tags(conn: &Connection, wad_id: i64, pattern: &str) -> Result<(), String> {

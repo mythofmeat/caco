@@ -3,6 +3,7 @@
 use rusqlite::Connection;
 
 use crate::dialogs::cache::CacheResult;
+use crate::dialogs::cacoward_link::CacowardLinkResult;
 use crate::dialogs::collections::CollectionsResult;
 use crate::dialogs::delete::DeleteResult;
 use crate::dialogs::edit::EditResult;
@@ -126,6 +127,22 @@ pub(super) fn render_active_dialog(
                     close_dialog = true;
                 }
                 LinkResult::Open => {}
+            },
+            ActiveDialog::CacowardLink(dialog) => match dialog.render(ctx) {
+                CacowardLinkResult::Linked(pk, wad_id) => {
+                    close_dialog = true;
+                    if let Err(e) = caco_core::db::cacowards::link_wad(conn, pk, wad_id, true) {
+                        state.notification = Some(Notification::error(format!("Link failed: {e}")));
+                    } else {
+                        state.cacowards.needs_reload = true;
+                        state.notification =
+                            Some(Notification::info("Linked to library WAD".to_string()));
+                    }
+                }
+                CacowardLinkResult::Cancelled => {
+                    close_dialog = true;
+                }
+                CacowardLinkResult::Open => {}
             },
             ActiveDialog::Help => {
                 if render_help_dialog(ctx) {
