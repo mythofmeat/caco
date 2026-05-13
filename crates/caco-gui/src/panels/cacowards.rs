@@ -7,45 +7,51 @@
 //! 3. Category sections (winner / runner-up / honorable-mention / mordeth)
 //!    rendered as poster cards, each tagged with the linked WAD's status.
 //!
-//! Layout is built from primitives (custom rect/text painting + `Frame`)
-//! rather than reusing the library's table widgets — the magazine treatment
-//! is the whole point, so it deliberately doesn't share visual code with
-//! the rest of the app.
+//! Cards are drawn with manual `allocate_exact_size` + direct painter calls
+//! (the same pattern as `wad_grid.rs`) rather than `egui::Grid`. Using Grid
+//! sized columns to the widest content, which made cards expand to the
+//! full content area and overlap.
 
 use caco_core::db::cacowards::{CacowardRecord, EffectiveStatus};
 use caco_core::db::{CORE_CATEGORIES, Status};
+use egui::{Color32, CornerRadius, Rect, StrokeKind, Vec2};
 
 use crate::state::{ActionRequest, AppState};
 use crate::theme;
 
-const HERO_HEIGHT: f32 = 160.0;
-const YEAR_STRIP_HEIGHT: f32 = 64.0;
-const CARD_WIDTH: f32 = 280.0;
-const CARD_HEIGHT: f32 = 130.0;
-const CARD_GAP: f32 = 14.0;
-const SECTION_PAD: f32 = 28.0;
+const HERO_HEIGHT: f32 = 150.0;
+const HERO_PAD_X: f32 = 40.0;
+const SECTION_PAD_X: f32 = 40.0;
+const SECTION_PAD_Y: f32 = 24.0;
 
-/// Render the Cacowards central panel. Returns the first action request
-/// produced this frame (typically a button click).
+const YEAR_CHIP_WIDTH: f32 = 78.0;
+const YEAR_CHIP_HEIGHT: f32 = 40.0;
+const YEAR_STRIP_VPAD: f32 = 14.0;
+
+const CARD_MIN_WIDTH: f32 = 240.0;
+const CARD_MAX_WIDTH: f32 = 320.0;
+const CARD_HEIGHT: f32 = 138.0;
+const CARD_GAP: f32 = 14.0;
+const CARD_ROUNDING: u8 = 8;
+const STATUS_EDGE_WIDTH: f32 = 3.0;
+
+/// Render the Cacowards central panel.
 pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<ActionRequest> {
     if state.cacowards.all_entries.is_empty() {
         return render_empty(ui);
     }
+    let year = state.cacowards.selected_year?;
 
     let mut action: Option<ActionRequest> = None;
-    let year = match state.cacowards.selected_year {
-        Some(y) => y,
-        None => return render_empty(ui),
-    };
 
     render_hero(ui, state, year);
-    let year_change = render_year_strip(ui, state);
-    if let Some(y) = year_change {
+
+    if let Some(y) = render_year_strip(ui, state) {
         state.cacowards.selected_year = Some(y);
     }
 
-    // Snapshot the entries for the selected year so we can iterate without
-    // holding a borrow on `state.cacowards`.
+    // Snapshot for the chosen year so we can iterate without borrowing
+    // `state.cacowards` during render.
     let year_entries: Vec<(CacowardRecord, EffectiveStatus)> = state
         .cacowards
         .all_entries
@@ -66,6 +72,10 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<ActionRequest> 
             action.get_or_insert(a);
         }
     }
+
+    // Trailing space so the last section's cards aren't flush with the
+    // status bar.
+    ui.add_space(40.0);
 
     action
 }
@@ -99,22 +109,37 @@ fn render_empty(ui: &mut egui::Ui) -> Option<ActionRequest> {
 
 fn render_hero(ui: &mut egui::Ui, state: &AppState, year: i64) {
     let (rect, _) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), HERO_HEIGHT),
+        Vec2::new(ui.available_width(), HERO_HEIGHT),
         egui::Sense::hover(),
     );
     let painter = ui.painter_at(rect);
 
-    // Background: layered fills to approximate the mockup's radial gradient.
-    // egui has no gradient primitive, so we stack a base + an offset accent
-    // panel on the right to fake the warm glow.
-    painter.rect_filled(rect, 0.0, theme::BG_MEDIUM);
-    let glow_rect = egui::Rect::from_min_max(egui::pos2(rect.max.x - 360.0, rect.min.y), rect.max);
-    painter.rect_filled(
-        glow_rect,
-        0.0,
-        egui::Color32::from_rgba_unmultiplied(0xff, 0x66, 0x33, 24),
-    );
-    // Subtle bottom rule.
+    // Flat dark background with a very slightly warmer right edge — the
+    // previous attempt used a semi-transparent overlay rect which painted
+    // as a hard-edged solid block. Easier to just blend the warm tone
+    // into the base color directly.
+    painter.rect_filled(rect, 0, theme::BG_MEDIUM);
+
+    // Subtle warm tint on the right third — built from rect bands so it
+    // fades rather than presenting as a colored panel.
+    let bands = 12;
+    let band_w = 160.0 / bands as f32;
+    for i in 0..bands {
+        let t = (i + 1) as f32 / bands as f32; // 1/bands … 1.0
+        let x = rect.max.x - 160.0 + band_w * i as f32;
+        let band_rect = Rect::from_min_max(
+            egui::pos2(x, rect.min.y),
+            egui::pos2(x + band_w + 0.5, rect.max.y),
+        );
+        // Lerp BG_MEDIUM → slightly warmer; max contribution stays
+        // dim enough that it reads as ambient rather than a panel.
+        let r = lerp_byte(theme::BG_MEDIUM.r(), 0x32, t * 0.45);
+        let g = lerp_byte(theme::BG_MEDIUM.g(), 0x1c, t * 0.45);
+        let b = lerp_byte(theme::BG_MEDIUM.b(), 0x14, t * 0.45);
+        painter.rect_filled(band_rect, 0, Color32::from_rgb(r, g, b));
+    }
+
+    // Bottom rule
     painter.line_segment(
         [
             egui::pos2(rect.min.x, rect.max.y - 0.5),
@@ -123,29 +148,26 @@ fn render_hero(ui: &mut egui::Ui, state: &AppState, year: i64) {
         egui::Stroke::new(1.0, theme::BORDER_MED),
     );
 
-    let pad_x = 40.0;
-    let mut cursor_y = rect.min.y + 28.0;
-
-    // Source pill — top-right corner.
+    // Source pill — top-right.
     let source_text = "FROM DOOMWORLD · VIA DOOM WIKI";
     let source_font = egui::FontId::proportional(10.0);
-    let source_galley = painter.layout_no_wrap(
+    let galley = painter.layout_no_wrap(
         source_text.to_string(),
         source_font.clone(),
         theme::TEXT_MUTED,
     );
-    let pill_pad = egui::vec2(10.0, 4.0);
-    let pill_size = source_galley.size() + pill_pad * 2.0;
-    let pill_rect = egui::Rect::from_min_size(
-        egui::pos2(rect.max.x - pad_x - pill_size.x, rect.min.y + 18.0),
+    let pill_pad = Vec2::new(10.0, 4.0);
+    let pill_size = galley.size() + pill_pad * 2.0;
+    let pill_rect = Rect::from_min_size(
+        egui::pos2(rect.max.x - HERO_PAD_X - pill_size.x, rect.min.y + 18.0),
         pill_size,
     );
     painter.rect(
         pill_rect,
-        12.0,
-        egui::Color32::from_black_alpha(80),
+        CornerRadius::same(11),
+        Color32::from_black_alpha(80),
         egui::Stroke::new(1.0, theme::BORDER_MED),
-        egui::StrokeKind::Inside,
+        StrokeKind::Inside,
     );
     painter.text(
         pill_rect.min + pill_pad,
@@ -155,8 +177,9 @@ fn render_hero(ui: &mut egui::Ui, state: &AppState, year: i64) {
         theme::TEXT_MUTED,
     );
 
-    // Kicker — small all-caps editorial intro.
-    let (total, done) = state.cacowards.year_summary(year);
+    let mut cursor_y = rect.min.y + 24.0;
+
+    // Kicker
     let by_cat = category_counts(&state.cacowards.all_entries, year);
     let kicker = format!(
         "ANNUAL CACOWARDS · {w} winners · {r} runners-up · {hm} honorable mentions",
@@ -165,37 +188,38 @@ fn render_hero(ui: &mut egui::Ui, state: &AppState, year: i64) {
         hm = by_cat.get("honorable-mention").copied().unwrap_or(0),
     );
     painter.text(
-        egui::pos2(rect.min.x + pad_x, cursor_y),
+        egui::pos2(rect.min.x + HERO_PAD_X, cursor_y),
         egui::Align2::LEFT_TOP,
         kicker,
         egui::FontId::proportional(11.0),
-        egui::Color32::from_rgb(0xd4, 0xa1, 0x4a), // gold
+        Color32::from_rgb(0xd4, 0xa1, 0x4a), // gold
     );
-    cursor_y += 22.0;
+    cursor_y += 20.0;
 
-    // Title — "Cacowards" + accent year.
-    let title_font = egui::FontId::proportional(48.0);
-    let prefix = painter.layout_no_wrap(
+    // Title — "Cacowards YEAR"
+    let title_font = egui::FontId::proportional(40.0);
+    let prefix_galley = painter.layout_no_wrap(
         "Cacowards ".to_string(),
         title_font.clone(),
         theme::TEXT_PRIMARY,
     );
-    let prefix_size = prefix.size();
+    let prefix_w = prefix_galley.size().x;
     painter.galley(
-        egui::pos2(rect.min.x + pad_x, cursor_y),
-        prefix,
+        egui::pos2(rect.min.x + HERO_PAD_X, cursor_y),
+        prefix_galley,
         theme::TEXT_PRIMARY,
     );
     painter.text(
-        egui::pos2(rect.min.x + pad_x + prefix_size.x, cursor_y),
+        egui::pos2(rect.min.x + HERO_PAD_X + prefix_w, cursor_y),
         egui::Align2::LEFT_TOP,
-        format!("{year}"),
+        year.to_string(),
         title_font,
         theme::TEXT_ACCENT,
     );
-    cursor_y += prefix_size.y + 12.0;
+    cursor_y += 48.0;
 
-    // Byline — completion + descriptor.
+    // Byline
+    let (total, done) = state.cacowards.year_summary(year);
     let pct = if total > 0 {
         done as f32 * 100.0 / total as f32
     } else {
@@ -205,7 +229,7 @@ fn render_hero(ui: &mut egui::Ui, state: &AppState, year: i64) {
         "{done} of {total} entries completed ({pct:.0}%) · Doomworld's annual selection of the year's best WADs"
     );
     painter.text(
-        egui::pos2(rect.min.x + pad_x, cursor_y),
+        egui::pos2(rect.min.x + HERO_PAD_X, cursor_y),
         egui::Align2::LEFT_TOP,
         byline,
         egui::FontId::proportional(13.0),
@@ -217,40 +241,71 @@ fn render_hero(ui: &mut egui::Ui, state: &AppState, year: i64) {
 // Year strip
 // ---------------------------------------------------------------------------
 
-/// Renders the horizontal year selector. Returns `Some(year)` if the user
-/// clicked a year other than the current selection.
 fn render_year_strip(ui: &mut egui::Ui, state: &AppState) -> Option<i64> {
-    let mut clicked: Option<i64> = None;
-    let selected = state.cacowards.selected_year;
-
     let years = state.cacowards.years();
-    egui::Frame::new()
-        .fill(theme::BG_MEDIUM)
-        .stroke(egui::Stroke::new(1.0, theme::BORDER))
-        .inner_margin(egui::Margin::symmetric(20, 12))
-        .show(ui, |ui| {
-            egui::ScrollArea::horizontal()
-                .auto_shrink([false, true])
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        for year in years {
-                            if year_chip(ui, state, year, selected == Some(year)) {
-                                clicked = Some(year);
-                            }
-                            ui.add_space(6.0);
-                        }
-                    });
-                });
-        });
+    let selected = state.cacowards.selected_year;
+    let strip_height = YEAR_CHIP_HEIGHT + YEAR_STRIP_VPAD * 2.0;
 
+    // Background strip the full width of the panel, with horizontal scroll
+    // for the chip row.
+    let (strip_rect, _) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width(), strip_height),
+        egui::Sense::hover(),
+    );
+    ui.painter().rect_filled(strip_rect, 0, theme::BG_MEDIUM);
+    ui.painter().line_segment(
+        [
+            egui::pos2(strip_rect.min.x, strip_rect.max.y - 0.5),
+            egui::pos2(strip_rect.max.x, strip_rect.max.y - 0.5),
+        ],
+        egui::Stroke::new(1.0, theme::BORDER),
+    );
+
+    // Layout chips manually inside the strip.
+    let mut x = strip_rect.min.x + HERO_PAD_X;
+    let y = strip_rect.min.y + YEAR_STRIP_VPAD;
+    let mut clicked: Option<i64> = None;
+    for year in years {
+        let chip_rect = Rect::from_min_size(
+            egui::pos2(x, y),
+            Vec2::new(YEAR_CHIP_WIDTH, YEAR_CHIP_HEIGHT),
+        );
+        // Bail out if we run out of room (scroll arrives in a follow-up;
+        // 30+ years of awards at 78px each fits in a 2400px+ window
+        // already and breaks gracefully when it doesn't).
+        if chip_rect.max.x > strip_rect.max.x - HERO_PAD_X {
+            break;
+        }
+        let response = ui.interact(
+            chip_rect,
+            ui.id().with(("cacoward-year", year)),
+            egui::Sense::click(),
+        );
+        draw_year_chip(
+            ui,
+            chip_rect,
+            year,
+            state,
+            selected == Some(year),
+            response.hovered(),
+        );
+        if response.clicked() {
+            clicked = Some(year);
+        }
+        x += YEAR_CHIP_WIDTH + 6.0;
+    }
     clicked
 }
 
-fn year_chip(ui: &mut egui::Ui, state: &AppState, year: i64, active: bool) -> bool {
-    let size = egui::vec2(80.0, YEAR_STRIP_HEIGHT - 24.0);
-    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+fn draw_year_chip(
+    ui: &egui::Ui,
+    rect: Rect,
+    year: i64,
+    state: &AppState,
+    active: bool,
+    hovered: bool,
+) {
     let painter = ui.painter_at(rect);
-    let hovered = response.hovered();
 
     let (bg, fg, sub) = if active {
         (
@@ -261,33 +316,31 @@ fn year_chip(ui: &mut egui::Ui, state: &AppState, year: i64, active: bool) -> bo
     } else if hovered {
         (theme::BG_LIGHT, theme::TEXT_PRIMARY, theme::TEXT_MUTED)
     } else {
-        (theme::BG_MEDIUM, theme::TEXT_SECONDARY, theme::TEXT_MUTED)
+        (theme::BG_DARK, theme::TEXT_SECONDARY, theme::TEXT_MUTED)
     };
 
     painter.rect(
         rect,
-        4.0,
+        CornerRadius::same(4),
         bg,
         egui::Stroke::new(if active { 1.0 } else { 0.0 }, theme::TEXT_ACCENT),
-        egui::StrokeKind::Inside,
+        StrokeKind::Inside,
     );
     painter.text(
-        rect.center() + egui::vec2(0.0, -8.0),
+        rect.center() + Vec2::new(0.0, -8.0),
         egui::Align2::CENTER_CENTER,
-        format!("{year}"),
+        year.to_string(),
         egui::FontId::proportional(14.0),
         fg,
     );
     let (total, done) = state.cacowards.year_summary(year);
     painter.text(
-        rect.center() + egui::vec2(0.0, 10.0),
+        rect.center() + Vec2::new(0.0, 9.0),
         egui::Align2::CENTER_CENTER,
         format!("{done}/{total}"),
         egui::FontId::proportional(10.0),
         sub,
     );
-
-    response.clicked()
 }
 
 // ---------------------------------------------------------------------------
@@ -311,71 +364,84 @@ fn render_category_section(
 
     let mut action: Option<ActionRequest> = None;
 
+    // Top padding
+    ui.add_space(SECTION_PAD_Y);
+
+    // Section header — small caps, accent
     egui::Frame::new()
         .inner_margin(egui::Margin {
-            left: 40,
-            right: 40,
-            top: SECTION_PAD as i8,
-            bottom: SECTION_PAD as i8,
+            left: SECTION_PAD_X as i8,
+            right: SECTION_PAD_X as i8,
+            top: 0,
+            bottom: 0,
         })
         .show(ui, |ui| {
-            // Section header
+            ui.label(
+                egui::RichText::new(category_label(category))
+                    .size(12.0)
+                    .strong()
+                    .color(theme::TEXT_ACCENT)
+                    .extra_letter_spacing(2.0),
+            );
+            ui.add_space(6.0);
             ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(category_label(category))
-                        .size(13.0)
-                        .strong()
-                        .color(theme::TEXT_ACCENT)
-                        .extra_letter_spacing(2.0),
-                );
-            });
-            ui.add_space(4.0);
-
-            // Progress line: meter + counts
-            ui.horizontal(|ui| {
-                draw_meter(ui, done, total, 110.0);
-                ui.add_space(8.0);
-                let summary = format!(
-                    "{done} of {total} completed{}",
-                    if absent > 0 {
-                        format!(" · {absent} absent")
-                    } else {
-                        String::new()
-                    }
-                );
+                draw_meter(ui, done, total, 120.0);
+                ui.add_space(10.0);
+                let summary = if absent > 0 {
+                    format!("{done} of {total} completed · {absent} absent")
+                } else {
+                    format!("{done} of {total} completed")
+                };
                 ui.colored_label(theme::TEXT_SECONDARY, summary);
             });
-            ui.add_space(14.0);
+        });
 
-            // Card grid: wrap based on available width.
-            let avail = ui.available_width();
-            let cols = ((avail + CARD_GAP) / (CARD_WIDTH + CARD_GAP))
-                .floor()
-                .max(1.0) as usize;
+    ui.add_space(14.0);
 
-            egui::Grid::new(("cacoward-grid", category))
-                .num_columns(cols)
-                .spacing(egui::vec2(CARD_GAP, CARD_GAP))
-                .show(ui, |ui| {
-                    for (i, (record, status)) in entries.iter().enumerate() {
-                        if let Some(a) = render_card(ui, record, *status) {
-                            action.get_or_insert(a);
+    // Card grid — manual layout to keep cards at a fixed width.
+    let available = ui.available_width() - SECTION_PAD_X * 2.0;
+    let card_w = card_width(available);
+    let columns = ((available + CARD_GAP) / (card_w + CARD_GAP))
+        .floor()
+        .max(1.0) as usize;
+
+    let rows = entries.len().div_ceil(columns);
+    for row in 0..rows {
+        egui::Frame::new()
+            .inner_margin(egui::Margin {
+                left: SECTION_PAD_X as i8,
+                right: SECTION_PAD_X as i8,
+                top: 0,
+                bottom: 0,
+            })
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = CARD_GAP;
+                    for col in 0..columns {
+                        let idx = row * columns + col;
+                        if idx >= entries.len() {
+                            break;
                         }
-                        if (i + 1) % cols == 0 {
-                            ui.end_row();
+                        let (record, status) = entries[idx];
+                        if let Some(a) = render_card(ui, record, *status, card_w) {
+                            action.get_or_insert(a);
                         }
                     }
                 });
+            });
+        if row + 1 < rows {
+            ui.add_space(CARD_GAP);
+        }
+    }
 
-            ui.add_space(8.0);
-        });
+    ui.add_space(SECTION_PAD_Y);
 
-    // Divider between sections
-    let rect = ui.available_rect_before_wrap();
+    // Section divider
+    let avail_rect = ui.available_rect_before_wrap();
     ui.painter().line_segment(
         [
-            egui::pos2(rect.min.x + 40.0, rect.min.y),
-            egui::pos2(rect.max.x - 40.0, rect.min.y),
+            egui::pos2(avail_rect.min.x + SECTION_PAD_X, avail_rect.min.y),
+            egui::pos2(avail_rect.max.x - SECTION_PAD_X, avail_rect.min.y),
         ],
         egui::Stroke::new(1.0, theme::BORDER),
     );
@@ -383,90 +449,149 @@ fn render_category_section(
     action
 }
 
+fn card_width(available: f32) -> f32 {
+    let cols = ((available + CARD_GAP) / (CARD_MIN_WIDTH + CARD_GAP))
+        .floor()
+        .max(1.0);
+    let w = (available - (cols - 1.0) * CARD_GAP) / cols;
+    w.clamp(CARD_MIN_WIDTH, CARD_MAX_WIDTH)
+}
+
+// ---------------------------------------------------------------------------
+// Single card — manual rect allocation + painter, no nested Frame.
+// ---------------------------------------------------------------------------
+
 fn render_card(
     ui: &mut egui::Ui,
     record: &CacowardRecord,
     status: EffectiveStatus,
+    width: f32,
 ) -> Option<ActionRequest> {
-    let mut action: Option<ActionRequest> = None;
-    let accent = status_accent(status);
+    let (rect, _response) =
+        ui.allocate_exact_size(Vec2::new(width, CARD_HEIGHT), egui::Sense::hover());
+    let painter = ui.painter_at(rect);
+    let rounding = CornerRadius::same(CARD_ROUNDING);
     let absent = matches!(status, EffectiveStatus::Absent);
 
-    let stroke = if absent {
-        egui::Stroke::new(1.0, theme::BORDER_MED)
+    // Background
+    painter.rect_filled(rect, rounding, theme::BG_MEDIUM);
+
+    // Border — solid muted for absent, none otherwise (status edge does
+    // the work for library entries).
+    if absent {
+        painter.rect_stroke(
+            rect,
+            rounding,
+            egui::Stroke::new(1.0, theme::BORDER_MED),
+            StrokeKind::Inside,
+        );
+    }
+
+    // Status-colored left edge (only for library entries).
+    if !absent {
+        let accent = status_accent(status);
+        let edge = Rect::from_min_size(rect.min, Vec2::new(STATUS_EDGE_WIDTH, rect.height()));
+        // Paint with a rounded-top/left corner matching the card.
+        let edge_rounding = CornerRadius {
+            nw: CARD_ROUNDING,
+            sw: CARD_ROUNDING,
+            ne: 0,
+            se: 0,
+        };
+        painter.rect_filled(edge, edge_rounding, accent);
+    }
+
+    // Inset content rect (inside the status edge + padding).
+    let pad = 14.0;
+    let content = Rect::from_min_max(
+        egui::pos2(rect.min.x + pad + STATUS_EDGE_WIDTH, rect.min.y + pad),
+        egui::pos2(rect.max.x - pad, rect.max.y - pad),
+    );
+
+    // Rank top-left
+    if let Some(rank) = record.rank {
+        painter.text(
+            egui::pos2(content.min.x, content.min.y),
+            egui::Align2::LEFT_TOP,
+            format!("#{rank}"),
+            egui::FontId::proportional(11.0),
+            theme::TEXT_MUTED,
+        );
+    }
+
+    // Status pill top-right
+    paint_status_pill(&painter, content, status);
+
+    // Title — wraps if needed but capped at two lines so cards stay
+    // uniform-height. Use a layout job with row limit.
+    let title_color = if absent {
+        theme::TEXT_SECONDARY
     } else {
-        egui::Stroke::NONE
+        theme::TEXT_PRIMARY
     };
+    let title_y = content.min.y + 22.0;
+    let title_w = content.width();
+    let mut title_job = egui::text::LayoutJob::single_section(
+        record.wad_title.clone(),
+        egui::TextFormat {
+            font_id: egui::FontId::proportional(15.0),
+            color: title_color,
+            ..Default::default()
+        },
+    );
+    title_job.wrap.max_width = title_w;
+    title_job.wrap.max_rows = 2;
+    title_job.wrap.break_anywhere = false;
+    let title_galley = painter.layout_job(title_job);
+    let title_h = title_galley.size().y;
+    painter.galley(
+        egui::pos2(content.min.x, title_y),
+        title_galley,
+        title_color,
+    );
 
-    egui::Frame::new()
-        .fill(theme::BG_MEDIUM)
-        .stroke(stroke)
-        .corner_radius(6.0)
-        .inner_margin(egui::Margin::same(16))
-        .show(ui, |ui| {
-            ui.set_min_size(egui::vec2(CARD_WIDTH - 16.0, CARD_HEIGHT - 16.0));
-            ui.set_max_width(CARD_WIDTH - 16.0);
+    // Author below title
+    if let Some(author) = record.wad_author.as_deref() {
+        painter.text(
+            egui::pos2(content.min.x, title_y + title_h + 4.0),
+            egui::Align2::LEFT_TOP,
+            truncate(author, 36),
+            egui::FontId::proportional(12.0),
+            theme::TEXT_SECONDARY,
+        );
+    }
 
-            // Status-colored left edge (skip for absent — already dashed).
-            if !absent {
-                let rect = ui.max_rect();
-                let edge = egui::Rect::from_min_size(
-                    egui::pos2(rect.min.x - 16.0, rect.min.y - 16.0),
-                    egui::vec2(3.0, rect.height() + 32.0),
-                );
-                ui.painter().rect_filled(edge, 0.0, accent);
-            }
+    // Action button — bottom-left of the card, rendered as a real egui
+    // button (clickable) inside a sub-ui clipped to the card's bottom row.
+    let button_rect = Rect::from_min_max(
+        egui::pos2(content.min.x, content.max.y - 22.0),
+        egui::pos2(content.max.x, content.max.y),
+    );
+    let mut sub_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(button_rect)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    action_button(&mut sub_ui, record, status)
+}
 
-            // Rank + status badge row
-            ui.horizontal(|ui| {
-                if let Some(rank) = record.rank {
-                    ui.colored_label(
-                        theme::TEXT_MUTED,
-                        egui::RichText::new(format!("#{rank}")).size(11.0).strong(),
-                    );
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    status_pill(ui, status);
-                });
-            });
-            ui.add_space(4.0);
-
-            // Title
-            let title_color = if absent {
-                theme::TEXT_SECONDARY
-            } else {
-                theme::TEXT_PRIMARY
-            };
-            ui.label(
-                egui::RichText::new(&record.wad_title)
-                    .size(15.0)
-                    .strong()
-                    .color(title_color),
-            );
-
-            // Author
-            if let Some(author) = record.wad_author.as_deref() {
-                ui.colored_label(
-                    theme::TEXT_SECONDARY,
-                    egui::RichText::new(author).size(12.0),
-                );
-            }
-
-            // Action button — pushed to the bottom of the card.
-            ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                ui.horizontal(|ui| {
-                    if let Some(a) = action_button(ui, record, status) {
-                        action = Some(a);
-                    }
-                });
-            });
-        });
-
-    action
+fn paint_status_pill(painter: &egui::Painter, content: Rect, status: EffectiveStatus) {
+    let (text, color) = status_label_and_color(status);
+    let font = egui::FontId::proportional(10.0);
+    let galley = painter.layout_no_wrap(text.to_string(), font.clone(), color);
+    let pad = Vec2::new(8.0, 2.0);
+    let pill_size = galley.size() + pad * 2.0;
+    let pill_rect = Rect::from_min_size(
+        egui::pos2(content.max.x - pill_size.x, content.min.y - 2.0),
+        pill_size,
+    );
+    let bg = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 32);
+    painter.rect_filled(pill_rect, CornerRadius::same(11), bg);
+    painter.galley(pill_rect.min + pad, galley, color);
 }
 
 // ---------------------------------------------------------------------------
-// Small visual helpers
+// Helpers
 // ---------------------------------------------------------------------------
 
 fn category_label(category: &str) -> &'static str {
@@ -490,40 +615,26 @@ fn category_counts(
     m
 }
 
-fn status_accent(status: EffectiveStatus) -> egui::Color32 {
+fn status_accent(status: EffectiveStatus) -> Color32 {
     match status {
         EffectiveStatus::Library(Status::Completed) => theme::COLOR_SUCCESS,
         EffectiveStatus::Library(Status::InProgress) => theme::COLOR_WARNING,
         EffectiveStatus::Library(Status::Abandoned) => theme::COLOR_ERROR,
-        EffectiveStatus::Library(Status::Unplayed) => egui::Color32::from_rgb(0x33, 0x66, 0xcc),
+        EffectiveStatus::Library(Status::Unplayed) => Color32::from_rgb(0x33, 0x66, 0xcc),
         EffectiveStatus::Absent => theme::TEXT_MUTED,
     }
 }
 
-fn status_pill(ui: &mut egui::Ui, status: EffectiveStatus) {
-    let (text, color) = match status {
+fn status_label_and_color(status: EffectiveStatus) -> (&'static str, Color32) {
+    match status {
         EffectiveStatus::Library(Status::Completed) => ("completed", theme::COLOR_SUCCESS),
         EffectiveStatus::Library(Status::InProgress) => ("in progress", theme::COLOR_WARNING),
         EffectiveStatus::Library(Status::Abandoned) => ("dropped", theme::COLOR_ERROR),
         EffectiveStatus::Library(Status::Unplayed) => {
-            ("unplayed", egui::Color32::from_rgb(0x33, 0x66, 0xcc))
+            ("unplayed", Color32::from_rgb(0x33, 0x66, 0xcc))
         }
         EffectiveStatus::Absent => ("absent", theme::TEXT_SECONDARY),
-    };
-    let bg = egui::Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 32);
-    egui::Frame::new()
-        .fill(bg)
-        .corner_radius(11.0)
-        .inner_margin(egui::Margin::symmetric(8, 2))
-        .show(ui, |ui| {
-            ui.label(
-                egui::RichText::new(text)
-                    .color(color)
-                    .size(10.0)
-                    .strong()
-                    .extra_letter_spacing(0.4),
-            );
-        });
+    }
 }
 
 fn action_button(
@@ -535,34 +646,34 @@ fn action_button(
         EffectiveStatus::Absent => {
             let btn = egui::Button::new(
                 egui::RichText::new("Import")
-                    .size(12.0)
+                    .size(11.0)
                     .strong()
-                    .color(egui::Color32::from_rgb(0x1a, 0x0a, 0x04)),
+                    .color(Color32::from_rgb(0x1a, 0x0a, 0x04)),
             )
             .fill(theme::TEXT_ACCENT)
-            .corner_radius(4.0);
+            .corner_radius(4.0)
+            .min_size(Vec2::new(0.0, 22.0));
             if ui.add(btn).clicked() {
                 return Some(ActionRequest::ImportCacoward(record.id));
             }
             None
         }
-        EffectiveStatus::Library(_) => {
-            // Library row exists — the headline action is "play it". The
-            // wad_id is guaranteed Some when status is Library(_).
+        EffectiveStatus::Library(s) => {
             let wad_id = record.wad_id?;
-            let label = match status {
-                EffectiveStatus::Library(Status::InProgress)
-                | EffectiveStatus::Library(Status::Unplayed) => "Play",
-                _ => "Open",
+            let label = if matches!(s, Status::InProgress | Status::Unplayed) {
+                "Play"
+            } else {
+                "Open"
             };
             let btn = egui::Button::new(
                 egui::RichText::new(label)
-                    .size(12.0)
+                    .size(11.0)
                     .color(theme::TEXT_PRIMARY),
             )
             .fill(theme::BG_LIGHT)
             .stroke(egui::Stroke::new(1.0, theme::BORDER_MED))
-            .corner_radius(4.0);
+            .corner_radius(4.0)
+            .min_size(Vec2::new(0.0, 22.0));
             if ui.add(btn).clicked() {
                 return Some(ActionRequest::Play(wad_id));
             }
@@ -572,12 +683,26 @@ fn action_button(
 }
 
 fn draw_meter(ui: &mut egui::Ui, done: usize, total: usize, width: f32) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 6.0), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 6.0), egui::Sense::hover());
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 3.0, theme::BG_LIGHT);
+    painter.rect_filled(rect, CornerRadius::same(3), theme::BG_LIGHT);
     if total > 0 {
         let fill_w = rect.width() * (done as f32 / total as f32);
-        let fill_rect = egui::Rect::from_min_size(rect.min, egui::vec2(fill_w, rect.height()));
-        painter.rect_filled(fill_rect, 3.0, theme::TEXT_ACCENT);
+        let fill_rect = Rect::from_min_size(rect.min, Vec2::new(fill_w, rect.height()));
+        painter.rect_filled(fill_rect, CornerRadius::same(3), theme::TEXT_ACCENT);
     }
+}
+
+fn lerp_byte(a: u8, b: u8, t: f32) -> u8 {
+    let t = t.clamp(0.0, 1.0);
+    (a as f32 + (b as f32 - a as f32) * t).round() as u8
+}
+
+fn truncate(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        return s.to_string();
+    }
+    let mut out: String = s.chars().take(max_chars - 1).collect();
+    out.push('…');
+    out
 }
