@@ -18,9 +18,9 @@ pub use analysis::{
 };
 pub use cacowards::{
     CATEGORY_HONORABLE_MENTION, CATEGORY_MORDETH, CATEGORY_RUNNER_UP, CATEGORY_WINNER,
-    CORE_CATEGORIES, CacowardRecord, NewCacoward, delete_cacoward, find_wad_by_idgames_id,
-    get_all_cacowards, get_cacoward, get_cacowards_by_year, get_cacowards_for_wad, get_years,
-    link_wad, unlink_wad, upsert_cacoward,
+    CORE_CATEGORIES, CacowardRecord, NewCacoward, clear_year_unpinned, delete_cacoward,
+    find_wad_by_idgames_id, get_all_cacowards, get_cacoward, get_cacowards_by_year,
+    get_cacowards_for_wad, get_years, link_wad, unlink_wad, upsert_cacoward,
 };
 pub use collections::{
     CollectionRecord, create_collection, delete_collection, get_all_collections, get_collection,

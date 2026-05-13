@@ -208,6 +208,21 @@ pub fn delete_cacoward(conn: &Connection, id: i64) -> Result<()> {
     Ok(())
 }
 
+/// Delete every non-pinned Cacoward entry for `year`. Used by the enricher
+/// before a fresh scrape so the scrape result is the canonical state for the
+/// year — without this, a stale row from an older buggy scrape would linger.
+///
+/// Rows with `manual_override = 1` are preserved on the assumption the user
+/// curated them by hand and an upstream wiki edit shouldn't blow that away.
+/// Returns the number of rows removed.
+pub fn clear_year_unpinned(conn: &Connection, year: i64) -> Result<usize> {
+    let count = conn.execute(
+        "DELETE FROM cacowards WHERE year = ?1 AND manual_override = 0",
+        rusqlite::params![year],
+    )?;
+    Ok(count)
+}
+
 // =============================================================================
 // Tests
 // =============================================================================
@@ -373,5 +388,30 @@ mod tests {
         let id = upsert_cacoward(&conn, &sample(2020, CATEGORY_WINNER, "Z")).unwrap();
         delete_cacoward(&conn, id).unwrap();
         assert!(get_cacoward(&conn, id).unwrap().is_none());
+    }
+
+    #[test]
+    fn clear_year_unpinned_keeps_manual_links() {
+        let conn = setup();
+        conn.execute(
+            "INSERT INTO wads (id, title, source_type) VALUES (1, 'fake', 'manual')",
+            [],
+        )
+        .unwrap();
+
+        let pinned = upsert_cacoward(&conn, &sample(2023, CATEGORY_WINNER, "Pinned")).unwrap();
+        link_wad(&conn, pinned, 1, true).unwrap();
+        let _orphan = upsert_cacoward(&conn, &sample(2023, CATEGORY_WINNER, "Orphan")).unwrap();
+        let _other_year = upsert_cacoward(&conn, &sample(2022, CATEGORY_WINNER, "Other")).unwrap();
+
+        let removed = clear_year_unpinned(&conn, 2023).unwrap();
+        assert_eq!(removed, 1);
+
+        // Pinned 2023 entry survives; 2022 untouched.
+        assert!(get_cacoward(&conn, pinned).unwrap().is_some());
+        let remaining_2023 = get_cacowards_by_year(&conn, 2023).unwrap();
+        assert_eq!(remaining_2023.len(), 1);
+        assert_eq!(remaining_2023[0].wad_title, "Pinned");
+        assert_eq!(get_cacowards_by_year(&conn, 2022).unwrap().len(), 1);
     }
 }

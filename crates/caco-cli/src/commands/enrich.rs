@@ -7,10 +7,11 @@ use rusqlite::Connection;
 
 use caco_core::complevel::complevel_name;
 use caco_core::db::{self, WadRecord, WadUpdate};
-use caco_sources::doomwiki::DoomwikiClient;
+use caco_sources::doomwiki::{self, DoomwikiClient};
+use caco_sources::idgames::extract_idgames_id_from_url;
 use caco_sources::import_service::{port_to_complevel, port_to_zdoom_required, titles_match};
 
-#[derive(Args)]
+#[derive(Args, Default)]
 pub struct EnrichArgs {
     /// WAD query (all WADs if omitted)
     query: Vec<String>,
@@ -18,6 +19,16 @@ pub struct EnrichArgs {
     /// Only enrich WADs with missing complevel
     #[arg(long)]
     complevel: bool,
+
+    /// Fetch the Cacowards page for `--year` from the Doom Wiki and upsert
+    /// entries into the cacowards table, auto-linking to library WADs by
+    /// idgames id.
+    #[arg(long)]
+    cacowards: bool,
+
+    /// Year to scrape (required with `--cacowards`).
+    #[arg(long, value_name = "YYYY")]
+    year: Option<i64>,
 
     /// Preview changes without applying them
     #[arg(long)]
@@ -39,6 +50,19 @@ impl EnrichResult {
 }
 
 pub fn run(conn: &Connection, args: &EnrichArgs) -> Result<(), String> {
+    if args.cacowards {
+        let Some(year) = args.year else {
+            return Err("--cacowards requires --year YYYY".to_string());
+        };
+        if !args.query.is_empty() {
+            return Err("--cacowards does not accept a WAD query".to_string());
+        }
+        return run_cacowards(conn, year, args.dry_run);
+    }
+    if args.year.is_some() {
+        return Err("--year is only valid with --cacowards".to_string());
+    }
+
     // Search for matching WADs
     let query = if args.query.is_empty() {
         None
@@ -222,6 +246,99 @@ fn wiki_lookup_port(wad: &WadRecord, wiki_lookups: &mut u32) -> Option<String> {
     }
 
     Some(entry.port.clone())
+}
+
+// =============================================================================
+// Cacowards enrichment
+// =============================================================================
+
+#[derive(Default)]
+struct CacowardSummary {
+    scraped: usize,
+    upserted: usize,
+    linked: usize,
+}
+
+/// Fetch the Cacowards page for `year` and ingest its entries.
+fn run_cacowards(conn: &Connection, year: i64, dry_run: bool) -> Result<(), String> {
+    let client = DoomwikiClient::new();
+    eprintln!("Fetching Cacowards {year} from Doom Wiki…");
+    let entries = doomwiki::fetch_cacowards(&client, year)
+        .map_err(|e| format!("Doom Wiki fetch failed: {e}"))?;
+
+    if entries.is_empty() {
+        return Err(format!(
+            "No Cacoward entries parsed for {year} (page missing or no recognised sections)."
+        ));
+    }
+
+    let summary = ingest_cacoward_entries(conn, year, &entries, dry_run)?;
+
+    let suffix = if dry_run { " (dry run)" } else { "" };
+    println!(
+        "Cacowards {year}: scraped {}, upserted {}, auto-linked {} to library WADs{suffix}",
+        summary.scraped, summary.upserted, summary.linked
+    );
+    Ok(())
+}
+
+/// Upsert scraped Cacoward entries into the DB and auto-link to library WADs
+/// whose `idgames_id` matches an entry's idgames URL.
+///
+/// Auto-linking does not set `manual_override`, so the user can correct any
+/// false-positive matches later without their fix being overwritten on the
+/// next scrape.
+fn ingest_cacoward_entries(
+    conn: &Connection,
+    year: i64,
+    entries: &[db::NewCacoward],
+    dry_run: bool,
+) -> Result<CacowardSummary, String> {
+    let mut summary = CacowardSummary {
+        scraped: entries.len(),
+        ..Default::default()
+    };
+
+    // Reconcile: remove non-pinned rows for this year before upserting the
+    // fresh scrape, so stale entries from an older scrape (e.g. parser bugs,
+    // wiki edits) don't linger. Pinned manual links are preserved.
+    if !dry_run {
+        db::clear_year_unpinned(conn, year).map_err(|e| format!("DB cleanup failed: {e}"))?;
+    }
+
+    for entry in entries {
+        if dry_run {
+            println!(
+                "Would upsert {year} {} — {} ({})",
+                entry.category,
+                entry.wad_title,
+                entry.idgames_url.as_deref().unwrap_or("no idgames link"),
+            );
+            continue;
+        }
+
+        let id = db::upsert_cacoward(conn, entry).map_err(|e| format!("DB upsert failed: {e}"))?;
+        summary.upserted += 1;
+
+        let Some(ref url) = entry.idgames_url else {
+            continue;
+        };
+        let Some(idgames_id) = extract_idgames_id_from_url(url) else {
+            continue;
+        };
+        let key = idgames_id.to_string();
+        match db::find_wad_by_idgames_id(conn, &key) {
+            Ok(Some(wad_id)) => {
+                db::link_wad(conn, id, wad_id, false)
+                    .map_err(|e| format!("DB link failed: {e}"))?;
+                summary.linked += 1;
+            }
+            Ok(None) => {}
+            Err(e) => return Err(format!("DB lookup failed: {e}")),
+        }
+    }
+
+    Ok(summary)
 }
 
 #[cfg(test)]
@@ -509,6 +626,8 @@ mod tests {
             query: vec![],
             complevel: false,
             dry_run: false,
+            cacowards: false,
+            year: None,
         };
         let result = run(&conn, &args);
         assert!(result.is_err());
@@ -526,6 +645,8 @@ mod tests {
             query: vec![],
             complevel: true,
             dry_run: false,
+            cacowards: false,
+            year: None,
         };
         // Should succeed (prints "All matching WADs already have complevel set.")
         let result = run(&conn, &args);
@@ -555,6 +676,8 @@ mod tests {
             query: vec![],
             complevel: true,
             dry_run: false,
+            cacowards: false,
+            year: None,
         };
         let result = run(&conn, &args);
         assert!(result.is_ok());
@@ -575,6 +698,8 @@ mod tests {
             query: vec!["Alpha".to_string()],
             complevel: false,
             dry_run: false,
+            cacowards: false,
+            year: None,
         };
         let result = run(&conn, &args);
         assert!(result.is_ok());
@@ -589,6 +714,8 @@ mod tests {
             query: vec!["Nonexistent".to_string()],
             complevel: false,
             dry_run: false,
+            cacowards: false,
+            year: None,
         };
         let result = run(&conn, &args);
         assert!(result.is_err());
@@ -612,6 +739,8 @@ mod tests {
             query: vec![],
             complevel: false,
             dry_run: true,
+            cacowards: false,
+            year: None,
         };
         let result = run(&conn, &args);
         assert!(result.is_ok());
@@ -620,6 +749,66 @@ mod tests {
         let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
         assert_eq!(wad.complevel, None);
         assert_eq!(wad.custom_iwad, None);
+    }
+
+    #[test]
+    fn test_run_cacowards_upserts_and_links() {
+        let conn = setup();
+        // Pre-seed a WAD whose idgames_id matches one of the sample entries
+        // so we can assert auto-linking fires.
+        let wad_id = add_test_wad(&conn, "Piña Colada");
+        db::update_wad(
+            &conn,
+            wad_id,
+            &db::WadUpdate::new().set_text("idgames_id", Some("20917".to_string())),
+        )
+        .unwrap();
+
+        let entries = vec![
+            db::NewCacoward {
+                year: 2023,
+                category: db::CATEGORY_WINNER.to_string(),
+                wad_title: "Piña Colada".to_string(),
+                idgames_url: Some("https://www.doomworld.com/idgames/?id=20917".to_string()),
+                ..Default::default()
+            },
+            db::NewCacoward {
+                year: 2023,
+                category: db::CATEGORY_WINNER.to_string(),
+                wad_title: "Dreamblood".to_string(),
+                idgames_url: None,
+                ..Default::default()
+            },
+        ];
+
+        let summary = super::ingest_cacoward_entries(&conn, 2023, &entries, false).unwrap();
+        assert_eq!(summary.upserted, 2);
+        assert_eq!(summary.linked, 1);
+
+        let by_year = db::get_cacowards_by_year(&conn, 2023).unwrap();
+        assert_eq!(by_year.len(), 2);
+        let pina = by_year
+            .iter()
+            .find(|c| c.wad_title == "Piña Colada")
+            .unwrap();
+        assert!(pina.wad_id.is_some());
+        assert!(!pina.manual_override);
+    }
+
+    #[test]
+    fn test_run_cacowards_dry_run_makes_no_changes() {
+        let conn = setup();
+        let entries = vec![db::NewCacoward {
+            year: 2023,
+            category: db::CATEGORY_WINNER.to_string(),
+            wad_title: "Piña Colada".to_string(),
+            ..Default::default()
+        }];
+
+        let summary = super::ingest_cacoward_entries(&conn, 2023, &entries, true).unwrap();
+        assert_eq!(summary.upserted, 0);
+        assert_eq!(summary.linked, 0);
+        assert!(db::get_cacowards_by_year(&conn, 2023).unwrap().is_empty());
     }
 
     #[test]

@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use comfy_table::{Cell, CellAlignment, Color, Table, presets};
 
 use caco_core::db::{
-    CompletionRecord, Id24Record, IwadRecord, SessionRecord, StatsSnapshot, Status,
+    CacowardRecord, CompletionRecord, Id24Record, IwadRecord, SessionRecord, StatsSnapshot, Status,
     WadCompanionRecord, WadRecord, WadStats,
 };
 use caco_core::player::format_duration;
@@ -947,4 +947,251 @@ mod tests {
         assert_eq!("json".parse::<OutputFormat>().unwrap(), OutputFormat::Json);
         assert!("invalid".parse::<OutputFormat>().is_err());
     }
+}
+
+// ---------------------------------------------------------------------------
+// Cacoward rendering
+// ---------------------------------------------------------------------------
+
+/// One Cacoward entry plus the resolved play status of its linked WAD (if
+/// any). Status is `None` when the entry isn't linked to a library WAD or
+/// when the link points to a deleted row.
+pub type CacowardView = (CacowardRecord, Option<Status>);
+
+/// Per-(year, category) completion summary used by the aggregate view.
+#[derive(Debug, Clone)]
+pub struct CacowardSummaryRow {
+    pub year: i64,
+    pub category: String,
+    pub total: usize,
+    pub linked: usize,
+    pub completed: usize,
+    pub in_progress: usize,
+}
+
+pub fn render_cacowards_year(views: &[CacowardView], year: i64, format: OutputFormat) {
+    match format {
+        OutputFormat::Table => render_cacowards_year_table(views, year),
+        OutputFormat::Plain => render_cacowards_year_plain(views, year),
+        OutputFormat::Json => render_cacowards_year_json(views, year),
+    }
+}
+
+pub fn render_cacowards_summary(rows: &[CacowardSummaryRow], format: OutputFormat) {
+    match format {
+        OutputFormat::Table => render_cacowards_summary_table(rows),
+        OutputFormat::Plain => render_cacowards_summary_plain(rows),
+        OutputFormat::Json => render_cacowards_summary_json(rows),
+    }
+}
+
+fn category_display(category: &str) -> &'static str {
+    match category {
+        "winner" => "Winner",
+        "runner-up" => "Runner-up",
+        "honorable-mention" => "Honorable Mention",
+        "mordeth" => "Mordeth",
+        _ => "Other",
+    }
+}
+
+fn status_label(status: Option<Status>) -> &'static str {
+    match status {
+        Some(Status::Completed) => "completed",
+        Some(Status::InProgress) => "in-progress",
+        Some(Status::Abandoned) => "abandoned",
+        Some(Status::Unplayed) => "unplayed",
+        None => "unlinked",
+    }
+}
+
+fn status_color(status: Option<Status>) -> Color {
+    match status {
+        Some(Status::Completed) => Color::Green,
+        Some(Status::InProgress) => Color::Yellow,
+        Some(Status::Abandoned) => Color::Red,
+        Some(Status::Unplayed) => Color::White,
+        None => Color::DarkGrey,
+    }
+}
+
+fn render_cacowards_year_table(views: &[CacowardView], year: i64) {
+    if views.is_empty() {
+        println!("No Cacoward entries recorded for {year}.");
+        return;
+    }
+
+    let mut table = Table::new();
+    table.load_preset(presets::NOTHING).set_header(vec![
+        Cell::new("Category").fg(Color::DarkGrey),
+        Cell::new("#").fg(Color::DarkGrey),
+        Cell::new("Title").fg(Color::DarkGrey),
+        Cell::new("Author").fg(Color::DarkGrey),
+        Cell::new("Status").fg(Color::DarkGrey),
+        Cell::new("WAD").fg(Color::DarkGrey),
+    ]);
+
+    let mut last_category: Option<&str> = None;
+    for (record, status) in views {
+        let cat = record.category.as_str();
+        let cat_cell = if last_category == Some(cat) {
+            String::new()
+        } else {
+            category_display(cat).to_string()
+        };
+        last_category = Some(cat);
+        let rank = record.rank.map(|r| r.to_string()).unwrap_or_default();
+        let author = record.wad_author.as_deref().unwrap_or("").to_string();
+        let wad_cell = record
+            .wad_id
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| "—".to_string());
+
+        table.add_row(vec![
+            Cell::new(cat_cell),
+            Cell::new(rank).set_alignment(CellAlignment::Right),
+            Cell::new(&record.wad_title),
+            Cell::new(author),
+            Cell::new(status_label(*status)).fg(status_color(*status)),
+            Cell::new(wad_cell),
+        ]);
+    }
+
+    println!("Cacowards {year}");
+    println!("{table}");
+}
+
+fn render_cacowards_year_plain(views: &[CacowardView], year: i64) {
+    for (record, status) in views {
+        // TSV: year, category, rank, title, author, status, wad_id, idgames_url
+        println!(
+            "{year}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            record.category,
+            record.rank.map(|r| r.to_string()).unwrap_or_default(),
+            record.wad_title,
+            record.wad_author.as_deref().unwrap_or(""),
+            status_label(*status),
+            record.wad_id.map(|id| id.to_string()).unwrap_or_default(),
+            record.idgames_url.as_deref().unwrap_or(""),
+        );
+    }
+}
+
+fn render_cacowards_year_json(views: &[CacowardView], year: i64) {
+    let entries: Vec<serde_json::Value> = views
+        .iter()
+        .map(|(record, status)| {
+            serde_json::json!({
+                "id": record.id,
+                "category": record.category,
+                "rank": record.rank,
+                "wad_title": record.wad_title,
+                "wad_author": record.wad_author,
+                "idgames_url": record.idgames_url,
+                "doomwiki_url": record.doomwiki_url,
+                "blurb": record.blurb,
+                "wad_id": record.wad_id,
+                "status": status.map(|s| s.as_str().to_string()),
+                "manual_override": record.manual_override,
+            })
+        })
+        .collect();
+
+    let payload = serde_json::json!({
+        "year": year,
+        "count": entries.len(),
+        "entries": entries,
+    });
+
+    println!("{}", serde_json::to_string_pretty(&payload).unwrap());
+}
+
+fn render_cacowards_summary_table(rows: &[CacowardSummaryRow]) {
+    if rows.is_empty() {
+        println!("No Cacoward entries in the database. Run `caco enrich --cacowards --year YYYY`.");
+        return;
+    }
+
+    let mut table = Table::new();
+    table.load_preset(presets::NOTHING).set_header(vec![
+        Cell::new("Year").fg(Color::DarkGrey),
+        Cell::new("Category").fg(Color::DarkGrey),
+        Cell::new("Total").fg(Color::DarkGrey),
+        Cell::new("Linked").fg(Color::DarkGrey),
+        Cell::new("Done").fg(Color::DarkGrey),
+        Cell::new("In Progress").fg(Color::DarkGrey),
+    ]);
+
+    let mut last_year: Option<i64> = None;
+    for row in rows {
+        let year_cell = if last_year == Some(row.year) {
+            String::new()
+        } else {
+            row.year.to_string()
+        };
+        last_year = Some(row.year);
+        let done_color = if row.completed == row.total && row.total > 0 {
+            Color::Green
+        } else if row.completed > 0 {
+            Color::Yellow
+        } else {
+            Color::White
+        };
+        table.add_row(vec![
+            Cell::new(year_cell),
+            Cell::new(category_display(&row.category)),
+            Cell::new(row.total).set_alignment(CellAlignment::Right),
+            Cell::new(row.linked).set_alignment(CellAlignment::Right),
+            Cell::new(row.completed)
+                .set_alignment(CellAlignment::Right)
+                .fg(done_color),
+            Cell::new(row.in_progress).set_alignment(CellAlignment::Right),
+        ]);
+    }
+
+    println!("{table}");
+}
+
+fn render_cacowards_summary_plain(rows: &[CacowardSummaryRow]) {
+    for row in rows {
+        println!(
+            "{}\t{}\t{}\t{}\t{}\t{}",
+            row.year, row.category, row.total, row.linked, row.completed, row.in_progress,
+        );
+    }
+}
+
+fn render_cacowards_summary_json(rows: &[CacowardSummaryRow]) {
+    // Group by year for a structured JSON document.
+    let mut by_year: Vec<serde_json::Value> = Vec::new();
+    let mut current_year: Option<i64> = None;
+    let mut current_categories: Vec<serde_json::Value> = Vec::new();
+
+    for row in rows {
+        if current_year != Some(row.year) {
+            if let Some(year) = current_year {
+                by_year.push(serde_json::json!({
+                    "year": year,
+                    "categories": std::mem::take(&mut current_categories),
+                }));
+            }
+            current_year = Some(row.year);
+        }
+        current_categories.push(serde_json::json!({
+            "category": row.category,
+            "total": row.total,
+            "linked": row.linked,
+            "completed": row.completed,
+            "in_progress": row.in_progress,
+        }));
+    }
+    if let Some(year) = current_year {
+        by_year.push(serde_json::json!({
+            "year": year,
+            "categories": current_categories,
+        }));
+    }
+
+    let payload = serde_json::json!({ "years": by_year });
+    println!("{}", serde_json::to_string_pretty(&payload).unwrap());
 }
