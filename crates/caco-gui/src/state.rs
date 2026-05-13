@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Instant;
 
+use caco_core::db::cacowards::{CacowardRecord, EffectiveStatus};
 use caco_core::db::collections::{self, CollectionRecord};
 use caco_core::db::models::WadRecord;
 use caco_core::db::sessions::WadStats;
@@ -31,6 +32,9 @@ pub enum ViewMode {
     #[default]
     Library,
     Import,
+    /// Magazine-style view over the `cacowards` table — see
+    /// [`CacowardsState`] for the data backing it.
+    Cacowards,
 }
 
 // ---------------------------------------------------------------------------
@@ -61,6 +65,11 @@ pub enum ActionRequest {
     Collections,
     EditCollection(String),
     DeleteCollection(String),
+    /// Import the WAD referenced by a Cacoward entry (by DB pk). The
+    /// dispatcher spawns a background worker that resolves the entry,
+    /// fetches the underlying idgames or doomwiki source, and links the
+    /// new wad row back to the cacoward entry.
+    ImportCacoward(i64),
 }
 
 // ---------------------------------------------------------------------------
@@ -160,6 +169,78 @@ pub struct AppState {
     pub sidebar_collections: Vec<CollectionRecord>,
     /// Name of the currently active collection (acts like a playlist selection).
     pub active_collection: Option<String>,
+
+    /// Magazine-style Cacowards view state. Independent of `wads`/library
+    /// state so switching views doesn't churn either side's cache.
+    pub cacowards: CacowardsState,
+}
+
+// ---------------------------------------------------------------------------
+// Cacowards view state
+// ---------------------------------------------------------------------------
+
+/// Backs the magazine-style `ViewMode::Cacowards` central panel.
+///
+/// Strategy: load every cacoward row + its effective status into memory up
+/// front (the table is tiny — low thousands of rows across 30+ years of
+/// awards). Year navigation and category sectioning are then pure filters
+/// over [`all_entries`], so flicking between years stays render-only with
+/// no DB hits.
+pub struct CacowardsState {
+    /// All Cacoward entries joined with their linked-WAD effective status.
+    /// Sorted year DESC, then canonical category order, then rank.
+    pub all_entries: Vec<(CacowardRecord, EffectiveStatus)>,
+
+    /// Currently focused year. `None` only when the table is empty (i.e.
+    /// the user hasn't run `caco enrich --cacowards` yet).
+    pub selected_year: Option<i64>,
+
+    /// Set true when the underlying table may have changed (initial load,
+    /// after import, after enrich). The app's update loop drains this flag
+    /// and re-runs `db::search_cacowards`.
+    pub needs_reload: bool,
+}
+
+impl Default for CacowardsState {
+    fn default() -> Self {
+        Self {
+            all_entries: Vec::new(),
+            selected_year: None,
+            // Eager-load on first view-mode entry so the magazine has
+            // something to render the moment the user clicks the nav item.
+            needs_reload: true,
+        }
+    }
+}
+
+impl CacowardsState {
+    /// Distinct years present in the loaded entries, newest first.
+    pub fn years(&self) -> Vec<i64> {
+        let mut years: Vec<i64> = self.all_entries.iter().map(|(r, _)| r.year).collect();
+        years.dedup();
+        years
+    }
+
+    /// (total, completed) for `year` — the per-year completion ratio shown
+    /// in the year strip. "Completed" means any linked-WAD status of
+    /// `completed`; absent and in-progress don't count.
+    pub fn year_summary(&self, year: i64) -> (usize, usize) {
+        let mut total = 0;
+        let mut done = 0;
+        for (record, status) in &self.all_entries {
+            if record.year != year {
+                continue;
+            }
+            total += 1;
+            if matches!(
+                status,
+                EffectiveStatus::Library(caco_core::db::Status::Completed)
+            ) {
+                done += 1;
+            }
+        }
+        (total, done)
+    }
 }
 
 impl AppState {
@@ -198,6 +279,7 @@ impl AppState {
             total_wad_count: 0,
             sidebar_collections: Vec::new(),
             active_collection: None,
+            cacowards: CacowardsState::default(),
         }
     }
 
@@ -333,6 +415,37 @@ impl AppState {
         self.refresh_collections(conn);
 
         self.needs_reload = false;
+    }
+
+    /// Reload the magazine-style Cacowards view's data. Pulls every entry
+    /// plus its effective status in one query, then picks the newest year
+    /// as the focused tab if the previous focus is gone (e.g. after a
+    /// re-enrich removed entries for that year).
+    pub fn reload_cacowards(&mut self, conn: &Connection) {
+        match caco_core::db::cacowards::search_cacowards(
+            conn,
+            &caco_core::db::cacowards::CacowardFilters::default(),
+        ) {
+            Ok(entries) => {
+                self.cacowards.all_entries = entries;
+            }
+            Err(e) => {
+                eprintln!("cacowards reload failed: {e}");
+                self.cacowards.all_entries.clear();
+            }
+        }
+        // Pick the newest year by default; preserve the user's selection
+        // if it still exists in the loaded set.
+        let years = self.cacowards.years();
+        if let Some(current) = self.cacowards.selected_year
+            && !years.contains(&current)
+        {
+            self.cacowards.selected_year = None;
+        }
+        if self.cacowards.selected_year.is_none() {
+            self.cacowards.selected_year = years.first().copied();
+        }
+        self.cacowards.needs_reload = false;
     }
 
     /// Check if filter debounce has elapsed and apply if so.

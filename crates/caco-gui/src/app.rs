@@ -173,6 +173,15 @@ impl CacoApp {
                     self.state.active_dialog = Some(ActiveDialog::WadStats(dialog));
                 }
             }
+            ActionRequest::ImportCacoward(pk) => {
+                import::workers::spawn_import_cacoward(
+                    self.bg.sender(),
+                    self.state.db_path.clone(),
+                    pk,
+                );
+                self.state.notification =
+                    Some(Notification::info("Importing Cacoward entry…".to_string()));
+            }
             ActionRequest::StartNewPlaythrough(wad_id) => {
                 match caco_core::player::start_new_playthrough(&self.conn, wad_id) {
                     Ok(_) => {
@@ -437,6 +446,10 @@ impl eframe::App for CacoApp {
                                     "WAD imported successfully".to_string(),
                                 ));
                                 self.state.needs_reload = true;
+                                // If the Cacowards panel is the source of
+                                // this import (or just open), force a
+                                // refresh so the new wad link shows up.
+                                self.state.cacowards.needs_reload = true;
                                 // Reset only the active form on success
                                 match active {
                                     2 => self.state.import.doomworld.reset(),
@@ -462,6 +475,9 @@ impl eframe::App for CacoApp {
         if self.state.needs_reload && self.state.view_mode == ViewMode::Library {
             self.state.reload(&self.conn);
             self.kick_reanalysis();
+        }
+        if self.state.cacowards.needs_reload && self.state.view_mode == ViewMode::Cacowards {
+            self.state.reload_cacowards(&self.conn);
         }
 
         // 4. Render active dialog (modal, overlays everything)
@@ -574,6 +590,16 @@ impl eframe::App for CacoApp {
                         if let Some(import_action) = import::render(ui, &mut self.state.import) {
                             self.dispatch_import_action(import_action);
                         }
+                    }
+                    ViewMode::Cacowards => {
+                        egui::ScrollArea::vertical()
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                ui.set_min_width(ui.available_width());
+                                if let Some(a) = panels::cacowards::render(ui, &mut self.state) {
+                                    actions.push(a);
+                                }
+                            });
                     }
                 }
             });

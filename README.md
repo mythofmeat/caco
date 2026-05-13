@@ -106,7 +106,10 @@ Key bindings:
 
 ### GUI
 
-Desktop application with a dark Doom-inspired theme.
+Desktop application with a dark Doom-inspired theme. The left sidebar's
+`Cacowards` entry opens a magazine-style year-by-year view that doubles as
+a "what should I play / import next?" dashboard — entries you don't own
+yet are flagged `absent` with an inline Import button.
 
 ```bash
 caco-gui

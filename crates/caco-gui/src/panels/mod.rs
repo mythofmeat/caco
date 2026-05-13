@@ -1,3 +1,4 @@
+pub mod cacowards;
 pub mod filter_bar;
 pub mod library;
 pub mod sort_controls;

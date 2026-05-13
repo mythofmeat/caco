@@ -41,6 +41,15 @@ pub(super) fn render_sidebar(
         }
         state.view_mode = ViewMode::Import;
     }
+    if theme::sidebar_nav_item(ui, "Cacowards", state.view_mode == ViewMode::Cacowards) {
+        if state.clear_active_collection() {
+            state.needs_reload = true;
+        }
+        state.view_mode = ViewMode::Cacowards;
+        // Re-pull on each entry; cheap relative to user-perceived latency
+        // and keeps the year strip honest after an enrich or import.
+        state.cacowards.needs_reload = true;
+    }
 
     // Divider
     ui.add_space(12.0);

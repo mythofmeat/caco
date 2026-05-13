@@ -117,6 +117,64 @@ pub fn spawn_import_doomwiki(sender: BackgroundSender, db_path: PathBuf, source_
     });
 }
 
+/// Import the WAD referenced by a Cacoward entry (DB pk). Mirrors the CLI
+/// `caco import --cacoward` flow: prefer the entry's idgames URL, fall back
+/// to the doomwiki page, then link the new wad row to the cacoward entry
+/// so the magazine view immediately reflects the new state.
+pub fn spawn_import_cacoward(sender: BackgroundSender, db_path: PathBuf, cacoward_pk: i64) {
+    thread::spawn(move || {
+        let result: Result<_, String> = (|| {
+            let conn = caco_core::db::open_connection(&db_path).map_err(|e| e.to_string())?;
+            let record = caco_core::db::cacowards::get_cacoward(&conn, cacoward_pk)
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| format!("no cacoward entry with pk {cacoward_pk}"))?;
+
+            let service = ImportService::new();
+
+            // Pass 1: idgames URL → numeric id → import_idgames.
+            let import_result = if let Some(ref url) = record.idgames_url
+                && let Some(id) = caco_sources::idgames::extract_idgames_id_from_url(url)
+            {
+                let client = caco_sources::idgames::IdgamesClient::new();
+                let entry = client.get(Some(id), None).map_err(|e| e.to_string())?;
+                service.import_idgames(&conn, &entry, None, false)
+            } else if let Some(ref url) = record.doomwiki_url
+                && let Some(title) = caco_sources::doomwiki::extract_doomwiki_title_from_url(url)
+            {
+                // Pass 2: Doom Wiki fallback.
+                let client = caco_sources::doomwiki::DoomwikiClient::new();
+                let entry = client
+                    .get_entry(&title)
+                    .map_err(|e| e.to_string())?
+                    .ok_or_else(|| format!("Doom Wiki page '{title}' not found"))?;
+                service.import_doomwiki(&conn, &entry, None, false)
+            } else {
+                return Err(format!(
+                    "{} has neither an idgames link nor a Doom Wiki URL — import manually",
+                    record.wad_title,
+                ));
+            };
+
+            if let Some(err) = &import_result.error {
+                return Err(err.clone());
+            }
+
+            // Link the cacoward entry to the resulting wad row (new or
+            // pre-existing duplicate). Auto-link, never sets manual_override.
+            let target_wad = import_result.wad_id.or(import_result.duplicate_id);
+            if let Some(wad_id) = target_wad
+                && record.wad_id != Some(wad_id)
+            {
+                caco_core::db::cacowards::link_wad(&conn, record.id, wad_id, false)
+                    .map_err(|e| e.to_string())?;
+            }
+
+            Ok(import_result)
+        })();
+        sender.send(AppMessage::ImportComplete(result));
+    });
+}
+
 pub fn spawn_import_form(
     sender: BackgroundSender,
     db_path: PathBuf,
