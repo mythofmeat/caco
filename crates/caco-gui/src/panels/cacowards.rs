@@ -251,6 +251,28 @@ fn render_hero(ui: &mut egui::Ui, state: &AppState, year: i64) {
         egui::FontId::proportional(13.0),
         theme::TEXT_SECONDARY,
     );
+
+    // Hero progress bar — wide, thin, just above the bottom rule.
+    // Replaces the byline as the gut-feel "look how far I've come"
+    // signal; the byline becomes the precise label below it. Fills
+    // green at 100% to mirror the per-category meter's swept state.
+    let bar_h = 4.0;
+    let bar_y = rect.max.y - bar_h - 12.0;
+    let bar_rect = Rect::from_min_max(
+        egui::pos2(rect.min.x + HERO_PAD_X, bar_y),
+        egui::pos2(rect.max.x - HERO_PAD_X, bar_y + bar_h),
+    );
+    painter.rect_filled(bar_rect, CornerRadius::same(2), theme::BG_LIGHT);
+    if total > 0 {
+        let fill_w = bar_rect.width() * (done as f32 / total as f32);
+        let fill_rect = Rect::from_min_size(bar_rect.min, Vec2::new(fill_w, bar_h));
+        let fill_color = if done == total {
+            theme::COLOR_SUCCESS
+        } else {
+            theme::TEXT_ACCENT
+        };
+        painter.rect_filled(fill_rect, CornerRadius::same(2), fill_color);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -385,6 +407,8 @@ fn render_category_section(
     // Top padding
     ui.add_space(SECTION_PAD_Y);
 
+    let swept = done == total && total > 0;
+
     // Section header — small caps, accent
     egui::Frame::new()
         .inner_margin(egui::Margin {
@@ -394,16 +418,22 @@ fn render_category_section(
             bottom: 0,
         })
         .show(ui, |ui| {
-            ui.label(
-                egui::RichText::new(category_label(category))
-                    .size(12.0)
-                    .strong()
-                    .color(theme::TEXT_ACCENT)
-                    .extra_letter_spacing(2.0),
-            );
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(category_label(category))
+                        .size(12.0)
+                        .strong()
+                        .color(theme::TEXT_ACCENT)
+                        .extra_letter_spacing(2.0),
+                );
+                if swept {
+                    ui.add_space(8.0);
+                    paint_swept_chip(ui);
+                }
+            });
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                draw_meter(ui, done, total, 120.0);
+                draw_meter(ui, done, total, 120.0, swept);
                 ui.add_space(10.0);
                 let summary = if absent > 0 {
                     format!("{done} of {total} completed · {absent} absent")
@@ -416,6 +446,13 @@ fn render_category_section(
 
     ui.add_space(14.0);
 
+    // Reorder so undone entries render first and completed entries pile up
+    // at the end of the section — the "checklist" feel relies on the
+    // ticked-off items visually receding to the bottom. Stable sort
+    // preserves the original rank ordering within each group.
+    let mut ordered: Vec<&(CacowardRecord, EffectiveStatus)> = entries.to_vec();
+    ordered.sort_by_key(|(_, s)| matches!(s, EffectiveStatus::Library(Status::Completed)) as u8);
+
     // Card grid — manual layout to keep cards at a fixed width.
     let available = ui.available_width() - SECTION_PAD_X * 2.0;
     let card_w = card_width(available);
@@ -424,7 +461,7 @@ fn render_category_section(
         .floor()
         .max(1.0) as usize;
 
-    let rows = entries.len().div_ceil(columns);
+    let rows = ordered.len().div_ceil(columns);
     for row in 0..rows {
         egui::Frame::new()
             .inner_margin(egui::Margin {
@@ -438,10 +475,10 @@ fn render_category_section(
                     ui.spacing_mut().item_spacing.x = CARD_GAP;
                     for col in 0..columns {
                         let idx = row * columns + col;
-                        if idx >= entries.len() {
+                        if idx >= ordered.len() {
                             break;
                         }
-                        let (record, status) = entries[idx];
+                        let (record, status) = ordered[idx];
                         if let Some(a) =
                             render_card(ui, state, record, *status, card_w, card_h, thumbnails)
                         {
@@ -527,6 +564,14 @@ fn render_card(
     };
     paint_card_thumbnail(&painter, thumb_rect, thumb_rounding, record, thumbnails);
 
+    // Completed cards get a dark wash over the thumbnail so they recede
+    // into the "already ticked off" pile at the bottom of each section.
+    // Selection / hover rings draw on top of this, so the card is still
+    // clearly interactive when reactivated.
+    if matches!(status, EffectiveStatus::Library(Status::Completed)) {
+        painter.rect_filled(thumb_rect, thumb_rounding, Color32::from_black_alpha(140));
+    }
+
     // Top overlay strip + rank / status pill.
     let strip = Rect::from_min_max(
         thumb_rect.min,
@@ -555,10 +600,16 @@ fn render_card(
         egui::pos2(rect.max.x - pad_x, rect.max.y - 10.0),
     );
 
-    let title_color = if absent {
-        theme::TEXT_SECONDARY
+    let completed = matches!(status, EffectiveStatus::Library(Status::Completed));
+    let title_color = if completed || absent {
+        theme::TEXT_MUTED
     } else {
         theme::TEXT_PRIMARY
+    };
+    let author_color = if completed {
+        theme::TEXT_MUTED
+    } else {
+        theme::TEXT_SECONDARY
     };
     let mut title_job = egui::text::LayoutJob::single_section(
         record.wad_title.clone(),
@@ -581,7 +632,7 @@ fn render_card(
             egui::Align2::LEFT_TOP,
             truncate(author, 36),
             egui::FontId::proportional(11.0),
-            theme::TEXT_SECONDARY,
+            author_color,
         );
     }
 
@@ -776,15 +827,44 @@ fn action_button(
     }
 }
 
-fn draw_meter(ui: &mut egui::Ui, done: usize, total: usize, width: f32) {
+fn draw_meter(ui: &mut egui::Ui, done: usize, total: usize, width: f32, swept: bool) {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 6.0), egui::Sense::hover());
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, CornerRadius::same(3), theme::BG_LIGHT);
     if total > 0 {
         let fill_w = rect.width() * (done as f32 / total as f32);
         let fill_rect = Rect::from_min_size(rect.min, Vec2::new(fill_w, rect.height()));
-        painter.rect_filled(fill_rect, CornerRadius::same(3), theme::TEXT_ACCENT);
+        // Fill turns green when the category is swept — the meter and
+        // the chip read the same status, so a glance is enough.
+        let fill_color = if swept {
+            theme::COLOR_SUCCESS
+        } else {
+            theme::TEXT_ACCENT
+        };
+        painter.rect_filled(fill_rect, CornerRadius::same(3), fill_color);
     }
+}
+
+/// Small gold "✓ SWEPT" chip — shown on category headers when every
+/// entry in the section is `Library(Completed)`. The point is reward
+/// surface: a single Mordeth Award sweep is a one-clickaway badge of
+/// honour, a 12/12 Winners sweep is a year-long victory.
+fn paint_swept_chip(ui: &mut egui::Ui) {
+    let gold = Color32::from_rgb(0xd4, 0xa1, 0x4a);
+    let bg = Color32::from_rgba_unmultiplied(gold.r(), gold.g(), gold.b(), 40);
+    egui::Frame::new()
+        .fill(bg)
+        .corner_radius(11.0)
+        .inner_margin(egui::Margin::symmetric(8, 2))
+        .show(ui, |ui| {
+            ui.label(
+                egui::RichText::new("✓ SWEPT")
+                    .color(gold)
+                    .size(10.0)
+                    .strong()
+                    .extra_letter_spacing(1.0),
+            );
+        });
 }
 
 /// Map a cacoward entry pk to a synthetic ThumbnailManager key for absent
