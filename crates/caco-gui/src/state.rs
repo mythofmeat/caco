@@ -191,9 +191,19 @@ pub struct CacowardsState {
     /// Sorted year DESC, then canonical category order, then rank.
     pub all_entries: Vec<(CacowardRecord, EffectiveStatus)>,
 
+    /// Library WAD records for every entry with a linked `wad_id`. Loaded
+    /// once per reload so card rendering can pull thumbnail hints
+    /// (source type / URL / cached path) without per-frame DB lookups.
+    pub linked_wads: HashMap<i64, WadRecord>,
+
     /// Currently focused year. `None` only when the table is empty (i.e.
     /// the user hasn't run `caco enrich --cacowards` yet).
     pub selected_year: Option<i64>,
+
+    /// Currently selected cacoward entry (by DB pk), used to draw the
+    /// highlight border on the magazine card grid. `None` means nothing
+    /// is selected — pressing Esc clears the selection.
+    pub selected_entry_pk: Option<i64>,
 
     /// Set true when the underlying table may have changed (initial load,
     /// after import, after enrich). The app's update loop drains this flag
@@ -205,7 +215,9 @@ impl Default for CacowardsState {
     fn default() -> Self {
         Self {
             all_entries: Vec::new(),
+            linked_wads: HashMap::new(),
             selected_year: None,
+            selected_entry_pk: None,
             // Eager-load on first view-mode entry so the magazine has
             // something to render the moment the user clicks the nav item.
             needs_reload: true,
@@ -434,6 +446,24 @@ impl AppState {
                 self.cacowards.all_entries.clear();
             }
         }
+        // Hydrate library-WAD records for every linked entry — the
+        // magazine renderer needs source_type / cached_path / source_url
+        // to ask the thumbnail manager for a TITLEPIC.
+        self.cacowards.linked_wads.clear();
+        let wad_ids: Vec<i64> = self
+            .cacowards
+            .all_entries
+            .iter()
+            .filter_map(|(r, _)| r.wad_id)
+            .collect();
+        for id in wad_ids {
+            if self.cacowards.linked_wads.contains_key(&id) {
+                continue;
+            }
+            if let Ok(Some(wad)) = caco_core::db::wads::get_wad(conn, id, false) {
+                self.cacowards.linked_wads.insert(id, wad);
+            }
+        }
         // Pick the newest year by default; preserve the user's selection
         // if it still exists in the loaded set.
         let years = self.cacowards.years();
@@ -444,6 +474,12 @@ impl AppState {
         }
         if self.cacowards.selected_year.is_none() {
             self.cacowards.selected_year = years.first().copied();
+        }
+        // Drop a stale selection if the entry vanished.
+        if let Some(pk) = self.cacowards.selected_entry_pk
+            && !self.cacowards.all_entries.iter().any(|(r, _)| r.id == pk)
+        {
+            self.cacowards.selected_entry_pk = None;
         }
         self.cacowards.needs_reload = false;
     }

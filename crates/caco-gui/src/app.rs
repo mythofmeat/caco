@@ -596,7 +596,11 @@ impl eframe::App for CacoApp {
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
                                 ui.set_min_width(ui.available_width());
-                                if let Some(a) = panels::cacowards::render(ui, &mut self.state) {
+                                if let Some(a) = panels::cacowards::render(
+                                    ui,
+                                    &mut self.state,
+                                    Some(&self.thumbnails),
+                                ) {
                                     actions.push(a);
                                 }
                             });
@@ -604,7 +608,8 @@ impl eframe::App for CacoApp {
                 }
             });
 
-        // 7. Request thumbnails for visible WADs
+        // 7. Request thumbnails for visible WADs (library) or linked
+        // cacoward entries (magazine view).
         if self.state.view_mode == ViewMode::Library {
             let sender = self.bg.sender();
 
@@ -625,6 +630,19 @@ impl eframe::App for CacoApp {
                         };
                         self.thumbnails.request(wad.id, path, &hint, &sender);
                     }
+                }
+            }
+        } else if self.state.view_mode == ViewMode::Cacowards {
+            let sender = self.bg.sender();
+            for wad in self.state.cacowards.linked_wads.values() {
+                if self.thumbnails.needs_request(wad.id) {
+                    let path = wad.cached_path.as_deref().map(std::path::Path::new);
+                    let hint = ThumbnailHint {
+                        source_type: wad.source_type.as_str().to_string(),
+                        source_url: wad.source_url.clone(),
+                        title: wad.title.clone(),
+                    };
+                    self.thumbnails.request(wad.id, path, &hint, &sender);
                 }
             }
         }
