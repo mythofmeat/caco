@@ -512,7 +512,7 @@ fn mention_has_strict_requirement_context(text: &str, start: usize, end: usize) 
     let after_trimmed = after_lower.trim_start();
     let strict_prefix = last_index_of_any(&before_lower, STRICT_PORT_PREFIXES);
     let weak_prefix = last_index_of_any(&before_lower, WEAK_COMPAT_INTENT);
-    let has_strict_prefix = strict_prefix.is_some_and(|s| weak_prefix.map_or(true, |w| s > w));
+    let has_strict_prefix = strict_prefix.is_some_and(|s| weak_prefix.is_none_or(|w| s > w));
     let suffix_negated = ["not required", "not needed", "not mandatory"]
         .iter()
         .any(|p| after_lower.contains(p));
