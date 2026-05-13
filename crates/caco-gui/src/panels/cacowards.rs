@@ -392,15 +392,21 @@ fn render_category_section(
     entries: &[&(CacowardRecord, EffectiveStatus)],
     thumbnails: Option<&crate::thumbnails::ThumbnailManager>,
 ) -> Option<ActionRequest> {
-    let total = entries.len();
+    // Completion math excludes unsupported entries so the meter / swept
+    // chip reflect "of the playable entries". Unsupported entries are
+    // still rendered (just visually distinct) so the user can see them
+    // and re-mark them when caco grows the needed IWAD / sourceport
+    // support.
+    let total = entries.iter().filter(|(r, _)| r.supported).count();
     let done = entries
         .iter()
-        .filter(|(_, s)| matches!(s, EffectiveStatus::Library(Status::Completed)))
+        .filter(|(r, s)| r.supported && matches!(s, EffectiveStatus::Library(Status::Completed)))
         .count();
     let absent = entries
         .iter()
-        .filter(|(_, s)| matches!(s, EffectiveStatus::Absent))
+        .filter(|(r, s)| r.supported && matches!(s, EffectiveStatus::Absent))
         .count();
+    let unsupported = entries.iter().filter(|(r, _)| !r.supported).count();
 
     let mut action: Option<ActionRequest> = None;
 
@@ -435,23 +441,32 @@ fn render_category_section(
             ui.horizontal(|ui| {
                 draw_meter(ui, done, total, 120.0, swept);
                 ui.add_space(10.0);
-                let summary = if absent > 0 {
-                    format!("{done} of {total} completed · {absent} absent")
-                } else {
-                    format!("{done} of {total} completed")
-                };
-                ui.colored_label(theme::TEXT_SECONDARY, summary);
+                let mut bits = vec![format!("{done} of {total} completed")];
+                if absent > 0 {
+                    bits.push(format!("{absent} absent"));
+                }
+                if unsupported > 0 {
+                    bits.push(format!("{unsupported} unsupported"));
+                }
+                ui.colored_label(theme::TEXT_SECONDARY, bits.join(" · "));
             });
         });
 
     ui.add_space(14.0);
 
-    // Reorder so undone entries render first and completed entries pile up
-    // at the end of the section — the "checklist" feel relies on the
-    // ticked-off items visually receding to the bottom. Stable sort
-    // preserves the original rank ordering within each group.
+    // Reorder so undone supported entries render first, completed entries
+    // pile up next, and unsupported entries trail at the very end. Stable
+    // sort preserves rank ordering within each group.
     let mut ordered: Vec<&(CacowardRecord, EffectiveStatus)> = entries.to_vec();
-    ordered.sort_by_key(|(_, s)| matches!(s, EffectiveStatus::Library(Status::Completed)) as u8);
+    ordered.sort_by_key(|(r, s)| {
+        if !r.supported {
+            2u8
+        } else if matches!(s, EffectiveStatus::Library(Status::Completed)) {
+            1
+        } else {
+            0
+        }
+    });
 
     // Card grid — manual layout to keep cards at a fixed width.
     let available = ui.available_width() - SECTION_PAD_X * 2.0;
@@ -532,7 +547,8 @@ fn render_card(
     height: f32,
     thumbnails: Option<&crate::thumbnails::ThumbnailManager>,
 ) -> Option<ActionRequest> {
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), egui::Sense::click());
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(width, height), egui::Sense::click_and_drag());
     let painter = ui.painter_at(rect);
     let rounding = CornerRadius::same(CARD_ROUNDING);
     let absent = matches!(status, EffectiveStatus::Absent);
@@ -544,6 +560,34 @@ fn render_card(
     if response.clicked() {
         state.cacowards.selected_entry_pk = Some(record.id);
     }
+
+    // Right-click context menu: manual linking + supported toggle. Used
+    // for the long tail of cases the auto-linker can't reach (renamed
+    // titles, alternative IWAD families, etc.).
+    let mut menu_action: Option<ActionRequest> = None;
+    response.context_menu(|ui| {
+        if ui.button("Link to library WAD…").clicked() {
+            menu_action = Some(ActionRequest::LinkCacoward(record.id));
+            ui.close_menu();
+        }
+        if record.wad_id.is_some() && ui.button("Unlink").clicked() {
+            menu_action = Some(ActionRequest::UnlinkCacoward(record.id));
+            ui.close_menu();
+        }
+        ui.separator();
+        let toggle_label = if record.supported {
+            "Mark as unsupported"
+        } else {
+            "Mark as supported"
+        };
+        if ui.button(toggle_label).clicked() {
+            menu_action = Some(ActionRequest::SetCacowardSupported(
+                record.id,
+                !record.supported,
+            ));
+            ui.close_menu();
+        }
+    });
 
     // Background — slightly lifted when selected.
     let bg = if selected {
@@ -564,11 +608,12 @@ fn render_card(
     };
     paint_card_thumbnail(&painter, thumb_rect, thumb_rounding, record, thumbnails);
 
-    // Completed cards get a dark wash over the thumbnail so they recede
-    // into the "already ticked off" pile at the bottom of each section.
-    // Selection / hover rings draw on top of this, so the card is still
-    // clearly interactive when reactivated.
-    if matches!(status, EffectiveStatus::Library(Status::Completed)) {
+    // Completed and unsupported cards both get a dark wash over the
+    // thumbnail. Completed = "ticked off"; unsupported = "out of the
+    // game" — they recede for different reasons but the visual cue is
+    // the same so the eye lands on actionable cards first.
+    let dim = matches!(status, EffectiveStatus::Library(Status::Completed)) || !record.supported;
+    if dim {
         painter.rect_filled(thumb_rect, thumb_rounding, Color32::from_black_alpha(140));
     }
 
@@ -587,7 +632,12 @@ fn render_card(
             Color32::from_rgb(0xe8, 0xd8, 0xc8),
         );
     }
-    paint_status_pill(&painter, thumb_rect.shrink2(Vec2::new(8.0, 8.0)), status);
+    paint_status_pill(
+        &painter,
+        thumb_rect.shrink2(Vec2::new(8.0, 8.0)),
+        status,
+        record.supported,
+    );
 
     // ── Body ──────────────────────────────────────────────────────────
     // (No status-colored left edge — the pill on the thumbnail conveys
@@ -670,7 +720,10 @@ fn render_card(
         );
     }
 
-    button_action
+    // Context-menu picks take precedence — they're the user's
+    // most recent gesture and shouldn't get clobbered by a stray
+    // button-region click.
+    menu_action.or(button_action)
 }
 
 fn paint_card_thumbnail(
@@ -730,8 +783,20 @@ fn paint_card_thumbnail(
     }
 }
 
-fn paint_status_pill(painter: &egui::Painter, content: Rect, status: EffectiveStatus) {
-    let (text, color) = status_label_and_color(status);
+fn paint_status_pill(
+    painter: &egui::Painter,
+    content: Rect,
+    status: EffectiveStatus,
+    supported: bool,
+) {
+    // Unsupported overrides whatever the linked-WAD status would say —
+    // the user has explicitly removed this entry from the completion
+    // game, so it shouldn't read "in progress" or "completed" either.
+    let (text, color) = if supported {
+        status_label_and_color(status)
+    } else {
+        ("unsupported", theme::TEXT_MUTED)
+    };
     let font = egui::FontId::proportional(10.0);
     let galley = painter.layout_no_wrap(text.to_string(), font.clone(), color);
     let pad = Vec2::new(8.0, 2.0);

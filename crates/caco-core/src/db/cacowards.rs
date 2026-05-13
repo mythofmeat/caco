@@ -64,6 +64,11 @@ pub struct CacowardRecord {
     pub blurb: Option<String>,
     pub wad_id: Option<i64>,
     pub manual_override: bool,
+    /// User-controlled flag for entries caco can't currently play (Doom 64,
+    /// Hedon, etc.). Unsupported rows are still listed in the magazine view
+    /// but excluded from per-year / per-category completion totals so the
+    /// progress bars reflect playable entries only.
+    pub supported: bool,
 }
 
 impl CacowardRecord {
@@ -80,6 +85,7 @@ impl CacowardRecord {
             blurb: row.get("blurb")?,
             wad_id: row.get("wad_id")?,
             manual_override: row.get::<_, i64>("manual_override")? != 0,
+            supported: row.get::<_, i64>("supported")? != 0,
         })
     }
 }
@@ -221,6 +227,17 @@ pub fn find_wad_by_idgames_id(conn: &Connection, idgames_id: &str) -> Result<Opt
 /// of entries that turn out to be wiki noise.
 pub fn delete_cacoward(conn: &Connection, id: i64) -> Result<()> {
     conn.execute("DELETE FROM cacowards WHERE id = ?", [id])?;
+    Ok(())
+}
+
+/// Flip the `supported` flag on a Cacoward entry. Unsupported entries are
+/// preserved across re-scrapes (clear_year_unpinned respects them) so the
+/// user's marking sticks.
+pub fn set_supported(conn: &Connection, cacoward_id: i64, supported: bool) -> Result<()> {
+    conn.execute(
+        "UPDATE cacowards SET supported = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
+        rusqlite::params![supported as i64, cacoward_id],
+    )?;
     Ok(())
 }
 
@@ -455,8 +472,12 @@ impl CacowardFilters {
 /// curated them by hand and an upstream wiki edit shouldn't blow that away.
 /// Returns the number of rows removed.
 pub fn clear_year_unpinned(conn: &Connection, year: i64) -> Result<usize> {
+    // Preserve both manually-pinned links AND entries the user has marked
+    // unsupported — both represent user-curated state that the next scrape
+    // would otherwise wipe.
     let count = conn.execute(
-        "DELETE FROM cacowards WHERE year = ?1 AND manual_override = 0",
+        "DELETE FROM cacowards
+         WHERE year = ?1 AND manual_override = 0 AND supported = 1",
         rusqlite::params![year],
     )?;
     Ok(count)
@@ -767,7 +788,40 @@ mod tests {
             blurb: None,
             wad_id: None,
             manual_override: false,
+            supported: true,
         }
+    }
+
+    #[test]
+    fn set_supported_toggles_flag() {
+        let conn = setup();
+        let id = upsert_cacoward(&conn, &sample(2023, CATEGORY_WINNER, "X")).unwrap();
+        let initial = get_cacoward(&conn, id).unwrap().unwrap();
+        assert!(initial.supported); // default is true
+
+        set_supported(&conn, id, false).unwrap();
+        let unsupported = get_cacoward(&conn, id).unwrap().unwrap();
+        assert!(!unsupported.supported);
+
+        set_supported(&conn, id, true).unwrap();
+        let supported = get_cacoward(&conn, id).unwrap().unwrap();
+        assert!(supported.supported);
+    }
+
+    #[test]
+    fn clear_year_unpinned_preserves_unsupported_entries() {
+        let conn = setup();
+        let keep = upsert_cacoward(&conn, &sample(2023, CATEGORY_WINNER, "KeepMe")).unwrap();
+        set_supported(&conn, keep, false).unwrap();
+        let _drop = upsert_cacoward(&conn, &sample(2023, CATEGORY_WINNER, "DropMe")).unwrap();
+
+        let removed = clear_year_unpinned(&conn, 2023).unwrap();
+        assert_eq!(removed, 1);
+
+        let remaining = get_cacowards_by_year(&conn, 2023).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].wad_title, "KeepMe");
+        assert!(!remaining[0].supported);
     }
 
     #[test]

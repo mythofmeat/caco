@@ -10,6 +10,7 @@ use caco_core::wad_analysis::WadAnalysis;
 use rusqlite::Connection;
 
 use crate::dialogs::cache::CacheDialogState;
+use crate::dialogs::cacoward_link::CacowardLinkDialogState;
 use crate::dialogs::collections::CollectionsDialogState;
 use crate::dialogs::delete::DeleteDialogState;
 use crate::dialogs::edit::EditDialogState;
@@ -70,6 +71,19 @@ pub enum ActionRequest {
     /// fetches the underlying idgames or doomwiki source, and links the
     /// new wad row back to the cacoward entry.
     ImportCacoward(i64),
+
+    /// Open the modal that lets the user pick a library WAD to link to
+    /// this cacoward entry (cacoward pk).
+    LinkCacoward(i64),
+
+    /// Clear the wad_id on a cacoward entry, restoring it to the
+    /// auto-linker's reach on the next enrich.
+    UnlinkCacoward(i64),
+
+    /// Flip the `supported` flag on a cacoward entry. `true` makes the
+    /// entry playable / counted toward completion; `false` parks it as
+    /// "not yet supported by caco".
+    SetCacowardSupported(i64, bool),
 }
 
 // ---------------------------------------------------------------------------
@@ -86,6 +100,8 @@ pub enum ActiveDialog {
     Resources(ResourcesDialogState),
     WadStats(WadStatsDialogState),
     Link(LinkDialogState),
+    /// Modal picker for choosing a library WAD to link to a Cacoward entry.
+    CacowardLink(CacowardLinkDialogState),
     Help,
     About,
 }
@@ -235,12 +251,14 @@ impl CacowardsState {
 
     /// (total, completed) for `year` — the per-year completion ratio shown
     /// in the year strip. "Completed" means any linked-WAD status of
-    /// `completed`; absent and in-progress don't count.
+    /// `completed`; absent and in-progress don't count. Unsupported
+    /// entries are excluded from both numerator and denominator so the
+    /// year reads "x of N playable entries completed".
     pub fn year_summary(&self, year: i64) -> (usize, usize) {
         let mut total = 0;
         let mut done = 0;
         for (record, status) in &self.all_entries {
-            if record.year != year {
+            if record.year != year || !record.supported {
                 continue;
             }
             total += 1;

@@ -22,7 +22,7 @@ pub use cacowards::{
     clear_year_unpinned, delete_cacoward, find_wad_by_idgames_id, format_cacoward_id,
     get_all_cacowards, get_cacoward, get_cacowards_by_year, get_cacowards_for_wad, get_years,
     link_wad, normalize_category, parse_cacoward_id, resolve_cacoward_ref, search_cacowards,
-    unlink_wad, upsert_cacoward,
+    set_supported, unlink_wad, upsert_cacoward,
 };
 pub use collections::{
     CollectionRecord, create_collection, delete_collection, get_all_collections, get_collection,

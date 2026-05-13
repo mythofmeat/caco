@@ -159,6 +159,11 @@ static MIGRATIONS: &[Migration] = &[
         migrate_add_required_sourceport_family,
     ),
     (36, "add_cacowards_table", migrate_add_cacowards_table),
+    (
+        37,
+        "add_cacoward_supported_flag",
+        migrate_add_cacoward_supported_flag,
+    ),
 ];
 
 // ---------------------------------------------------------------------------
@@ -711,6 +716,16 @@ fn migrate_add_cacowards_table(conn: &Connection) -> Result<()> {
         )?;
     }
     Ok(())
+}
+
+/// Cacoward entries the user has flagged as "not playable from caco" —
+/// usually because they require an IWAD or sourceport family caco doesn't
+/// yet wire up (Doom 64, Hedon, sometimes Heretic/Hexen depending on setup).
+/// `supported = 0` rows still display in the magazine view but are excluded
+/// from completion totals so the year's progress bar reflects only entries
+/// the user can actually play.
+fn migrate_add_cacoward_supported_flag(conn: &Connection) -> Result<()> {
+    add_column_if_missing(conn, "cacowards", "supported", "INTEGER NOT NULL DEFAULT 1")
 }
 
 fn migrate_consolidate_status(conn: &Connection) -> Result<()> {
