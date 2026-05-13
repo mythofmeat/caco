@@ -81,6 +81,8 @@ caco stats                         # Library statistics
 caco enrich --cacowards --year 2023  # Scrape that year's Cacowards from Doom Wiki
 caco stats --cacowards             # Year × category completion grid
 caco stats --cacowards --year 2023 -o json  # Per-entry detail as JSON
+caco ls cacoward:2023 cacoward:winner status:unplayed  # Browse unplayed 2023 winners
+caco import --cacoward c.2023.winner.1   # Import the Nth winner of YEAR
 ```
 
 ### TUI

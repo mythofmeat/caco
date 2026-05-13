@@ -133,7 +133,7 @@ egui = "0.31"
 ## Behavior
 
 **Query syntax** (beets-style — used by `ls`, `play`, `modify`, `trash`, etc.):
-- Fields: `id:`, `title:`, `author:`, `year:`, `filename:`, `tag:`, `status:`, `source:`, `iwad:`, `complevel:`, `config:`
+- Fields: `id:`, `title:`, `author:`, `year:`, `filename:`, `tag:`, `status:`, `source:`, `iwad:`, `complevel:`, `config:`, `cacoward:`
 - OR: `"status:in-progress , status:unplayed"` (comma with spaces)
 - Negation: `^status:completed`
 - Status shortcuts: `u` (unplayed), `p`/`ip` (in-progress), `c`/`f`/`done` (completed), `a`/`d` (abandoned)
@@ -152,15 +152,18 @@ egui = "0.31"
 
 **DB migrations**: run on `init_db()`; numbered sequentially; current schema version is 23+.
 
-**Cacowards**: `cacowards` table (year, category, rank, wad_title, idgames_url, doomwiki_url, wad_id, manual_override) tracks Doomworld's annual awards. Core categories: `winner`, `runner-up`, `honorable-mention`, `mordeth`. `caco enrich --cacowards --year YYYY` scrapes the Doom Wiki's `Cacowards_YYYY` page (`caco-sources/src/doomwiki/cacowards.rs`), upserts entries, and auto-links to library WADs by idgames id. Stale non-manual rows for the year are cleared before each re-scrape so the wiki view is canonical; `manual_override = 1` entries survive. `caco stats --cacowards` renders a year × category grid; `--year YYYY` drills into entry-level detail with linked-WAD status. TUI: `Shift+A` opens the Cacowards screen with `[`/`]` for year navigation.
+**Cacowards**: `cacowards` table (year, category, rank, wad_title, idgames_url, doomwiki_url, wad_id, manual_override) tracks Doomworld's annual awards. Core categories: `winner`, `runner-up`, `honorable-mention`, `mordeth`. `caco enrich --cacowards --year YYYY` scrapes the Doom Wiki's `Cacowards_YYYY` page (`caco-sources/src/doomwiki/cacowards.rs`), upserts entries, and auto-links to library WADs in two passes: (1) idgames URL → `wads.idgames_id`, (2) normalized-title fallback that links only when exactly one library WAD shares the normalized title. Stale non-manual rows for the year are cleared before each re-scrape so the wiki view is canonical; `manual_override = 1` entries survive. `caco stats --cacowards` renders a year × category grid; `--year YYYY` drills into entry-level detail with linked-WAD status. TUI: `Shift+A` opens the Cacowards screen with `[`/`]` for year navigation.
+
+**Cacoward filtering and import**: `cacoward:` in a `caco ls` query switches to entry-list mode showing both library and absent (un-imported) entries. Forms: `cacoward:2023`, `cacoward:winner` (with `r`/`hm`/`m` shortcuts), `cacoward:2023:winner`, `cacoward:*`. In entry mode, `status:unplayed` matches both library-unplayed AND absent (the "haven't played yet" bucket); `status:absent` filters to absent-only. Each entry exposes a stable display ID via `db::format_cacoward_id`: `c.YEAR.CATEGORY.RANK` (e.g. `c.2023.winner.10`), with `c.<pk>` as a stability fallback. `caco import --cacoward <ID>` resolves the ID and routes through the existing idgames or doomwiki import path, then auto-links the new wad row.
 
 ## CLI Commands Reference
 
 ```
-caco ls [query] [--iwad|--id24] [-o plain|json]
+caco ls [query] [--iwad|--id24] [-o plain|json]   # cacoward: filter switches to entry mode
 caco info <query> [--levelstats|--completions] [-o plain|json]
 caco modify <query> [field=value...] [beaten±N] [completion.<id>.notes|date|stats=value] [--add-file|--remove-file] [--stats-file FILE --completion ID]
 caco import <source> [--idgames|--doomwiki|--doomworld|--url|--local]
+caco import --cacoward <ID>                                          # ID like c.2023.winner.10
 caco play <query> [-p PORT] [-c COMPLEVEL] [-C CONFIG] [--iwad] [--record]
 caco trash <query> [--restore|--list] [--iwad FAMILY|--id24 NAME]
 caco random [query] [--info]

@@ -67,6 +67,12 @@ pub struct ImportArgs {
     /// Multi-select from search results (requires fzf)
     #[arg(short = 'm', long)]
     multi: bool,
+
+    /// Import the WAD referenced by a Cacoward entry ID (e.g.
+    /// `c.2023.winner.10` from `caco ls cacoward:...`). Pulls from the
+    /// entry's idgames URL when available, otherwise its Doom Wiki page.
+    #[arg(long, value_name = "ID")]
+    cacoward: Option<String>,
 }
 
 /// Print the outcome of a batch import. Returns true if the WAD was imported.
@@ -90,6 +96,29 @@ fn print_import_result(result: &ImportResult, display_name: &str, suffix: &str) 
 }
 
 pub fn run(conn: &Connection, args: &ImportArgs) -> Result<(), String> {
+    // --cacoward short-circuits everything else: it resolves a cacoward ID
+    // to its idgames or doomwiki URL and re-uses the existing import
+    // routines under the hood.
+    if let Some(ref id) = args.cacoward {
+        if !args.source.is_empty() {
+            return Err(
+                "--cacoward consumes the entry id directly; don't also pass a source argument."
+                    .to_string(),
+            );
+        }
+        let tags = if args.tag.is_empty() {
+            None
+        } else {
+            Some(
+                args.tag
+                    .iter()
+                    .map(|t| t.to_lowercase())
+                    .collect::<Vec<_>>(),
+            )
+        };
+        return import_cacoward(conn, id, tags, args.force);
+    }
+
     let source_str = args.source.join(" ");
 
     // Determine source type
@@ -419,6 +448,121 @@ fn import_doomwiki_search(
     if imported > 0 && selected.len() > 1 {
         println!("Imported {imported} WAD(s).");
     }
+    Ok(())
+}
+
+/// Import the WAD referenced by a Cacoward entry ID. Prefers the entry's
+/// idgames link (more reliable metadata + a real download URL); falls back
+/// to the Doom Wiki page when there's no idgames link. After a successful
+/// import we run `db::link_wad` so the cacoward row points at the new wad
+/// without waiting for the next `enrich --cacowards` cycle.
+fn import_cacoward(
+    conn: &Connection,
+    id_str: &str,
+    tags: Option<Vec<String>>,
+    force: bool,
+) -> Result<(), String> {
+    let id_ref = db::parse_cacoward_id(id_str).ok_or_else(|| {
+        format!(
+            "invalid cacoward id '{id_str}' — expected `c.YEAR.CATEGORY.RANK` (e.g. \
+             c.2023.winner.10) or `c.<pk>`"
+        )
+    })?;
+    let record = db::resolve_cacoward_ref(conn, &id_ref)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("no cacoward entry matches '{id_str}'"))?;
+
+    // Already linked? Refuse unless --force, otherwise re-running this
+    // command would silently duplicate-import.
+    if let Some(wad_id) = record.wad_id
+        && !force
+    {
+        return Err(format!(
+            "{} is already linked to library WAD #{wad_id} \
+             (run `caco play {wad_id}` to play, or --force to re-import)",
+            record.wad_title,
+        ));
+    }
+
+    let svc = ImportService::new();
+
+    // Path 1: idgames URL → numeric id → existing import_idgames.
+    if let Some(ref url) = record.idgames_url
+        && let Some(idgames_id) = caco_sources::idgames::extract_idgames_id_from_url(url)
+    {
+        let client = IdgamesClient::new();
+        let entry = match client.get(Some(idgames_id), None) {
+            Ok(e) => e,
+            Err(caco_sources::SourceError::WafBlocked { .. }) => {
+                print_api_hint("idgames", &idgames_id.to_string());
+                return Err("idgames API blocked by Cloudflare challenge.".to_string());
+            }
+            Err(e) => return Err(e.to_string()),
+        };
+        let result = svc.import_idgames(conn, &entry, tags, force);
+        return finish_cacoward_import(conn, &record, &result, &entry.title);
+    }
+
+    // Path 2: Doom Wiki page. Always present (the scraper builds it from the
+    // wikilink), so this is the universal fallback for non-/idgames entries.
+    let Some(ref wiki_url) = record.doomwiki_url else {
+        return Err(format!(
+            "{} has neither an idgames link nor a Doom Wiki URL — import manually",
+            record.wad_title,
+        ));
+    };
+    let title = caco_sources::doomwiki::extract_doomwiki_title_from_url(wiki_url)
+        .ok_or_else(|| format!("could not parse a wiki title from {wiki_url}"))?;
+    let client = DoomwikiClient::new();
+    let (entry, has_infobox) = match client.get_entry_permissive(&title) {
+        Ok(Some(pair)) => pair,
+        Ok(None) => return Err(format!("Doom Wiki page not found: '{title}'")),
+        Err(caco_sources::SourceError::WafBlocked { .. }) => {
+            print_api_hint("doomwiki", &title);
+            return Err("Doom Wiki blocked the request (WAF challenge).".to_string());
+        }
+        Err(e) => return Err(e.to_string()),
+    };
+    if !has_infobox && !force {
+        return Err(format!(
+            "Doom Wiki page '{title}' has no {{{{Wad}}}} infobox — looks like an \
+             IWAD or disambig page. Retry with --force to import anyway."
+        ));
+    }
+    let result = svc.import_doomwiki(conn, &entry, tags, force);
+    finish_cacoward_import(conn, &record, &result, entry.display_name())
+}
+
+/// Common tail for `import_cacoward`: print the outcome and, on success,
+/// link the cacoward entry to the newly imported WAD.
+fn finish_cacoward_import(
+    conn: &Connection,
+    record: &db::CacowardRecord,
+    result: &ImportResult,
+    display_name: &str,
+) -> Result<(), String> {
+    if result.is_duplicate {
+        let wad_id = result.duplicate_id.unwrap_or(0);
+        println!(
+            "Already in library: '{}' (ID: {wad_id})",
+            result.duplicate_title.as_deref().unwrap_or("?"),
+        );
+        // Link the cacoward to the existing dup if it isn't already.
+        if record.wad_id.is_none() && wad_id > 0 {
+            db::link_wad(conn, record.id, wad_id, false).map_err(|e| e.to_string())?;
+            println!("Linked cacoward entry → existing WAD #{wad_id}.");
+        }
+        return Ok(());
+    }
+    let Some(wad_id) = result.wad_id else {
+        if let Some(ref err) = result.error {
+            return Err(format!("Import error: {err}"));
+        }
+        return Err("Import produced no WAD id (unknown reason).".to_string());
+    };
+    println!("Imported '{display_name}' (ID: {wad_id})");
+    db::link_wad(conn, record.id, wad_id, false).map_err(|e| e.to_string())?;
+    println!("Linked cacoward {} → WAD #{wad_id}.", record.wad_title);
     Ok(())
 }
 
@@ -873,6 +1017,7 @@ mod tests {
             description: None,
             force: false,
             multi: false,
+            cacoward: None,
         }
     }
 
