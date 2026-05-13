@@ -158,6 +158,7 @@ static MIGRATIONS: &[Migration] = &[
         "add_required_sourceport_family",
         migrate_add_required_sourceport_family,
     ),
+    (36, "add_cacowards_table", migrate_add_cacowards_table),
 ];
 
 // ---------------------------------------------------------------------------
@@ -681,6 +682,37 @@ fn migrate_add_required_sourceport_family(conn: &Connection) -> Result<()> {
     add_column_if_missing(conn, "wads", "required_sourceport_family", "TEXT")
 }
 
+/// Cacowards: yearly "best WAD" awards from Doomworld, scraped from the Doom
+/// Wiki. The table stands alone (entries exist whether or not the user owns
+/// the WAD) so the completion-rate view can compute "x of N runners-up beaten."
+/// `wad_id` is best-effort auto-linked from `idgames_url`; `manual_override`
+/// pins a link so subsequent enrichment scrapes don't clobber a user's choice.
+fn migrate_add_cacowards_table(conn: &Connection) -> Result<()> {
+    if !table_exists(conn, "cacowards")? {
+        conn.execute_batch(
+            "CREATE TABLE cacowards (
+                id INTEGER PRIMARY KEY,
+                year INTEGER NOT NULL,
+                category TEXT NOT NULL,
+                rank INTEGER,
+                wad_title TEXT NOT NULL,
+                wad_author TEXT,
+                idgames_url TEXT,
+                doomwiki_url TEXT,
+                blurb TEXT,
+                wad_id INTEGER REFERENCES wads(id) ON DELETE SET NULL,
+                manual_override INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(year, category, wad_title)
+            );
+            CREATE INDEX idx_cacowards_wad_id ON cacowards(wad_id);
+            CREATE INDEX idx_cacowards_year ON cacowards(year);",
+        )?;
+    }
+    Ok(())
+}
+
 fn migrate_consolidate_status(conn: &Connection) -> Result<()> {
     // Step 1: Map old status values to new ones
     conn.execute_batch(
@@ -748,6 +780,7 @@ mod tests {
         assert!(table_exists(&conn, "playthroughs").unwrap());
         assert!(table_exists(&conn, "smart_collections").unwrap());
         assert!(table_exists(&conn, "wad_analysis").unwrap());
+        assert!(table_exists(&conn, "cacowards").unwrap());
     }
 
     #[test]

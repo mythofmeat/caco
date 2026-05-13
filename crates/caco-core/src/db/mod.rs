@@ -1,4 +1,5 @@
 pub mod analysis;
+pub mod cacowards;
 pub mod collections;
 pub mod companions;
 pub mod connection;
@@ -14,6 +15,12 @@ pub mod wads;
 // Re-export commonly used items
 pub use analysis::{
     ensure_fresh_analysis, get_analyses_batch, get_analysis, get_required_maps_batch, save_analysis,
+};
+pub use cacowards::{
+    CATEGORY_HONORABLE_MENTION, CATEGORY_MORDETH, CATEGORY_RUNNER_UP, CATEGORY_WINNER,
+    CORE_CATEGORIES, CacowardRecord, NewCacoward, delete_cacoward, find_wad_by_idgames_id,
+    get_all_cacowards, get_cacoward, get_cacowards_by_year, get_cacowards_for_wad, get_years,
+    link_wad, unlink_wad, upsert_cacoward,
 };
 pub use collections::{
     CollectionRecord, create_collection, delete_collection, get_all_collections, get_collection,
