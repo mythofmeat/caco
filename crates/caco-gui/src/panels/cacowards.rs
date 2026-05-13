@@ -32,7 +32,6 @@ const CARD_MIN_WIDTH: f32 = 240.0;
 const CARD_MAX_WIDTH: f32 = 320.0;
 const CARD_GAP: f32 = 14.0;
 const CARD_ROUNDING: u8 = 8;
-const STATUS_EDGE_WIDTH: f32 = 3.0;
 /// Thumbnail height as a multiple of card width. Matches the 5:3 poster
 /// proportion the magazine view leans on; a touch shorter than the
 /// library grid's 4:3 so the body has room for title + button.
@@ -546,29 +545,13 @@ fn render_card(
     paint_status_pill(&painter, thumb_rect.shrink2(Vec2::new(8.0, 8.0)), status);
 
     // ── Body ──────────────────────────────────────────────────────────
-    // Status-colored left edge — only across the body so it doesn't
-    // collide with the thumbnail's rounded corners.
-    if !absent {
-        let accent = status_accent(status);
-        let edge = Rect::from_min_size(
-            egui::pos2(rect.min.x, thumb_rect.max.y),
-            Vec2::new(STATUS_EDGE_WIDTH, rect.max.y - thumb_rect.max.y),
-        );
-        let edge_rounding = CornerRadius {
-            nw: 0,
-            sw: CARD_ROUNDING,
-            ne: 0,
-            se: 0,
-        };
-        painter.rect_filled(edge, edge_rounding, accent);
-    }
+    // (No status-colored left edge — the pill on the thumbnail conveys
+    // the same info, and a square-cornered bar peeking past the card's
+    // rounded border looked broken.)
 
     let pad_x = 12.0;
     let body = Rect::from_min_max(
-        egui::pos2(
-            rect.min.x + pad_x + STATUS_EDGE_WIDTH,
-            thumb_rect.max.y + 10.0,
-        ),
+        egui::pos2(rect.min.x + pad_x, thumb_rect.max.y + 10.0),
         egui::pos2(rect.max.x - pad_x, rect.max.y - 10.0),
     );
 
@@ -621,17 +604,13 @@ fn render_card(
         painter.rect_stroke(
             rect,
             rounding,
-            egui::Stroke::new(3.0, theme::TEXT_ACCENT),
+            egui::Stroke::new(2.0, theme::TEXT_ACCENT),
             StrokeKind::Inside,
         );
-    } else if response.hovered() {
-        painter.rect_stroke(
-            rect,
-            rounding,
-            egui::Stroke::new(1.5, theme::BORDER_MED),
-            StrokeKind::Inside,
-        );
-    } else if absent {
+    } else if response.hovered() || absent {
+        // Hover and absent share the same muted ring — absent acts as
+        // the persistent "this row isn't in your library" affordance,
+        // hover is the transient pointer feedback.
         painter.rect_stroke(
             rect,
             rounding,
@@ -738,16 +717,6 @@ fn category_counts(
         *m.entry(r.category.clone()).or_insert(0) += 1;
     }
     m
-}
-
-fn status_accent(status: EffectiveStatus) -> Color32 {
-    match status {
-        EffectiveStatus::Library(Status::Completed) => theme::COLOR_SUCCESS,
-        EffectiveStatus::Library(Status::InProgress) => theme::COLOR_WARNING,
-        EffectiveStatus::Library(Status::Abandoned) => theme::COLOR_ERROR,
-        EffectiveStatus::Library(Status::Unplayed) => Color32::from_rgb(0x33, 0x66, 0xcc),
-        EffectiveStatus::Absent => theme::TEXT_MUTED,
-    }
 }
 
 fn status_label_and_color(status: EffectiveStatus) -> (&'static str, Color32) {
