@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use comfy_table::{Cell, CellAlignment, Color, Table, presets};
 
 use caco_core::db::{
-    CacowardRecord, CompletionRecord, Id24Record, IwadRecord, SessionRecord, StatsSnapshot, Status,
-    WadCompanionRecord, WadRecord, WadStats,
+    CacowardRecord, CompletionRecord, EffectiveStatus, Id24Record, IwadRecord, SessionRecord,
+    StatsSnapshot, Status, WadCompanionRecord, WadRecord, WadStats, format_cacoward_id,
 };
 use caco_core::player::format_duration;
 
@@ -1158,6 +1158,129 @@ fn render_cacowards_summary_plain(rows: &[CacowardSummaryRow]) {
             "{}\t{}\t{}\t{}\t{}\t{}",
             row.year, row.category, row.total, row.linked, row.completed, row.in_progress,
         );
+    }
+}
+
+/// Render the cacoward-entry listing used by `caco ls cacoward:...`. Unlike
+/// [`render_cacowards_year`], this view spans all years in the result set,
+/// shows the stable display id (`c.YEAR.cat.RANK`), and uses the broader
+/// [`EffectiveStatus`] (which includes `absent` for un-imported entries).
+pub fn render_cacoward_entries(
+    entries: &[(CacowardRecord, EffectiveStatus)],
+    format: OutputFormat,
+) {
+    match format {
+        OutputFormat::Table => render_cacoward_entries_table(entries),
+        OutputFormat::Plain => render_cacoward_entries_plain(entries),
+        OutputFormat::Json => render_cacoward_entries_json(entries),
+    }
+}
+
+fn effective_status_color(status: EffectiveStatus) -> Color {
+    match status {
+        EffectiveStatus::Library(Status::Completed) => Color::Green,
+        EffectiveStatus::Library(Status::InProgress) => Color::Yellow,
+        EffectiveStatus::Library(Status::Abandoned) => Color::Red,
+        EffectiveStatus::Library(Status::Unplayed) => Color::Cyan,
+        EffectiveStatus::Absent => Color::DarkGrey,
+    }
+}
+
+fn render_cacoward_entries_table(entries: &[(CacowardRecord, EffectiveStatus)]) {
+    if entries.is_empty() {
+        println!("No matching Cacoward entries.");
+        return;
+    }
+
+    let mut table = Table::new();
+    table.load_preset(presets::NOTHING).set_header(vec![
+        Cell::new("ID").fg(Color::DarkGrey),
+        Cell::new("Year").fg(Color::DarkGrey),
+        Cell::new("Cat").fg(Color::DarkGrey),
+        Cell::new("#").fg(Color::DarkGrey),
+        Cell::new("Title").fg(Color::DarkGrey),
+        Cell::new("Status").fg(Color::DarkGrey),
+        Cell::new("Author").fg(Color::DarkGrey),
+    ]);
+
+    for (record, status) in entries {
+        let id = format_cacoward_id(record);
+        let rank = record.rank.map(|r| r.to_string()).unwrap_or_default();
+        let author = record.wad_author.as_deref().unwrap_or("").to_string();
+        let title_cell = if record.manual_override {
+            format!("{} 📌", record.wad_title)
+        } else {
+            record.wad_title.clone()
+        };
+
+        table.add_row(vec![
+            Cell::new(id),
+            Cell::new(record.year),
+            Cell::new(short_category(&record.category)),
+            Cell::new(rank).set_alignment(CellAlignment::Right),
+            Cell::new(title_cell),
+            Cell::new(status.as_str()).fg(effective_status_color(*status)),
+            Cell::new(author),
+        ]);
+    }
+
+    println!("{table}");
+}
+
+fn render_cacoward_entries_plain(entries: &[(CacowardRecord, EffectiveStatus)]) {
+    for (record, status) in entries {
+        // TSV: id, year, category, rank, title, status, author, wad_id, idgames_url
+        println!(
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            format_cacoward_id(record),
+            record.year,
+            record.category,
+            record.rank.map(|r| r.to_string()).unwrap_or_default(),
+            record.wad_title,
+            status.as_str(),
+            record.wad_author.as_deref().unwrap_or(""),
+            record.wad_id.map(|id| id.to_string()).unwrap_or_default(),
+            record.idgames_url.as_deref().unwrap_or(""),
+        );
+    }
+}
+
+fn render_cacoward_entries_json(entries: &[(CacowardRecord, EffectiveStatus)]) {
+    let items: Vec<serde_json::Value> = entries
+        .iter()
+        .map(|(record, status)| {
+            serde_json::json!({
+                "id": format_cacoward_id(record),
+                "pk": record.id,
+                "year": record.year,
+                "category": record.category,
+                "rank": record.rank,
+                "title": record.wad_title,
+                "author": record.wad_author,
+                "idgames_url": record.idgames_url,
+                "doomwiki_url": record.doomwiki_url,
+                "blurb": record.blurb,
+                "wad_id": record.wad_id,
+                "status": status.as_str(),
+                "manual_override": record.manual_override,
+            })
+        })
+        .collect();
+
+    let payload = serde_json::json!({
+        "count": items.len(),
+        "entries": items,
+    });
+    println!("{}", serde_json::to_string_pretty(&payload).unwrap());
+}
+
+fn short_category(category: &str) -> &'static str {
+    match category {
+        "winner" => "W",
+        "runner-up" => "R",
+        "honorable-mention" => "HM",
+        "mordeth" => "M",
+        _ => "?",
     }
 }
 
