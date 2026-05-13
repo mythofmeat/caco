@@ -130,20 +130,23 @@ pub fn render(
                     let bg = theme::BG_MEDIUM;
                     painter.rect_filled(rect, rounding, bg);
 
-                    // Border
+                    // Border. Painted inside the rect so the parent scroll
+                    // area / inner-margin doesn't clip the outer pixels —
+                    // `StrokeKind::Outside` was effectively halving the
+                    // visible width of the selection ring.
                     if is_selected {
                         painter.rect_stroke(
                             rect,
                             rounding,
-                            egui::Stroke::new(2.0, theme::TEXT_ACCENT),
-                            StrokeKind::Outside,
+                            egui::Stroke::new(3.0, theme::TEXT_ACCENT),
+                            StrokeKind::Inside,
                         );
                     } else if response.hovered() {
                         painter.rect_stroke(
                             rect,
                             rounding,
-                            egui::Stroke::new(1.0, theme::BORDER_MED),
-                            StrokeKind::Outside,
+                            egui::Stroke::new(1.5, theme::BORDER_MED),
+                            StrokeKind::Inside,
                         );
                     }
 

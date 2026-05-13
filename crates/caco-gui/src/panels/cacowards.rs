@@ -613,20 +613,23 @@ fn render_card(
     );
     let button_action = action_button(&mut sub_ui, record, status);
 
-    // ── Borders ───────────────────────────────────────────────────────
+    // Border painted INSIDE the rect — `StrokeKind::Outside` was
+    // effectively halving the visible width because the row's
+    // horizontal layout clipped to its allocated space, eating the
+    // outer pixels of the ring.
     if selected {
         painter.rect_stroke(
             rect,
             rounding,
-            egui::Stroke::new(2.0, theme::TEXT_ACCENT),
-            StrokeKind::Outside,
+            egui::Stroke::new(3.0, theme::TEXT_ACCENT),
+            StrokeKind::Inside,
         );
     } else if response.hovered() {
         painter.rect_stroke(
             rect,
             rounding,
-            egui::Stroke::new(1.0, theme::BORDER_MED),
-            StrokeKind::Outside,
+            egui::Stroke::new(1.5, theme::BORDER_MED),
+            StrokeKind::Inside,
         );
     } else if absent {
         painter.rect_stroke(
@@ -648,9 +651,11 @@ fn paint_card_thumbnail(
     thumbnails: Option<&crate::thumbnails::ThumbnailManager>,
 ) {
     // Try the linked WAD's TITLEPIC first.
-    if let Some(wad_id) = record.wad_id
-        && let Some(tm) = thumbnails
-        && let Some(tex) = tm.get(wad_id)
+    let thumb_key = record
+        .wad_id
+        .unwrap_or_else(|| thumb_key_for_absent(record.id));
+    if let Some(tm) = thumbnails
+        && let Some(tex) = tm.get(thumb_key)
     {
         painter.rect_filled(thumb_rect, thumb_rounding, Color32::BLACK);
         let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
@@ -811,6 +816,14 @@ fn draw_meter(ui: &mut egui::Ui, done: usize, total: usize, width: f32) {
         let fill_rect = Rect::from_min_size(rect.min, Vec2::new(fill_w, rect.height()));
         painter.rect_filled(fill_rect, CornerRadius::same(3), theme::TEXT_ACCENT);
     }
+}
+
+/// Map a cacoward entry pk to a synthetic ThumbnailManager key for absent
+/// entries. Wad ids are always positive SQLite primary keys, so negating
+/// the cacoward pk gives a stable, collision-free namespace we can share
+/// the existing thumbnail cache + worker pool with.
+pub fn thumb_key_for_absent(cacoward_pk: i64) -> i64 {
+    -cacoward_pk
 }
 
 fn lerp_byte(a: u8, b: u8, t: f32) -> u8 {

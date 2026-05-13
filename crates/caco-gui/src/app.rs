@@ -634,6 +634,8 @@ impl eframe::App for CacoApp {
             }
         } else if self.state.view_mode == ViewMode::Cacowards {
             let sender = self.bg.sender();
+            // Linked WADs use their wad_id and the existing pipeline
+            // (cache → TITLEPIC → wiki scrape).
             for wad in self.state.cacowards.linked_wads.values() {
                 if self.thumbnails.needs_request(wad.id) {
                     let path = wad.cached_path.as_deref().map(std::path::Path::new);
@@ -644,6 +646,28 @@ impl eframe::App for CacoApp {
                     };
                     self.thumbnails.request(wad.id, path, &hint, &sender);
                 }
+            }
+            // Absent entries have no wad row but always carry a Doom Wiki
+            // URL — feed it into the same scraper path the import-flow
+            // wiki thumbnails use. Negative pk keys avoid colliding with
+            // wad_ids in the manager's hashmap.
+            for (record, status) in &self.state.cacowards.all_entries {
+                if !matches!(status, caco_core::db::cacowards::EffectiveStatus::Absent) {
+                    continue;
+                }
+                let Some(url) = record.doomwiki_url.as_deref() else {
+                    continue;
+                };
+                let key = panels::cacowards::thumb_key_for_absent(record.id);
+                if !self.thumbnails.needs_request(key) {
+                    continue;
+                }
+                let hint = ThumbnailHint {
+                    source_type: "doomwiki".to_string(),
+                    source_url: Some(url.to_string()),
+                    title: record.wad_title.clone(),
+                };
+                self.thumbnails.request(key, None, &hint, &sender);
             }
         }
 
