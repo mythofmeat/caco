@@ -355,6 +355,17 @@ fn build_term_sql(term: &QueryTerm) -> (String, Vec<SqlParam>) {
             vec![Box::new(format!("%{}%", term.value))],
         ),
 
+        // Cacoward link filter — matches WADs linked to a Cacoward entry.
+        //
+        // Forms accepted (the CLI normally routes `caco ls cacoward:*` to a
+        // cacoward-entry listing instead of the wads table, but this clause
+        // makes the filter usable in any wad-side query too):
+        //   - `cacoward:*` / `cacoward:any` — any linked cacoward
+        //   - `cacoward:2023`               — linked to any 2023 award
+        //   - `cacoward:winner`             — linked to any winner
+        //   - `cacoward:2023:winner`        — both year and category
+        Some("cacoward") | Some("cacowards") => build_cacoward_term_sql(&term.value),
+
         Some(_) => {
             // Unknown field — treat as free text
             let like = format!("%{}%", term.value);
@@ -374,6 +385,51 @@ fn build_term_sql(term: &QueryTerm) -> (String, Vec<SqlParam>) {
     } else {
         (clause, params)
     }
+}
+
+/// Build the SQL subquery for a `cacoward:<value>` term. Returns an empty
+/// clause for unparseable values so the rest of the query still works (the
+/// CLI layer is the authoritative validator for typos).
+fn build_cacoward_term_sql(value: &str) -> (String, Vec<SqlParam>) {
+    use crate::db::cacowards::normalize_category;
+
+    let v = value.trim();
+    // Bare wildcards: match any linked cacoward.
+    if v.is_empty() || v == "*" || v.eq_ignore_ascii_case("any") {
+        return (
+            "wads.id IN (SELECT wad_id FROM cacowards WHERE wad_id IS NOT NULL)".into(),
+            Vec::new(),
+        );
+    }
+
+    // Combined `YEAR:CATEGORY`.
+    if let Some((y, c)) = v.split_once(':') {
+        if let (Ok(year), Some(cat)) = (y.parse::<i64>(), normalize_category(c)) {
+            return (
+                "wads.id IN (SELECT wad_id FROM cacowards WHERE year = ? AND category = ?)".into(),
+                vec![Box::new(year), Box::new(cat.to_string())],
+            );
+        }
+        return (String::new(), Vec::new());
+    }
+
+    // Bare year.
+    if let Ok(year) = v.parse::<i64>() {
+        return (
+            "wads.id IN (SELECT wad_id FROM cacowards WHERE year = ?)".into(),
+            vec![Box::new(year)],
+        );
+    }
+
+    // Bare category (with shortcut expansion).
+    if let Some(cat) = normalize_category(v) {
+        return (
+            "wads.id IN (SELECT wad_id FROM cacowards WHERE category = ?)".into(),
+            vec![Box::new(cat.to_string())],
+        );
+    }
+
+    (String::new(), Vec::new())
 }
 
 /// Build SQL WHERE clause from a ParsedQuery.
@@ -992,6 +1048,49 @@ mod tests {
         // Contradictory terms
         let results =
             search_wads(&conn, Some("author:alm year:2016"), None, true, false, 0).unwrap();
+        assert_eq!(results.len(), 0);
+    }
+
+    #[test]
+    fn test_search_wads_cacoward_filter() {
+        let conn = setup();
+        // Seed a couple of WADs and link one to a 2023 winner cacoward.
+        let scythe = add_wad(
+            &conn,
+            &NewWad::new("Scythe", SourceType::Idgames).author("Erik Alm"),
+        )
+        .unwrap();
+        add_wad(
+            &conn,
+            &NewWad::new("Ancient Aliens", SourceType::Idgames).author("skillsaw"),
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO cacowards (year, category, wad_id, wad_title) VALUES (2023, 'winner', ?1, 'Scythe')",
+            [scythe],
+        )
+        .unwrap();
+
+        // cacoward:* — any linked entry.
+        let results = search_wads(&conn, Some("cacoward:*"), None, true, false, 0).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "Scythe");
+
+        // Year filter.
+        let results = search_wads(&conn, Some("cacoward:2023"), None, true, false, 0).unwrap();
+        assert_eq!(results.len(), 1);
+
+        // Year + category.
+        let results =
+            search_wads(&conn, Some("cacoward:2023:winner"), None, true, false, 0).unwrap();
+        assert_eq!(results.len(), 1);
+
+        // Category shortcut.
+        let results = search_wads(&conn, Some("cacoward:w"), None, true, false, 0).unwrap();
+        assert_eq!(results.len(), 1);
+
+        // Non-matching year.
+        let results = search_wads(&conn, Some("cacoward:2019"), None, true, false, 0).unwrap();
         assert_eq!(results.len(), 0);
     }
 
