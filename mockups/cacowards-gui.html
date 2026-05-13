@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>caco — Cacowards GUI mockups</title>
+<style>
+  :root {
+    --bg-page: #0a0707;
+    --bg-sidebar: #16100c;
+    --bg-dark: #1c1410;
+    --bg-medium: #201810;
+    --bg-light: #261c14;
+    --bg-selected: #2a1808;
+    --text-primary: #e8d8c8;
+    --text-secondary: #8a7a6a;
+    --text-muted: #5a4a3a;
+    --text-accent: #ff6633;
+    --border: #2a1e16;
+    --border-med: #3a2e24;
+    --green: #33cc33;
+    --yellow: #cccc33;
+    --red: #cc4444;
+    --blue: #3366cc;
+    --gold: #d4a14a;
+  }
+  html, body { background: var(--bg-page); color: var(--text-primary); margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    padding: 40px;
+    line-height: 1.45;
+  }
+  h1.page-title { font-size: 22px; margin: 0 0 4px; font-weight: 600; }
+  h1.page-title small { color: var(--text-muted); font-weight: 400; font-size: 14px; margin-left: 8px; }
+  .lede { color: var(--text-secondary); max-width: 800px; margin: 0 0 32px; }
+  .lede code { background: var(--bg-medium); padding: 1px 6px; border-radius: 3px; color: var(--text-primary); }
+
+  .mockup { margin-bottom: 56px; }
+  .mockup-header { display: flex; align-items: baseline; gap: 16px; margin-bottom: 12px; }
+  .mockup-header h2 { font-size: 16px; font-weight: 600; margin: 0; color: var(--text-accent); letter-spacing: 0.5px; text-transform: uppercase; }
+  .mockup-header .desc { color: var(--text-secondary); font-size: 13px; }
+
+  /* ── App window chrome ── */
+  .window {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    grid-template-rows: 48px 1fr 24px;
+    background: var(--bg-dark);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    min-height: 720px;
+  }
+  .sidebar {
+    grid-column: 1; grid-row: 1 / 4;
+    background: var(--bg-sidebar);
+    border-right: 1px solid var(--border);
+    padding: 18px 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .sidebar .logo { color: var(--text-accent); font-size: 22px; font-weight: 700; padding: 0 22px 22px; }
+  .sidebar nav, .sidebar .group { display: flex; flex-direction: column; }
+  .sidebar a {
+    color: var(--text-primary);
+    font-size: 14px;
+    text-decoration: none;
+    padding: 8px 22px;
+    cursor: default;
+  }
+  .sidebar a.active { background: var(--bg-selected); color: var(--text-accent); }
+  .sidebar a.active::before { content: "▸ "; }
+  .sidebar .heading { color: var(--text-muted); font-size: 11px; font-weight: 600; padding: 18px 22px 6px; letter-spacing: 1px; }
+  .sidebar .footer { margin-top: auto; padding: 12px 22px; border-top: 1px solid var(--border); display: flex; gap: 14px; }
+  .sidebar .footer a { color: var(--text-muted); font-size: 11px; padding: 0; }
+
+  .topbar {
+    grid-column: 2; grid-row: 1;
+    background: #1a1410;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 18px;
+    gap: 12px;
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+  .topbar .crumb { color: var(--text-primary); }
+  .topbar .search {
+    background: var(--bg-medium);
+    border: 1px solid var(--border-med);
+    border-radius: 4px;
+    padding: 5px 10px;
+    color: var(--text-muted);
+    min-width: 220px;
+    margin-left: auto;
+    font-size: 13px;
+  }
+
+  .statusbar {
+    grid-column: 2; grid-row: 3;
+    background: var(--bg-page);
+    border-top: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    padding: 0 18px;
+  }
+
+  .content {
+    grid-column: 2; grid-row: 2;
+    overflow: auto;
+  }
+
+  /* ── Shared bits ── */
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 11px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+  }
+  .badge.done       { background: rgba(51,204,51,0.16);  color: var(--green); }
+  .badge.playing    { background: rgba(204,204,51,0.16); color: var(--yellow); }
+  .badge.dropped    { background: rgba(204,68,68,0.16);  color: var(--red); }
+  .badge.unplayed   { background: rgba(51,102,204,0.16); color: var(--blue); }
+  .badge.absent     { background: rgba(138,122,106,0.12); color: var(--text-secondary); border: 1px dashed var(--border-med); }
+  .badge.pinned     { background: rgba(255,102,51,0.12);  color: var(--text-accent); }
+
+  button.primary, button.ghost {
+    border: 1px solid var(--border-med);
+    background: var(--bg-medium);
+    color: var(--text-primary);
+    border-radius: 4px;
+    font-size: 12px;
+    padding: 4px 10px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  button.primary {
+    background: var(--text-accent);
+    border-color: var(--text-accent);
+    color: #1a0a04;
+    font-weight: 600;
+  }
+  button.ghost { background: transparent; }
+
+  /* ════════════════════════════════════════════════
+     MOCKUP A — Magazine view
+     ════════════════════════════════════════════════ */
+
+  .magazine .hero {
+    position: relative;
+    padding: 36px 40px 28px;
+    background:
+      radial-gradient(ellipse at 80% 40%, rgba(255,102,51,0.18), transparent 60%),
+      linear-gradient(135deg, #2a1408 0%, #1a0d06 70%);
+    border-bottom: 1px solid var(--border-med);
+    overflow: hidden;
+  }
+  .magazine .hero::before {
+    /* Faux Cacoward "demon head" watermark using a CSS shape (suggestion of horns) */
+    content: "";
+    position: absolute;
+    right: -40px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 240px;
+    height: 240px;
+    background:
+      radial-gradient(circle at 35% 60%, #ff6633 0 6px, transparent 7px),
+      radial-gradient(circle at 65% 60%, #ff6633 0 6px, transparent 7px),
+      radial-gradient(circle at 50% 80%, transparent 0 30px, #ff663344 31px 36px, transparent 37px),
+      radial-gradient(circle at 50% 50%, #2a1408 0 100px, transparent 101px);
+    opacity: 0.45;
+  }
+  .magazine .hero .kicker {
+    font-size: 11px;
+    letter-spacing: 4px;
+    color: var(--gold);
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+  .magazine .hero h1 {
+    margin: 8px 0 4px;
+    font-size: 56px;
+    font-weight: 800;
+    letter-spacing: -1px;
+    color: var(--text-primary);
+    line-height: 1;
+  }
+  .magazine .hero h1 .year { color: var(--text-accent); }
+  .magazine .hero .byline {
+    color: var(--text-secondary);
+    font-size: 13px;
+    margin-top: 12px;
+    max-width: 600px;
+  }
+  .magazine .hero .source {
+    position: absolute;
+    top: 18px;
+    right: 18px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+    border: 1px solid var(--border-med);
+    padding: 4px 10px;
+    border-radius: 12px;
+    background: rgba(0,0,0,0.3);
+    z-index: 1;
+  }
+
+  .magazine .year-strip {
+    display: flex;
+    gap: 4px;
+    padding: 14px 40px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-medium);
+    overflow-x: auto;
+  }
+  .magazine .year-strip .year {
+    padding: 6px 12px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    cursor: default;
+    border-radius: 4px;
+  }
+  .magazine .year-strip .year.active {
+    background: var(--bg-selected);
+    color: var(--text-accent);
+    font-weight: 600;
+  }
+  .magazine .year-strip .year .stat {
+    font-size: 10px;
+    color: var(--text-muted);
+    display: block;
+    text-align: center;
+    margin-top: 1px;
+  }
+  .magazine .year-strip .year.active .stat { color: var(--text-secondary); }
+
+  .magazine .section {
+    padding: 28px 40px;
+    border-bottom: 1px solid var(--border);
+  }
+  .magazine .section h3 {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--text-accent);
+    margin: 0 0 4px;
+  }
+  .magazine .section h3 + .progress {
+    color: var(--text-secondary);
+    font-size: 12px;
+    margin-bottom: 18px;
+  }
+  .magazine .section .meter {
+    display: inline-block;
+    width: 110px;
+    height: 6px;
+    background: var(--bg-light);
+    border-radius: 3px;
+    overflow: hidden;
+    vertical-align: middle;
+    margin-right: 8px;
+  }
+  .magazine .section .meter > span {
+    display: block;
+    height: 100%;
+    background: var(--text-accent);
+  }
+
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 14px;
+  }
+  .card {
+    background: var(--bg-medium);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    min-height: 130px;
+    position: relative;
+    transition: border-color 0.2s;
+  }
+  .card .rank {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1px;
+  }
+  .card h4 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+  .card .author {
+    margin: 4px 0 12px;
+    color: var(--text-secondary);
+    font-size: 12px;
+  }
+  .card .row {
+    margin-top: auto;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+  }
+  .card.absent { border-style: dashed; border-color: var(--border-med); }
+  .card.absent h4 { color: var(--text-secondary); }
+  .card.done { border-left: 3px solid var(--green); }
+  .card.playing { border-left: 3px solid var(--yellow); }
+  .card.dropped { border-left: 3px solid var(--red); }
+
+  /* ════════════════════════════════════════════════
+     MOCKUP B — Dashboard view
+     ════════════════════════════════════════════════ */
+
+  .dashboard {
+    padding: 28px 40px;
+  }
+  .dashboard .header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 4px;
+  }
+  .dashboard h2 {
+    font-size: 22px;
+    margin: 0;
+    font-weight: 700;
+  }
+  .dashboard h2 .accent { color: var(--text-accent); }
+  .dashboard .source-pill {
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    border: 1px solid var(--border-med);
+    padding: 3px 10px;
+    border-radius: 12px;
+  }
+  .dashboard .sub {
+    color: var(--text-secondary);
+    font-size: 13px;
+    margin: 0 0 24px;
+  }
+  .dashboard .legend {
+    color: var(--text-muted);
+    font-size: 11px;
+    margin-bottom: 12px;
+    display: flex;
+    gap: 18px;
+    align-items: center;
+  }
+  .dashboard .legend .swatch {
+    display: inline-block;
+    width: 12px; height: 12px;
+    border-radius: 2px;
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+
+  .heatmap {
+    display: grid;
+    grid-template-columns: 80px repeat(4, 1fr);
+    gap: 4px;
+    margin-bottom: 32px;
+  }
+  .heatmap .h-head, .heatmap .h-year {
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    padding: 8px 4px;
+    text-align: center;
+  }
+  .heatmap .h-year { text-align: left; padding-left: 4px; color: var(--text-muted); }
+  .heatmap .cell {
+    background: var(--bg-medium);
+    border-radius: 4px;
+    padding: 10px 12px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border: 1px solid var(--border);
+    cursor: default;
+    position: relative;
+  }
+  .heatmap .cell .ratio { font-weight: 600; color: var(--text-primary); }
+  .heatmap .cell .bar {
+    position: absolute;
+    left: 0; bottom: 0;
+    height: 3px;
+    background: var(--text-accent);
+    opacity: 0.6;
+  }
+  .heatmap .row-year.active .cell {
+    background: var(--bg-selected);
+    border-color: var(--text-accent);
+  }
+  .heatmap .cell.empty { color: var(--text-muted); }
+
+  /* Coloration by completion ratio */
+  .heatmap .cell.q0 .bar { width: 0%; }
+  .heatmap .cell.q1 .bar { width: 25%; background: #553; }
+  .heatmap .cell.q2 .bar { width: 50%; background: var(--yellow); }
+  .heatmap .cell.q3 .bar { width: 75%; background: #9c3; }
+  .heatmap .cell.q4 .bar { width: 100%; background: var(--green); }
+
+  .dashboard h3 {
+    font-size: 14px;
+    margin: 32px 0 12px;
+    color: var(--text-accent);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  .dashboard h3 small { color: var(--text-secondary); font-weight: 400; text-transform: none; letter-spacing: 0; }
+
+  table.entries {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  table.entries th {
+    text-align: left;
+    color: var(--text-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-size: 10px;
+    border-bottom: 1px solid var(--border);
+    padding: 6px 10px;
+  }
+  table.entries td {
+    padding: 9px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  table.entries tr.absent td { opacity: 0.7; }
+  table.entries .id {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    color: var(--text-muted);
+    font-size: 11px;
+  }
+  table.entries .title { font-weight: 600; }
+  table.entries .author { color: var(--text-secondary); }
+
+</style>
+</head>
+<body>
+
+<h1 class="page-title">Cacowards GUI mockups <small>two takes on the same data shape</small></h1>
+<p class="lede">
+  Same caco chrome (sidebar, top bar, status bar). Differences are confined to the central panel and how the Cacowards surface signals
+  that it's a curated annual feature pulled from Doomworld vs. just another database listing. Both wire to the existing
+  <code>caco enrich --cacowards --year YYYY</code> pipeline and use the same <code>c.YEAR.cat.RANK</code> display ids.
+</p>
+
+<!-- ────────────── Mockup A ────────────── -->
+<section class="mockup">
+  <div class="mockup-header">
+    <h2>Mockup A — Magazine</h2>
+    <span class="desc">A year banner, year-strip nav, and category sections of poster cards. Most "this is a thing from outside, dressed up" — leans into the editorial character.</span>
+  </div>
+
+  <div class="window">
+    <aside class="sidebar">
+      <div class="logo">caco</div>
+      <nav>
+        <a>Library</a>
+        <a>Import</a>
+        <a class="active">Cacowards</a>
+      </nav>
+      <div class="group">
+        <div class="heading">COLLECTIONS</div>
+        <a style="color:var(--text-secondary)">Megawads</a>
+        <a style="color:var(--text-secondary)">Slaughter</a>
+        <a style="color:var(--text-secondary)">Quick session</a>
+      </div>
+      <div class="footer">
+        <a>Stats</a><a>Cache</a><a>IWADs</a>
+      </div>
+    </aside>
+
+    <div class="topbar">
+      <span class="crumb">Cacowards</span>
+      <span style="color:var(--text-muted)">/</span>
+      <span>2023</span>
+      <input class="search" placeholder="Filter…" disabled />
+    </div>
+
+    <div class="content magazine">
+      <div class="hero">
+        <span class="source">from Doomworld · via Doom Wiki</span>
+        <div class="kicker">THE 30TH ANNUAL · 12 winners · 15 runners-up · 28 honorable mentions</div>
+        <h1>Cacowards <span class="year">2023</span></h1>
+        <div class="byline">
+          Doomworld's annual selection of the best WADs of the year. Caco syncs the list automatically and tracks which ones
+          you've imported, played, or completed.
+        </div>
+      </div>
+
+      <div class="year-strip">
+        <span class="year">2024<span class="stat">3/48</span></span>
+        <span class="year active">2023<span class="stat">20/56</span></span>
+        <span class="year">2022<span class="stat">30/55</span></span>
+        <span class="year">2021<span class="stat">25/50</span></span>
+        <span class="year">2020<span class="stat">21/57</span></span>
+        <span class="year">2019<span class="stat">8/45</span></span>
+        <span class="year">2018<span class="stat">12/41</span></span>
+        <span class="year" style="color:var(--text-muted)">… 1994</span>
+      </div>
+
+      <section class="section">
+        <h3>Winners</h3>
+        <div class="progress">
+          <span class="meter"><span style="width:58%"></span></span>
+          7 of 12 completed · 4 in library, 1 absent
+        </div>
+        <div class="cards">
+          <article class="card absent">
+            <span class="rank">#1</span>
+            <h4>Dreamblood</h4>
+            <p class="author">HeadshotTAS</p>
+            <div class="row"><span class="badge absent">absent</span><button class="primary">Import</button></div>
+          </article>
+          <article class="card done">
+            <span class="rank">#2</span>
+            <h4>Piña Colada</h4>
+            <p class="author">Alex Decker (myolden) et al.</p>
+            <div class="row"><span class="badge done">completed</span><button class="ghost">Open</button></div>
+          </article>
+          <article class="card playing">
+            <span class="rank">#3</span>
+            <h4>Insanity Edged</h4>
+            <p class="author">Pieruskwurje</p>
+            <div class="row"><span class="badge playing">in&nbsp;progress</span><button class="ghost">Play</button></div>
+          </article>
+          <article class="card dropped">
+            <span class="rank">#4</span>
+            <h4>Hardfest 2</h4>
+            <p class="author">Various</p>
+            <div class="row"><span class="badge dropped">dropped</span><button class="ghost">Open</button></div>
+          </article>
+          <article class="card done">
+            <span class="rank">#5</span>
+            <h4>Austrian Avian Association</h4>
+            <p class="author">MundyC</p>
+            <div class="row"><span class="badge done">completed</span><button class="ghost">Open</button></div>
+          </article>
+          <article class="card done">
+            <span class="rank">#6</span>
+            <h4>DBK03: Silver CyberPrimate</h4>
+            <p class="author">Big Ol' Billy et al.</p>
+            <div class="row"><span class="badge done">completed</span><button class="ghost">Open</button></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <h3>Runners-up</h3>
+        <div class="progress">
+          <span class="meter"><span style="width:87%"></span></span>
+          13 of 15 completed
+        </div>
+        <div class="cards">
+          <article class="card done">
+            <span class="rank">#1</span>
+            <h4>1x1</h4>
+            <p class="author">Various</p>
+            <div class="row"><span class="badge done">completed</span><button class="ghost">Open</button></div>
+          </article>
+          <article class="card done">
+            <span class="rank">#2</span>
+            <h4>BOOMER: Beyond Vanilla</h4>
+            <p class="author">Fernito</p>
+            <div class="row"><span class="badge done">completed</span><button class="ghost">Open</button></div>
+          </article>
+          <article class="card absent">
+            <span class="rank">#3</span>
+            <h4>El Viaje de Diciembre</h4>
+            <p class="author">Cacodemon187</p>
+            <div class="row"><span class="badge absent">absent</span><button class="primary">Import</button></div>
+          </article>
+          <article class="card unplayed">
+            <span class="rank">#4</span>
+            <h4>Hexen: Veil of Darkness</h4>
+            <p class="author">Captain Toenail</p>
+            <div class="row"><span class="badge unplayed">unplayed</span><button class="ghost">Play</button></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <h3>Honorable Mentions <span class="badge pinned" style="margin-left:8px">📌 0 pinned</span></h3>
+        <div class="progress">
+          <span class="meter"><span style="width:0%"></span></span>
+          0 of 28 completed · 1 in library, 27 absent
+        </div>
+        <p style="color:var(--text-muted);font-size:12px;margin:4px 0 0">Scroll to see all 28 honorable mentions and the Mordeth Award.</p>
+      </section>
+    </div>
+
+    <div class="statusbar">56 entries · 20 completed · 1 in progress · last enrich 2026-05-13</div>
+  </div>
+</section>
+
+
+<!-- ────────────── Mockup B ────────────── -->
+<section class="mockup">
+  <div class="mockup-header">
+    <h2>Mockup B — Dashboard</h2>
+    <span class="desc">Year × category heatmap as the lead. Click a cell to drill into entries. More utilitarian, treats Cacowards as "another data axis" — the externality is just a label.</span>
+  </div>
+
+  <div class="window">
+    <aside class="sidebar">
+      <div class="logo">caco</div>
+      <nav>
+        <a>Library</a>
+        <a>Import</a>
+        <a class="active">Cacowards</a>
+      </nav>
+      <div class="group">
+        <div class="heading">COLLECTIONS</div>
+        <a style="color:var(--text-secondary)">Megawads</a>
+        <a style="color:var(--text-secondary)">Slaughter</a>
+        <a style="color:var(--text-secondary)">Quick session</a>
+      </div>
+      <div class="footer">
+        <a>Stats</a><a>Cache</a><a>IWADs</a>
+      </div>
+    </aside>
+
+    <div class="topbar">
+      <span class="crumb">Cacowards</span>
+      <span style="color:var(--text-muted)">/</span>
+      <span>2023 · Winners</span>
+      <input class="search" placeholder="Filter entries…" disabled />
+    </div>
+
+    <div class="content dashboard">
+      <div class="header">
+        <h2>Cacowards <span class="accent">completion</span></h2>
+        <span class="source-pill">from Doomworld · via Doom Wiki</span>
+      </div>
+      <p class="sub">
+        Every Cacoward entry from 1994 onwards, linked automatically to your library by idgames id or normalized title.
+        Click any cell below to drill into that year and category.
+      </p>
+
+      <div class="legend">
+        <span><span class="swatch" style="background:var(--bg-medium); border:1px solid var(--border-med)"></span>0%</span>
+        <span><span class="swatch" style="background:#553"></span>1–25%</span>
+        <span><span class="swatch" style="background:var(--yellow)"></span>25–50%</span>
+        <span><span class="swatch" style="background:#9c3"></span>50–75%</span>
+        <span><span class="swatch" style="background:var(--green)"></span>75–100%</span>
+      </div>
+
+      <div class="heatmap">
+        <div class="h-head"></div>
+        <div class="h-head">Winner</div>
+        <div class="h-head">Runner-up</div>
+        <div class="h-head">Hon. Mention</div>
+        <div class="h-head">Mordeth</div>
+
+        <div class="row-year" style="display:contents">
+          <div class="h-year">2024</div>
+          <div class="cell q1"><span>Dreamblood…</span><span class="ratio">3/10</span><span class="bar"></span></div>
+          <div class="cell q0"><span></span><span class="ratio">0/15</span><span class="bar"></span></div>
+          <div class="cell q0"><span></span><span class="ratio">0/22</span><span class="bar"></span></div>
+          <div class="cell q0"><span></span><span class="ratio">0/1</span><span class="bar"></span></div>
+        </div>
+
+        <div class="row-year active" style="display:contents">
+          <div class="h-year" style="color:var(--text-accent);font-weight:600">2023</div>
+          <div class="cell q3"><span></span><span class="ratio">7/12</span><span class="bar"></span></div>
+          <div class="cell q4"><span></span><span class="ratio">13/15</span><span class="bar"></span></div>
+          <div class="cell q0"><span></span><span class="ratio">0/28</span><span class="bar"></span></div>
+          <div class="cell q0"><span></span><span class="ratio">0/1</span><span class="bar"></span></div>
+        </div>
+
+        <div class="row-year" style="display:contents">
+          <div class="h-year">2022</div>
+          <div class="cell q4"><span></span><span class="ratio">12/12</span><span class="bar"></span></div>
+          <div class="cell q3"><span></span><span class="ratio">14/15</span><span class="bar"></span></div>
+          <div class="cell q1"><span></span><span class="ratio">3/27</span><span class="bar"></span></div>
+          <div class="cell q4"><span></span><span class="ratio">1/1</span><span class="bar"></span></div>
+        </div>
+
+        <div class="row-year" style="display:contents">
+          <div class="h-year">2021</div>
+          <div class="cell q4"><span></span><span class="ratio">9/10</span><span class="bar"></span></div>
+          <div class="cell q3"><span></span><span class="ratio">10/14</span><span class="bar"></span></div>
+          <div class="cell q1"><span></span><span class="ratio">5/25</span><span class="bar"></span></div>
+          <div class="cell q4"><span></span><span class="ratio">1/1</span><span class="bar"></span></div>
+        </div>
+
+        <div class="row-year" style="display:contents">
+          <div class="h-year">2020</div>
+          <div class="cell q4"><span></span><span class="ratio">8/10</span><span class="bar"></span></div>
+          <div class="cell q3"><span></span><span class="ratio">11/16</span><span class="bar"></span></div>
+          <div class="cell q1"><span></span><span class="ratio">2/30</span><span class="bar"></span></div>
+          <div class="cell q0"><span></span><span class="ratio">0/1</span><span class="bar"></span></div>
+        </div>
+
+        <div class="row-year" style="display:contents">
+          <div class="h-year">2019</div>
+          <div class="cell q2"><span></span><span class="ratio">3/9</span><span class="bar"></span></div>
+          <div class="cell q1"><span></span><span class="ratio">2/14</span><span class="bar"></span></div>
+          <div class="cell q1"><span></span><span class="ratio">3/21</span><span class="bar"></span></div>
+          <div class="cell q0"><span></span><span class="ratio">0/1</span><span class="bar"></span></div>
+        </div>
+
+        <div class="row-year" style="display:contents">
+          <div class="h-year">2018 ↓</div>
+          <div class="cell empty"><span style="font-style:italic;font-size:11px">click to expand…</span><span class="bar"></span></div>
+          <div class="cell empty"><span></span><span class="bar"></span></div>
+          <div class="cell empty"><span></span><span class="bar"></span></div>
+          <div class="cell empty"><span></span><span class="bar"></span></div>
+        </div>
+      </div>
+
+      <h3>2023 · Winners <small>— 7 of 12 completed (drill-down)</small></h3>
+      <table class="entries">
+        <thead>
+          <tr>
+            <th style="width:130px">ID</th>
+            <th style="width:30px">#</th>
+            <th>Title</th>
+            <th style="width:200px">Author</th>
+            <th style="width:120px">Status</th>
+            <th style="width:90px"></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="absent">
+            <td class="id">c.2023.winner.1</td>
+            <td>1</td>
+            <td class="title">Dreamblood</td>
+            <td class="author">HeadshotTAS</td>
+            <td><span class="badge absent">absent</span></td>
+            <td><button class="primary">Import</button></td>
+          </tr>
+          <tr>
+            <td class="id">c.2023.winner.2</td>
+            <td>2</td>
+            <td class="title">Piña Colada</td>
+            <td class="author">Alex Decker (myolden) et al.</td>
+            <td><span class="badge done">completed</span></td>
+            <td><button class="ghost">Open</button></td>
+          </tr>
+          <tr>
+            <td class="id">c.2023.winner.3</td>
+            <td>3</td>
+            <td class="title">Insanity Edged</td>
+            <td class="author">Pieruskwurje</td>
+            <td><span class="badge playing">in progress</span></td>
+            <td><button class="ghost">Play</button></td>
+          </tr>
+          <tr>
+            <td class="id">c.2023.winner.4</td>
+            <td>4</td>
+            <td class="title">Hardfest 2</td>
+            <td class="author">Various</td>
+            <td><span class="badge dropped">dropped</span></td>
+            <td><button class="ghost">Open</button></td>
+          </tr>
+          <tr>
+            <td class="id">c.2023.winner.5</td>
+            <td>5</td>
+            <td class="title">Austrian Avian Association</td>
+            <td class="author">MundyC</td>
+            <td><span class="badge done">completed</span></td>
+            <td><button class="ghost">Open</button></td>
+          </tr>
+          <tr>
+            <td class="id">c.2023.winner.6</td>
+            <td>6</td>
+            <td class="title">DBK03: Shrine of the Silver CyberPrimate</td>
+            <td class="author">Big Ol' Billy et al.</td>
+            <td><span class="badge done">completed</span></td>
+            <td><button class="ghost">Open</button></td>
+          </tr>
+          <tr>
+            <td class="id">c.2023.winner.7</td>
+            <td>7</td>
+            <td class="title">Sepia</td>
+            <td class="author">Petyan et al.</td>
+            <td><span class="badge done">completed</span></td>
+            <td><button class="ghost">Open</button></td>
+          </tr>
+          <tr style="color:var(--text-muted)">
+            <td colspan="6" style="text-align:center;padding:14px">…5 more winners (8–12)</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="statusbar">56 entries this year · 20 completed · last enrich 2026-05-13</div>
+  </div>
+</section>
+
+<p class="lede" style="margin-top:48px;color:var(--text-muted);font-size:12px">
+  Both mockups assume Cacowards becomes a top-level sidebar item alongside Library / Import.
+  The same data could equally well live behind a "Cacowards…" entry in the bottom-row admin links — but giving it sidebar
+  real estate is what signals to the user that this is a feature, not a settings dialog.
+</p>
+
+</body>
+</html>
