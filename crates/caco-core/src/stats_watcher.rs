@@ -24,33 +24,113 @@ use crate::wad_stats::{self, MapStats, TICS_PER_SECOND, WadStats};
 // PK3 mod management
 // ---------------------------------------------------------------------------
 
+// uzdoom 4.15pre+1355 (May 2026) regressed `GameInfo.AddEventHandlers` so the
+// handler is recreated per-map and `WorldUnloaded` no longer fires for some
+// transition paths (e.g. the `nextmap` console command). The handler keeps its
+// `WorldUnloaded` reporting for the normal case, but also snapshots stats into
+// user CVars and emits a fallback EXIT from `WorldLoaded` for the *previous*
+// map when WorldUnloaded never fired. CVars are required because per-map
+// handler instances cannot share state directly.
 const ZSCRIPT_ZS: &str = r#"version "4.0"
 
 class CacoStatsReporter : EventHandler
 {
-    override void WorldUnloaded(WorldEvent e)
+    transient CVar cvMap;
+    transient CVar cvSkill;
+    transient CVar cvMaptime;
+    transient CVar cvKills, cvTotalKills;
+    transient CVar cvItems, cvTotalItems;
+    transient CVar cvSecrets, cvTotalSecrets;
+    transient CVar cvReported;
+
+    void InitCVars()
     {
-        // Only map exits should count as completions. Periodic snapshots make
-        // the current map look completed, and save/reopen transitions are not
-        // player exits.
-        if (e.IsSaveGame || e.IsReopen)
-        {
-            return;
-        }
-        ReportStats();
+        if (cvMap == null) cvMap = CVar.FindCVar("caco_prev_map");
+        if (cvSkill == null) cvSkill = CVar.FindCVar("caco_prev_skill");
+        if (cvMaptime == null) cvMaptime = CVar.FindCVar("caco_prev_maptime");
+        if (cvKills == null) cvKills = CVar.FindCVar("caco_prev_kills");
+        if (cvTotalKills == null) cvTotalKills = CVar.FindCVar("caco_prev_totalkills");
+        if (cvItems == null) cvItems = CVar.FindCVar("caco_prev_items");
+        if (cvTotalItems == null) cvTotalItems = CVar.FindCVar("caco_prev_totalitems");
+        if (cvSecrets == null) cvSecrets = CVar.FindCVar("caco_prev_secrets");
+        if (cvTotalSecrets == null) cvTotalSecrets = CVar.FindCVar("caco_prev_totalsecrets");
+        if (cvReported == null) cvReported = CVar.FindCVar("caco_prev_reported");
     }
 
-    void ReportStats()
+    void ReportExit(string mapName, int skill, int maptime, int k, int tk, int it, int tit, int sec, int tsec)
     {
-        int sk = G_SkillPropertyInt(SKILLP_ACSReturn);
         Console.PrintfEx(PRINT_LOG, "CACOSTATS|EXIT|%s|%d|%d|%d/%d|%d/%d|%d/%d",
-            level.MapName,
-            sk,
+            mapName, skill, maptime, k, tk, it, tit, sec, tsec);
+    }
+
+    override void WorldLoaded(WorldEvent e)
+    {
+        InitCVars();
+        if (cvMap == null) return;
+
+        string prevMap = cvMap.GetString();
+
+        // Fallback: a previous map was tracked, this transition isn't a save
+        // load, and WorldUnloaded never reported it - so emit EXIT for it now
+        // using the last snapshot we captured in WorldTick.
+        if (prevMap.Length() > 0
+            && prevMap != level.MapName
+            && !e.IsSaveGame
+            && !e.IsReopen
+            && !cvReported.GetBool())
+        {
+            ReportExit(prevMap,
+                cvSkill.GetInt(),
+                cvMaptime.GetInt(),
+                cvKills.GetInt(), cvTotalKills.GetInt(),
+                cvItems.GetInt(), cvTotalItems.GetInt(),
+                cvSecrets.GetInt(), cvTotalSecrets.GetInt());
+        }
+
+        // Rebase tracking to the new map. Done for save loads too so the next
+        // real exit on this map fires correctly.
+        cvMap.SetString(level.MapName);
+        cvReported.SetBool(false);
+        cvSkill.SetInt(0);
+        cvMaptime.SetInt(0);
+        cvKills.SetInt(0); cvTotalKills.SetInt(0);
+        cvItems.SetInt(0); cvTotalItems.SetInt(0);
+        cvSecrets.SetInt(0); cvTotalSecrets.SetInt(0);
+    }
+
+    override void WorldTick()
+    {
+        InitCVars();
+        if (cvMap == null || level == null) return;
+        // Throttle to once per second to keep CVar writes off the hot path.
+        if (level.maptime % 35 != 0) return;
+        // Only update when the tracked map matches the current map.
+        if (cvMap.GetString() != level.MapName) return;
+
+        cvSkill.SetInt(G_SkillPropertyInt(SKILLP_ACSReturn));
+        cvMaptime.SetInt(level.maptime);
+        cvKills.SetInt(level.killed_monsters);
+        cvTotalKills.SetInt(level.total_monsters);
+        cvItems.SetInt(level.found_items);
+        cvTotalItems.SetInt(level.total_items);
+        cvSecrets.SetInt(level.found_secrets);
+        cvTotalSecrets.SetInt(level.total_secrets);
+    }
+
+    override void WorldUnloaded(WorldEvent e)
+    {
+        InitCVars();
+        // Save/reopen transitions are not player exits.
+        if (e.IsSaveGame || e.IsReopen) return;
+
+        ReportExit(level.MapName,
+            G_SkillPropertyInt(SKILLP_ACSReturn),
             level.maptime,
             level.killed_monsters, level.total_monsters,
             level.found_items, level.total_items,
-            level.found_secrets, level.total_secrets
-        );
+            level.found_secrets, level.total_secrets);
+
+        if (cvReported != null) cvReported.SetBool(true);
     }
 }
 "#;
@@ -59,6 +139,18 @@ const MAPINFO: &str = r#"GameInfo
 {
     AddEventHandlers = "CacoStatsReporter"
 }
+"#;
+
+const CVARINFO: &str = r#"user noarchive string caco_prev_map = "";
+user noarchive int caco_prev_skill = 0;
+user noarchive int caco_prev_maptime = 0;
+user noarchive int caco_prev_kills = 0;
+user noarchive int caco_prev_totalkills = 0;
+user noarchive int caco_prev_items = 0;
+user noarchive int caco_prev_totalitems = 0;
+user noarchive int caco_prev_secrets = 0;
+user noarchive int caco_prev_totalsecrets = 0;
+user noarchive bool caco_prev_reported = false;
 "#;
 
 /// Get the directory where caco stores its mods.
@@ -89,6 +181,13 @@ pub fn ensure_stats_mod() -> crate::Result<PathBuf> {
     Ok(pk3_path)
 }
 
+fn read_pk3_lump(zip: &mut zip::ZipArchive<std::fs::File>, name: &str) -> Option<String> {
+    let mut file = zip.by_name(name).ok()?;
+    let mut out = String::new();
+    file.read_to_string(&mut out).ok()?;
+    Some(out)
+}
+
 fn stats_mod_needs_refresh(pk3_path: &Path) -> bool {
     let file = match std::fs::File::open(pk3_path) {
         Ok(file) => file,
@@ -99,24 +198,17 @@ fn stats_mod_needs_refresh(pk3_path: &Path) -> bool {
         Err(_) => return true,
     };
 
-    let mut zscript = String::new();
-    let Ok(mut file) = zip.by_name("zscript.zs") else {
+    let Some(zscript) = read_pk3_lump(&mut zip, "zscript.zs") else {
         return true;
     };
-    if file.read_to_string(&mut zscript).is_err() {
-        return true;
-    }
-    drop(file);
-
-    let mut mapinfo = String::new();
-    let Ok(mut file) = zip.by_name("MAPINFO") else {
+    let Some(mapinfo) = read_pk3_lump(&mut zip, "MAPINFO") else {
         return true;
     };
-    if file.read_to_string(&mut mapinfo).is_err() {
+    let Some(cvarinfo) = read_pk3_lump(&mut zip, "CVARINFO") else {
         return true;
-    }
+    };
 
-    zscript != ZSCRIPT_ZS || mapinfo != MAPINFO
+    zscript != ZSCRIPT_ZS || mapinfo != MAPINFO || cvarinfo != CVARINFO
 }
 
 fn write_stats_mod(pk3_path: &Path) -> crate::Result<()> {
@@ -133,6 +225,10 @@ fn write_stats_mod(pk3_path: &Path) -> crate::Result<()> {
     zip.start_file("MAPINFO", options)
         .map_err(std::io::Error::other)?;
     zip.write_all(MAPINFO.as_bytes())?;
+
+    zip.start_file("CVARINFO", options)
+        .map_err(std::io::Error::other)?;
+    zip.write_all(CVARINFO.as_bytes())?;
 
     zip.finish().map_err(std::io::Error::other)?;
 
@@ -469,9 +565,17 @@ mod tests {
 
     #[test]
     fn test_reporter_source_is_exit_only() {
+        // The reporter has WorldUnloaded (primary) and WorldLoaded (fallback)
+        // and snapshots stats in WorldTick into CVars. It must only emit
+        // CACOSTATS|EXIT lines (no live/periodic snapshots that would fool
+        // completion detection).
         assert!(ZSCRIPT_ZS.contains("WorldUnloaded"));
+        assert!(ZSCRIPT_ZS.contains("WorldLoaded"));
         assert!(ZSCRIPT_ZS.contains("CACOSTATS|EXIT|"));
-        assert!(!ZSCRIPT_ZS.contains("WorldTick"));
+        // The only Console.PrintfEx call must be the EXIT one (no LIVE/SNAPSHOT
+        // variants).
+        let printf_count = ZSCRIPT_ZS.matches("Console.PrintfEx").count();
+        assert_eq!(printf_count, 1, "expected a single CACOSTATS emitter");
     }
 
     #[test]
@@ -710,6 +814,8 @@ mod tests {
         zip.write_all(b"old reporter").unwrap();
         zip.start_file("MAPINFO", options).unwrap();
         zip.write_all(MAPINFO.as_bytes()).unwrap();
+        zip.start_file("CVARINFO", options).unwrap();
+        zip.write_all(CVARINFO.as_bytes()).unwrap();
         zip.finish().unwrap();
 
         assert!(stats_mod_needs_refresh(&pk3_path));
@@ -718,26 +824,39 @@ mod tests {
     }
 
     #[test]
-    fn test_ensure_stats_mod_creates_valid_pk3() {
-        // Use a temp dir to avoid polluting the real mods dir
+    fn test_stats_mod_refresh_detects_missing_cvarinfo() {
+        // A pk3 from before the WorldLoaded-fallback rewrite has no CVARINFO
+        // lump. It must be flagged for refresh so users get the fixed reporter.
         let dir = tempfile::tempdir().unwrap();
-        let pk3_path = dir.path().join("test_stats.pk3");
+        let pk3_path = dir.path().join("legacy.pk3");
 
         let file = std::fs::File::create(&pk3_path).unwrap();
         let mut zip = zip::ZipWriter::new(file);
         let options = zip::write::SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Deflated);
-
         zip.start_file("zscript.zs", options).unwrap();
         zip.write_all(ZSCRIPT_ZS.as_bytes()).unwrap();
         zip.start_file("MAPINFO", options).unwrap();
         zip.write_all(MAPINFO.as_bytes()).unwrap();
         zip.finish().unwrap();
 
-        // Verify we can read it back
+        assert!(stats_mod_needs_refresh(&pk3_path));
+    }
+
+    #[test]
+    fn test_ensure_stats_mod_creates_valid_pk3() {
+        // Use a temp dir to avoid polluting the real mods dir
+        let dir = tempfile::tempdir().unwrap();
+        let pk3_path = dir.path().join("test_stats.pk3");
+
+        write_stats_mod(&pk3_path).unwrap();
+
         let archive = zip::ZipArchive::new(std::fs::File::open(&pk3_path).unwrap()).unwrap();
-        assert_eq!(archive.len(), 2);
-        assert!(archive.name_for_index(0).unwrap().contains("zscript"));
-        assert!(archive.name_for_index(1).unwrap().contains("MAPINFO"));
+        let names: Vec<&str> = (0..archive.len())
+            .map(|i| archive.name_for_index(i).unwrap())
+            .collect();
+        assert!(names.contains(&"zscript.zs"));
+        assert!(names.contains(&"MAPINFO"));
+        assert!(names.contains(&"CVARINFO"));
     }
 }
