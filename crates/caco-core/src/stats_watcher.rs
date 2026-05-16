@@ -287,13 +287,39 @@ static CACOSTATS_RE: LazyLock<Regex> = LazyLock::new(|| {
         .unwrap()
 });
 
-/// Parse a ZDoom log file for CACOSTATS lines.
+// uzdoom's own map header lines, e.g. "MAP03 - the lower depths" or "E1M1 - Hangar".
+// We use these as a fallback transition detector when the EventHandler-based
+// reporter can't see what's happening (e.g. after a save load in current uzdoom,
+// where WorldLoaded / WorldUnloaded / WorldTick all stop firing).
+static MAP_HEADER_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^([A-Z][A-Z0-9_]{2,15}) - \S").unwrap());
+
+/// Build a `MapLogEntry` for a map we know the player exited but for which the
+/// ZScript reporter never emitted a CACOSTATS|EXIT line. Stats are marked
+/// unknown (-1 totals) so the merge keeps any prior real numbers.
+fn synthetic_entry(lump: String) -> MapLogEntry {
+    MapLogEntry {
+        lump,
+        skill: -1,
+        time_tics: -1,
+        kills: 0,
+        total_kills: -1,
+        items: 0,
+        total_items: -1,
+        secrets: 0,
+        total_secrets: -1,
+    }
+}
+
+/// Parse a ZDoom log file for CACOSTATS lines, plus synthesise EXIT entries
+/// for transitions seen in uzdoom's own map headers but missed by the reporter.
 ///
 /// Returns the last (most up-to-date) entry for each map, preserving
 /// the order maps were first seen.
 fn parse_log(text: &str) -> Vec<MapLogEntry> {
     let mut latest: HashMap<String, MapLogEntry> = HashMap::new();
     let mut order: Vec<String> = Vec::new();
+    let mut visit_order: Vec<String> = Vec::new();
 
     for line in text.lines() {
         if let Some(caps) = CACOSTATS_RE.captures(line) {
@@ -317,6 +343,28 @@ fn parse_log(text: &str) -> Vec<MapLogEntry> {
                     total_secrets: caps[9].parse().unwrap_or(0),
                 },
             );
+        } else if let Some(caps) = MAP_HEADER_RE.captures(line) {
+            let lump = caps[1].to_string();
+            // Collapse consecutive duplicates (quickload prints the same header).
+            if visit_order.last().map(String::as_str) != Some(lump.as_str()) {
+                visit_order.push(lump);
+            }
+        }
+    }
+
+    // Fallback: any visit_order[i] whose successor is a different map and which
+    // didn't get a CACOSTATS|EXIT line was almost certainly exited - the player
+    // had to leave it to reach the next one. We exclude TITLEMAP as a source
+    // because the engine routes through it on game start, not via player exit.
+    for pair in visit_order.windows(2) {
+        let from = &pair[0];
+        let to = &pair[1];
+        if from == to || from == "TITLEMAP" {
+            continue;
+        }
+        if !latest.contains_key(from) {
+            order.push(from.clone());
+            latest.insert(from.clone(), synthetic_entry(from.clone()));
         }
     }
 
@@ -331,7 +379,20 @@ fn entries_to_wad_stats(entries: &[MapLogEntry]) -> WadStats {
     let mut maps = Vec::new();
 
     for entry in entries {
-        let map_secs = entry.time_tics as f64 / TICS_PER_SECOND;
+        // Negative tics means the entry is synthesised from a header-only
+        // transition - no real time was captured. Keep time/totals unknown, but
+        // mark best_skill=4 (matching the levelstat parser's "played at unknown
+        // skill" convention) so `played_maps()` and the levelstats display
+        // recognise the map as played.
+        let (best_time, time_secs, best_skill) = if entry.time_tics < 0 {
+            (-1, -1.0, 4)
+        } else {
+            (
+                entry.time_tics,
+                entry.time_tics as f64 / TICS_PER_SECOND,
+                entry.skill + 1,
+            )
+        };
 
         maps.push(MapStats {
             lump: entry.lump.clone(),
@@ -341,10 +402,10 @@ fn entries_to_wad_stats(entries: &[MapLogEntry]) -> WadStats {
             total_items: entry.total_items,
             secrets: entry.secrets,
             total_secrets: entry.total_secrets,
-            best_skill: entry.skill + 1, // ACS skill is 0-indexed, stats uses 1-indexed
-            best_time: entry.time_tics,
+            best_skill,
+            best_time,
             total_exits: 1,
-            time_secs: map_secs,
+            time_secs,
             total_time_secs: -1.0,
             // Fields not available from zdoom log
             episode: 0,
@@ -561,6 +622,73 @@ mod tests {
     fn test_parse_log_empty() {
         assert!(parse_log("").is_empty());
         assert!(parse_log("no stats here\njust noise\n").is_empty());
+    }
+
+    #[test]
+    fn test_parse_log_header_fallback_save_load_scenario() {
+        // Mirrors the actual uzdoom regression: TITLEMAP loads, save load
+        // suppresses every EventHandler event for MAP03, exit to MAP04 fires
+        // WorldLoaded for MAP04 with stale state -> reporter logs TITLEMAP
+        // by mistake. MAP03 has no CACOSTATS line. The header fallback must
+        // synthesise a MAP03 EXIT entry.
+        let log = "TITLEMAP - Unnamed\n\
+                   MAP03 - the lower depths\n\
+                   Picked up a clip.\n\
+                   MAP03 - the lower depths\n\
+                   Picked up a clip.\n\
+                   MAP04 - in the valley\n\
+                   CACOSTATS|EXIT|TITLEMAP|2|105|0/0|0/0|0/0\n";
+        let entries = parse_log(log);
+        let lumps: Vec<&str> = entries.iter().map(|e| e.lump.as_str()).collect();
+        assert!(
+            lumps.contains(&"MAP03"),
+            "expected MAP03 synthesised, got {:?}",
+            lumps
+        );
+        let map03 = entries.iter().find(|e| e.lump == "MAP03").unwrap();
+        assert_eq!(
+            map03.time_tics, -1,
+            "synthetic entry should mark time unknown"
+        );
+        assert_eq!(
+            map03.total_kills, -1,
+            "synthetic entry should mark totals unknown"
+        );
+    }
+
+    #[test]
+    fn test_parse_log_header_fallback_skips_titlemap_as_source() {
+        // TITLEMAP -> MAP01 is just menu->play, not a player exit.
+        let log = "TITLEMAP - Unnamed\nMAP01 - Entryway\n";
+        let entries = parse_log(log);
+        assert!(
+            !entries.iter().any(|e| e.lump == "TITLEMAP"),
+            "TITLEMAP must not be credited as exited"
+        );
+    }
+
+    #[test]
+    fn test_parse_log_header_fallback_collapses_quickloads() {
+        // Repeated MAP03 headers (each quickload) must not produce a self-transition.
+        let log = "MAP03 - foo\nMAP03 - foo\nMAP03 - foo\n";
+        let entries = parse_log(log);
+        assert!(entries.is_empty(), "no transition, nothing to synthesise");
+    }
+
+    #[test]
+    fn test_parse_log_header_fallback_yields_to_real_cacostats() {
+        // When a real CACOSTATS line exists for the source map, the fallback
+        // must not overwrite it with a synthetic entry.
+        let log = "MAP01 - Entryway\n\
+                   CACOSTATS|EXIT|MAP01|3|3500|50/100|10/20|3/5\n\
+                   MAP02 - Underhalls\n";
+        let entries = parse_log(log);
+        let map01 = entries.iter().find(|e| e.lump == "MAP01").unwrap();
+        assert_eq!(
+            map01.time_tics, 3500,
+            "real CACOSTATS must win over fallback"
+        );
+        assert_eq!(map01.kills, 50);
     }
 
     #[test]
