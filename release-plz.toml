@@ -24,7 +24,18 @@ changelog_update = false
 # release is owned by caco-cli below.
 git_release_enable = false
 git_tag_enable = false
-release_commits = "^(feat|fix|perf|refactor|revert)(\\(.+\\))?:"
+# Plain `v{{ version }}` for every crate. With git_only=true, release-plz reads
+# each crate's prior version from tags matching this pattern; without this
+# override the 5 non-cli crates would fall back to the multi-package default
+# `caco-core-v*` etc., find no matching tags, and baseline from 0.0.0 instead
+# of v3.2.2. Only caco-cli has git_tag_enable=true, so this pattern is used
+# for *creating* tags only on caco-cli; the other crates use it solely for
+# version detection.
+git_tag_name = "v{{ version }}"
+# No release_commits filter: this repo's history uses a mix of non-conventional
+# squash titles (e.g. "Add ...", "Stats reporter: ..."). A regex would skip
+# release PRs for those. commit_parsers below still handle conventional-style
+# grouping in the changelog when those subjects are used.
 
 # Lockstep version group: every workspace crate shares the same next version,
 # so a release driven by changes in any single crate still produces one
@@ -62,7 +73,6 @@ changelog_update = true
 changelog_include = ["caco-core", "caco-sources", "caco-tui", "caco-gui", "caco-mcp"]
 git_tag_enable = true
 git_release_enable = true
-git_tag_name = "v{{ version }}"
 git_release_name = "v{{ version }}"
 
 [changelog]
