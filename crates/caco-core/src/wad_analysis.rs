@@ -46,7 +46,7 @@ const DOOM2_BOSS_BRAIN_THING: u16 = 88;
 
 /// Analysis format version. Bump this whenever detection logic changes
 /// so that stale cached analyses are automatically invalidated and re-run.
-pub const ANALYSIS_VERSION: u32 = 7;
+pub const ANALYSIS_VERSION: u32 = 8;
 
 /// UDMF normal exit specials.
 const UDMF_NORMAL_EXITS: &[i32] = &[243, 74, 75]; // Exit_Normal, Teleport_NewMap, Teleport_EndGame
@@ -936,7 +936,7 @@ fn detect_udmf_exits(textmap_data: &[u8]) -> (bool, bool) {
     let mut has_secret = false;
 
     static LINEDEF_BLOCK_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?si)linedef\s*\{([^}]*)\}").unwrap());
+        LazyLock::new(|| Regex::new(r"(?si)linedef\b(?:\s*//[^\r\n]*)?\s*\{([^}]*)\}").unwrap());
     static SPECIAL_RE: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"(?i)special\s*=\s*(\d+)").unwrap());
 
@@ -1244,6 +1244,21 @@ mod tests {
             detect_udmf_exits(&build_textmap(&[0, 1, 80])),
             (false, false)
         );
+    }
+
+    #[test]
+    fn test_udmf_linedef_comment_headers() {
+        let textmap = br#"
+namespace = "zdoom";
+
+linedef // 831
+{
+  v1 = 0;
+  v2 = 1;
+  special = 75;
+}
+"#;
+        assert_eq!(detect_udmf_exits(textmap), (true, false));
     }
 
     // -----------------------------------------------------------------------
