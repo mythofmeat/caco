@@ -10,9 +10,9 @@ use crate::parsing;
 use caco_core::db;
 use caco_core::sourceports;
 
-const FISH_SCRIPT: &str = include_str!("../../../../completions/caco.fish");
-const BASH_SCRIPT: &str = include_str!("../../../../completions/caco.bash");
-const ZSH_SCRIPT: &str = include_str!("../../../../completions/_caco");
+const FISH_SCRIPT: &str = include_str!("../../completions/caco.fish");
+const BASH_SCRIPT: &str = include_str!("../../completions/caco.bash");
+const ZSH_SCRIPT: &str = include_str!("../../completions/_caco");
 
 #[derive(Args)]
 pub struct CompletionsArgs {
