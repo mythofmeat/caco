@@ -42,11 +42,12 @@ pytest-of-*/
 .mcp.json
 .ripgreprc
 
-# Bare git objects (sandbox artifacts)
-HEAD
-config
-hooks
-objects
-refs
+# Bare git objects (sandbox artifacts). Keep these anchored so release-plz can
+# copy a complete .git directory into its temporary repo.
+/HEAD
+/config
+/hooks
+/objects
+/refs
 
 .worktrees
