@@ -11,18 +11,55 @@
 # Distribution is via Arch packages, not crates.io.
 publish = false
 semver_check = false
-# Single workspace-wide changelog at the repo root.
+# We don't publish to crates.io, so version detection must come from git tags
+# (matching git_tag_name) rather than the cargo registry.
+git_only = true
+# Single workspace-wide changelog at the repo root. Per-package changelog
+# updates are disabled here and re-enabled only for the caco-cli umbrella
+# below; otherwise every changed crate would prepend its own `## [X.Y.Z]`
+# section to the same file.
 changelog_path = "./CHANGELOG.md"
+changelog_update = false
 # Default: no per-package git tag or GitHub release. The single umbrella
 # release is owned by caco-cli below.
 git_release_enable = false
 git_tag_enable = false
 release_commits = "^(feat|fix|perf|refactor|revert)(\\(.+\\))?:"
 
-# Umbrella package: emits the single tag + GitHub release for every workspace
-# bump. Tag format matches what package.yml listens for.
+# Lockstep version group: every workspace crate shares the same next version,
+# so a release driven by changes in any single crate still produces one
+# coordinated workspace bump (and therefore one v{{ version }} tag from the
+# caco-cli package below). version_group is a per-package field — workspace
+# defaults do not propagate it — so it has to be listed on each crate.
+[[package]]
+name = "caco-core"
+version_group = "caco"
+
+[[package]]
+name = "caco-sources"
+version_group = "caco"
+
+[[package]]
+name = "caco-tui"
+version_group = "caco"
+
+[[package]]
+name = "caco-gui"
+version_group = "caco"
+
+[[package]]
+name = "caco-mcp"
+version_group = "caco"
+
+# Umbrella package: owns the single tag, GitHub release, and changelog entry
+# for every workspace bump. changelog_include pulls in commits that touched
+# the other crates so the one written section captures the full workspace
+# diff. Tag format matches what package.yml listens for.
 [[package]]
 name = "caco-cli"
+version_group = "caco"
+changelog_update = true
+changelog_include = ["caco-core", "caco-sources", "caco-tui", "caco-gui", "caco-mcp"]
 git_tag_enable = true
 git_release_enable = true
 git_tag_name = "v{{ version }}"
