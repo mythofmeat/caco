@@ -3,6 +3,96 @@
 All notable changes to Caco are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.2.2] - 2026-05-19
+
+### Added
+
+- Manage completions & stats from CLI and GUI
+- **db**: Snapshot DB before migrations; document recovery
+- **core**: Add start_new_playthrough for replay flow
+- **db**: Drop play_state and intent columns in migration 32
+- **completions**: Add profile/saves/demos/sessions completions, fix Helion exe case
+- **sourceports**: Add Helion family with .ini config extension
+- **stats**: Add ZDoom-family stats collection via custom PK3 mod
+- **sourceports**: Add uzdoom to zdoom family and wiki detection
+- **detect**: Auto-detect ZDoom-family sourceport requirement
+- **analysis**: Add PK3 support with MAPINFO-driven completion detection
+- **play**: Auto-detect WAD completion and enforce playing/queued exclusivity
+- **core**: Add tri-axis status model with dual-write sync
+- Global path override flags and env vars for CLI
+
+### Changed
+
+- Stats reporter: Rust-side header-fallback for save-load regression
+- Stats reporter: WorldLoaded-side fallback for uzdoom regression
+- Add `supported` flag on cacowards, exclude unsupported from totals
+- Add cacoward: query filter and ID helpers
+- Wire Cacowards into the CLI (enrich + stats)
+- Add cacowards table and CRUD module
+- Detect Boss Brain exits in WAD analysis
+- Fix GUI link retry and sourceport family clearing
+- Fix WAD completion exit detection
+- Show short sessions with map progress
+- Fix session map deltas from DB snapshots
+- Fix ZDoom stats session tracking
+- **completion**: Split classifier and verdict into pure layers
+- Add sourceport family metadata
+- Overhaul Doomworld import metadata; drop LLM path
+- Address code review findings from prior feature batch
+- **core**: Make config reloadable via ArcSwap<Config>
+- **db**: Type WadRecord status/availability/source_type as enums
+- **db**: WadUpdate accumulates errors instead of short-circuiting
+- Validate custom_args on write, not just at play time
+- **db**: Drop custom_complevel column, aggregate status counts
+- Stream downloads, bound thumbnail pool, harden zip extract, add CI
+- Wrap player/import in transactions, surface silent errors
+- **db**: Add transaction helper, wrap migrations + update_wad
+- **playthroughs**: Use simplified Status enum
+- **core**: Update mod.rs re-exports and sessions.rs for status simplification
+- **query**: Update query parser for simplified Status enum
+- **core**: Add migration 32 to consolidate status columns
+- **core**: Simplify wads.rs — delete sync layer, update builders
+- **core**: Simplify Status to 4-variant enum, remove PlayState/Intent
+- Deduplicate code and fix quality issues across all crates
+- Deduplicate code, fix bugs, and improve error handling across crates
+- Expand detection, companion system, sourceports, utils, wad stats
+- Update .gitignore: add Rust target/, reorganize by category
+
+### Fixed
+
+- **completion**: Unify GUI and verdict on the classifier's Required set
+- Resolve sourceport family TODOs
+- **completion**: Require real terminal progress
+- **detect**: Verify map markers are followed by map data lumps
+- **detect**: Only count IWAD-required patches reachable from used textures
+- Auto-heal wad completion stats after sourceport hangs
+- **gui**: Grid progress bar pinned at 100% for levelstat WADs
+- **db**: Don't duplicate completion on idempotent status rewrite
+- **core**: Complete zdoom auto-completion + repair drifted status
+- **core**: Require real exit to count a new map as played
+- **core**: Detect session progress via compute_stats_delta
+- **gui**: Properly AND status filter with collection/user query
+- **core**: Only mark WAD in-progress after actual level progress
+- **completion**: Auto-complete when terminal exited despite orphan map slots
+- Zdoom family uses .ini config, not .cfg
+- Auto-download without idgames_id, complevel 77 bug, playthrough init
+- **db**: Drop indexes before columns in migration 32
+- Update player.rs play_state reference to status
+- **analysis**: Raise ZIP entry cap to 1 GiB for large megaWADs
+- **cli**: Preserve spaces in query args like tag:"multi word"
+- **analysis**: Invalidate stale cached analyses via version tracking
+- **analysis**: Detect Boom generalized exit linedefs
+- **helion**: Pass -config arg and use wall-clock playtime
+- **detect**: Check all WADs in PK3 archives, not just maps/ directory
+- **detect**: Rewrite zdoom detection to only check UDMF map format
+- **detect**: Remove DECORATE and GLDEFS from zdoom detection
+- **completion**: Guard against false Complete when required=0
+- **db**: Filter out short sessions (<5min) from stats and listings
+- **db**: Prevent started+dropped (playing+abandoned) state conflict
+- Find and merge all stats files in WAD data directories
+- Pre-create dsda nested save dir before launching sourceport
+- Use Doom PLAYPAL instead of grayscale for TITLEPIC rendering
+
 ## [3.0.0] — 2026-04-16
 
 ### BREAKING CHANGES

@@ -2,45 +2,36 @@
 #
 # All caco-* crates share a single workspace version (workspace.package.version
 # in the root Cargo.toml). On every push to main, release-plz opens or updates
-# a "Release vX.Y.Z" PR. Merging it bumps the workspace version, prepends new
-# entries to CHANGELOG.md (one per crate that changed, each tagged with the
-# crate name), and pushes the v{{ version }} tag from the caco-cli package.
+# a "Release vX.Y.Z" PR. Merging it bumps the workspace version, prepends a
+# shared workspace entry to CHANGELOG.md, and pushes the v{{ version }} tag
+# from the caco-cli package.
 # The tag push then triggers .github/workflows/package.yml which builds the
 # Arch packages and — only after the build succeeds — creates the GitHub
 # Release. release-plz itself does NOT create the GitHub Release, so users
 # never see a vX.Y.Z release that lacks working Arch artifacts.
 
 [workspace]
-# Distribution is via Arch packages, not crates.io. Since release-plz PR
-# #2357 (Aug 2025) `publish = false` is sufficient on its own to skip
-# crates.io registry lookups; an earlier attempt to also set `git_only = true`
-# tripped a release-plz bug where the workspace was copied to a temp dir
-# without `.git`, then git ops were run against that dir and failed (similar
-# in shape to issue #1004; the git_only code path appears to bypass the fix
-# from #1336). Leaving git_only unset works fine in practice — version
-# detection falls back to git tags / Cargo.toml.
+# Distribution is via Arch packages, not crates.io. `publish = false` keeps
+# release-plz from publishing or requiring registry tokens, while still letting
+# `release-plz update` compare the local packages and update versions.
+#
+# Do not set `git_only = true` here: the pre-release-plz v* tags point at
+# commits whose Cargo metadata was not packageable, and git-only mode packages
+# the historical tag before it can calculate the next version.
 publish = false
 semver_check = false
-# Single workspace-wide changelog at the repo root. Every crate has
-# changelog_update=true (the default) and writes its own section to this
-# file, prefixed with the crate name via `{{ package }}` in the changelog
-# template below. This is the documented "all packages, single changelog"
-# pattern — robust under git_only mode where alternatives like
-# changelog_include on an umbrella package are not guaranteed to fire when
-# only non-umbrella crates have commits.
-changelog_path = "./CHANGELOG.md"
+repo_url = "https://github.com/mythofmeat/caco"
+pr_name = "Release v{{ version }}"
 # Default: no per-package git tag, and no GitHub release from release-plz at
 # all. The single umbrella tag is owned by caco-cli below; the GitHub Release
 # is created by package.yml after Arch packaging succeeds.
 git_release_enable = false
 git_tag_enable = false
-# Plain `v{{ version }}` for every crate. The multi-package workspace
-# default is `{{ package }}-v{{ version }}`, but no such per-crate tags
-# exist in this repo — only the shared `v*` tags pushed from caco-cli.
-# Setting this at the workspace level keeps version detection consistent
-# across all crates. Only caco-cli has git_tag_enable=true, so this pattern
-# is used for *creating* a tag only on caco-cli; the other crates use it
-# solely for matching existing tags during prior-version lookup.
+# Plain `v{{ version }}` for every crate. The multi-package workspace default
+# is `{{ package }}-v{{ version }}`, but this repo uses only the shared `v*`
+# tags pushed from caco-cli. Only caco-cli has git_tag_enable=true, so this
+# pattern is used for creating a tag only on caco-cli; the other crates use it
+# for tag-existence checks.
 git_tag_name = "v{{ version }}"
 # No release_commits filter: this repo's history uses a mix of non-conventional
 # squash titles (e.g. "Add ...", "Stats reporter: ..."). A regex would skip
@@ -55,22 +46,27 @@ git_tag_name = "v{{ version }}"
 [[package]]
 name = "caco-core"
 version_group = "caco"
+changelog_path = "./CHANGELOG.md"
 
 [[package]]
 name = "caco-sources"
 version_group = "caco"
+changelog_path = "./CHANGELOG.md"
 
 [[package]]
 name = "caco-tui"
 version_group = "caco"
+changelog_path = "./CHANGELOG.md"
 
 [[package]]
 name = "caco-gui"
 version_group = "caco"
+changelog_path = "./CHANGELOG.md"
 
 [[package]]
 name = "caco-mcp"
 version_group = "caco"
+changelog_path = "./CHANGELOG.md"
 
 # Umbrella package: owns the single workspace-wide git tag. The GitHub
 # Release itself is created downstream by package.yml after Arch packaging
@@ -78,15 +74,20 @@ version_group = "caco"
 [[package]]
 name = "caco-cli"
 version_group = "caco"
+changelog_path = "./CHANGELOG.md"
 git_tag_enable = true
 
 [changelog]
-header = "# Changelog\n\n"
-# `{{ package }}` in the header distinguishes per-crate sections that share
-# the same version. A release that touches 3 crates produces 3 sections all
-# at [X.Y.Z], one per crate.
+header = """
+# Changelog
+
+All notable changes to Caco are documented in this file.
+Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+"""
+# Keep the version at the start of the heading so release-plz can parse the
+# latest changelog entry on subsequent runs.
 body = """
-## `{{ package }}` - [{{ version | trim_start_matches(pat=\"v\") }}] - {{ timestamp | date(format=\"%Y-%m-%d\") }}
+## [{{ version | trim_start_matches(pat=\"v\") }}] - {{ timestamp | date(format=\"%Y-%m-%d\") }}
 {% for group, commits in commits | group_by(attribute=\"group\") %}
 ### {{ group | upper_first }}
 {% for commit in commits %}
