@@ -11,12 +11,16 @@
 # never see a vX.Y.Z release that lacks working Arch artifacts.
 
 [workspace]
-# Distribution is via Arch packages, not crates.io.
+# Distribution is via Arch packages, not crates.io. Since release-plz PR
+# #2357 (Aug 2025) `publish = false` is sufficient on its own to skip
+# crates.io registry lookups; an earlier attempt to also set `git_only = true`
+# tripped a release-plz bug where the workspace was copied to a temp dir
+# without `.git`, then git ops were run against that dir and failed (similar
+# in shape to issue #1004; the git_only code path appears to bypass the fix
+# from #1336). Leaving git_only unset works fine in practice — version
+# detection falls back to git tags / Cargo.toml.
 publish = false
 semver_check = false
-# We don't publish to crates.io, so version detection must come from git tags
-# (matching git_tag_name) rather than the cargo registry.
-git_only = true
 # Single workspace-wide changelog at the repo root. Every crate has
 # changelog_update=true (the default) and writes its own section to this
 # file, prefixed with the crate name via `{{ package }}` in the changelog
@@ -30,13 +34,13 @@ changelog_path = "./CHANGELOG.md"
 # is created by package.yml after Arch packaging succeeds.
 git_release_enable = false
 git_tag_enable = false
-# Plain `v{{ version }}` for every crate. With git_only=true, release-plz
-# reads each crate's prior version from tags matching this pattern; without
-# this override the 5 non-cli crates would fall back to the multi-package
-# default `caco-core-v*` etc., find no matching tags, and baseline from
-# 0.0.0 instead of v3.2.2. Only caco-cli has git_tag_enable=true, so this
-# pattern is used for *creating* tags only on caco-cli; the other crates use
-# it solely for version detection.
+# Plain `v{{ version }}` for every crate. The multi-package workspace
+# default is `{{ package }}-v{{ version }}`, but no such per-crate tags
+# exist in this repo — only the shared `v*` tags pushed from caco-cli.
+# Setting this at the workspace level keeps version detection consistent
+# across all crates. Only caco-cli has git_tag_enable=true, so this pattern
+# is used for *creating* a tag only on caco-cli; the other crates use it
+# solely for matching existing tags during prior-version lookup.
 git_tag_name = "v{{ version }}"
 # No release_commits filter: this repo's history uses a mix of non-conventional
 # squash titles (e.g. "Add ...", "Stats reporter: ..."). A regex would skip
