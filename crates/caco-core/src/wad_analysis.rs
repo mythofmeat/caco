@@ -1248,6 +1248,8 @@ mod tests {
 
     #[test]
     fn test_udmf_linedef_comment_headers() {
+        // UDB commonly writes linedef IDs as inline comments between the
+        // block keyword and opening brace: `linedef // 831`.
         let textmap = br#"
 namespace = "zdoom";
 
