@@ -13,3 +13,42 @@ jobs:
       pkgbuild_dir: contrib/arch
       extra_pacman_packages: "wayland libxkbcommon fontconfig"
     secrets: inherit
+
+  # Create the GitHub Release only after Arch packaging has succeeded.
+  # release-plz pushes the v* tag but leaves the Release to us — that way a
+  # failed Arch build never produces a published Release with no artifacts.
+  release:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+      - name: Extract release notes from CHANGELOG.md
+        id: notes
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          # All sections for this version share the same `[X.Y.Z]` bracket.
+          # Each section header starts with `## ` (sub-sections use `### `),
+          # so we toggle on every `## ` line and emit while the bracket
+          # matches our version.
+          awk -v ver="$version" '
+            /^## / {
+              in_ver = (index($0, "[" ver "]") > 0)
+            }
+            in_ver { print }
+          ' CHANGELOG.md > release_notes.md
+          if [ ! -s release_notes.md ]; then
+            echo "No CHANGELOG.md section found for v${version}" >&2
+            exit 1
+          fi
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file release_notes.md

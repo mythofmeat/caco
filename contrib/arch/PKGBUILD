@@ -1,8 +1,8 @@
 # Maintainer: eshen
 pkgbase=caco
 pkgname=('caco' 'caco-gui' 'caco-tui')
-pkgver=3.0.0
-pkgrel=2
+pkgver=3.2.2
+pkgrel=1
 pkgdesc="Doom WAD library manager"
 arch=('x86_64')
 url="https://github.com/mythofmeat/caco"
