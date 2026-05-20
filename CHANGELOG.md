@@ -3,6 +3,13 @@
 All notable changes to Caco are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.2.4] - 2026-05-20
+
+### Fixed
+
+- **arch**: Install shell completions from the caco-cli crate after the completions directory move.
+- **gui**: Keep embedded icon and symbol fonts inside the caco-gui crate so Cargo package verification can build standalone.
+
 ## [3.2.3] - 2026-05-20
 
 ### Fixed

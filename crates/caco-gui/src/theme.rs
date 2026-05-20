@@ -310,13 +310,13 @@ pub fn apply_doom_theme(ctx: &egui::Context) {
     fonts.font_data.insert(
         "symbols2".to_owned(),
         std::sync::Arc::new(egui::FontData::from_static(include_bytes!(
-            "../../../assets/fonts/NotoSansSymbols2-Regular.ttf"
+            "../assets/fonts/NotoSansSymbols2-Regular.ttf"
         ))),
     );
     fonts.font_data.insert(
         "symbols".to_owned(),
         std::sync::Arc::new(egui::FontData::from_static(include_bytes!(
-            "../../../assets/fonts/NotoSansSymbols-Regular.ttf"
+            "../assets/fonts/NotoSansSymbols-Regular.ttf"
         ))),
     );
     for family_name in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {

@@ -1,7 +1,7 @@
 # Maintainer: eshen
 pkgbase=caco
 pkgname=('caco' 'caco-gui' 'caco-tui')
-pkgver=3.2.2
+pkgver=3.2.4
 pkgrel=1
 pkgdesc="Doom WAD library manager"
 arch=('x86_64')
@@ -42,9 +42,9 @@ package_caco() {
 
     install -Dm755 target/release/caco "$pkgdir/usr/bin/caco"
 
-    install -Dm644 completions/caco.fish "$pkgdir/usr/share/fish/vendor_completions.d/caco.fish"
-    install -Dm644 completions/caco.bash "$pkgdir/usr/share/bash-completion/completions/caco"
-    install -Dm644 completions/_caco     "$pkgdir/usr/share/zsh/site-functions/_caco"
+    install -Dm644 crates/caco-cli/completions/caco.fish "$pkgdir/usr/share/fish/vendor_completions.d/caco.fish"
+    install -Dm644 crates/caco-cli/completions/caco.bash "$pkgdir/usr/share/bash-completion/completions/caco"
+    install -Dm644 crates/caco-cli/completions/_caco     "$pkgdir/usr/share/zsh/site-functions/_caco"
 }
 
 package_caco-gui() {

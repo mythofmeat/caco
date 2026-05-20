@@ -15,9 +15,9 @@
 # release-plz from publishing or requiring registry tokens, while still letting
 # `release-plz update` compare the local packages and update versions.
 #
-# Do not set `git_only = true` here: the pre-release-plz v* tags point at
-# commits whose Cargo metadata was not packageable, and git-only mode packages
-# the historical tag before it can calculate the next version.
+# Do not set `git_only = true` here until a package-verified v* tag is the
+# latest tag. git-only mode packages the previous tag before calculating the
+# next version, so it cannot bootstrap across an unpackageable historical tag.
 publish = false
 semver_check = false
 repo_url = "https://github.com/mythofmeat/caco"

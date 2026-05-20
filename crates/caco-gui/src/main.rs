@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-const ICON_BYTES: &[u8] = include_bytes!("../../../assets/caco.png");
+const ICON_BYTES: &[u8] = include_bytes!("../assets/caco.png");
 
 /// Decode the embedded icon PNG into `egui::IconData`. Returns `None` if
 /// decoding fails so a bad asset never panics startup.
