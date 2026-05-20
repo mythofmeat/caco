@@ -3,6 +3,12 @@
 All notable changes to Caco are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.2.3] - 2026-05-20
+
+### Fixed
+
+- **analysis**: Detect UDMF linedef blocks with inline comment labels so real exit maps like Infernal Odyssey MAP12 remain required for completion.
+
 ## [3.2.2] - 2026-05-19
 
 ### Added
