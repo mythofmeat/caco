@@ -8,7 +8,7 @@ arch=('x86_64')
 url="https://github.com/mythofmeat/caco"
 license=('custom')
 makedepends=('cargo' 'gcc' 'git')
-options=(!lto)
+options=(!lto !debug strip)
 source=("$pkgbase::git+ssh://git@github.com/mythofmeat/caco.git")
 sha256sums=('SKIP')
 
