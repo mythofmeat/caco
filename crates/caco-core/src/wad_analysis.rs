@@ -46,7 +46,7 @@ const DOOM2_BOSS_BRAIN_THING: u16 = 88;
 
 /// Analysis format version. Bump this whenever detection logic changes
 /// so that stale cached analyses are automatically invalidated and re-run.
-pub const ANALYSIS_VERSION: u32 = 8;
+pub const ANALYSIS_VERSION: u32 = 9;
 
 /// UDMF normal exit specials.
 const UDMF_NORMAL_EXITS: &[i32] = &[243, 74, 75]; // Exit_Normal, Teleport_NewMap, Teleport_EndGame
@@ -355,21 +355,22 @@ fn classify_maps(graph: &MapGraph, infos: &mut [MapInfo]) {
         };
     }
 
-    // 2. Reclassify terminus as OptionalCredits if it really is a stopper
-    //    (no outgoing edges + no detected exit linedef). A node with no
-    //    outgoing edge but with detected linedef exits is a "false dead-end"
-    //    — likely an intermediate map whose exit is ACS/DEH-patched and
-    //    doesn't land in the static graph. Leave it as Required so the
-    //    verdict layer surfaces the missing chain rather than silently
-    //    rewriting it as a stopper.
+    // 2. Reclassify terminus as OptionalCredits only if it really is a
+    //    stopper: no outgoing edges AND no detected exit linedef. A UMAPINFO
+    //    endgame marker (`endgame`/`endpic`/`endcast`/`endbunny`) describes
+    //    what plays *after* the map is exited normally — it doesn't mean the
+    //    map is unexitable. If the terminus has a real exit, the player must
+    //    exit it for completion. A node with no outgoing edge but with
+    //    detected linedef exits is either a true endgame map (exit triggers
+    //    the credits screen) or a "false dead-end" whose exit is ACS/DEH-
+    //    patched out of the static graph — either way, leave it Required.
     if let Some(term) = walk_order.last() {
         let no_normal_out = !graph.edges_normal.contains_key(term);
         let no_secret_out = !graph.edges_secret.contains_key(term);
-        let has_endgame_marker = graph.has_endgame.contains(term);
         if let Some(&idx) = by_lump.get(term.as_str()) {
             let info = &infos[idx];
             let no_exit = !info.has_normal_exit && !info.has_secret_exit;
-            if no_normal_out && no_secret_out && (no_exit || has_endgame_marker) {
+            if no_normal_out && no_secret_out && no_exit {
                 infos[idx].classification = MapClassification::OptionalCredits;
             }
         }
@@ -1523,7 +1524,11 @@ MAP MAP06
     }
 
     #[test]
-    fn test_analyze_wad_umapinfo_explicit_endgame() {
+    fn test_analyze_wad_umapinfo_explicit_endgame_with_exit_stays_required() {
+        // MAP03 is the terminus and declares `endgame = true`, but it also has
+        // a real normal exit linedef. The UMAPINFO marker describes what plays
+        // *after* the map is exited, not that the map is unexitable — exiting
+        // MAP03 IS the completion. Keep it Required.
         let ld_normal = build_linedefs(&[11]);
         let umapinfo = br#"
 MAP MAP01
@@ -1549,9 +1554,43 @@ MAP MAP03
             ("UMAPINFO", umapinfo),
         ]);
         let a = analyze_wad(&wad).unwrap();
-        // MAP03 has has_endgame marker → stopper, OptionalCredits
+        assert_eq!(classify_of(&a, "MAP03"), MapClassification::Required);
+        assert_eq!(a.required_maps, 3);
+        assert_eq!(a.terminal_map, None);
+    }
+
+    #[test]
+    fn test_analyze_wad_umapinfo_endgame_without_exit_is_stopper() {
+        // MAP03 declares `endgame = true` and has no exit linedef — there is
+        // no way for the player to exit it, so it really is a stopper.
+        let ld_normal = build_linedefs(&[11]);
+        let umapinfo = br#"
+MAP MAP01
+{
+    next = "MAP02"
+}
+MAP MAP02
+{
+    next = "MAP03"
+}
+MAP MAP03
+{
+    endgame = true
+}
+"#;
+        let wad = build_wad(&[
+            ("MAP01", &[]),
+            ("LINEDEFS", &ld_normal),
+            ("MAP02", &[]),
+            ("LINEDEFS", &ld_normal),
+            ("MAP03", &[]),
+            // No LINEDEFS for MAP03 → no exit detected
+            ("UMAPINFO", umapinfo),
+        ]);
+        let a = analyze_wad(&wad).unwrap();
         assert_eq!(classify_of(&a, "MAP03"), MapClassification::OptionalCredits);
         assert_eq!(a.required_maps, 2);
+        assert_eq!(a.terminal_map.as_deref(), Some("MAP03"));
     }
 
     #[test]
@@ -1595,7 +1634,9 @@ MAP MAP10
     #[test]
     fn test_analyze_wad_umapinfo_self_loop_with_real_secret_not_stopper() {
         // Defensive case: `next = SELF` but a real `nextsecret = OTHER` means
-        // the secret IS the path forward. Don't treat as stopper.
+        // the secret IS the path forward. Don't treat MAP02 as stopper.
+        // MAP31 self-loops AND has a real exit linedef, so exiting it is the
+        // completion — keep it Required.
         let ld_normal = build_linedefs(&[11]);
         let ld_secret = build_linedefs(&[51]);
         let umapinfo = br#"
@@ -1623,9 +1664,9 @@ MAP MAP31
             ("UMAPINFO", umapinfo),
         ]);
         let a = analyze_wad(&wad).unwrap();
-        // MAP02 → forced secret → MAP31 (which self-loops, so it's the stopper).
         assert_eq!(classify_of(&a, "MAP02"), MapClassification::Required);
-        assert_eq!(classify_of(&a, "MAP31"), MapClassification::OptionalCredits);
+        assert_eq!(classify_of(&a, "MAP31"), MapClassification::Required);
+        assert_eq!(a.terminal_map, None);
     }
 
     #[test]
@@ -1671,7 +1712,9 @@ MAP MAP31
         ]);
         let a = analyze_wad(&wad).unwrap();
         assert_eq!(classify_of(&a, "MAP04"), MapClassification::Required);
-        assert_eq!(classify_of(&a, "MAP31"), MapClassification::OptionalCredits);
+        // MAP31 declares endgame AND has a real exit — endgame is what plays
+        // after exit, so the player still has to exit it. Required.
+        assert_eq!(classify_of(&a, "MAP31"), MapClassification::Required);
         // No secrets — MAP31 was forced, not optional.
         assert!(a.secret_maps.is_empty());
     }
@@ -1720,7 +1763,9 @@ MAP MAP31
         let a = analyze_wad(&wad).unwrap();
         assert_eq!(classify_of(&a, "MAP15"), MapClassification::Required);
         assert_eq!(classify_of(&a, "MAP31"), MapClassification::OptionalSecret);
-        assert_eq!(classify_of(&a, "MAP30"), MapClassification::OptionalCredits);
+        // MAP30 declares endgame AND has a real exit linedef — endgame fires
+        // *after* MAP30 is exited, so exiting MAP30 is the completion.
+        assert_eq!(classify_of(&a, "MAP30"), MapClassification::Required);
     }
 
     // -----------------------------------------------------------------------
@@ -1779,7 +1824,8 @@ map MAP18GZ "Biocide"
         assert_eq!(classify_of(&a, "MAP17"), MapClassification::Required);
         assert_eq!(classify_of(&a, "MAP18GZ"), MapClassification::Required);
         assert_eq!(classify_of(&a, "MAP18"), MapClassification::Unreachable);
-        assert_eq!(classify_of(&a, "MAP19"), MapClassification::OptionalCredits);
+        // MAP19 declares endgame AND has a real exit — must be exited.
+        assert_eq!(classify_of(&a, "MAP19"), MapClassification::Required);
     }
 
     // -----------------------------------------------------------------------
@@ -1841,6 +1887,7 @@ MAP MAP03
         ]);
         let a = analyze_wad(&wad).unwrap();
         assert_eq!(classify_of(&a, "MAP02"), MapClassification::Unreachable);
-        assert_eq!(classify_of(&a, "MAP03"), MapClassification::OptionalCredits);
+        // MAP03 declares endgame AND has a real exit — required for completion.
+        assert_eq!(classify_of(&a, "MAP03"), MapClassification::Required);
     }
 }
