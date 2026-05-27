@@ -20,6 +20,12 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.REPO_ARCH_TOKEN }}
       - uses: dtolnay/rust-toolchain@stable
+      # `.cargo/config.toml` pins the linux-gnu linker to clang + mold for
+      # local dev. release-plz with git_only=true runs `cargo package` to
+      # verify the previous tag, so the Ubuntu runner needs both available
+      # or cargo errors with `invalid linker name in argument '-fuse-ld=mold'`.
+      - name: Install mold linker
+        run: sudo apt-get update && sudo apt-get install -y mold clang
       - uses: release-plz/action@v0.5
         env:
           GITHUB_TOKEN: ${{ secrets.REPO_ARCH_TOKEN }}
