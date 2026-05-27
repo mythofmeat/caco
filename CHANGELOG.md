@@ -3,6 +3,12 @@
 All notable changes to Caco are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.2.5] - 2026-05-27
+
+### Fixed
+
+- **completion**: Treat UMAPINFO `endgame`/`endpic`/`endcast`/`endbunny` markers as post-exit cinematics rather than no-exit stoppers, so WADs like Nova IV MAP30 still require the player to hit the real exit before reporting Complete. Bumps `ANALYSIS_VERSION` to re-run cached analyses.
+
 ## [3.2.4] - 2026-05-20
 
 ### Fixed
