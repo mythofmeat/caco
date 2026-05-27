@@ -197,3 +197,19 @@ caco completions [fish|bash|zsh]
 - Commit working changes to git; keep the tree green between commits.
 - Update README.md and CLAUDE.md when adding or changing user-visible features.
 - Quality gates before any commit: `cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`.
+
+### Commit messages
+
+**Every commit MUST use Conventional Commits**: `type(scope): subject`. The user delegates all commit-writing to Claude, so if commits drift from this format, releases break — release-plz uses the type prefix to decide whether to bump and what kind of bump.
+
+Bumping types (open a Release PR):
+- `feat:` → minor bump
+- `fix:` / `perf:` / `refactor:` → patch bump
+- Append `BREAKING CHANGE:` in the body for a major bump
+
+Hidden from changelog, never trigger a release:
+- `chore:`, `docs:`, `test:`, `ci:`, `build:`, `style:`
+
+Common scopes in this repo: `db`, `core`, `gui`, `tui`, `sources`, `cli`, `mcp`, `arch`, `completion`, `stats`, `sourceports`, `doomwiki`, `idgames`, `doomworld`. Pick the smallest accurate scope. Omit the scope when a change genuinely spans many areas.
+
+Never write non-conventional commit subjects (e.g. `Add foo`, `Fix bar`, single-word like `gitignore`). The `{ message = ".*", group = "Changed" }` catch-all in `release-plz.toml` exists only for legacy history; non-conventional commits land in the changelog but do **not** trigger a release on their own, so a series of them silently skips a release.
