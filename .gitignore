@@ -50,4 +50,5 @@ pytest-of-*/
 /objects
 /refs
 
+.worktree
 .worktrees
