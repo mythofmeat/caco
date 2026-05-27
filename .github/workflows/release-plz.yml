@@ -26,6 +26,17 @@ jobs:
       # or cargo errors with `invalid linker name in argument '-fuse-ld=mold'`.
       - name: Install mold linker
         run: sudo apt-get update && sudo apt-get install -y mold clang
+      # Cache the cargo registry and the verification build artifacts.
+      # release-plz packages the workspace in a temp worktree, so we point
+      # CARGO_TARGET_DIR at a stable path that survives between runs and
+      # tell rust-cache to manage that directory. Without this, the verify
+      # step recompiles every dependency from scratch (~14 min); with it,
+      # the second+ run reuses incremental artifacts.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> /home/runner/release-plz-target"
+          shared-key: release-plz-verify
       - uses: release-plz/action@v0.5
         env:
           GITHUB_TOKEN: ${{ secrets.REPO_ARCH_TOKEN }}
+          CARGO_TARGET_DIR: /home/runner/release-plz-target
