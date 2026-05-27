@@ -26,17 +26,22 @@ jobs:
       # or cargo errors with `invalid linker name in argument '-fuse-ld=mold'`.
       - name: Install mold linker
         run: sudo apt-get update && sudo apt-get install -y mold clang
-      # Cache the cargo registry and the verification build artifacts.
-      # release-plz packages the workspace in a temp worktree, so we point
-      # CARGO_TARGET_DIR at a stable path that survives between runs and
-      # tell rust-cache to manage that directory. Without this, the verify
-      # step recompiles every dependency from scratch (~14 min); with it,
-      # the second+ run reuses incremental artifacts.
+      # Cache the cargo registry index and downloaded crate sources.
+      # release-plz with git_only=true runs `cargo package --workspace` in a
+      # fresh temp worktree per package, so the per-run target/ can't be
+      # reused — but the cargo registry can. Compile cost still dominates,
+      # but caching the registry shaves several minutes off "Updating
+      # crates.io index" + "Downloaded foo v1.2.3" work.
+      #
+      # We deliberately do NOT redirect CARGO_TARGET_DIR to a persistent
+      # path: cargo's `package` verify step strips path deps from the
+      # generated tarball and only resolves them via workspace overrides
+      # when target/ lives inside the worktree. Pointing it elsewhere
+      # breaks the rebuild with "no matching package named `caco-core`".
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: ". -> /home/runner/release-plz-target"
-          shared-key: release-plz-verify
+          cache-targets: false
+          shared-key: release-plz-registry
       - uses: release-plz/action@v0.5
         env:
           GITHUB_TOKEN: ${{ secrets.REPO_ARCH_TOKEN }}
-          CARGO_TARGET_DIR: /home/runner/release-plz-target
