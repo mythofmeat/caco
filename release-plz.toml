@@ -12,13 +12,17 @@
 
 [workspace]
 # Distribution is via Arch packages, not crates.io. `publish = false` keeps
-# release-plz from publishing or requiring registry tokens, while still letting
-# `release-plz update` compare the local packages and update versions.
+# release-plz from publishing or requiring registry tokens; `git_only = true`
+# tells release-plz to use git tags (not crates.io) as the source of truth
+# for "currently published version". Without git_only, release-pr silently
+# emits {"prs":[]} for every push because caco-* aren't on crates.io and
+# release-plz can't determine whether a bump is needed.
 #
-# Do not set `git_only = true` here until a package-verified v* tag is the
-# latest tag. git-only mode packages the previous tag before calculating the
-# next version, so it cannot bootstrap across an unpackageable historical tag.
+# git_only is safe now that v3.2.4 and v3.2.5 are both package-verified
+# tags: git-only mode packages the previous tag before calculating the next
+# version, so it requires the latest tag to be cleanly packageable.
 publish = false
+git_only = true
 semver_check = false
 repo_url = "https://github.com/mythofmeat/caco"
 pr_name = "Release v{{ version }}"
