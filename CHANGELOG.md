@@ -3,6 +3,12 @@
 All notable changes to Caco are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.2.6] - 2026-05-28
+
+### Changed
+
+- **core**: Classify map completability by monster count ([#5](https://github.com/mythofmeat/caco/pull/5))
+
 ## [3.2.5] - 2026-05-27
 
 ### Fixed
