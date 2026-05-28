@@ -317,7 +317,6 @@ The original Python implementation. Key milestones:
 - **2026-03-10**: Comprehensive test suite, mypy integration, garbage collection
 - **2026-03-18**: JSON import fallback, Cloudflare bypass, offline support
 
-[Unreleased]: http://localhost:3000/eshen/caco/compare/v3.2.6...main
 [3.2.6]: http://localhost:3000/eshen/caco/compare/v3.2.5...v3.2.6
 [3.2.5]: http://localhost:3000/eshen/caco/compare/v3.2.4...v3.2.5
 [3.2.4]: http://localhost:3000/eshen/caco/compare/v3.2.3...v3.2.4
