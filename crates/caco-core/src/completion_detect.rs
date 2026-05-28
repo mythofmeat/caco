@@ -82,8 +82,6 @@ mod tests {
             .iter()
             .map(|(lump, c)| MapInfo {
                 lump: lump.to_string(),
-                has_normal_exit: true,
-                has_secret_exit: false,
                 classification: *c,
             })
             .collect();
@@ -338,10 +336,7 @@ mod tests {
                 wad.id, wad.title, analysis.required_maps, analysis.terminal_map
             );
             for m in &analysis.maps {
-                eprintln!(
-                    "  {:10} {:?}  exit={} sec_exit={}",
-                    m.lump, m.classification, m.has_normal_exit, m.has_secret_exit
-                );
+                eprintln!("  {:10} {:?}", m.lump, m.classification);
             }
             if let Some(ref ss) = wad.stats_snapshot {
                 let stats: crate::wad_stats::WadStats = serde_json::from_str(ss).unwrap();

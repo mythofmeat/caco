@@ -2,10 +2,16 @@
 //!
 //! Two pure layers:
 //! - `analyze_wad` / `analyze_pk3` build a directed map graph from the WAD's
-//!   ZMAPINFO/UMAPINFO/MAPINFO/vanilla edges, walk the main path from start
-//!   to credits-stopper, and assign each map a `MapClassification`.
+//!   ZMAPINFO/UMAPINFO/MAPINFO/vanilla edges, walk the main path, then peel
+//!   trailing zero-monster maps off the tail as `OptionalCredits`.
 //! - `completion_detect::check_completion` intersects the Required set with
 //!   the player's exit stats. The classifier never sees stats.
+//!
+//! We deliberately do not try to detect exit linedefs, boss-brain exits,
+//! sector death-exits, ACS exits, or any other "how does this map end"
+//! mechanism. WAD designers have too many ways to wire up an exit, and any
+//! detection we add is brittle. Instead we lean on a single robust signal:
+//! a playable map has monsters, a credits map does not.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::LazyLock;
@@ -33,25 +39,41 @@ const MAP_LUMPS: &[&str] = &[
     "BLOCKMAP", "BEHAVIOR", "SCRIPTS", "TEXTMAP", "ENDMAP", "DIALOGUE", "ZNODES",
 ];
 
-// ---------------------------------------------------------------------------
-// Exit linedef specials
-// ---------------------------------------------------------------------------
-
-/// Vanilla/Boom normal exit linedef types.
-const VANILLA_NORMAL_EXITS: &[u16] = &[11, 52, 197];
-/// Vanilla/Boom secret exit linedef types.
-const VANILLA_SECRET_EXITS: &[u16] = &[51, 124, 198];
-/// Doom II "Boss Brain" thing. Killing it calls the normal level-exit path.
-const DOOM2_BOSS_BRAIN_THING: u16 = 88;
-
 /// Analysis format version. Bump this whenever detection logic changes
 /// so that stale cached analyses are automatically invalidated and re-run.
-pub const ANALYSIS_VERSION: u32 = 9;
+pub const ANALYSIS_VERSION: u32 = 10;
 
-/// UDMF normal exit specials.
-const UDMF_NORMAL_EXITS: &[i32] = &[243, 74, 75]; // Exit_Normal, Teleport_NewMap, Teleport_EndGame
-/// UDMF secret exit specials.
-const UDMF_SECRET_EXITS: &[i32] = &[244]; // Exit_Secret
+/// Tail maps with fewer than this many monster things are peeled off as
+/// `OptionalCredits`. Threshold is "more than one" so a single decorative
+/// imp on a credits screen doesn't make the map count as playable.
+const MIN_MONSTERS_FOR_PLAYABLE: usize = 2;
+
+/// Doom thing types that count as monsters for the "is this map playable"
+/// heuristic. Editor numbers, not DEH mobjinfo slots. Boss Brain (88) is the
+/// Romero head — not strictly COUNTKILL, but it's the only target on an Icon
+/// of Sin map and we want those classified as playable.
+const MONSTER_THING_TYPES: &[u16] = &[
+    7,    // Spider Mastermind
+    9,    // Shotgun Guy
+    16,   // Cyberdemon
+    58,   // Spectre
+    64,   // Archvile
+    65,   // Heavy Weapon Dude
+    66,   // Revenant
+    67,   // Mancubus
+    68,   // Arachnotron
+    69,   // Hell Knight
+    71,   // Pain Elemental
+    72,   // Commander Keen
+    84,   // Wolfenstein SS
+    88,   // Boss Brain (Romero head)
+    3001, // Imp
+    3002, // Demon
+    3003, // Baron of Hell
+    3004, // Former Human
+    3005, // Cacodemon
+    3006, // Lost Soul
+];
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -76,10 +98,6 @@ pub enum MapClassification {
 pub struct MapInfo {
     /// Map lump name (e.g., "MAP01", "E1M1").
     pub lump: String,
-    /// Map has at least one normal exit linedef (diagnostic).
-    pub has_normal_exit: bool,
-    /// Map has at least one secret exit linedef (diagnostic).
-    pub has_secret_exit: bool,
     /// Single source of truth for what this map represents in the play flow.
     #[serde(default = "default_classification")]
     pub classification: MapClassification,
@@ -103,7 +121,8 @@ pub struct WadAnalysis {
     pub required_maps: usize,
     /// Derived: lump names where `classification == OptionalSecret`.
     pub secret_maps: Vec<String>,
-    /// Derived: the lump where `classification == OptionalCredits`, if any.
+    /// Derived: the first map (in directory order) where
+    /// `classification == OptionalCredits`, if any.
     pub terminal_map: Option<String>,
     /// Whether any structured map-flow data was found (UMAPINFO/MAPINFO/ZMAPINFO).
     pub has_umapinfo: bool,
@@ -149,7 +168,6 @@ impl FlowSource {
 /// sources. Edges that point to lumps not in `map_set` are dropped.
 fn build_graph(
     map_set: &HashSet<&str>,
-    map_exits: &HashMap<&str, (bool, bool)>,
     is_doom1: bool,
     sources: &[(FlowSource, HashMap<String, MapinfoEdge>)],
 ) -> MapGraph {
@@ -160,7 +178,7 @@ fn build_graph(
     let mut graph = MapGraph::default();
 
     // Layer 0: vanilla edges (lowest priority, applied first)
-    add_vanilla_edges(&mut graph, map_set, map_exits, is_doom1);
+    add_vanilla_edges(&mut graph, map_set, is_doom1);
 
     // Higher layers: overlay each source in priority order. Each property
     // is only overridden when the higher-priority source explicitly sets it
@@ -168,8 +186,8 @@ fn build_graph(
     // Setting endgame=true also clears any normal/secret edge for that map
     // (game ends here, no progression). A self-loop in `next`/`nextsecret`
     // (`map MAP10 { next = "MAP10" }`) is the established UMAPINFO idiom for
-    // "stops here" — treat it as endgame so the terminus reclassification
-    // can promote it to OptionalCredits.
+    // "stops here" — treat it as endgame so the tail-peel can promote it to
+    // OptionalCredits when it has no monsters.
     for (_, entries) in &by_priority {
         for (lump, edge) in entries.iter() {
             if !map_set.contains(lump.as_str()) {
@@ -223,30 +241,30 @@ struct MapinfoEdge {
 }
 
 /// Add vanilla map-flow edges based on map naming conventions.
-fn add_vanilla_edges(
-    graph: &mut MapGraph,
-    map_set: &HashSet<&str>,
-    map_exits: &HashMap<&str, (bool, bool)>,
-    is_doom1: bool,
-) {
+///
+/// These are the edges the Doom/Doom 2 engine implies from map names alone,
+/// independent of any linedef inspection. We synthesize them whenever both
+/// source and destination maps exist in the WAD — exit-linedef detection is
+/// too brittle (Boom generalized specials, voodoo plumbing, DEH-patched
+/// codepointers, ACS scripts all bypass it). If a map happens to have no
+/// reachable exit, that's a WAD-design issue we can't see from static lump
+/// inspection; the tail-peel step handles the case where the designer
+/// genuinely intends the last map to be a credits screen.
+fn add_vanilla_edges(graph: &mut MapGraph, map_set: &HashSet<&str>, is_doom1: bool) {
     if is_doom1 {
-        // ExMy → ExM(y+1) for y < 8; ExM3 secret → ExM9; ExM9 → ExM(source+1)
-        // is rare and engine-specific, skip. Only synthesize convention edges
-        // when the source map has the corresponding exit linedef.
+        // ExMy → ExM(y+1) for y < 8; ExM3 secret → ExM9.
         for &lump in map_set {
             if let Some(caps) = DOOM1_MAP_RE.captures(lump)
                 && let Ok(ep) = caps[1].parse::<u32>()
                 && let Ok(mn) = caps[2].parse::<u32>()
             {
-                let (has_normal_exit, has_secret_exit) =
-                    map_exits.get(lump).copied().unwrap_or((false, false));
-                if mn < 8 && has_normal_exit {
+                if mn < 8 {
                     let next = format!("E{ep}M{}", mn + 1);
                     if map_set.contains(next.as_str()) {
                         graph.edges_normal.insert(lump.to_string(), next);
                     }
                 }
-                if mn == 3 && has_secret_exit {
+                if mn == 3 {
                     let secret = format!("E{ep}M9");
                     if map_set.contains(secret.as_str()) {
                         graph.edges_secret.insert(lump.to_string(), secret);
@@ -255,40 +273,36 @@ fn add_vanilla_edges(
             }
         }
     } else {
-        // MAP_n → MAP_(n+1) for n < 30; MAP15 secret → MAP31; MAP31 → MAP32 → MAP16.
-        // Only synthesize convention edges when the source map has the
-        // corresponding exit linedef; a no-exit credits map named MAP24 must
-        // not imply a playable transition to MAP25.
+        // MAP_n → MAP_(n+1) for n < 30; MAP15 secret → MAP31;
+        // MAP31 normal → MAP16 + secret → MAP32; MAP32 normal → MAP16.
         for &lump in map_set {
             if let Some(caps) = DOOM2_MAP_RE.captures(lump)
                 && let Ok(n) = caps[1].parse::<u32>()
             {
-                let (has_normal_exit, has_secret_exit) =
-                    map_exits.get(lump).copied().unwrap_or((false, false));
-                if n < 30 && has_normal_exit {
+                if n < 30 {
                     let next = format!("MAP{:02}", n + 1);
                     if map_set.contains(next.as_str()) {
                         graph.edges_normal.insert(lump.to_string(), next);
                     }
                 }
-                if n == 15 && has_secret_exit && map_set.contains("MAP31") {
+                if n == 15 && map_set.contains("MAP31") {
                     graph
                         .edges_secret
                         .insert(lump.to_string(), "MAP31".to_string());
                 }
                 if n == 31 {
-                    if has_normal_exit && map_set.contains("MAP16") {
+                    if map_set.contains("MAP16") {
                         graph
                             .edges_normal
                             .insert(lump.to_string(), "MAP16".to_string());
                     }
-                    if has_secret_exit && map_set.contains("MAP32") {
+                    if map_set.contains("MAP32") {
                         graph
                             .edges_secret
                             .insert(lump.to_string(), "MAP32".to_string());
                     }
                 }
-                if n == 32 && has_normal_exit && map_set.contains("MAP16") {
+                if n == 32 && map_set.contains("MAP16") {
                     graph
                         .edges_normal
                         .insert(lump.to_string(), "MAP16".to_string());
@@ -299,7 +313,7 @@ fn add_vanilla_edges(
 }
 
 // ---------------------------------------------------------------------------
-// Internal: classification (graph walk)
+// Internal: classification (graph walk + tail peel)
 // ---------------------------------------------------------------------------
 
 /// Walk the graph and assign a classification to each map.
@@ -308,12 +322,15 @@ fn add_vanilla_edges(
 /// 1. Pick start = lowest-keyed playable map.
 /// 2. Walk the main path, preferring normal edges, falling back to secret
 ///    edges only when no normal edge exists ("forced secret = true ending").
-/// 3. The terminus (last node visited) is reclassified as `OptionalCredits`
-///    if it has no outgoing edges and no detected exit linedefs.
+/// 3. **Tail peel**: starting from the end of the walk, demote each map to
+///    `OptionalCredits` while its monster count is below the playable
+///    threshold. The deepest map with real monsters is the playable
+///    terminus. The walk's *first* map is never peeled — we always require
+///    at least one Required map so an empty/test WAD doesn't auto-complete.
 /// 4. Walk secret branches off main-path nodes; mark visited nodes as
 ///    `OptionalSecret`.
 /// 5. Anything still unmarked is `Unreachable`.
-fn classify_maps(graph: &MapGraph, infos: &mut [MapInfo]) {
+fn classify_maps(graph: &MapGraph, infos: &mut [MapInfo], monsters: &HashMap<String, usize>) {
     if infos.is_empty() {
         return;
     }
@@ -355,24 +372,18 @@ fn classify_maps(graph: &MapGraph, infos: &mut [MapInfo]) {
         };
     }
 
-    // 2. Reclassify terminus as OptionalCredits only if it really is a
-    //    stopper: no outgoing edges AND no detected exit linedef. A UMAPINFO
-    //    endgame marker (`endgame`/`endpic`/`endcast`/`endbunny`) describes
-    //    what plays *after* the map is exited normally — it doesn't mean the
-    //    map is unexitable. If the terminus has a real exit, the player must
-    //    exit it for completion. A node with no outgoing edge but with
-    //    detected linedef exits is either a true endgame map (exit triggers
-    //    the credits screen) or a "false dead-end" whose exit is ACS/DEH-
-    //    patched out of the static graph — either way, leave it Required.
-    if let Some(term) = walk_order.last() {
-        let no_normal_out = !graph.edges_normal.contains_key(term);
-        let no_secret_out = !graph.edges_secret.contains_key(term);
-        if let Some(&idx) = by_lump.get(term.as_str()) {
-            let info = &infos[idx];
-            let no_exit = !info.has_normal_exit && !info.has_secret_exit;
-            if no_normal_out && no_secret_out && no_exit {
-                infos[idx].classification = MapClassification::OptionalCredits;
-            }
+    // 2. Tail peel: walk back from the end demoting low-monster maps to
+    //    OptionalCredits. Stop at the first map that has real monsters —
+    //    that's the playable terminus. Never peel index 0 so a tiny/empty
+    //    WAD still has at least one Required map.
+    for i in (1..walk_order.len()).rev() {
+        let lump = &walk_order[i];
+        let count = monsters.get(lump).copied().unwrap_or(0);
+        if count >= MIN_MONSTERS_FOR_PLAYABLE {
+            break;
+        }
+        if let Some(&idx) = by_lump.get(lump.as_str()) {
+            infos[idx].classification = MapClassification::OptionalCredits;
         }
     }
 
@@ -490,14 +501,14 @@ pub fn analyze_wad(wad_data: &[u8]) -> Option<WadAnalysis> {
         return None;
     }
 
-    // Per-map exit detection
+    // Per-map monster count + bare map info skeleton
     let mut infos: Vec<MapInfo> = Vec::with_capacity(map_ranges.len());
+    let mut monsters: HashMap<String, usize> = HashMap::new();
     for (name, start_idx, end_idx) in &map_ranges {
-        let (has_normal, has_secret) = detect_exits(wad_data, &directory, *start_idx, *end_idx);
+        let count = count_monsters_in_range(wad_data, &directory, *start_idx, *end_idx);
+        monsters.insert(name.clone(), count);
         infos.push(MapInfo {
             lump: name.clone(),
-            has_normal_exit: has_normal,
-            has_secret_exit: has_secret,
             classification: MapClassification::Unreachable,
         });
     }
@@ -514,10 +525,6 @@ pub fn analyze_wad(wad_data: &[u8]) -> Option<WadAnalysis> {
 
     let lumps: Vec<String> = infos.iter().map(|m| m.lump.clone()).collect();
     let map_set: HashSet<&str> = lumps.iter().map(|s| s.as_str()).collect();
-    let map_exits: HashMap<&str, (bool, bool)> = infos
-        .iter()
-        .map(|m| (m.lump.as_str(), (m.has_normal_exit, m.has_secret_exit)))
-        .collect();
     let is_doom1 = lumps.first().is_some_and(|m| DOOM1_MAP_RE.is_match(m));
 
     // Collect flow sources from the WAD.
@@ -546,8 +553,8 @@ pub fn analyze_wad(wad_data: &[u8]) -> Option<WadAnalysis> {
         }
     }
 
-    let graph = build_graph(&map_set, &map_exits, is_doom1, &sources);
-    classify_maps(&graph, &mut infos);
+    let graph = build_graph(&map_set, is_doom1, &sources);
+    classify_maps(&graph, &mut infos, &monsters);
 
     Some(finalize(infos, has_structured))
 }
@@ -563,8 +570,9 @@ pub fn analyze_pk3(pk3_path: &std::path::Path) -> Option<WadAnalysis> {
     let file = std::fs::File::open(pk3_path).ok()?;
     let mut archive = zip::ZipArchive::new(file).ok()?;
 
-    // --- Step 1: Discover maps and analyze exits ---
+    // --- Step 1: Discover maps and count monsters ---
     let mut infos: Vec<MapInfo> = Vec::new();
+    let mut monsters: HashMap<String, usize> = HashMap::new();
 
     // Try maps/ directory first (one map per WAD)
     let map_wad_names: Vec<String> = (0..archive.len())
@@ -590,11 +598,10 @@ pub fn analyze_pk3(pk3_path: &std::path::Path) -> Option<WadAnalysis> {
                 .and_then(|s| s.to_str())?
                 .to_uppercase();
 
-            let (has_normal, has_secret) = analyze_map_wad_exits(&data);
+            let count = count_monsters_in_map_wad(&data);
+            monsters.insert(stem.clone(), count);
             infos.push(MapInfo {
                 lump: stem,
-                has_normal_exit: has_normal,
-                has_secret_exit: has_secret,
                 classification: MapClassification::Unreachable,
             });
         }
@@ -620,11 +627,11 @@ pub fn analyze_pk3(pk3_path: &std::path::Path) -> Option<WadAnalysis> {
             let directory = parse_wad_directory(&data);
             let ranges = find_map_ranges(&directory);
             for (name, start, end) in &ranges {
-                let (has_normal, has_secret) = detect_exits(&data, &directory, *start, *end);
+                let count = count_monsters_in_range(&data, &directory, *start, *end);
+                let upper = name.to_uppercase();
+                monsters.insert(upper.clone(), count);
                 infos.push(MapInfo {
-                    lump: name.to_uppercase(),
-                    has_normal_exit: has_normal,
-                    has_secret_exit: has_secret,
+                    lump: upper,
                     classification: MapClassification::Unreachable,
                 });
             }
@@ -684,10 +691,6 @@ pub fn analyze_pk3(pk3_path: &std::path::Path) -> Option<WadAnalysis> {
 
     // --- Step 4: Build graph + classify (linear/branching path) ---
     let map_set: HashSet<&str> = lumps.iter().map(|s| s.as_str()).collect();
-    let map_exits: HashMap<&str, (bool, bool)> = infos
-        .iter()
-        .map(|m| (m.lump.as_str(), (m.has_normal_exit, m.has_secret_exit)))
-        .collect();
     let is_doom1 = lumps.first().is_some_and(|m| DOOM1_MAP_RE.is_match(m));
 
     let mut sources: Vec<(FlowSource, HashMap<String, MapinfoEdge>)> = Vec::new();
@@ -703,8 +706,8 @@ pub fn analyze_pk3(pk3_path: &std::path::Path) -> Option<WadAnalysis> {
     // PK3 maps may also have UMAPINFO embedded inside one of the WAD files.
     // Skip that lookup for now — MAPINFO/ZMAPINFO is the standard for PK3s.
 
-    let graph = build_graph(&map_set, &map_exits, is_doom1, &sources);
-    classify_maps(&graph, &mut infos);
+    let graph = build_graph(&map_set, is_doom1, &sources);
+    classify_maps(&graph, &mut infos, &monsters);
 
     Some(finalize(infos, has_structured))
 }
@@ -807,47 +810,38 @@ fn is_map_lump(name: &str) -> bool {
 }
 
 // ---------------------------------------------------------------------------
-// Exit detection
+// Monster counting
 // ---------------------------------------------------------------------------
 
-fn detect_exits(
+fn count_monsters_in_range(
     wad_data: &[u8],
     directory: &[(String, u32, u32)],
     start_idx: usize,
     end_idx: usize,
-) -> (bool, bool) {
+) -> usize {
     let map_lumps = &directory[start_idx..end_idx];
 
     if let Some(textmap) = find_lump_data(wad_data, map_lumps, "TEXTMAP") {
-        return detect_udmf_exits(&textmap);
+        return count_udmf_monsters(&textmap);
     }
 
-    let (mut has_normal, has_secret) =
-        if let Some(linedefs) = find_lump_data(wad_data, map_lumps, "LINEDEFS") {
-            detect_vanilla_exits(&linedefs)
-        } else {
-            (false, false)
-        };
-
-    if let Some(things) = find_lump_data(wad_data, map_lumps, "THINGS")
-        && detect_boss_brain_exit(&things)
-    {
-        has_normal = true;
+    if let Some(things) = find_lump_data(wad_data, map_lumps, "THINGS") {
+        return count_vanilla_monsters(&things);
     }
 
-    (has_normal, has_secret)
+    0
 }
 
-fn analyze_map_wad_exits(wad_data: &[u8]) -> (bool, bool) {
+fn count_monsters_in_map_wad(wad_data: &[u8]) -> usize {
     let directory = parse_wad_directory(wad_data);
     if directory.is_empty() {
-        return (false, false);
+        return 0;
     }
     let map_ranges = find_map_ranges(&directory);
     if let Some((_, start, end)) = map_ranges.first() {
-        detect_exits(wad_data, &directory, *start, *end)
+        count_monsters_in_range(wad_data, &directory, *start, *end)
     } else {
-        (false, false)
+        0
     }
 }
 
@@ -885,77 +879,44 @@ fn read_lump_text(
     None
 }
 
-/// Parse vanilla/Boom LINEDEFS lump for exit specials.
-fn detect_vanilla_exits(linedefs: &[u8]) -> (bool, bool) {
-    let mut has_normal = false;
-    let mut has_secret = false;
-
-    let linedef_size = 14;
-    let count = linedefs.len() / linedef_size;
-
-    for i in 0..count {
-        let base = i * linedef_size;
-        if base + 8 > linedefs.len() {
-            break;
-        }
-        let special = u16::from_le_bytes([linedefs[base + 6], linedefs[base + 7]]);
-
-        if VANILLA_NORMAL_EXITS.contains(&special) {
-            has_normal = true;
-        }
-        if VANILLA_SECRET_EXITS.contains(&special) {
-            has_secret = true;
-        }
-    }
-
-    (has_normal, has_secret)
-}
-
-/// Detect Doom II Boss Brain things, whose death exits the current level.
-fn detect_boss_brain_exit(things: &[u8]) -> bool {
+/// Count monster things in a vanilla/Boom THINGS lump.
+fn count_vanilla_monsters(things: &[u8]) -> usize {
     let thing_size = 10;
     let count = things.len() / thing_size;
-
+    let mut n = 0;
     for i in 0..count {
         let base = i * thing_size;
         if base + 8 > things.len() {
             break;
         }
         let thing_type = u16::from_le_bytes([things[base + 6], things[base + 7]]);
-        if thing_type == DOOM2_BOSS_BRAIN_THING {
-            return true;
+        if MONSTER_THING_TYPES.contains(&thing_type) {
+            n += 1;
         }
     }
-
-    false
+    n
 }
 
-/// Parse UDMF TEXTMAP for exit specials.
-fn detect_udmf_exits(textmap_data: &[u8]) -> (bool, bool) {
+/// Count monster things in a UDMF TEXTMAP lump.
+fn count_udmf_monsters(textmap_data: &[u8]) -> usize {
     let text = String::from_utf8_lossy(textmap_data);
-    let mut has_normal = false;
-    let mut has_secret = false;
 
-    static LINEDEF_BLOCK_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?si)linedef\b(?:\s*//[^\r\n]*)?\s*\{([^}]*)\}").unwrap());
-    static SPECIAL_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?i)special\s*=\s*(\d+)").unwrap());
+    static THING_BLOCK_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?si)\bthing\b(?:\s*//[^\r\n]*)?\s*\{([^}]*)\}").unwrap());
+    static TYPE_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)\btype\s*=\s*(\d+)").unwrap());
 
-    for block in LINEDEF_BLOCK_RE.captures_iter(&text) {
+    let mut n = 0;
+    for block in THING_BLOCK_RE.captures_iter(&text) {
         let body = &block[1];
-        if let Some(caps) = SPECIAL_RE.captures(body)
-            && let Ok(special) = caps[1].parse::<i32>()
+        if let Some(caps) = TYPE_RE.captures(body)
+            && let Ok(t) = caps[1].parse::<u16>()
+            && MONSTER_THING_TYPES.contains(&t)
         {
-            if UDMF_NORMAL_EXITS.contains(&special) {
-                has_normal = true;
-            }
-            if UDMF_SECRET_EXITS.contains(&special) {
-                has_secret = true;
-            }
+            n += 1;
         }
     }
-
-    (has_normal, has_secret)
+    n
 }
 
 // ---------------------------------------------------------------------------
@@ -1111,21 +1072,7 @@ mod tests {
         wad
     }
 
-    fn make_linedef(special: u16) -> [u8; 14] {
-        let mut ld = [0u8; 14];
-        ld[6] = (special & 0xFF) as u8;
-        ld[7] = (special >> 8) as u8;
-        ld
-    }
-
-    fn build_linedefs(specials: &[u16]) -> Vec<u8> {
-        let mut data = Vec::new();
-        for &s in specials {
-            data.extend_from_slice(&make_linedef(s));
-        }
-        data
-    }
-
+    /// Build a THINGS lump from a list of thing types.
     fn build_things(types: &[u16]) -> Vec<u8> {
         let mut data = Vec::new();
         for &thing_type in types {
@@ -1137,13 +1084,18 @@ mod tests {
         data
     }
 
-    fn build_textmap(specials: &[i32]) -> Vec<u8> {
-        let mut text = String::new();
-        text.push_str("namespace = \"zdoom\";\n");
-        for &s in specials {
+    /// Build a THINGS lump with `n` imps (a "playable" map).
+    fn playable_things(n: usize) -> Vec<u8> {
+        build_things(&vec![3001u16; n])
+    }
+
+    /// Build a UDMF TEXTMAP with the given thing types.
+    fn build_textmap_things(types: &[u16]) -> Vec<u8> {
+        let mut text = String::from("namespace = \"zdoom\";\n");
+        for &t in types {
             text.push_str(&format!(
-                "linedef {{\n  special = {};\n  v1 = 0;\n  v2 = 1;\n}}\n",
-                s
+                "thing {{\n  type = {};\n  x = 0;\n  y = 0;\n}}\n",
+                t
             ));
         }
         text.into_bytes()
@@ -1158,110 +1110,51 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Linedef parsing
+    // Monster counting
     // -----------------------------------------------------------------------
 
     #[test]
-    fn test_vanilla_normal_exit() {
-        let linedefs = build_linedefs(&[0, 0, 11, 0]);
-        let (normal, secret) = detect_vanilla_exits(&linedefs);
-        assert!(normal);
-        assert!(!secret);
+    fn test_count_vanilla_monsters_basic() {
+        // Three imps and a player start
+        let things = build_things(&[3001, 3001, 3001, 1]);
+        assert_eq!(count_vanilla_monsters(&things), 3);
     }
 
     #[test]
-    fn test_vanilla_secret_exit() {
-        let linedefs = build_linedefs(&[0, 51, 0]);
-        let (normal, secret) = detect_vanilla_exits(&linedefs);
-        assert!(!normal);
-        assert!(secret);
+    fn test_count_vanilla_monsters_excludes_decorations() {
+        // Player start, lamp, key — all non-monsters
+        let things = build_things(&[1, 2028, 5]);
+        assert_eq!(count_vanilla_monsters(&things), 0);
     }
 
     #[test]
-    fn test_vanilla_both_exits() {
-        let linedefs = build_linedefs(&[11, 51]);
-        let (normal, secret) = detect_vanilla_exits(&linedefs);
-        assert!(normal);
-        assert!(secret);
+    fn test_count_vanilla_monsters_full_bestiary() {
+        // One of every monster type the heuristic knows about
+        let types: Vec<u16> = MONSTER_THING_TYPES.to_vec();
+        let things = build_things(&types);
+        assert_eq!(count_vanilla_monsters(&things), MONSTER_THING_TYPES.len());
     }
 
     #[test]
-    fn test_vanilla_no_exits() {
-        let linedefs = build_linedefs(&[0, 1, 2, 3, 4, 5]);
-        let (normal, secret) = detect_vanilla_exits(&linedefs);
-        assert!(!normal);
-        assert!(!secret);
+    fn test_count_udmf_monsters_basic() {
+        let textmap = build_textmap_things(&[3001, 3001, 1, 2028]);
+        assert_eq!(count_udmf_monsters(&textmap), 2);
     }
 
     #[test]
-    fn test_vanilla_all_exit_types() {
-        for &s in VANILLA_NORMAL_EXITS {
-            let linedefs = build_linedefs(&[s]);
-            let (normal, secret) = detect_vanilla_exits(&linedefs);
-            assert!(normal, "special {} should be a normal exit", s);
-            assert!(!secret);
-        }
-        for &s in VANILLA_SECRET_EXITS {
-            let linedefs = build_linedefs(&[s]);
-            let (normal, secret) = detect_vanilla_exits(&linedefs);
-            assert!(!normal);
-            assert!(secret, "special {} should be a secret exit", s);
-        }
-    }
-
-    #[test]
-    fn test_boom_generalized_linedefs_are_not_exits() {
-        // Boom has no generalized exit family. Generalized ranges start at
-        // crushers/lifts/stairs/etc.; 0x345B (13403) is a lift special seen in
-        // Sewerlust's credits maps and must not keep them required.
-        for &special in &[0x2F80, 0x3000, 0x345B, 0x3489, 0x3800, 0x4000, 0x6000] {
-            let (normal, secret) = detect_vanilla_exits(&build_linedefs(&[special]));
-            assert!(
-                !normal && !secret,
-                "generalized special {special:#06x} should not be an exit"
-            );
-        }
-    }
-
-    #[test]
-    fn test_boss_brain_thing_counts_as_normal_exit() {
-        assert!(detect_boss_brain_exit(&build_things(&[
-            DOOM2_BOSS_BRAIN_THING
-        ])));
-        assert!(!detect_boss_brain_exit(&build_things(&[87, 89])));
-    }
-
-    // -----------------------------------------------------------------------
-    // UDMF parsing
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn test_udmf_exits() {
-        assert_eq!(detect_udmf_exits(&build_textmap(&[243])), (true, false));
-        assert_eq!(detect_udmf_exits(&build_textmap(&[244])), (false, true));
-        assert_eq!(detect_udmf_exits(&build_textmap(&[74])), (true, false));
-        assert_eq!(detect_udmf_exits(&build_textmap(&[75])), (true, false));
-        assert_eq!(
-            detect_udmf_exits(&build_textmap(&[0, 1, 80])),
-            (false, false)
-        );
-    }
-
-    #[test]
-    fn test_udmf_linedef_comment_headers() {
-        // UDB commonly writes linedef IDs as inline comments between the
-        // block keyword and opening brace: `linedef // 831`.
+    fn test_count_udmf_monsters_with_comment_header() {
+        // UDB-style comment between block keyword and brace.
         let textmap = br#"
 namespace = "zdoom";
 
-linedef // 831
+thing // 42
 {
-  v1 = 0;
-  v2 = 1;
-  special = 75;
+  type = 3001;
+  x = 0;
+  y = 0;
 }
 "#;
-        assert_eq!(detect_udmf_exits(textmap), (true, false));
+        assert_eq!(count_udmf_monsters(textmap), 1);
     }
 
     // -----------------------------------------------------------------------
@@ -1297,116 +1190,120 @@ MAP MAP01
     // -----------------------------------------------------------------------
 
     #[test]
-    fn test_analyze_wad_vanilla_doom2_short_chain() {
-        // MAP01 → MAP02 → MAP03 (no exit, stopper)
-        let ld_normal = build_linedefs(&[11]);
-        let ld_dead = build_linedefs(&[0, 1, 2]);
+    fn test_vanilla_doom2_chain_with_empty_terminus() {
+        // MAP01 → MAP02 → MAP03. MAP03 has no monsters → peeled as credits.
+        let monsters = playable_things(5);
+        let no_monsters = playable_things(0);
         let wad = build_wad(&[
             ("MAP01", &[]),
-            ("LINEDEFS", &ld_normal),
+            ("THINGS", &monsters),
             ("MAP02", &[]),
-            ("LINEDEFS", &ld_normal),
+            ("THINGS", &monsters),
             ("MAP03", &[]),
-            ("LINEDEFS", &ld_dead),
+            ("THINGS", &no_monsters),
         ]);
 
         let a = analyze_wad(&wad).unwrap();
         assert_eq!(a.total_maps, 3);
         assert_eq!(classify_of(&a, "MAP01"), MapClassification::Required);
         assert_eq!(classify_of(&a, "MAP02"), MapClassification::Required);
-        // MAP03 has no exit, no outgoing edge → stopper
         assert_eq!(classify_of(&a, "MAP03"), MapClassification::OptionalCredits);
         assert_eq!(a.required_maps, 2);
         assert_eq!(a.terminal_map.as_deref(), Some("MAP03"));
     }
 
     #[test]
-    fn test_vanilla_edge_requires_detected_exit() {
-        // Adjacent map numbers alone do not prove progression. Sewerlust has
-        // no-exit credits maps in adjacent slots; MAP24 must stop the walk
-        // instead of inventing MAP24 -> MAP25 from the name.
-        let ld_normal = build_linedefs(&[11]);
-        let ld_dead = build_linedefs(&[]);
+    fn test_pgr_shape_no_exit_with_monsters_stays_required() {
+        // Regression for Perdition's Gate Resurgence (WAD #133). MAP29 has
+        // no detectable exit linedef but is a real playable map with many
+        // monsters. Old algorithm peeled it as terminal; new algorithm trusts
+        // the monster count and keeps the whole chain required.
+        let monsters = playable_things(50);
+        let mut lumps: Vec<(String, Vec<u8>)> = Vec::new();
+        for i in 1..=30 {
+            lumps.push((format!("MAP{:02}", i), Vec::new()));
+            lumps.push(("THINGS".to_string(), monsters.clone()));
+        }
+        let lump_refs: Vec<(&str, &[u8])> = lumps
+            .iter()
+            .map(|(n, d)| (n.as_str(), d.as_slice()))
+            .collect();
+        let wad = build_wad(&lump_refs);
+
+        let a = analyze_wad(&wad).unwrap();
+        assert_eq!(a.required_maps, 30);
+        assert_eq!(classify_of(&a, "MAP29"), MapClassification::Required);
+        assert_eq!(classify_of(&a, "MAP30"), MapClassification::Required);
+        assert_eq!(a.terminal_map, None);
+    }
+
+    #[test]
+    fn test_sewerlust_shape_trailing_credits_peeled() {
+        // Adjacent no-monster credits maps after the real finale must all
+        // demote to OptionalCredits. MAP23 is the playable terminus.
+        let monsters = playable_things(20);
+        let empty = playable_things(0);
         let wad = build_wad(&[
             ("MAP23", &[]),
-            ("LINEDEFS", &ld_normal),
+            ("THINGS", &monsters),
             ("MAP24", &[]),
-            ("LINEDEFS", &ld_dead),
+            ("THINGS", &empty),
             ("MAP25", &[]),
-            ("LINEDEFS", &ld_dead),
+            ("THINGS", &empty),
         ]);
 
         let a = analyze_wad(&wad).unwrap();
         assert_eq!(classify_of(&a, "MAP23"), MapClassification::Required);
         assert_eq!(classify_of(&a, "MAP24"), MapClassification::OptionalCredits);
-        assert_eq!(classify_of(&a, "MAP25"), MapClassification::Unreachable);
+        assert_eq!(classify_of(&a, "MAP25"), MapClassification::OptionalCredits);
+        assert_eq!(a.required_maps, 1);
+        // terminal_map is the first OptionalCredits in directory order.
+        assert_eq!(a.terminal_map.as_deref(), Some("MAP24"));
+    }
+
+    #[test]
+    fn test_single_decorative_monster_does_not_save_terminus() {
+        // One lone cyberdemon for atmosphere isn't a playable map.
+        let monsters = playable_things(10);
+        let one_monster = build_things(&[16]);
+        let wad = build_wad(&[
+            ("MAP01", &[]),
+            ("THINGS", &monsters),
+            ("MAP02", &[]),
+            ("THINGS", &one_monster),
+        ]);
+
+        let a = analyze_wad(&wad).unwrap();
+        assert_eq!(classify_of(&a, "MAP01"), MapClassification::Required);
+        assert_eq!(classify_of(&a, "MAP02"), MapClassification::OptionalCredits);
+    }
+
+    #[test]
+    fn test_start_map_never_peeled() {
+        // Even if every map has no monsters, MAP01 stays Required so an
+        // empty/test WAD doesn't auto-complete.
+        let empty = playable_things(0);
+        let wad = build_wad(&[
+            ("MAP01", &[]),
+            ("THINGS", &empty),
+            ("MAP02", &[]),
+            ("THINGS", &empty),
+        ]);
+
+        let a = analyze_wad(&wad).unwrap();
+        assert_eq!(classify_of(&a, "MAP01"), MapClassification::Required);
+        assert_eq!(classify_of(&a, "MAP02"), MapClassification::OptionalCredits);
         assert_eq!(a.required_maps, 1);
     }
 
     #[test]
-    fn test_boss_brain_exit_extends_main_path() {
-        // Abscission shape: MAP20 has no exit linedef, but includes the Doom II
-        // Boss Brain thing whose death exits normally to MAP21.
-        let ld_normal = build_linedefs(&[11]);
-        let ld_dead = build_linedefs(&[]);
-        let boss_brain = build_things(&[DOOM2_BOSS_BRAIN_THING]);
-        let wad = build_wad(&[
-            ("MAP19", &[]),
-            ("LINEDEFS", &ld_normal),
-            ("MAP20", &[]),
-            ("THINGS", &boss_brain),
-            ("LINEDEFS", &ld_dead),
-            ("MAP21", &[]),
-            ("LINEDEFS", &ld_dead),
-        ]);
-
-        let a = analyze_wad(&wad).unwrap();
-        assert_eq!(classify_of(&a, "MAP19"), MapClassification::Required);
-        assert_eq!(classify_of(&a, "MAP20"), MapClassification::Required);
-        assert_eq!(classify_of(&a, "MAP21"), MapClassification::OptionalCredits);
-        assert_eq!(a.required_maps, 2);
-        assert_eq!(a.terminal_map.as_deref(), Some("MAP21"));
-    }
-
-    #[test]
-    fn test_boss_brain_exit_reaches_map30() {
-        // Boss Brain exits before MAP30 are real progression edges; MAP30 also
-        // stays Required because exiting it records actual completion.
-        let ld_normal = build_linedefs(&[11]);
-        let ld_dead = build_linedefs(&[]);
-        let boss_brain = build_things(&[DOOM2_BOSS_BRAIN_THING]);
-        let wad = build_wad(&[
-            ("MAP28", &[]),
-            ("LINEDEFS", &ld_normal),
-            ("MAP29", &[]),
-            ("THINGS", &boss_brain),
-            ("LINEDEFS", &ld_dead),
-            ("MAP30", &[]),
-            ("THINGS", &boss_brain),
-            ("LINEDEFS", &ld_dead),
-        ]);
-
-        let a = analyze_wad(&wad).unwrap();
-        assert_eq!(classify_of(&a, "MAP28"), MapClassification::Required);
-        assert_eq!(classify_of(&a, "MAP29"), MapClassification::Required);
-        assert_eq!(classify_of(&a, "MAP30"), MapClassification::Required);
-        assert_eq!(a.required_maps, 3);
-        assert_eq!(a.terminal_map, None);
-    }
-
-    #[test]
-    fn test_analyze_wad_vanilla_doom2_full_with_secrets() {
-        let ld_normal = build_linedefs(&[11]);
-        let ld_normal_and_secret = build_linedefs(&[11, 51]);
+    fn test_vanilla_doom2_full_with_secrets() {
+        let monsters = playable_things(20);
 
         let mut lumps: Vec<(String, Vec<u8>)> = Vec::new();
         for i in 1..=32 {
             lumps.push((format!("MAP{:02}", i), Vec::new()));
-            if i == 15 || i == 31 {
-                lumps.push(("LINEDEFS".to_string(), ld_normal_and_secret.clone()));
-            } else {
-                lumps.push(("LINEDEFS".to_string(), ld_normal.clone()));
-            }
+            lumps.push(("THINGS".to_string(), monsters.clone()));
         }
         let lump_refs: Vec<(&str, &[u8])> = lumps
             .iter()
@@ -1416,14 +1313,10 @@ MAP MAP01
 
         let a = analyze_wad(&wad).unwrap();
         assert_eq!(a.total_maps, 32);
-        // MAP30 is the vanilla terminus and has a normal exit linedef so it's
-        // NOT classified as a stopper — it stays Required since the static
-        // graph has nothing past it. Classifier doesn't synthesize an
-        // endgame-only marker for MAP30 alone.
-        // Required = MAP01..MAP30 (no UMAPINFO endgame marker)
+        // MAP01..MAP30 all required (no UMAPINFO endgame).
         assert_eq!(classify_of(&a, "MAP01"), MapClassification::Required);
         assert_eq!(classify_of(&a, "MAP30"), MapClassification::Required);
-        // MAP31 / MAP32 are reached only via secret edges from MAP15/MAP31
+        // MAP31 / MAP32 reached only via vanilla secret edges.
         assert_eq!(classify_of(&a, "MAP31"), MapClassification::OptionalSecret);
         assert_eq!(classify_of(&a, "MAP32"), MapClassification::OptionalSecret);
         assert!(a.secret_maps.contains(&"MAP31".to_string()));
@@ -1431,29 +1324,18 @@ MAP MAP01
     }
 
     #[test]
-    fn test_analyze_wad_doom1_full_episode() {
-        // Full E1: E1M1..E1M8 + E1M9 secret. Walk follows vanilla edges all
-        // the way to E1M8 (stopper, no outgoing edge). E1M9 is reached from
-        // E1M3's secret edge.
-        let ld_normal = build_linedefs(&[11]);
-        let ld_normal_and_secret = build_linedefs(&[11, 51]);
-        let ld_dead = build_linedefs(&[]);
+    fn test_doom1_full_episode_with_bosses() {
+        // E1M8 has bosses → playable terminus stays Required.
+        // E1M9 reached only via E1M3's vanilla secret edge.
+        let monsters = playable_things(20);
+
         let mut lumps: Vec<(String, Vec<u8>)> = Vec::new();
         for m in 1..=8 {
             lumps.push((format!("E1M{m}"), Vec::new()));
-            lumps.push((
-                "LINEDEFS".to_string(),
-                if m == 8 {
-                    ld_dead.clone()
-                } else if m == 3 {
-                    ld_normal_and_secret.clone()
-                } else {
-                    ld_normal.clone()
-                },
-            ));
+            lumps.push(("THINGS".to_string(), monsters.clone()));
         }
         lumps.push(("E1M9".to_string(), Vec::new()));
-        lumps.push(("LINEDEFS".to_string(), ld_normal.clone()));
+        lumps.push(("THINGS".to_string(), monsters.clone()));
         let lump_refs: Vec<(&str, &[u8])> = lumps
             .iter()
             .map(|(n, d)| (n.as_str(), d.as_slice()))
@@ -1463,9 +1345,7 @@ MAP MAP01
         assert_eq!(a.total_maps, 9);
         assert_eq!(classify_of(&a, "E1M1"), MapClassification::Required);
         assert_eq!(classify_of(&a, "E1M7"), MapClassification::Required);
-        // E1M8 has no exit linedef and no outgoing edge → stopper
-        assert_eq!(classify_of(&a, "E1M8"), MapClassification::OptionalCredits);
-        // E1M9 reached only via E1M3 secret edge → optional
+        assert_eq!(classify_of(&a, "E1M8"), MapClassification::Required);
         assert_eq!(classify_of(&a, "E1M9"), MapClassification::OptionalSecret);
     }
 
@@ -1474,9 +1354,10 @@ MAP MAP01
     // -----------------------------------------------------------------------
 
     #[test]
-    fn test_analyze_wad_umapinfo_linear_chain() {
-        // The Pact-shape: MAP01..MAP06, all linked, MAP06 is stopper.
-        let ld_normal = build_linedefs(&[11]);
+    fn test_umapinfo_linear_chain_with_playable_terminus() {
+        // MAP01..MAP06, all linked, MAP06 has monsters so it's a real
+        // playable terminus.
+        let monsters = playable_things(15);
         let umapinfo = br#"
 MAP MAP01
 {
@@ -1505,7 +1386,7 @@ MAP MAP06
         let mut lumps = Vec::new();
         for i in 1..=6 {
             lumps.push((format!("MAP{:02}", i), Vec::new()));
-            lumps.push(("LINEDEFS".to_string(), ld_normal.clone()));
+            lumps.push(("THINGS".to_string(), monsters.clone()));
         }
         lumps.push(("UMAPINFO".to_string(), umapinfo.to_vec()));
         let lump_refs: Vec<(&str, &[u8])> = lumps
@@ -1517,19 +1398,14 @@ MAP MAP06
         let a = analyze_wad(&wad).unwrap();
         assert!(a.has_umapinfo);
         assert_eq!(classify_of(&a, "MAP05"), MapClassification::Required);
-        // MAP06 has no outgoing edge but it has a normal exit linedef, so
-        // it's a "false dead-end" — classifier keeps it Required rather than
-        // silently rewriting it as a stopper.
         assert_eq!(classify_of(&a, "MAP06"), MapClassification::Required);
     }
 
     #[test]
-    fn test_analyze_wad_umapinfo_explicit_endgame_with_exit_stays_required() {
-        // MAP03 is the terminus and declares `endgame = true`, but it also has
-        // a real normal exit linedef. The UMAPINFO marker describes what plays
-        // *after* the map is exited, not that the map is unexitable — exiting
-        // MAP03 IS the completion. Keep it Required.
-        let ld_normal = build_linedefs(&[11]);
+    fn test_umapinfo_endgame_with_monsters_stays_required() {
+        // MAP03 has `endgame = true` AND lots of monsters → it's the real
+        // finale and must be exited.
+        let monsters = playable_things(10);
         let umapinfo = br#"
 MAP MAP01
 {
@@ -1546,11 +1422,11 @@ MAP MAP03
 "#;
         let wad = build_wad(&[
             ("MAP01", &[]),
-            ("LINEDEFS", &ld_normal),
+            ("THINGS", &monsters),
             ("MAP02", &[]),
-            ("LINEDEFS", &ld_normal),
+            ("THINGS", &monsters),
             ("MAP03", &[]),
-            ("LINEDEFS", &ld_normal),
+            ("THINGS", &monsters),
             ("UMAPINFO", umapinfo),
         ]);
         let a = analyze_wad(&wad).unwrap();
@@ -1560,10 +1436,11 @@ MAP MAP03
     }
 
     #[test]
-    fn test_analyze_wad_umapinfo_endgame_without_exit_is_stopper() {
-        // MAP03 declares `endgame = true` and has no exit linedef — there is
-        // no way for the player to exit it, so it really is a stopper.
-        let ld_normal = build_linedefs(&[11]);
+    fn test_umapinfo_endgame_without_monsters_is_credits() {
+        // MAP03 declares `endgame = true` and has no monsters — it's a
+        // credits screen, demote it.
+        let monsters = playable_things(10);
+        let empty = playable_things(0);
         let umapinfo = br#"
 MAP MAP01
 {
@@ -1580,11 +1457,11 @@ MAP MAP03
 "#;
         let wad = build_wad(&[
             ("MAP01", &[]),
-            ("LINEDEFS", &ld_normal),
+            ("THINGS", &monsters),
             ("MAP02", &[]),
-            ("LINEDEFS", &ld_normal),
+            ("THINGS", &monsters),
             ("MAP03", &[]),
-            // No LINEDEFS for MAP03 → no exit detected
+            ("THINGS", &empty),
             ("UMAPINFO", umapinfo),
         ]);
         let a = analyze_wad(&wad).unwrap();
@@ -1594,12 +1471,11 @@ MAP MAP03
     }
 
     #[test]
-    fn test_analyze_wad_umapinfo_self_loop_is_stopper() {
-        // ][vydotwad shape: the credits map has no exit linedef and uses
-        // `next = SELF` as the established UMAPINFO idiom for "stops here".
-        // MAP10 must classify as OptionalCredits, not as a Required map the
-        // player can never exit.
-        let ld_normal = build_linedefs(&[11]);
+    fn test_umapinfo_self_loop_without_monsters_is_credits() {
+        // ][vydotwad shape: credits map uses `next = SELF` as the "stops
+        // here" idiom and has no monsters. Should peel to OptionalCredits.
+        let monsters = playable_things(10);
+        let empty = playable_things(0);
         let umapinfo = br#"
 MAP MAP01
 {
@@ -1616,11 +1492,11 @@ MAP MAP10
 "#;
         let wad = build_wad(&[
             ("MAP01", &[]),
-            ("LINEDEFS", &ld_normal),
+            ("THINGS", &monsters),
             ("MAP02", &[]),
-            ("LINEDEFS", &ld_normal),
+            ("THINGS", &monsters),
             ("MAP10", &[]),
-            // No LINEDEFS lump for MAP10 means no exit linedef detected.
+            ("THINGS", &empty),
             ("UMAPINFO", umapinfo),
         ]);
         let a = analyze_wad(&wad).unwrap();
@@ -1632,13 +1508,10 @@ MAP MAP10
     }
 
     #[test]
-    fn test_analyze_wad_umapinfo_self_loop_with_real_secret_not_stopper() {
+    fn test_umapinfo_self_loop_with_real_secret_not_stopper() {
         // Defensive case: `next = SELF` but a real `nextsecret = OTHER` means
-        // the secret IS the path forward. Don't treat MAP02 as stopper.
-        // MAP31 self-loops AND has a real exit linedef, so exiting it is the
-        // completion — keep it Required.
-        let ld_normal = build_linedefs(&[11]);
-        let ld_secret = build_linedefs(&[51]);
+        // the secret IS the path forward.
+        let monsters = playable_things(15);
         let umapinfo = br#"
 MAP MAP01
 {
@@ -1656,11 +1529,11 @@ MAP MAP31
 "#;
         let wad = build_wad(&[
             ("MAP01", &[]),
-            ("LINEDEFS", &ld_normal),
+            ("THINGS", &monsters),
             ("MAP02", &[]),
-            ("LINEDEFS", &ld_secret),
+            ("THINGS", &monsters),
             ("MAP31", &[]),
-            ("LINEDEFS", &ld_normal),
+            ("THINGS", &monsters),
             ("UMAPINFO", umapinfo),
         ]);
         let a = analyze_wad(&wad).unwrap();
@@ -1670,11 +1543,10 @@ MAP MAP31
     }
 
     #[test]
-    fn test_analyze_wad_umapinfo_forced_secret_continuation() {
+    fn test_umapinfo_forced_secret_continuation() {
         // Formless Mother shape: MAP04 has only a secret exit to MAP31, and
-        // MAP31 is the true ending. MAP31 must be Required.
-        let ld_normal = build_linedefs(&[11]);
-        let ld_secret = build_linedefs(&[51]);
+        // MAP31 is the true ending. With monsters on MAP31 it stays Required.
+        let monsters = playable_things(15);
         let umapinfo = br#"
 MAP MAP01
 {
@@ -1699,31 +1571,29 @@ MAP MAP31
 "#;
         let wad = build_wad(&[
             ("MAP01", &[]),
-            ("LINEDEFS", &ld_normal),
+            ("THINGS", &monsters),
             ("MAP02", &[]),
-            ("LINEDEFS", &ld_normal),
+            ("THINGS", &monsters),
             ("MAP03", &[]),
-            ("LINEDEFS", &ld_normal),
+            ("THINGS", &monsters),
             ("MAP04", &[]),
-            ("LINEDEFS", &ld_secret),
+            ("THINGS", &monsters),
             ("MAP31", &[]),
-            ("LINEDEFS", &ld_normal),
+            ("THINGS", &monsters),
             ("UMAPINFO", umapinfo),
         ]);
         let a = analyze_wad(&wad).unwrap();
         assert_eq!(classify_of(&a, "MAP04"), MapClassification::Required);
-        // MAP31 declares endgame AND has a real exit — endgame is what plays
-        // after exit, so the player still has to exit it. Required.
         assert_eq!(classify_of(&a, "MAP31"), MapClassification::Required);
         // No secrets — MAP31 was forced, not optional.
         assert!(a.secret_maps.is_empty());
     }
 
     #[test]
-    fn test_analyze_wad_umapinfo_skippable_secret() {
+    fn test_umapinfo_skippable_secret() {
         // MAP15 has both `next = MAP16` and `nextsecret = MAP31`, so MAP31
         // is a skippable secret branch (OptionalSecret).
-        let ld = build_linedefs(&[11]);
+        let monsters = playable_things(15);
         let umapinfo = br#"
 MAP MAP01
 {
@@ -1749,22 +1619,20 @@ MAP MAP31
 "#;
         let wad = build_wad(&[
             ("MAP01", &[]),
-            ("LINEDEFS", &ld),
+            ("THINGS", &monsters),
             ("MAP15", &[]),
-            ("LINEDEFS", &ld),
+            ("THINGS", &monsters),
             ("MAP16", &[]),
-            ("LINEDEFS", &ld),
+            ("THINGS", &monsters),
             ("MAP30", &[]),
-            ("LINEDEFS", &ld),
+            ("THINGS", &monsters),
             ("MAP31", &[]),
-            ("LINEDEFS", &ld),
+            ("THINGS", &monsters),
             ("UMAPINFO", umapinfo),
         ]);
         let a = analyze_wad(&wad).unwrap();
         assert_eq!(classify_of(&a, "MAP15"), MapClassification::Required);
         assert_eq!(classify_of(&a, "MAP31"), MapClassification::OptionalSecret);
-        // MAP30 declares endgame AND has a real exit linedef — endgame fires
-        // *after* MAP30 is exited, so exiting MAP30 is the completion.
         assert_eq!(classify_of(&a, "MAP30"), MapClassification::Required);
     }
 
@@ -1773,10 +1641,10 @@ MAP MAP31
     // -----------------------------------------------------------------------
 
     #[test]
-    fn test_analyze_wad_zmapinfo_overrides_umapinfo() {
+    fn test_zmapinfo_overrides_umapinfo() {
         // UMAPINFO routes MAP17 → MAP18 (vanilla flow).
         // ZMAPINFO routes MAP17 → MAP18GZ. ZMAPINFO must win.
-        let ld = build_linedefs(&[11]);
+        let monsters = playable_things(15);
         let umapinfo = br#"
 MAP MAP01
 {
@@ -1807,24 +1675,22 @@ map MAP18GZ "Biocide"
 "#;
         let wad = build_wad(&[
             ("MAP01", &[]),
-            ("LINEDEFS", &ld),
+            ("THINGS", &monsters),
             ("MAP17", &[]),
-            ("LINEDEFS", &ld),
+            ("THINGS", &monsters),
             ("MAP18", &[]),
-            ("LINEDEFS", &ld),
+            ("THINGS", &monsters),
             ("MAP18GZ", &[]),
-            ("LINEDEFS", &ld),
+            ("THINGS", &monsters),
             ("MAP19", &[]),
-            ("LINEDEFS", &ld),
+            ("THINGS", &monsters),
             ("UMAPINFO", umapinfo),
             ("ZMAPINFO", zmapinfo),
         ]);
         let a = analyze_wad(&wad).unwrap();
-        // ZMAPINFO routes through MAP18GZ; MAP18 becomes orphan
         assert_eq!(classify_of(&a, "MAP17"), MapClassification::Required);
         assert_eq!(classify_of(&a, "MAP18GZ"), MapClassification::Required);
         assert_eq!(classify_of(&a, "MAP18"), MapClassification::Unreachable);
-        // MAP19 declares endgame AND has a real exit — must be exited.
         assert_eq!(classify_of(&a, "MAP19"), MapClassification::Required);
     }
 
@@ -1865,7 +1731,7 @@ map MAP18GZ "Biocide"
     #[test]
     fn test_classify_unreachable_orphan() {
         // MAP01 → MAP03 via UMAPINFO, MAP02 has no incoming edge.
-        let ld = build_linedefs(&[11]);
+        let monsters = playable_things(10);
         let umapinfo = br#"
 MAP MAP01
 {
@@ -1878,16 +1744,15 @@ MAP MAP03
 "#;
         let wad = build_wad(&[
             ("MAP01", &[]),
-            ("LINEDEFS", &ld),
+            ("THINGS", &monsters),
             ("MAP02", &[]),
-            ("LINEDEFS", &ld),
+            ("THINGS", &monsters),
             ("MAP03", &[]),
-            ("LINEDEFS", &ld),
+            ("THINGS", &monsters),
             ("UMAPINFO", umapinfo),
         ]);
         let a = analyze_wad(&wad).unwrap();
         assert_eq!(classify_of(&a, "MAP02"), MapClassification::Unreachable);
-        // MAP03 declares endgame AND has a real exit — required for completion.
         assert_eq!(classify_of(&a, "MAP03"), MapClassification::Required);
     }
 }

@@ -151,8 +151,6 @@ mod tests {
             .iter()
             .map(|(lump, c)| MapInfo {
                 lump: lump.to_string(),
-                has_normal_exit: true,
-                has_secret_exit: false,
                 classification: *c,
             })
             .collect();
