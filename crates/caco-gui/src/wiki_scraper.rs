@@ -57,12 +57,67 @@ pub fn search_wiki_image(title: &str) -> Option<Vec<u8>> {
 
     for page_title in titles {
         let page_title = page_title.as_str()?;
+        // opensearch ranks loosely; an unrelated page's screenshot is worse
+        // than no thumbnail at all. Only follow results that actually match
+        // the WAD title.
+        if !titles_match(title, page_title) {
+            continue;
+        }
         if let Some(result) = fetch_image_for_page(&client, page_title) {
             return Some(result);
         }
     }
 
     None
+}
+
+/// Loose-but-not-fuzzy title match: collapse both to lowercase alphanumerics
+/// and require one to contain the other. Guards against opensearch linking a
+/// WAD to an unrelated page (and serving that page's screenshot as the
+/// thumbnail).
+fn titles_match(a: &str, b: &str) -> bool {
+    fn norm(s: &str) -> String {
+        s.chars()
+            .filter(|c| c.is_alphanumeric())
+            .flat_map(char::to_lowercase)
+            .collect()
+    }
+    let (a, b) = (norm(a), norm(b));
+    if a.is_empty() || b.is_empty() {
+        return false;
+    }
+    a == b || a.contains(&b) || b.contains(&a)
+}
+
+/// True for wiki chrome, award badges, and boilerplate that aren't a
+/// screenshot of the WAD itself.
+///
+/// The Cacoward/Mordeth trophy badges are the worst offenders: they appear on
+/// every award-winning WAD's page, so the "first image on the page" fallback
+/// was grabbing the gold Cacoward statue as the thumbnail for cacoward
+/// winners.
+fn is_chrome_image(name_lower: &str) -> bool {
+    const DENY: &[&str] = &[
+        "cacoward",
+        "mordeth",
+        "espi award",
+        "icon",
+        "logo",
+        "stub",
+        "ambox",
+        "commons",
+        "magnify",
+        "disambig",
+        "padlock",
+        "nuvola",
+        "crystal",
+        "emblem",
+        "wiki.png",
+        "button",
+        "symbol",
+        "placeholder",
+    ];
+    DENY.iter().any(|d| name_lower.contains(d))
 }
 
 /// Core logic: fetch a title screen image from a Doom Wiki page.
@@ -96,15 +151,21 @@ fn fetch_image_for_page(client: &Client, page_title: &str) -> Option<Vec<u8>> {
 
     for img in &images {
         let name_lower = img.title.to_lowercase();
+        if is_chrome_image(&name_lower) {
+            continue;
+        }
         if title_keywords.iter().any(|k| name_lower.contains(k)) {
             title_images.push(&img.title);
         }
     }
 
-    // Fallback: first .png/.jpg image
+    // Fallback: first .png/.jpg image that isn't wiki chrome / an award badge.
     if title_images.is_empty() {
         for img in &images {
             let name_lower = img.title.to_lowercase();
+            if is_chrome_image(&name_lower) {
+                continue;
+            }
             if name_lower.ends_with(".png")
                 || name_lower.ends_with(".jpg")
                 || name_lower.ends_with(".jpeg")
@@ -182,4 +243,45 @@ struct ImageRef {
 #[derive(Deserialize)]
 struct ImageInfo {
     url: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chrome_images_rejected() {
+        // The gold trophy badge on every award-winning WAD's page.
+        assert!(is_chrome_image("file:cacoward.png"));
+        assert!(is_chrome_image("file:cacoward 2022.png"));
+        assert!(is_chrome_image("file:mordeth award.png"));
+        assert!(is_chrome_image("file:doomwiki_logo.png"));
+        assert!(is_chrome_image("file:wiki.png"));
+    }
+
+    #[test]
+    fn real_screenshots_accepted() {
+        assert!(!is_chrome_image("file:hardfest3 titlepic.png"));
+        assert!(!is_chrome_image("file:sunder map01.png"));
+        assert!(!is_chrome_image("file:eviternity_screenshot.jpg"));
+    }
+
+    #[test]
+    fn titles_match_ignores_case_punctuation_and_spacing() {
+        assert!(titles_match(
+            "The Smoking Dog [part2]",
+            "The Smoking Dog [part2]"
+        ));
+        assert!(titles_match("Eviternity", "eviternity!"));
+        assert!(titles_match("Ancient Aliens", "Ancient   Aliens"));
+        // Substring containment is allowed (subtitles, episode suffixes).
+        assert!(titles_match("Sunder", "Sunder (megawad)"));
+    }
+
+    #[test]
+    fn titles_match_rejects_unrelated_pages() {
+        assert!(!titles_match("Infernal Odyssey", "Doom II"));
+        assert!(!titles_match("The Smoking Dog [part2]", "Plutonia"));
+        assert!(!titles_match("Hardfest 3", ""));
+    }
 }
