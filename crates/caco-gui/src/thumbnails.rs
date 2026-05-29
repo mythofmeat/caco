@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
 
 use egui::TextureHandle;
@@ -53,13 +53,36 @@ pub struct ThumbnailHint {
     pub title: String,
 }
 
+/// On-disk cache layout version.
+///
+/// Bumped whenever the cache scheme changes so stale entries from an older
+/// scheme are ignored (and regenerated) rather than served. v1 stored
+/// wiki-scraped images under `{id}.png` — the same path TITLEPIC thumbnails
+/// use — so a wiki fallback cached before a WAD was downloaded would shadow
+/// the WAD's real TITLEPIC forever. v2 splits the two and lets a local
+/// TITLEPIC supersede a previously cached wiki image.
+const CACHE_SCHEME: &str = "v2";
+
+/// Root directory for the current cache scheme.
+fn cache_root() -> PathBuf {
+    caco_core::config::thumbnail_cache_dir().join(CACHE_SCHEME)
+}
+
 /// Manages thumbnail textures for WAD cards.
 ///
 /// Loading priority:
-/// 1. Filesystem cache (`~/.cache/caco/thumbnails/{wad_id}.png`)
-/// 2. TITLEPIC extraction from WAD file
-/// 3. Doom Wiki image scraping (direct URL for doomwiki source, title search for others)
-/// 4. Placeholder (rendered by grid view)
+/// 1. Cached TITLEPIC (`{wad_id}.png`) — authoritative, never superseded
+/// 2. TITLEPIC extraction from the local WAD file (canonical; wins over any wiki image)
+/// 3. Cached wiki fallback (`{wad_id}.wiki.png`)
+/// 4. Doom Wiki image scraping (direct URL for doomwiki source, title search for others)
+/// 5. Placeholder (rendered by grid view)
+///
+/// Because a WAD's TITLEPIC is canonical, step 2 deliberately runs *before*
+/// the wiki cache: a wiki fallback scraped while the WAD was un-downloaded
+/// must not shadow the real TITLEPIC once the file lands. A `{wad_id}.none`
+/// marker records that a local file was already checked and has no usable
+/// TITLEPIC, so we don't decompress it again every session just to fall
+/// through to the wiki.
 pub struct ThumbnailManager {
     textures: HashMap<i64, TextureHandle>,
     pending: HashSet<i64>,
@@ -117,11 +140,13 @@ impl ThumbnailManager {
         let title = hint.title.clone();
 
         pool_submit(Box::new(move || {
-            let cache_dir = caco_core::config::thumbnail_cache_dir();
-            let cache_path = cache_dir.join(format!("{wad_id}.png"));
+            let cache_dir = cache_root();
+            let titlepic_cache = cache_dir.join(format!("{wad_id}.png"));
+            let wiki_cache = cache_dir.join(format!("{wad_id}.wiki.png"));
+            let no_titlepic_marker = cache_dir.join(format!("{wad_id}.none"));
 
-            // 1. Filesystem cache
-            if let Some((w, h, pixels)) = load_cached_thumbnail(&cache_path) {
+            // 1. Cached TITLEPIC — authoritative, never superseded.
+            if let Some((w, h, pixels)) = load_cached_thumbnail(&titlepic_cache) {
                 sender.send(AppMessage::ThumbnailReady {
                     wad_id,
                     width: w,
@@ -131,21 +156,44 @@ impl ThumbnailManager {
                 return;
             }
 
-            // 2. TITLEPIC from WAD file
-            if let Some(ref p) = path
-                && let Some(pic) = caco_core::titlepic::extract_titlepic(p)
+            // 2. TITLEPIC from the local WAD file. A WAD's TITLEPIC is
+            //    canonical, so this runs before the wiki cache: a fallback
+            //    scraped while the WAD was un-downloaded must not shadow the
+            //    real title screen once the file lands. Skipped if we've
+            //    already confirmed this local file has no usable TITLEPIC.
+            let local = path.as_deref().filter(|p| p.exists());
+            if let Some(p) = local
+                && !no_titlepic_marker.exists()
             {
-                save_thumbnail_cache(&cache_path, pic.width, pic.height, &pic.pixels);
+                if let Some(pic) = caco_core::titlepic::extract_titlepic(p) {
+                    save_thumbnail_cache(&titlepic_cache, pic.width, pic.height, &pic.pixels);
+                    let _ = std::fs::remove_file(&no_titlepic_marker);
+                    sender.send(AppMessage::ThumbnailReady {
+                        wad_id,
+                        width: pic.width,
+                        height: pic.height,
+                        pixels: pic.pixels,
+                    });
+                    return;
+                }
+                // Local file present but no usable TITLEPIC — remember it so we
+                // don't decompress it again next session.
+                let _ = std::fs::create_dir_all(&cache_dir);
+                let _ = std::fs::write(&no_titlepic_marker, []);
+            }
+
+            // 3. Cached wiki fallback.
+            if let Some((w, h, pixels)) = load_cached_thumbnail(&wiki_cache) {
                 sender.send(AppMessage::ThumbnailReady {
                     wad_id,
-                    width: pic.width,
-                    height: pic.height,
-                    pixels: pic.pixels,
+                    width: w,
+                    height: h,
+                    pixels,
                 });
                 return;
             }
 
-            // 3. Wiki scrape
+            // 4. Scrape the Doom Wiki.
             let wiki_bytes = if source_type == "doomwiki" {
                 source_url
                     .as_deref()
@@ -162,7 +210,7 @@ impl ThumbnailManager {
                 let w = rgba.width();
                 let h = rgba.height();
                 let pixels = rgba.into_raw();
-                save_thumbnail_cache(&cache_path, w, h, &pixels);
+                save_thumbnail_cache(&wiki_cache, w, h, &pixels);
                 sender.send(AppMessage::ThumbnailReady {
                     wad_id,
                     width: w,
@@ -172,7 +220,7 @@ impl ThumbnailManager {
                 return;
             }
 
-            // 4. Nothing found — mark as failed so we don't retry.
+            // 5. Nothing found — mark as failed so we don't retry.
             sender.send(AppMessage::ThumbnailFailed { wad_id });
         }));
     }
