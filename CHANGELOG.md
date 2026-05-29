@@ -3,6 +3,12 @@
 All notable changes to Caco are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.2.8] - 2026-05-29
+
+### Fixed
+
+- **gui**: Stop wiki images shadowing real TITLEPICs in thumbnails ([#10](https://github.com/mythofmeat/caco/pull/10))
+
 ## [3.2.7] - 2026-05-28
 
 ### Changed
