@@ -10,7 +10,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "3.2.8"
+version = "3.2.9"
 edition = "2024"
 description = "Doom WAD library manager"
 authors = ["eshen"]
@@ -98,6 +98,6 @@ fs_extra = "1.3"
 # cargo errors with "dependency X does not specify a version" (release-plz
 # issue #2595). release-plz keeps these in sync with workspace.package.version
 # on every bump.
-caco-core = { path = "crates/caco-core", version = "3.2.8" }
-caco-sources = { path = "crates/caco-sources", version = "3.2.8" }
-caco-mcp = { path = "crates/caco-mcp", version = "3.2.8" }
+caco-core = { path = "crates/caco-core", version = "3.2.9" }
+caco-sources = { path = "crates/caco-sources", version = "3.2.9" }
+caco-mcp = { path = "crates/caco-mcp", version = "3.2.9" }
