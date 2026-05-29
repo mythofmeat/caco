@@ -101,6 +101,14 @@ body = """
 """
 trim = true
 commit_parsers = [
+  # Break the release loop. Release PRs are squash-merged, which rewrites
+  # release-plz's own `chore: release` commit into `Release vX.Y.Z (#N)` with
+  # a fresh SHA — so release-plz no longer recognizes it as its own release
+  # commit and skips it. Without this rule the `.*` catch-all below would
+  # treat that squash commit as a releasable change and open the *next*
+  # "Release vX.Y.Z+1" PR, which on merge spawns another, ad infinitum.
+  # Skipping it keeps it out of the changelog AND stops it triggering a bump.
+  { message = "^Release v", skip = true },
   { message = "^feat",     group = "Added" },
   { message = "^fix",      group = "Fixed" },
   { message = "^refactor", group = "Changed" },
