@@ -435,6 +435,7 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
 
     // For zdoom-family ports, inject the stats reporter PK3 mod
     let is_zdoom = sourceports::family_name(&port) == Some("zdoom");
+    let is_helion = sourceports::family_name(&port) == Some("helion");
     if is_zdoom
         && config::get_auto_stats()
         && let Ok(pk3_path) = stats_watcher::ensure_stats_mod()
@@ -466,6 +467,16 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
         // Avoid parsing stale lines if the sourceport appends to an existing log.
         let _ = std::fs::remove_file(&log_path);
         cmd.args(["+logfile", &log_path.to_string_lossy()]);
+    }
+
+    // For helion, enable the native global levelstat file
+    if is_helion && config::get_auto_stats() {
+        cmd.arg("-levelstat");
+        // Helion clears the file itself at launch, but remove it up front so
+        // a crash before init can't leave stale exits to be absorbed later.
+        if let Some(path) = stats_watcher::helion_levelstat_path() {
+            let _ = std::fs::remove_file(&path);
+        }
     }
 
     // Handle --new-playthrough: start fresh before launching
@@ -520,6 +531,14 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
         && let Some(ref data_dir) = wad_data_dir
     {
         stats_watcher::collect_zdoom_stats(data_dir);
+    }
+
+    // For helion, consume the global levelstat file into managed stats.txt
+    if is_helion
+        && config::get_auto_stats()
+        && let Some(ref data_dir) = wad_data_dir
+    {
+        stats_watcher::collect_helion_stats(data_dir);
     }
 
     // Auto-track stats

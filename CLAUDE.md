@@ -67,6 +67,7 @@ crates/
 - `companion_service.rs`, `resource_service.rs` — MD5 dedup + managed storage; IWAD/id24 registration
 - `sourceports.rs`, `complevel.rs`, `complevel_detect.rs`, `iwad_detect.rs` — family registry + detection heuristics (COMPLVL, UMAPINFO, DEHACKED, PNAMES, map lumps)
 - `wad_stats.rs` — per-map stats parser (stats.txt + levelstat.txt)
+- `stats_watcher.rs` — stats collection for ports without native stats.txt: zdoom (ZScript reporter PK3 + `+logfile` parsing) and helion (`-levelstat`, consuming its global `~/.config/Helion/levelstat.txt` — unpadded-milliseconds time format — into the managed stats.txt)
 - `saves.rs`, `demos.rs`, `titlepic.rs`, `utils.rs`
 - `db/` — schema, migrations (23+), models, query parser, wads, sessions, iwads, id24, companions
 

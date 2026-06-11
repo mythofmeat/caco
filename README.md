@@ -42,7 +42,6 @@ pip install -e .
 pip install -e '.[gui]'  # Optional: Qt6 GUI
 ```
 
-The Python implementation also ships live stats watchers (Helion / UZDoom) that the Rust port does not yet have.
 
 ## Quick Start
 
@@ -343,7 +342,13 @@ Caco recognises six sourceport families. Family membership determines which per-
 | `eternity` | eternity | no | yes | — |
 | `helion` | helion | no | yes | — |
 
-Unknown sourceports still launch, they just skip isolation and auto-injection. Stat tracking currently works with dsda / woof (levelstat.txt) and has dedicated live watchers for Helion and UZDoom in the Python implementation.
+Unknown sourceports still launch, they just skip isolation and auto-injection.
+
+Per-map stat tracking (which feeds completion detection and progress bars) works with:
+
+- **dsda / woof** — native `stats.txt` / `levelstat.txt` in the per-WAD data dir.
+- **zdoom** — caco injects a small ZScript reporter PK3 plus `+logfile`, then converts the log into a managed `stats.txt` after each session.
+- **helion** — caco passes `-levelstat` and consumes Helion's global `levelstat.txt` (from `~/.config/Helion`) into the WAD's managed `stats.txt` after each session.
 
 ## Development
 
