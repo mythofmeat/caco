@@ -173,38 +173,95 @@ impl SettingsDialogState {
     pub fn render(&mut self, ctx: &egui::Context) -> SettingsResult {
         let mut result = SettingsResult::Open;
 
-        egui::Window::new("Settings")
+        egui::Window::new("settings_dialog")
+            .title_bar(false)
             .collapsible(false)
-            .resizable(true)
-            .default_size([560.0, 580.0])
+            .resizable(false)
+            .fixed_size([560.0, 580.0])
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .frame(
+                egui::Frame::new()
+                    .fill(egui::Color32::from_rgb(0x1a, 0x14, 0x10))
+                    .corner_radius(16)
+                    .stroke(egui::Stroke::new(1.0, theme::BORDER_MED))
+                    .shadow(egui::Shadow {
+                        offset: [0, 8],
+                        blur: 32,
+                        spread: 8,
+                        color: egui::Color32::from_black_alpha(128),
+                    }),
+            )
             .show(ctx, |ui| {
-                egui::ScrollArea::vertical()
-                    .max_height(ui.available_height() - 40.0)
+                // ── Header ──
+                egui::Frame::new()
+                    .inner_margin(egui::Margin::symmetric(20, 14))
+                    .stroke(egui::Stroke::new(1.0, theme::BORDER))
                     .show(ui, |ui| {
-                        self.section_sourceports(ui);
-                        self.section_behavior(ui);
-                        self.section_cache(ui);
-                        self.section_paths(ui);
+                        ui.vertical(|ui| {
+                            ui.colored_label(
+                                theme::TEXT_PRIMARY,
+                                egui::RichText::new("Settings").size(16.0).strong(),
+                            );
+                            ui.colored_label(
+                                theme::TEXT_SECONDARY,
+                                egui::RichText::new("Saved to ~/.config/caco/config.toml")
+                                    .size(11.0),
+                            );
+                        });
                     });
 
-                ui.add_space(4.0);
-                ui.separator();
-                ui.add_space(4.0);
-
+                // ── Error banner ──
                 if let Some(ref err) = self.error {
-                    ui.colored_label(theme::COLOR_ERROR, err);
-                    ui.add_space(4.0);
+                    egui::Frame::new()
+                        .fill(egui::Color32::from_rgb(0x2a, 0x0d, 0x0d))
+                        .inner_margin(egui::Margin::symmetric(20, 6))
+                        .show(ui, |ui| {
+                            ui.colored_label(theme::COLOR_ERROR, err);
+                        });
                 }
 
-                ui.horizontal(|ui| {
-                    if ui.button("Save").clicked() && self.save() {
-                        result = SettingsResult::Saved;
-                    }
-                    if ui.button("Cancel").clicked() {
-                        result = SettingsResult::Closed;
-                    }
-                });
+                // ── Body ──
+                egui::ScrollArea::vertical()
+                    .max_height(440.0)
+                    .show(ui, |ui| {
+                        egui::Frame::new()
+                            .inner_margin(egui::Margin::symmetric(20, 16))
+                            .show(ui, |ui| {
+                                ui.spacing_mut().item_spacing.y = 8.0;
+                                self.section_sourceports(ui);
+                                self.section_behavior(ui);
+                                self.section_cache(ui);
+                                self.section_paths(ui);
+                            });
+                    });
+
+                // ── Footer ──
+                ui.add_space(4.0);
+                egui::Frame::new()
+                    .inner_margin(egui::Margin::symmetric(20, 10))
+                    .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                    .show(ui, |ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new("Save")
+                                            .color(egui::Color32::WHITE)
+                                            .strong(),
+                                    )
+                                    .fill(theme::TEXT_ACCENT)
+                                    .corner_radius(8),
+                                )
+                                .clicked()
+                                && self.save()
+                            {
+                                result = SettingsResult::Saved;
+                            }
+                            if ui.button("Cancel").clicked() {
+                                result = SettingsResult::Closed;
+                            }
+                        });
+                    });
             });
 
         // Escape closes without saving
@@ -216,79 +273,102 @@ impl SettingsDialogState {
     }
 
     fn section_header(ui: &mut egui::Ui, title: &str) {
-        ui.add_space(8.0);
-        ui.colored_label(theme::TEXT_SECONDARY, egui::RichText::new(title).strong());
+        ui.add_space(10.0);
+        ui.colored_label(
+            theme::TEXT_ACCENT,
+            egui::RichText::new(title.to_ascii_uppercase())
+                .size(11.0)
+                .strong(),
+        );
         ui.separator();
+        ui.add_space(2.0);
     }
 
     fn section_sourceports(&mut self, ui: &mut egui::Ui) {
         Self::section_header(ui, "Sourceports");
-        egui::Grid::new("settings_sourceports")
-            .num_columns(2)
-            .spacing([12.0, 6.0])
-            .show(ui, |ui| {
-                ui.label("Default sourceport");
-                ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(&mut self.sourceport).desired_width(180.0));
-                    if !self.detected_ports.is_empty() {
-                        egui::ComboBox::from_id_salt("detected_ports")
-                            .selected_text("detected")
-                            .width(90.0)
-                            .show_ui(ui, |ui| {
-                                for port in &self.detected_ports {
-                                    if ui
-                                        .selectable_label(self.sourceport == *port, port)
-                                        .clicked()
-                                    {
-                                        self.sourceport = port.clone();
-                                    }
-                                }
-                            });
-                    }
-                });
-                ui.end_row();
 
-                ui.label("ZDoom-family port");
-                ui.add(egui::TextEdit::singleline(&mut self.zdoom_sourceport).desired_width(180.0))
-                    .on_hover_text("Used for WADs that require a zdoom-family sourceport");
-                ui.end_row();
-
-                ui.label("Global launch args");
+        ui.columns(2, |cols| {
+            form_label(&mut cols[0], "Default sourceport");
+            cols[0].horizontal(|ui| {
+                let combo_w = 110.0;
+                let field_w =
+                    (ui.available_width() - combo_w - ui.spacing().item_spacing.x).max(80.0);
                 ui.add(
-                    egui::TextEdit::singleline(&mut self.sourceport_args)
-                        .desired_width(280.0)
-                        .hint_text("passed to every sourceport"),
-                )
-                .on_hover_text("Shell-style: quote arguments containing spaces");
-                ui.end_row();
+                    egui::TextEdit::singleline(&mut self.sourceport)
+                        .desired_width(field_w)
+                        .text_color(theme::TEXT_PRIMARY),
+                );
+                if !self.detected_ports.is_empty() {
+                    egui::ComboBox::from_id_salt("detected_ports")
+                        .selected_text("detected")
+                        .width(combo_w)
+                        .show_ui(ui, |ui| {
+                            for port in &self.detected_ports {
+                                if ui
+                                    .selectable_label(self.sourceport == *port, port)
+                                    .clicked()
+                                {
+                                    self.sourceport = port.clone();
+                                }
+                            }
+                        });
+                }
             });
+            form_label(&mut cols[1], "ZDoom-family port");
+            cols[1]
+                .add(
+                    egui::TextEdit::singleline(&mut self.zdoom_sourceport)
+                        .desired_width(f32::INFINITY)
+                        .text_color(theme::TEXT_PRIMARY),
+                )
+                .on_hover_text("Used for WADs that require a zdoom-family sourceport");
+        });
+
+        form_label(ui, "Global launch args (every sourceport)");
+        ui.add(
+            egui::TextEdit::singleline(&mut self.sourceport_args)
+                .desired_width(f32::INFINITY)
+                .text_color(theme::TEXT_PRIMARY)
+                .hint_text("e.g. -nomusic — quote args containing spaces"),
+        );
 
         self.subsection_port_args(ui);
     }
 
     /// Per-port launch args list: one row per port, plus an add row.
     fn subsection_port_args(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(6.0);
-        ui.colored_label(theme::TEXT_SECONDARY, "Per-port launch args");
+        form_label(ui, "Per-port launch args");
 
         let mut remove: Option<usize> = None;
-        egui::Grid::new("settings_port_args")
-            .num_columns(3)
-            .spacing([12.0, 6.0])
-            .show(ui, |ui| {
-                for (idx, (port, args)) in self.port_args.iter_mut().enumerate() {
-                    ui.label(port.as_str());
-                    ui.add(
-                        egui::TextEdit::singleline(args)
-                            .desired_width(240.0)
-                            .hint_text("e.g. -geometry 1920x1200"),
-                    );
-                    if ui.button("✖").on_hover_text("Remove").clicked() {
-                        remove = Some(idx);
-                    }
-                    ui.end_row();
+        for (idx, (port, args)) in self.port_args.iter_mut().enumerate() {
+            ui.horizontal(|ui| {
+                ui.add_sized(
+                    [130.0, 18.0],
+                    egui::Label::new(
+                        egui::RichText::new(port.as_str())
+                            .size(12.0)
+                            .color(theme::TEXT_PRIMARY),
+                    )
+                    .truncate(),
+                );
+                let btn_w = 24.0;
+                let field_w =
+                    (ui.available_width() - btn_w - ui.spacing().item_spacing.x).max(80.0);
+                ui.add(
+                    egui::TextEdit::singleline(args)
+                        .desired_width(field_w)
+                        .text_color(theme::TEXT_PRIMARY)
+                        .hint_text("e.g. -geometry 1920x1200"),
+                );
+                if ui
+                    .add(egui::Button::new("\u{2715}").frame(false))
+                    .on_hover_text("Remove")
+                    .clicked()
+                {
+                    remove = Some(idx);
                 }
             });
+        }
         if let Some(idx) = remove {
             self.port_args.remove(idx);
         }
@@ -302,7 +382,7 @@ impl SettingsDialogState {
                 } else {
                     self.new_port_name.as_str()
                 })
-                .width(140.0)
+                .width(130.0)
                 .show_ui(ui, |ui| {
                     for port in &self.detected_ports {
                         if !listed.contains(&port.as_str())
@@ -316,7 +396,8 @@ impl SettingsDialogState {
                 });
             ui.add(
                 egui::TextEdit::singleline(&mut self.new_port_name)
-                    .desired_width(120.0)
+                    .desired_width(140.0)
+                    .text_color(theme::TEXT_PRIMARY)
                     .hint_text("or type a name"),
             );
             let name = self.new_port_name.trim().to_string();
@@ -335,59 +416,54 @@ impl SettingsDialogState {
 
     fn section_behavior(&mut self, ui: &mut egui::Ui) {
         Self::section_header(ui, "Behavior");
-        egui::Grid::new("settings_behavior")
-            .num_columns(2)
-            .spacing([12.0, 6.0])
-            .show(ui, |ui| {
-                ui.label("Default IWAD");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.iwad)
-                        .desired_width(180.0)
-                        .hint_text("empty = auto-detect"),
-                );
-                ui.end_row();
 
-                ui.label("Import link mode");
-                egui::ComboBox::from_id_salt("link_mode")
-                    .selected_text(&self.link_mode)
-                    .width(120.0)
-                    .show_ui(ui, |ui| {
-                        for mode in ["move", "copy"] {
-                            ui.selectable_value(&mut self.link_mode, mode.to_string(), mode);
-                        }
-                    });
-                ui.end_row();
+        ui.columns(2, |cols| {
+            form_label(&mut cols[0], "Default IWAD");
+            cols[0].add(
+                egui::TextEdit::singleline(&mut self.iwad)
+                    .desired_width(f32::INFINITY)
+                    .text_color(theme::TEXT_PRIMARY)
+                    .hint_text("empty = auto-detect"),
+            );
+            form_label(&mut cols[1], "idgames mirror");
+            egui::ComboBox::from_id_salt("download_mirror")
+                .selected_text(mirror_label(self.download_mirror))
+                .width(cols[1].available_width())
+                .show_ui(&mut cols[1], |ui| {
+                    for (i, _) in MIRRORS.iter().enumerate() {
+                        ui.selectable_value(
+                            &mut self.download_mirror,
+                            i as i64,
+                            mirror_label(i as i64),
+                        );
+                    }
+                });
+        });
 
-                ui.label("Orphaned companions");
-                egui::ComboBox::from_id_salt("companion_orphan_cleanup")
-                    .selected_text(&self.companion_orphan_cleanup)
-                    .width(120.0)
-                    .show_ui(ui, |ui| {
-                        for mode in ["ask", "delete", "keep"] {
-                            ui.selectable_value(
-                                &mut self.companion_orphan_cleanup,
-                                mode.to_string(),
-                                mode,
-                            );
-                        }
-                    });
-                ui.end_row();
-
-                ui.label("idgames mirror");
-                egui::ComboBox::from_id_salt("download_mirror")
-                    .selected_text(mirror_label(self.download_mirror))
-                    .width(280.0)
-                    .show_ui(ui, |ui| {
-                        for (i, _) in MIRRORS.iter().enumerate() {
-                            ui.selectable_value(
-                                &mut self.download_mirror,
-                                i as i64,
-                                mirror_label(i as i64),
-                            );
-                        }
-                    });
-                ui.end_row();
-            });
+        ui.columns(2, |cols| {
+            form_label(&mut cols[0], "Import link mode");
+            egui::ComboBox::from_id_salt("link_mode")
+                .selected_text(&self.link_mode)
+                .width(cols[0].available_width())
+                .show_ui(&mut cols[0], |ui| {
+                    for mode in ["move", "copy"] {
+                        ui.selectable_value(&mut self.link_mode, mode.to_string(), mode);
+                    }
+                });
+            form_label(&mut cols[1], "Orphaned companions");
+            egui::ComboBox::from_id_salt("companion_orphan_cleanup")
+                .selected_text(&self.companion_orphan_cleanup)
+                .width(cols[1].available_width())
+                .show_ui(&mut cols[1], |ui| {
+                    for mode in ["ask", "delete", "keep"] {
+                        ui.selectable_value(
+                            &mut self.companion_orphan_cleanup,
+                            mode.to_string(),
+                            mode,
+                        );
+                    }
+                });
+        });
 
         ui.add_space(4.0);
         ui.checkbox(
@@ -406,53 +482,56 @@ impl SettingsDialogState {
     fn section_cache(&mut self, ui: &mut egui::Ui) {
         Self::section_header(ui, "WAD cache");
         ui.checkbox(&mut self.cache_auto_clean, "Auto-clean cache after play");
-        egui::Grid::new("settings_cache")
-            .num_columns(2)
-            .spacing([12.0, 6.0])
-            .show(ui, |ui| {
-                ui.label("Max cache size (GB)");
-                ui.add(
-                    egui::DragValue::new(&mut self.cache_max_size_gb)
-                        .speed(0.5)
-                        .range(0.0..=f64::MAX),
-                )
-                .on_hover_text("0 = unlimited");
-                ui.end_row();
-
-                ui.label("Max cache age (days)");
-                ui.add(
-                    egui::DragValue::new(&mut self.cache_max_age_days)
-                        .speed(1)
-                        .range(0..=i64::MAX),
-                )
-                .on_hover_text("0 = unlimited");
-                ui.end_row();
-            });
+        ui.horizontal(|ui| {
+            form_label(ui, "Max size (GB)");
+            ui.add(
+                egui::DragValue::new(&mut self.cache_max_size_gb)
+                    .speed(0.5)
+                    .range(0.0..=f64::MAX),
+            )
+            .on_hover_text("0 = unlimited");
+            ui.add_space(16.0);
+            form_label(ui, "Max age (days)");
+            ui.add(
+                egui::DragValue::new(&mut self.cache_max_age_days)
+                    .speed(1)
+                    .range(0..=i64::MAX),
+            )
+            .on_hover_text("0 = unlimited");
+        });
     }
 
     fn section_paths(&mut self, ui: &mut egui::Ui) {
         Self::section_header(ui, "Paths");
-        egui::Grid::new("settings_paths")
-            .num_columns(2)
-            .spacing([12.0, 6.0])
-            .show(ui, |ui| {
-                for (label, value) in [
-                    ("WAD cache dir", &mut self.cache_dir),
-                    ("Data dir", &mut self.data_dir),
-                    ("IWAD dir", &mut self.iwad_dir),
-                    ("Sourceport config dir", &mut self.sourceport_dir),
-                ] {
-                    ui.label(label);
-                    ui.add(egui::TextEdit::singleline(value).desired_width(320.0));
-                    ui.end_row();
-                }
+        for (label, value) in [
+            ("WAD cache dir", &mut self.cache_dir),
+            ("Data dir", &mut self.data_dir),
+            ("IWAD dir", &mut self.iwad_dir),
+            ("Sourceport config dir", &mut self.sourceport_dir),
+        ] {
+            form_label(ui, label);
+            ui.add(
+                egui::TextEdit::singleline(value)
+                    .desired_width(f32::INFINITY)
+                    .text_color(theme::TEXT_PRIMARY),
+            );
+        }
 
-                ui.label("Database path");
-                ui.add(egui::TextEdit::singleline(&mut self.db_path).desired_width(320.0))
-                    .on_hover_text("Takes effect after restarting caco");
-                ui.end_row();
-            });
+        form_label(ui, "Database path");
+        ui.add(
+            egui::TextEdit::singleline(&mut self.db_path)
+                .desired_width(f32::INFINITY)
+                .text_color(theme::TEXT_PRIMARY),
+        )
+        .on_hover_text("Takes effect after restarting caco");
     }
+}
+
+fn form_label(ui: &mut egui::Ui, label: &str) {
+    ui.colored_label(
+        theme::TEXT_SECONDARY,
+        egui::RichText::new(label).size(12.0).strong(),
+    );
 }
 
 /// Join an args vec into a shell-style string (quoting where needed).
