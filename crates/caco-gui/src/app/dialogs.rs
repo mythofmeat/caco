@@ -10,6 +10,7 @@ use crate::dialogs::edit::EditResult;
 use crate::dialogs::link::LinkResult;
 use crate::dialogs::resources::ResourcesResult;
 use crate::dialogs::sessions::SessionsResult;
+use crate::dialogs::settings::SettingsResult;
 use crate::dialogs::stats::StatsResult;
 use crate::dialogs::wad_stats::WadStatsResult;
 use crate::message::Notification;
@@ -77,6 +78,17 @@ pub(super) fn render_active_dialog(
                     close_dialog = true;
                 }
                 CacheResult::Open => {}
+            },
+            ActiveDialog::Settings(settings_state) => match settings_state.render(ctx) {
+                SettingsResult::Saved => {
+                    state.notification = Some(Notification::info("Settings saved".to_string()));
+                    state.needs_reload = true;
+                    close_dialog = true;
+                }
+                SettingsResult::Closed => {
+                    close_dialog = true;
+                }
+                SettingsResult::Open => {}
             },
             ActiveDialog::Collections(collections_state) => {
                 let modified = collections_state.modified;

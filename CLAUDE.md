@@ -81,7 +81,7 @@ crates/
 
 **caco-tui**: `app.rs` drives the event loop and screen stack. Screens live in `src/screens/`; shared widgets (wad_table, wad_info, filter_input, library_pane, import_pane, …) in `src/widgets/`. Background work flows through an mpsc channel drained each tick.
 
-**caco-gui**: `app.rs` hosts the `CacoApp` state machine. Panels in `src/panels/`, dialogs in `src/dialogs/`, import flow in `src/import/`. `thumbnails.rs` extracts and caches TITLEPIC; `wiki_scraper.rs` fetches Doom Wiki thumbs; `workers.rs` coordinates background search/import/play via mpsc channels. The Cacowards view (`ViewMode::Cacowards`) is rendered by `panels/cacowards.rs` in a deliberately editorial layout (hero banner + year strip + category card grid) to signal the curated-external-feed origin while sharing the rest of the GUI chrome. Imports kicked off from cacoward cards spawn through `import::workers::spawn_import_cacoward` so they reuse the existing duplicate-detection and auto-link plumbing.
+**caco-gui**: `app.rs` hosts the `CacoApp` state machine. Panels in `src/panels/`, dialogs in `src/dialogs/`, import flow in `src/import/`. `thumbnails.rs` extracts and caches TITLEPIC; `wiki_scraper.rs` fetches Doom Wiki thumbs; `workers.rs` coordinates background search/import/play via mpsc channels. The Cacowards view (`ViewMode::Cacowards`) is rendered by `panels/cacowards.rs` in a deliberately editorial layout (hero banner + year strip + category card grid) to signal the curated-external-feed origin while sharing the rest of the GUI chrome. Imports kicked off from cacoward cards spawn through `import::workers::spawn_import_cacoward` so they reuse the existing duplicate-detection and auto-link plumbing. `dialogs/settings.rs` is the GUI settings editor: it snapshots the live `Config`, edits a curated field subset (sourceports, behavior, cache, paths), and on Save writes the full struct via `config::save_config` + `config::reload_config` so unexposed sections (tui/list, sourceport_preferences, iwad_priority) survive round-trips and changes apply without restart.
 
 **caco-mcp**: `server.rs` hosts the rmcp `ServerHandler`. `cli_tools.rs` exposes 17 `caco_*` tools that shell out to a sandboxed `caco` binary; `introspect.rs` adds 7 `inspect_*` read-only tools plus `run_sql`. `sandbox.rs` enforces that writes only land in the sandbox copy.
 
@@ -150,6 +150,8 @@ egui = "0.31"
 **Sourceport families**: dsda / zdoom / chocolate / woof / eternity / helion / uzdoom. Each maps to data dir args, save dir args, complevel args, and config args.
 
 **Per-WAD config columns**: `custom_iwad`, `custom_sourceport`, `custom_args` (JSON), `complevel` (INT), `custom_config` (TEXT).
+
+**Launch args layering**: global `sourceport_args` (every port) → `[port_args]` table (executable basename → args, case-insensitive fallback, applied only when that port launches) → per-WAD `custom_args` → CLI extra args. GUI settings dialog edits args as shell-quoted strings via `shlex`.
 
 **DB migrations**: run on `init_db()`; numbered sequentially; current schema version is 23+.
 

@@ -22,6 +22,7 @@ serde_json.workspace = true
 rfd.workspace = true
 dirs.workspace = true
 open.workspace = true
+shlex.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

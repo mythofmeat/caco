@@ -6,5 +6,6 @@ pub mod edit;
 pub mod link;
 pub mod resources;
 pub mod sessions;
+pub mod settings;
 pub mod stats;
 pub mod wad_stats;

@@ -141,6 +141,10 @@ impl CacoApp {
                 let dialog = CacheDialogState::new(&self.conn);
                 self.state.active_dialog = Some(ActiveDialog::Cache(dialog));
             }
+            ActionRequest::Settings => {
+                let dialog = crate::dialogs::settings::SettingsDialogState::new();
+                self.state.active_dialog = Some(ActiveDialog::Settings(dialog));
+            }
             ActionRequest::Resources => {
                 let dialog = ResourcesDialogState::new(&self.conn);
                 self.state.active_dialog = Some(ActiveDialog::Resources(dialog));

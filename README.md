@@ -119,6 +119,7 @@ caco-gui
 - Right-click context menu (play, edit, delete, sessions, map stats, new playthrough)
 - Right-hand detail sidebar with metadata, play stats, and quick actions
 - Dialogs for editing WADs, confirming deletes, browsing sessions, viewing library stats, managing the cache, and registering IWADs / id24 WADs
+- Settings dialog (sidebar > Settings) for editing the caco config — sourceports, global and per-port launch args, behavior toggles, cache limits, and paths — persisted to `config.toml` on save
 - Keyboard shortcuts: `j/k`, `g`/`G`, `Home`/`End`, `Enter`, `E`, `D`, `S`, `P`, `Esc`
 
 ## Importing
@@ -242,13 +243,17 @@ iwad_dirs = ["/usr/share/games/doom"]
 sourceport = "nyan-doom"
 iwad = "doom2"
 iwad_dirs = ["/usr/share/games/doom", "~/games/iwads"]
-sourceport_args = ["-nomusic"]
+sourceport_args = ["-nomusic"]          # passed to every sourceport
 
 auto_detect_iwad = true
 auto_detect_complevel = true
 auto_doomwiki_enrich = true
 cache_max_size_gb = 20.0
 cache_auto_clean = true
+
+# Extra args for specific ports only (appended after sourceport_args)
+[port_args]
+nyan-doom = ["-geometry", "1920x1200"]
 
 [list]
 format = ["id", "title", "author", "status", "beaten", "playtime", "last_played"]

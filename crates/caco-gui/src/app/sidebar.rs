@@ -211,6 +211,19 @@ pub(super) fn render_sidebar(
             {
                 actions.push(ActionRequest::Resources);
             }
+            if ui
+                .add(
+                    egui::Button::new(
+                        egui::RichText::new("Settings")
+                            .size(11.0)
+                            .color(theme::TEXT_MUTED),
+                    )
+                    .frame(false),
+                )
+                .clicked()
+            {
+                actions.push(ActionRequest::Settings);
+            }
         });
     });
 }

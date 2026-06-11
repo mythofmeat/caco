@@ -44,6 +44,7 @@ arc-swap = "1"
 
 # Text processing
 regex = "1"
+shlex = "1"
 
 # Hashing / binary
 md-5 = "0.10"

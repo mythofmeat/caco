@@ -322,8 +322,9 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
         cmd.args(["-iwad", &resolved]);
     }
 
-    // Add default sourceport args from global config
-    let default_args = config::get_sourceport_args();
+    // Add default sourceport args from global config, then per-port args
+    let mut default_args = config::get_sourceport_args();
+    default_args.extend(config::get_port_args(&port));
     if !default_args.is_empty() {
         cmd.args(&default_args);
     }
@@ -646,8 +647,9 @@ pub fn play_iwad(
     let mut cmd = Command::new(&port);
     cmd.args(["-iwad", &resolved]);
 
-    // Add default sourceport args
-    let default_args = config::get_sourceport_args();
+    // Add default sourceport args, then per-port args
+    let mut default_args = config::get_sourceport_args();
+    default_args.extend(config::get_port_args(&port));
     if !default_args.is_empty() {
         cmd.args(&default_args);
     }
