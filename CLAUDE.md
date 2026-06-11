@@ -150,6 +150,8 @@ egui = "0.31"
 
 **Per-WAD config columns**: `custom_iwad`, `custom_sourceport`, `custom_args` (JSON), `complevel` (INT), `custom_config` (TEXT).
 
+**Launch args layering**: global `sourceport_args` (every port) → `[port_args]` table (executable basename → args, case-insensitive fallback, applied only when that port launches) → per-WAD `custom_args` → CLI extra args. GUI settings dialog edits args as shell-quoted strings via `shlex`.
+
 **DB migrations**: run on `init_db()`; numbered sequentially; current schema version is 23+.
 
 **Cacowards**: `cacowards` table (year, category, rank, wad_title, idgames_url, doomwiki_url, wad_id, manual_override) tracks Doomworld's annual awards. Core categories: `winner`, `runner-up`, `honorable-mention`, `mordeth`. `caco enrich --cacowards --year YYYY` scrapes the Doom Wiki's `Cacowards_YYYY` page (`caco-sources/src/doomwiki/cacowards.rs`), upserts entries, and auto-links to library WADs in two passes: (1) idgames URL → `wads.idgames_id`, (2) normalized-title fallback that links only when exactly one library WAD shares the normalized title. Stale non-manual rows for the year are cleared before each re-scrape so the wiki view is canonical; `manual_override = 1` entries survive. `caco stats --cacowards` renders a year × category grid; `--year YYYY` drills into entry-level detail with linked-WAD status. TUI: `Shift+A` opens the Cacowards screen with `[`/`]` for year navigation.

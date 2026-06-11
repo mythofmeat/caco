@@ -118,6 +118,11 @@ pub struct Config {
     pub companion_orphan_cleanup: String,
     pub zdoom_sourceport: String,
     pub sourceport_preferences: HashMap<String, String>,
+    /// Extra launch args applied only when a specific sourceport launches,
+    /// keyed by executable basename (e.g. `"nyan-doom"`, `"helion"`).
+    /// Appended after the global `sourceport_args`.
+    #[serde(default)]
+    pub port_args: HashMap<String, Vec<String>>,
 
     #[serde(default)]
     pub tui: TuiConfig,
@@ -154,6 +159,7 @@ impl Default for Config {
             companion_orphan_cleanup: "ask".to_string(),
             zdoom_sourceport: String::new(),
             sourceport_preferences: HashMap::new(),
+            port_args: HashMap::new(),
             tui: TuiConfig::default(),
             gui: GuiConfig::default(),
             list: ListConfig::default(),
@@ -493,6 +499,32 @@ pub fn get_sourceport_args() -> Vec<String> {
     load_config().sourceport_args.clone()
 }
 
+/// Get per-port launch args for a sourceport executable.
+///
+/// Keys in `[port_args]` are executable basenames (extension stripped,
+/// matching `sourceports::identify_family`); `executable` may be a bare
+/// name or full path. Lookup is exact first, then case-insensitive (Helion
+/// ships as both `helion` and `Helion`). Returns an empty vec when no
+/// entry exists.
+pub fn get_port_args(executable: &str) -> Vec<String> {
+    lookup_port_args(&load_config(), executable)
+}
+
+fn lookup_port_args(cfg: &Config, executable: &str) -> Vec<String> {
+    let basename = Path::new(executable)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(executable);
+    if let Some(args) = cfg.port_args.get(basename) {
+        return args.clone();
+    }
+    cfg.port_args
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case(basename))
+        .map(|(_, v)| v.clone())
+        .unwrap_or_default()
+}
+
 /// Whether to manage per-WAD data directories.
 pub fn get_manage_data_dirs() -> bool {
     load_config().manage_data_dirs
@@ -800,6 +832,41 @@ zdoom = "uzdoom"
             cfg.sourceport_preferences.get("zdoom").map(String::as_str),
             Some("uzdoom")
         );
+    }
+
+    #[test]
+    fn test_config_port_args() {
+        let toml_str = r#"
+[port_args]
+nyan-doom = ["-geometry", "1920x1200"]
+helion = ["-loglevel", "info"]
+"#;
+        let cfg: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(
+            lookup_port_args(&cfg, "nyan-doom"),
+            vec!["-geometry", "1920x1200"]
+        );
+        // Full path resolves to basename
+        assert_eq!(
+            lookup_port_args(&cfg, "/usr/bin/nyan-doom"),
+            vec!["-geometry", "1920x1200"]
+        );
+        // Case-insensitive fallback (Helion ships as helion or Helion)
+        assert_eq!(lookup_port_args(&cfg, "Helion"), vec!["-loglevel", "info"]);
+        // Windows-style extension is stripped
+        assert_eq!(
+            lookup_port_args(&cfg, "nyan-doom.exe"),
+            vec!["-geometry", "1920x1200"]
+        );
+        // Unknown port gets nothing
+        assert!(lookup_port_args(&cfg, "gzdoom").is_empty());
+    }
+
+    #[test]
+    fn test_config_port_args_default_empty() {
+        let cfg: Config = toml::from_str("").unwrap();
+        assert!(cfg.port_args.is_empty());
+        assert!(lookup_port_args(&cfg, "nyan-doom").is_empty());
     }
 
     #[test]

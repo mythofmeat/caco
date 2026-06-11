@@ -17,8 +17,12 @@ pub struct SettingsDialogState {
     // Sourceports
     sourceport: String,
     zdoom_sourceport: String,
-    /// One argument per line.
+    /// Shell-style quoted argument string (parsed with shlex).
     sourceport_args: String,
+    /// Per-port launch args: (executable basename, shlex arg string).
+    port_args: Vec<(String, String)>,
+    /// Entry field for adding a port to the per-port args list.
+    new_port_name: String,
     detected_ports: Vec<String>,
 
     // Behavior
@@ -70,10 +74,19 @@ impl SettingsDialogState {
             .collect();
         detected_ports.dedup();
 
+        let mut port_args: Vec<(String, String)> = cfg
+            .port_args
+            .iter()
+            .map(|(port, args)| (port.clone(), join_args(args)))
+            .collect();
+        port_args.sort_by(|a, b| a.0.cmp(&b.0));
+
         Self {
             sourceport: cfg.sourceport.clone(),
             zdoom_sourceport: cfg.zdoom_sourceport.clone(),
-            sourceport_args: cfg.sourceport_args.join("\n"),
+            sourceport_args: join_args(&cfg.sourceport_args),
+            port_args,
+            new_port_name: String::new(),
             detected_ports,
             iwad: cfg.iwad.clone(),
             link_mode: cfg.link_mode.clone(),
@@ -97,18 +110,25 @@ impl SettingsDialogState {
     }
 
     /// Build a full [`Config`] from the edited fields, preserving sections
-    /// this dialog doesn't expose.
-    fn to_config(&self) -> Config {
+    /// this dialog doesn't expose. Fails when an args string has unbalanced
+    /// quotes.
+    fn to_config(&self) -> Result<Config, String> {
         let mut cfg = (*config::load_config()).clone();
         cfg.sourceport = self.sourceport.trim().to_string();
         cfg.zdoom_sourceport = self.zdoom_sourceport.trim().to_string();
-        cfg.sourceport_args = self
-            .sourceport_args
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty())
-            .map(String::from)
-            .collect();
+        cfg.sourceport_args =
+            parse_args(&self.sourceport_args).ok_or("Global launch args: unbalanced quotes")?;
+        cfg.port_args = self
+            .port_args
+            .iter()
+            .filter(|(port, _)| !port.trim().is_empty())
+            .map(|(port, args)| {
+                let parsed = parse_args(args)
+                    .ok_or_else(|| format!("Launch args for {port}: unbalanced quotes"))?;
+                Ok((port.trim().to_string(), parsed))
+            })
+            .filter(|r| !matches!(r, Ok((_, args)) if args.is_empty()))
+            .collect::<Result<_, String>>()?;
         cfg.iwad = self.iwad.trim().to_string();
         cfg.link_mode = self.link_mode.clone();
         cfg.companion_orphan_cleanup = self.companion_orphan_cleanup.clone();
@@ -126,11 +146,18 @@ impl SettingsDialogState {
         cfg.iwad_dir = self.iwad_dir.trim().to_string();
         cfg.sourceport_dir = self.sourceport_dir.trim().to_string();
         cfg.db_path = self.db_path.trim().to_string();
-        cfg
+        Ok(cfg)
     }
 
     fn save(&mut self) -> bool {
-        match config::save_config(&self.to_config()) {
+        let cfg = match self.to_config() {
+            Ok(cfg) => cfg,
+            Err(e) => {
+                self.error = Some(e);
+                return false;
+            }
+        };
+        match config::save_config(&cfg) {
             Ok(()) => {
                 config::reload_config();
                 true
@@ -226,15 +253,84 @@ impl SettingsDialogState {
                     .on_hover_text("Used for WADs that require a zdoom-family sourceport");
                 ui.end_row();
 
-                ui.label("Extra launch args");
+                ui.label("Global launch args");
                 ui.add(
-                    egui::TextEdit::multiline(&mut self.sourceport_args)
+                    egui::TextEdit::singleline(&mut self.sourceport_args)
                         .desired_width(280.0)
-                        .desired_rows(2)
-                        .hint_text("one argument per line"),
-                );
+                        .hint_text("passed to every sourceport"),
+                )
+                .on_hover_text("Shell-style: quote arguments containing spaces");
                 ui.end_row();
             });
+
+        self.subsection_port_args(ui);
+    }
+
+    /// Per-port launch args list: one row per port, plus an add row.
+    fn subsection_port_args(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(6.0);
+        ui.colored_label(theme::TEXT_SECONDARY, "Per-port launch args");
+
+        let mut remove: Option<usize> = None;
+        egui::Grid::new("settings_port_args")
+            .num_columns(3)
+            .spacing([12.0, 6.0])
+            .show(ui, |ui| {
+                for (idx, (port, args)) in self.port_args.iter_mut().enumerate() {
+                    ui.label(port.as_str());
+                    ui.add(
+                        egui::TextEdit::singleline(args)
+                            .desired_width(240.0)
+                            .hint_text("e.g. -geometry 1920x1200"),
+                    );
+                    if ui.button("✖").on_hover_text("Remove").clicked() {
+                        remove = Some(idx);
+                    }
+                    ui.end_row();
+                }
+            });
+        if let Some(idx) = remove {
+            self.port_args.remove(idx);
+        }
+
+        // Add row: pick a detected port not yet listed, or type a name
+        ui.horizontal(|ui| {
+            let listed: Vec<&str> = self.port_args.iter().map(|(p, _)| p.as_str()).collect();
+            egui::ComboBox::from_id_salt("add_port_args")
+                .selected_text(if self.new_port_name.is_empty() {
+                    "add port…"
+                } else {
+                    self.new_port_name.as_str()
+                })
+                .width(140.0)
+                .show_ui(ui, |ui| {
+                    for port in &self.detected_ports {
+                        if !listed.contains(&port.as_str())
+                            && ui
+                                .selectable_label(self.new_port_name == *port, port)
+                                .clicked()
+                        {
+                            self.new_port_name = port.clone();
+                        }
+                    }
+                });
+            ui.add(
+                egui::TextEdit::singleline(&mut self.new_port_name)
+                    .desired_width(120.0)
+                    .hint_text("or type a name"),
+            );
+            let name = self.new_port_name.trim().to_string();
+            if ui
+                .add_enabled(
+                    !name.is_empty() && !listed.contains(&name.as_str()),
+                    egui::Button::new("Add"),
+                )
+                .clicked()
+            {
+                self.port_args.push((name, String::new()));
+                self.new_port_name.clear();
+            }
+        });
     }
 
     fn section_behavior(&mut self, ui: &mut egui::Ui) {
@@ -357,6 +453,16 @@ impl SettingsDialogState {
                 ui.end_row();
             });
     }
+}
+
+/// Join an args vec into a shell-style string (quoting where needed).
+fn join_args(args: &[String]) -> String {
+    shlex::try_join(args.iter().map(String::as_str)).unwrap_or_else(|_| args.join(" "))
+}
+
+/// Parse a shell-style args string. `None` on unbalanced quotes.
+fn parse_args(text: &str) -> Option<Vec<String>> {
+    shlex::split(text.trim())
 }
 
 fn mirror_label(index: i64) -> String {
