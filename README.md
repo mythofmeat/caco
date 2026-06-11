@@ -120,6 +120,7 @@ caco-gui
 - Right-click context menu (play, edit, delete, sessions, map stats, new playthrough)
 - Right-hand detail sidebar with metadata, play stats, and quick actions
 - Dialogs for editing WADs, confirming deletes, browsing sessions, viewing library stats, managing the cache, and registering IWADs / id24 WADs
+- Settings dialog (sidebar > Settings) for editing the caco config — sourceports, behavior toggles, cache limits, and paths — persisted to `config.toml` on save
 - Keyboard shortcuts: `j/k`, `g`/`G`, `Home`/`End`, `Enter`, `E`, `D`, `S`, `P`, `Esc`
 
 ## Importing

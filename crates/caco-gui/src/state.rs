@@ -17,6 +17,7 @@ use crate::dialogs::edit::EditDialogState;
 use crate::dialogs::link::LinkDialogState;
 use crate::dialogs::resources::ResourcesDialogState;
 use crate::dialogs::sessions::SessionsDialogState;
+use crate::dialogs::settings::SettingsDialogState;
 use crate::dialogs::stats::StatsDialogState;
 use crate::dialogs::wad_stats::WadStatsDialogState;
 use crate::filter_query::{FilterCheck, FilterQuery};
@@ -62,6 +63,7 @@ pub enum ActionRequest {
     MapStats(i64),
     Stats,
     Cache,
+    Settings,
     Resources,
     Collections,
     EditCollection(String),
@@ -102,6 +104,7 @@ pub enum ActiveDialog {
     Link(LinkDialogState),
     /// Modal picker for choosing a library WAD to link to a Cacoward entry.
     CacowardLink(CacowardLinkDialogState),
+    Settings(SettingsDialogState),
     Help,
     About,
 }
