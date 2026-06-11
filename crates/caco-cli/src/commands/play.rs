@@ -40,9 +40,12 @@ use caco_sources::idgames::{
 
 #[derive(Args)]
 pub struct PlayArgs {
-    /// WAD query or ID + extra args for sourceport
-    #[arg(trailing_var_arg = true)]
+    /// WAD query or ID
     query: Vec<String>,
+
+    /// Extra sourceport args, after `--` (e.g. `caco play 1 -- -warp 15`)
+    #[arg(last = true)]
+    passthrough: Vec<String>,
 
     /// Sourceport to use
     #[arg(short = 'p', long)]
@@ -111,6 +114,9 @@ pub fn run(conn: &Connection, args: &PlayArgs) -> Result<(), String> {
         extra_args.push(cl.to_string());
     }
 
+    // Forward raw sourceport args given after `--`
+    extra_args.extend(args.passthrough.iter().cloned());
+
     let opts = PlayOptions {
         sourceport: args.sourceport.clone(),
         extra_args,
@@ -157,7 +163,15 @@ pub fn run(conn: &Connection, args: &PlayArgs) -> Result<(), String> {
 fn play_iwad(conn: &Connection, iwad_name: &str, args: &PlayArgs) -> Result<(), String> {
     eprintln!("Playing IWAD: {iwad_name}");
 
-    let mut extra_args: Vec<String> = args.query.clone();
+    // Sourceport args come after `--`; stray query terms are meaningless in
+    // IWAD mode, so reject them instead of passing them through silently.
+    if !args.query.is_empty() {
+        return Err(format!(
+            "Unexpected arguments with --iwad: '{}'. Pass sourceport args after `--`.",
+            args.query.join(" ")
+        ));
+    }
+    let mut extra_args: Vec<String> = args.passthrough.clone();
 
     if let Some(ref cl_str) = args.complevel {
         let cl = caco_core::complevel::parse_complevel(cl_str)
@@ -392,6 +406,39 @@ fn direct_idgames_download_from_wad(wad: &WadRecord) -> Option<DirectIdgamesDown
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct Harness {
+        #[command(flatten)]
+        args: PlayArgs,
+    }
+
+    #[test]
+    fn test_flags_parse_after_query() {
+        // Regression: with trailing_var_arg, flags placed after the query
+        // were silently swallowed into the query terms.
+        let h = Harness::parse_from(["caco", "-p", "Helion", "abscission", "--new-playthrough"]);
+        assert!(h.args.new_playthrough);
+        assert_eq!(h.args.query, vec!["abscission"]);
+        assert_eq!(h.args.sourceport.as_deref(), Some("Helion"));
+        assert!(h.args.passthrough.is_empty());
+    }
+
+    #[test]
+    fn test_passthrough_after_double_dash() {
+        let h = Harness::parse_from(["caco", "1", "--", "-warp", "15", "-skill", "4"]);
+        assert_eq!(h.args.query, vec!["1"]);
+        assert_eq!(h.args.passthrough, vec!["-warp", "15", "-skill", "4"]);
+        assert!(!h.args.new_playthrough);
+    }
+
+    #[test]
+    fn test_misplaced_flag_errors_loudly() {
+        // A typo'd or unknown flag must fail parsing, not become a query term.
+        assert!(Harness::try_parse_from(["caco", "abscission", "--new-playthru"]).is_err());
+        assert!(Harness::try_parse_from(["caco", "abscission", "-warp", "15"]).is_err());
+    }
 
     #[test]
     fn test_idgames_id_from_download_urls() {

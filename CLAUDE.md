@@ -169,7 +169,7 @@ caco info <query> [--levelstats|--completions] [-o plain|json]
 caco modify <query> [field=value...] [beaten±N] [completion.<id>.notes|date|stats=value] [--add-file|--remove-file] [--stats-file FILE --completion ID]
 caco import <source> [--idgames|--doomwiki|--doomworld|--url|--local]
 caco import --cacoward <ID>                                          # ID like c.2023.winner.10
-caco play <query> [-p PORT] [-c COMPLEVEL] [-C CONFIG] [--iwad] [--record]
+caco play <query> [-p PORT] [-c COMPLEVEL] [-C CONFIG] [--iwad] [--record] [--new-playthrough] [-- SOURCEPORT_ARGS]
 caco trash <query> [--restore|--list] [--iwad FAMILY|--id24 NAME]
 caco random [query] [--info]
 caco companion add|rm|enable|disable|ls
