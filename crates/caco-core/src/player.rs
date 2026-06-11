@@ -202,7 +202,34 @@ pub fn start_new_playthrough(conn: &Connection, wad_id: i64) -> crate::Result<i6
     let update = db::WadUpdate::new().set_text("stats_snapshot", None);
     db::update_wad(conn, wad_id, &update)?;
 
+    // Clearing the DB snapshot alone is not enough: every stats read path
+    // prefers the on-disk stats files, so reconcile_stats would absorb the
+    // prior playthrough's stats.txt right back and instantly auto-complete
+    // the new playthrough. Archive the disk files too; the prior
+    // playthrough's final stats already live on its own DB record.
+    if let Some(data_dir) = config::find_wad_data_dir(wad_id) {
+        archive_stats_files(&data_dir);
+    }
+
     Ok(pt_id)
+}
+
+/// Rename all stats files under `data_dir` so the stats reader no longer
+/// sees them (`stats.txt` → `stats.txt.archived`, numbered on collision).
+/// The sourceport then starts a fresh stats file on the next session.
+fn archive_stats_files(data_dir: &Path) {
+    for path in find_all_stats_files(data_dir) {
+        let base = format!("{}.archived", path.to_string_lossy());
+        let mut target = PathBuf::from(&base);
+        let mut n = 1;
+        while target.exists() {
+            n += 1;
+            target = PathBuf::from(format!("{base}{n}"));
+        }
+        if let Err(e) = std::fs::rename(&path, &target) {
+            tracing::warn!("failed to archive stats file {path:?}: {e}");
+        }
+    }
 }
 
 /// Play a WAD with the specified sourceport.
@@ -1319,6 +1346,33 @@ mod tests {
         let active = db::get_active_playthrough(&conn, wad_id).unwrap();
         assert!(active.is_some());
         assert_ne!(active.unwrap().id, pt_id);
+    }
+
+    #[test]
+    fn test_archive_stats_files_hides_them_from_reader() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("dsda_doom_data/doom2/test");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(dir.path().join("stats.txt"), "1\n0\n").unwrap();
+        std::fs::write(nested.join("levelstat.txt"), "").unwrap();
+
+        archive_stats_files(dir.path());
+
+        // The reader must no longer find anything
+        assert!(find_all_stats_files(dir.path()).is_empty());
+        // The data is preserved under archived names
+        assert!(dir.path().join("stats.txt.archived").exists());
+        assert!(nested.join("levelstat.txt.archived").exists());
+
+        // A second playthrough archives again without clobbering the first
+        std::fs::write(dir.path().join("stats.txt"), "1\n5\n").unwrap();
+        archive_stats_files(dir.path());
+        assert!(find_all_stats_files(dir.path()).is_empty());
+        assert!(dir.path().join("stats.txt.archived2").exists());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("stats.txt.archived")).unwrap(),
+            "1\n0\n"
+        );
     }
 
     #[test]
