@@ -15,6 +15,21 @@ jobs:
       contents: write
       pull-requests: write
     steps:
+      # release-plz with git_only=true verifies the previous tag by running
+      # `cargo package --workspace` in a SEPARATE temp worktree per crate
+      # (release-plz hardcodes the verify build; publish_no_verify only
+      # affects `cargo publish`). All six worktrees stay alive until the
+      # version calculation finishes, so six full debug target/ dirs coexist
+      # in /tmp — which blew past the runner's ~14GB free disk starting
+      # 2026-06-11 ("rustc-LLVM ERROR: IO failure on output stream: No space
+      # left on device"). Drop the preinstalled toolchains we never use
+      # (~25GB) before building.
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android \
+            /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL \
+            /usr/local/share/powershell /usr/share/swift
+          df -h /
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -45,3 +60,10 @@ jobs:
       - uses: release-plz/action@v0.5
         env:
           GITHUB_TOKEN: ${{ secrets.REPO_ARCH_TOKEN }}
+          # The verify builds only need to compile, not be debuggable or
+          # rebuilt incrementally. debuginfo=2 + incremental caches are the
+          # bulk of each worktree's target/ size; stripping them keeps the
+          # six concurrent worktrees comfortably inside the runner's disk
+          # and shaves build time.
+          CARGO_PROFILE_DEV_DEBUG: "0"
+          CARGO_INCREMENTAL: "0"
