@@ -67,6 +67,7 @@ crates/
 - `companion_service.rs`, `resource_service.rs` — MD5 dedup + managed storage; IWAD/id24 registration
 - `sourceports.rs`, `complevel.rs`, `complevel_detect.rs`, `iwad_detect.rs` — family registry + detection heuristics (COMPLVL, UMAPINFO, DEHACKED, PNAMES, map lumps)
 - `wad_stats.rs` — per-map stats parser (stats.txt + levelstat.txt)
+- `stats_watcher.rs` — stats collection for ports without native stats.txt: zdoom (ZScript reporter PK3 + `+logfile` parsing) and helion (`-levelstat`, consuming its global `~/.config/Helion/levelstat.txt` — unpadded-milliseconds time format — into the managed stats.txt)
 - `saves.rs`, `demos.rs`, `titlepic.rs`, `utils.rs`
 - `db/` — schema, migrations (23+), models, query parser, wads, sessions, iwads, id24, companions
 
@@ -168,7 +169,7 @@ caco info <query> [--levelstats|--completions] [-o plain|json]
 caco modify <query> [field=value...] [beaten±N] [completion.<id>.notes|date|stats=value] [--add-file|--remove-file] [--stats-file FILE --completion ID]
 caco import <source> [--idgames|--doomwiki|--doomworld|--url|--local]
 caco import --cacoward <ID>                                          # ID like c.2023.winner.10
-caco play <query> [-p PORT] [-c COMPLEVEL] [-C CONFIG] [--iwad] [--record]
+caco play <query> [-p PORT] [-c COMPLEVEL] [-C CONFIG] [--iwad] [--record] [--new-playthrough] [-- SOURCEPORT_ARGS]
 caco trash <query> [--restore|--list] [--iwad FAMILY|--id24 NAME]
 caco random [query] [--info]
 caco companion add|rm|enable|disable|ls

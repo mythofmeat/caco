@@ -1,4 +1,4 @@
-//! ZDoom-family stats collection via custom PK3 mod.
+//! Stats collection for sourceports that don't write `stats.txt` natively.
 //!
 //! ZDoom-family sourceports (gzdoom, uzdoom, etc.) don't natively write
 //! per-map stats files like dsda-doom does. This module bridges the gap by:
@@ -9,11 +9,19 @@
 //! 3. After the sourceport exits, parsing the log for `CACOSTATS|…` lines
 //!    and writing a `stats.txt` that the existing stats infrastructure
 //!    can consume.
+//!
+//! Helion supports `-levelstat`, which appends one line per map exit to a
+//! single global `levelstat.txt` in its user data folder (not the `-savedir`).
+//! The format looks like dsda's but the time fraction is unpadded
+//! milliseconds rather than zero-padded centiseconds, so it gets its own
+//! parser here. After each session the file is converted, merged into the
+//! WAD's managed `stats.txt`, and truncated.
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
+use std::time::SystemTime;
 
 use regex::Regex;
 
@@ -427,7 +435,12 @@ fn entries_to_wad_stats(entries: &[MapLogEntry]) -> WadStats {
     }
 }
 
-fn merge_zdoom_stats(existing: Option<WadStats>, session: WadStats) -> WadStats {
+/// Merge a session's exit entries into existing cumulative stats.
+///
+/// Duplicate lumps *within* the session also fold together here: exit counts
+/// sum, counts keep the max, times keep the best. Shared by the zdoom log
+/// collector and the helion levelstat collector.
+fn merge_session_stats(existing: Option<WadStats>, session: WadStats) -> WadStats {
     let mut maps_by_lump: HashMap<String, MapStats> = existing
         .map(|stats| {
             stats
@@ -543,7 +556,7 @@ pub fn collect_zdoom_stats(data_dir: &Path) -> bool {
         None
     };
 
-    let merged = merge_zdoom_stats(existing, new_stats);
+    let merged = merge_session_stats(existing, new_stats);
     let output = wad_stats::format_stats(&merged);
     if std::fs::write(&stats_path, &output).is_err() {
         return false;
@@ -554,6 +567,214 @@ pub fn collect_zdoom_stats(data_dir: &Path) -> bool {
     if legacy_levelstat_path.exists() {
         let _ = std::fs::remove_file(&legacy_levelstat_path);
     }
+
+    true
+}
+
+// ---------------------------------------------------------------------------
+// Helion levelstat collection
+// ---------------------------------------------------------------------------
+
+// Helion levelstat line: "MAP01 - 1:5.40 (1:5)  K: 59/59  I: 38/38  S: 1/3"
+// Written via C# `$"{t.Minutes}:{t.Seconds}.{t.Milliseconds}"`: seconds and
+// the fraction are unpadded, and the fraction is a raw milliseconds component
+// (0-999) — unlike dsda's zero-padded centiseconds — so dsda's levelstat
+// parser would silently misread these times. Minutes wrap at 60 (hours are
+// lost by Helion itself; nothing to recover here).
+static HELION_LEVELSTAT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"^(\S+)\s+-\s+(\d+):(\d+)\.(\d+)\s+\((\d+):(\d+)(?:\.\d+)?\)\s+K:\s*(\d+)/(\d+)\s+I:\s*(\d+)/(\d+)\s+S:\s*(\d+)/(\d+)",
+    )
+    .unwrap()
+});
+
+/// Path to Helion's global `levelstat.txt`.
+///
+/// Helion writes it to its user data folder regardless of `-savedir`:
+/// `$XDG_CONFIG_HOME/Helion` on Linux, preferring a legacy lowercase
+/// `helion` folder when one exists. Windows ("Saved Games") and portable
+/// installs are not resolved; collection just no-ops for those.
+pub fn helion_levelstat_path() -> Option<PathBuf> {
+    let config_home = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|p| !p.as_os_str().is_empty())
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .filter(|h| !h.is_empty())
+                .map(|h| PathBuf::from(h).join(".config"))
+        })?;
+    let legacy = config_home.join("helion");
+    let dir = if legacy.exists() {
+        legacy
+    } else {
+        config_home.join("Helion")
+    };
+    Some(dir.join("levelstat.txt"))
+}
+
+/// Parse Helion levelstat text into a stats.txt-shaped `WadStats`.
+///
+/// One entry per exit line (duplicates fold later in `merge_session_stats`),
+/// `total_exits = 1`, and `best_skill = 4` — levelstat carries no skill, so
+/// mark "played at unknown skill" like the dsda levelstat parser does. The
+/// real skill is recovered afterwards from `.hsg` save games when possible.
+fn parse_helion_levelstat(text: &str) -> WadStats {
+    let mut maps = Vec::new();
+    for line in text.lines() {
+        let Some(caps) = HELION_LEVELSTAT_RE.captures(line.trim()) else {
+            continue;
+        };
+        let mins: f64 = caps[2].parse().unwrap_or(0.0);
+        let secs: f64 = caps[3].parse().unwrap_or(0.0);
+        let millis: f64 = caps[4].parse().unwrap_or(0.0);
+        let time_secs = mins * 60.0 + secs + millis / 1000.0;
+
+        maps.push(MapStats {
+            lump: caps[1].to_string(),
+            kills: caps[7].parse().unwrap_or(0),
+            total_kills: caps[8].parse().unwrap_or(-1),
+            items: caps[9].parse().unwrap_or(0),
+            total_items: caps[10].parse().unwrap_or(-1),
+            secrets: caps[11].parse().unwrap_or(0),
+            total_secrets: caps[12].parse().unwrap_or(-1),
+            best_skill: 4,
+            best_time: (time_secs * TICS_PER_SECOND).round() as i32,
+            total_exits: 1,
+            time_secs,
+            total_time_secs: -1.0,
+            episode: 0,
+            map_num: 0,
+            best_max_time: -1,
+            best_nm_time: -1,
+            cumulative_kills: 0,
+        });
+    }
+
+    WadStats {
+        format: "stats_txt".to_string(),
+        maps,
+        version: 1,
+        header_total_kills: 0,
+    }
+}
+
+/// Skill levels recovered from Helion `.hsg` saves written during a session.
+struct HelionSessionSkills {
+    by_map: HashMap<String, i32>,
+    /// Skill of the most recently written save — fallback for exited maps
+    /// whose own autosave has already rotated away.
+    latest: Option<i32>,
+}
+
+/// Recover per-map skill from Helion save games in `savedir`.
+///
+/// Helion's levelstat carries no skill, but its `.hsg` saves (a zip with a
+/// `world.json`) record both `MapName` and `Skill`. Helion autosaves on map
+/// entry, so saves written during the session cover the maps played. The
+/// `SkillLevel` enum (None, VeryEasy..Nightmare = 0..5) maps 1:1 onto Doom
+/// skill numbers 1-5. Only saves modified at/after `since` are considered.
+fn read_helion_save_skills(savedir: &Path, since: Option<SystemTime>) -> HelionSessionSkills {
+    let mut saves: Vec<(SystemTime, String, i32)> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(savedir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("hsg") {
+                continue;
+            }
+            let Ok(mtime) = entry.metadata().and_then(|m| m.modified()) else {
+                continue;
+            };
+            if let Some(since) = since
+                && mtime < since
+            {
+                continue;
+            }
+            let Some((map, skill)) = read_hsg_map_skill(&path) else {
+                continue;
+            };
+            if (1..=5).contains(&skill) {
+                saves.push((mtime, map, skill));
+            }
+        }
+    }
+    saves.sort_by_key(|s| s.0);
+    let latest = saves.last().map(|s| s.2);
+    let by_map = saves
+        .into_iter()
+        .map(|(_, map, skill)| (map, skill))
+        .collect();
+    HelionSessionSkills { by_map, latest }
+}
+
+/// Extract (MapName, Skill) from one Helion `.hsg` save game.
+fn read_hsg_map_skill(path: &Path) -> Option<(String, i32)> {
+    let file = std::fs::File::open(path).ok()?;
+    let mut zip = zip::ZipArchive::new(file).ok()?;
+    let mut world = zip.by_name("world.json").ok()?;
+    let mut text = String::new();
+    world.read_to_string(&mut text).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let map = v.get("MapName")?.as_str()?.to_ascii_uppercase();
+    let skill = v.get("Skill")?.as_i64()? as i32;
+    Some((map, skill))
+}
+
+/// After a Helion session, consume the global levelstat file into the WAD's
+/// managed `stats.txt` in `data_dir`.
+///
+/// `session_start` bounds the save-game scan used for skill recovery to
+/// this session's saves.
+///
+/// Returns `true` if stats were merged and written.
+pub fn collect_helion_stats(data_dir: &Path, session_start: Option<SystemTime>) -> bool {
+    match helion_levelstat_path() {
+        Some(path) => collect_helion_stats_from(&path, data_dir, session_start),
+        None => false,
+    }
+}
+
+fn collect_helion_stats_from(
+    levelstat_path: &Path,
+    data_dir: &Path,
+    session_start: Option<SystemTime>,
+) -> bool {
+    let text = match std::fs::read_to_string(levelstat_path) {
+        Ok(t) => t,
+        Err(_) => return false,
+    };
+
+    let mut session = parse_helion_levelstat(&text);
+    if session.maps.is_empty() {
+        return false;
+    }
+
+    // Recover real skill from this session's save games (the levelstat
+    // format has no skill field). Unmatched maps fall back to the latest
+    // session save's skill, then to the parser's "unknown skill" default.
+    let skills = read_helion_save_skills(data_dir, session_start);
+    for m in &mut session.maps {
+        if let Some(skill) = skills.by_map.get(&m.lump).copied().or(skills.latest) {
+            m.best_skill = skill;
+        }
+    }
+
+    let stats_path = data_dir.join("stats.txt");
+    let existing = if stats_path.exists() {
+        wad_stats::parse_stats_file(&stats_path).ok()
+    } else {
+        None
+    };
+
+    let merged = merge_session_stats(existing, session);
+    let output = wad_stats::format_stats(&merged);
+    if std::fs::write(&stats_path, &output).is_err() {
+        return false;
+    }
+
+    // Truncate the consumed file: it is global to Helion and only cleared on
+    // the *next* `-levelstat` launch, so a later collect (any WAD) would
+    // otherwise double-count these exits.
+    let _ = std::fs::write(levelstat_path, "");
 
     true
 }
@@ -969,6 +1190,244 @@ mod tests {
         zip.finish().unwrap();
 
         assert!(stats_mod_needs_refresh(&pk3_path));
+    }
+
+    // --- Helion levelstat ---
+
+    #[test]
+    fn test_parse_helion_levelstat_basic() {
+        // Helion writes unpadded seconds/millis: 1:5.40 = 65.040s, not 65.40s
+        let text = "MAP01 - 1:5.40 (1:5)  K: 59/59  I: 38/38  S: 1/3\n";
+        let stats = parse_helion_levelstat(text);
+        assert_eq!(stats.format, "stats_txt");
+        assert_eq!(stats.maps.len(), 1);
+        let m = &stats.maps[0];
+        assert_eq!(m.lump, "MAP01");
+        assert!((m.time_secs - 65.040).abs() < 0.001);
+        assert_eq!(m.best_time, (65.040f64 * TICS_PER_SECOND).round() as i32);
+        assert_eq!(m.kills, 59);
+        assert_eq!(m.total_kills, 59);
+        assert_eq!(m.items, 38);
+        assert_eq!(m.total_items, 38);
+        assert_eq!(m.secrets, 1);
+        assert_eq!(m.total_secrets, 3);
+        assert_eq!(m.total_exits, 1);
+        assert_eq!(m.best_skill, 4);
+    }
+
+    #[test]
+    fn test_parse_helion_levelstat_millis_not_centis() {
+        // ".97" is 97 milliseconds in Helion's format, not dsda's 0.97s
+        let text = "E1M1 - 0:32.97 (0:32)  K: 10/10  I: 5/5  S: 0/0\n";
+        let stats = parse_helion_levelstat(text);
+        assert!((stats.maps[0].time_secs - 32.097).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_parse_helion_levelstat_total_time_with_fraction() {
+        // Defensive: accept a fractional total time even though current
+        // Helion omits it.
+        let text = "MAP02 - 2:10.5 (3:15.40)  K: 1/2  I: 0/0  S: 0/0\n";
+        let stats = parse_helion_levelstat(text);
+        assert_eq!(stats.maps.len(), 1);
+        assert!((stats.maps[0].time_secs - 130.005).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_parse_helion_levelstat_ignores_noise() {
+        let text = "garbage line\nMAP01 - 0:30.0 (0:30)  K: 1/1  I: 0/0  S: 0/0\n\n";
+        let stats = parse_helion_levelstat(text);
+        assert_eq!(stats.maps.len(), 1);
+    }
+
+    #[test]
+    fn test_collect_helion_stats_missing_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("levelstat.txt");
+        assert!(!collect_helion_stats_from(&src, dir.path(), None));
+    }
+
+    #[test]
+    fn test_collect_helion_stats_writes_and_truncates_source() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let data_dir = tempfile::tempdir().unwrap();
+        let src = src_dir.path().join("levelstat.txt");
+        std::fs::write(
+            &src,
+            "MAP01 - 1:5.40 (1:5)  K: 59/59  I: 38/38  S: 1/3\n\
+             MAP02 - 0:45.2 (1:50)  K: 30/40  I: 10/10  S: 0/2\n",
+        )
+        .unwrap();
+
+        assert!(collect_helion_stats_from(&src, data_dir.path(), None));
+
+        let content = std::fs::read_to_string(data_dir.path().join("stats.txt")).unwrap();
+        let stats = wad_stats::parse_stats_text(&content).unwrap();
+        assert_eq!(stats.format, "stats_txt");
+        assert_eq!(stats.maps.len(), 2);
+        assert_eq!(stats.maps[0].lump, "MAP01");
+        assert_eq!(stats.maps[0].total_exits, 1);
+        assert_eq!(stats.maps[1].lump, "MAP02");
+
+        // Source must be truncated so a later collect can't double-count
+        assert_eq!(std::fs::read_to_string(&src).unwrap(), "");
+        assert!(!collect_helion_stats_from(&src, data_dir.path(), None));
+    }
+
+    #[test]
+    fn test_collect_helion_stats_repeat_exits_fold() {
+        // The same map exited twice in one session sums exits, keeps best time
+        let src_dir = tempfile::tempdir().unwrap();
+        let data_dir = tempfile::tempdir().unwrap();
+        let src = src_dir.path().join("levelstat.txt");
+        std::fs::write(
+            &src,
+            "MAP01 - 1:30.0 (1:30)  K: 40/59  I: 20/38  S: 0/3\n\
+             MAP01 - 1:5.40 (2:35)  K: 59/59  I: 38/38  S: 1/3\n",
+        )
+        .unwrap();
+
+        assert!(collect_helion_stats_from(&src, data_dir.path(), None));
+
+        let content = std::fs::read_to_string(data_dir.path().join("stats.txt")).unwrap();
+        let stats = wad_stats::parse_stats_text(&content).unwrap();
+        assert_eq!(stats.maps.len(), 1);
+        let m = &stats.maps[0];
+        assert_eq!(m.total_exits, 2);
+        assert_eq!(m.kills, 59);
+        assert_eq!(m.secrets, 1);
+        assert_eq!(m.best_time, (65.040f64 * TICS_PER_SECOND).round() as i32);
+    }
+
+    fn write_hsg(path: &Path, map: &str, skill: i32) {
+        let file = std::fs::File::create(path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        zip.start_file("world.json", options).unwrap();
+        zip.write_all(format!(r#"{{"MapName":"{map}","Skill":{skill}}}"#).as_bytes())
+            .unwrap();
+        zip.finish().unwrap();
+    }
+
+    #[test]
+    fn test_read_hsg_map_skill() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("autosave0.hsg");
+        write_hsg(&path, "MAP02", 1);
+        assert_eq!(read_hsg_map_skill(&path), Some(("MAP02".to_string(), 1)));
+    }
+
+    #[test]
+    fn test_collect_helion_applies_save_skill() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let data_dir = tempfile::tempdir().unwrap();
+        let src = src_dir.path().join("levelstat.txt");
+        std::fs::write(&src, "MAP01 - 1:5.40 (1:5)  K: 59/59  I: 38/38  S: 1/3\n").unwrap();
+        // Autosave for MAP01 played on ITYTD (VeryEasy = 1)
+        write_hsg(&data_dir.path().join("autosave0.hsg"), "MAP01", 1);
+
+        assert!(collect_helion_stats_from(&src, data_dir.path(), None));
+
+        let content = std::fs::read_to_string(data_dir.path().join("stats.txt")).unwrap();
+        let stats = wad_stats::parse_stats_text(&content).unwrap();
+        assert_eq!(stats.maps[0].best_skill, 1);
+    }
+
+    #[test]
+    fn test_collect_helion_skill_falls_back_to_latest_save() {
+        // MAP01's autosave rotated away; only MAP02's save remains. MAP01
+        // gets the latest session save's skill instead of defaulting to UV.
+        let src_dir = tempfile::tempdir().unwrap();
+        let data_dir = tempfile::tempdir().unwrap();
+        let src = src_dir.path().join("levelstat.txt");
+        std::fs::write(
+            &src,
+            "MAP01 - 1:5.40 (1:5)  K: 59/59  I: 38/38  S: 1/3\n\
+             MAP02 - 0:45.2 (1:50)  K: 30/40  I: 10/10  S: 0/2\n",
+        )
+        .unwrap();
+        write_hsg(&data_dir.path().join("autosave0.hsg"), "MAP02", 2);
+
+        assert!(collect_helion_stats_from(&src, data_dir.path(), None));
+
+        let content = std::fs::read_to_string(data_dir.path().join("stats.txt")).unwrap();
+        let stats = wad_stats::parse_stats_text(&content).unwrap();
+        let map01 = stats.maps.iter().find(|m| m.lump == "MAP01").unwrap();
+        let map02 = stats.maps.iter().find(|m| m.lump == "MAP02").unwrap();
+        assert_eq!(map02.best_skill, 2);
+        assert_eq!(map01.best_skill, 2); // latest-save fallback
+    }
+
+    #[test]
+    fn test_collect_helion_no_saves_defaults_to_uv() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let data_dir = tempfile::tempdir().unwrap();
+        let src = src_dir.path().join("levelstat.txt");
+        std::fs::write(&src, "MAP01 - 1:5.40 (1:5)  K: 59/59  I: 38/38  S: 1/3\n").unwrap();
+
+        assert!(collect_helion_stats_from(&src, data_dir.path(), None));
+
+        let content = std::fs::read_to_string(data_dir.path().join("stats.txt")).unwrap();
+        let stats = wad_stats::parse_stats_text(&content).unwrap();
+        assert_eq!(stats.maps[0].best_skill, 4);
+    }
+
+    #[test]
+    fn test_collect_helion_ignores_saves_before_session() {
+        // A stale save from an older session (mtime < session_start) must
+        // not leak its skill into this session's maps.
+        let src_dir = tempfile::tempdir().unwrap();
+        let data_dir = tempfile::tempdir().unwrap();
+        let src = src_dir.path().join("levelstat.txt");
+        std::fs::write(&src, "MAP01 - 1:5.40 (1:5)  K: 59/59  I: 38/38  S: 1/3\n").unwrap();
+        write_hsg(&data_dir.path().join("autosave0.hsg"), "MAP01", 1);
+
+        let future = SystemTime::now() + std::time::Duration::from_secs(3600);
+        assert!(collect_helion_stats_from(
+            &src,
+            data_dir.path(),
+            Some(future)
+        ));
+
+        let content = std::fs::read_to_string(data_dir.path().join("stats.txt")).unwrap();
+        let stats = wad_stats::parse_stats_text(&content).unwrap();
+        assert_eq!(stats.maps[0].best_skill, 4);
+    }
+
+    #[test]
+    fn test_collect_helion_stats_merges_across_sessions() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let data_dir = tempfile::tempdir().unwrap();
+        let src = src_dir.path().join("levelstat.txt");
+
+        // Session 1: MAP01
+        std::fs::write(&src, "MAP01 - 1:30.0 (1:30)  K: 40/59  I: 20/38  S: 0/3\n").unwrap();
+        assert!(collect_helion_stats_from(&src, data_dir.path(), None));
+
+        // Session 2: replay MAP01 (better), plus MAP02
+        std::fs::write(
+            &src,
+            "MAP01 - 1:5.40 (1:5)  K: 59/59  I: 38/38  S: 1/3\n\
+             MAP02 - 0:45.2 (1:50)  K: 30/40  I: 10/10  S: 0/2\n",
+        )
+        .unwrap();
+        assert!(collect_helion_stats_from(&src, data_dir.path(), None));
+
+        let content = std::fs::read_to_string(data_dir.path().join("stats.txt")).unwrap();
+        let after = wad_stats::parse_stats_text(&content).unwrap();
+        assert_eq!(after.maps.len(), 2);
+        let map01 = after.maps.iter().find(|m| m.lump == "MAP01").unwrap();
+        assert_eq!(map01.total_exits, 2);
+        assert_eq!(map01.kills, 59);
+        assert_eq!(
+            map01.best_time,
+            (65.040f64 * TICS_PER_SECOND).round() as i32
+        );
+
+        // Session deltas key off total_exits diffs, so only MAP02 is "new"
+        // relative to a snapshot taken after session 1 plus the MAP01 replay.
+        let map02 = after.maps.iter().find(|m| m.lump == "MAP02").unwrap();
+        assert_eq!(map02.total_exits, 1);
     }
 
     #[test]

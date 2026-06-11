@@ -38,7 +38,7 @@ pub struct BackupInfo {
 
 /// Find all save files in a WAD data directory.
 ///
-/// Recursively scans for files matching known save extensions (.dsg, .zds).
+/// Recursively scans for files matching known save extensions (.dsg, .zds, .hsg).
 pub fn find_save_files(data_dir: &Path) -> Vec<SaveFile> {
     if !data_dir.is_dir() {
         return Vec::new();

@@ -29,7 +29,7 @@ pub struct GcArgs {
     #[arg(short = 'y', long)]
     yes: bool,
 
-    /// Preserve save files (.dsg/.zds) in data dirs
+    /// Preserve save files (.dsg/.zds/.hsg) in data dirs
     #[arg(long)]
     keep_saves: bool,
 
