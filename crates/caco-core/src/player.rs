@@ -524,6 +524,7 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
     let stats_before = read_session_stats_before(conn, wad_id);
 
     // Launch sourceport
+    let session_start = std::time::SystemTime::now();
     cmd.stdin(std::process::Stdio::null());
     let mut child = cmd.spawn().map_err(|e| {
         crate::Error::FileNotFound(format!("Failed to launch sourceport '{}': {}", port, e))
@@ -565,7 +566,7 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
         && config::get_auto_stats()
         && let Some(ref data_dir) = wad_data_dir
     {
-        stats_watcher::collect_helion_stats(data_dir);
+        stats_watcher::collect_helion_stats(data_dir, Some(session_start));
     }
 
     // Auto-track stats

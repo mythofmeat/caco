@@ -21,6 +21,7 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
+use std::time::SystemTime;
 
 use regex::Regex;
 
@@ -615,7 +616,8 @@ pub fn helion_levelstat_path() -> Option<PathBuf> {
 ///
 /// One entry per exit line (duplicates fold later in `merge_session_stats`),
 /// `total_exits = 1`, and `best_skill = 4` — levelstat carries no skill, so
-/// mark "played at unknown skill" like the dsda levelstat parser does.
+/// mark "played at unknown skill" like the dsda levelstat parser does. The
+/// real skill is recovered afterwards from `.hsg` save games when possible.
 fn parse_helion_levelstat(text: &str) -> WadStats {
     let mut maps = Vec::new();
     for line in text.lines() {
@@ -656,26 +658,104 @@ fn parse_helion_levelstat(text: &str) -> WadStats {
     }
 }
 
+/// Skill levels recovered from Helion `.hsg` saves written during a session.
+struct HelionSessionSkills {
+    by_map: HashMap<String, i32>,
+    /// Skill of the most recently written save — fallback for exited maps
+    /// whose own autosave has already rotated away.
+    latest: Option<i32>,
+}
+
+/// Recover per-map skill from Helion save games in `savedir`.
+///
+/// Helion's levelstat carries no skill, but its `.hsg` saves (a zip with a
+/// `world.json`) record both `MapName` and `Skill`. Helion autosaves on map
+/// entry, so saves written during the session cover the maps played. The
+/// `SkillLevel` enum (None, VeryEasy..Nightmare = 0..5) maps 1:1 onto Doom
+/// skill numbers 1-5. Only saves modified at/after `since` are considered.
+fn read_helion_save_skills(savedir: &Path, since: Option<SystemTime>) -> HelionSessionSkills {
+    let mut saves: Vec<(SystemTime, String, i32)> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(savedir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("hsg") {
+                continue;
+            }
+            let Ok(mtime) = entry.metadata().and_then(|m| m.modified()) else {
+                continue;
+            };
+            if let Some(since) = since
+                && mtime < since
+            {
+                continue;
+            }
+            let Some((map, skill)) = read_hsg_map_skill(&path) else {
+                continue;
+            };
+            if (1..=5).contains(&skill) {
+                saves.push((mtime, map, skill));
+            }
+        }
+    }
+    saves.sort_by_key(|s| s.0);
+    let latest = saves.last().map(|s| s.2);
+    let by_map = saves
+        .into_iter()
+        .map(|(_, map, skill)| (map, skill))
+        .collect();
+    HelionSessionSkills { by_map, latest }
+}
+
+/// Extract (MapName, Skill) from one Helion `.hsg` save game.
+fn read_hsg_map_skill(path: &Path) -> Option<(String, i32)> {
+    let file = std::fs::File::open(path).ok()?;
+    let mut zip = zip::ZipArchive::new(file).ok()?;
+    let mut world = zip.by_name("world.json").ok()?;
+    let mut text = String::new();
+    world.read_to_string(&mut text).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let map = v.get("MapName")?.as_str()?.to_ascii_uppercase();
+    let skill = v.get("Skill")?.as_i64()? as i32;
+    Some((map, skill))
+}
+
 /// After a Helion session, consume the global levelstat file into the WAD's
 /// managed `stats.txt` in `data_dir`.
 ///
+/// `session_start` bounds the save-game scan used for skill recovery to
+/// this session's saves.
+///
 /// Returns `true` if stats were merged and written.
-pub fn collect_helion_stats(data_dir: &Path) -> bool {
+pub fn collect_helion_stats(data_dir: &Path, session_start: Option<SystemTime>) -> bool {
     match helion_levelstat_path() {
-        Some(path) => collect_helion_stats_from(&path, data_dir),
+        Some(path) => collect_helion_stats_from(&path, data_dir, session_start),
         None => false,
     }
 }
 
-fn collect_helion_stats_from(levelstat_path: &Path, data_dir: &Path) -> bool {
+fn collect_helion_stats_from(
+    levelstat_path: &Path,
+    data_dir: &Path,
+    session_start: Option<SystemTime>,
+) -> bool {
     let text = match std::fs::read_to_string(levelstat_path) {
         Ok(t) => t,
         Err(_) => return false,
     };
 
-    let session = parse_helion_levelstat(&text);
+    let mut session = parse_helion_levelstat(&text);
     if session.maps.is_empty() {
         return false;
+    }
+
+    // Recover real skill from this session's save games (the levelstat
+    // format has no skill field). Unmatched maps fall back to the latest
+    // session save's skill, then to the parser's "unknown skill" default.
+    let skills = read_helion_save_skills(data_dir, session_start);
+    for m in &mut session.maps {
+        if let Some(skill) = skills.by_map.get(&m.lump).copied().or(skills.latest) {
+            m.best_skill = skill;
+        }
     }
 
     let stats_path = data_dir.join("stats.txt");
@@ -1164,7 +1244,7 @@ mod tests {
     fn test_collect_helion_stats_missing_source() {
         let dir = tempfile::tempdir().unwrap();
         let src = dir.path().join("levelstat.txt");
-        assert!(!collect_helion_stats_from(&src, dir.path()));
+        assert!(!collect_helion_stats_from(&src, dir.path(), None));
     }
 
     #[test]
@@ -1179,7 +1259,7 @@ mod tests {
         )
         .unwrap();
 
-        assert!(collect_helion_stats_from(&src, data_dir.path()));
+        assert!(collect_helion_stats_from(&src, data_dir.path(), None));
 
         let content = std::fs::read_to_string(data_dir.path().join("stats.txt")).unwrap();
         let stats = wad_stats::parse_stats_text(&content).unwrap();
@@ -1191,7 +1271,7 @@ mod tests {
 
         // Source must be truncated so a later collect can't double-count
         assert_eq!(std::fs::read_to_string(&src).unwrap(), "");
-        assert!(!collect_helion_stats_from(&src, data_dir.path()));
+        assert!(!collect_helion_stats_from(&src, data_dir.path(), None));
     }
 
     #[test]
@@ -1207,7 +1287,7 @@ mod tests {
         )
         .unwrap();
 
-        assert!(collect_helion_stats_from(&src, data_dir.path()));
+        assert!(collect_helion_stats_from(&src, data_dir.path(), None));
 
         let content = std::fs::read_to_string(data_dir.path().join("stats.txt")).unwrap();
         let stats = wad_stats::parse_stats_text(&content).unwrap();
@@ -1219,6 +1299,101 @@ mod tests {
         assert_eq!(m.best_time, (65.040f64 * TICS_PER_SECOND).round() as i32);
     }
 
+    fn write_hsg(path: &Path, map: &str, skill: i32) {
+        let file = std::fs::File::create(path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        zip.start_file("world.json", options).unwrap();
+        zip.write_all(format!(r#"{{"MapName":"{map}","Skill":{skill}}}"#).as_bytes())
+            .unwrap();
+        zip.finish().unwrap();
+    }
+
+    #[test]
+    fn test_read_hsg_map_skill() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("autosave0.hsg");
+        write_hsg(&path, "MAP02", 1);
+        assert_eq!(read_hsg_map_skill(&path), Some(("MAP02".to_string(), 1)));
+    }
+
+    #[test]
+    fn test_collect_helion_applies_save_skill() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let data_dir = tempfile::tempdir().unwrap();
+        let src = src_dir.path().join("levelstat.txt");
+        std::fs::write(&src, "MAP01 - 1:5.40 (1:5)  K: 59/59  I: 38/38  S: 1/3\n").unwrap();
+        // Autosave for MAP01 played on ITYTD (VeryEasy = 1)
+        write_hsg(&data_dir.path().join("autosave0.hsg"), "MAP01", 1);
+
+        assert!(collect_helion_stats_from(&src, data_dir.path(), None));
+
+        let content = std::fs::read_to_string(data_dir.path().join("stats.txt")).unwrap();
+        let stats = wad_stats::parse_stats_text(&content).unwrap();
+        assert_eq!(stats.maps[0].best_skill, 1);
+    }
+
+    #[test]
+    fn test_collect_helion_skill_falls_back_to_latest_save() {
+        // MAP01's autosave rotated away; only MAP02's save remains. MAP01
+        // gets the latest session save's skill instead of defaulting to UV.
+        let src_dir = tempfile::tempdir().unwrap();
+        let data_dir = tempfile::tempdir().unwrap();
+        let src = src_dir.path().join("levelstat.txt");
+        std::fs::write(
+            &src,
+            "MAP01 - 1:5.40 (1:5)  K: 59/59  I: 38/38  S: 1/3\n\
+             MAP02 - 0:45.2 (1:50)  K: 30/40  I: 10/10  S: 0/2\n",
+        )
+        .unwrap();
+        write_hsg(&data_dir.path().join("autosave0.hsg"), "MAP02", 2);
+
+        assert!(collect_helion_stats_from(&src, data_dir.path(), None));
+
+        let content = std::fs::read_to_string(data_dir.path().join("stats.txt")).unwrap();
+        let stats = wad_stats::parse_stats_text(&content).unwrap();
+        let map01 = stats.maps.iter().find(|m| m.lump == "MAP01").unwrap();
+        let map02 = stats.maps.iter().find(|m| m.lump == "MAP02").unwrap();
+        assert_eq!(map02.best_skill, 2);
+        assert_eq!(map01.best_skill, 2); // latest-save fallback
+    }
+
+    #[test]
+    fn test_collect_helion_no_saves_defaults_to_uv() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let data_dir = tempfile::tempdir().unwrap();
+        let src = src_dir.path().join("levelstat.txt");
+        std::fs::write(&src, "MAP01 - 1:5.40 (1:5)  K: 59/59  I: 38/38  S: 1/3\n").unwrap();
+
+        assert!(collect_helion_stats_from(&src, data_dir.path(), None));
+
+        let content = std::fs::read_to_string(data_dir.path().join("stats.txt")).unwrap();
+        let stats = wad_stats::parse_stats_text(&content).unwrap();
+        assert_eq!(stats.maps[0].best_skill, 4);
+    }
+
+    #[test]
+    fn test_collect_helion_ignores_saves_before_session() {
+        // A stale save from an older session (mtime < session_start) must
+        // not leak its skill into this session's maps.
+        let src_dir = tempfile::tempdir().unwrap();
+        let data_dir = tempfile::tempdir().unwrap();
+        let src = src_dir.path().join("levelstat.txt");
+        std::fs::write(&src, "MAP01 - 1:5.40 (1:5)  K: 59/59  I: 38/38  S: 1/3\n").unwrap();
+        write_hsg(&data_dir.path().join("autosave0.hsg"), "MAP01", 1);
+
+        let future = SystemTime::now() + std::time::Duration::from_secs(3600);
+        assert!(collect_helion_stats_from(
+            &src,
+            data_dir.path(),
+            Some(future)
+        ));
+
+        let content = std::fs::read_to_string(data_dir.path().join("stats.txt")).unwrap();
+        let stats = wad_stats::parse_stats_text(&content).unwrap();
+        assert_eq!(stats.maps[0].best_skill, 4);
+    }
+
     #[test]
     fn test_collect_helion_stats_merges_across_sessions() {
         let src_dir = tempfile::tempdir().unwrap();
@@ -1227,7 +1402,7 @@ mod tests {
 
         // Session 1: MAP01
         std::fs::write(&src, "MAP01 - 1:30.0 (1:30)  K: 40/59  I: 20/38  S: 0/3\n").unwrap();
-        assert!(collect_helion_stats_from(&src, data_dir.path()));
+        assert!(collect_helion_stats_from(&src, data_dir.path(), None));
 
         // Session 2: replay MAP01 (better), plus MAP02
         std::fs::write(
@@ -1236,7 +1411,7 @@ mod tests {
              MAP02 - 0:45.2 (1:50)  K: 30/40  I: 10/10  S: 0/2\n",
         )
         .unwrap();
-        assert!(collect_helion_stats_from(&src, data_dir.path()));
+        assert!(collect_helion_stats_from(&src, data_dir.path(), None));
 
         let content = std::fs::read_to_string(data_dir.path().join("stats.txt")).unwrap();
         let after = wad_stats::parse_stats_text(&content).unwrap();
