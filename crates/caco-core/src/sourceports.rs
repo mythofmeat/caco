@@ -87,12 +87,12 @@ pub static SAVE_EXTENSIONS: LazyLock<HashMap<&'static str, &'static [&'static st
             ("chocolate", &[".dsg"][..]),
             ("woof", &[".dsg"][..]),
             ("eternity", &[".dsg"][..]),
-            ("helion", &[".dsg"][..]),
+            ("helion", &[".hsg"][..]),
         ])
     });
 
 /// All known save file extensions.
-pub static ALL_SAVE_EXTENSIONS: &[&str] = &[".dsg", ".zds"];
+pub static ALL_SAVE_EXTENSIONS: &[&str] = &[".dsg", ".zds", ".hsg"];
 
 // Reverse lookup: executable basename -> family
 static EXE_MAP: LazyLock<HashMap<&'static str, &'static SourceportFamily>> = LazyLock::new(|| {
@@ -603,6 +603,7 @@ mod tests {
 
     #[test]
     fn test_helion_save_extensions() {
-        assert_eq!(SAVE_EXTENSIONS.get("helion").unwrap(), &[".dsg"]);
+        assert_eq!(SAVE_EXTENSIONS.get("helion").unwrap(), &[".hsg"]);
+        assert!(ALL_SAVE_EXTENSIONS.contains(&".hsg"));
     }
 }
