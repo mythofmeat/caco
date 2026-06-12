@@ -37,17 +37,17 @@ git_tag_enable = false
 # pattern is used for creating a tag only on caco-cli; the other crates use it
 # for tag-existence checks.
 git_tag_name = "v{{ version }}"
-# Only bumping conventional types trigger a release. This is the actual
-# release-loop breaker: release PRs are squash-merged as "Release vX.Y.Z (#N)",
-# which doesn't match this regex, so merging a release PR can never spawn the
-# next one. (The `^Release v` skip in commit_parsers below is cosmetic only —
-# per release-plz docs, changelog-skipped commits still count toward the
-# version bump; release_commits alone gates whether a release is triggered.
-# Learned the hard way: v3.3.1–v3.3.3 were empty self-spawned releases.)
-# Side effect, as documented in CLAUDE.md: non-conventional and
-# chore/docs/ci/etc. commits no longer trigger releases on their own, though
-# the changelog catch-all still lists non-conventional ones when they ride
-# along with a real release.
+# release_commits is the gate that decides whether a release is prepared at
+# all: release-plz bumps the version and opens a Release PR only if at least
+# one commit since the last release matches this regex. Only bumping
+# conventional types match, so squash-merged "Release vX.Y.Z (#N)" commits
+# (and chore/docs/ci/non-conventional ones) can never spawn the next release
+# — this is what broke the v3.3.1–v3.3.3 self-release loop.
+# Do not confuse this with `commit_parsers.skip` in [changelog] below:
+# `skip` only controls changelog grouping/rendering and does NOT prevent
+# version bumps; release_commits is the only mechanism that stops a commit
+# from triggering a release. Non-conventional commits still appear in the
+# changelog via the catch-all when they ride along with a real release.
 release_commits = "^(feat|fix|perf|refactor|revert)[(:!]"
 
 # Lockstep version group: every workspace crate shares the same next version,
