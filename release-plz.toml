@@ -37,10 +37,18 @@ git_tag_enable = false
 # pattern is used for creating a tag only on caco-cli; the other crates use it
 # for tag-existence checks.
 git_tag_name = "v{{ version }}"
-# No release_commits filter: this repo's history uses a mix of non-conventional
-# squash titles (e.g. "Add ...", "Stats reporter: ..."). A regex would skip
-# release PRs for those. commit_parsers below still groups conventional
-# commits into changelog sections when used, with a catch-all for the rest.
+# Only bumping conventional types trigger a release. This is the actual
+# release-loop breaker: release PRs are squash-merged as "Release vX.Y.Z (#N)",
+# which doesn't match this regex, so merging a release PR can never spawn the
+# next one. (The `^Release v` skip in commit_parsers below is cosmetic only —
+# per release-plz docs, changelog-skipped commits still count toward the
+# version bump; release_commits alone gates whether a release is triggered.
+# Learned the hard way: v3.3.1–v3.3.3 were empty self-spawned releases.)
+# Side effect, as documented in CLAUDE.md: non-conventional and
+# chore/docs/ci/etc. commits no longer trigger releases on their own, though
+# the changelog catch-all still lists non-conventional ones when they ride
+# along with a real release.
+release_commits = "^(feat|fix|perf|refactor|revert)[(:!]"
 
 # Lockstep version group: every workspace crate shares the same next version,
 # so a release driven by changes in any single crate still produces one
@@ -101,13 +109,9 @@ body = """
 """
 trim = true
 commit_parsers = [
-  # Break the release loop. Release PRs are squash-merged, which rewrites
-  # release-plz's own `chore: release` commit into `Release vX.Y.Z (#N)` with
-  # a fresh SHA — so release-plz no longer recognizes it as its own release
-  # commit and skips it. Without this rule the `.*` catch-all below would
-  # treat that squash commit as a releasable change and open the *next*
-  # "Release vX.Y.Z+1" PR, which on merge spawns another, ad infinitum.
-  # Skipping it keeps it out of the changelog AND stops it triggering a bump.
+  # Keep squash-merged release commits ("Release vX.Y.Z (#N)") out of the
+  # changelog body. Changelog-only: this does NOT stop the commit from
+  # triggering a bump — `release_commits` in [workspace] is the loop breaker.
   { message = "^Release v", skip = true },
   { message = "^feat",     group = "Added" },
   { message = "^fix",      group = "Fixed" },
@@ -120,8 +124,9 @@ commit_parsers = [
   { message = "^ci",       skip  = true },
   { message = "^build",    skip  = true },
   { message = "^style",    skip  = true },
-  # Catch-all: this repo's non-conventional squash titles (`Add ...`,
+  # Catch-all: legacy non-conventional squash titles (`Add ...`,
   # `Stats reporter: ...`) would otherwise be omitted from the changelog
-  # body even though release_commits is unset and they trigger releases.
+  # body. They don't trigger releases (see release_commits), but still get
+  # listed when they ride along with one.
   { message = ".*",         group = "Changed" },
 ]
