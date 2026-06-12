@@ -3,6 +3,13 @@
 All notable changes to Caco are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.3.1] - 2026-06-11
+
+### Added
+
+- **gui**: Settings dialog with config.toml persistence and per-port launch args ([#17](https://github.com/mythofmeat/caco/pull/17))
+- **stats**: Helion level completion tracking ([#16](https://github.com/mythofmeat/caco/pull/16))
+
 ## [3.3.0] - 2026-06-11
 
 ### Added
