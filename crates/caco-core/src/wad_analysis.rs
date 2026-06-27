@@ -41,7 +41,7 @@ const MAP_LUMPS: &[&str] = &[
 
 /// Analysis format version. Bump this whenever detection logic changes
 /// so that stale cached analyses are automatically invalidated and re-run.
-pub const ANALYSIS_VERSION: u32 = 10;
+pub const ANALYSIS_VERSION: u32 = 11;
 
 /// Tail maps with fewer than this many monster things are peeled off as
 /// `OptionalCredits`. Threshold is "more than one" so a single decorative
@@ -223,8 +223,14 @@ fn build_graph(
                 || (normal_self_loop && (secret_self_loop || edge.secret_next.is_none()));
             if stops_here {
                 graph.has_endgame.insert(lump.clone());
+                // The normal exit ends the episode; drop any normal edge
+                // (including a vanilla one inherited from the map name).
                 graph.edges_normal.remove(lump.as_str());
-                graph.edges_secret.remove(lump.as_str());
+                // A valid forward secret edge survives: `next = endpic` with
+                // `secretnext = MAP31` ends the episode on the normal exit but
+                // still branches to a secret level. The secret block above
+                // already removed self-loops and out-of-set targets, so any
+                // remaining secret edge is a real branch worth keeping.
             }
         }
     }
@@ -319,18 +325,26 @@ fn add_vanilla_edges(graph: &mut MapGraph, map_set: &HashSet<&str>, is_doom1: bo
 /// Walk the graph and assign a classification to each map.
 ///
 /// Algorithm:
-/// 1. Pick start = lowest-keyed playable map.
-/// 2. Walk the main path, preferring normal edges, falling back to secret
-///    edges only when no normal edge exists ("forced secret = true ending").
-/// 3. **Tail peel**: starting from the end of the walk, demote each map to
+/// 1. Roots = the canonical start (lowest-keyed playable map) plus every
+///    `episode` entry point. A multi-episode WAD has no single linear path
+///    through all maps, so each episode's first map is walked independently.
+/// 2. From each root, walk the main path, preferring normal edges, falling
+///    back to secret edges only when no normal edge exists ("forced secret =
+///    true ending"). A node already claimed by an earlier walk stops the walk.
+/// 3. **Tail peel** (per walk): starting from the end, demote each map to
 ///    `OptionalCredits` while its monster count is below the playable
-///    threshold. The deepest map with real monsters is the playable
-///    terminus. The walk's *first* map is never peeled — we always require
-///    at least one Required map so an empty/test WAD doesn't auto-complete.
+///    threshold. The deepest map with real monsters is the playable terminus.
+///    A walk's *first* map (a root) is never peeled — we always require at
+///    least one Required map so an empty/test WAD doesn't auto-complete.
 /// 4. Walk secret branches off main-path nodes; mark visited nodes as
 ///    `OptionalSecret`.
 /// 5. Anything still unmarked is `Unreachable`.
-fn classify_maps(graph: &MapGraph, infos: &mut [MapInfo], monsters: &HashMap<String, usize>) {
+fn classify_maps(
+    graph: &MapGraph,
+    infos: &mut [MapInfo],
+    monsters: &HashMap<String, usize>,
+    episode_roots: &[String],
+) {
     if infos.is_empty() {
         return;
     }
@@ -350,45 +364,58 @@ fn classify_maps(graph: &MapGraph, infos: &mut [MapInfo], monsters: &HashMap<Str
         .map(|(i, m)| (m.lump.clone(), i))
         .collect();
 
-    // 1. Main-path walk
+    // Roots: canonical start first, then each episode entry point that exists
+    // as a playable map. Order matters — the start owns shared tails; episode
+    // walks pick up only the maps the start didn't already claim.
+    let mut roots: Vec<String> = vec![start];
+    for r in episode_roots {
+        if by_lump.contains_key(r) && !roots.contains(r) {
+            roots.push(r.clone());
+        }
+    }
+
+    // 1. Main-path walk from every root. `visited` is shared across roots so a
+    //    walk that merges into an already-claimed chain stops cleanly.
     let mut visited: HashSet<String> = HashSet::new();
-    let mut walk_order: Vec<String> = Vec::new();
-    let mut current = Some(start);
-    while let Some(node) = current {
-        if !visited.insert(node.clone()) {
-            break; // cycle
+    for root in &roots {
+        let mut walk_order: Vec<String> = Vec::new();
+        let mut current = Some(root.clone());
+        while let Some(node) = current {
+            if !visited.insert(node.clone()) {
+                break; // cycle or already claimed by an earlier root
+            }
+            walk_order.push(node.clone());
+            if let Some(&idx) = by_lump.get(node.as_str()) {
+                infos[idx].classification = MapClassification::Required;
+            }
+            if graph.has_endgame.contains(&node) {
+                break;
+            }
+            current = match (graph.edges_normal.get(&node), graph.edges_secret.get(&node)) {
+                (Some(nx), _) => Some(nx.clone()),
+                (None, Some(sx)) => Some(sx.clone()), // forced secret = true ending
+                (None, None) => None,
+            };
         }
-        walk_order.push(node.clone());
-        if let Some(&idx) = by_lump.get(node.as_str()) {
-            infos[idx].classification = MapClassification::Required;
+
+        // 2. Tail peel this walk: walk back from the end demoting low-monster
+        //    maps to OptionalCredits. Stop at the first map that has real
+        //    monsters — that's the playable terminus. Never peel index 0 (the
+        //    root) so a tiny/empty WAD still has at least one Required map.
+        for i in (1..walk_order.len()).rev() {
+            let lump = &walk_order[i];
+            let count = monsters.get(lump).copied().unwrap_or(0);
+            if count >= MIN_MONSTERS_FOR_PLAYABLE {
+                break;
+            }
+            if let Some(&idx) = by_lump.get(lump.as_str()) {
+                infos[idx].classification = MapClassification::OptionalCredits;
+            }
         }
-        if graph.has_endgame.contains(&node) {
-            break;
-        }
-        current = match (graph.edges_normal.get(&node), graph.edges_secret.get(&node)) {
-            (Some(nx), _) => Some(nx.clone()),
-            (None, Some(sx)) => Some(sx.clone()), // forced secret = true ending
-            (None, None) => None,
-        };
     }
 
-    // 2. Tail peel: walk back from the end demoting low-monster maps to
-    //    OptionalCredits. Stop at the first map that has real monsters —
-    //    that's the playable terminus. Never peel index 0 so a tiny/empty
-    //    WAD still has at least one Required map.
-    for i in (1..walk_order.len()).rev() {
-        let lump = &walk_order[i];
-        let count = monsters.get(lump).copied().unwrap_or(0);
-        if count >= MIN_MONSTERS_FOR_PLAYABLE {
-            break;
-        }
-        if let Some(&idx) = by_lump.get(lump.as_str()) {
-            infos[idx].classification = MapClassification::OptionalCredits;
-        }
-    }
-
-    // 3. Secret branches off the main path
-    let main_path: HashSet<String> = walk_order.iter().cloned().collect();
+    // 3. Secret branches off any main-path node.
+    let main_path: HashSet<String> = visited;
     let mut sec_queue: VecDeque<String> = VecDeque::new();
     for node in &main_path {
         if let Some(sx) = graph.edges_secret.get(node)
@@ -529,6 +556,7 @@ pub fn analyze_wad(wad_data: &[u8]) -> Option<WadAnalysis> {
 
     // Collect flow sources from the WAD.
     let mut sources: Vec<(FlowSource, HashMap<String, MapinfoEdge>)> = Vec::new();
+    let mut episode_roots: Vec<String> = Vec::new();
     let mut has_structured = false;
 
     if let Some(text) = read_lump_text(wad_data, &directory, "ZMAPINFO") {
@@ -537,6 +565,7 @@ pub fn analyze_wad(wad_data: &[u8]) -> Option<WadAnalysis> {
             has_structured = true;
             sources.push((FlowSource::Zmapinfo, entries));
         }
+        episode_roots.extend(crate::mapinfo::parse_episode_starts(&text));
     }
     if let Some(text) = read_lump_text(wad_data, &directory, "UMAPINFO") {
         let entries = parse_umapinfo_to_edges(&parse_umapinfo(&text));
@@ -551,10 +580,11 @@ pub fn analyze_wad(wad_data: &[u8]) -> Option<WadAnalysis> {
             has_structured = true;
             sources.push((FlowSource::Mapinfo, entries));
         }
+        episode_roots.extend(crate::mapinfo::parse_episode_starts(&text));
     }
 
     let graph = build_graph(&map_set, is_doom1, &sources);
-    classify_maps(&graph, &mut infos, &monsters);
+    classify_maps(&graph, &mut infos, &monsters, &episode_roots);
 
     Some(finalize(infos, has_structured))
 }
@@ -706,8 +736,10 @@ pub fn analyze_pk3(pk3_path: &std::path::Path) -> Option<WadAnalysis> {
     // PK3 maps may also have UMAPINFO embedded inside one of the WAD files.
     // Skip that lookup for now — MAPINFO/ZMAPINFO is the standard for PK3s.
 
+    let episode_roots = crate::mapinfo::parse_episode_starts(&mapinfo_text);
+
     let graph = build_graph(&map_set, is_doom1, &sources);
-    classify_maps(&graph, &mut infos, &monsters);
+    classify_maps(&graph, &mut infos, &monsters, &episode_roots);
 
     Some(finalize(infos, has_structured))
 }
@@ -1697,6 +1729,120 @@ map MAP18GZ "Biocide"
     // -----------------------------------------------------------------------
     // Edge cases
     // -----------------------------------------------------------------------
+
+    // -----------------------------------------------------------------------
+    // Multi-episode WADs (Eisberg regression)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_eisberg_shape_episodes_all_required() {
+        // Eisberg #149: an episodic megawad. Each tier is a 3-map arc ending
+        // in `next = Endpic, CREDIT`, reachable from its own `episode` marker.
+        // Before the fix the walk stopped at MAP03 and MAP04-06 were
+        // Unreachable, so the WAD auto-completed after one episode.
+        let monsters = playable_things(15);
+        let mapinfo = br#"
+episode MAP01
+{
+    name = "Tier 1"
+}
+episode MAP04
+{
+    name = "Tier 2"
+}
+map MAP01 "A"
+{
+    next = Map02
+}
+map MAP02 "B"
+{
+    next = Map03
+}
+map MAP03 "C"
+{
+    next = Endpic, CREDIT
+}
+map MAP04 "D"
+{
+    next = Map05
+}
+map MAP05 "E"
+{
+    next = Map06
+}
+map MAP06 "F"
+{
+    next = Endpic, CREDIT
+}
+"#;
+        let mut lumps: Vec<(String, Vec<u8>)> = Vec::new();
+        for i in 1..=6 {
+            lumps.push((format!("MAP{:02}", i), Vec::new()));
+            lumps.push(("THINGS".to_string(), monsters.clone()));
+        }
+        lumps.push(("MAPINFO".to_string(), mapinfo.to_vec()));
+        let lump_refs: Vec<(&str, &[u8])> = lumps
+            .iter()
+            .map(|(n, d)| (n.as_str(), d.as_slice()))
+            .collect();
+        let wad = build_wad(&lump_refs);
+
+        let a = analyze_wad(&wad).unwrap();
+        assert_eq!(a.required_maps, 6, "all six maps across both episodes");
+        for i in 1..=6 {
+            assert_eq!(
+                classify_of(&a, &format!("MAP{:02}", i)),
+                MapClassification::Required,
+            );
+        }
+        assert_eq!(a.terminal_map, None);
+    }
+
+    #[test]
+    fn test_episode_end_keeps_secret_branch_optional() {
+        // A tier whose finale ends the episode on the normal exit but branches
+        // to a secret map: `next = endpic` + `secretnext = MAP31`. MAP31 must
+        // be OptionalSecret, not a forced Required continuation.
+        let monsters = playable_things(15);
+        let mapinfo = br#"
+episode MAP13
+{
+    name = "Tier 5"
+}
+map MAP13 "A"
+{
+    next = Map14
+}
+map MAP14 "B"
+{
+    next = Map15
+}
+map MAP15 "C"
+{
+    next = Endpic, CREDIT
+    secretnext = MAP31
+}
+map MAP31 "S"
+{
+    next = Endpic, CREDIT
+}
+"#;
+        let wad = build_wad(&[
+            ("MAP13", &[]),
+            ("THINGS", &monsters),
+            ("MAP14", &[]),
+            ("THINGS", &monsters),
+            ("MAP15", &[]),
+            ("THINGS", &monsters),
+            ("MAP31", &[]),
+            ("THINGS", &monsters),
+            ("MAPINFO", mapinfo),
+        ]);
+        let a = analyze_wad(&wad).unwrap();
+        assert_eq!(classify_of(&a, "MAP15"), MapClassification::Required);
+        assert_eq!(classify_of(&a, "MAP31"), MapClassification::OptionalSecret);
+        assert!(a.secret_maps.contains(&"MAP31".to_string()));
+    }
 
     #[test]
     fn test_analyze_wad_no_maps() {
