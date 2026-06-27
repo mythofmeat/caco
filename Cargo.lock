@@ -676,7 +676,7 @@ checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 
 [[package]]
 name = "caco-cli"
-version = "3.3.4"
+version = "3.3.5"
 dependencies = [
  "caco-core",
  "caco-sources",
@@ -693,7 +693,7 @@ dependencies = [
 
 [[package]]
 name = "caco-core"
-version = "3.3.4"
+version = "3.3.5"
 dependencies = [
  "arc-swap",
  "byteorder",
@@ -714,7 +714,7 @@ dependencies = [
 
 [[package]]
 name = "caco-gui"
-version = "3.3.4"
+version = "3.3.5"
 dependencies = [
  "caco-core",
  "caco-sources",
@@ -736,7 +736,7 @@ dependencies = [
 
 [[package]]
 name = "caco-mcp"
-version = "3.3.4"
+version = "3.3.5"
 dependencies = [
  "anyhow",
  "caco-core",
@@ -761,7 +761,7 @@ dependencies = [
 
 [[package]]
 name = "caco-sources"
-version = "3.3.4"
+version = "3.3.5"
 dependencies = [
  "caco-core",
  "html-escape",
@@ -778,7 +778,7 @@ dependencies = [
 
 [[package]]
 name = "caco-tui"
-version = "3.3.4"
+version = "3.3.5"
 dependencies = [
  "caco-core",
  "caco-sources",
