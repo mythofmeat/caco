@@ -41,7 +41,12 @@ static EPISODE_RE: LazyLock<Regex> =
 /// start with `End`; a value like `next = endpic, CREDIT` means "this map ends
 /// the episode", which is semantically a `has_endgame` stopper.
 fn is_endgame_target(value: &str) -> bool {
-    value.len() >= 3 && value[..3].eq_ignore_ascii_case("end")
+    // `value` comes from a Unicode-aware `\w+` capture, so byte-slicing the
+    // first three bytes could split a multi-byte char and panic. `get(..3)`
+    // returns None on a non-char-boundary or a too-short value instead.
+    value
+        .get(..3)
+        .is_some_and(|p| p.eq_ignore_ascii_case("end"))
 }
 
 // ---------------------------------------------------------------------------
@@ -431,6 +436,15 @@ map MAP03 "Finale"
         let entries = parse_mapinfo(text);
         assert!(entries["MAP03"].has_endgame);
         assert_eq!(entries["MAP03"].next, None);
+    }
+
+    #[test]
+    fn test_next_unicode_target_does_not_panic() {
+        // `\w` is Unicode-aware, so a multi-byte map target must not panic the
+        // first-three-bytes endgame check. It's simply not an endgame target.
+        let text = "map MAP01 \"X\"\n{\n  next = \u{00e9}poque\n}\n";
+        let entries = parse_mapinfo(text);
+        assert!(!entries["MAP01"].has_endgame);
     }
 
     #[test]

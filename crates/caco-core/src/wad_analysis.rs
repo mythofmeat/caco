@@ -226,11 +226,19 @@ fn build_graph(
                 // The normal exit ends the episode; drop any normal edge
                 // (including a vanilla one inherited from the map name).
                 graph.edges_normal.remove(lump.as_str());
-                // A valid forward secret edge survives: `next = endpic` with
-                // `secretnext = MAP31` ends the episode on the normal exit but
-                // still branches to a secret level. The secret block above
-                // already removed self-loops and out-of-set targets, so any
-                // remaining secret edge is a real branch worth keeping.
+                // A secret branch survives only when *this* entry explicitly
+                // declared a valid one: `next = endpic` with `secretnext =
+                // MAP31` ends the episode on the normal exit but still branches
+                // to a secret level. An inherited vanilla secret edge (e.g. a
+                // Doom II MAP15 -> MAP31 the map name implies) is not a real
+                // branch once the episode ends here, so drop it.
+                let has_explicit_secret = edge
+                    .secret_next
+                    .as_deref()
+                    .is_some_and(|sx| !secret_self_loop && map_set.contains(sx));
+                if !has_explicit_secret {
+                    graph.edges_secret.remove(lump.as_str());
+                }
             }
         }
     }
