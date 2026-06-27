@@ -29,6 +29,26 @@ static ENDGAME_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)^\s*(endgame|endpic|endcast|endbunny|endtitle|endsequence)\s*=").unwrap()
 });
 
+/// Top-level `episode <MAP>` markers (ZDoom episode-select entries). Each names
+/// a map that is a separate entry point into the WAD's flow. The `\s+` (not
+/// `\s*=`) distinguishes the definition form `episode MAP04` from a per-map
+/// `episode = "..."` property.
+static EPISODE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)^\s*episode\s+(\w+)").unwrap());
+
+/// Whether a `next = <value>` target names a game/episode ender rather than a
+/// real map. ZDoom's end specials (`EndPic`, `EndGameC`, `EndTitle`, …) all
+/// start with `End`; a value like `next = endpic, CREDIT` means "this map ends
+/// the episode", which is semantically a `has_endgame` stopper.
+fn is_endgame_target(value: &str) -> bool {
+    // `value` comes from a Unicode-aware `\w+` capture, so byte-slicing the
+    // first three bytes could split a multi-byte char and panic. `get(..3)`
+    // returns None on a non-char-boundary or a too-short value instead.
+    value
+        .get(..3)
+        .is_some_and(|p| p.eq_ignore_ascii_case("end"))
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -96,6 +116,28 @@ pub fn parse_mapinfo(text: &str) -> HashMap<String, MapinfoEntry> {
     entries
 }
 
+/// Extract the map names of all top-level `episode <MAP>` markers.
+///
+/// In a multi-episode WAD (e.g. an episodic megawad whose tiers are picked
+/// from the episode menu) each episode names a distinct entry-point map. These
+/// are roots for flow analysis in addition to the canonical first map — without
+/// them, every episode after the first is unreachable from the start map and
+/// would be misclassified, letting the WAD auto-complete after one episode.
+///
+/// Returns uppercase map names in declaration order. Non-map markers such as
+/// `episode clear` are returned verbatim; callers filter to real maps.
+pub fn parse_episode_starts(text: &str) -> Vec<String> {
+    let text = strip_block_comments(text);
+    let mut starts = Vec::new();
+    for line in text.lines() {
+        let line = strip_line_comment(line);
+        if let Some(caps) = EPISODE_RE.captures(line) {
+            starts.push(caps[1].to_uppercase());
+        }
+    }
+    starts
+}
+
 /// Parse a block `{ ... }` starting from the header line.
 /// Returns the parsed entry and the line index after the closing `}`.
 fn parse_block(lines: &[&str], start: usize) -> (MapinfoEntry, usize) {
@@ -128,7 +170,13 @@ fn parse_block(lines: &[&str], start: usize) -> (MapinfoEntry, usize) {
         }
 
         if let Some(caps) = NEXT_RE.captures(line) {
-            entry.next = Some(caps[1].to_uppercase());
+            // `next = EndPic`-style targets end the episode; treat them as a
+            // stopper rather than an edge to a (non-existent) map.
+            if is_endgame_target(&caps[1]) {
+                entry.has_endgame = true;
+            } else {
+                entry.next = Some(caps[1].to_uppercase());
+            }
         } else if let Some(caps) = SECRETNEXT_RE.captures(line) {
             entry.secretnext = Some(caps[1].to_uppercase());
         } else if ENDGAME_RE.is_match(line) {
@@ -372,6 +420,56 @@ map MAP01 "Test"
         let entries = parse_mapinfo(text);
         assert_eq!(entries.len(), 1);
         assert!(entries.contains_key("MAP01"));
+    }
+
+    #[test]
+    fn test_next_endpic_is_endgame() {
+        // ZDoom's `next = EndPic` (often `next = endpic, LUMP`) ends the
+        // episode — it must not be recorded as an edge to a bogus "ENDPIC"
+        // map. Mirrors Eisberg's tier finales.
+        let text = r#"
+map MAP03 "Finale"
+{
+    next = Endpic, CREDIT
+}
+"#;
+        let entries = parse_mapinfo(text);
+        assert!(entries["MAP03"].has_endgame);
+        assert_eq!(entries["MAP03"].next, None);
+    }
+
+    #[test]
+    fn test_next_unicode_target_does_not_panic() {
+        // `\w` is Unicode-aware, so a multi-byte map target must not panic the
+        // first-three-bytes endgame check. It's simply not an endgame target.
+        let text = "map MAP01 \"X\"\n{\n  next = \u{00e9}poque\n}\n";
+        let entries = parse_mapinfo(text);
+        assert!(!entries["MAP01"].has_endgame);
+    }
+
+    #[test]
+    fn test_parse_episode_starts() {
+        let text = r#"
+episode MAP01
+{
+    name = "Tier 1"
+}
+episode MAP04
+{
+    name = "Tier 2"
+}
+clearepisodes
+episode clear
+map MAP01 "A"
+{
+    next = Map02
+}
+"#;
+        let starts = parse_episode_starts(text);
+        assert_eq!(starts, vec!["MAP01", "MAP04", "CLEAR"]);
+        // `episode = "..."` (a per-map property) must not be captured.
+        let prop = parse_episode_starts("map MAP01 {\n  episode = \"foo\"\n}");
+        assert!(prop.is_empty());
     }
 
     #[test]
