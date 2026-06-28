@@ -57,7 +57,26 @@ jobs:
         with:
           cache-targets: false
           shared-key: release-plz-registry
-      - uses: release-plz/action@v0.5
+      # release-pr and release are split into two explicit invocations so we
+      # can suppress release-pr on the merge of a "Release vX" PR.
+      #
+      # Why: with git_only=true, release-pr computes the next version against
+      # the latest *git tag*. But the tag for a just-merged release is not
+      # created until the `release` step runs later in the SAME push. So right
+      # after a Release PR merges, release-pr sees Cargo.toml already bumped
+      # (e.g. 3.3.4) against the stale latest tag (v3.3.3), treats the real
+      # commit as still-unreleased, and opens a phantom follow-up PR (v3.3.5)
+      # containing no actual commits. Skipping release-pr when the head commit
+      # is a "Release vX" merge removes that race — and re-breaks the older
+      # self-release loop at its source. The squash-merge commit message for a
+      # Release PR is its title ("Release vX.Y.Z (#N)"), so the prefix match is
+      # reliable. The `release` step always runs, so the just-merged version
+      # still gets its v* tag pushed.
+      - name: release-plz release-pr
+        if: ${{ !startsWith(github.event.head_commit.message, 'Release v') }}
+        uses: release-plz/action@v0.5
+        with:
+          command: release-pr
         env:
           GITHUB_TOKEN: ${{ secrets.REPO_ARCH_TOKEN }}
           # The verify builds only need to compile, not be debuggable or
@@ -65,5 +84,13 @@ jobs:
           # bulk of each worktree's target/ size; stripping them keeps the
           # six concurrent worktrees comfortably inside the runner's disk
           # and shaves build time.
+          CARGO_PROFILE_DEV_DEBUG: "0"
+          CARGO_INCREMENTAL: "0"
+      - name: release-plz release
+        uses: release-plz/action@v0.5
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.REPO_ARCH_TOKEN }}
           CARGO_PROFILE_DEV_DEBUG: "0"
           CARGO_INCREMENTAL: "0"

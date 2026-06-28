@@ -14,47 +14,35 @@ jobs:
       extra_pacman_packages: "wayland libxkbcommon fontconfig"
     secrets: inherit
 
-  # Create the GitHub Release only after Arch packaging has succeeded.
-  # release-plz pushes the v* tag but leaves the Release to us — that way a
-  # failed Arch build never produces a published Release with no artifacts.
+  # Guarantee a GitHub Release exists only after Arch packaging has succeeded
+  # (via `needs: publish`) — a failed Arch build never produces a published
+  # Release with no artifacts. Release notes are auto-generated from the
+  # conventional-commit history; we deliberately do NOT extract them from
+  # CHANGELOG.md. (CHANGELOG.md is not reliably updated under this workspace's
+  # release-plz config: `release_commits` gates the changelog update per crate,
+  # and the crate that owns the shared CHANGELOG.md + git tag — caco-cli —
+  # rarely has a directly-matching commit, so it bumps as a dependency-only
+  # release and writes no changelog section. Reading it here used to hard-fail
+  # the release on the missing section.)
   release:
     needs: publish
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.ref }}
-      - name: Extract release notes from CHANGELOG.md
-        id: notes
-        run: |
-          set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
-          # All sections for this version share the same `[X.Y.Z]` bracket.
-          # Each section header starts with `## ` (sub-sections use `### `),
-          # so we toggle on every `## ` line and emit while the bracket
-          # matches our version.
-          awk -v ver="$version" '
-            /^## / {
-              in_ver = (index($0, "[" ver "]") > 0)
-            }
-            in_ver { print }
-          ' CHANGELOG.md > release_notes.md
-          if [ ! -s release_notes.md ]; then
-            echo "No CHANGELOG.md section found for v${version}" >&2
-            exit 1
-          fi
-      - name: Create or update GitHub Release
+      - name: Ensure a GitHub Release exists with auto-generated notes
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
+          # The Arch publish job already creates the Release (with git-cliff
+          # notes) to hold the package artifacts, so normally this is a no-op
+          # safety net. If for any reason the Release is missing, create it
+          # with GitHub's auto-generated notes. Never overwrite existing notes.
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release edit "$GITHUB_REF_NAME" \
-              --title "$GITHUB_REF_NAME" \
-              --notes-file release_notes.md
+            echo "Release $GITHUB_REF_NAME already exists; leaving its notes as-is."
           else
             gh release create "$GITHUB_REF_NAME" \
               --title "$GITHUB_REF_NAME" \
-              --notes-file release_notes.md
+              --generate-notes
           fi
