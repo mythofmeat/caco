@@ -2,6 +2,8 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+git pull || true
+
 PREFIX="${PREFIX:-/usr/local}"
 BINDIR="$PREFIX/bin"
 
