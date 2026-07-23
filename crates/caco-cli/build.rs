@@ -1,6 +1,14 @@
 use std::process::Command;
 
 fn main() {
+    // Only embed the git hash in release builds. In dev, watching .git/ would force
+    // a full recompile of this crate on every git operation (commit, branch switch,
+    // `git pull` touching refs/), so dev builds get a constant placeholder instead.
+    if std::env::var("PROFILE").as_deref() != Ok("release") {
+        println!("cargo:rustc-env=CACO_GIT_HASH=dev");
+        return;
+    }
+
     // Embed git hash into the binary for --version output
     let hash = Command::new("git")
         .args(["rev-parse", "--short", "HEAD"])
