@@ -4,6 +4,14 @@ cd "$(dirname "$0")"
 
 git pull || true
 
+# Embed the current commit into `--version`. Passed via env (not read from .git by
+# the build script) so a no-op `git pull` can't trigger a needless release rebuild.
+CACO_GIT_HASH="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+if ! git diff --quiet HEAD 2>/dev/null; then
+    CACO_GIT_HASH="$CACO_GIT_HASH-dirty"
+fi
+export CACO_GIT_HASH
+
 PREFIX="${PREFIX:-/usr/local}"
 BINDIR="$PREFIX/bin"
 

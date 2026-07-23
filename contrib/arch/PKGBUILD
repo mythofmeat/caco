@@ -23,6 +23,9 @@ build() {
     export RUSTUP_TOOLCHAIN=stable
     export CARGO_TARGET_DIR=target
     unset RUSTFLAGS LDFLAGS
+    # Embed the commit into `--version`; the build script reads it from the env
+    # rather than watching .git, so it never causes a spurious rebuild.
+    export CACO_GIT_HASH="$(git rev-parse --short HEAD)"
     cargo build --frozen --release --workspace
 }
 

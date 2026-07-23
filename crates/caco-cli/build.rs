@@ -1,33 +1,21 @@
-use std::process::Command;
-
 fn main() {
-    // Only embed the git hash in release builds. In dev, watching .git/ would force
-    // a full recompile of this crate on every git operation (commit, branch switch,
-    // `git pull` touching refs/), so dev builds get a constant placeholder instead.
-    if std::env::var("PROFILE").as_deref() != Ok("release") {
-        println!("cargo:rustc-env=CACO_GIT_HASH=dev");
-        return;
-    }
+    // `--version` embeds a short build identifier. We deliberately do NOT watch
+    // `.git/*` with `cargo:rerun-if-changed`: cargo compares those paths by mtime,
+    // and git rewrites HEAD/refs mtimes on fetch/pull/gc even when the commit is
+    // unchanged. That forced a full (LTO, ~50s) rebuild of this crate on every
+    // no-op `git pull` in install.sh — a rebuild for a hash that never changed.
+    //
+    // Instead the hash is injected via $CACO_GIT_HASH (install.sh and the Arch
+    // PKGBUILD export it), and `rerun-if-env-changed` rebuilds only when that value
+    // actually changes — never on a spurious mtime bump. Plain local builds show
+    // "dev": no git dependency, no spurious rebuilds.
+    println!("cargo:rerun-if-env-changed=CACO_GIT_HASH");
 
-    // Embed git hash into the binary for --version output
-    let hash = Command::new("git")
-        .args(["rev-parse", "--short", "HEAD"])
-        .output()
+    let version = std::env::var("CACO_GIT_HASH")
         .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_else(|| "unknown".to_string());
-
-    let dirty = Command::new("git")
-        .args(["diff", "--quiet", "HEAD"])
-        .status()
-        .map(|s| !s.success())
-        .unwrap_or(false);
-
-    let version = if dirty { format!("{hash}-dirty") } else { hash };
+        .filter(|v| !v.trim().is_empty())
+        .map(|v| v.trim().to_string())
+        .unwrap_or_else(|| "dev".to_string());
 
     println!("cargo:rustc-env=CACO_GIT_HASH={version}");
-    // Rebuild when git HEAD changes
-    println!("cargo:rerun-if-changed=../../.git/HEAD");
-    println!("cargo:rerun-if-changed=../../.git/refs/");
 }
