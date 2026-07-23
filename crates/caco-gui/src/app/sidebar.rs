@@ -59,7 +59,7 @@ pub(super) fn render_sidebar(
             egui::pos2(rect.min.x + 20.0, rect.min.y),
             egui::pos2(rect.max.x - 20.0, rect.min.y),
         ],
-        egui::Stroke::new(1.0, theme::BORDER),
+        egui::Stroke::new(1.0_f32, theme::BORDER),
     );
     ui.add_space(16.0);
 
@@ -165,7 +165,7 @@ pub(super) fn render_sidebar(
                 egui::pos2(rect.min.x + 20.0, rect.max.y),
                 egui::pos2(rect.max.x - 20.0, rect.max.y),
             ],
-            egui::Stroke::new(1.0, theme::BORDER),
+            egui::Stroke::new(1.0_f32, theme::BORDER),
         );
         ui.add_space(12.0);
 

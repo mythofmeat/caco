@@ -161,7 +161,7 @@ fn render_hero(ui: &mut egui::Ui, state: &AppState, year: i64) {
             egui::pos2(rect.min.x, rect.max.y - 0.5),
             egui::pos2(rect.max.x, rect.max.y - 0.5),
         ],
-        egui::Stroke::new(1.0, theme::BORDER_MED),
+        egui::Stroke::new(1.0_f32, theme::BORDER_MED),
     );
 
     // Source pill — top-right.
@@ -182,7 +182,7 @@ fn render_hero(ui: &mut egui::Ui, state: &AppState, year: i64) {
         pill_rect,
         CornerRadius::same(11),
         Color32::from_black_alpha(80),
-        egui::Stroke::new(1.0, theme::BORDER_MED),
+        egui::Stroke::new(1.0_f32, theme::BORDER_MED),
         StrokeKind::Inside,
     );
     painter.text(
@@ -296,7 +296,7 @@ fn render_year_strip(ui: &mut egui::Ui, state: &AppState) -> Option<i64> {
             egui::pos2(strip_rect.min.x, strip_rect.max.y - 0.5),
             egui::pos2(strip_rect.max.x, strip_rect.max.y - 0.5),
         ],
-        egui::Stroke::new(1.0, theme::BORDER),
+        egui::Stroke::new(1.0_f32, theme::BORDER),
     );
 
     // Layout chips manually inside the strip.
@@ -361,7 +361,7 @@ fn draw_year_chip(
         rect,
         CornerRadius::same(4),
         bg,
-        egui::Stroke::new(if active { 1.0 } else { 0.0 }, theme::TEXT_ACCENT),
+        egui::Stroke::new(if active { 1.0_f32 } else { 0.0_f32 }, theme::TEXT_ACCENT),
         StrokeKind::Inside,
     );
     painter.text(
@@ -516,7 +516,7 @@ fn render_category_section(
             egui::pos2(avail_rect.min.x + SECTION_PAD_X, avail_rect.min.y),
             egui::pos2(avail_rect.max.x - SECTION_PAD_X, avail_rect.min.y),
         ],
-        egui::Stroke::new(1.0, theme::BORDER),
+        egui::Stroke::new(1.0_f32, theme::BORDER),
     );
 
     action
@@ -705,7 +705,7 @@ fn render_card(
         painter.rect_stroke(
             rect,
             rounding,
-            egui::Stroke::new(2.0, theme::TEXT_ACCENT),
+            egui::Stroke::new(2.0_f32, theme::TEXT_ACCENT),
             StrokeKind::Inside,
         );
     } else if response.hovered() || absent {
@@ -715,7 +715,7 @@ fn render_card(
         painter.rect_stroke(
             rect,
             rounding,
-            egui::Stroke::new(1.0, theme::BORDER_MED),
+            egui::Stroke::new(1.0_f32, theme::BORDER_MED),
             StrokeKind::Inside,
         );
     }
@@ -881,7 +881,7 @@ fn action_button(
                     .color(theme::TEXT_PRIMARY),
             )
             .fill(theme::BG_LIGHT)
-            .stroke(egui::Stroke::new(1.0, theme::BORDER_MED))
+            .stroke(egui::Stroke::new(1.0_f32, theme::BORDER_MED))
             .corner_radius(4.0)
             .min_size(Vec2::new(0.0, 22.0));
             if ui.add(btn).clicked() {

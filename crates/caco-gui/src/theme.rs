@@ -92,10 +92,10 @@ pub fn filter_pill(
         let c = accent.unwrap_or(TEXT_ACCENT);
         // Active: tinted background, bright text, accent border
         let bg = Color32::from_rgba_premultiplied(c.r() / 5, c.g() / 5, c.b() / 5, 255);
-        (bg, c, egui::Stroke::new(1.0, c))
+        (bg, c, egui::Stroke::new(1.0_f32, c))
     } else {
         // Inactive: subtle background, muted text, no visible border
-        (BG_LIGHT, TEXT_SECONDARY, egui::Stroke::new(1.0, BORDER))
+        (BG_LIGHT, TEXT_SECONDARY, egui::Stroke::new(1.0_f32, BORDER))
     };
 
     let btn = egui::Button::new(egui::RichText::new(&text).size(11.5).color(text_color))

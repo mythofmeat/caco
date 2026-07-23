@@ -379,14 +379,14 @@ pub fn render(
                         painter.rect_stroke(
                             rect,
                             rounding,
-                            egui::Stroke::new(2.0, theme::TEXT_ACCENT),
+                            egui::Stroke::new(2.0_f32, theme::TEXT_ACCENT),
                             StrokeKind::Inside,
                         );
                     } else if response.hovered() {
                         painter.rect_stroke(
                             rect,
                             rounding,
-                            egui::Stroke::new(1.0, theme::BORDER_MED),
+                            egui::Stroke::new(1.0_f32, theme::BORDER_MED),
                             StrokeKind::Inside,
                         );
                     }

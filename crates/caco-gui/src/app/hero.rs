@@ -31,9 +31,9 @@ pub(super) fn render_now_playing_hero(
                 .wads
                 .iter()
                 .find(|w| w.status == caco_core::db::Status::InProgress);
-            match playing_wad {
-                Some(w) => (w.title.clone(), w.author.clone(), w.id, false),
-                None => return None, // No hero to show
+            {
+                let w = playing_wad?;
+                (w.title.clone(), w.author.clone(), w.id, false)
             }
         };
 
@@ -48,7 +48,10 @@ pub(super) fn render_now_playing_hero(
         .fill(Color32::from_rgb(0x22, 0x18, 0x0c))
         .corner_radius(16)
         .inner_margin(egui::Margin::symmetric(24, 20))
-        .stroke(egui::Stroke::new(1.0, Color32::from_rgb(0x3a, 0x2e, 0x1a)))
+        .stroke(egui::Stroke::new(
+            1.0_f32,
+            Color32::from_rgb(0x3a, 0x2e, 0x1a),
+        ))
         .outer_margin(egui::Margin::symmetric(20, 0));
 
     hero_frame.show(ui, |ui| {
@@ -87,7 +90,7 @@ pub(super) fn render_now_playing_hero(
                 ui.painter().rect_stroke(
                     thumb_rect,
                     10.0,
-                    egui::Stroke::new(1.5, theme::TEXT_ACCENT),
+                    egui::Stroke::new(1.5_f32, theme::TEXT_ACCENT),
                     egui::StrokeKind::Outside,
                 );
             }

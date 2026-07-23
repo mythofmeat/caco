@@ -524,7 +524,7 @@ impl WadStatsDialogState {
         };
         egui::Frame::new()
             .fill(theme::BG_MEDIUM)
-            .stroke(egui::Stroke::new(1.0, theme::TEXT_ACCENT))
+            .stroke(egui::Stroke::new(1.0_f32, theme::TEXT_ACCENT))
             .corner_radius(4)
             .inner_margin(egui::Margin::symmetric(12, 10))
             .show(ui, |ui| {

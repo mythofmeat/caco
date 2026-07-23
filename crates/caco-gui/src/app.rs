@@ -570,7 +570,7 @@ impl eframe::App for CacoApp {
                 egui::Frame::new()
                     .fill(Color32::from_rgb(0x1a, 0x14, 0x10))
                     .inner_margin(egui::Margin::symmetric(16, 8))
-                    .stroke(egui::Stroke::new(1.0, theme::BORDER)),
+                    .stroke(egui::Stroke::new(1.0_f32, theme::BORDER)),
             )
             .show(ctx, |ui| {
                 render_topbar(ui, &mut self.state, &mut actions);
@@ -582,7 +582,7 @@ impl eframe::App for CacoApp {
                 egui::Frame::new()
                     .fill(theme::BG_DARK)
                     .inner_margin(egui::Margin::symmetric(16, 4))
-                    .stroke(egui::Stroke::new(1.0, theme::BORDER)),
+                    .stroke(egui::Stroke::new(1.0_f32, theme::BORDER)),
             )
             .show(ctx, |ui| {
                 render_status_bar(ui, &mut self.state);

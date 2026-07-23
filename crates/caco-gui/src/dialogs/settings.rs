@@ -183,7 +183,7 @@ impl SettingsDialogState {
                 egui::Frame::new()
                     .fill(egui::Color32::from_rgb(0x1a, 0x14, 0x10))
                     .corner_radius(16)
-                    .stroke(egui::Stroke::new(1.0, theme::BORDER_MED))
+                    .stroke(egui::Stroke::new(1.0_f32, theme::BORDER_MED))
                     .shadow(egui::Shadow {
                         offset: [0, 8],
                         blur: 32,
@@ -195,7 +195,7 @@ impl SettingsDialogState {
                 // ── Header ──
                 egui::Frame::new()
                     .inner_margin(egui::Margin::symmetric(20, 14))
-                    .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                    .stroke(egui::Stroke::new(1.0_f32, theme::BORDER))
                     .show(ui, |ui| {
                         ui.vertical(|ui| {
                             ui.colored_label(
@@ -239,7 +239,7 @@ impl SettingsDialogState {
                 ui.add_space(4.0);
                 egui::Frame::new()
                     .inner_margin(egui::Margin::symmetric(20, 10))
-                    .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                    .stroke(egui::Stroke::new(1.0_f32, theme::BORDER))
                     .show(ui, |ui| {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui

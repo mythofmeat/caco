@@ -201,7 +201,7 @@ impl EditDialogState {
                 egui::Frame::new()
                     .fill(egui::Color32::from_rgb(0x1a, 0x14, 0x10))
                     .corner_radius(16)
-                    .stroke(egui::Stroke::new(1.0, theme::BORDER_MED))
+                    .stroke(egui::Stroke::new(1.0_f32, theme::BORDER_MED))
                     .shadow(egui::Shadow {
                         offset: [0, 8],
                         blur: 32,
@@ -213,7 +213,7 @@ impl EditDialogState {
                 // ── Header with thumbnail + title ──
                 egui::Frame::new()
                     .inner_margin(egui::Margin::symmetric(20, 14))
-                    .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                    .stroke(egui::Stroke::new(1.0_f32, theme::BORDER))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             // Thumbnail placeholder
@@ -245,13 +245,13 @@ impl EditDialogState {
                                 );
                                 let meta = format!(
                                     "{}{}{}",
-                                    &self.author,
+                                    self.author,
                                     if !self.year.is_empty() {
                                         " \u{00b7} "
                                     } else {
                                         ""
                                     },
-                                    &self.year
+                                    self.year
                                 );
                                 if !meta.trim().is_empty() {
                                     ui.colored_label(
@@ -296,7 +296,7 @@ impl EditDialogState {
                         top: 0,
                         bottom: 0,
                     })
-                    .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                    .stroke(egui::Stroke::new(1.0_f32, theme::BORDER))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             render_edit_tab(
@@ -355,7 +355,7 @@ impl EditDialogState {
                 ui.add_space(4.0);
                 egui::Frame::new()
                     .inner_margin(egui::Margin::symmetric(20, 10))
-                    .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                    .stroke(egui::Stroke::new(1.0_f32, theme::BORDER))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             // Delete button (left)
@@ -366,7 +366,7 @@ impl EditDialogState {
                                     )
                                     .fill(egui::Color32::from_rgb(0x2a, 0x0d, 0x0d))
                                     .stroke(egui::Stroke::new(
-                                        1.0,
+                                        1.0_f32,
                                         egui::Color32::from_rgb(0x3a, 0x16, 0x16),
                                     )),
                                 )
@@ -400,7 +400,10 @@ impl EditDialogState {
                                         .add(
                                             egui::Button::new("Cancel")
                                                 .fill(theme::BG_LIGHT)
-                                                .stroke(egui::Stroke::new(1.0, theme::BORDER_MED)),
+                                                .stroke(egui::Stroke::new(
+                                                    1.0_f32,
+                                                    theme::BORDER_MED,
+                                                )),
                                         )
                                         .clicked()
                                     {
@@ -470,7 +473,7 @@ impl EditDialogState {
                 let is_selected = self.status == status.as_str();
 
                 let stroke = if is_selected {
-                    egui::Stroke::new(1.5, color)
+                    egui::Stroke::new(1.5_f32, color)
                 } else {
                     egui::Stroke::NONE
                 };
@@ -617,7 +620,7 @@ impl EditDialogState {
                     )
                     .fill(egui::Color32::TRANSPARENT)
                     .stroke(egui::Stroke::new(
-                        1.0,
+                        1.0_f32,
                         egui::Color32::from_rgba_premultiplied(0x3a, 0x2e, 0x24, 128),
                     ))
                     .corner_radius(8),
@@ -783,7 +786,7 @@ impl EditDialogState {
             .add(
                 egui::Button::new("+ Add Companion")
                     .fill(theme::BG_LIGHT)
-                    .stroke(egui::Stroke::new(1.0, theme::BORDER_MED)),
+                    .stroke(egui::Stroke::new(1.0_f32, theme::BORDER_MED)),
             )
             .clicked()
         {
@@ -982,7 +985,7 @@ fn render_edit_tab(ui: &mut egui::Ui, label: &str, tab: EditTab, active: &mut Ed
         let rect = response.rect;
         ui.painter().line_segment(
             [rect.left_bottom(), rect.right_bottom()],
-            egui::Stroke::new(2.0, theme::TEXT_ACCENT),
+            egui::Stroke::new(2.0_f32, theme::TEXT_ACCENT),
         );
     }
 
