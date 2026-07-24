@@ -20,7 +20,9 @@ BINARIES=(
 )
 
 echo "Building caco (release)..."
+cargo sweep --stamp || true
 cargo build --release --workspace
+cargo sweep --file || true
 
 for bin in "${BINARIES[@]}"; do
     echo "Installing to $BINDIR..."
@@ -35,4 +37,5 @@ sudo gtk-update-icon-cache -f -t "$PREFIX/share/icons/hicolor" || true
 
 echo "Installed:"
 ls -lh "$BINDIR/caco" "$BINDIR/caco-gui" "$BINDIR/caco-tui"
+
 echo
