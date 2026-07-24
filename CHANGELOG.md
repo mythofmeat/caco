@@ -3,6 +3,13 @@
 All notable changes to Caco are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.3.6] - 2026-07-24
+
+### Fixed
+
+- **cli**: Embed git hash via env var to avoid spurious release rebuilds
+- **cli**: Stop rebuilding caco-cli on every git operation
+
 ## [3.3.1] - 2026-06-11
 
 ### Added

@@ -17,7 +17,7 @@ debug = "line-tables-only"
 opt-level = 3
 
 [workspace.package]
-version = "3.3.5"
+version = "3.3.6"
 edition = "2024"
 description = "Doom WAD library manager"
 authors = ["eshen"]
