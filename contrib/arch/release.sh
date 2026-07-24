@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
 #
-# Cut a release and publish it to the local pacman repo.
+# Cut a caco release and publish it to the local pacman repo.
 #
 #   ./contrib/arch/release.sh              # patch bump: 3.3.5 -> 3.3.6
 #   ./contrib/arch/release.sh minor        # 3.3.5 -> 3.4.0
 #   ./contrib/arch/release.sh 4.0.0        # explicit
-#   ./contrib/arch/release.sh --init       # one-time local repo setup
+#   ./contrib/arch/release.sh --repack     # rebuild this version as pkgrel+1
 #
 # Flags:
-#   --init          create the repo dir, print the pacman.conf stanza, exit
 #   --dry-run       show what would happen; change nothing
 #   --skip-checks   skip fmt/clippy/test (they are the slow part)
 #   --no-push       commit and tag locally, but do not push
@@ -16,10 +15,13 @@
 #   --repack        rebuild the current version as pkgrel+1 (no version bump)
 #
 # Env overrides:
-#   CACO_PKG_REPO       local repo dir      (default /var/cache/caco-repo)
-#   CACO_PKG_REPO_NAME  repo/db name        (default caco)
-#   CACO_PKG_KEEP       builds kept each    (default 2)
-#   CACO_SWEEP_DAYS     cargo-sweep age     (default 7; 0 disables)
+#   CACO_SWEEP_DAYS   cargo-sweep age threshold (default 7; 0 disables)
+#
+# This script owns building and versioning caco. Publishing is delegated to
+# `archrepo`, which owns the repo itself — see ~/dev/archrepo. Repo location,
+# name and retention are configured there, not here. Set it up once with:
+#
+#     archrepo init
 #
 # The whole pipeline is local: nothing is built in CI and no package leaves this
 # machine, so GitHub only ever holds source.
@@ -31,21 +33,16 @@
 
 set -euo pipefail
 
-REPO_DIR="${CACO_PKG_REPO:-/var/cache/caco-repo}"
-REPO_NAME="${CACO_PKG_REPO_NAME:-caco}"
-KEEP="${CACO_PKG_KEEP:-2}"
 SWEEP_DAYS="${CACO_SWEEP_DAYS:-7}"
-SUBPKGS=(caco caco-gui caco-tui)
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 arch_dir="$root/contrib/arch"
 
 BUMP=patch
-DRY=0 SKIP_CHECKS=0 NO_PUSH=0 NO_INSTALL=0 REPACK=0 INIT=0
+DRY=0 SKIP_CHECKS=0 NO_PUSH=0 NO_INSTALL=0 REPACK=0
 
 for a in "$@"; do
     case "$a" in
-        --init)         INIT=1 ;;
         --dry-run)      DRY=1 ;;
         --skip-checks)  SKIP_CHECKS=1 ;;
         --no-push)      NO_PUSH=1 ;;
@@ -62,42 +59,15 @@ warn() { printf '\033[1;33m==>\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31m==> error:\033[0m %s\n' "$*" >&2; exit 1; }
 run()  { if (( DRY )); then printf '   would run: %s\n' "$*"; else "$@"; fi; }
 
-# --------------------------------------------------------------------------
-# --init: one-time setup
-# --------------------------------------------------------------------------
-if (( INIT )); then
-    if [[ -d $REPO_DIR && -w $REPO_DIR ]]; then
-        say "$REPO_DIR already exists and is writable."
-    else
-        say "Creating $REPO_DIR owned by $USER (needs sudo once)..."
-        sudo install -d -o "$USER" -g "$(id -gn)" -m 755 "$REPO_DIR"
-    fi
-    cat <<EOF
-
-Add this to /etc/pacman.conf, below the [core]/[extra]/[multilib] entries:
-
-    [$REPO_NAME]
-    SigLevel = Optional TrustAll
-    Server = file://$REPO_DIR
-
-'Optional TrustAll' skips GPG signing, which is reasonable for a private
-single-machine repo. Then cut a release with:
-
-    $0
-
-EOF
-    exit 0
-fi
-
 cd "$root"
 
 # --------------------------------------------------------------------------
 # Guards — a package is only as trustworthy as the tree it was built from
 # --------------------------------------------------------------------------
-[[ -d $REPO_DIR ]] || die "local repo $REPO_DIR does not exist. Run: $0 --init"
-[[ -w $REPO_DIR ]] || die "local repo $REPO_DIR is not writable by $USER. Run: $0 --init"
 command -v makepkg  >/dev/null || die "makepkg not found (install base-devel)"
-command -v repo-add >/dev/null || die "repo-add not found (install pacman)"
+command -v archrepo >/dev/null || die "archrepo not found — install it from ~/dev/archrepo"
+
+archrepo status >/dev/null 2>&1 || die "local repo not set up — run: archrepo init"
 
 branch="$(git rev-parse --abbrev-ref HEAD)"
 [[ $branch == main ]] || die "on branch '$branch'; releases are cut from main"
@@ -241,28 +211,12 @@ else
 fi
 
 # --------------------------------------------------------------------------
-# Publish into the local repo
+# Publish — archrepo owns the repo, its location and its retention policy
 # --------------------------------------------------------------------------
-say "Publishing to $REPO_DIR..."
 shopt -s nullglob
 built=("$arch_dir"/*.pkg.tar.zst)
 (( ${#built[@]} )) || die "makepkg produced no packages"
-mv -f "${built[@]}" "$REPO_DIR/"
-
-# Prune to the newest $KEEP builds of each subpackage. Anchoring the glob with
-# -[0-9] stops 'caco-*' from also matching caco-gui and caco-tui.
-for name in "${SUBPKGS[@]}"; do
-    mapfile -t stale < <(ls -1t "$REPO_DIR/$name"-[0-9]*.pkg.tar.zst 2>/dev/null | tail -n +$((KEEP + 1)))
-    if (( ${#stale[@]} )); then
-        printf '   pruning %d old %s build(s)\n' "${#stale[@]}" "$name"
-        rm -f "${stale[@]}"
-    fi
-done
-
-# Rebuild the db from whatever survived pruning, so it can never reference a
-# package file that was just deleted.
-rm -f "$REPO_DIR/$REPO_NAME".db* "$REPO_DIR/$REPO_NAME".files*
-repo-add --quiet "$REPO_DIR/$REPO_NAME.db.tar.gz" "$REPO_DIR"/*.pkg.tar.zst
+archrepo add "${built[@]}"
 
 # --------------------------------------------------------------------------
 # Reclaim space
@@ -277,7 +231,7 @@ if (( SWEEP_DAYS > 0 )) && command -v cargo-sweep >/dev/null; then
     cargo sweep --time "$SWEEP_DAYS" "$root" >/dev/null 2>&1 || true
 fi
 
-say "Published ${SUBPKGS[*]} @ ${NEW}-${PKGREL}"
+say "Released ${NEW}-${PKGREL}"
 
 if (( NO_INSTALL )); then
     say "Skipping install (--no-install). Run: sudo pacman -Syu"

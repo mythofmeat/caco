@@ -27,17 +27,18 @@ CI and no package leaves the machine.
 ```bash
 git clone git@github.com:mythofmeat/caco.git && cd caco
 
-# One time: create the local repo and print the pacman.conf stanza to add
-./contrib/arch/release.sh --init
+# One time: set up the local pacman repo (shared by all locally-built programs)
+archrepo init
 
 # Cut a release: bump, build, publish, upgrade
 ./contrib/arch/release.sh
 ```
 
-After the first `--init`, add the printed stanza to `/etc/pacman.conf` and every
-subsequent release is just `./contrib/arch/release.sh` followed by the
-`pacman -Syu` it runs for you. Install individual packages with
-`pacman -S caco caco-gui caco-tui`.
+`archrepo` manages the local repo itself and is not caco-specific — see
+[archrepo](https://github.com/mythofmeat/archrepo). After `archrepo init` prints
+the `pacman.conf` stanza and you add it, every subsequent release is just
+`./contrib/arch/release.sh` followed by the `pacman -Syu` it runs for you.
+Install individual packages with `pacman -S caco caco-gui caco-tui`.
 
 To build the packages without cutting a release:
 
