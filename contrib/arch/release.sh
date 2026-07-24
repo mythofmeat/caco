@@ -37,7 +37,7 @@
 set -euo pipefail
 
 REPO_DIR="${CACO_PKG_REPO:-/var/lib/pacman-local}"
-REPO_NAME="${CACO_PKG_REPO_NAME:-local}"
+REPO_NAME="${CACO_PKG_REPO_NAME:-"pacman-local"}"
 KEEP="${CACO_PKG_KEEP:-2}"
 SWEEP_DAYS="${CACO_SWEEP_DAYS:-7}"
 
