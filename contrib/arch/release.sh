@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Cut a caco release and publish it to the local pacman repo.
+# Cut a release and publish it to the local pacman repo.
 #
 #   ./contrib/arch/release.sh              # patch bump: 3.3.5 -> 3.3.6
 #   ./contrib/arch/release.sh minor        # 3.3.5 -> 3.4.0
@@ -15,16 +15,7 @@
 #   --no-install    build and publish, but do not run pacman -Syu
 #   --repack        rebuild the current version as pkgrel+1 (no version bump)
 #
-# Env overrides:
-#   CACO_PKG_REPO       repo directory   (default /var/lib/pacman-local)
-#   CACO_PKG_REPO_NAME  repo/db name     (default local)
-#   CACO_PKG_KEEP       builds kept each (default 2)
-#   CACO_SWEEP_DAYS     cargo-sweep age  (default 7; 0 disables)
-#
-# The repo is shared by every locally-built program, not just caco — any other
-# project publishes into it the same way, by dropping its packages in and
-# re-running repo-add. Only `--init` is caco-specific by accident of living
-# here; run it once and no other project needs it.
+# The repo is shared by every locally-built program.
 #
 # The whole pipeline is local: nothing is built in CI and no package leaves this
 # machine, so GitHub only ever holds source.
@@ -36,20 +27,19 @@
 
 set -euo pipefail
 
-REPO_DIR="${CACO_PKG_REPO:-/var/lib/pacman-local}"
-REPO_NAME="${CACO_PKG_REPO_NAME:-"pacman-local"}"
-KEEP="${CACO_PKG_KEEP:-2}"
-SWEEP_DAYS="${CACO_SWEEP_DAYS:-7}"
+REPO_NAME="pacman-local"
+REPO_DIR="/var/lib/${REPO_NAME}"
+KEEP="2"
+SWEEP_DAYS="7"
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 arch_dir="$root/contrib/arch"
 
-BUMP=patch
-DRY=0 SKIP_CHECKS=0 NO_PUSH=0 NO_INSTALL=0 REPACK=0 INIT=0
+BUMP="patch"
+DRY=0 SKIP_CHECKS=0 NO_PUSH=0 NO_INSTALL=0 REPACK=0
 
 for a in "$@"; do
     case "$a" in
-        --init)         INIT=1 ;;
         --dry-run)      DRY=1 ;;
         --skip-checks)  SKIP_CHECKS=1 ;;
         --no-push)      NO_PUSH=1 ;;
@@ -66,41 +56,8 @@ warn() { printf '\033[1;33m==>\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31m==> error:\033[0m %s\n' "$*" >&2; exit 1; }
 run()  { if (( DRY )); then printf '   would run: %s\n' "$*"; else "$@"; fi; }
 
-# --------------------------------------------------------------------------
-# --init: one-time setup of the shared local repo
-# --------------------------------------------------------------------------
-if (( INIT )); then
-    if [[ -d $REPO_DIR && -w $REPO_DIR ]]; then
-        say "$REPO_DIR already exists and is writable."
-    else
-        say "Creating $REPO_DIR owned by $USER (needs sudo once)..."
-        sudo install -d -o "$USER" -g "$(id -gn)" -m 755 "$REPO_DIR"
-    fi
-    cat <<EOF
-
-Register the repo by appending this to /etc/pacman.conf:
-
-    [$REPO_NAME]
-    SigLevel = Optional TrustAll
-    Server = file://$REPO_DIR
-
-Copy-paste to append it now:
-
-sudo tee -a /etc/pacman.conf >/dev/null <<'PACMANCONF'
-
-[$REPO_NAME]
-SigLevel = Optional TrustAll
-Server = file://$REPO_DIR
-PACMANCONF
-
-Do that AFTER the first release — an empty repo has no database file and
-'pacman -Sy' will complain it cannot retrieve $REPO_NAME.db.
-EOF
-    exit 0
-fi
 
 cd "$root"
-
 # --------------------------------------------------------------------------
 # Guards — a package is only as trustworthy as the tree it was built from
 # --------------------------------------------------------------------------
@@ -261,10 +218,6 @@ built=("$arch_dir"/*.pkg.tar.zst)
 (( ${#built[@]} )) || die "makepkg produced no packages"
 mv -f "${built[@]}" "$REPO_DIR/"
 
-# Retention. paccache already understands package filenames, so it keeps the
-# newest $KEEP of each package without confusing caco-gui for a build of caco,
-# and it orders by version rather than mtime — so rebuilding an old version
-# cannot evict a newer one. It leaves the .db/.files entries alone.
 if (( KEEP > 0 )); then
     paccache -r -k "$KEEP" -c "$REPO_DIR" >/dev/null 2>&1 || true
 fi
@@ -278,7 +231,7 @@ fi
 # skip junk rather than letting one bad file abort the rebuild. And build the
 # new database in a temp dir, swapping it in only once repo-add has succeeded:
 # deleting the old db up front means a failure here leaves the repo with *no*
-# database, which breaks pacman -Syu for every program in it, not just caco.
+# database, which breaks pacman -Syu for every program in it.
 valid=()
 for f in "$REPO_DIR"/*.pkg.tar.*; do
     [[ $f == *.sig ]] && continue
