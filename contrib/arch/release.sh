@@ -271,8 +271,32 @@ fi
 
 # Rebuild the db from what survived rather than adding incrementally, so it can
 # never reference a package file that retention just deleted.
+#
+# Two safeguards, both learned the hard way. repo-add exits non-zero on any
+# unreadable file, and a stray or half-copied .pkg.tar.zst from some other
+# project's interrupted build is enough to trigger it — so validate first and
+# skip junk rather than letting one bad file abort the rebuild. And build the
+# new database in a temp dir, swapping it in only once repo-add has succeeded:
+# deleting the old db up front means a failure here leaves the repo with *no*
+# database, which breaks pacman -Syu for every program in it, not just caco.
+valid=()
+for f in "$REPO_DIR"/*.pkg.tar.*; do
+    [[ $f == *.sig ]] && continue
+    if bsdtar -tqf "$f" .PKGINFO >/dev/null 2>&1; then
+        valid+=("$f")
+    else
+        warn "not a readable package, skipping: $(basename "$f")"
+    fi
+done
+(( ${#valid[@]} )) || die "no valid packages in $REPO_DIR — database left untouched"
+
+tmpdb="$(mktemp -d)"
+trap 'rm -rf "$tmpdb"' EXIT
+repo-add --quiet "$tmpdb/$REPO_NAME.db.tar.gz" "${valid[@]}"
 rm -f "$REPO_DIR/$REPO_NAME".db* "$REPO_DIR/$REPO_NAME".files*
-repo-add --quiet "$REPO_DIR/$REPO_NAME.db.tar.gz" "$REPO_DIR"/*.pkg.tar.zst
+mv -f "$tmpdb/$REPO_NAME".db* "$tmpdb/$REPO_NAME".files* "$REPO_DIR/"
+rm -rf "$tmpdb"
+trap - EXIT
 
 # --------------------------------------------------------------------------
 # Reclaim space
