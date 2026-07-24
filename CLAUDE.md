@@ -220,19 +220,21 @@ Never write non-conventional commit subjects (e.g. `Add foo`, `Fix bar`, single-
 Releases are cut **locally** — there is no CI packaging. GitHub only ever holds source; the built packages never leave this machine. Distribution is a local pacman repo served over `file://`.
 
 ```bash
-archrepo init                         # one time, not caco-specific: set up the repo
+./contrib/arch/release.sh --init      # one time: create the repo, print the pacman.conf stanza
 ./contrib/arch/release.sh             # patch bump, then build + publish + pacman -Syu
 ./contrib/arch/release.sh minor       # or: major, or an explicit 4.0.0
 ./contrib/arch/release.sh --repack    # rebuild the current version as pkgrel+1
 ```
 
-Responsibilities are split. `release.sh` owns **building and versioning caco**; [`archrepo`](https://github.com/mythofmeat/archrepo) (`~/dev/archrepo`) owns **the repo itself** — its location, name and retention policy — and is shared by every program published to it. Adding another program to the repo requires no change here and no change to archrepo; that project just writes its own release script ending in `archrepo add`.
+The repo at `/var/lib/pacman-local` is shared by every locally-built program, not just caco. Another project publishes into it the same way — drop its `.pkg.tar.zst` files in, run `paccache` for retention, re-run `repo-add`. There is no shared tool to install; the three lines that do it live at the bottom of this script and are worth copying rather than abstracting.
 
-`release.sh` guards on a clean tree on `main` that is not behind `origin/main` and on the repo being set up, runs the quality gates, rewrites the version in `Cargo.toml` (workspace version **and** the internal path-dependency `version` fields), refreshes `Cargo.lock`, syncs `pkgver` in the PKGBUILD, **builds**, and only then commits `chore(release): vX.Y.Z`, tags, pushes and hands the packages to `archrepo add`.
+`release.sh` guards on a clean tree on `main` that is not behind `origin/main` and on the repo existing, runs the quality gates, rewrites the version in `Cargo.toml` (workspace version **and** the internal path-dependency `version` fields), refreshes `Cargo.lock`, syncs `pkgver` in the PKGBUILD, **builds**, and only then commits `chore(release): vX.Y.Z`, tags, pushes and publishes.
 
 The build deliberately happens *before* the commit: a failed build must never leave a published version behind with no artifact to match it. A trap reverts the version files if anything fails before the commit is reached.
 
-Env override: `CACO_SWEEP_DAYS` (default 7; 0 disables the post-release `cargo sweep`). Repo location and retention are configured in archrepo, not here.
+**Retention** is `paccache -r -k $KEEP -c $REPO_DIR`. paccache already parses package filenames, so it will not mistake `caco-gui` for a build of `caco`, and it orders by version rather than mtime so rebuilding an old version cannot evict a newer one. The database is then rebuilt from scratch rather than updated incrementally, so it can never reference a file retention just deleted — that mismatch is what makes `pacman -Syu` fail against a local repo.
+
+Env overrides: `CACO_PKG_REPO` (default `/var/lib/pacman-local`), `CACO_PKG_REPO_NAME` (default `local`), `CACO_PKG_KEEP` (default 2), `CACO_SWEEP_DAYS` (default 7; 0 disables the post-release `cargo sweep`).
 
 **Why the PKGBUILD has no `source=()`**: it builds the working tree in place rather than cloning into `$srcdir`. Cargo fingerprints record absolute source paths, so a `$srcdir` clone invalidates every artifact and forces a cold LTO rebuild of the whole workspace (~3.5 min), *and* leaves a second multi-GB `target/` behind. Building at the same path `cargo build` uses makes packaging a ~5s no-op recompile against the warm dev cache. `build()` also unsets makepkg's `CFLAGS`/`RUSTFLAGS`/`LDFLAGS` so the fingerprints match a plain `cargo build --release` exactly — otherwise every switch between a dev build and a package build would rebuild the world.
 

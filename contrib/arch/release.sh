@@ -8,6 +8,7 @@
 #   ./contrib/arch/release.sh --repack     # rebuild this version as pkgrel+1
 #
 # Flags:
+#   --init          create the repo dir, print the pacman.conf stanza, exit
 #   --dry-run       show what would happen; change nothing
 #   --skip-checks   skip fmt/clippy/test (they are the slow part)
 #   --no-push       commit and tag locally, but do not push
@@ -15,13 +16,15 @@
 #   --repack        rebuild the current version as pkgrel+1 (no version bump)
 #
 # Env overrides:
-#   CACO_SWEEP_DAYS   cargo-sweep age threshold (default 7; 0 disables)
+#   CACO_PKG_REPO       repo directory   (default /var/lib/pacman-local)
+#   CACO_PKG_REPO_NAME  repo/db name     (default local)
+#   CACO_PKG_KEEP       builds kept each (default 2)
+#   CACO_SWEEP_DAYS     cargo-sweep age  (default 7; 0 disables)
 #
-# This script owns building and versioning caco. Publishing is delegated to
-# `archrepo`, which owns the repo itself — see ~/dev/archrepo. Repo location,
-# name and retention are configured there, not here. Set it up once with:
-#
-#     archrepo init
+# The repo is shared by every locally-built program, not just caco — any other
+# project publishes into it the same way, by dropping its packages in and
+# re-running repo-add. Only `--init` is caco-specific by accident of living
+# here; run it once and no other project needs it.
 #
 # The whole pipeline is local: nothing is built in CI and no package leaves this
 # machine, so GitHub only ever holds source.
@@ -33,16 +36,20 @@
 
 set -euo pipefail
 
+REPO_DIR="${CACO_PKG_REPO:-/var/lib/pacman-local}"
+REPO_NAME="${CACO_PKG_REPO_NAME:-local}"
+KEEP="${CACO_PKG_KEEP:-2}"
 SWEEP_DAYS="${CACO_SWEEP_DAYS:-7}"
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 arch_dir="$root/contrib/arch"
 
 BUMP=patch
-DRY=0 SKIP_CHECKS=0 NO_PUSH=0 NO_INSTALL=0 REPACK=0
+DRY=0 SKIP_CHECKS=0 NO_PUSH=0 NO_INSTALL=0 REPACK=0 INIT=0
 
 for a in "$@"; do
     case "$a" in
+        --init)         INIT=1 ;;
         --dry-run)      DRY=1 ;;
         --skip-checks)  SKIP_CHECKS=1 ;;
         --no-push)      NO_PUSH=1 ;;
@@ -59,15 +66,50 @@ warn() { printf '\033[1;33m==>\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31m==> error:\033[0m %s\n' "$*" >&2; exit 1; }
 run()  { if (( DRY )); then printf '   would run: %s\n' "$*"; else "$@"; fi; }
 
+# --------------------------------------------------------------------------
+# --init: one-time setup of the shared local repo
+# --------------------------------------------------------------------------
+if (( INIT )); then
+    if [[ -d $REPO_DIR && -w $REPO_DIR ]]; then
+        say "$REPO_DIR already exists and is writable."
+    else
+        say "Creating $REPO_DIR owned by $USER (needs sudo once)..."
+        sudo install -d -o "$USER" -g "$(id -gn)" -m 755 "$REPO_DIR"
+    fi
+    cat <<EOF
+
+Register the repo by appending this to /etc/pacman.conf:
+
+    [$REPO_NAME]
+    SigLevel = Optional TrustAll
+    Server = file://$REPO_DIR
+
+Copy-paste to append it now:
+
+sudo tee -a /etc/pacman.conf >/dev/null <<'PACMANCONF'
+
+[$REPO_NAME]
+SigLevel = Optional TrustAll
+Server = file://$REPO_DIR
+PACMANCONF
+
+Do that AFTER the first release — an empty repo has no database file and
+'pacman -Sy' will complain it cannot retrieve $REPO_NAME.db.
+EOF
+    exit 0
+fi
+
 cd "$root"
 
 # --------------------------------------------------------------------------
 # Guards — a package is only as trustworthy as the tree it was built from
 # --------------------------------------------------------------------------
 command -v makepkg  >/dev/null || die "makepkg not found (install base-devel)"
-command -v archrepo >/dev/null || die "archrepo not found — install it from ~/dev/archrepo"
+command -v repo-add >/dev/null || die "repo-add not found (install pacman)"
+command -v paccache >/dev/null || die "paccache not found (install pacman-contrib)"
 
-archrepo status >/dev/null 2>&1 || die "local repo not set up — run: archrepo init"
+[[ -d $REPO_DIR ]] || die "local repo $REPO_DIR does not exist. Run: $0 --init"
+[[ -w $REPO_DIR ]] || die "local repo $REPO_DIR is not writable by $USER. Run: $0 --init"
 
 branch="$(git rev-parse --abbrev-ref HEAD)"
 [[ $branch == main ]] || die "on branch '$branch'; releases are cut from main"
@@ -211,12 +253,26 @@ else
 fi
 
 # --------------------------------------------------------------------------
-# Publish — archrepo owns the repo, its location and its retention policy
+# Publish into the shared local repo
 # --------------------------------------------------------------------------
+say "Publishing to $REPO_DIR..."
 shopt -s nullglob
 built=("$arch_dir"/*.pkg.tar.zst)
 (( ${#built[@]} )) || die "makepkg produced no packages"
-archrepo add "${built[@]}"
+mv -f "${built[@]}" "$REPO_DIR/"
+
+# Retention. paccache already understands package filenames, so it keeps the
+# newest $KEEP of each package without confusing caco-gui for a build of caco,
+# and it orders by version rather than mtime — so rebuilding an old version
+# cannot evict a newer one. It leaves the .db/.files entries alone.
+if (( KEEP > 0 )); then
+    paccache -r -k "$KEEP" -c "$REPO_DIR" >/dev/null 2>&1 || true
+fi
+
+# Rebuild the db from what survived rather than adding incrementally, so it can
+# never reference a package file that retention just deleted.
+rm -f "$REPO_DIR/$REPO_NAME".db* "$REPO_DIR/$REPO_NAME".files*
+repo-add --quiet "$REPO_DIR/$REPO_NAME.db.tar.gz" "$REPO_DIR"/*.pkg.tar.zst
 
 # --------------------------------------------------------------------------
 # Reclaim space
