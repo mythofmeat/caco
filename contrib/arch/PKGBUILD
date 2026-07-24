@@ -1,53 +1,95 @@
 # Maintainer: eshen
+#
+# Local-build packaging for a private, rebuilt-often package.
+#
+# Unlike a conventional PKGBUILD this one has no source=() and never clones
+# into $srcdir — it builds the working tree in place at $_repo. That is
+# deliberate and buys two things:
+#
+#   1. Cargo cache reuse. Cargo's fingerprints record absolute source paths,
+#      so building a fresh clone under $srcdir invalidates every artifact and
+#      forces a cold LTO rebuild of the whole workspace. Building at the same
+#      path a plain `cargo build` uses means makepkg reuses the dev target dir
+#      and is usually near-instant.
+#   2. One target dir instead of two. A $srcdir clone drags along its own
+#      multi-GB target/ next to the dev one.
+#
+# The tradeoff: this package is only as reproducible as the working tree it is
+# built from. release.sh enforces a clean tree on main before calling makepkg,
+# which is what keeps the pkgver honest.
+
 pkgbase=caco
 pkgname=('caco' 'caco-gui' 'caco-tui')
-pkgver=3.2.4
+pkgver=3.3.5
 pkgrel=1
 pkgdesc="Doom WAD library manager"
 arch=('x86_64')
 url="https://github.com/mythofmeat/caco"
-license=('custom')
-makedepends=('cargo' 'gcc' 'git')
+license=('MIT')
+# Intentionally empty. The Rust toolchain here is rustup-managed under
+# ~/.cargo/bin, not pacman's `cargo` package — listing `cargo` as a makedepend
+# would make makepkg install Arch's rust and shadow the rustup toolchain.
+makedepends=()
 options=(!lto !debug strip)
-source=("$pkgbase::git+ssh://git@github.com/mythofmeat/caco.git")
-sha256sums=('SKIP')
 
-prepare() {
-    cd "$pkgbase"
+# Working tree to build. $startdir is the directory makepkg was invoked from
+# (this file's directory), so the default resolves to the repo root. Override
+# to package a checkout elsewhere: CACO_SRC=/path/to/caco makepkg -f
+_repo="${CACO_SRC:-$(realpath "$startdir/../..")}"
+
+pkgver() {
+    # The workspace version in Cargo.toml is the single source of truth, so a
+    # release edits one file and the package version follows automatically.
+    # release.sh keeps the literal pkgver= above in sync too, so this is a
+    # self-healing no-op rather than a source of surprise diffs.
+    awk -F'"' '/^version = /{print $2; exit}' "$_repo/Cargo.toml"
+}
+
+# Reset the build environment to exactly what a plain `cargo build --release`
+# sees. makepkg exports its own CFLAGS/RUSTFLAGS/LDFLAGS; letting those through
+# would change the fingerprint of every crate — and of the cc-compiled bundled
+# SQLite in rusqlite — so every switch between a dev build and a package build
+# would rebuild the world. Unsetting them keeps one warm cache serving both.
+_setup_env() {
+    unset RUSTFLAGS CARGO_ENCODED_RUSTFLAGS LDFLAGS CFLAGS CXXFLAGS CPPFLAGS
     export RUSTUP_TOOLCHAIN=stable
-    cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+    export CARGO_TARGET_DIR="$_repo/target"
 }
 
 build() {
-    cd "$pkgbase"
-    export RUSTUP_TOOLCHAIN=stable
-    export CARGO_TARGET_DIR=target
-    unset RUSTFLAGS LDFLAGS
-    # Embed the commit into `--version`; the build script reads it from the env
-    # rather than watching .git, so it never causes a spurious rebuild.
-    export CACO_GIT_HASH="$(git rev-parse --short HEAD)"
-    cargo build --frozen --release --workspace
+    cd "$_repo"
+    _setup_env
+
+    # Embed the commit into `--version`. Injected via env rather than read from
+    # .git by the build script, so a no-op fetch can't trigger a rebuild — see
+    # crates/caco-cli/build.rs for the full rationale.
+    export CACO_GIT_HASH="$(git -C "$_repo" rev-parse --short HEAD)"
+
+    # caco-mcp is deliberately excluded: it is not packaged, so compiling it
+    # here is pure cost. check() still exercises the whole workspace.
+    cargo build --release --locked -p caco-cli -p caco-gui -p caco-tui
 }
 
 check() {
-    cd "$pkgbase"
-    export RUSTUP_TOOLCHAIN=stable
-    export CARGO_TARGET_DIR=target
-    unset RUSTFLAGS LDFLAGS
-    cargo test --frozen --workspace
+    cd "$_repo"
+    _setup_env
+    cargo test --locked --workspace
 }
 
 package_caco() {
     pkgdesc="Doom WAD library manager - CLI"
     depends=('openssl' 'gcc-libs' 'glibc')
 
-    cd "$pkgbase"
+    install -Dm755 "$_repo/target/release/caco" "$pkgdir/usr/bin/caco"
 
-    install -Dm755 target/release/caco "$pkgdir/usr/bin/caco"
+    install -Dm644 "$_repo/crates/caco-cli/completions/caco.fish" \
+        "$pkgdir/usr/share/fish/vendor_completions.d/caco.fish"
+    install -Dm644 "$_repo/crates/caco-cli/completions/caco.bash" \
+        "$pkgdir/usr/share/bash-completion/completions/caco"
+    install -Dm644 "$_repo/crates/caco-cli/completions/_caco" \
+        "$pkgdir/usr/share/zsh/site-functions/_caco"
 
-    install -Dm644 crates/caco-cli/completions/caco.fish "$pkgdir/usr/share/fish/vendor_completions.d/caco.fish"
-    install -Dm644 crates/caco-cli/completions/caco.bash "$pkgdir/usr/share/bash-completion/completions/caco"
-    install -Dm644 crates/caco-cli/completions/_caco     "$pkgdir/usr/share/zsh/site-functions/_caco"
+    install -Dm644 "$_repo/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
 
 package_caco-gui() {
@@ -58,24 +100,29 @@ package_caco-gui() {
         'xdg-desktop-portal: native file dialogs'
     )
 
-    cd "$pkgbase"
+    install -Dm755 "$_repo/target/release/caco-gui" "$pkgdir/usr/bin/caco-gui"
 
-    install -Dm755 target/release/caco-gui "$pkgdir/usr/bin/caco-gui"
+    install -Dm644 "$_repo/assets/caco.desktop" \
+        "$pkgdir/usr/share/applications/caco.desktop"
 
-    install -Dm644 assets/caco.desktop "$pkgdir/usr/share/applications/caco.desktop"
-    # 256x256 is a standard hicolor size that KDE/GTK icon caches scan.
-    # 1024x1024 is not a standard freedesktop size — launchers skip it.
-    # Do NOT install under hicolor/scalable/apps/ — that directory is
-    # SVG-only per the freedesktop Icon Theme Spec; a PNG there causes
-    # KDE's KIconLoader to fail the icon lookup silently.
-    install -Dm644 assets/caco.png     "$pkgdir/usr/share/icons/hicolor/256x256/apps/caco.png"
+    # Icons must match the size their hicolor directory declares — assets/caco.png
+    # is the 1024x1024 master and is NOT installed directly. Do NOT install under
+    # hicolor/scalable/apps/ either: that directory is SVG-only per the
+    # freedesktop Icon Theme Spec, and a PNG there makes KDE's KIconLoader fail
+    # the lookup silently.
+    install -Dm644 "$_repo/assets/icons/caco-256.png" \
+        "$pkgdir/usr/share/icons/hicolor/256x256/apps/caco.png"
+    install -Dm644 "$_repo/assets/icons/caco-128.png" \
+        "$pkgdir/usr/share/icons/hicolor/128x128/apps/caco.png"
+
+    install -Dm644 "$_repo/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
 
 package_caco-tui() {
     pkgdesc="Doom WAD library manager - TUI"
     depends=('openssl' 'gcc-libs' 'glibc')
 
-    cd "$pkgbase"
+    install -Dm755 "$_repo/target/release/caco-tui" "$pkgdir/usr/bin/caco-tui"
 
-    install -Dm755 target/release/caco-tui "$pkgdir/usr/bin/caco-tui"
+    install -Dm644 "$_repo/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

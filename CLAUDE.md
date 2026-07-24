@@ -203,16 +203,33 @@ caco completions [fish|bash|zsh]
 
 ### Commit messages
 
-**Every commit MUST use Conventional Commits**: `type(scope): subject`. The user delegates all commit-writing to Claude, so if commits drift from this format, releases break — release-plz uses the type prefix to decide whether to bump and what kind of bump.
+**Every commit MUST use Conventional Commits**: `type(scope): subject`. The user delegates all commit-writing to Claude. Versioning is no longer automated from commit types (release-plz was removed — see Releasing below), but the convention is still enforced: it is what makes `git log` readable enough to choose a bump level by hand.
 
-Bumping types (open a Release PR):
+Semantic meaning of the types, used to pick the bump level when releasing:
 - `feat:` → minor bump
 - `fix:` / `perf:` / `refactor:` → patch bump
-- Append `BREAKING CHANGE:` in the body for a major bump
-
-Hidden from changelog, never trigger a release:
-- `chore:`, `docs:`, `test:`, `ci:`, `build:`, `style:`
+- `BREAKING CHANGE:` in the body → major bump
+- `chore:`, `docs:`, `test:`, `ci:`, `build:`, `style:` → no bump on their own
 
 Common scopes in this repo: `db`, `core`, `gui`, `tui`, `sources`, `cli`, `mcp`, `arch`, `completion`, `stats`, `sourceports`, `doomwiki`, `idgames`, `doomworld`. Pick the smallest accurate scope. Omit the scope when a change genuinely spans many areas.
 
-Never write non-conventional commit subjects (e.g. `Add foo`, `Fix bar`, single-word like `gitignore`). The `{ message = ".*", group = "Changed" }` catch-all in `release-plz.toml` exists only for legacy history; non-conventional commits land in the changelog but do **not** trigger a release on their own, so a series of them silently skips a release.
+Never write non-conventional commit subjects (e.g. `Add foo`, `Fix bar`, single-word like `gitignore`).
+
+## Releasing
+
+Releases are cut **locally** — there is no CI packaging. GitHub only ever holds source; the built packages never leave this machine. Distribution is a local pacman repo served over `file://`.
+
+```bash
+./contrib/arch/release.sh --init      # one time: create the repo dir, print the pacman.conf stanza
+./contrib/arch/release.sh             # patch bump, then build + publish + pacman -Syu
+./contrib/arch/release.sh minor       # or: major, or an explicit 4.0.0
+./contrib/arch/release.sh --repack    # rebuild the current version as pkgrel+1
+```
+
+The script guards on a clean tree on `main` that is not behind `origin/main`, runs the quality gates, rewrites the version in `Cargo.toml` (workspace version **and** the three internal path-dependency `version` fields), refreshes `Cargo.lock`, syncs `pkgver` in the PKGBUILD, commits `chore(release): vX.Y.Z`, tags, pushes, builds, and publishes into the local repo — pruning to the newest `CACO_PKG_KEEP` (default 2) builds per subpackage.
+
+Overridable via env: `CACO_PKG_REPO` (default `/var/cache/caco-repo`), `CACO_PKG_REPO_NAME` (default `caco`), `CACO_PKG_KEEP`.
+
+**Why the PKGBUILD has no `source=()`**: it builds the working tree in place rather than cloning into `$srcdir`. Cargo fingerprints record absolute source paths, so a `$srcdir` clone invalidates every artifact and forces a cold LTO rebuild of the whole workspace (~3.5 min), *and* leaves a second multi-GB `target/` behind. Building at the same path `cargo build` uses makes packaging a ~5s no-op recompile against the warm dev cache. `build()` also unsets makepkg's `CFLAGS`/`RUSTFLAGS`/`LDFLAGS` so the fingerprints match a plain `cargo build --release` exactly — otherwise every switch between a dev build and a package build would rebuild the world.
+
+The tradeoff is that the package is only as reproducible as the working tree, which is why the clean-tree guard is not optional.

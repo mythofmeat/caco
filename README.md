@@ -18,6 +18,33 @@ A personal Doom WAD library manager inspired by [beets](https://beets.io). Impor
 
 ## Installation
 
+### Arch Linux (pacman-managed, recommended)
+
+Caco ships as three split packages — `caco` (CLI), `caco-gui`, `caco-tui` — built
+locally and published to a pacman repo on your own machine. Nothing is built in
+CI and no package leaves the machine.
+
+```bash
+git clone git@github.com:mythofmeat/caco.git && cd caco
+
+# One time: create the local repo and print the pacman.conf stanza to add
+./contrib/arch/release.sh --init
+
+# Cut a release: bump, build, publish, upgrade
+./contrib/arch/release.sh
+```
+
+After the first `--init`, add the printed stanza to `/etc/pacman.conf` and every
+subsequent release is just `./contrib/arch/release.sh` followed by the
+`pacman -Syu` it runs for you. Install individual packages with
+`pacman -S caco caco-gui caco-tui`.
+
+To build the packages without cutting a release:
+
+```bash
+cd contrib/arch && makepkg -f -d --nocheck
+```
+
 ### From source (Rust)
 
 ```bash
