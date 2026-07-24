@@ -2,8 +2,6 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-git pull || true
-
 # Embed the current commit into `--version`. Passed via env (not read from .git by
 # the build script) so a no-op `git pull` can't trigger a needless release rebuild.
 CACO_GIT_HASH="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
