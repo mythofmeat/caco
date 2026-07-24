@@ -9,7 +9,3 @@ Keywords=doom;caco;wad;
 MimeType=application/x-doom-wad;
 Terminal=false
 StartupNotify=false
-
-[Desktop Action tui]
-Name=Open TUI
-Exec=caco-tui
