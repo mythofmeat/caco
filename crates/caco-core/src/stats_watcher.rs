@@ -39,6 +39,10 @@ use crate::wad_stats::{self, MapStats, TICS_PER_SECOND, WadStats};
 // user CVars and emits a fallback EXIT from `WorldLoaded` for the *previous*
 // map when WorldUnloaded never fired. CVars are required because per-map
 // handler instances cannot share state directly.
+//
+// The same build additionally reports a genuine exit as `IsReopen` once the
+// level has been restored from a savegame, so `WorldUnloaded` distinguishes a
+// real hub revisit from that mislabelling via `sawWorldLoaded`.
 const ZSCRIPT_ZS: &str = r#"version "4.0"
 
 class CacoStatsReporter : EventHandler
@@ -50,6 +54,12 @@ class CacoStatsReporter : EventHandler
     transient CVar cvItems, cvTotalItems;
     transient CVar cvSecrets, cvTotalSecrets;
     transient CVar cvReported;
+
+    // Whether WorldLoaded fired for this level instance. Deliberately
+    // transient: it must NOT be serialised into savegames, because a false
+    // value after deserialisation is exactly how we detect a save-restored
+    // level (see WorldUnloaded).
+    transient bool sawWorldLoaded;
 
     void InitCVars()
     {
@@ -74,6 +84,7 @@ class CacoStatsReporter : EventHandler
     override void WorldLoaded(WorldEvent e)
     {
         InitCVars();
+        sawWorldLoaded = true;
         if (cvMap == null) return;
 
         string prevMap = cvMap.GetString();
@@ -128,8 +139,20 @@ class CacoStatsReporter : EventHandler
     override void WorldUnloaded(WorldEvent e)
     {
         InitCVars();
-        // Save/reopen transitions are not player exits.
-        if (e.IsSaveGame || e.IsReopen) return;
+        // Saving the game is never a player exit.
+        if (e.IsSaveGame) return;
+
+        // IsReopen normally marks a hub-style revisit, which is not a
+        // completion and must not be counted. But this build also sets
+        // IsReopen on a *genuine* exit when the level was restored from a
+        // savegame - and since WorldLoaded never fires for a save-restored
+        // level, sawWorldLoaded (transient, so not carried in the save) is
+        // still false there. False therefore means "this level came back from
+        // a save", where the exit is real and must be reported. Without this,
+        // beating a map you quickloaded into is silently dropped, and on a
+        // WAD's final map even the log's map-header fallback cannot recover it
+        // because there is no successor map to pair the transition with.
+        if (e.IsReopen && sawWorldLoaded) return;
 
         ReportExit(level.MapName,
             G_SkillPropertyInt(SKILLP_ACSReturn),
@@ -925,6 +948,52 @@ mod tests {
         // variants).
         let printf_count = ZSCRIPT_ZS.matches("Console.PrintfEx").count();
         assert_eq!(printf_count, 1, "expected a single CACOSTATS emitter");
+    }
+
+    #[test]
+    fn test_reporter_reports_exits_from_save_restored_levels() {
+        // uzdoom flags a genuine exit as IsReopen once the level came from a
+        // savegame, so WorldUnloaded must not bail on IsReopen alone - that
+        // silently drops every map beaten after a quickload, and on a WAD's
+        // final map nothing recovers it (the header fallback in parse_log
+        // needs a *successor* map header, which a final map never has).
+        assert!(
+            !ZSCRIPT_ZS.contains("if (e.IsSaveGame || e.IsReopen) return;"),
+            "IsReopen alone must not suppress the exit report"
+        );
+        assert!(
+            ZSCRIPT_ZS.contains("if (e.IsReopen && sawWorldLoaded) return;"),
+            "reopen must only be skipped for levels that saw WorldLoaded"
+        );
+        // The flag must stay transient: it is not serialised into the save, and
+        // a false value after a restore is precisely how a save-restored level
+        // is detected. Making it persistent would reintroduce the bug.
+        assert!(
+            ZSCRIPT_ZS.contains("transient bool sawWorldLoaded;"),
+            "sawWorldLoaded must be transient or save restores look normal"
+        );
+        assert!(ZSCRIPT_ZS.contains("sawWorldLoaded = true;"));
+    }
+
+    #[test]
+    fn test_parse_log_final_map_has_no_successor_to_fall_back_on() {
+        // Why the ZScript fix above matters rather than leaning on the header
+        // fallback: a final map is the last header in the log, so windows(2)
+        // never pairs it and no synthetic entry is produced. Only a real
+        // CACOSTATS|EXIT line records it.
+        let without = parse_log("MAP30 - The Final Understanding\n");
+        assert!(
+            without.is_empty(),
+            "a lone final-map header cannot be rescued by the fallback"
+        );
+
+        let with = parse_log(
+            "MAP30 - The Final Understanding\n\
+             CACOSTATS|EXIT|MAP30|4|9000|90/90|10/10|2/2\n",
+        );
+        assert_eq!(with.len(), 1);
+        assert_eq!(with[0].lump, "MAP30");
+        assert_eq!(with[0].kills, 90);
     }
 
     #[test]
