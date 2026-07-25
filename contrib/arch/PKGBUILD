@@ -26,11 +26,8 @@ pkgdesc="Doom WAD library manager"
 arch=('x86_64')
 url="https://github.com/mythofmeat/caco"
 license=('MIT')
-# Intentionally empty. The Rust toolchain here is rustup-managed under
-# ~/.cargo/bin, not pacman's `cargo` package — listing `cargo` as a makedepend
-# would make makepkg install Arch's rust and shadow the rustup toolchain.
-makedepends=()
-options=(!lto !debug strip)
+makedepends=('cargo' 'git' 'systemd')
+options=('!lto' '!debug' 'strip')
 
 # Working tree to build. $startdir is the directory makepkg was invoked from
 # (this file's directory), so the default resolves to the repo root. Override
@@ -38,18 +35,9 @@ options=(!lto !debug strip)
 _repo="${CACO_SRC:-$(realpath "$startdir/../..")}"
 
 pkgver() {
-    # The workspace version in Cargo.toml is the single source of truth, so a
-    # release edits one file and the package version follows automatically.
-    # release.sh keeps the literal pkgver= above in sync too, so this is a
-    # self-healing no-op rather than a source of surprise diffs.
-    awk -F'"' '/^version = /{print $2; exit}' "$_repo/Cargo.toml"
+    awk -F'"' '/^version = /{print $2; exit}' "$_repo/Cargo.toml" # The workspace version in Cargo.toml is the single source of truth
 }
 
-# Reset the build environment to exactly what a plain `cargo build --release`
-# sees. makepkg exports its own CFLAGS/RUSTFLAGS/LDFLAGS; letting those through
-# would change the fingerprint of every crate — and of the cc-compiled bundled
-# SQLite in rusqlite — so every switch between a dev build and a package build
-# would rebuild the world. Unsetting them keeps one warm cache serving both.
 _setup_env() {
     unset RUSTFLAGS CARGO_ENCODED_RUSTFLAGS LDFLAGS CFLAGS CXXFLAGS CPPFLAGS
     export RUSTUP_TOOLCHAIN=stable
@@ -59,21 +47,13 @@ _setup_env() {
 build() {
     cd "$_repo"
     _setup_env
-
-    # Embed the commit into `--version`. Injected via env rather than read from
-    # .git by the build script, so a no-op fetch can't trigger a rebuild — see
-    # crates/caco-cli/build.rs for the full rationale.
-    export CACO_GIT_HASH="$(git -C "$_repo" rev-parse --short HEAD)"
-
-    # caco-mcp is deliberately excluded: it is not packaged, so compiling it
-    # here is pure cost. check() still exercises the whole workspace.
-    cargo build --release --locked -p caco-cli -p caco-gui -p caco-tui
+    cargo build --release -p caco-cli -p caco-gui -p caco-tui
 }
 
 check() {
     cd "$_repo"
     _setup_env
-    cargo test --locked --workspace
+    cargo test --workspace
 }
 
 package_caco() {
