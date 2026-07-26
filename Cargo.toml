@@ -1,20 +1,15 @@
 [workspace]
 members = [
     "crates/caco-core",
-    "crates/caco-sources",
     "crates/caco-cli",
     "crates/caco-tui",
     "crates/caco-gui",
-    "crates/caco-mcp",
 ]
 resolver = "3"
 
 [profile.dev]
 opt-level = 1
 debug = "line-tables-only"
-
-[profile.dev.package."*"]
-opt-level = 3
 
 [workspace.package]
 version = "3.4.0"
@@ -23,9 +18,10 @@ description = "Doom WAD library manager"
 authors = ["eshen"]
 
 [profile.release]
-lto = true
-codegen-units = 1
 strip = true
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
 
 [workspace.dependencies]
 # Error handling
