@@ -1,0 +1,72 @@
+pkgbase=caco
+pkgname=('caco' 'caco-gui' 'caco-tui')
+pkgver=3.4.1
+pkgrel=1
+pkgdesc="Doom WAD library manager"
+arch=('x86_64')
+url="https://github.com/mythofmeat/caco"
+license=('MIT')
+makedepends=('cargo' 'git' 'systemd')
+options=('!lto' '!debug' 'strip')
+
+
+pkgver() {
+    cd "$srcdir/../../../"
+    git describe --tags --abbrev=0 | sed 's/^v//; s/-/_/'
+}
+
+build() {
+    cd "$srcdir/../../../"
+    cargo build --workspace --release
+}
+
+check() {
+    cd "$srcdir/../../../"
+    cargo test --workspace
+}
+
+package_caco() {
+    pkgdesc="Doom WAD library manager - CLI"
+    depends=('openssl' 'gcc-libs' 'glibc')
+
+    install -Dm755 "$srcdir/../../../target/release/caco" "$pkgdir/usr/bin/caco"
+
+    install -Dm644 "$srcdir/../../../crates/caco-cli/completions/caco.fish" \
+        "$pkgdir/usr/share/fish/vendor_completions.d/caco.fish"
+    install -Dm644 "$srcdir/../../../crates/caco-cli/completions/caco.bash" \
+        "$pkgdir/usr/share/bash-completion/completions/caco"
+    install -Dm644 "$srcdir/../../../crates/caco-cli/completions/_caco" \
+        "$pkgdir/usr/share/zsh/site-functions/_caco"
+
+    install -Dm644 "$srcdir/../../../LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
+
+package_caco-gui() {
+    pkgdesc="Doom WAD library manager - GUI"
+    depends=('openssl' 'gcc-libs' 'glibc' 'hicolor-icon-theme' 'desktop-file-utils')
+    optdepends=(
+        'vulkan-driver: GPU-accelerated rendering'
+        'xdg-desktop-portal: native file dialogs'
+    )
+
+    install -Dm755 "$srcdir/../../../target/release/caco-gui" "$pkgdir/usr/bin/caco-gui"
+
+    install -Dm644 "$srcdir/../../../assets/caco.desktop" \
+        "$pkgdir/usr/share/applications/caco.desktop"
+
+    install -Dm644 "$srcdir/../../../assets/icons/caco-256.png" \
+        "$pkgdir/usr/share/icons/hicolor/256x256/apps/caco.png"
+    install -Dm644 "$srcdir/../../../assets/icons/caco-128.png" \
+        "$pkgdir/usr/share/icons/hicolor/128x128/apps/caco.png"
+
+    install -Dm644 "$srcdir/../../../LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
+
+package_caco-tui() {
+    pkgdesc="Doom WAD library manager - TUI"
+    depends=('openssl' 'gcc-libs' 'glibc')
+
+    install -Dm755 "$srcdir/../../../target/release/caco-tui" "$pkgdir/usr/bin/caco-tui"
+
+    install -Dm644 "$srcdir/../../../LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
