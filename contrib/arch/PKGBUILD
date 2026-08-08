@@ -1,6 +1,6 @@
 pkgbase=caco
 pkgname=('caco' 'caco-gui' 'caco-tui')
-pkgver=3.4.1
+pkgver=3.4.0
 pkgrel=1
 pkgdesc="Doom WAD library manager"
 arch=('x86_64')
