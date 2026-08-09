@@ -15,6 +15,7 @@ use crate::dialogs::collections::CollectionsDialogState;
 use crate::dialogs::delete::DeleteDialogState;
 use crate::dialogs::edit::EditDialogState;
 use crate::dialogs::link::LinkDialogState;
+use crate::dialogs::profiles::ProfilesDialogState;
 use crate::dialogs::resources::ResourcesDialogState;
 use crate::dialogs::sessions::SessionsDialogState;
 use crate::dialogs::settings::SettingsDialogState;
@@ -65,6 +66,7 @@ pub enum ActionRequest {
     Cache,
     Settings,
     Resources,
+    Profiles,
     Collections,
     EditCollection(String),
     DeleteCollection(String),
@@ -98,6 +100,7 @@ pub enum ActiveDialog {
     Sessions(SessionsDialogState),
     Stats(StatsDialogState),
     Cache(CacheDialogState),
+    Profiles(Box<ProfilesDialogState>),
     Collections(CollectionsDialogState),
     Resources(ResourcesDialogState),
     WadStats(WadStatsDialogState),

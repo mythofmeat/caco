@@ -8,6 +8,7 @@ use crate::dialogs::collections::CollectionsResult;
 use crate::dialogs::delete::DeleteResult;
 use crate::dialogs::edit::EditResult;
 use crate::dialogs::link::LinkResult;
+use crate::dialogs::profiles::ProfilesResult;
 use crate::dialogs::resources::ResourcesResult;
 use crate::dialogs::sessions::SessionsResult;
 use crate::dialogs::settings::SettingsResult;
@@ -78,6 +79,12 @@ pub(super) fn render_active_dialog(
                     close_dialog = true;
                 }
                 CacheResult::Open => {}
+            },
+            ActiveDialog::Profiles(profiles_state) => match profiles_state.render(ctx, conn) {
+                ProfilesResult::Closed => {
+                    close_dialog = true;
+                }
+                ProfilesResult::Open => {}
             },
             ActiveDialog::Settings(settings_state) => match settings_state.render(ctx) {
                 SettingsResult::Saved => {

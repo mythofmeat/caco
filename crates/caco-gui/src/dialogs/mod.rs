@@ -4,6 +4,7 @@ pub mod collections;
 pub mod delete;
 pub mod edit;
 pub mod link;
+pub mod profiles;
 pub mod resources;
 pub mod sessions;
 pub mod settings;

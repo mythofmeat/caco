@@ -3,7 +3,7 @@
 use clap::Subcommand;
 use rusqlite::Connection;
 
-use caco_core::config;
+use caco_core::profiles;
 
 use crate::resolve;
 
@@ -88,15 +88,14 @@ pub fn run(conn: &Connection, cmd: &ProfileCommand) -> Result<(), String> {
     }
 }
 
-fn resolve_port(port: Option<&str>) -> String {
-    port.map(|p| p.to_string())
-        .unwrap_or_else(config::get_default_sourceport)
+fn resolve_port(port: Option<&str>) -> Result<String, String> {
+    profiles::resolve_sourceport(port).map_err(|e| e.to_string())
 }
 
 fn list_profiles(sourceport: Option<&str>) -> Result<(), String> {
-    let profiles = config::list_profiles(sourceport);
+    let found = profiles::list(sourceport);
 
-    if profiles.is_empty() {
+    if found.is_empty() {
         if let Some(port) = sourceport {
             println!("No profiles for '{port}'.");
         } else {
@@ -105,52 +104,27 @@ fn list_profiles(sourceport: Option<&str>) -> Result<(), String> {
         return Ok(());
     }
 
-    for (port, names) in &profiles {
-        for name in names {
-            println!("{port}/{name}");
-        }
+    for profile in &found {
+        println!("{}/{}", profile.sourceport, profile.name);
     }
     Ok(())
 }
 
 fn create_profile(name: &str, sourceport: Option<&str>, from: Option<&str>) -> Result<(), String> {
-    let port = resolve_port(sourceport);
-    if port.is_empty() {
-        return Err("No sourceport specified and no default configured.".to_string());
-    }
+    let port = resolve_port(sourceport)?;
+    profiles::create(&port, name, from).map_err(|e| e.to_string())?;
 
-    let path = config::get_profile_path(&port, name);
-    if path.exists() {
-        return Err(format!("Profile '{name}' already exists for '{port}'."));
-    }
-
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {e}"))?;
-    }
-
-    if let Some(source_name) = from {
-        let source_path = config::get_profile_path(&port, source_name);
-        if !source_path.exists() {
-            return Err(format!(
-                "Source profile '{source_name}' not found for '{port}'."
-            ));
-        }
-        std::fs::copy(&source_path, &path).map_err(|e| format!("Failed to copy profile: {e}"))?;
-        println!("Created profile '{name}' (copied from '{source_name}') for '{port}'.");
-    } else {
-        std::fs::File::create(&path).map_err(|e| format!("Failed to create profile: {e}"))?;
-        println!("Created profile '{name}' for '{port}'.");
+    match from {
+        Some(source) => println!("Created profile '{name}' (copied from '{source}') for '{port}'."),
+        None => println!("Created profile '{name}' for '{port}'."),
     }
     Ok(())
 }
 
 fn edit_profile(name: &str, sourceport: Option<&str>) -> Result<(), String> {
-    let port = resolve_port(sourceport);
-    if port.is_empty() {
-        return Err("No sourceport specified and no default configured.".to_string());
-    }
+    let port = resolve_port(sourceport)?;
 
-    let path = config::get_profile_path(&port, name);
+    let path = profiles::path(&port, name);
     if !path.exists() {
         return Err(format!(
             "Profile '{name}' not found for '{port}'. Create it with: caco profile create {name}"
@@ -176,28 +150,8 @@ fn edit_profile(name: &str, sourceport: Option<&str>) -> Result<(), String> {
 }
 
 fn copy_profile(source: &str, dest: &str, sourceport: Option<&str>) -> Result<(), String> {
-    let port = resolve_port(sourceport);
-    if port.is_empty() {
-        return Err("No sourceport specified and no default configured.".to_string());
-    }
-
-    let source_path = config::get_profile_path(&port, source);
-    let dest_path = config::get_profile_path(&port, dest);
-
-    if !source_path.exists() {
-        return Err(format!("Source profile '{source}' not found for '{port}'."));
-    }
-    if dest_path.exists() {
-        return Err(format!(
-            "Destination profile '{dest}' already exists for '{port}'."
-        ));
-    }
-
-    if let Some(parent) = dest_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {e}"))?;
-    }
-
-    std::fs::copy(&source_path, &dest_path).map_err(|e| format!("Failed to copy profile: {e}"))?;
+    let port = resolve_port(sourceport)?;
+    profiles::copy(&port, source, dest).map_err(|e| e.to_string())?;
     println!("Copied profile '{source}' to '{dest}' for '{port}'.");
     Ok(())
 }
@@ -208,20 +162,19 @@ fn remove_profile(
     sourceport: Option<&str>,
     yes: bool,
 ) -> Result<(), String> {
-    let port = resolve_port(sourceport);
-    if port.is_empty() {
-        return Err("No sourceport specified and no default configured.".to_string());
-    }
-
-    let path = config::get_profile_path(&port, name);
-    if !path.exists() {
-        return Err(format!("Profile '{name}' not found for '{port}'."));
+    let port = resolve_port(sourceport)?;
+    // Check existence before prompting, but let core own the wording so the
+    // message matches every other profile error.
+    if !profiles::exists(&port, name) {
+        return Err(caco_core::Error::ProfileNotFound {
+            sourceport: port,
+            name: name.to_string(),
+        }
+        .to_string());
     }
 
     // Check for WADs referencing this profile
-    let referencing =
-        caco_core::db::search_wads(conn, Some(&format!("config:{name}")), None, true, false, 0)
-            .map_err(|e| e.to_string())?;
+    let referencing = profiles::referencing_wads(conn, name).map_err(|e| e.to_string())?;
     if !referencing.is_empty() {
         eprintln!(
             "Warning: {} WAD(s) reference profile '{name}':",
@@ -236,18 +189,13 @@ fn remove_profile(
         return Err("Aborted.".to_string());
     }
 
-    std::fs::remove_file(&path).map_err(|e| format!("Failed to delete profile: {e}"))?;
+    profiles::remove(&port, name).map_err(|e| e.to_string())?;
     println!("Deleted profile '{name}' for '{port}'.");
     Ok(())
 }
 
 fn show_path(name: &str, sourceport: Option<&str>) -> Result<(), String> {
-    let port = resolve_port(sourceport);
-    if port.is_empty() {
-        return Err("No sourceport specified and no default configured.".to_string());
-    }
-
-    let path = config::get_profile_path(&port, name);
-    println!("{}", path.display());
+    let port = resolve_port(sourceport)?;
+    println!("{}", profiles::path(&port, name).display());
     Ok(())
 }

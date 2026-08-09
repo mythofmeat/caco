@@ -9,6 +9,7 @@ pub mod error;
 pub mod iwad_detect;
 pub mod mapinfo;
 pub mod player;
+pub mod profiles;
 pub mod resource_service;
 pub mod saves;
 pub mod sourceports;

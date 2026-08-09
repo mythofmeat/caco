@@ -201,6 +201,19 @@ pub(super) fn render_sidebar(
             if ui
                 .add(
                     egui::Button::new(
+                        egui::RichText::new("Profiles")
+                            .size(11.0)
+                            .color(theme::TEXT_MUTED),
+                    )
+                    .frame(false),
+                )
+                .clicked()
+            {
+                actions.push(ActionRequest::Profiles);
+            }
+            if ui
+                .add(
+                    egui::Button::new(
                         egui::RichText::new("IWADs")
                             .size(11.0)
                             .color(theme::TEXT_MUTED),

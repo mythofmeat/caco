@@ -50,6 +50,15 @@ pub enum Error {
 
     #[error("migration failed: {0}")]
     MigrationFailed(String),
+
+    #[error("profile '{name}' not found for '{sourceport}'")]
+    ProfileNotFound { sourceport: String, name: String },
+
+    #[error("profile '{name}' already exists for '{sourceport}'")]
+    ProfileExists { sourceport: String, name: String },
+
+    #[error("no sourceport specified and no default configured")]
+    NoSourceport,
 }
 
 /// Convenience alias used throughout caco-core.
