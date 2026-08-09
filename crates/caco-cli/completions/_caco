@@ -519,8 +519,6 @@ _caco() {
         _describe 'caco command' commands
         local -a options
         options=(
-            '--tui:Launch TUI interface'
-            '--gui:Launch GUI interface'
             '--help:Show help'
         )
         _describe 'option' options

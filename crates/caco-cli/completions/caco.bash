@@ -94,7 +94,7 @@ _caco() {
     # Top-level: complete commands or global options
     if [[ -z "$cmd" ]]; then
         if [[ "$cur" == -* ]]; then
-            COMPREPLY=($(compgen -W "--tui --gui --help" -- "$cur"))
+            COMPREPLY=($(compgen -W "--help" -- "$cur"))
         else
             COMPREPLY=($(compgen -W "ls info modify trash play import config random completions stats cache enrich companion gc collection profile saves demos sessions" -- "$cur"))
         fi

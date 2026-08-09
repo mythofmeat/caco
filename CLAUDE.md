@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Caco is a personal Doom WAD library manager inspired by `beets`. It tracks WADs you want to play, have played, or are playing, with metadata from multiple sources (idgames, Doomwiki, Doomworld forums, manual entry). Three interfaces share one workspace: a CLI (`caco`), a TUI (ratatui), and a GUI (egui). An MCP server (`caco-mcp`) exposes a sandboxed view of the library to LLMs.
+Caco is a personal Doom WAD library manager inspired by `beets`. It tracks WADs you want to play, have played, or are playing, with metadata from multiple sources (idgames, Doomwiki, Doomworld forums, manual entry). Two interfaces share one workspace: a CLI (`caco`) and a GUI (egui). The GUI is the primary interface; see issue #31 for the in-progress work to move the CLI-only features into the GUI and retire `caco-cli`.
 
 Key features:
 - SQLite database for WAD metadata and play history
@@ -35,7 +35,6 @@ cargo build --release -p caco-cli    # Release CLI binary
 
 # Run
 cargo run -p caco-cli -- <command>
-cargo run -p caco-tui
 cargo run -p caco-gui
 
 # Quality gates (required before commit)
@@ -56,7 +55,6 @@ crates/
 ├── caco-core/     Core library: DB, config, detection, player, services
 ├── caco-sources/  API clients (idgames, Doom Wiki, Doomworld) + import service + HTTP
 ├── caco-cli/      Clap-based CLI; all subcommands live in src/commands/
-├── caco-tui/      ratatui + crossterm TUI — tabbed library, import pane, detail/edit screens
 ├── caco-gui/      eframe/egui GUI — library panels, grid view, dialogs, background workers
 └── caco-mcp/      rmcp MCP server — sandboxed library access for LLM agents
 ```
@@ -79,11 +77,7 @@ crates/
 
 **caco-cli**: `main.rs` sets up clap + DB; `output.rs` renders table/plain/JSON; `picker.rs` is the fzf-style selector; `resolve.rs` handles WAD resolution; `parsing.rs` handles modify/sort parsing. Each subcommand owns a file in `src/commands/`.
 
-**caco-tui**: `app.rs` drives the event loop and screen stack. Screens live in `src/screens/`; shared widgets (wad_table, wad_info, filter_input, library_pane, import_pane, …) in `src/widgets/`. Background work flows through an mpsc channel drained each tick.
-
-**caco-gui**: `app.rs` hosts the `CacoApp` state machine. Panels in `src/panels/`, dialogs in `src/dialogs/`, import flow in `src/import/`. `thumbnails.rs` extracts and caches TITLEPIC; `wiki_scraper.rs` fetches Doom Wiki thumbs; `workers.rs` coordinates background search/import/play via mpsc channels. The Cacowards view (`ViewMode::Cacowards`) is rendered by `panels/cacowards.rs` in a deliberately editorial layout (hero banner + year strip + category card grid) to signal the curated-external-feed origin while sharing the rest of the GUI chrome. Imports kicked off from cacoward cards spawn through `import::workers::spawn_import_cacoward` so they reuse the existing duplicate-detection and auto-link plumbing. `dialogs/settings.rs` is the GUI settings editor: it snapshots the live `Config`, edits a curated field subset (sourceports, behavior, cache, paths), and on Save writes the full struct via `config::save_config` + `config::reload_config` so unexposed sections (tui/list, sourceport_preferences, iwad_priority) survive round-trips and changes apply without restart.
-
-**caco-mcp**: `server.rs` hosts the rmcp `ServerHandler`. `cli_tools.rs` exposes 17 `caco_*` tools that shell out to a sandboxed `caco` binary; `introspect.rs` adds 7 `inspect_*` read-only tools plus `run_sql`. `sandbox.rs` enforces that writes only land in the sandbox copy.
+**caco-gui**: `app.rs` hosts the `CacoApp` state machine. Panels in `src/panels/`, dialogs in `src/dialogs/`, import flow in `src/import/`. `thumbnails.rs` extracts and caches TITLEPIC; `wiki_scraper.rs` fetches Doom Wiki thumbs; `workers.rs` coordinates background search/import/play via mpsc channels. The Cacowards view (`ViewMode::Cacowards`) is rendered by `panels/cacowards.rs` in a deliberately editorial layout (hero banner + year strip + category card grid) to signal the curated-external-feed origin while sharing the rest of the GUI chrome. Imports kicked off from cacoward cards spawn through `import::workers::spawn_import_cacoward` so they reuse the existing duplicate-detection and auto-link plumbing. `dialogs/settings.rs` is the GUI settings editor: it snapshots the live `Config`, edits a curated field subset (sourceports, behavior, cache, paths), and on Save writes the full struct via `config::save_config` + `config::reload_config` so unexposed sections (list, sourceport_preferences, iwad_priority) survive round-trips and changes apply without restart.
 
 ## Dependencies (key crates)
 
@@ -101,8 +95,6 @@ clap = "4"              # CLI
 comfy-table = "7"
 indicatif = "0.17"
 reqwest = "0.12"        # HTTP (blocking)
-ratatui = "0.29"        # TUI
-crossterm = "0.28"
 eframe = "0.31"         # GUI
 egui = "0.31"
 ```
@@ -155,7 +147,7 @@ egui = "0.31"
 
 **DB migrations**: run on `init_db()`; numbered sequentially; current schema version is 23+.
 
-**Cacowards**: `cacowards` table (year, category, rank, wad_title, idgames_url, doomwiki_url, wad_id, manual_override) tracks Doomworld's annual awards. Core categories: `winner`, `runner-up`, `honorable-mention`, `mordeth`. `caco enrich --cacowards --year YYYY` scrapes the Doom Wiki's `Cacowards_YYYY` page (`caco-sources/src/doomwiki/cacowards.rs`), upserts entries, and auto-links to library WADs in two passes: (1) idgames URL → `wads.idgames_id`, (2) normalized-title fallback that links only when exactly one library WAD shares the normalized title. Stale non-manual rows for the year are cleared before each re-scrape so the wiki view is canonical; `manual_override = 1` entries survive. `caco stats --cacowards` renders a year × category grid; `--year YYYY` drills into entry-level detail with linked-WAD status. TUI: `Shift+A` opens the Cacowards screen with `[`/`]` for year navigation.
+**Cacowards**: `cacowards` table (year, category, rank, wad_title, idgames_url, doomwiki_url, wad_id, manual_override) tracks Doomworld's annual awards. Core categories: `winner`, `runner-up`, `honorable-mention`, `mordeth`. `caco enrich --cacowards --year YYYY` scrapes the Doom Wiki's `Cacowards_YYYY` page (`caco-sources/src/doomwiki/cacowards.rs`), upserts entries, and auto-links to library WADs in two passes: (1) idgames URL → `wads.idgames_id`, (2) normalized-title fallback that links only when exactly one library WAD shares the normalized title. Stale non-manual rows for the year are cleared before each re-scrape so the wiki view is canonical; `manual_override = 1` entries survive. `caco stats --cacowards` renders a year × category grid; `--year YYYY` drills into entry-level detail with linked-WAD status.
 
 **Cacoward filtering and import**: `cacoward:` in a `caco ls` query switches to entry-list mode showing both library and absent (un-imported) entries. Forms: `cacoward:2023`, `cacoward:winner` (with `r`/`hm`/`m` shortcuts), `cacoward:2023:winner`, `cacoward:*`. In entry mode, `status:unplayed` matches both library-unplayed AND absent (the "haven't played yet" bucket); `status:absent` filters to absent-only. Each entry exposes a stable display ID via `db::format_cacoward_id`: `c.YEAR.CATEGORY.RANK` (e.g. `c.2023.winner.10`), with `c.<pk>` as a stability fallback. `caco import --cacoward <ID>` resolves the ID and routes through the existing idgames or doomwiki import path, then auto-links the new wad row. `caco modify <wad-query> cacoward=<ID>` manually pins a cacoward link (sets `manual_override=true`); `!cacoward` or `cacoward=` (empty) clears every cacoward link pointing at the resolved WAD.
 
@@ -211,7 +203,7 @@ Semantic meaning of the types, used to pick the bump level when releasing:
 - `BREAKING CHANGE:` in the body → major bump
 - `chore:`, `docs:`, `test:`, `ci:`, `build:`, `style:` → no bump on their own
 
-Common scopes in this repo: `db`, `core`, `gui`, `tui`, `sources`, `cli`, `mcp`, `arch`, `completion`, `stats`, `sourceports`, `doomwiki`, `idgames`, `doomworld`. Pick the smallest accurate scope. Omit the scope when a change genuinely spans many areas.
+Common scopes in this repo: `db`, `core`, `gui`, `sources`, `cli`, `arch`, `completion`, `stats`, `sourceports`, `doomwiki`, `idgames`, `doomworld`. Pick the smallest accurate scope. Omit the scope when a change genuinely spans many areas.
 
 Never write non-conventional commit subjects (e.g. `Add foo`, `Fix bar`, single-word like `gitignore`).
 

@@ -100,18 +100,6 @@
 # Default status filter (empty array shows all statuses)
 # default_status = []
 
-# TUI configuration
-# [tui]
-
-# Starting tab (all, unplayed, in-progress, completed, abandoned, import)
-# default_tab = "all"
-
-# Default sort field (id, title, author, playtime, last_played, year, rating)
-# default_sort = "id"
-
-# Default sort direction (false = ascending, true = descending)
-# default_sort_desc = false
-
 # GUI configuration
 # [gui]
 

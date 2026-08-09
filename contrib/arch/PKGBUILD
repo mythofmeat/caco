@@ -1,5 +1,5 @@
 pkgbase=caco
-pkgname=('caco' 'caco-gui' 'caco-tui')
+pkgname=('caco' 'caco-gui')
 pkgver=3.4.0
 pkgrel=1
 pkgdesc="Doom WAD library manager"
@@ -58,15 +58,6 @@ package_caco-gui() {
         "$pkgdir/usr/share/icons/hicolor/256x256/apps/caco.png"
     install -Dm644 "$srcdir/../../../assets/icons/caco-128.png" \
         "$pkgdir/usr/share/icons/hicolor/128x128/apps/caco.png"
-
-    install -Dm644 "$srcdir/../../../LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
-}
-
-package_caco-tui() {
-    pkgdesc="Doom WAD library manager - TUI"
-    depends=('openssl' 'gcc-libs' 'glibc')
-
-    install -Dm755 "$srcdir/../../../target/release/caco-tui" "$pkgdir/usr/bin/caco-tui"
 
     install -Dm644 "$srcdir/../../../LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

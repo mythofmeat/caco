@@ -12,15 +12,14 @@ A personal Doom WAD library manager inspired by [beets](https://beets.io). Impor
 - **Per-WAD isolation** — saves, stats, and configs are separated per WAD so nothing gets mixed up.
 - **On-demand downloads** — idgames WADs are cached when you play, with configurable auto-cleanup.
 - **Garbage collection** — reclaim disk space from completed / abandoned WADs with smart cleanup.
-- **Three interfaces** — CLI, TUI (ratatui), and GUI (egui with thumbnails and grid/list views).
-- **MCP server** — expose the library to Claude or other MCP clients via a sandboxed read/write interface (`caco-mcp`).
+- **Two interfaces** — CLI and GUI (egui with thumbnails and grid/list views).
 - **Smart collections** — save queries by name and re-run them (`caco collection add`).
 
 ## Installation
 
 ### Arch Linux (pacman-managed, recommended)
 
-Caco ships as three split packages — `caco` (CLI), `caco-gui`, `caco-tui` — built
+Caco ships as two split packages — `caco` (CLI) and `caco-gui` — built
 locally and published to a pacman repo on your own machine. Nothing is built in
 CI and no package leaves the machine.
 
@@ -38,7 +37,7 @@ git clone git@github.com:mythofmeat/caco.git && cd caco
 add — do that after the first release, since an empty repo has no database for
 pacman to fetch. Every subsequent release is just `./contrib/arch/release.sh`
 followed by the `pacman -Syu` it runs for you. Install individual packages with
-`pacman -S caco caco-gui caco-tui`.
+`pacman -S caco caco-gui`.
 
 To build the packages without cutting a release:
 
@@ -111,25 +110,6 @@ caco stats --cacowards --year 2023 -o json  # Per-entry detail as JSON
 caco ls cacoward:2023 cacoward:winner status:unplayed  # Browse unplayed 2023 winners
 caco import --cacoward c.2023.winner.1   # Import the Nth winner of YEAR
 ```
-
-### TUI
-
-Terminal interface with vim-style navigation, tabbed filtering, and live search.
-
-```bash
-caco-tui
-```
-
-Key bindings:
-
-- **Navigate:** `j`/`k`, `gg`/`G`, `Ctrl-d`/`Ctrl-u`
-- **Filter / sort:** `/` or `f` filter, `o` cycle sort, `O` reverse
-- **Actions:** `Enter` play, `i` info, `e` edit, `d` delete, `h` sessions, `M` map stats
-- **Status:** `s`, then `u` / `p` / `c` / `a`
-- **Rating / beaten:** `r` cycle rating, `R` clear, `+` / `-` adjust beaten count
-- **Screens:** `S` stats, `C` cache, `W` resources, `A` Cacowards, `Tab`/`Shift-Tab` switch tabs
-- **Trash view:** `T` toggle, `u` untrash
-- **Help / quit:** `?` help, `q` quit
 
 ### GUI
 
@@ -290,10 +270,6 @@ sort = "id+"
 [gui]
 default_view = "list"
 thumbnail_size = 160
-
-[tui]
-default_tab = "all"
-default_sort = "id"
 ```
 
 See `config.example.toml` for all available options.

@@ -25,7 +25,6 @@ function __caco_profiles
 end
 
 # Global options
-complete -c caco -n __fish_use_subcommand -l tui -d "Launch TUI interface"
 complete -c caco -n __fish_use_subcommand -l gui -d "Launch GUI interface (requires PySide6)"
 
 # Main commands

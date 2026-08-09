@@ -2,7 +2,6 @@
 members = [
     "crates/caco-core",
     "crates/caco-cli",
-    "crates/caco-tui",
     "crates/caco-gui",
 ]
 resolver = "3"
@@ -80,36 +79,16 @@ egui_extras = { version = "0.31", features = ["syntect"] }
 rfd = "0.15"
 open = "5"
 
-# TUI
-ratatui = "0.29"
-crossterm = "0.28"
-tui-input = "0.11"
-unicode-width = "0.2"
-
 # Testing
 tempfile = "3"
 
-# MCP server
-rmcp = { version = "0.8", features = ["server", "macros", "transport-io"] }
-schemars = "1"
-tokio = { version = "1", features = [
-    "macros",
-    "rt-multi-thread",
-    "process",
-    "io-std",
-    "io-util",
-    "fs",
-    "signal",
-] }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-fs_extra = "1.3"
 
 # Internal crates. The `version` field is needed alongside `path` for
 # `cargo package --workspace` to work at all — without it cargo errors with
 # "dependency X does not specify a version". These must stay equal to
-# workspace.package.version; contrib/arch/release.sh rewrites all four together
-# on every bump and aborts if any reference is left behind.
+# workspace.package.version; the release script rewrites them together with
+# workspace.package.version on every bump and aborts if any reference is left
+# behind.
 caco-core = { path = "crates/caco-core", version = "3.4.0" }
 caco-sources = { path = "crates/caco-sources", version = "3.4.0" }
-caco-mcp = { path = "crates/caco-mcp", version = "3.4.0" }

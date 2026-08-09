@@ -125,8 +125,6 @@ pub struct Config {
     pub port_args: HashMap<String, Vec<String>>,
 
     #[serde(default)]
-    pub tui: TuiConfig,
-    #[serde(default)]
     pub gui: GuiConfig,
     #[serde(default)]
     pub list: ListConfig,
@@ -160,28 +158,9 @@ impl Default for Config {
             zdoom_sourceport: String::new(),
             sourceport_preferences: HashMap::new(),
             port_args: HashMap::new(),
-            tui: TuiConfig::default(),
             gui: GuiConfig::default(),
             list: ListConfig::default(),
             iwad_priority: HashMap::new(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct TuiConfig {
-    pub default_tab: String,
-    pub default_sort: String,
-    pub default_sort_desc: bool,
-}
-
-impl Default for TuiConfig {
-    fn default() -> Self {
-        Self {
-            default_tab: "all".to_string(),
-            default_sort: "id".to_string(),
-            default_sort_desc: false,
         }
     }
 }
@@ -306,7 +285,7 @@ pub fn reload_config() {
 /// Ensure the config file on disk has all known keys.
 ///
 /// Compares the existing config against `Config::default()`. Adds missing
-/// top-level keys with their default values. For sections (tui, gui, list),
+/// top-level keys with their default values. For sections (gui, list),
 /// only backfills keys in sections that already exist on disk — does not
 /// create missing sections. Writes only if changes were made.
 fn ensure_config_keys(path: &Path, contents: &str) {
@@ -802,7 +781,6 @@ mod tests {
         let parsed: Config = toml::from_str(&toml_str).unwrap();
         assert_eq!(parsed.link_mode, cfg.link_mode);
         assert_eq!(parsed.manage_data_dirs, cfg.manage_data_dirs);
-        assert_eq!(parsed.tui.default_tab, cfg.tui.default_tab);
         assert_eq!(parsed.gui.window_width, cfg.gui.window_width);
     }
 
@@ -926,27 +904,27 @@ helion = ["-loglevel", "info"]
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
 
-        // Config with a [tui] section missing default_sort_desc
-        let contents = "[tui]\ndefault_tab = \"playing\"\n";
+        // Config with a [gui] section missing default_sort_desc
+        let contents = "[gui]\ndefault_tab = \"playing\"\n";
         fs::write(&path, contents).unwrap();
 
         ensure_config_keys(&path, contents);
 
         let updated = fs::read_to_string(&path).unwrap();
         let table: toml::Table = updated.parse().unwrap();
-        let tui = table.get("tui").unwrap().as_table().unwrap();
+        let gui = table.get("gui").unwrap().as_table().unwrap();
 
         // Existing key preserved
         assert_eq!(
-            tui.get("default_tab").and_then(|v| v.as_str()),
+            gui.get("default_tab").and_then(|v| v.as_str()),
             Some("playing")
         );
         // Missing key added
         assert_eq!(
-            tui.get("default_sort_desc").and_then(|v| v.as_bool()),
+            gui.get("default_sort_desc").and_then(|v| v.as_bool()),
             Some(false)
         );
-        assert_eq!(tui.get("default_sort").and_then(|v| v.as_str()), Some("id"));
+        assert_eq!(gui.get("default_sort").and_then(|v| v.as_str()), Some("id"));
     }
 
     #[test]
@@ -1007,14 +985,6 @@ helion = ["-loglevel", "info"]
     }
 
     #[test]
-    fn test_section_defaults_tui() {
-        let cfg = TuiConfig::default();
-        assert_eq!(cfg.default_tab, "all");
-        assert_eq!(cfg.default_sort, "id");
-        assert!(!cfg.default_sort_desc);
-    }
-
-    #[test]
     fn test_section_defaults_gui() {
         let cfg = GuiConfig::default();
         assert_eq!(cfg.default_tab, "all");
@@ -1034,22 +1004,6 @@ helion = ["-loglevel", "info"]
         assert!(cfg.format.contains(&"author".to_string()));
         assert!(cfg.sort.is_none());
         assert!(cfg.default_status.is_empty());
-    }
-
-    #[test]
-    fn test_config_tui_section_override() {
-        let toml_str = r#"
-sourceport = "gzdoom"
-
-[tui]
-default_tab = "playing"
-default_sort_desc = true
-"#;
-        let cfg: Config = toml::from_str(toml_str).unwrap();
-        assert_eq!(cfg.tui.default_tab, "playing");
-        assert!(cfg.tui.default_sort_desc);
-        // Non-overridden key keeps default
-        assert_eq!(cfg.tui.default_sort, "id");
     }
 
     #[test]
@@ -1124,15 +1078,15 @@ window_width = 1600
     }
 
     #[test]
-    fn test_config_with_nested_tui_save() {
+    fn test_config_with_nested_gui_save() {
         let mut cfg = Config::default();
-        cfg.tui.default_tab = "playing".to_string();
-        cfg.tui.default_sort = "playtime".to_string();
+        cfg.gui.default_tab = "playing".to_string();
+        cfg.gui.default_sort = "playtime".to_string();
 
         let toml_str = toml::to_string_pretty(&cfg).unwrap();
         let parsed: Config = toml::from_str(&toml_str).unwrap();
-        assert_eq!(parsed.tui.default_tab, "playing");
-        assert_eq!(parsed.tui.default_sort, "playtime");
+        assert_eq!(parsed.gui.default_tab, "playing");
+        assert_eq!(parsed.gui.default_sort, "playtime");
     }
 
     #[test]
