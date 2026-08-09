@@ -307,18 +307,38 @@ idgames WADs are cleaned automatically (re-downloadable). Non-idgames WADs promp
 
 ## Data Storage
 
+Caco splits its files by whether they can be regenerated. Everything under
+`~/.config/caco` and `~/.local/share/caco` is worth carrying between machines;
+everything under `~/.cache/caco` is disposable and rebuilds itself on demand.
+
+**Keep these** — copy them to move your library to another machine:
+
 | Location | Contents |
 |----------|----------|
 | `~/.config/caco/config.toml` | Configuration |
 | `~/.local/share/caco/library.db` | Library database |
-| `~/.local/share/caco/wads/` | Cached WAD files |
 | `~/.local/share/caco/data/` | Per-WAD saves, stats, configs |
 | `~/.local/share/caco/iwads/` | Managed IWADs |
 | `~/.local/share/caco/id24/` | Managed id24 WADs |
 | `~/.local/share/caco/companions/` | Managed companion files |
 | `~/.local/share/caco/sourceports/` | Per-sourceport config profiles |
 | `~/.local/share/caco/backups/` | Save backups + pre-migration DB snapshots |
-| `~/.cache/caco/thumbnails/` | GUI thumbnail cache |
+
+**Disposable** — safe to delete at any time:
+
+| Location | Contents |
+|----------|----------|
+| `~/.cache/caco/wads/` | Cached WAD files, re-downloaded on demand |
+| `~/.cache/caco/thumbnails/` | GUI thumbnail cache, re-extracted from TITLEPIC |
+
+The WAD cache is usually the largest thing caco stores and is entirely
+re-downloadable, which is why it lives on the disposable side. If you are
+upgrading from a version that kept it at `~/.local/share/caco/wads/`, caco
+moves it for you on first launch and updates `cache_dir` to match. A `cache_dir`
+you set yourself is left alone.
+
+Override the cache root with `CACO_CACHE_HOME`, or just the WAD cache with
+`CACO_CACHE_DIR`.
 
 ### Recovering from a bad migration
 

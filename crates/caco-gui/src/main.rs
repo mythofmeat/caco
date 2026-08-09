@@ -24,6 +24,19 @@ fn main() -> eframe::Result<()> {
         None
     };
 
+    // Relocate the WAD cache out of the data dir if it predates the split.
+    // Idempotent; a no-op on every run after the first. Runs before the DB
+    // path is resolved so a first launch after upgrading does the move.
+    match caco_core::config::migrate_legacy_wad_cache() {
+        caco_core::config::CacheMigration::Moved { from, to } => {
+            eprintln!("Moved WAD cache: {} -> {}", from.display(), to.display());
+        }
+        caco_core::config::CacheMigration::Skipped { reason } => {
+            eprintln!("Could not move the WAD cache: {reason}");
+        }
+        caco_core::config::CacheMigration::NotNeeded => {}
+    }
+
     let db_path = db_path.unwrap_or_else(caco_core::config::get_db_path);
 
     // `app_id` must match the `.desktop` file basename so Wayland

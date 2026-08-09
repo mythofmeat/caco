@@ -48,10 +48,33 @@ pub fn default_db_path() -> PathBuf {
     default_data_dir().join("library.db")
 }
 
+/// Base directory for regenerable data. Overridden by `CACO_CACHE_HOME`.
+///
+/// Everything under here can be deleted without losing anything the user
+/// cannot get back: downloaded WADs re-fetch from idgames, thumbnails
+/// re-extract from TITLEPIC. This is deliberately *not* under
+/// [`default_data_dir`] so the data dir stays small enough to copy between
+/// machines — see the split documented in README's Data Locations table.
+pub fn cache_home() -> PathBuf {
+    if let Ok(p) = std::env::var("CACO_CACHE_HOME") {
+        return PathBuf::from(p);
+    }
+    dirs::cache_dir()
+        .unwrap_or_else(|| home_dir().join(".cache"))
+        .join("caco")
+}
+
 pub fn default_cache_dir() -> PathBuf {
     if let Ok(p) = std::env::var("CACO_CACHE_DIR") {
         return PathBuf::from(p);
     }
+    cache_home().join("wads")
+}
+
+/// Where the WAD cache lived before it moved to [`cache_home`].
+///
+/// Retained so [`migrate_legacy_wad_cache`] can find and relocate it.
+pub fn legacy_wad_cache_dir() -> PathBuf {
     default_data_dir().join("wads")
 }
 
@@ -64,9 +87,7 @@ pub fn id24_dir() -> PathBuf {
 }
 
 pub fn thumbnail_cache_dir() -> PathBuf {
-    dirs::cache_dir()
-        .unwrap_or_else(|| home_dir().join(".cache"))
-        .join("caco/thumbnails")
+    cache_home().join("thumbnails")
 }
 
 pub fn default_data_subdir() -> PathBuf {
@@ -370,6 +391,133 @@ pub fn get_cache_dir() -> PathBuf {
     } else {
         expand_tilde(p)
     }
+}
+
+/// Outcome of [`migrate_legacy_wad_cache`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CacheMigration {
+    /// Nothing to do — already migrated, or no legacy directory exists.
+    NotNeeded,
+    /// The cache was relocated.
+    Moved { from: PathBuf, to: PathBuf },
+    /// A legacy directory exists but was deliberately left alone.
+    Skipped { reason: String },
+}
+
+/// Move the WAD cache out of the data dir and into [`cache_home`].
+///
+/// The WAD cache is regenerable — every file re-downloads from idgames — so it
+/// does not belong in the directory the user copies between machines. This
+/// relocates it once and rewrites the stored `cache_dir` so the move sticks.
+///
+/// Deliberately conservative. It only acts when the configured `cache_dir` is
+/// unset or still points at the old default: a user who pointed the cache
+/// somewhere of their own choosing has made a decision, and it is not this
+/// function's place to override it. It also refuses to merge into a non-empty
+/// destination rather than risk interleaving two caches.
+///
+/// Idempotent, so calling it on every startup is fine.
+pub fn migrate_legacy_wad_cache() -> CacheMigration {
+    // An explicit env override means the caller is driving; don't interfere.
+    if std::env::var("CACO_CACHE_DIR").is_ok() {
+        return CacheMigration::NotNeeded;
+    }
+
+    let legacy = legacy_wad_cache_dir();
+    let target = default_cache_dir();
+
+    if legacy == target || !legacy.is_dir() {
+        return CacheMigration::NotNeeded;
+    }
+
+    // Respect a cache_dir the user pointed somewhere deliberate.
+    let cfg = load_config();
+    if !cfg.cache_dir.is_empty() && expand_tilde(&cfg.cache_dir) != legacy {
+        return CacheMigration::NotNeeded;
+    }
+
+    let outcome = move_cache_dir(&legacy, &target);
+
+    // Persist the new location so the move is not re-attempted or reverted.
+    if matches!(outcome, CacheMigration::Moved { .. }) && !cfg.cache_dir.is_empty() {
+        let mut updated = (*cfg).clone();
+        updated.cache_dir = target.to_string_lossy().into_owned();
+        if save_config(&updated).is_ok() {
+            reload_config();
+        }
+    }
+
+    outcome
+}
+
+/// Relocate `legacy` to `target`, without consulting config or environment.
+///
+/// Split out from [`migrate_legacy_wad_cache`] so the filesystem behaviour can
+/// be tested against temp dirs rather than the caller's real home directory.
+fn move_cache_dir(legacy: &Path, target: &Path) -> CacheMigration {
+    // Never merge two caches together.
+    let target_occupied = fs::read_dir(target)
+        .map(|mut entries| entries.next().is_some())
+        .unwrap_or(false);
+    if target_occupied {
+        return CacheMigration::Skipped {
+            reason: format!(
+                "{} already exists and is not empty; left {} in place",
+                target.display(),
+                legacy.display()
+            ),
+        };
+    }
+
+    if let Some(parent) = target.parent()
+        && let Err(e) = fs::create_dir_all(parent)
+    {
+        return CacheMigration::Skipped {
+            reason: format!("could not create {}: {e}", parent.display()),
+        };
+    }
+
+    // `rename` is the common case (same filesystem) and is atomic. It fails
+    // across mount points, so fall back to a copy-then-delete. An empty
+    // directory already at the target also fails rename on some platforms,
+    // so clear it first.
+    let _ = fs::remove_dir(target);
+    if fs::rename(legacy, target).is_err() {
+        if let Err(e) = copy_dir_recursive(legacy, target) {
+            return CacheMigration::Skipped {
+                reason: format!("could not copy the cache to {}: {e}", target.display()),
+            };
+        }
+        if let Err(e) = fs::remove_dir_all(legacy) {
+            return CacheMigration::Skipped {
+                reason: format!(
+                    "copied the cache to {} but could not remove {}: {e}",
+                    target.display(),
+                    legacy.display()
+                ),
+            };
+        }
+    }
+
+    CacheMigration::Moved {
+        from: legacy.to_path_buf(),
+        to: target.to_path_buf(),
+    }
+}
+
+fn copy_dir_recursive(from: &Path, to: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(to)?;
+    for entry in fs::read_dir(from)? {
+        let entry = entry?;
+        let src = entry.path();
+        let dst = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir_recursive(&src, &dst)?;
+        } else {
+            fs::copy(&src, &dst)?;
+        }
+    }
+    Ok(())
 }
 
 /// Get the managed IWAD directory from config.
@@ -1087,6 +1235,89 @@ window_width = 1600
         let parsed: Config = toml::from_str(&toml_str).unwrap();
         assert_eq!(parsed.gui.default_tab, "playing");
         assert_eq!(parsed.gui.default_sort, "playtime");
+    }
+
+    #[test]
+    fn test_move_cache_dir_relocates_contents() {
+        let root = tempfile::tempdir().unwrap();
+        let legacy = root.path().join("share/caco/wads");
+        let target = root.path().join("cache/caco/wads");
+        fs::create_dir_all(legacy.join("nested")).unwrap();
+        fs::write(legacy.join("doom2.wad"), b"iwad").unwrap();
+        fs::write(legacy.join("nested/map01.wad"), b"pwad").unwrap();
+
+        let outcome = move_cache_dir(&legacy, &target);
+
+        assert_eq!(
+            outcome,
+            CacheMigration::Moved {
+                from: legacy.clone(),
+                to: target.clone(),
+            }
+        );
+        assert!(!legacy.exists());
+        assert_eq!(fs::read(target.join("doom2.wad")).unwrap(), b"iwad");
+        assert_eq!(fs::read(target.join("nested/map01.wad")).unwrap(), b"pwad");
+    }
+
+    #[test]
+    fn test_move_cache_dir_refuses_to_merge_into_occupied_target() {
+        let root = tempfile::tempdir().unwrap();
+        let legacy = root.path().join("old");
+        let target = root.path().join("new");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::create_dir_all(&target).unwrap();
+        fs::write(legacy.join("a.wad"), b"a").unwrap();
+        fs::write(target.join("b.wad"), b"b").unwrap();
+
+        let outcome = move_cache_dir(&legacy, &target);
+
+        assert!(matches!(outcome, CacheMigration::Skipped { .. }));
+        // Both caches are left exactly as they were.
+        assert!(legacy.join("a.wad").is_file());
+        assert!(target.join("b.wad").is_file());
+    }
+
+    #[test]
+    fn test_move_cache_dir_into_existing_empty_target() {
+        let root = tempfile::tempdir().unwrap();
+        let legacy = root.path().join("old");
+        let target = root.path().join("new");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::create_dir_all(&target).unwrap();
+        fs::write(legacy.join("a.wad"), b"a").unwrap();
+
+        let outcome = move_cache_dir(&legacy, &target);
+
+        assert!(matches!(outcome, CacheMigration::Moved { .. }));
+        assert!(target.join("a.wad").is_file());
+        assert!(!legacy.exists());
+    }
+
+    #[test]
+    fn test_copy_dir_recursive_preserves_tree() {
+        let root = tempfile::tempdir().unwrap();
+        let from = root.path().join("from");
+        let to = root.path().join("to");
+        fs::create_dir_all(from.join("a/b")).unwrap();
+        fs::write(from.join("a/b/deep.txt"), b"deep").unwrap();
+        fs::write(from.join("top.txt"), b"top").unwrap();
+
+        copy_dir_recursive(&from, &to).unwrap();
+
+        assert_eq!(fs::read(to.join("a/b/deep.txt")).unwrap(), b"deep");
+        assert_eq!(fs::read(to.join("top.txt")).unwrap(), b"top");
+        // Source is untouched — the caller decides when to delete it.
+        assert!(from.join("top.txt").is_file());
+    }
+
+    #[test]
+    fn test_cache_home_is_outside_the_data_dir() {
+        // The whole point of the split: nothing regenerable may live under
+        // the directory the user copies between machines.
+        assert!(!cache_home().starts_with(default_data_dir()));
+        assert!(!default_cache_dir().starts_with(default_data_dir()));
+        assert!(!thumbnail_cache_dir().starts_with(default_data_dir()));
     }
 
     #[test]

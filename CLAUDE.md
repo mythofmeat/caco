@@ -112,16 +112,31 @@ egui = "0.31"
 
 ## Data Locations
 
+Split by regenerability: `~/.local/share/caco` is the portable set, `~/.cache/caco`
+is disposable. Nothing that cannot be re-derived may be added to the cache side,
+and nothing regenerable may be added to the data side — the point of the split is
+that the data dir stays small enough to copy between machines.
+
+Portable (`config::default_data_dir`, overridable via `CACO_HOME`):
 - Database: `~/.local/share/caco/library.db`
 - Config: `~/.config/caco/config.toml`
 - Managed IWADs: `~/.local/share/caco/iwads/{variant}/{family}.wad`
 - Managed id24 WADs: `~/.local/share/caco/id24/{name}.wad`
-- WAD cache: `~/.local/share/caco/wads/`
 - WAD data: `~/.local/share/caco/data/` (per-WAD saves, stats, configs)
 - Companion files: `~/.local/share/caco/companions/{md5[:12]}_{filename}`
 - Sourceport configs: `~/.local/share/caco/sourceports/{exe}/{profile}.cfg`
-- Backups: `~/.local/share/caco/backups/`
+- Backups: `~/.local/share/caco/backups/` (save backups + pre-migration DB snapshots)
+
+Disposable (`config::cache_home`, overridable via `CACO_CACHE_HOME`):
+- WAD cache: `~/.cache/caco/wads/` (`CACO_CACHE_DIR` overrides just this)
 - Thumbnails cache: `~/.cache/caco/thumbnails/`
+
+`config::migrate_legacy_wad_cache` relocates a pre-split `~/.local/share/caco/wads`
+on startup and rewrites the stored `cache_dir`. It is idempotent and deliberately
+conservative: it does nothing when `CACO_CACHE_DIR` is set, when `cache_dir` points
+somewhere the user chose, or when the destination already has contents. Both
+frontends call it before opening the DB. The filesystem half is `move_cache_dir`,
+split out so it can be tested against temp dirs.
 
 ## Behavior
 

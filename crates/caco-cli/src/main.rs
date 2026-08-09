@@ -63,6 +63,19 @@ fn main() {
     // Load config (triggers ensure_config_keys) and determine DB path.
     // get_db_path() respects CACO_DB_PATH env var > config > default.
     let _ = caco_core::config::load_config();
+
+    // Relocate the WAD cache out of the data dir if it predates the split.
+    // Idempotent; a no-op on every run after the first.
+    match caco_core::config::migrate_legacy_wad_cache() {
+        caco_core::config::CacheMigration::Moved { from, to } => {
+            eprintln!("Moved WAD cache: {} -> {}", from.display(), to.display());
+        }
+        caco_core::config::CacheMigration::Skipped { reason } => {
+            eprintln!("Could not move the WAD cache: {reason}");
+        }
+        caco_core::config::CacheMigration::NotNeeded => {}
+    }
+
     let db_path = caco_core::config::get_db_path();
 
     // Ensure parent directory exists
