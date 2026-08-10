@@ -18,6 +18,7 @@ use crate::dialogs::edit::EditDialogState;
 use crate::dialogs::enrich::EnrichDialogState;
 use crate::dialogs::gc::GcDialogState;
 use crate::dialogs::link::LinkDialogState;
+use crate::dialogs::ports::PortsDialogState;
 use crate::dialogs::profiles::ProfilesDialogState;
 use crate::dialogs::resources::ResourcesDialogState;
 use crate::dialogs::sessions::SessionsDialogState;
@@ -81,6 +82,10 @@ pub enum ActionRequest {
     Companions,
     /// Open the metadata / Cacowards enrichment dialog.
     Enrich,
+    /// Open the sourceport build manager.
+    Ports,
+    /// Build a sourceport the ports dialog has selected, on a worker thread.
+    StartPortBuild(Box<crate::dialogs::ports::PortBuildRequest>),
     /// Open the disk cleanup dialog.
     Gc,
     /// Open the trash browser for soft-deleted WADs.
@@ -124,6 +129,7 @@ pub enum ActiveDialog {
     Companions(CompanionsDialogState),
     Enrich(Box<EnrichDialogState>),
     Gc(Box<GcDialogState>),
+    Ports(Box<PortsDialogState>),
     Trash(TrashDialogState),
     Resources(ResourcesDialogState),
     WadStats(WadStatsDialogState),

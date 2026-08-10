@@ -104,6 +104,14 @@ pub enum AppMessage {
         title: String,
     },
     EnrichComplete(Result<EnrichReport, String>),
+    /// A sourceport build moved on to a new stage (fetch, configure, ...).
+    PortBuildStep(String),
+    /// One line of output from the running build command. Sent per line
+    /// rather than buffered so a four-minute compile shows progress.
+    PortBuildLine(String),
+    /// The build finished: `Ok` carries the message to show, `Err` the
+    /// failure with the tail of the output that produced it.
+    PortBuildComplete(Result<String, String>),
     SearchComplete(SearchSource, Vec<SearchResultEntry>),
     ImportComplete(Result<ImportResult, String>),
     ThumbnailReady {

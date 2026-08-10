@@ -283,6 +283,20 @@ pub(super) fn render_sidebar(
             if ui
                 .add(
                     egui::Button::new(
+                        egui::RichText::new("Ports")
+                            .size(11.0)
+                            .color(theme::TEXT_MUTED),
+                    )
+                    .frame(false),
+                )
+                .on_hover_text("Build and manage sourceports from source")
+                .clicked()
+            {
+                actions.push(ActionRequest::Ports);
+            }
+            if ui
+                .add(
+                    egui::Button::new(
                         egui::RichText::new("Settings")
                             .size(11.0)
                             .color(theme::TEXT_MUTED),

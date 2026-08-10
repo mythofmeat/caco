@@ -141,6 +141,63 @@ impl CacoApp {
         spawn_reanalysis(self.bg.sender(), self.state.db_path.clone(), jobs);
     }
 
+    /// Build a sourceport on a worker thread, streaming its output back to
+    /// the dialog a line at a time.
+    ///
+    /// A compile is minutes long (uzdoom measured at 3m45s on 16 threads) and
+    /// runs several child processes, so nothing about it can happen on the UI
+    /// thread. Unlike enrichment this needs no database connection — ports
+    /// live entirely on the filesystem.
+    fn spawn_port_build(&mut self, request: crate::dialogs::ports::PortBuildRequest) {
+        use caco_core::ports::{self, BuildOptions, BuildProgress, PortPaths};
+        use std::sync::atomic::Ordering;
+
+        let sender = self.bg.sender();
+        let crate::dialogs::ports::PortBuildRequest {
+            port,
+            clean,
+            cancel,
+        } = request;
+
+        std::thread::spawn(move || {
+            let paths = PortPaths::from_config();
+            let recipe = match ports::find_recipe(&paths.recipe_dir, &port) {
+                Ok(r) => r,
+                Err(e) => {
+                    sender.send(AppMessage::PortBuildComplete(Err(e.to_string())));
+                    return;
+                }
+            };
+
+            let opts = BuildOptions { jobs: None, clean };
+            let outcome = ports::build::install(
+                &recipe,
+                &paths,
+                &opts,
+                &mut |progress| match progress {
+                    BuildProgress::Step(step) => {
+                        sender.send(AppMessage::PortBuildStep(step.label().to_string()));
+                    }
+                    BuildProgress::Line(line) => {
+                        sender.send(AppMessage::PortBuildLine(line.to_string()));
+                    }
+                },
+                &|| cancel.load(Ordering::Relaxed),
+            );
+
+            let message = outcome
+                .map(|installed| {
+                    format!(
+                        "Built {} — {}",
+                        installed.manifest.name,
+                        installed.binary_path().display()
+                    )
+                })
+                .map_err(|e| e.to_string());
+            sender.send(AppMessage::PortBuildComplete(message));
+        });
+    }
+
     /// Run an enrichment on a worker thread, streaming progress back to the
     /// dialog. Enrichment does one Doom Wiki lookup per WAD it cannot settle
     /// from the file, so a whole-library run is minutes of network I/O and
@@ -296,6 +353,13 @@ impl CacoApp {
             }
             ActionRequest::StartEnrich(request) => {
                 self.spawn_enrich(*request);
+            }
+            ActionRequest::Ports => {
+                let dialog = crate::dialogs::ports::PortsDialogState::new();
+                self.state.active_dialog = Some(ActiveDialog::Ports(Box::new(dialog)));
+            }
+            ActionRequest::StartPortBuild(request) => {
+                self.spawn_port_build(*request);
             }
             ActionRequest::Trash => {
                 let dialog = crate::dialogs::trash::TrashDialogState::new(&self.conn);
@@ -645,6 +709,29 @@ impl eframe::App for CacoApp {
                     }
                     self.state.needs_reload = true;
                     self.state.cacowards.needs_reload = true;
+                }
+                AppMessage::PortBuildStep(step) => {
+                    if let Some(ActiveDialog::Ports(dialog)) = &mut self.state.active_dialog {
+                        dialog.set_step(step);
+                    }
+                }
+                AppMessage::PortBuildLine(line) => {
+                    if let Some(ActiveDialog::Ports(dialog)) = &mut self.state.active_dialog {
+                        dialog.push_log(line);
+                    }
+                }
+                AppMessage::PortBuildComplete(outcome) => {
+                    // As with enrichment: the dialog owns the log, so a run
+                    // the user closed out from under still reports failure.
+                    match &mut self.state.active_dialog {
+                        Some(ActiveDialog::Ports(dialog)) => dialog.finish(outcome),
+                        _ => {
+                            self.state.notification = Some(match outcome {
+                                Ok(msg) => Notification::info(msg),
+                                Err(e) => Notification::error(format!("Build failed: {e}")),
+                            });
+                        }
+                    }
                 }
                 AppMessage::SearchComplete(source, results) => {
                     self.state

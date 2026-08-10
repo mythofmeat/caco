@@ -11,6 +11,7 @@ use crate::dialogs::edit::EditResult;
 use crate::dialogs::enrich::EnrichResult;
 use crate::dialogs::gc::GcResult;
 use crate::dialogs::link::LinkResult;
+use crate::dialogs::ports::PortsResult;
 use crate::dialogs::profiles::ProfilesResult;
 use crate::dialogs::resources::ResourcesResult;
 use crate::dialogs::sessions::SessionsResult;
@@ -146,6 +147,15 @@ pub(super) fn render_active_dialog(
                 }
                 GcResult::Open => {}
             },
+            ActiveDialog::Ports(ports_state) => match ports_state.render(ctx) {
+                PortsResult::Closed => {
+                    close_dialog = true;
+                }
+                PortsResult::Start(request) => {
+                    follow_up_action = Some(ActionRequest::StartPortBuild(Box::new(request)));
+                }
+                PortsResult::Open => {}
+            },
             ActiveDialog::Companions(companions_state) => {
                 match companions_state.render(ctx, conn) {
                     CompanionsResult::Closed => {
@@ -233,6 +243,9 @@ pub(super) fn render_active_dialog(
             Some(ActiveDialog::Collections(s)) => s.modified,
             Some(ActiveDialog::Companions(s)) => s.modified,
             Some(ActiveDialog::Gc(s)) => s.modified,
+            // A build or a default-port change alters what the next launch
+            // resolves to, which the detail panel shows.
+            Some(ActiveDialog::Ports(s)) => s.modified,
             Some(ActiveDialog::Trash(s)) => s.modified,
             Some(ActiveDialog::Resources(s)) => s.modified,
             _ => false,
