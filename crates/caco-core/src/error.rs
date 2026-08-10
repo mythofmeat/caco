@@ -62,6 +62,22 @@ pub enum Error {
 
     #[error("no sourceport specified and no default configured")]
     NoSourceport,
+
+    #[error("no build recipe for sourceport '{0}'")]
+    PortNotFound(String),
+
+    #[error("required tool not found on PATH: {0}")]
+    MissingTool(String),
+
+    #[error("{step} failed for '{port}': {detail}")]
+    PortBuild {
+        port: String,
+        step: &'static str,
+        detail: String,
+    },
+
+    #[error("build of '{0}' was cancelled")]
+    PortBuildCancelled(String),
 }
 
 /// Convenience alias used throughout caco-core.

@@ -1,0 +1,54 @@
+# Built-in sourceport build recipes.
+#
+# A file dropped in the recipe directory (see `config::port_recipe_dir`) is
+# merged over this set by name, so a user can pin a ref, add build args or
+# attach patches without patching the binary.
+
+[nyan-doom]
+repo = "https://github.com/andrikpowell/nyan-doom"
+ref = "master"
+# The cmake root is not the repo root for this project.
+source_subdir = "prboom2"
+binary = "nyan-doom"
+
+[nyan-doom.build]
+system = "cmake"
+generator = "Ninja"
+args = ["-DCMAKE_BUILD_TYPE=Release"]
+install = true
+
+[nyan-doom.deps]
+arch = [
+    "cmake", "ninja", "pkgconf", "libxmp", "fluidsynth", "libmad", "portmidi",
+    "sdl2-compat", "sdl2_image", "sdl2_mixer", "libvorbis", "libsndfile",
+    "libzip", "glu", "mesa",
+]
+brew = [
+    "cmake", "ninja", "pkgconf", "fluid-synth", "libsndfile", "libvorbis",
+    "libxmp", "libzip", "mad", "portmidi", "sdl2-compat", "sdl2_image",
+    "sdl2_mixer",
+]
+
+[uzdoom]
+repo = "https://github.com/UZDoom/uzdoom"
+ref = "master"
+binary = "uzdoom"
+
+[uzdoom.build]
+system = "cmake"
+generator = "Ninja"
+# -DINSTALL_PK3_PATH=bin is load-bearing and must not be dropped. uzdoom's
+# default install puts the five pk3s in share/games/uzdoom while progdir (with
+# SYSTEMINSTALL off, the default) looks beside the executable, so the stock
+# install builds fine and then aborts at launch with "Cannot find uzdoom.pk3".
+# Installing the pk3s into bin/ fixes that without baking an absolute path the
+# way -DSYSTEMINSTALL=ON would, which is what keeps the prefix relocatable.
+args = ["-DCMAKE_BUILD_TYPE=Release", "-DINSTALL_PK3_PATH=bin"]
+install = true
+
+[uzdoom.deps]
+arch = [
+    "cmake", "ninja", "openal", "sdl2-compat", "libwebp", "bzip2", "libvpx",
+    "waylandpp", "zlib",
+]
+brew = ["cmake", "ninja", "openal-soft", "sdl2", "webp", "bzip2", "libvpx"]

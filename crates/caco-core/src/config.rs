@@ -127,6 +127,33 @@ pub fn default_sourceport_dir() -> PathBuf {
     default_data_dir().join("sourceports")
 }
 
+/// Where user sourceport build recipes live.
+///
+/// On the portable side, because the recipe *is* the portable artifact: it is
+/// a few hundred bytes that rebuild the port anywhere, whereas the binary it
+/// produces is ABI- and OS-specific. Patch files referenced by a recipe
+/// resolve against this directory for the same reason.
+pub fn port_recipe_dir() -> PathBuf {
+    default_data_dir().join("ports")
+}
+
+/// Root of the managed sourceport install prefixes.
+///
+/// Cache side: a built port is regenerable from its recipe, and the install
+/// trees are large (7.6M for nyan-doom, 74M for uzdoom) next to a data dir
+/// meant to stay copyable.
+pub fn port_prefix_root() -> PathBuf {
+    cache_home().join("ports")
+}
+
+/// Root of the git checkouts and build trees ports are built in.
+///
+/// Throwaway even by cache standards — uzdoom's checkout alone is 221M — and
+/// kept only so a rebuild is an incremental one.
+pub fn port_src_root() -> PathBuf {
+    cache_home().join("ports-src")
+}
+
 // ---------------------------------------------------------------------------
 // Config structs
 // ---------------------------------------------------------------------------
@@ -867,12 +894,21 @@ pub fn get_cache_auto_clean() -> bool {
 
 /// Resolve a sourceport name to a full path.
 ///
-/// If name is already an absolute path, return as-is.
-/// Otherwise, use `which` to find it on PATH.
+/// An absolute path is taken as given. Otherwise a caco-built port wins over
+/// `PATH`: if the user asked caco to build `uzdoom`, that build is the one
+/// they meant even when a distro package of the same name exists. Falls back
+/// to `which`, then to the bare name so the eventual spawn failure names
+/// something the user recognises.
+///
+/// This is the only place managed ports are wired in — every launch path
+/// already funnels through here.
 pub fn resolve_sourceport(name: &str) -> String {
     let p = Path::new(name);
     if p.is_absolute() {
         return name.to_string();
+    }
+    if let Some(managed) = crate::ports::managed_binary(name) {
+        return managed;
     }
     which(name).unwrap_or_else(|| name.to_string())
 }
