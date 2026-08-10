@@ -89,9 +89,17 @@ fn main() -> eframe::Result<()> {
             let conn = caco_core::db::open_connection(&db_path).expect("Failed to open database");
             caco_core::db::init_db(&conn).expect("Failed to initialize database");
 
+            // Repair cached_path values left dangling by a cache relocation.
+            // Needs the DB, so it cannot ride along with the migration itself.
+            let relinked =
+                caco_core::db::relink_cached_paths(&conn, &caco_core::config::get_cache_dir())
+                    .unwrap_or(0);
+
             let mut app = caco::app::CacoApp::new(conn, db_path.clone(), &cc.egui_ctx);
             if let Some(ref port) = detected.sourceport {
                 app.notify(format!("Detected {port}. Change it in Settings."));
+            } else if relinked > 0 {
+                app.notify(format!("Relinked {relinked} cached WAD file(s)."));
             }
             Ok(Box::new(app))
         }),

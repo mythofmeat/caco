@@ -66,8 +66,8 @@ pub use sessions::{
     get_last_played, get_last_played_batch, get_most_recently_played, get_session_count_batch,
     get_sessions, get_stats_snapshot, get_times_beaten, get_times_beaten_batch, get_total_playtime,
     get_total_playtime_batch, get_wad_by_cached_filename, get_wad_completions, get_wad_stats,
-    get_wad_stats_batch, get_wads_played_by_period, set_wad_completion_count, start_session,
-    update_session_demo, update_session_stats, update_wad_completion,
+    get_wad_stats_batch, get_wads_played_by_period, relink_cached_paths, set_wad_completion_count,
+    start_session, update_session_demo, update_session_stats, update_wad_completion,
 };
 pub use wads::{
     FieldValue, NewWad, WadUpdate, add_tag, add_wad, delete_wad, get_all_tags, get_status_counts,

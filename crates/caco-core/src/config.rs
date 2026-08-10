@@ -87,6 +87,11 @@ pub fn default_cache_dir() -> PathBuf {
 /// Where the WAD cache lived before it moved to [`cache_home`].
 ///
 /// Retained so [`migrate_legacy_wad_cache`] can find and relocate it.
+///
+/// Note that relocating the files is only half the job: every `wads.cached_path`
+/// still records an absolute path into the old directory. `db::relink_cached_paths`
+/// repairs those, and has to run separately because the migration happens before
+/// the database is open.
 pub fn legacy_wad_cache_dir() -> PathBuf {
     default_data_dir().join("wads")
 }

@@ -600,6 +600,51 @@ pub fn clear_cached_path(conn: &Connection, wad_id: i64) -> Result<bool> {
     Ok(count > 0)
 }
 
+/// Re-point dangling `cached_path` values at files that are still in the cache.
+///
+/// Moving the cache directory (see `config::migrate_legacy_wad_cache`) relocates
+/// the files but not the absolute paths recorded against each WAD, which leaves
+/// every row pointing at a location that no longer exists. The files are still
+/// there under the same names, so a row whose path is missing is repaired by
+/// looking for its basename in `cache_dir`.
+///
+/// Conservative by design: only rows whose current path does *not* exist are
+/// touched, and only when a same-named file is actually present. A WAD linked
+/// to a file outside the cache — someone's permanent collection — is left
+/// alone, since its path being absent means the file moved, not that a copy is
+/// waiting in the cache.
+///
+/// Returns the number of rows repaired. Idempotent; a no-op once paths resolve.
+pub fn relink_cached_paths(conn: &Connection, cache_dir: &std::path::Path) -> Result<usize> {
+    let mut stmt =
+        conn.prepare("SELECT id, cached_path FROM wads WHERE cached_path IS NOT NULL")?;
+    let rows: Vec<(i64, String)> = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+
+    let mut repaired = 0;
+    for (id, path) in rows {
+        let current = std::path::Path::new(&path);
+        if current.exists() {
+            continue;
+        }
+        let Some(name) = current.file_name() else {
+            continue;
+        };
+        let candidate = cache_dir.join(name);
+        if !candidate.is_file() {
+            continue;
+        }
+        conn.execute(
+            "UPDATE wads SET cached_path = ?1 WHERE id = ?2",
+            rusqlite::params![candidate.to_string_lossy(), id],
+        )?;
+        repaired += 1;
+    }
+
+    Ok(repaired)
+}
+
 /// Clear cached_path for all WADs. Returns count of WADs updated.
 pub fn clear_all_cached_paths(conn: &Connection) -> Result<usize> {
     let count = conn.execute(
@@ -1104,6 +1149,109 @@ mod tests {
 
         assert!(clear_cached_path(&conn, id).unwrap());
         assert!(get_cached_wads(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_relink_cached_paths_repairs_after_a_cache_move() {
+        use crate::db::models::SourceType;
+        use crate::db::wads::{NewWad, add_wad};
+
+        let conn = setup();
+        let cache = tempfile::tempdir().unwrap();
+        // The file is in the new cache under its original name...
+        std::fs::write(cache.path().join("map01.wad"), b"pwad").unwrap();
+
+        // ...but the row still points at where the cache used to be.
+        let id = add_wad(&conn, &NewWad::new("Moved", SourceType::Idgames)).unwrap();
+        crate::db::update_wad(
+            &conn,
+            id,
+            &crate::db::WadUpdate::new().set_text(
+                "cached_path",
+                Some("/old/share/caco/wads/map01.wad".to_string()),
+            ),
+        )
+        .unwrap();
+
+        assert_eq!(relink_cached_paths(&conn, cache.path()).unwrap(), 1);
+        assert_eq!(
+            crate::db::get_wad(&conn, id, false)
+                .unwrap()
+                .unwrap()
+                .cached_path,
+            Some(
+                cache
+                    .path()
+                    .join("map01.wad")
+                    .to_string_lossy()
+                    .into_owned()
+            )
+        );
+
+        // Idempotent — a second pass has nothing left to do.
+        assert_eq!(relink_cached_paths(&conn, cache.path()).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_relink_cached_paths_leaves_files_outside_the_cache_alone() {
+        use crate::db::models::SourceType;
+        use crate::db::wads::{NewWad, add_wad};
+
+        let conn = setup();
+        let cache = tempfile::tempdir().unwrap();
+
+        // A dangling path with no same-named file in the cache: the file moved,
+        // there is no copy to point at, and inventing one would be a lie.
+        let id = add_wad(&conn, &NewWad::new("Gone", SourceType::Local)).unwrap();
+        crate::db::update_wad(
+            &conn,
+            id,
+            &crate::db::WadUpdate::new()
+                .set_text("cached_path", Some("/mnt/collection/gone.wad".to_string())),
+        )
+        .unwrap();
+
+        assert_eq!(relink_cached_paths(&conn, cache.path()).unwrap(), 0);
+        assert_eq!(
+            crate::db::get_wad(&conn, id, false)
+                .unwrap()
+                .unwrap()
+                .cached_path,
+            Some("/mnt/collection/gone.wad".to_string())
+        );
+    }
+
+    #[test]
+    fn test_relink_cached_paths_does_not_touch_valid_rows() {
+        use crate::db::models::SourceType;
+        use crate::db::wads::{NewWad, add_wad};
+
+        let conn = setup();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+
+        // Path resolves, so it is correct regardless of what the cache holds.
+        let real = elsewhere.path().join("keep.wad");
+        std::fs::write(&real, b"pwad").unwrap();
+        std::fs::write(cache.path().join("keep.wad"), b"different").unwrap();
+
+        let id = add_wad(&conn, &NewWad::new("Linked", SourceType::Local)).unwrap();
+        crate::db::update_wad(
+            &conn,
+            id,
+            &crate::db::WadUpdate::new()
+                .set_text("cached_path", Some(real.to_string_lossy().into_owned())),
+        )
+        .unwrap();
+
+        assert_eq!(relink_cached_paths(&conn, cache.path()).unwrap(), 0);
+        assert_eq!(
+            crate::db::get_wad(&conn, id, false)
+                .unwrap()
+                .unwrap()
+                .cached_path,
+            Some(real.to_string_lossy().into_owned())
+        );
     }
 
     #[test]
