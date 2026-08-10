@@ -8,6 +8,7 @@ A personal Doom WAD library manager inspired by [beets](https://beets.io). Impor
 - **Smart queries** — beets-style filters (`status:in-progress`, `tag:megawad`, `author:"erik alm"`) with OR, negation, and glob support.
 - **Play tracking** — automatic playtime, session history, per-map stats (kills/items/secrets/time), and completion counts.
 - **IWAD management** — register your IWADs once, and caco auto-detects which one each WAD needs.
+- **Sourceports from source** — build nyan-doom or uzdoom into caco's own prefix, no system install required.
 - **Companion files** — manage DEH patches, music WADs, and other companion files with automatic deduplication.
 - **Per-WAD isolation** — saves, stats, and configs are separated per WAD so nothing gets mixed up.
 - **On-demand downloads** — idgames WADs are cached when you play, with configurable auto-cleanup.
@@ -84,6 +85,7 @@ the sourceport.
 | Files | Companion file registry: every managed file, the WADs using it, and orphan cleanup |
 | Profiles | Per-sourceport config profiles, edited in place |
 | IWADs | Registered IWADs and id24 resources |
+| Ports | Build sourceports from source into caco's own prefix |
 | Enrich | Re-run complevel / IWAD / port detection across the library, plus per-year Cacowards refresh |
 | Clean | Reclaim disk space, reviewing every file first |
 | Trash | Restore or permanently delete removed WADs |
@@ -192,6 +194,7 @@ Caco splits its files by whether they can be regenerated. Everything under
 | `~/.local/share/caco/id24/` | Managed id24 WADs |
 | `~/.local/share/caco/companions/` | Managed companion files |
 | `~/.local/share/caco/sourceports/` | Per-sourceport config profiles |
+| `~/.local/share/caco/ports/` | Sourceport build recipes and their patches |
 | `~/.local/share/caco/backups/` | Save backups + pre-migration DB snapshots |
 
 **Disposable** — safe to delete at any time:
@@ -200,6 +203,8 @@ Caco splits its files by whether they can be regenerated. Everything under
 |----------|----------|
 | `~/.cache/caco/wads/` | Cached WAD files, re-downloaded on demand |
 | `~/.cache/caco/thumbnails/` | Thumbnail cache, re-extracted from TITLEPIC |
+| `~/.cache/caco/ports/` | Built sourceport prefixes, rebuilt from the recipe |
+| `~/.cache/caco/ports-src/` | Sourceport checkouts and build trees |
 
 The WAD cache is usually the largest thing caco stores and is entirely
 re-downloadable, which is why it lives on the disposable side. If you are
@@ -243,6 +248,57 @@ Caco recognises six sourceport families. Family membership determines which per-
 
 Unknown sourceports still launch, they just skip isolation and auto-injection.
 
+### Building ports from source
+
+Not every port is packaged — nyan-doom and uzdoom are in no distro repo — and
+requiring a global install undercuts the point of a portable library. The
+**Ports** dialog clones, builds and installs a port into caco's own prefix,
+and caco launches it from there without anything being installed
+system-wide. A managed build wins over a same-named binary on `PATH`.
+
+What travels between machines is the **recipe**, not the binary: a few
+hundred bytes of TOML that rebuild the port on whatever machine and OS it
+lands on. That is why recipes live in the portable data dir while the built
+prefixes live in the cache with the WAD downloads — deleting the cache costs
+a rebuild, never a reconfiguration.
+
+Before building, caco checks the toolchain and asks your package manager
+(`pacman -T` or `brew list`) which dependencies are missing, and shows the
+exact install command. Missing packages warn rather than block: caco cannot
+tell an optional dependency from a required one, so cmake stays the
+authority.
+
+Recipes for `nyan-doom` and `uzdoom` ship built in. To pin a ref, add build
+flags or attach patches, drop a file in `~/.local/share/caco/ports/` — any
+`*.toml` there is merged over the built-ins by name:
+
+```toml
+# ~/.local/share/caco/ports/mine.toml
+[uzdoom]
+repo = "https://github.com/UZDoom/uzdoom"
+ref = "v1.0.0"                        # a branch or tag, not a bare commit
+binary = "uzdoom"
+patches = ["uzdoom-tweak.patch"]      # relative to this directory
+
+[uzdoom.build]
+system = "cmake"
+generator = "Ninja"
+args = ["-DCMAKE_BUILD_TYPE=Release", "-DINSTALL_PK3_PATH=bin"]
+
+[uzdoom.deps]
+arch = ["cmake", "ninja", "openal", "sdl2-compat", "libwebp", "bzip2", "libvpx", "zlib"]
+brew = ["cmake", "ninja", "openal-soft", "sdl2", "webp", "bzip2", "libvpx"]
+```
+
+`-DINSTALL_PK3_PATH=bin` on uzdoom is load-bearing. Its default install puts
+the pk3s in `share/games/uzdoom` while the binary looks beside itself, so a
+stock build succeeds and then aborts at launch with `Cannot find uzdoom.pk3`.
+Do not drop it when overriding the recipe.
+
+A recipe's name must match a sourceport caco knows (see the family table
+above), or the build works but complevel args, save directories and config
+profiles quietly stop applying.
+
 Per-map stat tracking (which feeds completion detection and progress bars) works with:
 
 - **dsda / woof** — native `stats.txt` / `levelstat.txt` in the per-WAD data dir.
@@ -255,6 +311,13 @@ Per-map stat tracking (which feeds completion detection and progress bars) works
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
+```
+
+The sourceport build driver has an end-to-end test that clones and compiles a
+real port, kept out of the default run:
+
+```bash
+cargo test -p caco-core --test ports_build -- --ignored --nocapture
 ```
 
 ## License

@@ -56,6 +56,7 @@ crates/
 - `player.rs` — sourceport launcher, playtime tracking, companion injection. `build_launch` is the single command builder behind both `play` and `play_demo`, parameterised by a private `LaunchMode`: playback needs an identical file set, complevel and load order to the recording (any difference desyncs the demo) but must not record a session or collect stats, since a replayed map exit is not progress the user just made.
 - `companion_service.rs`, `resource_service.rs` — MD5 dedup + managed storage; IWAD/id24 registration
 - `sourceports.rs`, `complevel.rs`, `complevel_detect.rs`, `iwad_detect.rs` — family registry + detection heuristics (COMPLVL, UMAPINFO, DEHACKED, PNAMES, map lumps)
+- `ports/` — build sourceports from source into a caco-owned prefix. `recipe.rs` holds the TOML schema and the built-in `recipes.toml` (nyan-doom, uzdoom), merged with any `*.toml` in `config::port_recipe_dir()`; `build.rs` is the clone → patch → configure → compile → install driver; `manifest.rs` records what was built inside the prefix; `doctor.rs` answers "can this machine build it" against pacman / brew. The recipe is the portable artifact and lives in the data dir, while checkouts and install prefixes live in the cache — a built port is regenerable and the trees are large. `config::resolve_sourceport` is the only integration point, and a managed build wins over `PATH`. `sourceports.rs` needed no change: nyan-doom was already mapped to dsda and uzdoom to zdoom.
 - `profiles.rs` — sourceport config profile operations (list/create/copy/remove/read/write + `referencing_wads`). Owns the operations but deliberately not *editing*, which the GUI does in a text buffer through `read`/`write`.
 - `wad_stats.rs` — per-map stats parser (stats.txt + levelstat.txt)
 - `stats_watcher.rs` — stats collection for ports without native stats.txt: zdoom (ZScript reporter PK3 + `+logfile` parsing) and helion (`-levelstat`, consuming its global `~/.config/Helion/levelstat.txt` — unpadded-milliseconds time format — into the managed stats.txt)
@@ -96,6 +97,7 @@ egui = "0.31"
 - **Query parser**: beets-style syntax — see Behavior below.
 - **Companion system**: `companion_files_registry` + `wad_companions` junction table. `companion_service.rs` handles MD5 dedup + managed storage at `~/.local/share/caco/companions/{md5[:12]}_{filename}`. DEH/BEX auto-detected; `-deh` for non-zdoom, `-file` for zdoom. Because files are deduplicated by MD5, one managed file can serve several WADs, so unlinking is not the same as deleting: `companion_service::plan_unregister` answers "what should happen to the file", returning `None` only when the file would be left with no owner *and* the configured policy is `ask` (the default). Both frontends must go through it — `unregister_companion` takes a resolved `OrphanPolicy`, so neither can swallow an `ask` and orphan a file unprompted. `delete_orphan` refuses while anything still links the file.
 - **GC**: `caco_core::gc` splits cleanup in two — `plan` measures and touches nothing, `execute` deletes exactly the `GcSelection` handed back. The GUI renders the plan as a checkbox list and passes back the ticked subset, so nothing is deleted that was not shown first. `gc_ignore` column excludes a WAD; orphan detection covers data dirs, backups, and companions. `plan` takes an explicit `GcPaths { data_dir, backup_dir }` rather than reading config: every path in it is a path something gets deleted from, and planning against an empty DB makes every directory look like an orphan, so a plan built over the real data dir and executed wipes the library's saves. The required argument is what keeps that unreachable from a test — `GcPaths::from_config()` is for frontends, and `gc`'s tests build every path from a tempdir. `saves::list_backups_in` exists for the same reason.
+- **Ports build driver**: every command is assembled by a pure function (`clone_args`, `configure_args`, ...) and only then handed to a process, so flags that are load-bearing and silently fatal if dropped — uzdoom's `-DINSTALL_PK3_PATH=bin`, whose absence produces a build that succeeds and aborts at launch — are testable without a network or a compiler. `PortPaths` is passed explicitly for the same reason `GcPaths` is: a test that could reach the real roots is one that can compile 74M of C++ into a user's cache, or delete out of it. The end-to-end build lives in `tests/ports_build.rs` behind `#[ignore]` — `cargo test --workspace` must never compile a sourceport. The install prefix is not touched until the compile succeeds, so a failed rebuild leaves a working port in place, and `remove_installed` refuses any directory without caco's own manifest.
 - **Import service**: centralises duplicate checking for all sources; auto-enriches with Doom Wiki metadata; JSON import fallback for Cloudflare-blocked APIs.
 - **Player**: wraps sourceport execution; injects companion files, data dir args, complevel args, config profile; returns `PlayResult` with crash detection.
 - **GUI background work**: egui is immediate-mode; `CacoApp` holds all state; background workers for search/import/play use `std::thread` + `std::sync::mpsc`.
@@ -115,11 +117,14 @@ Portable (`config::default_data_dir`, overridable via `CACO_HOME`):
 - WAD data: `~/.local/share/caco/data/` (per-WAD saves, stats, configs)
 - Companion files: `~/.local/share/caco/companions/{md5[:12]}_{filename}`
 - Sourceport configs: `~/.local/share/caco/sourceports/{exe}/{profile}.cfg`
+- Sourceport build recipes + patches: `~/.local/share/caco/ports/*.toml`
 - Backups: `~/.local/share/caco/backups/` (save backups + pre-migration DB snapshots)
 
 Disposable (`config::cache_home`, overridable via `CACO_CACHE_HOME`):
 - WAD cache: `~/.cache/caco/wads/` (`CACO_CACHE_DIR` overrides just this)
 - Thumbnails cache: `~/.cache/caco/thumbnails/`
+- Built sourceport prefixes: `~/.cache/caco/ports/{name}/{ref-slug}/`
+- Sourceport checkouts + build trees: `~/.cache/caco/ports-src/`
 
 `config::migrate_legacy_wad_cache` relocates a pre-split `~/.local/share/caco/wads`
 on startup and rewrites the stored `cache_dir`. It is idempotent and deliberately
@@ -171,6 +176,7 @@ Sidebar entries (`app/sidebar.rs` → `ActionRequest` → `app.rs::dispatch_acti
 | Files | `dialogs/companions.rs` | `companion_service` + `db::get_wads_for_companion` |
 | Profiles | `dialogs/profiles.rs` | `caco_core::profiles` |
 | IWADs | `dialogs/resources.rs` | `resource_service` |
+| Ports | `dialogs/ports.rs` | `caco_core::ports` (worker thread) |
 | Enrich | `dialogs/enrich.rs` | `caco_sources::enrich_service` (worker thread) |
 | Clean | `dialogs/gc.rs` | `caco_core::gc` plan/execute |
 | Trash | `dialogs/trash.rs` | `db::restore_wad` / `purge_all_deleted` |
