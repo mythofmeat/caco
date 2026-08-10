@@ -225,6 +225,23 @@ pub fn would_be_orphan(conn: &Connection, companion_id: i64, wad_id: i64) -> Res
     Ok(count == 0)
 }
 
+/// Get the WADs linking a companion, as `(id, title)` sorted by title.
+///
+/// The inverse of [`get_companions_for_wad`] — what a registry view needs to
+/// show who still wants a managed file before offering to delete it.
+pub fn get_wads_for_companion(conn: &Connection, companion_id: i64) -> Result<Vec<(i64, String)>> {
+    let mut stmt = conn.prepare(
+        "SELECT w.id, w.title FROM wads w
+         JOIN wad_companions wc ON wc.wad_id = w.id
+         WHERE wc.companion_id = ?
+         ORDER BY w.title",
+    )?;
+    let rows = stmt
+        .query_map([companion_id], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
 /// Get companion files that are not linked to any WAD.
 pub fn get_orphaned_companions(conn: &Connection) -> Result<Vec<CompanionRecord>> {
     let mut stmt = conn.prepare(

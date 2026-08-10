@@ -1,6 +1,7 @@
 pub mod cache;
 pub mod cacoward_link;
 pub mod collections;
+pub mod companions;
 pub mod delete;
 pub mod edit;
 pub mod link;

@@ -5,6 +5,7 @@ use rusqlite::Connection;
 use crate::dialogs::cache::CacheResult;
 use crate::dialogs::cacoward_link::CacowardLinkResult;
 use crate::dialogs::collections::CollectionsResult;
+use crate::dialogs::companions::CompanionsResult;
 use crate::dialogs::delete::DeleteResult;
 use crate::dialogs::edit::EditResult;
 use crate::dialogs::link::LinkResult;
@@ -117,6 +118,14 @@ pub(super) fn render_active_dialog(
                     CollectionsResult::Open => {}
                 }
             }
+            ActiveDialog::Companions(companions_state) => {
+                match companions_state.render(ctx, conn) {
+                    CompanionsResult::Closed => {
+                        close_dialog = true;
+                    }
+                    CompanionsResult::Open => {}
+                }
+            }
             ActiveDialog::Resources(resources_state) => match resources_state.render(ctx, conn) {
                 ResourcesResult::Closed => {
                     close_dialog = true;
@@ -194,6 +203,7 @@ pub(super) fn render_active_dialog(
         let was_modified = match &state.active_dialog {
             Some(ActiveDialog::Cache(s)) => s.modified,
             Some(ActiveDialog::Collections(s)) => s.modified,
+            Some(ActiveDialog::Companions(s)) => s.modified,
             Some(ActiveDialog::Resources(s)) => s.modified,
             _ => false,
         };

@@ -128,6 +128,7 @@ caco-gui
 - Right-hand detail sidebar with metadata, play stats, and quick actions
 - Dialogs for editing WADs, confirming deletes, browsing sessions, viewing library stats, managing the cache, editing sourceport config profiles, and registering IWADs / id24 WADs
 - Saves & Demos dialog (`F`, or the context menu) for backing up and restoring a WAD's data directory, clearing saves, and playing back or deleting recorded demos
+- Companion file registry (sidebar > Files) listing every managed file with the WADs that use it, and cleanup for the ones nothing links any more
 - Settings dialog (sidebar > Settings) for editing the caco config — sourceports, global and per-port launch args, behavior toggles, cache limits, and paths — persisted to `config.toml` on save
 - Keyboard shortcuts: `j/k`, `g`/`G`, `Home`/`End`, `Enter`, `E`, `D`, `S`, `M`, `F`, `P`, `Esc`
 

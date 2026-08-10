@@ -57,6 +57,9 @@ pub enum Error {
     #[error("profile '{name}' already exists for '{sourceport}'")]
     ProfileExists { sourceport: String, name: String },
 
+    #[error("companion file not found: {0}")]
+    CompanionNotFound(String),
+
     #[error("no sourceport specified and no default configured")]
     NoSourceport,
 }

@@ -9,9 +9,10 @@ use rusqlite::Connection;
 
 use crate::Result;
 use crate::config::{get_companion_dir, get_companion_orphan_cleanup};
+use crate::db::companions::WadCompanionRecord;
 use crate::db::{
-    add_companion, find_companion_by_md5, is_orphan, link_companion_to_wad,
-    remove_companion_with_path, unlink_companion_from_wad,
+    add_companion, find_companion_by_md5, get_companions_for_wad, is_orphan, link_companion_to_wad,
+    remove_companion_with_path, unlink_companion_from_wad, would_be_orphan,
 };
 use crate::utils::compute_md5;
 
@@ -24,6 +25,42 @@ pub fn is_deh_bex(path: &Path) -> bool {
         .and_then(|e| e.to_str())
         .map(|e| DEH_EXTENSIONS.contains(&e.to_lowercase().as_str()))
         .unwrap_or(false)
+}
+
+/// What to do with a managed companion file once no WAD links it any more.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrphanPolicy {
+    /// Delete the managed file and drop it from the registry.
+    Delete,
+    /// Leave the managed file in place, still registered.
+    Keep,
+    /// Defer to the user. Only [`plan_unregister`] resolves this; passing it
+    /// to [`unregister_companion`] keeps the file, since a non-interactive
+    /// caller must not delete data on a maybe.
+    Ask,
+}
+
+impl OrphanPolicy {
+    /// Read the configured policy, falling back to [`OrphanPolicy::Ask`].
+    pub fn from_config() -> Self {
+        Self::parse(&get_companion_orphan_cleanup())
+    }
+
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "delete" => Self::Delete,
+            "keep" => Self::Keep,
+            _ => Self::Ask,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Delete => "delete",
+            Self::Keep => "keep",
+            Self::Ask => "ask",
+        }
+    }
 }
 
 /// Result of orphan cleanup.
@@ -85,16 +122,67 @@ pub fn register_companion(
     Ok((companion_id, filename))
 }
 
-/// Unlink a companion from a WAD, applying orphan policy if it becomes orphaned.
+/// Look up one of a WAD's companions by filename.
+pub fn find_by_filename(
+    conn: &Connection,
+    wad_id: i64,
+    filename: &str,
+) -> Result<WadCompanionRecord> {
+    get_companions_for_wad(conn, wad_id)?
+        .into_iter()
+        .find(|c| c.filename == filename)
+        .ok_or_else(|| crate::Error::CompanionNotFound(filename.to_string()))
+}
+
+/// Decide what should happen to the managed file before unlinking it.
 ///
-/// If `orphan_policy` is `None`, reads from config.
+/// Returns `None` when the caller has to ask: unlinking would leave the file
+/// with no owner and the configured policy is `ask`. Any other answer is a
+/// decision the caller can pass straight to [`unregister_companion`].
+///
+/// Both frontends go through this rather than reading the config themselves,
+/// so neither can silently swallow an `ask` and orphan the file unprompted.
+pub fn plan_unregister(
+    conn: &Connection,
+    wad_id: i64,
+    companion_id: i64,
+) -> Result<Option<OrphanPolicy>> {
+    let policy = OrphanPolicy::from_config();
+    if policy != OrphanPolicy::Ask {
+        return Ok(Some(policy));
+    }
+    // Nothing to ask about if another WAD still wants the file.
+    if !would_be_orphan(conn, companion_id, wad_id)? {
+        return Ok(Some(OrphanPolicy::Keep));
+    }
+    Ok(None)
+}
+
+/// Enable or disable a companion for a WAD.
+///
+/// Returns `false` when the flag already had that value, so callers can say
+/// "already enabled" rather than reporting a change that did not happen.
+pub fn set_enabled(
+    conn: &Connection,
+    wad_id: i64,
+    companion: &WadCompanionRecord,
+    enabled: bool,
+) -> Result<bool> {
+    if companion.enabled == enabled {
+        return Ok(false);
+    }
+    crate::db::set_companion_enabled(conn, wad_id, companion.companion_id, enabled)?;
+    Ok(true)
+}
+
+/// Unlink a companion from a WAD, applying `policy` if it becomes orphaned.
 ///
 /// Returns the orphan result indicating what happened.
 pub fn unregister_companion(
     conn: &Connection,
     wad_id: i64,
     companion_id: i64,
-    orphan_policy: Option<&str>,
+    policy: OrphanPolicy,
 ) -> Result<OrphanResult> {
     let removed = unlink_companion_from_wad(conn, wad_id, companion_id)?;
     if !removed {
@@ -105,13 +193,7 @@ pub fn unregister_companion(
         return Ok(OrphanResult::NotOrphaned);
     }
 
-    // Companion is now orphaned — apply policy
-    let policy = match orphan_policy {
-        Some(p) => p.to_string(),
-        None => get_companion_orphan_cleanup(),
-    };
-
-    if policy == "delete" {
+    if policy == OrphanPolicy::Delete {
         let managed_path = remove_companion_with_path(conn, companion_id)?;
         if let Some(path_str) = managed_path {
             let p = Path::new(&path_str);
@@ -122,8 +204,25 @@ pub fn unregister_companion(
         return Ok(OrphanResult::Deleted);
     }
 
-    // "keep" or "ask" (caller handles "ask" at UI level)
+    // Keep, or an unresolved Ask that a non-interactive caller passed through.
     Ok(OrphanResult::Kept)
+}
+
+/// Delete a companion no WAD links any more — registry row and managed file.
+///
+/// Refuses (returns `false`) while any WAD still links it, so a registry view
+/// can offer "delete" per row without having to re-check the link count.
+pub fn delete_orphan(conn: &Connection, companion_id: i64) -> Result<bool> {
+    if !is_orphan(conn, companion_id)? {
+        return Ok(false);
+    }
+    if let Some(path_str) = remove_companion_with_path(conn, companion_id)? {
+        let path = Path::new(&path_str);
+        if path.exists() {
+            fs::remove_file(path)?;
+        }
+    }
+    Ok(true)
 }
 
 #[cfg(test)]
@@ -261,7 +360,7 @@ mod tests {
         link_companion_to_wad(&conn, w2, c_id).unwrap();
 
         // Unlink from w1 — still linked to w2, not orphaned
-        let result = unregister_companion(&conn, w1, c_id, Some("delete")).unwrap();
+        let result = unregister_companion(&conn, w1, c_id, OrphanPolicy::Delete).unwrap();
         assert_eq!(result, OrphanResult::NotOrphaned);
 
         // Companion still exists
@@ -275,7 +374,7 @@ mod tests {
         let c_id = add_companion(&conn, "md5abc", "patch.deh", "/path/patch.deh", 100).unwrap();
         link_companion_to_wad(&conn, wad_id, c_id).unwrap();
 
-        let result = unregister_companion(&conn, wad_id, c_id, Some("keep")).unwrap();
+        let result = unregister_companion(&conn, wad_id, c_id, OrphanPolicy::Keep).unwrap();
         assert_eq!(result, OrphanResult::Kept);
 
         // Companion still in registry (kept)
@@ -296,7 +395,7 @@ mod tests {
         let c_id = add_companion(&conn, "md5abc", "patch.deh", &managed_path, 100).unwrap();
         link_companion_to_wad(&conn, wad_id, c_id).unwrap();
 
-        let result = unregister_companion(&conn, wad_id, c_id, Some("delete")).unwrap();
+        let result = unregister_companion(&conn, wad_id, c_id, OrphanPolicy::Delete).unwrap();
         assert_eq!(result, OrphanResult::Deleted);
 
         // Companion removed from registry
@@ -313,7 +412,7 @@ mod tests {
         link_companion_to_wad(&conn, wad_id, c_id).unwrap();
 
         // "ask" policy keeps the companion (caller handles UI prompt)
-        let result = unregister_companion(&conn, wad_id, c_id, Some("ask")).unwrap();
+        let result = unregister_companion(&conn, wad_id, c_id, OrphanPolicy::Ask).unwrap();
         assert_eq!(result, OrphanResult::Kept);
 
         // Companion still in registry
@@ -327,8 +426,156 @@ mod tests {
         let c_id = add_companion(&conn, "md5abc", "patch.deh", "/path/patch.deh", 100).unwrap();
 
         // Not linked — unlink returns false, treated as not orphaned
-        let result = unregister_companion(&conn, wad_id, c_id, Some("delete")).unwrap();
+        let result = unregister_companion(&conn, wad_id, c_id, OrphanPolicy::Delete).unwrap();
         assert_eq!(result, OrphanResult::NotOrphaned);
+    }
+
+    // -- OrphanPolicy tests --
+
+    #[test]
+    fn test_orphan_policy_parse() {
+        assert_eq!(OrphanPolicy::parse("delete"), OrphanPolicy::Delete);
+        assert_eq!(OrphanPolicy::parse("keep"), OrphanPolicy::Keep);
+        assert_eq!(OrphanPolicy::parse("ask"), OrphanPolicy::Ask);
+        // Anything unrecognised must not resolve to a policy that deletes data.
+        assert_eq!(OrphanPolicy::parse("nonsense"), OrphanPolicy::Ask);
+        assert_eq!(OrphanPolicy::parse(""), OrphanPolicy::Ask);
+    }
+
+    #[test]
+    fn test_orphan_policy_round_trips_through_str() {
+        for policy in [OrphanPolicy::Delete, OrphanPolicy::Keep, OrphanPolicy::Ask] {
+            assert_eq!(OrphanPolicy::parse(policy.as_str()), policy);
+        }
+    }
+
+    // -- plan_unregister tests --
+
+    #[test]
+    fn test_plan_unregister_shared_companion_never_asks() {
+        let conn = setup();
+        let w1 = add_test_wad(&conn);
+        let w2 = add_wad(&conn, &NewWad::new("WAD 2", SourceType::Local)).unwrap();
+        let c_id = add_companion(&conn, "md5abc", "patch.deh", "/path/patch.deh", 100).unwrap();
+        link_companion_to_wad(&conn, w1, c_id).unwrap();
+        link_companion_to_wad(&conn, w2, c_id).unwrap();
+
+        // w2 still wants the file, so there is nothing to decide even under
+        // the default `ask` policy.
+        let plan = plan_unregister(&conn, w1, c_id).unwrap();
+        assert_eq!(plan, Some(OrphanPolicy::Keep));
+    }
+
+    // -- find_by_filename tests --
+
+    #[test]
+    fn test_find_by_filename() {
+        let conn = setup();
+        let wad_id = add_test_wad(&conn);
+        let c_id = add_companion(&conn, "md5abc", "patch.deh", "/path/patch.deh", 100).unwrap();
+        link_companion_to_wad(&conn, wad_id, c_id).unwrap();
+
+        let found = find_by_filename(&conn, wad_id, "patch.deh").unwrap();
+        assert_eq!(found.companion_id, c_id);
+
+        assert!(matches!(
+            find_by_filename(&conn, wad_id, "missing.deh"),
+            Err(crate::Error::CompanionNotFound(_))
+        ));
+    }
+
+    // -- set_enabled tests --
+
+    #[test]
+    fn test_set_enabled_reports_no_op() {
+        let conn = setup();
+        let wad_id = add_test_wad(&conn);
+        let c_id = add_companion(&conn, "md5abc", "patch.deh", "/path/patch.deh", 100).unwrap();
+        link_companion_to_wad(&conn, wad_id, c_id).unwrap();
+
+        let comp = find_by_filename(&conn, wad_id, "patch.deh").unwrap();
+        assert!(comp.enabled, "companions start enabled");
+
+        // Already enabled — no change to report.
+        assert!(!set_enabled(&conn, wad_id, &comp, true).unwrap());
+        // Disabling is a real change.
+        assert!(set_enabled(&conn, wad_id, &comp, false).unwrap());
+        assert!(
+            !find_by_filename(&conn, wad_id, "patch.deh")
+                .unwrap()
+                .enabled
+        );
+    }
+
+    // -- get_wads_for_companion tests --
+
+    #[test]
+    fn test_get_wads_for_companion() {
+        let conn = setup();
+        let w1 = add_wad(&conn, &NewWad::new("Zeta", SourceType::Local)).unwrap();
+        let w2 = add_wad(&conn, &NewWad::new("Alpha", SourceType::Local)).unwrap();
+        let c_id = add_companion(&conn, "md5abc", "patch.deh", "/path/patch.deh", 100).unwrap();
+        link_companion_to_wad(&conn, w1, c_id).unwrap();
+        link_companion_to_wad(&conn, w2, c_id).unwrap();
+
+        let wads = crate::db::get_wads_for_companion(&conn, c_id).unwrap();
+        assert_eq!(
+            wads,
+            vec![(w2, "Alpha".to_string()), (w1, "Zeta".to_string())]
+        );
+    }
+
+    #[test]
+    fn test_get_wads_for_companion_orphan() {
+        let conn = setup();
+        let c_id = add_companion(&conn, "md5abc", "patch.deh", "/path/patch.deh", 100).unwrap();
+        assert!(
+            crate::db::get_wads_for_companion(&conn, c_id)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    // -- delete_orphan tests --
+
+    #[test]
+    fn test_delete_orphan_removes_file_and_row() {
+        let conn = setup();
+        let dir = tempfile::tempdir().unwrap();
+        let managed = create_test_file(dir.path(), "patch.deh", b"content");
+        let c_id = add_companion(
+            &conn,
+            "md5abc",
+            "patch.deh",
+            &managed.to_string_lossy(),
+            100,
+        )
+        .unwrap();
+
+        assert!(delete_orphan(&conn, c_id).unwrap());
+        assert!(find_companion_by_md5(&conn, "md5abc").unwrap().is_none());
+        assert!(!managed.exists());
+    }
+
+    #[test]
+    fn test_delete_orphan_refuses_while_linked() {
+        let conn = setup();
+        let wad_id = add_test_wad(&conn);
+        let dir = tempfile::tempdir().unwrap();
+        let managed = create_test_file(dir.path(), "patch.deh", b"content");
+        let c_id = add_companion(
+            &conn,
+            "md5abc",
+            "patch.deh",
+            &managed.to_string_lossy(),
+            100,
+        )
+        .unwrap();
+        link_companion_to_wad(&conn, wad_id, c_id).unwrap();
+
+        assert!(!delete_orphan(&conn, c_id).unwrap());
+        assert!(find_companion_by_md5(&conn, "md5abc").unwrap().is_some());
+        assert!(managed.exists(), "a file a WAD still wants must survive");
     }
 
     // -- is_orphan DB function tests --

@@ -157,6 +157,10 @@ impl CacoApp {
                 let dialog = CollectionsDialogState::new(&self.conn);
                 self.state.active_dialog = Some(ActiveDialog::Collections(dialog));
             }
+            ActionRequest::Companions => {
+                let dialog = crate::dialogs::companions::CompanionsDialogState::new(&self.conn);
+                self.state.active_dialog = Some(ActiveDialog::Companions(dialog));
+            }
             ActionRequest::EditCollection(name) => {
                 let dialog = CollectionsDialogState::new_editing(&self.conn, &name);
                 self.state.active_dialog = Some(ActiveDialog::Collections(dialog));

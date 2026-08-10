@@ -403,7 +403,7 @@ fn apply_modifications(
                     conn,
                     wad.id,
                     comp.companion_id,
-                    Some("delete"),
+                    caco_core::companion_service::OrphanPolicy::Delete,
                 )
                 .map_err(|e| format!("Failed to remove companion '{name}': {e}"))?;
                 eprintln!("  Removed companion '{name}'.");

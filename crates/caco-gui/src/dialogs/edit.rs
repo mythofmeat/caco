@@ -1,4 +1,4 @@
-use caco_core::companion_service;
+use caco_core::companion_service::{self, OrphanPolicy};
 use caco_core::complevel::parse_complevel;
 use caco_core::db::companions;
 use caco_core::db::models::Status;
@@ -46,6 +46,17 @@ enum CompanionAction {
     Add,
     Remove(i64),
     Toggle(i64, bool),
+    /// Answer to the "this file will be orphaned" prompt.
+    ResolveOrphan(OrphanPolicy),
+    CancelOrphan,
+}
+
+/// A removal held back because the managed file would be left with no owner
+/// and the configured policy is `ask`. Without this the GUI silently kept
+/// every orphan, since it had no way to put the question to the user.
+struct PendingOrphan {
+    companion_id: i64,
+    filename: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -90,6 +101,8 @@ pub struct EditDialogState {
     companions_modified: bool,
     /// Async file-picker for the "Add companion" button, polled each frame.
     pending_companion_pick: Option<crate::workers::FileDialogReceiver>,
+    /// Removal awaiting the user's answer on what to do with the managed file.
+    pending_orphan: Option<PendingOrphan>,
 
     // Tag add state
     adding_tag: bool,
@@ -160,6 +173,7 @@ impl EditDialogState {
             companions,
             companions_modified: false,
             pending_companion_pick: None,
+            pending_orphan: None,
 
             adding_tag: false,
             new_tag_text: String::new(),
@@ -733,6 +747,30 @@ impl EditDialogState {
     fn render_companions_tab(&mut self, ui: &mut egui::Ui) -> Option<CompanionAction> {
         let mut action = None;
 
+        if let Some(pending) = &self.pending_orphan {
+            ui.colored_label(
+                theme::COLOR_ERROR,
+                format!("No other WAD uses '{}'.", pending.filename),
+            );
+            ui.colored_label(
+                theme::TEXT_SECONDARY,
+                "Delete the managed copy too, or keep it in the registry for later?",
+            );
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                if ui.button("Remove & Delete File").clicked() {
+                    action = Some(CompanionAction::ResolveOrphan(OrphanPolicy::Delete));
+                }
+                if ui.button("Remove & Keep File").clicked() {
+                    action = Some(CompanionAction::ResolveOrphan(OrphanPolicy::Keep));
+                }
+                if ui.button("Cancel").clicked() {
+                    action = Some(CompanionAction::CancelOrphan);
+                }
+            });
+            return action;
+        }
+
         if self.companions.is_empty() {
             ui.colored_label(
                 theme::TEXT_SECONDARY,
@@ -819,16 +857,34 @@ impl EditDialogState {
                     Some(crate::workers::spawn_file_dialog(Some(ctx.clone()), req));
             }
             CompanionAction::Remove(companion_id) => {
-                match companion_service::unregister_companion(conn, self.wad_id, companion_id, None)
-                {
-                    Ok(_) => {
-                        self.companions_modified = true;
-                        self.reload_companions(conn);
+                // `None` means the managed file would be orphaned and the
+                // config says to ask — stage the question instead of guessing.
+                match companion_service::plan_unregister(conn, self.wad_id, companion_id) {
+                    Ok(Some(policy)) => self.remove_companion(conn, companion_id, policy),
+                    Ok(None) => {
+                        let filename = self
+                            .companions
+                            .iter()
+                            .find(|c| c.companion_id == companion_id)
+                            .map(|c| c.filename.clone())
+                            .unwrap_or_default();
+                        self.pending_orphan = Some(PendingOrphan {
+                            companion_id,
+                            filename,
+                        });
                     }
                     Err(e) => {
                         self.error_message = Some(format!("Failed to remove companion: {e}"));
                     }
                 }
+            }
+            CompanionAction::ResolveOrphan(policy) => {
+                if let Some(pending) = self.pending_orphan.take() {
+                    self.remove_companion(conn, pending.companion_id, policy);
+                }
+            }
+            CompanionAction::CancelOrphan => {
+                self.pending_orphan = None;
             }
             CompanionAction::Toggle(companion_id, enabled) => {
                 match companions::set_companion_enabled(conn, self.wad_id, companion_id, enabled) {
@@ -843,7 +899,20 @@ impl EditDialogState {
         }
     }
 
+    fn remove_companion(&mut self, conn: &Connection, companion_id: i64, policy: OrphanPolicy) {
+        match companion_service::unregister_companion(conn, self.wad_id, companion_id, policy) {
+            Ok(_) => {
+                self.companions_modified = true;
+                self.reload_companions(conn);
+            }
+            Err(e) => {
+                self.error_message = Some(format!("Failed to remove companion: {e}"));
+            }
+        }
+    }
+
     fn reload_companions(&mut self, conn: &Connection) {
+        self.pending_orphan = None;
         let records = companions::get_companions_for_wad(conn, self.wad_id).unwrap_or_default();
         self.companions = records.iter().map(CompanionEntry::from_record).collect();
     }

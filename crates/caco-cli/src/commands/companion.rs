@@ -5,8 +5,7 @@ use std::path::Path;
 use clap::Subcommand;
 use rusqlite::Connection;
 
-use caco_core::companion_service::{self, OrphanResult};
-use caco_core::config;
+use caco_core::companion_service::{self, OrphanPolicy, OrphanResult};
 use caco_core::db;
 use caco_core::utils::format_size;
 
@@ -82,48 +81,27 @@ fn cmd_add(conn: &Connection, query: &[String], file: &str) -> Result<(), String
 
 fn cmd_rm(conn: &Connection, query: &[String], file: &str, yes: bool) -> Result<(), String> {
     let wad = resolve::resolve_one_wad(conn, query, false)?;
+    let comp =
+        companion_service::find_by_filename(conn, wad.id, file).map_err(|e| e.to_string())?;
 
-    let companions = db::get_companions_for_wad(conn, wad.id).map_err(|e| e.to_string())?;
-
-    let comp = companions
-        .iter()
-        .find(|c| c.filename == file)
-        .ok_or_else(|| format!("Companion '{}' not found for '{}'.", file, wad.title))?;
-
-    let policy = config::get_companion_orphan_cleanup();
-
-    // For "ask" policy, check if it would become orphaned and prompt
-    let effective_policy = if policy == "ask" && !yes {
-        // Temporarily check: will unlinking make it orphaned?
-        // Count other WADs that also have this companion
-        let other_links = companions_linked_elsewhere(conn, comp.companion_id, wad.id)?;
-        if other_links == 0 {
-            // It will become orphaned — ask user
-            if resolve::confirm(&format!(
-                "'{}' will be orphaned. Delete managed file?",
-                file
-            )) {
-                "delete"
+    // `None` means the file would be orphaned and the config says to ask.
+    // `-y` answers "delete" without a prompt, matching the rest of the CLI.
+    let policy = match companion_service::plan_unregister(conn, wad.id, comp.companion_id)
+        .map_err(|e| e.to_string())?
+    {
+        Some(policy) => policy,
+        None if yes => OrphanPolicy::Delete,
+        None => {
+            if resolve::confirm(&format!("'{file}' will be orphaned. Delete managed file?")) {
+                OrphanPolicy::Delete
             } else {
-                "keep"
+                OrphanPolicy::Keep
             }
-        } else {
-            "keep" // not going to be orphaned
         }
-    } else if yes {
-        // -y means auto-delete orphans
-        "delete"
-    } else {
-        &policy
     };
 
-    let result = companion_service::unregister_companion(
-        conn,
-        wad.id,
-        comp.companion_id,
-        Some(effective_policy),
-    )
-    .map_err(|e| format!("Failed to remove companion: {e}"))?;
+    let result = companion_service::unregister_companion(conn, wad.id, comp.companion_id, policy)
+        .map_err(|e| format!("Failed to remove companion: {e}"))?;
 
     match result {
         OrphanResult::Deleted => {
@@ -143,42 +121,36 @@ fn cmd_rm(conn: &Connection, query: &[String], file: &str, yes: bool) -> Result<
 }
 
 fn cmd_enable(conn: &Connection, query: &[String], file: &str) -> Result<(), String> {
-    let wad = resolve::resolve_one_wad(conn, query, false)?;
-
-    let companions = db::get_companions_for_wad(conn, wad.id).map_err(|e| e.to_string())?;
-
-    let comp = companions
-        .iter()
-        .find(|c| c.filename == file)
-        .ok_or_else(|| format!("Companion '{}' not found for '{}'.", file, wad.title))?;
-
-    if comp.enabled {
-        println!("'{}' is already enabled for '{}'.", file, wad.title);
-        return Ok(());
-    }
-
-    db::set_companion_enabled(conn, wad.id, comp.companion_id, true).map_err(|e| e.to_string())?;
-    println!("Enabled '{}' for '{}'.", file, wad.title);
-    Ok(())
+    set_enabled(conn, query, file, true)
 }
 
 fn cmd_disable(conn: &Connection, query: &[String], file: &str) -> Result<(), String> {
+    set_enabled(conn, query, file, false)
+}
+
+fn set_enabled(
+    conn: &Connection,
+    query: &[String],
+    file: &str,
+    enabled: bool,
+) -> Result<(), String> {
     let wad = resolve::resolve_one_wad(conn, query, false)?;
+    let comp =
+        companion_service::find_by_filename(conn, wad.id, file).map_err(|e| e.to_string())?;
 
-    let companions = db::get_companions_for_wad(conn, wad.id).map_err(|e| e.to_string())?;
+    let verb = if enabled { "Enabled" } else { "Disabled" };
+    let changed =
+        companion_service::set_enabled(conn, wad.id, &comp, enabled).map_err(|e| e.to_string())?;
 
-    let comp = companions
-        .iter()
-        .find(|c| c.filename == file)
-        .ok_or_else(|| format!("Companion '{}' not found for '{}'.", file, wad.title))?;
-
-    if !comp.enabled {
-        println!("'{}' is already disabled for '{}'.", file, wad.title);
-        return Ok(());
+    if changed {
+        println!("{verb} '{file}' for '{}'.", wad.title);
+    } else {
+        println!(
+            "'{file}' is already {} for '{}'.",
+            verb.to_lowercase(),
+            wad.title
+        );
     }
-
-    db::set_companion_enabled(conn, wad.id, comp.companion_id, false).map_err(|e| e.to_string())?;
-    println!("Disabled '{}' for '{}'.", file, wad.title);
     Ok(())
 }
 
@@ -249,22 +221,6 @@ fn list_all_companions(conn: &Connection, plain: bool) -> Result<(), String> {
     Ok(())
 }
 
-/// Count how many other WADs (besides `exclude_wad_id`) link to this companion.
-fn companions_linked_elsewhere(
-    conn: &Connection,
-    companion_id: i64,
-    exclude_wad_id: i64,
-) -> Result<i64, String> {
-    let count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM wad_companions WHERE companion_id = ? AND wad_id != ?",
-            rusqlite::params![companion_id, exclude_wad_id],
-            |row| row.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-    Ok(count)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -280,63 +236,6 @@ mod tests {
 
     fn add_test_wad(conn: &Connection, title: &str) -> i64 {
         add_wad(conn, &NewWad::new(title, SourceType::Local)).unwrap()
-    }
-
-    // -- companions_linked_elsewhere tests --
-
-    #[test]
-    fn test_companions_linked_elsewhere_none() {
-        let conn = setup();
-        let wad_id = add_test_wad(&conn, "WAD 1");
-        let c_id = db::add_companion(&conn, "md5abc", "patch.deh", "/path/patch.deh", 100).unwrap();
-        db::link_companion_to_wad(&conn, wad_id, c_id).unwrap();
-
-        // Only linked to this WAD — no links elsewhere
-        let count = companions_linked_elsewhere(&conn, c_id, wad_id).unwrap();
-        assert_eq!(count, 0);
-    }
-
-    #[test]
-    fn test_companions_linked_elsewhere_some() {
-        let conn = setup();
-        let w1 = add_test_wad(&conn, "WAD 1");
-        let w2 = add_test_wad(&conn, "WAD 2");
-        let c_id = db::add_companion(&conn, "md5abc", "patch.deh", "/path/patch.deh", 100).unwrap();
-
-        db::link_companion_to_wad(&conn, w1, c_id).unwrap();
-        db::link_companion_to_wad(&conn, w2, c_id).unwrap();
-
-        // w2 also links to it
-        let count = companions_linked_elsewhere(&conn, c_id, w1).unwrap();
-        assert_eq!(count, 1);
-    }
-
-    #[test]
-    fn test_companions_linked_elsewhere_not_linked() {
-        let conn = setup();
-        let wad_id = add_test_wad(&conn, "WAD 1");
-        let c_id = db::add_companion(&conn, "md5abc", "patch.deh", "/path/patch.deh", 100).unwrap();
-
-        // Not linked at all
-        let count = companions_linked_elsewhere(&conn, c_id, wad_id).unwrap();
-        assert_eq!(count, 0);
-    }
-
-    #[test]
-    fn test_companions_linked_elsewhere_multiple() {
-        let conn = setup();
-        let w1 = add_test_wad(&conn, "WAD 1");
-        let w2 = add_test_wad(&conn, "WAD 2");
-        let w3 = add_test_wad(&conn, "WAD 3");
-        let c_id = db::add_companion(&conn, "md5abc", "patch.deh", "/path/patch.deh", 100).unwrap();
-
-        db::link_companion_to_wad(&conn, w1, c_id).unwrap();
-        db::link_companion_to_wad(&conn, w2, c_id).unwrap();
-        db::link_companion_to_wad(&conn, w3, c_id).unwrap();
-
-        // w2 and w3 also link to it
-        let count = companions_linked_elsewhere(&conn, c_id, w1).unwrap();
-        assert_eq!(count, 2);
     }
 
     // -- list formatting tests --

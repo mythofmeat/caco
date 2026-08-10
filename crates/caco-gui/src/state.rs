@@ -12,6 +12,7 @@ use rusqlite::Connection;
 use crate::dialogs::cache::CacheDialogState;
 use crate::dialogs::cacoward_link::CacowardLinkDialogState;
 use crate::dialogs::collections::CollectionsDialogState;
+use crate::dialogs::companions::CompanionsDialogState;
 use crate::dialogs::delete::DeleteDialogState;
 use crate::dialogs::edit::EditDialogState;
 use crate::dialogs::link::LinkDialogState;
@@ -73,6 +74,8 @@ pub enum ActionRequest {
     Resources,
     Profiles,
     Collections,
+    /// Open the library-wide companion file registry.
+    Companions,
     EditCollection(String),
     DeleteCollection(String),
     /// Import the WAD referenced by a Cacoward entry (by DB pk). The
@@ -107,6 +110,7 @@ pub enum ActiveDialog {
     Cache(CacheDialogState),
     Profiles(Box<ProfilesDialogState>),
     Collections(CollectionsDialogState),
+    Companions(CompanionsDialogState),
     Resources(ResourcesDialogState),
     WadStats(WadStatsDialogState),
     WadData(Box<WadDataDialogState>),
