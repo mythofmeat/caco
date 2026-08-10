@@ -602,8 +602,8 @@ pub fn clear_cached_path(conn: &Connection, wad_id: i64) -> Result<bool> {
 
 /// Re-point dangling `cached_path` values at files that are still in the cache.
 ///
-/// Moving the cache directory (see `config::migrate_legacy_wad_cache`) relocates
-/// the files but not the absolute paths recorded against each WAD, which leaves
+/// Moving the cache directory — it is editable in Settings — relocates the
+/// files but not the absolute paths recorded against each WAD, which leaves
 /// every row pointing at a location that no longer exists. The files are still
 /// there under the same names, so a row whose path is missing is repaired by
 /// looking for its basename in `cache_dir`.

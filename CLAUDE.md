@@ -111,7 +111,7 @@ that the data dir stays small enough to copy between machines.
 
 Portable (`config::default_data_dir`, overridable via `CACO_HOME`):
 - Database: `~/.local/share/caco/library.db`
-- Config: `~/.local/share/caco/config.toml` (moved out of `~/.config` — it is written by the settings dialog, the cache migration and first-run detection far more often than by hand, and keeping it here makes the portable set one directory and `CACO_HOME` a complete isolation switch; `migrate_legacy_config` relocates it on startup, normalising it on the way)
+- Config: `~/.local/share/caco/config.toml` (deliberately not `~/.config` — it is written by the settings dialog and first-run detection far more often than by hand, and keeping it here makes the portable set one directory and `CACO_HOME` a complete isolation switch)
 - Managed IWADs: `~/.local/share/caco/iwads/{variant}/{family}.wad`
 - Managed id24 WADs: `~/.local/share/caco/id24/{name}.wad`
 - WAD data: `~/.local/share/caco/data/` (per-WAD saves, stats, configs)
@@ -126,12 +126,12 @@ Disposable (`config::cache_home`, overridable via `CACO_CACHE_HOME`):
 - Built sourceport prefixes: `~/.cache/caco/ports/{name}/{ref-slug}/` (+ `update-check.toml`)
 - Sourceport checkouts + build trees: `~/.cache/caco/ports-src/`
 
-`config::migrate_legacy_wad_cache` relocates a pre-split `~/.local/share/caco/wads`
-on startup and rewrites the stored `cache_dir`. It is idempotent and deliberately
-conservative: it does nothing when `CACO_CACHE_DIR` is set, when `cache_dir` points
-somewhere the user chose, or when the destination already has contents. Both
-frontends call it before opening the DB. The filesystem half is `move_cache_dir`,
-split out so it can be tested against temp dirs.
+Caco carries **no migrations between layouts**. It is pre-1.0 and single-user;
+a layout change is applied by moving the files by hand, which is why nothing in
+`config.rs` knows about a previous location. `db::relink_cached_paths` still runs
+at startup, but for a live reason rather than a historical one: `cache_dir` is
+editable in Settings, and every `wads.cached_path` records an absolute path into
+wherever the cache used to be.
 
 ## Behavior
 

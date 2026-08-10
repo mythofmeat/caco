@@ -24,37 +24,11 @@ fn main() -> eframe::Result<()> {
         None
     };
 
-    // Move the config next to the database if it still lives under
-    // ~/.config/caco. Must run before the cache migration, which reads and
-    // rewrites the config it finds.
-    match caco_core::config::migrate_legacy_config() {
-        caco_core::config::ConfigMigration::Moved { from, to } => {
-            eprintln!("Moved config: {} -> {}", from.display(), to.display());
-        }
-        caco_core::config::ConfigMigration::Skipped { reason } => {
-            eprintln!("Could not move the config: {reason}");
-        }
-        caco_core::config::ConfigMigration::NotNeeded => {}
-    }
-
     // Adopt an installed sourceport when none is configured, so a fresh
     // install can launch something without a trip to Settings first.
     let detected = caco_core::config::ensure_sourceport_defaults();
     if let Some(ref port) = detected.sourceport {
         eprintln!("Detected sourceport: {port}");
-    }
-
-    // Relocate the WAD cache out of the data dir if it predates the split.
-    // Idempotent; a no-op on every run after the first. Runs before the DB
-    // path is resolved so a first launch after upgrading does the move.
-    match caco_core::config::migrate_legacy_wad_cache() {
-        caco_core::config::CacheMigration::Moved { from, to } => {
-            eprintln!("Moved WAD cache: {} -> {}", from.display(), to.display());
-        }
-        caco_core::config::CacheMigration::Skipped { reason } => {
-            eprintln!("Could not move the WAD cache: {reason}");
-        }
-        caco_core::config::CacheMigration::NotNeeded => {}
     }
 
     let db_path = db_path.unwrap_or_else(caco_core::config::get_db_path);
@@ -89,8 +63,9 @@ fn main() -> eframe::Result<()> {
             let conn = caco_core::db::open_connection(&db_path).expect("Failed to open database");
             caco_core::db::init_db(&conn).expect("Failed to initialize database");
 
-            // Repair cached_path values left dangling by a cache relocation.
-            // Needs the DB, so it cannot ride along with the migration itself.
+            // Repair cached_path values left dangling by a cache relocation —
+            // the cache directory is editable in Settings, and every row
+            // records an absolute path into wherever it used to be.
             let relinked =
                 caco_core::db::relink_cached_paths(&conn, &caco_core::config::get_cache_dir())
                     .unwrap_or(0);
