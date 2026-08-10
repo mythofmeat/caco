@@ -4,6 +4,7 @@ pub mod collections;
 pub mod companions;
 pub mod delete;
 pub mod edit;
+pub mod enrich;
 pub mod link;
 pub mod profiles;
 pub mod resources;

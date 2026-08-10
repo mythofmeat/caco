@@ -14,7 +14,7 @@ use crate::dialogs::stats::StatsDialogState;
 use crate::dialogs::wad_stats::WadStatsDialogState;
 use crate::import;
 use crate::import::state::SearchSource;
-use crate::message::{AppMessage, Notification};
+use crate::message::{AppMessage, EnrichReport, Notification};
 use crate::panels;
 use crate::persist;
 use crate::state::{ActionRequest, ActiveDialog, AppState, PlayState, ViewLayout, ViewMode};
@@ -36,6 +36,24 @@ use section_header::render_section_header;
 use sidebar::render_sidebar;
 use status_bar::render_status_bar;
 use topbar::render_topbar;
+
+/// One line describing what enrichment found for a WAD.
+fn describe_outcome(outcome: &caco_sources::enrich_service::EnrichOutcome) -> String {
+    let mut parts = Vec::new();
+    if let Some(cl) = outcome.complevel {
+        parts.push(format!(
+            "complevel {cl} ({})",
+            caco_core::complevel::complevel_name(Some(cl))
+        ));
+    }
+    if let Some(ref iwad) = outcome.iwad {
+        parts.push(format!("IWAD {iwad}"));
+    }
+    if outcome.zdoom_required == Some(true) {
+        parts.push("zdoom required".to_string());
+    }
+    format!("{} → {}", outcome.title, parts.join(", "))
+}
 
 pub struct CacoApp {
     conn: Connection,
@@ -115,6 +133,108 @@ impl CacoApp {
         spawn_reanalysis(self.bg.sender(), self.state.db_path.clone(), jobs);
     }
 
+    /// Run an enrichment on a worker thread, streaming progress back to the
+    /// dialog. Enrichment does one Doom Wiki lookup per WAD it cannot settle
+    /// from the file, so a whole-library run is minutes of network I/O and
+    /// must never block the UI thread.
+    fn spawn_enrich(&mut self, request: crate::dialogs::enrich::EnrichRequest) {
+        use crate::dialogs::enrich::{EnrichRequest, EnrichScope};
+        use caco_sources::enrich_service::{self, EnrichProgress};
+
+        let sender = self.bg.sender();
+        let db_path = self.state.db_path.clone();
+
+        std::thread::spawn(move || {
+            let conn = match caco_core::db::open_connection(&db_path) {
+                Ok(c) => c,
+                Err(e) => {
+                    sender.send(AppMessage::EnrichComplete(Err(format!(
+                        "DB open failed: {e}"
+                    ))));
+                    return;
+                }
+            };
+
+            let outcome = match request {
+                EnrichRequest::Wads {
+                    scope,
+                    dry_run,
+                    cancel,
+                } => run_wad_enrich(&conn, &sender, scope, dry_run, &cancel),
+                EnrichRequest::Cacowards { year, dry_run } => {
+                    enrich_service::enrich_cacowards(&conn, year, dry_run)
+                        .map(|s| EnrichReport::Cacowards {
+                            year: s.year,
+                            scraped: s.scraped,
+                            upserted: s.upserted,
+                            linked: s.linked_total(),
+                            previews: s
+                                .previews
+                                .iter()
+                                .map(|p| {
+                                    format!(
+                                        "{} — {} ({})",
+                                        p.category,
+                                        p.wad_title,
+                                        p.idgames_url.as_deref().unwrap_or("no idgames link")
+                                    )
+                                })
+                                .collect(),
+                            dry_run,
+                        })
+                        .map_err(|e| e.to_string())
+                }
+            };
+
+            sender.send(AppMessage::EnrichComplete(outcome));
+
+            // Local so the closure below can borrow `sender` without the
+            // spawn body needing a second clone.
+            fn run_wad_enrich(
+                conn: &Connection,
+                sender: &crate::workers::BackgroundSender,
+                scope: EnrichScope,
+                dry_run: bool,
+                cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+            ) -> Result<EnrichReport, String> {
+                let mut wads = caco_core::db::search_wads(conn, None, None, true, false, 0)
+                    .map_err(|e| format!("Search error: {e}"))?;
+                if scope == EnrichScope::MissingComplevel {
+                    wads.retain(|w| w.complevel.is_none());
+                }
+
+                let summary = enrich_service::enrich_wads(
+                    conn,
+                    &wads,
+                    dry_run,
+                    &mut |progress| {
+                        if let EnrichProgress::Started {
+                            index,
+                            total,
+                            title,
+                        } = progress
+                        {
+                            sender.send(AppMessage::EnrichProgress {
+                                done: index,
+                                total,
+                                title: title.to_string(),
+                            });
+                        }
+                    },
+                    &|| cancel.load(std::sync::atomic::Ordering::Relaxed),
+                );
+
+                Ok(EnrichReport::Wads {
+                    examined: summary.examined,
+                    findings: summary.changed.iter().map(describe_outcome).collect(),
+                    wiki_lookups: summary.wiki_lookups,
+                    cancelled: summary.cancelled,
+                    dry_run,
+                })
+            }
+        });
+    }
+
     /// Dispatch an action request (from detail panel buttons or table shortcuts).
     fn dispatch_action(&mut self, action: ActionRequest) {
         match action {
@@ -156,6 +276,18 @@ impl CacoApp {
             ActionRequest::Collections => {
                 let dialog = CollectionsDialogState::new(&self.conn);
                 self.state.active_dialog = Some(ActiveDialog::Collections(dialog));
+            }
+            ActionRequest::Enrich => {
+                let year = chrono::Local::now()
+                    .format("%Y")
+                    .to_string()
+                    .parse()
+                    .unwrap_or(2024);
+                let dialog = crate::dialogs::enrich::EnrichDialogState::new(year);
+                self.state.active_dialog = Some(ActiveDialog::Enrich(Box::new(dialog)));
+            }
+            ActionRequest::StartEnrich(request) => {
+                self.spawn_enrich(*request);
             }
             ActionRequest::Companions => {
                 let dialog = crate::dialogs::companions::CompanionsDialogState::new(&self.conn);
@@ -476,6 +608,27 @@ impl eframe::App for CacoApp {
                             }
                         }
                     }
+                }
+                AppMessage::EnrichProgress { done, total, title } => {
+                    if let Some(ActiveDialog::Enrich(dialog)) = &mut self.state.active_dialog {
+                        dialog.set_progress(done, total, title);
+                    }
+                }
+                AppMessage::EnrichComplete(outcome) => {
+                    // The dialog owns the report; if the user closed it mid-run
+                    // the result has nowhere to go, so surface the failure at
+                    // least as a toast.
+                    match &mut self.state.active_dialog {
+                        Some(ActiveDialog::Enrich(dialog)) => dialog.finish(outcome),
+                        _ => {
+                            if let Err(e) = outcome {
+                                self.state.notification =
+                                    Some(Notification::error(format!("Enrich failed: {e}")));
+                            }
+                        }
+                    }
+                    self.state.needs_reload = true;
+                    self.state.cacowards.needs_reload = true;
                 }
                 AppMessage::SearchComplete(source, results) => {
                     self.state

@@ -8,6 +8,7 @@ use crate::dialogs::collections::CollectionsResult;
 use crate::dialogs::companions::CompanionsResult;
 use crate::dialogs::delete::DeleteResult;
 use crate::dialogs::edit::EditResult;
+use crate::dialogs::enrich::EnrichResult;
 use crate::dialogs::link::LinkResult;
 use crate::dialogs::profiles::ProfilesResult;
 use crate::dialogs::resources::ResourcesResult;
@@ -118,6 +119,19 @@ pub(super) fn render_active_dialog(
                     CollectionsResult::Open => {}
                 }
             }
+            ActiveDialog::Enrich(enrich_state) => match enrich_state.render(ctx) {
+                EnrichResult::Closed => {
+                    close_dialog = true;
+                    // Enrichment writes complevel / IWAD / zdoom flags, so the
+                    // library view is stale by the time the dialog closes.
+                    state.needs_reload = true;
+                    state.cacowards.needs_reload = true;
+                }
+                EnrichResult::Start(request) => {
+                    follow_up_action = Some(ActionRequest::StartEnrich(Box::new(request)));
+                }
+                EnrichResult::Open => {}
+            },
             ActiveDialog::Companions(companions_state) => {
                 match companions_state.render(ctx, conn) {
                     CompanionsResult::Closed => {

@@ -15,6 +15,7 @@ use crate::dialogs::collections::CollectionsDialogState;
 use crate::dialogs::companions::CompanionsDialogState;
 use crate::dialogs::delete::DeleteDialogState;
 use crate::dialogs::edit::EditDialogState;
+use crate::dialogs::enrich::EnrichDialogState;
 use crate::dialogs::link::LinkDialogState;
 use crate::dialogs::profiles::ProfilesDialogState;
 use crate::dialogs::resources::ResourcesDialogState;
@@ -76,6 +77,10 @@ pub enum ActionRequest {
     Collections,
     /// Open the library-wide companion file registry.
     Companions,
+    /// Open the metadata / Cacowards enrichment dialog.
+    Enrich,
+    /// Run an enrichment the dialog has configured, on a worker thread.
+    StartEnrich(Box<crate::dialogs::enrich::EnrichRequest>),
     EditCollection(String),
     DeleteCollection(String),
     /// Import the WAD referenced by a Cacoward entry (by DB pk). The
@@ -111,6 +116,7 @@ pub enum ActiveDialog {
     Profiles(Box<ProfilesDialogState>),
     Collections(CollectionsDialogState),
     Companions(CompanionsDialogState),
+    Enrich(Box<EnrichDialogState>),
     Resources(ResourcesDialogState),
     WadStats(WadStatsDialogState),
     WadData(Box<WadDataDialogState>),

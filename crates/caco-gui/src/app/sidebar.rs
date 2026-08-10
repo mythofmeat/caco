@@ -228,6 +228,20 @@ pub(super) fn render_sidebar(
             if ui
                 .add(
                     egui::Button::new(
+                        egui::RichText::new("Enrich")
+                            .size(11.0)
+                            .color(theme::TEXT_MUTED),
+                    )
+                    .frame(false),
+                )
+                .on_hover_text("Re-run metadata detection / refresh Cacowards")
+                .clicked()
+            {
+                actions.push(ActionRequest::Enrich);
+            }
+            if ui
+                .add(
+                    egui::Button::new(
                         egui::RichText::new("IWADs")
                             .size(11.0)
                             .color(theme::TEXT_MUTED),

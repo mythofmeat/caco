@@ -62,6 +62,29 @@ impl Notification {
 // AppMessage (for background thread communication)
 // ---------------------------------------------------------------------------
 
+/// What an enrichment run produced.
+///
+/// Findings arrive pre-rendered as display lines: the enrich service's own
+/// types stay in caco-sources, and the dialog only ever shows this list.
+#[derive(Debug, Clone)]
+pub enum EnrichReport {
+    Wads {
+        examined: usize,
+        findings: Vec<String>,
+        wiki_lookups: u32,
+        cancelled: bool,
+        dry_run: bool,
+    },
+    Cacowards {
+        year: i64,
+        scraped: usize,
+        upserted: usize,
+        linked: usize,
+        previews: Vec<String>,
+        dry_run: bool,
+    },
+}
+
 pub enum AppMessage {
     Notify(Notification),
     PlayFinished {
@@ -73,6 +96,14 @@ pub enum AppMessage {
     PlayUnavailable {
         wad_id: i64,
     },
+    /// An enrichment run moved on to another WAD. `done` counts WADs already
+    /// finished, so `done / total` drives a progress bar directly.
+    EnrichProgress {
+        done: usize,
+        total: usize,
+        title: String,
+    },
+    EnrichComplete(Result<EnrichReport, String>),
     SearchComplete(SearchSource, Vec<SearchResultEntry>),
     ImportComplete(Result<ImportResult, String>),
     ThumbnailReady {
