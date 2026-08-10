@@ -272,14 +272,22 @@ pub fn list_backups(wad_id: i64) -> Vec<BackupInfo> {
 ///
 /// Sorted by creation time (newest first).
 pub fn list_all_backups() -> Vec<BackupInfo> {
-    let backup_dir = get_backup_dir();
+    list_backups_in(&get_backup_dir())
+}
+
+/// List every backup in an explicit directory.
+///
+/// Callers that decide what to delete take this rather than
+/// [`list_all_backups`], so their tests can point at a temp dir instead of
+/// the user's real backups.
+pub fn list_backups_in(backup_dir: &Path) -> Vec<BackupInfo> {
     if !backup_dir.is_dir() {
         return Vec::new();
     }
 
     let mut backups = Vec::new();
 
-    if let Ok(entries) = fs::read_dir(&backup_dir) {
+    if let Ok(entries) = fs::read_dir(backup_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("zip") {

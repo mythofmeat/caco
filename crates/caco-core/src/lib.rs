@@ -6,6 +6,7 @@ pub mod config;
 pub mod db;
 pub mod demos;
 pub mod error;
+pub mod gc;
 pub mod iwad_detect;
 pub mod mapinfo;
 pub mod player;
