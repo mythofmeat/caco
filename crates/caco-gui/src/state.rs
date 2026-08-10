@@ -16,6 +16,7 @@ use crate::dialogs::companions::CompanionsDialogState;
 use crate::dialogs::delete::DeleteDialogState;
 use crate::dialogs::edit::EditDialogState;
 use crate::dialogs::enrich::EnrichDialogState;
+use crate::dialogs::gc::GcDialogState;
 use crate::dialogs::link::LinkDialogState;
 use crate::dialogs::profiles::ProfilesDialogState;
 use crate::dialogs::resources::ResourcesDialogState;
@@ -79,6 +80,8 @@ pub enum ActionRequest {
     Companions,
     /// Open the metadata / Cacowards enrichment dialog.
     Enrich,
+    /// Open the disk cleanup dialog.
+    Gc,
     /// Run an enrichment the dialog has configured, on a worker thread.
     StartEnrich(Box<crate::dialogs::enrich::EnrichRequest>),
     EditCollection(String),
@@ -117,6 +120,7 @@ pub enum ActiveDialog {
     Collections(CollectionsDialogState),
     Companions(CompanionsDialogState),
     Enrich(Box<EnrichDialogState>),
+    Gc(Box<GcDialogState>),
     Resources(ResourcesDialogState),
     WadStats(WadStatsDialogState),
     WadData(Box<WadDataDialogState>),

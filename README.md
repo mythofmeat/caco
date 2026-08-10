@@ -130,6 +130,7 @@ caco-gui
 - Saves & Demos dialog (`F`, or the context menu) for backing up and restoring a WAD's data directory, clearing saves, and playing back or deleting recorded demos
 - Companion file registry (sidebar > Files) listing every managed file with the WADs that use it, and cleanup for the ones nothing links any more
 - Enrich dialog (sidebar > Enrich) to re-run complevel / IWAD / port detection across the library with a progress bar, a dry-run mode and a cancel button, plus per-year Cacowards refresh
+- Clean Up dialog (sidebar > Clean) showing every reclaimable file as a checkbox — finished WADs' data, caches and companions, plus orphaned directories, backups and companion files — with keep-toggles and a confirmation before anything is deleted
 - Settings dialog (sidebar > Settings) for editing the caco config — sourceports, global and per-port launch args, behavior toggles, cache limits, and paths — persisted to `config.toml` on save
 - Keyboard shortcuts: `j/k`, `g`/`G`, `Home`/`End`, `Enter`, `E`, `D`, `S`, `M`, `F`, `P`, `Esc`
 

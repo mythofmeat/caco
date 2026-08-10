@@ -873,6 +873,132 @@ mod tests {
         assert_eq!(size, 500);
     }
 
+    // -- gc_candidates --
+
+    #[test]
+    fn test_gc_candidates_finds_finished_and_abandoned_only() {
+        let conn = setup();
+        add_status_wad(&conn, "Done", "completed", None);
+        add_status_wad(&conn, "Dropped", "abandoned", None);
+        add_status_wad(&conn, "Playing", "in-progress", None);
+        add_status_wad(&conn, "Fresh", "unplayed", None);
+
+        let mut titles: Vec<String> = gc_candidates(&conn)
+            .unwrap()
+            .into_iter()
+            .map(|w| w.title)
+            .collect();
+        titles.sort();
+        assert_eq!(titles, vec!["Done".to_string(), "Dropped".to_string()]);
+    }
+
+    #[test]
+    fn test_gc_candidates_excludes_ignored() {
+        let conn = setup();
+        let keep = add_status_wad(&conn, "Keep", "completed", None);
+        add_status_wad(&conn, "Sweep", "completed", None);
+        set_gc_ignore(&conn, keep, true).unwrap();
+
+        let titles: Vec<String> = gc_candidates(&conn)
+            .unwrap()
+            .into_iter()
+            .map(|w| w.title)
+            .collect();
+        assert_eq!(titles, vec!["Sweep".to_string()]);
+    }
+
+    #[test]
+    fn test_gc_candidates_empty_db() {
+        let conn = setup();
+        assert!(gc_candidates(&conn).unwrap().is_empty());
+    }
+
+    // -- existing_wad_ids --
+
+    #[test]
+    fn test_existing_wad_ids() {
+        let conn = setup();
+        let a = add_status_wad(&conn, "A", "unplayed", None);
+        let b = add_status_wad(&conn, "B", "unplayed", None);
+
+        let found = existing_wad_ids(&conn, &[a, b, 9999]);
+        assert!(found.contains(&a));
+        assert!(found.contains(&b));
+        assert!(!found.contains(&9999));
+
+        assert!(existing_wad_ids(&conn, &[]).is_empty());
+        assert!(existing_wad_ids(&conn, &[9998, 9999]).is_empty());
+    }
+
+    // -- orphaned companions --
+
+    #[test]
+    fn test_find_orphaned_companions_ignores_linked_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = setup();
+        let linked = dir.path().join("linked.deh");
+        write(&linked, 10);
+
+        let wad_id = add_status_wad(&conn, "Owner", "unplayed", None);
+        let c_id =
+            db::add_companion(&conn, "md5a", "linked.deh", &linked.to_string_lossy(), 10).unwrap();
+        db::link_companion_to_wad(&conn, wad_id, c_id).unwrap();
+
+        assert!(find_orphaned_companions(&conn).is_empty());
+    }
+
+    #[test]
+    fn test_find_orphaned_companions_reports_unlinked() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = setup();
+        let loose = dir.path().join("loose.deh");
+        write(&loose, 25);
+        let c_id =
+            db::add_companion(&conn, "md5b", "loose.deh", &loose.to_string_lossy(), 25).unwrap();
+
+        let orphans = find_orphaned_companions(&conn);
+        assert_eq!(orphans.len(), 1);
+        assert_eq!(orphans[0].size, 25);
+        assert_eq!(orphans[0].companion_id, Some(c_id));
+    }
+
+    #[test]
+    fn test_find_orphaned_companions_drops_rows_whose_file_is_gone() {
+        let conn = setup();
+        db::add_companion(&conn, "md5c", "gone.deh", "/nope/gone.deh", 25).unwrap();
+
+        // Nothing to reclaim, so it is not offered as a decision...
+        assert!(find_orphaned_companions(&conn).is_empty());
+        // ...and the dangling registry row is cleaned up in passing.
+        assert!(db::find_companion_by_md5(&conn, "md5c").unwrap().is_none());
+    }
+
+    // -- directory helpers --
+
+    #[test]
+    fn test_dir_size_counts_nested_files() {
+        let dir = tempfile::tempdir().unwrap();
+        write(&dir.path().join("a.txt"), 10);
+        write(&dir.path().join("sub/b.txt"), 20);
+        write(&dir.path().join("sub/deep/c.txt"), 30);
+
+        assert_eq!(dir_size(dir.path()), 60);
+        assert_eq!(dir_size(&dir.path().join("missing")), 0);
+        assert_eq!(dir_size(&dir.path().join("a.txt")), 0, "not a directory");
+    }
+
+    #[test]
+    fn test_remove_empty_dirs_preserves_non_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("empty/deeper")).unwrap();
+        write(&dir.path().join("full/keep.txt"), 5);
+
+        remove_empty_dirs(dir.path());
+
+        assert!(!dir.path().join("empty").exists());
+        assert!(dir.path().join("full/keep.txt").exists());
+    }
+
     // -- plan totals --
 
     #[test]

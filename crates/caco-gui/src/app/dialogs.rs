@@ -9,6 +9,7 @@ use crate::dialogs::companions::CompanionsResult;
 use crate::dialogs::delete::DeleteResult;
 use crate::dialogs::edit::EditResult;
 use crate::dialogs::enrich::EnrichResult;
+use crate::dialogs::gc::GcResult;
 use crate::dialogs::link::LinkResult;
 use crate::dialogs::profiles::ProfilesResult;
 use crate::dialogs::resources::ResourcesResult;
@@ -132,6 +133,12 @@ pub(super) fn render_active_dialog(
                 }
                 EnrichResult::Open => {}
             },
+            ActiveDialog::Gc(gc_state) => match gc_state.render(ctx, conn) {
+                GcResult::Closed => {
+                    close_dialog = true;
+                }
+                GcResult::Open => {}
+            },
             ActiveDialog::Companions(companions_state) => {
                 match companions_state.render(ctx, conn) {
                     CompanionsResult::Closed => {
@@ -218,6 +225,7 @@ pub(super) fn render_active_dialog(
             Some(ActiveDialog::Cache(s)) => s.modified,
             Some(ActiveDialog::Collections(s)) => s.modified,
             Some(ActiveDialog::Companions(s)) => s.modified,
+            Some(ActiveDialog::Gc(s)) => s.modified,
             Some(ActiveDialog::Resources(s)) => s.modified,
             _ => false,
         };

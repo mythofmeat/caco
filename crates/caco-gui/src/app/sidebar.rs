@@ -242,6 +242,20 @@ pub(super) fn render_sidebar(
             if ui
                 .add(
                     egui::Button::new(
+                        egui::RichText::new("Clean")
+                            .size(11.0)
+                            .color(theme::TEXT_MUTED),
+                    )
+                    .frame(false),
+                )
+                .on_hover_text("Reclaim disk space from finished WADs and orphans")
+                .clicked()
+            {
+                actions.push(ActionRequest::Gc);
+            }
+            if ui
+                .add(
+                    egui::Button::new(
                         egui::RichText::new("IWADs")
                             .size(11.0)
                             .color(theme::TEXT_MUTED),
