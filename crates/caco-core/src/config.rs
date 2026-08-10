@@ -22,8 +22,16 @@ fn home_dir() -> PathBuf {
     dirs::home_dir().expect("could not determine home directory")
 }
 
+/// Where the config file lives — inside the data directory.
+///
+/// Deliberately not `~/.config/caco`. The file is written by the program far
+/// more often than by hand (the settings dialog, the cache migration, first-run
+/// sourceport detection), and keeping it beside the database means the portable
+/// set is one directory rather than two: copy `~/.local/share/caco` and the
+/// install comes with it. It also makes `CACO_HOME` a complete isolation
+/// switch, since nothing outside it can redirect the database.
 pub fn config_dir() -> PathBuf {
-    home_dir().join(".config").join("caco")
+    default_data_dir()
 }
 
 pub fn config_file() -> PathBuf {
@@ -31,6 +39,11 @@ pub fn config_file() -> PathBuf {
         return PathBuf::from(p);
     }
     config_dir().join("config.toml")
+}
+
+/// Where the config lived before it moved next to the database.
+pub fn legacy_config_file() -> PathBuf {
+    home_dir().join(".config").join("caco").join("config.toml")
 }
 
 /// Base data directory. Overridden by `CACO_HOME` env var.
@@ -259,10 +272,7 @@ fn read_config_from_disk() -> Config {
     }
     match fs::read_to_string(&path) {
         Ok(contents) => match toml::from_str::<Config>(&contents) {
-            Ok(cfg) => {
-                ensure_config_keys(&path, &contents);
-                cfg
-            }
+            Ok(cfg) => cfg,
             Err(e) => {
                 eprintln!("Warning: Invalid TOML syntax in {}: {e}", path.display());
                 eprintln!("Warning: Using default configuration.");
@@ -303,61 +313,62 @@ pub fn reload_config() {
     config_cell().store(Arc::new(read_config_from_disk()));
 }
 
-/// Ensure the config file on disk has all known keys.
+/// Strip every key that still equals its default.
 ///
-/// Compares the existing config against `Config::default()`. Adds missing
-/// top-level keys with their default values. For sections (gui, list),
-/// only backfills keys in sections that already exist on disk — does not
-/// create missing sections. Writes only if changes were made.
-fn ensure_config_keys(path: &Path, contents: &str) {
-    let Ok(mut on_disk) = contents.parse::<toml::Table>() else {
-        return;
-    };
+/// Only settings the user actually changed are written. Two reasons this
+/// matters more than tidiness:
+///
+/// - The path keys default to *absolute* paths under `$HOME`. Persisting them
+///   bakes one machine's layout into a file that is meant to travel with the
+///   data directory; left absent they resolve at runtime on whatever machine
+///   is reading them.
+/// - A config that lists only real choices is one a person can read. The
+///   defaults are documented in `config.example.toml`, not echoed back.
+fn strip_defaults(current: toml::Table, default: &toml::Table) -> toml::Table {
+    let mut out = toml::Table::new();
 
-    let defaults = Config::default();
-    let Ok(default_toml) = toml::to_string_pretty(&defaults) else {
-        return;
-    };
-    let Ok(default_table) = default_toml.parse::<toml::Table>() else {
-        return;
-    };
-
-    let mut changed = false;
-
-    for (key, default_val) in &default_table {
-        if let toml::Value::Table(default_section) = default_val {
-            // Section: only backfill keys if section already exists on disk
-            if let Some(toml::Value::Table(on_disk_section)) = on_disk.get_mut(key) {
-                for (skey, sval) in default_section {
-                    if !on_disk_section.contains_key(skey) {
-                        on_disk_section.insert(skey.clone(), sval.clone());
-                        changed = true;
-                    }
+    for (key, value) in current {
+        match (&value, default.get(&key)) {
+            // Same as stock — say nothing.
+            (_, Some(default_value)) if &value == default_value => {}
+            // Sub-table: keep only the keys inside it that differ, and drop
+            // the table entirely if that leaves it empty.
+            (toml::Value::Table(table), Some(toml::Value::Table(default_table))) => {
+                let pruned = strip_defaults(table.clone(), default_table);
+                if !pruned.is_empty() {
+                    out.insert(key, toml::Value::Table(pruned));
                 }
             }
-        } else {
-            // Top-level scalar: add if missing
-            if !on_disk.contains_key(key) {
-                on_disk.insert(key.clone(), default_val.clone());
-                changed = true;
+            _ => {
+                out.insert(key, value);
             }
         }
     }
 
-    if changed {
-        let Ok(new_contents) = toml::to_string_pretty(&on_disk) else {
-            return;
-        };
-        let _ = fs::write(path, new_contents);
-    }
+    out
+}
+
+/// Serialize a config down to just its non-default settings.
+fn minimal_toml(config: &Config) -> crate::Result<String> {
+    let current: toml::Table = toml::Value::try_from(config)?
+        .as_table()
+        .cloned()
+        .unwrap_or_default();
+    let default: toml::Table = toml::Value::try_from(Config::default())?
+        .as_table()
+        .cloned()
+        .unwrap_or_default();
+
+    Ok(toml::to_string_pretty(&strip_defaults(current, &default))?)
 }
 
 /// Save configuration to disk.
 pub fn save_config(config: &Config) -> crate::Result<()> {
-    let dir = config_dir();
-    fs::create_dir_all(&dir)?;
-    let contents = toml::to_string_pretty(config)?;
-    fs::write(config_file(), contents)?;
+    let path = config_file();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, minimal_toml(config)?)?;
     Ok(())
 }
 
@@ -391,6 +402,163 @@ pub fn get_cache_dir() -> PathBuf {
     } else {
         expand_tilde(p)
     }
+}
+
+/// Outcome of [`migrate_legacy_config`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigMigration {
+    /// Nothing to do — already migrated, or no legacy file exists.
+    NotNeeded,
+    Moved {
+        from: PathBuf,
+        to: PathBuf,
+    },
+    /// Left alone, with the reason. Never destructive.
+    Skipped {
+        reason: String,
+    },
+}
+
+/// Relocate `~/.config/caco/config.toml` next to the database.
+///
+/// Also normalises the file on the way: the old code wrote every default back
+/// to disk, including absolute paths under `$HOME`, which is exactly what makes
+/// a config non-portable. Re-saving through [`save_config`] drops all of it.
+///
+/// Refuses to overwrite an existing config at the destination — two configs
+/// means the user (or another tool) put one there, and picking a winner is not
+/// this function's call.
+pub fn migrate_legacy_config() -> ConfigMigration {
+    // An explicitly chosen path is the user's business.
+    if std::env::var("CACO_CONFIG").is_ok() {
+        return ConfigMigration::NotNeeded;
+    }
+
+    let outcome = move_config_file(&legacy_config_file(), &config_file());
+    if matches!(outcome, ConfigMigration::Moved { .. }) {
+        reload_config();
+    }
+    outcome
+}
+
+/// Split out from [`migrate_legacy_config`] so the filesystem behaviour can be
+/// tested against temp dirs rather than the caller's real home — the same
+/// reason [`move_cache_dir`] exists separately.
+fn move_config_file(legacy: &Path, target: &Path) -> ConfigMigration {
+    if legacy == target || !legacy.is_file() {
+        return ConfigMigration::NotNeeded;
+    }
+    if target.exists() {
+        return ConfigMigration::Skipped {
+            reason: format!("{} already exists", target.display()),
+        };
+    }
+
+    let Ok(contents) = fs::read_to_string(legacy) else {
+        return ConfigMigration::Skipped {
+            reason: format!("could not read {}", legacy.display()),
+        };
+    };
+
+    if let Some(parent) = target.parent()
+        && let Err(e) = fs::create_dir_all(parent)
+    {
+        return ConfigMigration::Skipped {
+            reason: format!("could not create {}: {e}", parent.display()),
+        };
+    }
+
+    // Normalise when it parses; copy verbatim when it does not, so a config we
+    // cannot understand is preserved rather than dropped.
+    let written = match toml::from_str::<Config>(&contents) {
+        Ok(cfg) => minimal_toml(&cfg)
+            .and_then(|minimal| Ok(fs::write(target, minimal)?))
+            .is_ok(),
+        Err(_) => fs::write(target, &contents).is_ok(),
+    };
+
+    if !written {
+        return ConfigMigration::Skipped {
+            reason: format!("could not write {}", target.display()),
+        };
+    }
+
+    let _ = fs::remove_file(legacy);
+    // Succeeds only if we emptied it; the directory may hold unrelated files.
+    if let Some(parent) = legacy.parent() {
+        let _ = fs::remove_dir(parent);
+    }
+
+    ConfigMigration::Moved {
+        from: legacy.to_path_buf(),
+        to: target.to_path_buf(),
+    }
+}
+
+/// What [`ensure_sourceport_defaults`] picked, if anything.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DetectedPorts {
+    /// Newly chosen default sourceport.
+    pub sourceport: Option<String>,
+    /// Newly chosen zdoom-family sourceport.
+    pub zdoom_sourceport: Option<String>,
+}
+
+impl DetectedPorts {
+    pub fn is_empty(&self) -> bool {
+        self.sourceport.is_none() && self.zdoom_sourceport.is_none()
+    }
+}
+
+/// On a config with no sourceport set, adopt one that is actually installed.
+///
+/// An empty `sourceport` means launching fails until the user goes looking for
+/// the setting, which is a poor first five minutes. Only ever fills in blanks —
+/// a port the user chose is never second-guessed, including one that is not
+/// currently on `PATH` (they may be about to install it).
+pub fn ensure_sourceport_defaults() -> DetectedPorts {
+    let cfg = load_config();
+    let needs_default = cfg.sourceport.trim().is_empty();
+    let needs_zdoom = cfg.zdoom_sourceport.trim().is_empty();
+    if !needs_default && !needs_zdoom {
+        return DetectedPorts::default();
+    }
+
+    let installed = crate::sourceports::detect_sourceports();
+    if installed.is_empty() {
+        return DetectedPorts::default();
+    }
+
+    let mut found = DetectedPorts::default();
+    // FAMILIES order is the preference order, and detect_sourceports walks it,
+    // so the first hit is the best available.
+    if needs_default {
+        found.sourceport = installed.first().map(|(exe, _, _)| (*exe).to_string());
+    }
+    if needs_zdoom {
+        found.zdoom_sourceport = installed
+            .iter()
+            .find(|(_, _, family)| *family == "zdoom")
+            .map(|(exe, _, _)| (*exe).to_string());
+    }
+
+    if found.is_empty() {
+        return DetectedPorts::default();
+    }
+
+    let mut updated = (*cfg).clone();
+    if let Some(ref port) = found.sourceport {
+        updated.sourceport = port.clone();
+    }
+    if let Some(ref port) = found.zdoom_sourceport {
+        updated.zdoom_sourceport = port.clone();
+    }
+
+    if save_config(&updated).is_err() {
+        return DetectedPorts::default();
+    }
+    reload_config();
+    found
 }
 
 /// Outcome of [`migrate_legacy_wad_cache`].
@@ -1016,120 +1184,120 @@ helion = ["-loglevel", "info"]
         assert!(path.to_string_lossy().ends_with("default.ini"));
     }
 
+    // -- minimal config serialization --
+
     #[test]
-    fn test_ensure_config_keys_adds_missing_toplevel() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
-
-        // Write a minimal config with only one key
-        let contents = r#"sourceport = "dsda-doom""#;
-        fs::write(&path, contents).unwrap();
-
-        ensure_config_keys(&path, contents);
-
-        // Re-read and verify missing keys were added
-        let updated = fs::read_to_string(&path).unwrap();
-        let table: toml::Table = updated.parse().unwrap();
-
+    fn test_minimal_toml_omits_untouched_defaults() {
+        let rendered = minimal_toml(&Config::default()).unwrap();
         assert_eq!(
-            table.get("sourceport").and_then(|v| v.as_str()),
-            Some("dsda-doom")
-        );
-        // auto_stats should have been added with default value
-        assert_eq!(
-            table.get("auto_stats").and_then(|v| v.as_bool()),
-            Some(true)
-        );
-        // manage_data_dirs should have been added
-        assert_eq!(
-            table.get("manage_data_dirs").and_then(|v| v.as_bool()),
-            Some(true)
+            rendered.trim(),
+            "",
+            "a stock config has nothing worth writing down"
         );
     }
 
     #[test]
-    fn test_ensure_config_keys_backfills_existing_section() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
+    fn test_minimal_toml_keeps_only_changed_keys() {
+        let cfg = Config {
+            sourceport: "nyan-doom".to_string(),
+            zdoom_sourceport: "uzdoom".to_string(),
+            ..Default::default()
+        };
 
-        // Config with a [gui] section missing default_sort_desc
-        let contents = "[gui]\ndefault_tab = \"playing\"\n";
-        fs::write(&path, contents).unwrap();
+        let table: toml::Table = minimal_toml(&cfg).unwrap().parse().unwrap();
+        assert_eq!(
+            table.get("sourceport").and_then(|v| v.as_str()),
+            Some("nyan-doom")
+        );
+        assert_eq!(
+            table.get("zdoom_sourceport").and_then(|v| v.as_str()),
+            Some("uzdoom")
+        );
+        assert_eq!(table.len(), 2, "everything else matched its default");
+    }
 
-        ensure_config_keys(&path, contents);
+    #[test]
+    fn test_minimal_toml_drops_machine_specific_paths() {
+        // These default to absolute paths under $HOME. Writing them back is
+        // what makes a config refuse to travel with its data directory.
+        let table: toml::Table = minimal_toml(&Config::default()).unwrap().parse().unwrap();
+        for key in ["db_path", "cache_dir", "data_dir", "iwad_dir"] {
+            assert!(table.get(key).is_none(), "{key} should not be persisted");
+        }
+    }
 
-        let updated = fs::read_to_string(&path).unwrap();
-        let table: toml::Table = updated.parse().unwrap();
+    #[test]
+    fn test_minimal_toml_keeps_an_explicit_path() {
+        let cfg = Config {
+            db_path: "/mnt/games/caco.db".to_string(),
+            ..Default::default()
+        };
+
+        let table: toml::Table = minimal_toml(&cfg).unwrap().parse().unwrap();
+        assert_eq!(
+            table.get("db_path").and_then(|v| v.as_str()),
+            Some("/mnt/games/caco.db")
+        );
+    }
+
+    #[test]
+    fn test_minimal_toml_prunes_sections_to_changed_keys() {
+        let cfg = Config {
+            gui: GuiConfig {
+                thumbnail_size: 240,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let table: toml::Table = minimal_toml(&cfg).unwrap().parse().unwrap();
         let gui = table.get("gui").unwrap().as_table().unwrap();
-
-        // Existing key preserved
         assert_eq!(
-            gui.get("default_tab").and_then(|v| v.as_str()),
-            Some("playing")
+            gui.get("thumbnail_size").and_then(|v| v.as_integer()),
+            Some(240)
         );
-        // Missing key added
-        assert_eq!(
-            gui.get("default_sort_desc").and_then(|v| v.as_bool()),
-            Some(false)
+        assert_eq!(gui.len(), 1, "untouched gui keys stay out");
+        assert!(
+            table.get("list").is_none(),
+            "an untouched section is dropped"
         );
-        assert_eq!(gui.get("default_sort").and_then(|v| v.as_str()), Some("id"));
     }
 
     #[test]
-    fn test_ensure_config_keys_does_not_create_missing_sections() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
+    fn test_minimal_toml_keeps_populated_maps() {
+        let mut port_args = HashMap::new();
+        port_args.insert("nyan-doom".to_string(), vec!["-geometry".to_string()]);
+        let cfg = Config {
+            port_args,
+            ..Default::default()
+        };
 
-        // Config with no [gui] section
-        let contents = r#"sourceport = "dsda-doom""#;
-        fs::write(&path, contents).unwrap();
-
-        ensure_config_keys(&path, contents);
-
-        let updated = fs::read_to_string(&path).unwrap();
-        let table: toml::Table = updated.parse().unwrap();
-
-        // [gui] section should NOT have been created
-        assert!(table.get("gui").is_none());
+        let table: toml::Table = minimal_toml(&cfg).unwrap().parse().unwrap();
+        assert!(table.get("port_args").is_some());
     }
 
     #[test]
-    fn test_ensure_config_keys_noop_when_complete() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
+    fn test_minimal_toml_round_trips_through_parse() {
+        let cfg = Config {
+            sourceport: "woof".to_string(),
+            gui: GuiConfig {
+                thumbnail_size: 240,
+                ..Default::default()
+            },
+            list: ListConfig {
+                default_status: vec!["unplayed".to_string()],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
 
-        // Write a full default config
-        let cfg = Config::default();
-        let contents = toml::to_string_pretty(&cfg).unwrap();
-        fs::write(&path, &contents).unwrap();
-
-        ensure_config_keys(&path, &contents);
-
-        // File should be unchanged (no extra write)
-        let updated = fs::read_to_string(&path).unwrap();
-        assert_eq!(updated, contents);
-    }
-
-    #[test]
-    fn test_ensure_config_keys_preserves_user_values() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
-
-        let contents = "sourceport = \"dsda-doom\"\ndownload_mirror = 3\n";
-        fs::write(&path, contents).unwrap();
-
-        ensure_config_keys(&path, contents);
-
-        let updated = fs::read_to_string(&path).unwrap();
-        let table: toml::Table = updated.parse().unwrap();
-        assert_eq!(
-            table.get("sourceport").and_then(|v| v.as_str()),
-            Some("dsda-doom")
-        );
-        assert_eq!(
-            table.get("download_mirror").and_then(|v| v.as_integer()),
-            Some(3)
-        );
+        let parsed: Config = toml::from_str(&minimal_toml(&cfg).unwrap()).unwrap();
+        assert_eq!(parsed.sourceport, "woof");
+        assert_eq!(parsed.gui.thumbnail_size, 240);
+        assert_eq!(parsed.list.default_status, vec!["unplayed".to_string()]);
+        // Omitted keys come back as their defaults, not as blanks.
+        assert_eq!(parsed.link_mode, "move");
+        assert_eq!(parsed.db_path, Config::default().db_path);
     }
 
     #[test]
@@ -1235,6 +1403,106 @@ window_width = 1600
         let parsed: Config = toml::from_str(&toml_str).unwrap();
         assert_eq!(parsed.gui.default_tab, "playing");
         assert_eq!(parsed.gui.default_sort, "playtime");
+    }
+
+    // -- config relocation --
+
+    #[test]
+    fn test_move_config_normalises_on_the_way() {
+        let root = tempfile::tempdir().unwrap();
+        let legacy = root.path().join("config/caco/config.toml");
+        let target = root.path().join("share/caco/config.toml");
+        fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+
+        // A config as the old backfill wrote them: one real choice buried in
+        // defaults and machine-specific absolute paths.
+        let cfg = Config {
+            sourceport: "nyan-doom".to_string(),
+            ..Default::default()
+        };
+        fs::write(&legacy, toml::to_string_pretty(&cfg).unwrap()).unwrap();
+
+        let outcome = move_config_file(&legacy, &target);
+        assert_eq!(
+            outcome,
+            ConfigMigration::Moved {
+                from: legacy.clone(),
+                to: target.clone(),
+            }
+        );
+
+        assert!(!legacy.exists());
+        assert!(
+            !legacy.parent().unwrap().exists(),
+            "the emptied directory should go too"
+        );
+
+        let table: toml::Table = fs::read_to_string(&target).unwrap().parse().unwrap();
+        assert_eq!(
+            table.get("sourceport").and_then(|v| v.as_str()),
+            Some("nyan-doom")
+        );
+        assert_eq!(table.len(), 1, "the defaults should not have survived");
+    }
+
+    #[test]
+    fn test_move_config_refuses_to_clobber() {
+        let root = tempfile::tempdir().unwrap();
+        let legacy = root.path().join("config/caco/config.toml");
+        let target = root.path().join("share/caco/config.toml");
+        fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        fs::write(&legacy, "sourceport = \"old\"\n").unwrap();
+        fs::write(&target, "sourceport = \"new\"\n").unwrap();
+
+        assert!(matches!(
+            move_config_file(&legacy, &target),
+            ConfigMigration::Skipped { .. }
+        ));
+        assert!(legacy.exists(), "the source must survive a refusal");
+        assert_eq!(
+            fs::read_to_string(&target).unwrap(),
+            "sourceport = \"new\"\n"
+        );
+    }
+
+    #[test]
+    fn test_move_config_preserves_a_file_it_cannot_parse() {
+        let root = tempfile::tempdir().unwrap();
+        let legacy = root.path().join("config/caco/config.toml");
+        let target = root.path().join("share/caco/config.toml");
+        fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        let broken = "sourceport = \"unclosed\nthis is not toml [[[";
+        fs::write(&legacy, broken).unwrap();
+
+        assert!(matches!(
+            move_config_file(&legacy, &target),
+            ConfigMigration::Moved { .. }
+        ));
+        assert_eq!(
+            fs::read_to_string(&target).unwrap(),
+            broken,
+            "an unparseable config is relocated verbatim, never discarded"
+        );
+    }
+
+    #[test]
+    fn test_move_config_not_needed_without_a_legacy_file() {
+        let root = tempfile::tempdir().unwrap();
+        let legacy = root.path().join("config/caco/config.toml");
+        let target = root.path().join("share/caco/config.toml");
+        assert_eq!(
+            move_config_file(&legacy, &target),
+            ConfigMigration::NotNeeded
+        );
+    }
+
+    #[test]
+    fn test_config_lives_in_the_data_dir() {
+        assert!(
+            config_file().starts_with(default_data_dir()),
+            "config must travel with the data directory"
+        );
     }
 
     #[test]

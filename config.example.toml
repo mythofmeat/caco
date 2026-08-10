@@ -1,5 +1,7 @@
 # Caco configuration
-# Copy to ~/.config/caco/config.toml
+# Reference for every available option. Caco's own config lives at
+# ~/.local/share/caco/config.toml and only ever lists settings you changed —
+# anything omitted falls back to the default shown here.
 
 # Default sourceport (full path is also acceptable)
 # sourceport = "dsda-doom"

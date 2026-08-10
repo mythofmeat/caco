@@ -109,7 +109,7 @@ that the data dir stays small enough to copy between machines.
 
 Portable (`config::default_data_dir`, overridable via `CACO_HOME`):
 - Database: `~/.local/share/caco/library.db`
-- Config: `~/.config/caco/config.toml`
+- Config: `~/.local/share/caco/config.toml` (moved out of `~/.config` — it is written by the settings dialog, the cache migration and first-run detection far more often than by hand, and keeping it here makes the portable set one directory and `CACO_HOME` a complete isolation switch; `migrate_legacy_config` relocates it on startup, normalising it on the way)
 - Managed IWADs: `~/.local/share/caco/iwads/{variant}/{family}.wad`
 - Managed id24 WADs: `~/.local/share/caco/id24/{name}.wad`
 - WAD data: `~/.local/share/caco/data/` (per-WAD saves, stats, configs)

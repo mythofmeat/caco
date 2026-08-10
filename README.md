@@ -132,9 +132,19 @@ as a cross-family fallback.
 
 ## Configuration
 
-Config file: `~/.config/caco/config.toml`. The Settings dialog edits the common
-options; anything it does not expose survives a save untouched, so hand-editing
-the file is safe.
+Config file: `~/.local/share/caco/config.toml` — beside the database, not in
+`~/.config`, so the portable set is one directory. The Settings dialog edits the
+common options; anything it does not expose survives a save untouched, so
+hand-editing the file is safe.
+
+Only settings you actually changed are written. A stock install has an empty (or
+absent) config, and defaults resolve at runtime — which is what lets the data
+directory move between machines without dragging one machine's absolute paths
+along. Upgrading from a version that kept the config in `~/.config/caco` moves
+it for you on first launch and drops the redundant keys on the way.
+
+On a first launch with no sourceport configured, caco adopts the best one it
+finds on `PATH` and tells you which.
 
 ### Example Config
 
@@ -168,14 +178,14 @@ See `config.example.toml` for all available options.
 ## Data Storage
 
 Caco splits its files by whether they can be regenerated. Everything under
-`~/.config/caco` and `~/.local/share/caco` is worth carrying between machines;
-everything under `~/.cache/caco` is disposable and rebuilds itself on demand.
+`~/.local/share/caco` is worth carrying between machines; everything under
+`~/.cache/caco` is disposable and rebuilds itself on demand.
 
 **Keep these** — copy them to move your library to another machine:
 
 | Location | Contents |
 |----------|----------|
-| `~/.config/caco/config.toml` | Configuration |
+| `~/.local/share/caco/config.toml` | Configuration |
 | `~/.local/share/caco/library.db` | Library database |
 | `~/.local/share/caco/data/` | Per-WAD saves, stats, configs |
 | `~/.local/share/caco/iwads/` | Managed IWADs |

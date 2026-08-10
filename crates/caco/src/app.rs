@@ -75,6 +75,14 @@ impl CacoApp {
         }
     }
 
+    /// Show a message as soon as the first frame renders.
+    ///
+    /// Startup work happens before the app exists, so anything it wants to
+    /// tell the user has to be handed in rather than pushed.
+    pub fn notify(&mut self, text: String) {
+        self.state.notification = Some(Notification::info(text));
+    }
+
     /// Dispatch an import action (from import view).
     fn dispatch_import_action(&mut self, action: import::ImportAction) {
         let sender = self.bg.sender();
