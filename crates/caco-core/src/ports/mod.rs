@@ -23,11 +23,13 @@ pub mod build;
 pub mod doctor;
 pub mod manifest;
 pub mod recipe;
+pub mod update;
 
 pub use build::{BuildOptions, BuildProgress, BuildStep, PortPaths};
 pub use doctor::{DoctorReport, PackageCheck, doctor};
 pub use manifest::{InstalledPort, PortManifest, find_installed, list_installed, remove_installed};
 pub use recipe::{PortRecipe, builtin_recipes, find_recipe, load_recipes};
+pub use update::{UpdateStatus, check_updates};
 
 /// A recipe paired with whatever is installed for it.
 #[derive(Debug, Clone)]
@@ -38,11 +40,30 @@ pub struct PortStatus {
     /// True when something is installed but at a different ref than the
     /// recipe now asks for — the case a rebuild fixes.
     pub ref_changed: bool,
+    /// Commit the ref pointed at as of the last update check, if one has
+    /// run. Read from the cache, so building this list stays offline.
+    pub remote_commit: Option<String>,
+}
+
+impl PortStatus {
+    /// Whether the remote has moved past the installed build.
+    ///
+    /// Distinct from [`Self::ref_changed`]: that is the user repointing the
+    /// recipe, this is upstream committing.
+    pub fn update_available(&self) -> bool {
+        let (Some(installed), Some(remote)) = (&self.installed, &self.remote_commit) else {
+            return false;
+        };
+        installed.manifest.commit != "unknown" && &installed.manifest.commit != remote
+    }
 }
 
 /// Every known recipe with its install state, for the ports UI.
+/// Never reaches the network — remote state comes from whatever the last
+/// update check cached, so opening the dialog is instant.
 pub fn status(paths: &PortPaths) -> crate::Result<Vec<PortStatus>> {
     let installed = list_installed(&paths.prefix_root);
+    let cache = update::load_cache(&paths.prefix_root);
     let mut out = Vec::new();
     for recipe in load_recipes(&paths.recipe_dir)? {
         let current = installed
@@ -52,10 +73,15 @@ pub fn status(paths: &PortPaths) -> crate::Result<Vec<PortStatus>> {
         let ref_changed = current
             .as_ref()
             .is_some_and(|p| p.manifest.git_ref != recipe.git_ref);
+        let remote_commit = cache
+            .ports
+            .get(&recipe.name)
+            .map(|c| c.remote_commit.clone());
         out.push(PortStatus {
             recipe,
             installed: current,
             ref_changed,
+            remote_commit,
         });
     }
     Ok(out)

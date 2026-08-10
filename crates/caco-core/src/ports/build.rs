@@ -338,6 +338,10 @@ pub fn install(
         built_at: chrono::Local::now().to_rfc3339(),
     };
     write_manifest(&prefix, &manifest)?;
+    // The commit just recorded is the current answer, so a cached "behind"
+    // verdict from before the build would keep the badge lit until the
+    // check interval expired.
+    super::update::invalidate(&paths.prefix_root, &recipe.name);
 
     let installed = InstalledPort { manifest, prefix };
     if !installed.is_usable() {

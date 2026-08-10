@@ -31,7 +31,9 @@ brew = [
 
 [uzdoom]
 repo = "https://github.com/UZDoom/uzdoom"
-ref = "master"
+# Not "master" — uzdoom's default branch is trunk, and the per-version
+# branches (4.14.3, 2.6, ...) are what tags would be elsewhere.
+ref = "trunk"
 binary = "uzdoom"
 
 [uzdoom.build]

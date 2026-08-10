@@ -161,6 +161,7 @@ auto_detect_complevel = true
 auto_doomwiki_enrich = true
 cache_max_size_gb = 20.0
 cache_auto_clean = true
+port_update_check_days = 1              # 0 = never check built ports for updates
 
 # Extra args for specific ports only (appended after sourceport_args)
 [port_args]
@@ -298,6 +299,18 @@ Do not drop it when overriding the recipe.
 A recipe's name must match a sourceport caco knows (see the family table
 above), or the build works but complevel args, save directories and config
 profiles quietly stop applying.
+
+#### Update checks
+
+Since a recipe usually tracks a branch, "is there a new version" means "does
+the remote ref still point at the commit we built". At startup caco asks each
+built port's remote exactly that, with one `git ls-remote` per port — no
+objects are fetched — and shows a notification if any has moved. The Ports
+dialog marks them `update available`; rebuilding is always your call.
+
+The answer is cached and checked at most once a day, so most launches do no
+network at all. Set `port_update_check_days = 0` (or the Settings field) to
+turn it off entirely.
 
 Per-map stat tracking (which feeds completion detection and progress bars) works with:
 

@@ -67,12 +67,42 @@ impl CacoApp {
         let mut bg = BackgroundChannel::new();
         bg.set_ctx(ctx.clone());
 
-        Self {
+        let app = Self {
             conn,
             state: AppState::new(db_path),
             bg,
             thumbnails: ThumbnailManager::new(),
+        };
+        app.spawn_port_update_check();
+        app
+    }
+
+    /// Ask each built sourceport's remote whether its ref has moved.
+    ///
+    /// Fire-and-forget on a worker thread: one `git ls-remote` per installed
+    /// port, throttled to `port_update_check_days` and answered from cache in
+    /// between, so most launches do no network at all. A user with nothing
+    /// built never sees a thread do any work, and an offline machine gets
+    /// silence rather than a stall — the window is already up either way.
+    fn spawn_port_update_check(&self) {
+        use caco_core::ports::{self, PortPaths};
+
+        let interval = caco_core::config::load_config().port_update_check_days;
+        if interval <= 0 {
+            return;
         }
+        let sender = self.bg.sender();
+        std::thread::spawn(move || {
+            let paths = PortPaths::from_config();
+            let behind: Vec<String> = ports::check_updates(&paths, interval, chrono::Local::now())
+                .into_iter()
+                .filter(ports::UpdateStatus::is_behind)
+                .map(|s| s.name)
+                .collect();
+            if !behind.is_empty() {
+                sender.send(AppMessage::PortUpdatesAvailable(behind));
+            }
+        });
     }
 
     /// Show a message as soon as the first frame renders.
@@ -732,6 +762,19 @@ impl eframe::App for CacoApp {
                             });
                         }
                     }
+                }
+                AppMessage::PortUpdatesAvailable(names) => {
+                    // Informational only — never interrupts, and never starts
+                    // a build the user did not ask for.
+                    let text = match names.as_slice() {
+                        [one] => format!("{one} has an update. Rebuild it from Ports."),
+                        many => format!(
+                            "{} sourceports have updates ({}). Rebuild from Ports.",
+                            many.len(),
+                            many.join(", ")
+                        ),
+                    };
+                    self.state.notification = Some(Notification::info(text));
                 }
                 AppMessage::SearchComplete(source, results) => {
                     self.state

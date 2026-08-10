@@ -216,10 +216,15 @@ impl PortsDialogState {
                 .ports
                 .iter()
                 .map(|p| {
-                    let (label, color) = match (&p.installed, p.ref_changed) {
-                        (Some(_), true) => ("update available", theme::COLOR_WARNING),
-                        (Some(_), false) => ("installed", theme::COLOR_SUCCESS),
-                        (None, _) => ("not built", theme::TEXT_MUTED),
+                    // Two distinct reasons a rebuild would change something:
+                    // the user repointed the recipe, or upstream committed.
+                    let (label, color) = match &p.installed {
+                        None => ("not built", theme::TEXT_MUTED),
+                        Some(_) if p.ref_changed => ("ref changed", theme::COLOR_WARNING),
+                        Some(_) if p.update_available() => {
+                            ("update available", theme::COLOR_WARNING)
+                        }
+                        Some(_) => ("installed", theme::COLOR_SUCCESS),
                     };
                     (p.recipe.name.clone(), label.to_string(), color)
                 })
@@ -296,6 +301,18 @@ impl PortsDialogState {
                             "Recipe now asks for '{}' — rebuild to switch.",
                             port.recipe.git_ref
                         ),
+                    );
+                } else if port.update_available() {
+                    let remote = port
+                        .remote_commit
+                        .as_deref()
+                        .unwrap_or_default()
+                        .chars()
+                        .take(9)
+                        .collect::<String>();
+                    ui.colored_label(
+                        theme::COLOR_WARNING,
+                        format!("Upstream is at {remote} — rebuild to update."),
                     );
                 }
             }

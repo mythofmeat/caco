@@ -79,6 +79,57 @@ fn nyan_doom_builds_and_installs() {
     );
 }
 
+/// uzdoom is the expensive case and the one with a silently-fatal flag.
+///
+/// Its stock install puts the pk3s in `share/games/uzdoom` while progdir — with
+/// `SYSTEMINSTALL` off, the default — looks beside the executable, so the build
+/// succeeds and only aborts at launch with `Cannot find uzdoom.pk3`.
+/// `-DINSTALL_PK3_PATH=bin` is what fixes that while keeping the prefix
+/// relocatable, and this test is what stops it being "cleaned up" later.
+///
+/// Deliberately does not execute the binary: uzdoom has no batch mode that
+/// exits, so a launch would open a window. Where the pk3s land *is* the
+/// property, since progdir is the executable's own directory by definition.
+#[test]
+#[ignore = "clones and compiles a large C++ sourceport (~4 min)"]
+fn uzdoom_installs_its_pk3s_beside_the_binary() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = sandbox(dir.path());
+    let recipe = recipe::find_recipe(&paths.recipe_dir, "uzdoom").unwrap();
+
+    let installed = build::install(
+        &recipe,
+        &paths,
+        &BuildOptions::default(),
+        &mut |p| {
+            if let BuildProgress::Step(s) = p {
+                eprintln!("== {}", s.label());
+            }
+        },
+        &|| false,
+    )
+    .expect("build failed");
+
+    assert!(installed.is_usable());
+    let bin = installed.prefix.join("bin");
+    assert!(
+        bin.join("uzdoom.pk3").is_file(),
+        "uzdoom.pk3 is not beside the binary — has -DINSTALL_PK3_PATH=bin been dropped? \
+         bin/ holds: {:?}",
+        std::fs::read_dir(&bin)
+            .map(|d| d.flatten().map(|e| e.file_name()).collect::<Vec<_>>())
+            .unwrap_or_default()
+    );
+
+    // The other four support pk3s ride along with the same flag.
+    let pk3s = std::fs::read_dir(&bin)
+        .unwrap()
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "pk3"))
+        .count();
+    assert!(pk3s >= 5, "expected 5 pk3s beside the binary, found {pk3s}");
+}
+
 #[test]
 #[ignore = "clones a sourceport"]
 fn cancel_stops_a_build_in_flight() {
@@ -126,6 +177,23 @@ fn doctor_report_for_this_machine() {
         eprintln!("   package check:    {:?}", report.package_check);
         eprintln!("   missing packages: {:?}", report.missing_packages);
         eprintln!("   hint:             {:?}", report.install_hint());
+    }
+}
+
+/// Resolve every built-in recipe's ref against its real remote.
+///
+/// Catches the failure that is otherwise invisible until someone tries to
+/// build: a recipe pinned to a branch the project does not have. uzdoom's
+/// default branch is `trunk`, not `master`, and only a live lookup says so.
+#[test]
+#[ignore = "hits the network"]
+fn every_builtin_ref_exists_on_its_remote() {
+    for recipe in recipe::builtin_recipes() {
+        let commit = caco_core::ports::update::remote_commit(&recipe.repo, &recipe.git_ref)
+            .unwrap_or_else(|e| panic!("{} @ {}: {e}", recipe.name, recipe.git_ref));
+        eprintln!("{} @ {} -> {commit}", recipe.name, recipe.git_ref);
+        assert_eq!(commit.len(), 40, "not a sha: {commit}");
+        assert!(commit.chars().all(|c| c.is_ascii_hexdigit()));
     }
 }
 

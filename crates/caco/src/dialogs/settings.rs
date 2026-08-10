@@ -40,6 +40,7 @@ pub struct SettingsDialogState {
     cache_auto_clean: bool,
     cache_max_size_gb: f64,
     cache_max_age_days: i64,
+    port_update_check_days: i64,
 
     // Paths
     cache_dir: String,
@@ -100,6 +101,7 @@ impl SettingsDialogState {
             cache_auto_clean: cfg.cache_auto_clean,
             cache_max_size_gb: cfg.cache_max_size_gb,
             cache_max_age_days: cfg.cache_max_age_days,
+            port_update_check_days: cfg.port_update_check_days,
             cache_dir: cfg.cache_dir.clone(),
             data_dir: cfg.data_dir.clone(),
             iwad_dir: cfg.iwad_dir.clone(),
@@ -141,6 +143,7 @@ impl SettingsDialogState {
         cfg.cache_auto_clean = self.cache_auto_clean;
         cfg.cache_max_size_gb = self.cache_max_size_gb.max(0.0);
         cfg.cache_max_age_days = self.cache_max_age_days.max(0);
+        cfg.port_update_check_days = self.port_update_check_days.max(0);
         cfg.cache_dir = self.cache_dir.trim().to_string();
         cfg.data_dir = self.data_dir.trim().to_string();
         cfg.iwad_dir = self.iwad_dir.trim().to_string();
@@ -477,6 +480,17 @@ impl SettingsDialogState {
             &mut self.auto_doomwiki_enrich,
             "Auto-enrich imports with Doom Wiki metadata",
         );
+
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            form_label(ui, "Check built sourceports for updates every (days)");
+            ui.add(
+                egui::DragValue::new(&mut self.port_update_check_days)
+                    .speed(1)
+                    .range(0..=i64::MAX),
+            )
+            .on_hover_text("One `git ls-remote` per built port at startup. 0 = never check.");
+        });
     }
 
     fn section_cache(&mut self, ui: &mut egui::Ui) {

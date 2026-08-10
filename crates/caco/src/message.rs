@@ -112,6 +112,10 @@ pub enum AppMessage {
     /// The build finished: `Ok` carries the message to show, `Err` the
     /// failure with the tail of the output that produced it.
     PortBuildComplete(Result<String, String>),
+    /// Names of built sourceports whose remote has moved past the installed
+    /// commit. Only sent when the list is non-empty — a startup check that
+    /// finds nothing says nothing.
+    PortUpdatesAvailable(Vec<String>),
     SearchComplete(SearchSource, Vec<SearchResultEntry>),
     ImportComplete(Result<ImportResult, String>),
     ThumbnailReady {

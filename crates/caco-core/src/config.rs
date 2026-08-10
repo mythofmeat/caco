@@ -178,6 +178,9 @@ pub struct Config {
     pub cache_max_size_gb: f64,
     pub cache_max_age_days: i64,
     pub cache_auto_clean: bool,
+    /// How often to ask each built sourceport's remote whether its ref has
+    /// moved. `0` disables the check, so caco touches no network at startup.
+    pub port_update_check_days: i64,
     pub data_dir: String,
     pub iwad_dir: String,
     pub sourceport_dir: String,
@@ -217,6 +220,7 @@ impl Default for Config {
             cache_max_size_gb: 0.0,
             cache_max_age_days: 0,
             cache_auto_clean: false,
+            port_update_check_days: 1,
             data_dir: default_data_subdir().to_string_lossy().into_owned(),
             iwad_dir: iwad_dir().to_string_lossy().into_owned(),
             sourceport_dir: String::new(),
