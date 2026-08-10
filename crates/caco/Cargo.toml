@@ -1,10 +1,10 @@
 [package]
-name = "caco-gui"
+name = "caco"
 version.workspace = true
 edition.workspace = true
 
 [[bin]]
-name = "caco-gui"
+name = "caco"
 path = "src/main.rs"
 
 [dependencies]

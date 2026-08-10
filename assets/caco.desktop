@@ -2,7 +2,7 @@
 Type=Application
 Name=Caco
 Comment=Doom WAD library manager
-Exec=caco-gui
+Exec=caco
 Icon=caco
 Categories=Game;
 Keywords=doom;caco;wad;

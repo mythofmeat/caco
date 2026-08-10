@@ -1,6 +1,6 @@
 # caco
 
-A personal Doom WAD library manager inspired by [beets](https://beets.io). Import WADs from multiple sources, track what you've played, and launch them with your preferred sourceport — all from the command line, a terminal UI, or a desktop GUI.
+A personal Doom WAD library manager inspired by [beets](https://beets.io). Import WADs from multiple sources, track what you've played, and launch them with your preferred sourceport — from a desktop GUI with a dark, Doom-inspired theme.
 
 ## Features
 
@@ -11,17 +11,16 @@ A personal Doom WAD library manager inspired by [beets](https://beets.io). Impor
 - **Companion files** — manage DEH patches, music WADs, and other companion files with automatic deduplication.
 - **Per-WAD isolation** — saves, stats, and configs are separated per WAD so nothing gets mixed up.
 - **On-demand downloads** — idgames WADs are cached when you play, with configurable auto-cleanup.
-- **Garbage collection** — reclaim disk space from completed / abandoned WADs with smart cleanup.
-- **Two interfaces** — CLI and GUI (egui with thumbnails and grid/list views).
-- **Smart collections** — save queries by name and re-run them (`caco collection add`).
+- **Cacowards browser** — a magazine-style year-by-year view of Doomworld's awards, doubling as an import queue.
+- **Garbage collection** — reclaim disk space from completed / abandoned WADs, reviewing every file before it goes.
+- **Smart collections** — save queries by name and pin them to the sidebar.
 
 ## Installation
 
 ### Arch Linux (pacman-managed, recommended)
 
-Caco ships as two split packages — `caco` (CLI) and `caco-gui` — built
-locally and published to a pacman repo on your own machine. Nothing is built in
-CI and no package leaves the machine.
+Caco is built locally and published to a pacman repo on your own machine.
+Nothing is built in CI and no package leaves the machine.
 
 ```bash
 git clone git@github.com:mythofmeat/caco.git && cd caco
@@ -36,218 +35,106 @@ git clone git@github.com:mythofmeat/caco.git && cd caco
 `--init` creates `/var/lib/pacman-local` and prints a `pacman.conf` stanza to
 add — do that after the first release, since an empty repo has no database for
 pacman to fetch. Every subsequent release is just `./contrib/arch/release.sh`
-followed by the `pacman -Syu` it runs for you. Install individual packages with
-`pacman -S caco caco-gui`.
+followed by the `pacman -Syu` it runs for you.
 
-To build the packages without cutting a release:
+To build the package without cutting a release:
 
 ```bash
 cd contrib/arch && makepkg -f -d --nocheck
 ```
 
-### From source (Rust)
+### From source
 
 ```bash
-git clone https://github.com/evansheen/caco && cd caco
-
-# Build all binaries
-cargo build --release
-
-# Install CLI
-cargo install --path crates/caco-cli
-
-# Install GUI
-cargo install --path crates/caco-gui
+git clone https://github.com/mythofmeat/caco && cd caco
+cargo install --path crates/caco
 ```
-
-### From source (Python — legacy)
-
-Requires Python 3.10+.
-
-```bash
-pip install -e .
-pip install -e '.[gui]'  # Optional: Qt6 GUI
-```
-
 
 ## Quick Start
 
-```bash
-# 1. Configure your sourceport
-caco config --edit
+Launch `caco` (or pick it from your application menu), then:
 
-# 2. Import some WADs
-caco import "scythe 2"                 # Search idgames
-caco import ~/Downloads/map.wad        # Local file
-caco import https://doomwiki.org/wiki/Eviternity
+1. **Settings** in the sidebar — set your sourceport and IWAD directories.
+2. **IWADs** in the sidebar — register your IWADs. Drop in a directory and caco
+   identifies each file by MD5.
+3. **Import** in the sidebar — search idgames or the Doom Wiki, paste a
+   Doomworld thread URL, or point at a local file.
+4. Select a WAD and press **Enter** to play. On first launch caco detects the
+   required IWAD and complevel from the WAD file itself.
 
-# 3. Browse and play
-caco ls
-caco play scythe
+Play time, sessions, and per-map stats are recorded automatically once you quit
+the sourceport.
 
-# 4. Track progress
-caco modify scythe status=completed rating=5
-caco modify scythe beaten+1
-```
-
-## Interfaces
-
-### CLI
-
-The primary interface. Every command supports `--help` for detailed usage.
-
-```bash
-caco ls                            # List library
-caco ls status:in-progress playtime-  # Filter + sort
-caco info "Eviternity"             # WAD details
-caco modify id:1 status=p tag=megawad rating=4
-caco play 1 -- -warp 15 -skill 4   # Play with extra args
-caco sessions "Eviternity"         # Session history
-caco stats                         # Library statistics
-caco enrich --cacowards --year 2023  # Scrape that year's Cacowards from Doom Wiki
-caco stats --cacowards             # Year × category completion grid
-caco stats --cacowards --year 2023 -o json  # Per-entry detail as JSON
-caco ls cacoward:2023 cacoward:winner status:unplayed  # Browse unplayed 2023 winners
-caco import --cacoward c.2023.winner.1   # Import the Nth winner of YEAR
-```
-
-### GUI
-
-Desktop application with a dark Doom-inspired theme. The left sidebar's
-`Cacowards` entry opens a magazine-style year-by-year view that doubles as
-a "what should I play / import next?" dashboard — entries you don't own
-yet are flagged `absent` with an inline Import button.
-
-```bash
-caco-gui
-```
+## The Interface
 
 - Grid and list views with sortable columns and a live filter bar
 - WAD thumbnails scraped from the Doom Wiki (or extracted from TITLEPIC) with on-disk caching
 - Right-click context menu (play, edit, delete, sessions, map stats, saves & demos, new playthrough)
 - Right-hand detail sidebar with metadata, play stats, and quick actions
-- Dialogs for editing WADs, confirming deletes, browsing sessions, viewing library stats, managing the cache, editing sourceport config profiles, and registering IWADs / id24 WADs
-- Saves & Demos dialog (`F`, or the context menu) for backing up and restoring a WAD's data directory, clearing saves, and playing back or deleting recorded demos
-- Companion file registry (sidebar > Files) listing every managed file with the WADs that use it, and cleanup for the ones nothing links any more
-- Enrich dialog (sidebar > Enrich) to re-run complevel / IWAD / port detection across the library with a progress bar, a dry-run mode and a cancel button, plus per-year Cacowards refresh
-- Clean Up dialog (sidebar > Clean) showing every reclaimable file as a checkbox — finished WADs' data, caches and companions, plus orphaned directories, backups and companion files — with keep-toggles and a confirmation before anything is deleted
-- Settings dialog (sidebar > Settings) for editing the caco config — sourceports, global and per-port launch args, behavior toggles, cache limits, and paths — persisted to `config.toml` on save
+- Cacowards view — a year-by-year browse of Doomworld's awards where entries you
+  don't own yet are flagged `absent` with an inline Import button
 - Keyboard shortcuts: `j/k`, `g`/`G`, `Home`/`End`, `Enter`, `E`, `D`, `S`, `M`, `F`, `P`, `Esc`
 
-## Importing
+### Dialogs
 
-`caco import` auto-detects the source type:
+| Sidebar | What it does |
+|---------|--------------|
+| Stats | Library statistics — playtime, completions, activity over time |
+| Cache | Cached downloads, with per-entry and bulk removal |
+| Files | Companion file registry: every managed file, the WADs using it, and orphan cleanup |
+| Profiles | Per-sourceport config profiles, edited in place |
+| IWADs | Registered IWADs and id24 resources |
+| Enrich | Re-run complevel / IWAD / port detection across the library, plus per-year Cacowards refresh |
+| Clean | Reclaim disk space, reviewing every file first |
+| Trash | Restore or permanently delete removed WADs |
+| Settings | Sourceports, launch args, behavior toggles, cache limits, paths |
 
-```bash
-caco import "sunlust"              # idgames search (opens fzf picker)
-caco import 19509                  # idgames file ID
-caco import https://doomwiki.org/wiki/Eviternity
-caco import https://www.doomworld.com/forum/topic/134292-myhousewad/
-caco import ~/Downloads/mymap.wad  # Local file
-caco import ~/iwads/doom2.wad      # Auto-detected as IWAD
-caco import saved_search.json      # Offline JSON fallback
-```
-
-Non-Doomwiki imports are auto-enriched with Doom Wiki metadata (author, year, description, IWAD). Duplicate detection warns before re-importing.
+Per-WAD dialogs come from the context menu or a shortcut: **Edit** (`E`),
+**Sessions** (`S`), **Map Stats** (`M`), **Saves & Demos** (`F`).
 
 ## Queries
 
-Caco uses beets-style query syntax across all commands (`ls`, `play`, `modify`, `trash`, etc.):
+The filter bar uses beets-style query syntax:
 
-```bash
-caco ls scythe                     # Free text search
-caco ls title:scythe author:alm    # Field queries (AND)
-caco ls "status:in-progress , status:unplayed"  # OR queries
-caco ls ^status:completed          # Negation
-caco ls tag:caco*                  # Glob patterns
-caco ls status:p playtime-         # Query + sort (shortcut + sort)
+```
+scythe                          Free text search
+title:scythe author:alm         Field queries (AND)
+status:in-progress , status:unplayed    OR queries
+^status:completed               Negation
+tag:caco*                       Glob patterns
+cacoward:2023                   Cacoward entries for a year
 ```
 
-**Fields:** `id`, `title`, `author`, `year`, `filename`, `tag`, `status`, `source`, `iwad`, `complevel`, `config`
+**Fields:** `id`, `title`, `author`, `year`, `filename`, `tag`, `status`, `source`, `iwad`, `complevel`, `config`, `cacoward`
 
 **Status values:** `unplayed`, `in-progress`, `completed`, `abandoned`
 
 **Status shortcuts:** `u` (unplayed); `p`, `ip` (in-progress); `c`, `f`, `done` (completed); `a`, `d` (abandoned)
 
-## Managing Your Library
+Save a query as a collection to pin it to the sidebar.
 
-```bash
-# Modify metadata
-caco modify id:1 status=in-progress rating=4 tag=megawad
-caco modify id:1 title="New Title" author="Author" year=2024
-caco modify id:1 !rating              # Clear a field
+## Importing
 
-# Completion tracking
-caco modify id:1 beaten+1             # Mark beaten
-caco modify id:1 beaten+1 --notes "UV max" --date 2024-06-15
-caco info id:1 --completions          # List completion records with IDs
-caco modify id:1 completion.42.notes="pacifist run"
-caco modify id:1 completion.42.date=2026-04-15T15:42:00+00:00
-caco modify id:1 completion.42.stats=/path/to/levelstat.txt
-caco modify id:1 completion.42.stats= # Clear the attached stats
+The Import view auto-detects what you give it — an idgames search term or file
+ID, a Doom Wiki or Doomworld URL, or a path to a local file or directory. WAD
+files that turn out to be IWADs are registered as IWADs rather than library
+entries.
 
-# Per-WAD launch config
-caco modify id:1 iwad=tnt sourceport=dsda-doom complevel=boom
-caco modify id:1 config=controller
-caco modify id:1 args="-warp 1"
-
-# Companion files (DEH patches, music WADs, etc.)
-caco companion add id:1 /path/to/music.wad
-caco companion ls id:1
-
-# Smart collections (saved queries)
-caco collection add megawads tag:megawad status:u --sort year
-caco collection ls
-caco collection run megawads
-caco collection rm megawads
-
-# Trash (soft delete with restore)
-caco trash id:1
-caco trash --restore id:1
-```
-
-## Playing
-
-```bash
-caco play scythe                   # Interactive picker
-caco play 1 -p dsda-doom           # Specific sourceport
-caco play 1 -c boom                # Override complevel
-caco play 1 -C controller          # Config profile
-caco play 1 --record               # Record a demo
-caco play --iwad doom2             # Play IWAD directly
-caco play 1 -- -warp 15 -skill 4   # Extra sourceport args
-```
-
-On first play, caco auto-detects the required IWAD and complevel from the WAD file. Per-map stats are auto-tracked after each session.
+Non-Doomwiki imports are auto-enriched with Doom Wiki metadata (author, year,
+description, IWAD). Duplicate detection warns before re-importing.
 
 ## IWADs
 
-Register your IWADs once and reference them by family name everywhere:
-
-```bash
-caco import ~/iwads/doom2.wad      # Auto-detected by MD5
-caco import ~/iwads/               # Scan a directory
-caco ls --iwad                     # List registered IWADs
-```
-
-IWADs are organized by family (doom, doom2, tnt, plutonia) with variant support (v1.9, bfg, kex). The preferred variant is resolved automatically, with Freedoom as a cross-family fallback.
+Register your IWADs once and caco references them by family name everywhere.
+They are organised by family (doom, doom2, tnt, plutonia) with variant support
+(v1.9, bfg, kex). The preferred variant is resolved automatically, with Freedoom
+as a cross-family fallback.
 
 ## Configuration
 
-Config file: `~/.config/caco/config.toml`
-
-```bash
-caco config --edit                 # Open in $EDITOR
-caco config                        # Print current config
-```
-
-### Essential Settings
-
-```toml
-sourceport = "dsda-doom"
-iwad = "doom2"
-iwad_dirs = ["/usr/share/games/doom"]
-```
+Config file: `~/.config/caco/config.toml`. The Settings dialog edits the common
+options; anything it does not expose survives a save untouched, so hand-editing
+the file is safe.
 
 ### Example Config
 
@@ -278,37 +165,6 @@ thumbnail_size = 160
 
 See `config.example.toml` for all available options.
 
-## Shell Completions
-
-```bash
-caco completions --install         # Auto-install for your shell
-caco completions fish              # Generate for specific shell
-```
-
-Supports fish, bash, and zsh with dynamic completions for WAD names, tags, IWADs, and more.
-
-## Scripting
-
-```bash
-caco ls -o plain                   # TSV output (default is `table`)
-caco ls -o json                    # JSON output
-caco info 1 -o json                # Structured WAD data
-caco random status:unplayed        # Random WAD ID
-caco play $(caco random)           # Play a random WAD
-```
-
-## Garbage Collection
-
-```bash
-caco gc                            # Clean completed/abandoned WAD data
-caco gc --dry-run                  # Preview reclaimable space
-caco gc --keep-saves               # Clean but keep save files
-caco gc --orphans-only             # Only clean orphaned dirs/backups
-caco gc --ignore id:5              # Permanently exclude from GC
-```
-
-idgames WADs are cleaned automatically (re-downloadable). Non-idgames WADs prompt individually with the option to permanently ignore.
-
 ## Data Storage
 
 Caco splits its files by whether they can be regenerated. Everything under
@@ -333,7 +189,7 @@ everything under `~/.cache/caco` is disposable and rebuilds itself on demand.
 | Location | Contents |
 |----------|----------|
 | `~/.cache/caco/wads/` | Cached WAD files, re-downloaded on demand |
-| `~/.cache/caco/thumbnails/` | GUI thumbnail cache, re-extracted from TITLEPIC |
+| `~/.cache/caco/thumbnails/` | Thumbnail cache, re-extracted from TITLEPIC |
 
 The WAD cache is usually the largest thing caco stores and is entirely
 re-downloadable, which is why it lives on the disposable side. If you are
@@ -386,13 +242,9 @@ Per-map stat tracking (which feeds completion detection and progress bars) works
 ## Development
 
 ```bash
-# Rust (primary)
 cargo test --workspace
-cargo clippy --workspace -- -D warnings
-
-# Python (legacy)
-pip install -e '.[test]'
-pytest tests/ -v
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all -- --check
 ```
 
 ## License

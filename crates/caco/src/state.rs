@@ -23,6 +23,7 @@ use crate::dialogs::resources::ResourcesDialogState;
 use crate::dialogs::sessions::SessionsDialogState;
 use crate::dialogs::settings::SettingsDialogState;
 use crate::dialogs::stats::StatsDialogState;
+use crate::dialogs::trash::TrashDialogState;
 use crate::dialogs::wad_data::WadDataDialogState;
 use crate::dialogs::wad_stats::WadStatsDialogState;
 use crate::filter_query::{FilterCheck, FilterQuery};
@@ -82,6 +83,8 @@ pub enum ActionRequest {
     Enrich,
     /// Open the disk cleanup dialog.
     Gc,
+    /// Open the trash browser for soft-deleted WADs.
+    Trash,
     /// Run an enrichment the dialog has configured, on a worker thread.
     StartEnrich(Box<crate::dialogs::enrich::EnrichRequest>),
     EditCollection(String),
@@ -121,6 +124,7 @@ pub enum ActiveDialog {
     Companions(CompanionsDialogState),
     Enrich(Box<EnrichDialogState>),
     Gc(Box<GcDialogState>),
+    Trash(TrashDialogState),
     Resources(ResourcesDialogState),
     WadStats(WadStatsDialogState),
     WadData(Box<WadDataDialogState>),

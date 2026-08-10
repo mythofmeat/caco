@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Caco is a personal Doom WAD library manager inspired by `beets`. It tracks WADs you want to play, have played, or are playing, with metadata from multiple sources (idgames, Doomwiki, Doomworld forums, manual entry). Two interfaces share one workspace: a CLI (`caco`) and a GUI (egui). The GUI is the primary interface; see issue #31 for the in-progress work to move the CLI-only features into the GUI and retire `caco-cli`.
+Caco is a personal Doom WAD library manager inspired by `beets`. It tracks WADs you want to play, have played, or are playing, with metadata from multiple sources (idgames, Doomwiki, Doomworld forums, manual entry). The interface is a single egui desktop application, `caco`. It was CLI-first until issue #31 moved every remaining feature into the GUI and retired `caco-cli`; anything that reads as "the CLI did X" in this file is history, kept because it explains why a boundary sits where it does.
 
 Key features:
 - SQLite database for WAD metadata and play history
@@ -31,21 +31,15 @@ Key features:
 ```bash
 # Build
 cargo build --workspace
-cargo build --release -p caco-cli    # Release CLI binary
+cargo build --release      # Release binary at target/release/caco
 
 # Run
-cargo run -p caco-cli -- <command>
-cargo run -p caco-gui
+cargo run -p caco
 
 # Quality gates (required before commit)
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-
-# Examples
-cargo run -p caco-cli -- ls
-cargo run -p caco-cli -- ls -o plain
-cargo run -p caco-cli -- info 1 -o json
 ```
 
 ## Architecture
@@ -54,9 +48,7 @@ cargo run -p caco-cli -- info 1 -o json
 crates/
 ├── caco-core/     Core library: DB, config, detection, player, services
 ├── caco-sources/  API clients (idgames, Doom Wiki, Doomworld) + import service + HTTP
-├── caco-cli/      Clap-based CLI; all subcommands live in src/commands/
-├── caco-gui/      eframe/egui GUI — library panels, grid view, dialogs, background workers
-└── caco-mcp/      rmcp MCP server — sandboxed library access for LLM agents
+└── caco/          eframe/egui GUI — library panels, grid view, dialogs, background workers
 ```
 
 **caco-core** top-level modules:
@@ -64,7 +56,7 @@ crates/
 - `player.rs` — sourceport launcher, playtime tracking, companion injection. `build_launch` is the single command builder behind both `play` and `play_demo`, parameterised by a private `LaunchMode`: playback needs an identical file set, complevel and load order to the recording (any difference desyncs the demo) but must not record a session or collect stats, since a replayed map exit is not progress the user just made.
 - `companion_service.rs`, `resource_service.rs` — MD5 dedup + managed storage; IWAD/id24 registration
 - `sourceports.rs`, `complevel.rs`, `complevel_detect.rs`, `iwad_detect.rs` — family registry + detection heuristics (COMPLVL, UMAPINFO, DEHACKED, PNAMES, map lumps)
-- `profiles.rs` — sourceport config profile operations (list/create/copy/remove/read/write + `referencing_wads`). Owns the operations but deliberately not *editing*: the CLI spawns `$EDITOR`, the GUI edits in a text buffer, and both go through `read`/`write`. First of the six extractions tracked in issue #31.
+- `profiles.rs` — sourceport config profile operations (list/create/copy/remove/read/write + `referencing_wads`). Owns the operations but deliberately not *editing*, which the GUI does in a text buffer through `read`/`write`.
 - `wad_stats.rs` — per-map stats parser (stats.txt + levelstat.txt)
 - `stats_watcher.rs` — stats collection for ports without native stats.txt: zdoom (ZScript reporter PK3 + `+logfile` parsing) and helion (`-levelstat`, consuming its global `~/.config/Helion/levelstat.txt` — unpadded-milliseconds time format — into the managed stats.txt)
 - `saves.rs`, `demos.rs` — save/backup/restore and demo discovery. `demos::resolve_demo_path` picks by mtime rather than filename order, so a restored or hand-copied demo still resolves as "most recent".
@@ -78,9 +70,7 @@ crates/
 - `json_import.rs` — offline JSON fallback for Cloudflare-blocked APIs
 - `idgames/`, `doomwiki/`, `doomworld/` — per-source API clients + parsers
 
-**caco-cli**: `main.rs` sets up clap + DB; `output.rs` renders table/plain/JSON; `picker.rs` is the fzf-style selector; `resolve.rs` handles WAD resolution; `parsing.rs` handles modify/sort parsing. Each subcommand owns a file in `src/commands/`.
-
-**caco-gui**: `app.rs` hosts the `CacoApp` state machine. Panels in `src/panels/`, dialogs in `src/dialogs/`, import flow in `src/import/`. `thumbnails.rs` extracts and caches TITLEPIC; `wiki_scraper.rs` fetches Doom Wiki thumbs; `workers.rs` coordinates background search/import/play via mpsc channels. The Cacowards view (`ViewMode::Cacowards`) is rendered by `panels/cacowards.rs` in a deliberately editorial layout (hero banner + year strip + category card grid) to signal the curated-external-feed origin while sharing the rest of the GUI chrome. Imports kicked off from cacoward cards spawn through `import::workers::spawn_import_cacoward` so they reuse the existing duplicate-detection and auto-link plumbing. `dialogs/settings.rs` is the GUI settings editor: it snapshots the live `Config`, edits a curated field subset (sourceports, behavior, cache, paths), and on Save writes the full struct via `config::save_config` + `config::reload_config` so unexposed sections (list, sourceport_preferences, iwad_priority) survive round-trips and changes apply without restart. `dialogs/profiles.rs` manages sourceport config profiles (list on the left, contents editable on the right); it is the GUI counterpart to `caco profile` and shares `caco_core::profiles` with it. Deleting a profile stages a confirmation that lists the WADs still referencing it rather than warning after the fact. `dialogs/gc.rs` is the cleanup panel: keep-toggles across the top re-measure the plan on change, every row is a checkbox (so one WAD's saves can be kept while another's go), and Clean stages a confirmation naming the item count and size. `dialogs/enrich.rs` drives `caco_sources::enrich_service` from the GUI: it owns only the request, live progress and the report, while `app.rs::spawn_enrich` runs the work on a thread and streams `AppMessage::EnrichProgress` / `EnrichComplete` back. Cancellation is an `Arc<AtomicBool>` the dialog shares with the worker; a fresh one is minted per run so a previously cancelled flag can't abort the next one instantly. `dialogs/companions.rs` is the library-wide companion registry (`caco companion ls` with no query): every managed file with its size, MD5 and the WADs still linking it, plus per-row and bulk orphan deletion. Per-WAD linking stays in the edit dialog's Companions tab, which stages the orphan question when `plan_unregister` returns `None`. `dialogs/wad_data.rs` is the per-WAD Saves / Backups / Demos dialog (`caco saves` + `caco demos` in one place, since both act on the same data dir); every destructive action stages a confirmation, and demo playback returns `WadDataResult::PlayDemo` so `app.rs` can run the blocking launch on a worker thread while the dialog stays open.
+**caco**: `app.rs` hosts the `CacoApp` state machine. Panels in `src/panels/`, dialogs in `src/dialogs/`, import flow in `src/import/`. `thumbnails.rs` extracts and caches TITLEPIC; `wiki_scraper.rs` fetches Doom Wiki thumbs; `workers.rs` coordinates background search/import/play via mpsc channels. The Cacowards view (`ViewMode::Cacowards`) is rendered by `panels/cacowards.rs` in a deliberately editorial layout (hero banner + year strip + category card grid) to signal the curated-external-feed origin while sharing the rest of the GUI chrome. Imports kicked off from cacoward cards spawn through `import::workers::spawn_import_cacoward` so they reuse the existing duplicate-detection and auto-link plumbing. `dialogs/settings.rs` is the GUI settings editor: it snapshots the live `Config`, edits a curated field subset (sourceports, behavior, cache, paths), and on Save writes the full struct via `config::save_config` + `config::reload_config` so unexposed sections (list, sourceport_preferences, iwad_priority) survive round-trips and changes apply without restart. `dialogs/profiles.rs` manages sourceport config profiles (list on the left, contents editable on the right); it is the GUI counterpart to `caco profile` and shares `caco_core::profiles` with it. Deleting a profile stages a confirmation that lists the WADs still referencing it rather than warning after the fact. `dialogs/gc.rs` is the cleanup panel: keep-toggles across the top re-measure the plan on change, every row is a checkbox (so one WAD's saves can be kept while another's go), and Clean stages a confirmation naming the item count and size. `dialogs/enrich.rs` drives `caco_sources::enrich_service` from the GUI: it owns only the request, live progress and the report, while `app.rs::spawn_enrich` runs the work on a thread and streams `AppMessage::EnrichProgress` / `EnrichComplete` back. Cancellation is an `Arc<AtomicBool>` the dialog shares with the worker; a fresh one is minted per run so a previously cancelled flag can't abort the next one instantly. `dialogs/companions.rs` is the library-wide companion registry (`caco companion ls` with no query): every managed file with its size, MD5 and the WADs still linking it, plus per-row and bulk orphan deletion. Per-WAD linking stays in the edit dialog's Companions tab, which stages the orphan question when `plan_unregister` returns `None`. `dialogs/wad_data.rs` is the per-WAD Saves / Backups / Demos dialog (`caco saves` + `caco demos` in one place, since both act on the same data dir); every destructive action stages a confirmation, and demo playback returns `WadDataResult::PlayDemo` so `app.rs` can run the blocking launch on a worker thread while the dialog stays open.
 
 ## Dependencies (key crates)
 
@@ -94,9 +84,6 @@ regex = "1"
 md-5 = "0.10"           # companion dedup
 zip = "2"
 image = "0.25"          # thumbnails
-clap = "4"              # CLI
-comfy-table = "7"
-indicatif = "0.17"
 reqwest = "0.12"        # HTTP (blocking)
 eframe = "0.31"         # GUI
 egui = "0.31"
@@ -108,7 +95,7 @@ egui = "0.31"
 - **Batch stats**: `get_total_playtime_batch()`, `get_last_played_batch()`, etc. — avoid N+1 queries when rendering lists.
 - **Query parser**: beets-style syntax — see Behavior below.
 - **Companion system**: `companion_files_registry` + `wad_companions` junction table. `companion_service.rs` handles MD5 dedup + managed storage at `~/.local/share/caco/companions/{md5[:12]}_{filename}`. DEH/BEX auto-detected; `-deh` for non-zdoom, `-file` for zdoom. Because files are deduplicated by MD5, one managed file can serve several WADs, so unlinking is not the same as deleting: `companion_service::plan_unregister` answers "what should happen to the file", returning `None` only when the file would be left with no owner *and* the configured policy is `ask` (the default). Both frontends must go through it — `unregister_companion` takes a resolved `OrphanPolicy`, so neither can swallow an `ask` and orphan a file unprompted. `delete_orphan` refuses while anything still links the file.
-- **GC**: `caco_core::gc` splits cleanup in two — `plan` measures and touches nothing, `execute` deletes exactly the `GcSelection` handed back. That is what lets the CLI confirm y/n per section while the GUI renders the same plan as a checkbox list, with neither re-deriving what is safe to delete. `gc_ignore` column excludes a WAD; orphan detection covers data dirs, backups, and companions. `plan` takes an explicit `GcPaths { data_dir, backup_dir }` rather than reading config: every path in it is a path something gets deleted from, and planning against an empty DB makes every directory look like an orphan, so a plan built over the real data dir and executed wipes the library's saves. The required argument is what keeps that unreachable from a test — `GcPaths::from_config()` is for frontends, and `gc`'s tests build every path from a tempdir. `saves::list_backups_in` exists for the same reason.
+- **GC**: `caco_core::gc` splits cleanup in two — `plan` measures and touches nothing, `execute` deletes exactly the `GcSelection` handed back. The GUI renders the plan as a checkbox list and passes back the ticked subset, so nothing is deleted that was not shown first. `gc_ignore` column excludes a WAD; orphan detection covers data dirs, backups, and companions. `plan` takes an explicit `GcPaths { data_dir, backup_dir }` rather than reading config: every path in it is a path something gets deleted from, and planning against an empty DB makes every directory look like an orphan, so a plan built over the real data dir and executed wipes the library's saves. The required argument is what keeps that unreachable from a test — `GcPaths::from_config()` is for frontends, and `gc`'s tests build every path from a tempdir. `saves::list_backups_in` exists for the same reason.
 - **Import service**: centralises duplicate checking for all sources; auto-enriches with Doom Wiki metadata; JSON import fallback for Cloudflare-blocked APIs.
 - **Player**: wraps sourceport execution; injects companion files, data dir args, complevel args, config profile; returns `PlayResult` with crash detection.
 - **GUI background work**: egui is immediate-mode; `CacoApp` holds all state; background workers for search/import/play use `std::thread` + `std::sync::mpsc`.
@@ -161,7 +148,7 @@ split out so it can be tested against temp dirs.
 
 **Per-WAD config columns**: `custom_iwad`, `custom_sourceport`, `custom_args` (JSON), `complevel` (INT), `custom_config` (TEXT).
 
-**Launch args layering**: global `sourceport_args` (every port) → `[port_args]` table (executable basename → args, case-insensitive fallback, applied only when that port launches) → per-WAD `custom_args` → CLI extra args. GUI settings dialog edits args as shell-quoted strings via `shlex`.
+**Launch args layering**: global `sourceport_args` (every port) → `[port_args]` table (executable basename → args, case-insensitive fallback, applied only when that port launches) → per-WAD `custom_args` → per-launch extra args. GUI settings dialog edits args as shell-quoted strings via `shlex`.
 
 **DB migrations**: run on `init_db()`; numbered sequentially; current schema version is 23+.
 
@@ -173,37 +160,28 @@ split out so it can be tested against temp dirs.
 
 **GUI Cacowards view**: a magazine-style central panel reachable from the left sidebar. Backed by `state::CacowardsState` (all entries + selected year, refreshed via `AppState::reload_cacowards`). Each entry renders as a card whose left edge is colored by linked-WAD status (green/yellow/red/blue) or dashed when absent. The action button on each card is contextual: absent entries get an `Import` button that fires `ActionRequest::ImportCacoward(pk)`, library entries get a `Play`/`Open` button reusing the existing `ActionRequest::Play(wad_id)`. After an import completes, both `state.needs_reload` and `state.cacowards.needs_reload` are set so the library list and the magazine view both pick up the new link without a manual refresh.
 
-## CLI Commands Reference
+## GUI Surfaces
 
-```
-caco ls [query] [--iwad|--id24] [-o plain|json]   # cacoward: filter switches to entry mode
-caco info <query> [--levelstats|--completions] [-o plain|json]
-caco modify <query> [field=value...] [beaten±N] [completion.<id>.notes|date|stats=value] [--add-file|--remove-file] [--stats-file FILE --completion ID]
-caco import <source> [--idgames|--doomwiki|--doomworld|--url|--local]
-caco import --cacoward <ID>                                          # ID like c.2023.winner.10
-caco play <query> [-p PORT] [-c COMPLEVEL] [-C CONFIG] [--iwad] [--record] [--new-playthrough] [-- SOURCEPORT_ARGS]
-caco trash <query> [--restore|--list] [--iwad FAMILY|--id24 NAME]
-caco random [query] [--info]
-caco companion add|rm|enable|disable|ls
-caco gc [--dry-run] [-y] [--keep-saves|--keep-demos|--keep-data|--keep-cache|--keep-companions] [--orphans-only] [--ignore|--unignore]
-caco enrich [query] [--complevel] [--dry-run]
-caco enrich --cacowards --year YYYY [--dry-run]
-caco stats [--period month|year] [--limit N] [-o plain|json|table]
-caco stats --cacowards [--year YYYY] [-o plain|json|table]
-caco sessions <query> [--plain]
-caco cache list [-o plain|json|table] [--orphans] | clear | prune
-caco saves list [-o plain|json|table] | backup | restore | clean | backups [-o plain|json|table]
-caco demos list [-o plain|json|table] | play | clean
-caco profile ls|create|edit|cp|rm|path
-caco config [--edit]
-caco completions [fish|bash|zsh]
-```
+Sidebar entries (`app/sidebar.rs` → `ActionRequest` → `app.rs::dispatch_action`):
 
-## Shell Completions
+| Entry | Dialog | Backed by |
+|-------|--------|-----------|
+| Stats | `dialogs/stats.rs` | `db::sessions` aggregates |
+| Cache | `dialogs/cache.rs` | `db::sessions::get_cached_wads` |
+| Files | `dialogs/companions.rs` | `companion_service` + `db::get_wads_for_companion` |
+| Profiles | `dialogs/profiles.rs` | `caco_core::profiles` |
+| IWADs | `dialogs/resources.rs` | `resource_service` |
+| Enrich | `dialogs/enrich.rs` | `caco_sources::enrich_service` (worker thread) |
+| Clean | `dialogs/gc.rs` | `caco_core::gc` plan/execute |
+| Trash | `dialogs/trash.rs` | `db::restore_wad` / `purge_all_deleted` |
+| Settings | `dialogs/settings.rs` | `config::save_config` + `reload_config` |
 
-- Hand-crafted scripts for fish, bash, zsh in `completions/`.
-- `caco completions [shell]` emits static completions via clap_complete.
-- Dynamic data via hidden `caco _complete <context>` for: wads, tags, iwads, statuses, sort-fields, sourceports, modify-fields, query-fields.
+Per-WAD, from the context menu or a shortcut: Edit (`E`), Delete (`D`),
+Sessions (`S`), Map Stats (`M`), Saves & Demos (`F`), Play (`Enter`/`P`).
+
+Deleting a WAD soft-deletes it (`deleted_at`), so the Trash dialog is the only
+route back — without it a soft delete would be indistinguishable from a
+permanent one, and the play history it preserves would be unreachable.
 
 ## Git Instructions
 
@@ -242,7 +220,7 @@ The repo at `/var/lib/pacman-local` is shared by every locally-built program, no
 
 The build deliberately happens *before* the commit: a failed build must never leave a published version behind with no artifact to match it. A trap reverts the version files if anything fails before the commit is reached.
 
-**Retention** is `paccache -r -k $KEEP -c $REPO_DIR`. paccache already parses package filenames, so it will not mistake `caco-gui` for a build of `caco`, and it orders by version rather than mtime so rebuilding an old version cannot evict a newer one. The database is then rebuilt from scratch rather than updated incrementally, so it can never reference a file retention just deleted — that mismatch is what makes `pacman -Syu` fail against a local repo.
+**Retention** is `paccache -r -k $KEEP -c $REPO_DIR`. paccache parses package filenames and orders by version rather than mtime so rebuilding an old version cannot evict a newer one. The database is then rebuilt from scratch rather than updated incrementally, so it can never reference a file retention just deleted — that mismatch is what makes `pacman -Syu` fail against a local repo.
 
 Env overrides: `CACO_PKG_REPO` (default `/var/lib/pacman-local`), `CACO_PKG_REPO_NAME` (default `local`), `CACO_PKG_KEEP` (default 2), `CACO_SWEEP_DAYS` (default 7; 0 disables the post-release `cargo sweep`).
 

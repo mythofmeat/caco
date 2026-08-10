@@ -42,8 +42,7 @@ fn main() -> eframe::Result<()> {
     // `app_id` must match the `.desktop` file basename so Wayland
     // compositors map the window to caco.desktop and show its icon.
     // Without this, Wayland ignores `with_icon()` and falls back to a
-    // generic icon because the eframe app name (`caco-gui`) doesn't
-    // match `caco.desktop`.
+    // generic icon.
     let mut viewport = egui::ViewportBuilder::default()
         .with_app_id("caco")
         .with_title("Caco")
@@ -60,17 +59,17 @@ fn main() -> eframe::Result<()> {
     };
 
     eframe::run_native(
-        "caco-gui",
+        "caco",
         options,
         Box::new(move |cc| {
             // Apply Doom theme
-            caco_gui::theme::apply_doom_theme(&cc.egui_ctx);
+            caco::theme::apply_doom_theme(&cc.egui_ctx);
 
             // Open database
             let conn = caco_core::db::open_connection(&db_path).expect("Failed to open database");
             caco_core::db::init_db(&conn).expect("Failed to initialize database");
 
-            Ok(Box::new(caco_gui::app::CacoApp::new(
+            Ok(Box::new(caco::app::CacoApp::new(
                 conn,
                 db_path.clone(),
                 &cc.egui_ctx,

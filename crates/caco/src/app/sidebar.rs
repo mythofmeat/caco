@@ -256,6 +256,20 @@ pub(super) fn render_sidebar(
             if ui
                 .add(
                     egui::Button::new(
+                        egui::RichText::new("Trash")
+                            .size(11.0)
+                            .color(theme::TEXT_MUTED),
+                    )
+                    .frame(false),
+                )
+                .on_hover_text("Restore or permanently delete removed WADs")
+                .clicked()
+            {
+                actions.push(ActionRequest::Trash);
+            }
+            if ui
+                .add(
+                    egui::Button::new(
                         egui::RichText::new("IWADs")
                             .size(11.0)
                             .color(theme::TEXT_MUTED),

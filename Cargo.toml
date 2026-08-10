@@ -1,8 +1,7 @@
 [workspace]
 members = [
     "crates/caco-core",
-    "crates/caco-cli",
-    "crates/caco-gui",
+    "crates/caco",
 ]
 resolver = "3"
 
@@ -58,11 +57,6 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 
 # Archive
 zip = { version = "2", default-features = false, features = ["deflate"] }
-
-# CLI
-clap = { version = "4", features = ["derive", "env"] }
-comfy-table = "7"
-indicatif = "0.17"
 
 # HTTP
 reqwest = { version = "0.12", features = ["json", "blocking"] }

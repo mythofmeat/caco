@@ -289,6 +289,10 @@ impl CacoApp {
             ActionRequest::StartEnrich(request) => {
                 self.spawn_enrich(*request);
             }
+            ActionRequest::Trash => {
+                let dialog = crate::dialogs::trash::TrashDialogState::new(&self.conn);
+                self.state.active_dialog = Some(ActiveDialog::Trash(dialog));
+            }
             ActionRequest::Gc => {
                 let dialog = crate::dialogs::gc::GcDialogState::new(&self.conn);
                 self.state.active_dialog = Some(ActiveDialog::Gc(Box::new(dialog)));
