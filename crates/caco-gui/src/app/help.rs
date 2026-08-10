@@ -32,6 +32,7 @@ pub(super) fn render_help_dialog(ctx: &egui::Context) -> bool {
                             ("d", "Delete selected WAD"),
                             ("s", "View sessions"),
                             ("m", "Map stats"),
+                            ("f", "Saves & demos"),
                         ],
                     );
                     shortcut_section(ui, "Import", &[("1\u{2013}5", "Switch source")]);

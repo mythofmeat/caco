@@ -20,6 +20,7 @@ use crate::dialogs::resources::ResourcesDialogState;
 use crate::dialogs::sessions::SessionsDialogState;
 use crate::dialogs::settings::SettingsDialogState;
 use crate::dialogs::stats::StatsDialogState;
+use crate::dialogs::wad_data::WadDataDialogState;
 use crate::dialogs::wad_stats::WadStatsDialogState;
 use crate::filter_query::{FilterCheck, FilterQuery};
 use crate::import::state::ImportState;
@@ -62,6 +63,10 @@ pub enum ActionRequest {
     Delete(i64),
     Sessions(i64),
     MapStats(i64),
+    /// Open the per-WAD saves / backups / demos dialog.
+    WadData(i64),
+    /// Play back a demo file (by name) from a WAD's demos directory.
+    PlayDemo(i64, String),
     Stats,
     Cache,
     Settings,
@@ -104,6 +109,7 @@ pub enum ActiveDialog {
     Collections(CollectionsDialogState),
     Resources(ResourcesDialogState),
     WadStats(WadStatsDialogState),
+    WadData(Box<WadDataDialogState>),
     Link(LinkDialogState),
     /// Modal picker for choosing a library WAD to link to a Cacoward entry.
     CacowardLink(CacowardLinkDialogState),

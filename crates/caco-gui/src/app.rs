@@ -181,6 +181,35 @@ impl CacoApp {
                     self.state.active_dialog = Some(ActiveDialog::WadStats(dialog));
                 }
             }
+            ActionRequest::WadData(wad_id) => {
+                if let Some(dialog) =
+                    crate::dialogs::wad_data::WadDataDialogState::new(&self.conn, wad_id)
+                {
+                    self.state.active_dialog = Some(ActiveDialog::WadData(Box::new(dialog)));
+                }
+            }
+            ActionRequest::PlayDemo(wad_id, demo) => {
+                // Playback blocks until the sourceport exits, so it runs on a
+                // worker thread. No session is recorded, so unlike Play there
+                // is no PlayState to enter — the dialog stays usable.
+                let sender = self.bg.sender();
+                let db_path = self.state.db_path.clone();
+                self.state.notification = Some(Notification::info(format!("Playing demo {demo}…")));
+                std::thread::spawn(move || {
+                    let outcome = (|| -> Result<(), String> {
+                        let conn = caco_core::db::open_connection(&db_path)
+                            .map_err(|e| format!("DB open failed: {e}"))?;
+                        caco_core::player::play_demo(&conn, wad_id, Some(&demo), None)
+                            .map_err(|e| e.to_string())?;
+                        Ok(())
+                    })();
+                    if let Err(msg) = outcome {
+                        sender.send(AppMessage::Notify(Notification::error(format!(
+                            "Demo playback failed: {msg}"
+                        ))));
+                    }
+                });
+            }
             ActionRequest::ImportCacoward(pk) => {
                 import::workers::spawn_import_cacoward(
                     self.bg.sender(),

@@ -81,6 +81,33 @@ pub enum RecordOption {
     Named(String),
 }
 
+/// What a launch is being built for.
+///
+/// Playback needs byte-identical launch configuration to the session that
+/// recorded the demo — same complevel, same companion and id24 files, same
+/// load order — because any difference desyncs the playback. It does *not*
+/// want the session bookkeeping: watching a demo is not playtime, and the
+/// stats reporters would fabricate map exits the user never made.
+#[derive(Debug, Clone, Copy)]
+enum LaunchMode<'a> {
+    Play,
+    Playback(&'a Path),
+}
+
+/// A launch command plus the context the caller needs once it has run.
+struct BuiltLaunch {
+    cmd: Command,
+    /// Resolved sourceport executable (path or bare name).
+    port: String,
+    wad_path: PathBuf,
+    /// Managed data dir, when `manage_data_dirs` is on.
+    data_dir: Option<PathBuf>,
+    /// Demo being recorded, if any (no extension — the port appends `.lmp`).
+    demo_path: Option<String>,
+    is_zdoom: bool,
+    is_helion: bool,
+}
+
 fn non_empty(value: Option<&str>) -> Option<&str> {
     value.and_then(|s| {
         let trimmed = s.trim();
@@ -235,7 +262,18 @@ fn archive_stats_files(data_dir: &Path) {
 /// Play a WAD with the specified sourceport.
 ///
 /// Returns a `PlayResult` with duration and exit code.
-pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result<PlayResult> {
+/// Build the sourceport command for a WAD.
+///
+/// Shared by [`play`] and [`play_demo`] so a demo is played back under exactly
+/// the configuration it was recorded under. Has side effects by design: it
+/// persists auto-detected IWAD and complevel values and creates the managed
+/// data, save, and config directories the port expects to already exist.
+fn build_launch(
+    conn: &Connection,
+    wad_id: i64,
+    opts: &PlayOptions,
+    mode: LaunchMode<'_>,
+) -> crate::Result<BuiltLaunch> {
     let wad = db::get_wad(conn, wad_id, false)?.ok_or(crate::Error::WadNotFound(wad_id))?;
 
     // Get WAD file path (must already be cached/linked)
@@ -407,9 +445,10 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
         wad_data_dir = Some(data_dir);
     }
 
-    // Handle demo recording
+    // Handle demo recording. Never while playing one back — `-record` and
+    // `-playdemo` in the same command line is not a meaningful request.
     let mut demo_path: Option<String> = None;
-    if let Some(ref record) = opts.record {
+    if let (LaunchMode::Play, Some(record)) = (mode, opts.record.as_ref()) {
         let data_dir = wad_data_dir.clone().unwrap_or_else(|| {
             config::find_wad_data_dir(wad_id)
                 .unwrap_or_else(|| config::get_wad_data_dir(wad_id, &wad.title))
@@ -486,26 +525,59 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
         cmd.args(&opts.extra_args);
     }
 
-    // For zdoom-family ports, set up logfile for stats collection
-    if is_zdoom
-        && config::get_auto_stats()
-        && let Some(ref data_dir) = wad_data_dir
-    {
-        let log_path = data_dir.join(stats_watcher::LOG_FILENAME);
-        // Avoid parsing stale lines if the sourceport appends to an existing log.
-        let _ = std::fs::remove_file(&log_path);
-        cmd.args(["+logfile", &log_path.to_string_lossy()]);
-    }
+    // Stats collection is deliberately skipped during playback: a demo replays
+    // map exits the user did not just make, and absorbing those would inflate
+    // progress and could auto-complete the WAD from a recording.
+    if matches!(mode, LaunchMode::Play) {
+        // For zdoom-family ports, set up logfile for stats collection
+        if is_zdoom
+            && config::get_auto_stats()
+            && let Some(ref data_dir) = wad_data_dir
+        {
+            let log_path = data_dir.join(stats_watcher::LOG_FILENAME);
+            // Avoid parsing stale lines if the sourceport appends to an existing log.
+            let _ = std::fs::remove_file(&log_path);
+            cmd.args(["+logfile", &log_path.to_string_lossy()]);
+        }
 
-    // For helion, enable the native global levelstat file
-    if is_helion && config::get_auto_stats() {
-        cmd.arg("-levelstat");
-        // Helion clears the file itself at launch, but remove it up front so
-        // a crash before init can't leave stale exits to be absorbed later.
-        if let Some(path) = stats_watcher::helion_levelstat_path() {
-            let _ = std::fs::remove_file(&path);
+        // For helion, enable the native global levelstat file
+        if is_helion && config::get_auto_stats() {
+            cmd.arg("-levelstat");
+            // Helion clears the file itself at launch, but remove it up front so
+            // a crash before init can't leave stale exits to be absorbed later.
+            if let Some(path) = stats_watcher::helion_levelstat_path() {
+                let _ = std::fs::remove_file(&path);
+            }
         }
     }
+
+    // Playback flag goes last so nothing layered above can shadow it.
+    if let LaunchMode::Playback(demo) = mode {
+        cmd.args(["-playdemo", &demo.to_string_lossy()]);
+    }
+
+    Ok(BuiltLaunch {
+        cmd,
+        port,
+        wad_path,
+        data_dir: wad_data_dir,
+        demo_path,
+        is_zdoom,
+        is_helion,
+    })
+}
+
+/// Launch a WAD, tracking the session and reconciling stats afterwards.
+pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result<PlayResult> {
+    let BuiltLaunch {
+        mut cmd,
+        port,
+        wad_path,
+        data_dir: wad_data_dir,
+        demo_path,
+        is_zdoom,
+        is_helion,
+    } = build_launch(conn, wad_id, opts, LaunchMode::Play)?;
 
     // Handle --new-playthrough: start fresh before launching
     if opts.new_playthrough {
@@ -614,6 +686,52 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
         exit_code: status.code(),
         auto_complete,
     })
+}
+
+/// Play back a recorded demo for a WAD.
+///
+/// `demo` names a file in the WAD's demos directory, with or without the
+/// `.lmp` extension; `None` picks the most recent one. Playback reuses the
+/// full launch configuration from [`build_launch`], so the complevel,
+/// companion files and id24 resources match the recording — a demo played
+/// back with a different file set desyncs.
+///
+/// No session is recorded and no stats are collected: watching a demo is not
+/// playtime.
+pub fn play_demo(
+    conn: &Connection,
+    wad_id: i64,
+    demo: Option<&str>,
+    sourceport: Option<&str>,
+) -> crate::Result<PathBuf> {
+    let wad = db::get_wad(conn, wad_id, false)?.ok_or(crate::Error::WadNotFound(wad_id))?;
+    let data_dir = config::find_wad_data_dir(wad_id)
+        .unwrap_or_else(|| config::get_wad_data_dir(wad_id, &wad.title));
+    let demo_path = demos::resolve_demo_path(&data_dir, demo)?;
+
+    let opts = PlayOptions {
+        sourceport: sourceport.map(str::to_string),
+        ..Default::default()
+    };
+    let mut built = build_launch(conn, wad_id, &opts, LaunchMode::Playback(&demo_path))?;
+
+    built.cmd.stdin(std::process::Stdio::null());
+    let status = built
+        .cmd
+        .spawn()
+        .map_err(|e| {
+            crate::Error::FileNotFound(format!("Failed to launch sourceport '{}': {e}", built.port))
+        })?
+        .wait()?;
+
+    if !status.success() {
+        tracing::warn!(
+            "sourceport exited with code {} during demo playback",
+            status.code().unwrap_or(-1)
+        );
+    }
+
+    Ok(demo_path)
 }
 
 /// Play an IWAD directly with no PWAD.

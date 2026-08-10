@@ -45,6 +45,10 @@ pub fn wad_context_menu(
             action = Some(ActionRequest::MapStats(wad_id));
             ui.close_menu();
         }
+        if ui.button("Saves & Demos").clicked() {
+            action = Some(ActionRequest::WadData(wad_id));
+            ui.close_menu();
+        }
     });
     action
 }
@@ -68,6 +72,9 @@ pub fn handle_action_keys(ui: &egui::Ui, selected_wad_id: Option<i64>) -> Option
     }
     if ui.input(|i| i.key_pressed(egui::Key::M)) {
         return Some(ActionRequest::MapStats(wad_id));
+    }
+    if ui.input(|i| i.key_pressed(egui::Key::F)) {
+        return Some(ActionRequest::WadData(wad_id));
     }
     None
 }

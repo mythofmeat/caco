@@ -9,4 +9,5 @@ pub mod resources;
 pub mod sessions;
 pub mod settings;
 pub mod stats;
+pub mod wad_data;
 pub mod wad_stats;

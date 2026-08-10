@@ -13,6 +13,7 @@ use crate::dialogs::resources::ResourcesResult;
 use crate::dialogs::sessions::SessionsResult;
 use crate::dialogs::settings::SettingsResult;
 use crate::dialogs::stats::StatsResult;
+use crate::dialogs::wad_data::WadDataResult;
 use crate::dialogs::wad_stats::WadStatsResult;
 use crate::message::Notification;
 use crate::state::{ActionRequest, ActiveDialog, AppState};
@@ -132,6 +133,17 @@ pub(super) fn render_active_dialog(
                     state.needs_reload = true;
                 }
                 WadStatsResult::Open => {}
+            },
+            ActiveDialog::WadData(wad_data_state) => match wad_data_state.render(ctx) {
+                WadDataResult::Closed => {
+                    close_dialog = true;
+                }
+                WadDataResult::PlayDemo { wad_id, demo } => {
+                    // Stay open — playback runs on a worker thread and the
+                    // user usually wants to pick another demo afterwards.
+                    follow_up_action = Some(ActionRequest::PlayDemo(wad_id, demo));
+                }
+                WadDataResult::Open => {}
             },
             ActiveDialog::Link(link_state) => match link_state.render(ctx, conn) {
                 LinkResult::Linked(wad_id) => {
