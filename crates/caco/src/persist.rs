@@ -34,10 +34,7 @@ impl Default for GuiState {
 }
 
 fn state_path() -> PathBuf {
-    let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
-    path.push("caco");
-    path.push("gui-state.json");
-    path
+    caco_core::config::default_data_dir().join("gui-state.json")
 }
 
 pub fn load() -> GuiState {

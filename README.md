@@ -142,8 +142,7 @@ hand-editing the file is safe.
 Only settings you actually changed are written. A stock install has an empty (or
 absent) config, and defaults resolve at runtime — which is what lets the data
 directory move between machines without dragging one machine's absolute paths
-along. Upgrading from a version that kept the config in `~/.config/caco` moves
-it for you on first launch and drops the redundant keys on the way.
+along.
 
 On a first launch with no sourceport configured, caco adopts the best one it
 finds on `PATH` and tells you which.
@@ -189,6 +188,7 @@ Caco splits its files by whether they can be regenerated. Everything under
 | Location | Contents |
 |----------|----------|
 | `~/.local/share/caco/config.toml` | Configuration |
+| `~/.local/share/caco/gui-state.json` | GUI view/sort/filter state |
 | `~/.local/share/caco/library.db` | Library database |
 | `~/.local/share/caco/data/` | Per-WAD saves, stats, configs |
 | `~/.local/share/caco/iwads/` | Managed IWADs |
