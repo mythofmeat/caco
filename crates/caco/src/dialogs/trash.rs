@@ -129,64 +129,58 @@ impl TrashDialogState {
         })
     }
 
-    pub fn render(&mut self, ctx: &egui::Context, conn: &Connection) -> TrashResult {
-        let mut result = TrashResult::Open;
-
-        crate::dialogs::modal_window(ctx, "Trash", [680.0, 440.0]).show(ctx, |ui| {
-            if self.wads.is_empty() {
-                ui.colored_label(theme::TEXT_SECONDARY, "Trash is empty.");
-            } else {
-                ui.colored_label(
-                    theme::TEXT_SECONDARY,
-                    format!(
-                        "{} deleted WAD{} — the rows are kept until purged.",
-                        self.wads.len(),
-                        if self.wads.len() == 1 { "" } else { "s" }
-                    ),
-                );
-                ui.add_space(4.0);
-                self.render_list(ui);
-            }
-
+    pub fn render_body(&mut self, ctx: &egui::Context, ui: &mut egui::Ui, conn: &Connection) {
+        if self.wads.is_empty() {
+            ui.colored_label(theme::TEXT_SECONDARY, "Trash is empty.");
+        } else {
+            ui.colored_label(
+                theme::TEXT_SECONDARY,
+                format!(
+                    "{} deleted WAD{} — the rows are kept until purged.",
+                    self.wads.len(),
+                    if self.wads.len() == 1 { "" } else { "s" }
+                ),
+            );
             ui.add_space(4.0);
-            ui.separator();
-            ui.add_space(4.0);
-
-            if let Some(prompt) = self.pending_prompt() {
-                ui.colored_label(theme::COLOR_ERROR, prompt);
-                ui.horizontal(|ui| {
-                    if ui.button("Delete Permanently").clicked() {
-                        self.run_pending(conn);
-                    }
-                    if ui.button("Cancel").clicked() {
-                        self.pending = None;
-                    }
-                });
-            } else {
-                self.render_actions(ui, conn, &mut result);
-            }
-
-            if let Some(status) = &self.status {
-                ui.add_space(4.0);
-                let color = if status.is_error {
-                    theme::COLOR_ERROR
-                } else {
-                    theme::TEXT_SECONDARY
-                };
-                ui.colored_label(color, &status.text);
-            }
-        });
-
-        // Escape backs out of a confirmation before it closes the dialog.
-        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            if self.pending.is_some() {
-                self.pending = None;
-            } else {
-                return TrashResult::Closed;
-            }
+            self.render_list(ui);
         }
 
-        result
+        ui.add_space(4.0);
+        ui.separator();
+        ui.add_space(4.0);
+
+        if let Some(prompt) = self.pending_prompt() {
+            ui.colored_label(theme::COLOR_ERROR, prompt);
+            ui.horizontal(|ui| {
+                if ui.button("Delete Permanently").clicked() {
+                    self.run_pending(conn);
+                }
+                if ui.button("Cancel").clicked() {
+                    self.pending = None;
+                }
+            });
+        } else {
+            self.render_actions(ui, conn);
+        }
+
+        if let Some(status) = &self.status {
+            ui.add_space(4.0);
+            let color = if status.is_error {
+                theme::COLOR_ERROR
+            } else {
+                theme::TEXT_SECONDARY
+            };
+            ui.colored_label(color, &status.text);
+        }
+    }
+
+    /// Escape. Backs out of a staged confirmation before it closes Storage.
+    pub fn escape(&mut self) -> bool {
+        if self.pending.is_some() {
+            self.pending = None;
+            return false;
+        }
+        true
     }
 
     fn render_list(&mut self, ui: &mut egui::Ui) {
@@ -214,7 +208,7 @@ impl TrashDialogState {
             });
     }
 
-    fn render_actions(&mut self, ui: &mut egui::Ui, conn: &Connection, result: &mut TrashResult) {
+    fn render_actions(&mut self, ui: &mut egui::Ui, conn: &Connection) {
         ui.horizontal(|ui| {
             let has_selection = self.selected.is_some();
 
@@ -238,10 +232,6 @@ impl TrashDialogState {
                 .clicked()
             {
                 self.pending = Some(Pending::PurgeAll);
-            }
-
-            if ui.button("Close").clicked() {
-                *result = TrashResult::Closed;
             }
         });
     }
