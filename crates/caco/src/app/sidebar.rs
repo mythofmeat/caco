@@ -169,144 +169,103 @@ pub(super) fn render_sidebar(
         );
         ui.add_space(12.0);
 
-        // Small action links
+        // Management tools.
+        //
+        // These were one `ui.horizontal` of ten buttons. `horizontal` does not
+        // wrap, so the row measured about 380pt wide inside a 200pt panel:
+        // everything past "Enrich" was clipped away — Clean, Trash, IWADs,
+        // Ports and Settings were unreachable from the GUI entirely — and
+        // because egui sizes a panel from the rect its contents actually
+        // occupied, the overflow shoved the top bar and central panel ~180pt
+        // to the right and left a dead strip beside the sidebar.
+        //
+        // Stacked rows can't overflow: each sizes to `available_width`.
+        // Bottom-up layout means this list is written last-to-first.
+        for tool in TOOLS.iter().rev() {
+            let resp = theme::sidebar_tool_item(ui, tool.label);
+            let resp = if tool.hint.is_empty() {
+                resp
+            } else {
+                resp.on_hover_text(tool.hint)
+            };
+            if resp.clicked() {
+                actions.push((tool.action)());
+            }
+        }
+
+        ui.add_space(6.0);
         ui.horizontal(|ui| {
-            ui.add_space(16.0);
-            if ui
-                .add(
-                    egui::Button::new(
-                        egui::RichText::new("Stats")
-                            .size(11.0)
-                            .color(theme::TEXT_MUTED),
-                    )
-                    .frame(false),
-                )
-                .clicked()
-            {
-                actions.push(ActionRequest::Stats);
-            }
-            if ui
-                .add(
-                    egui::Button::new(
-                        egui::RichText::new("Cache")
-                            .size(11.0)
-                            .color(theme::TEXT_MUTED),
-                    )
-                    .frame(false),
-                )
-                .clicked()
-            {
-                actions.push(ActionRequest::Cache);
-            }
-            if ui
-                .add(
-                    egui::Button::new(
-                        egui::RichText::new("Profiles")
-                            .size(11.0)
-                            .color(theme::TEXT_MUTED),
-                    )
-                    .frame(false),
-                )
-                .clicked()
-            {
-                actions.push(ActionRequest::Profiles);
-            }
-            if ui
-                .add(
-                    egui::Button::new(
-                        egui::RichText::new("Files")
-                            .size(11.0)
-                            .color(theme::TEXT_MUTED),
-                    )
-                    .frame(false),
-                )
-                .on_hover_text("Companion file registry")
-                .clicked()
-            {
-                actions.push(ActionRequest::Companions);
-            }
-            if ui
-                .add(
-                    egui::Button::new(
-                        egui::RichText::new("Enrich")
-                            .size(11.0)
-                            .color(theme::TEXT_MUTED),
-                    )
-                    .frame(false),
-                )
-                .on_hover_text("Re-run metadata detection / refresh Cacowards")
-                .clicked()
-            {
-                actions.push(ActionRequest::Enrich);
-            }
-            if ui
-                .add(
-                    egui::Button::new(
-                        egui::RichText::new("Clean")
-                            .size(11.0)
-                            .color(theme::TEXT_MUTED),
-                    )
-                    .frame(false),
-                )
-                .on_hover_text("Reclaim disk space from finished WADs and orphans")
-                .clicked()
-            {
-                actions.push(ActionRequest::Gc);
-            }
-            if ui
-                .add(
-                    egui::Button::new(
-                        egui::RichText::new("Trash")
-                            .size(11.0)
-                            .color(theme::TEXT_MUTED),
-                    )
-                    .frame(false),
-                )
-                .on_hover_text("Restore or permanently delete removed WADs")
-                .clicked()
-            {
-                actions.push(ActionRequest::Trash);
-            }
-            if ui
-                .add(
-                    egui::Button::new(
-                        egui::RichText::new("IWADs")
-                            .size(11.0)
-                            .color(theme::TEXT_MUTED),
-                    )
-                    .frame(false),
-                )
-                .clicked()
-            {
-                actions.push(ActionRequest::Resources);
-            }
-            if ui
-                .add(
-                    egui::Button::new(
-                        egui::RichText::new("Ports")
-                            .size(11.0)
-                            .color(theme::TEXT_MUTED),
-                    )
-                    .frame(false),
-                )
-                .on_hover_text("Build and manage sourceports from source")
-                .clicked()
-            {
-                actions.push(ActionRequest::Ports);
-            }
-            if ui
-                .add(
-                    egui::Button::new(
-                        egui::RichText::new("Settings")
-                            .size(11.0)
-                            .color(theme::TEXT_MUTED),
-                    )
-                    .frame(false),
-                )
-                .clicked()
-            {
-                actions.push(ActionRequest::Settings);
-            }
+            ui.add_space(20.0);
+            ui.colored_label(
+                theme::TEXT_MUTED,
+                egui::RichText::new("MANAGE").size(11.0).strong(),
+            );
         });
+        ui.add_space(4.0);
     });
 }
+
+/// One entry in the sidebar's management list.
+struct Tool {
+    label: &'static str,
+    /// A constructor rather than a value: `ActionRequest` is not `Clone`, and
+    /// these are only ever built when the row is clicked.
+    action: fn() -> ActionRequest,
+    /// Empty means no tooltip.
+    hint: &'static str,
+}
+
+/// The management dialogs, in the order they appear in the sidebar: the
+/// everyday three first, then library maintenance, then setup.
+const TOOLS: &[Tool] = &[
+    Tool {
+        label: "Stats",
+        action: || ActionRequest::Stats,
+        hint: "Playtime and library totals",
+    },
+    Tool {
+        label: "Cache",
+        action: || ActionRequest::Cache,
+        hint: "Downloaded WAD files on disk",
+    },
+    Tool {
+        label: "Files",
+        action: || ActionRequest::Companions,
+        hint: "Companion file registry",
+    },
+    Tool {
+        label: "Clean",
+        action: || ActionRequest::Gc,
+        hint: "Reclaim disk space from finished WADs and orphans",
+    },
+    Tool {
+        label: "Trash",
+        action: || ActionRequest::Trash,
+        hint: "Restore or permanently delete removed WADs",
+    },
+    Tool {
+        label: "Enrich",
+        action: || ActionRequest::Enrich,
+        hint: "Re-run metadata detection / refresh Cacowards",
+    },
+    Tool {
+        label: "IWADs",
+        action: || ActionRequest::Resources,
+        hint: "Managed IWADs and id24",
+    },
+    Tool {
+        label: "Ports",
+        action: || ActionRequest::Ports,
+        hint: "Build and manage sourceports from source",
+    },
+    Tool {
+        label: "Profiles",
+        action: || ActionRequest::Profiles,
+        hint: "Sourceport config profiles",
+    },
+    Tool {
+        label: "Settings",
+        action: || ActionRequest::Settings,
+        hint: "",
+    },
+];

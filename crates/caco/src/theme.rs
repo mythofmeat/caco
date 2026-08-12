@@ -250,6 +250,33 @@ pub fn sidebar_nav_item(ui: &mut egui::Ui, label: &str, is_active: bool) -> bool
     response.clicked()
 }
 
+/// Render a compact sidebar row for the management tools (Stats, Ports, …).
+///
+/// Same shape as [`sidebar_nav_item`] but shorter and quieter, because these
+/// open a dialog rather than switching what the main panel shows. Crucially it
+/// sizes to `ui.available_width()`, so ten of them stack inside the panel
+/// instead of running off its edge.
+pub fn sidebar_tool_item(ui: &mut egui::Ui, label: &str) -> egui::Response {
+    let desired_size = egui::vec2(ui.available_width(), 26.0);
+    let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
+
+    let is_hovered = response.hovered();
+    let painter = ui.painter();
+
+    if is_hovered {
+        painter.rect_filled(rect, 0.0, BG_DARK);
+    }
+    painter.text(
+        egui::pos2(rect.min.x + 20.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        label,
+        egui::FontId::proportional(12.5),
+        if is_hovered { TEXT_PRIMARY } else { TEXT_MUTED },
+    );
+
+    response
+}
+
 /// Render a sidebar collection item (playlist-style). Returns the response.
 pub fn sidebar_collection_item(ui: &mut egui::Ui, name: &str, is_active: bool) -> egui::Response {
     let desired_size = egui::vec2(ui.available_width(), 28.0);
