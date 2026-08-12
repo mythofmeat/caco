@@ -95,10 +95,10 @@ egui = "0.31"
 - **Builder pattern for DB writes**: `NewWad::builder()` and `WadUpdate::builder()` produce type-safe WAD creation/updates.
 - **Batch stats**: `get_total_playtime_batch()`, `get_last_played_batch()`, etc. — avoid N+1 queries when rendering lists.
 - **Query parser**: beets-style syntax — see Behavior below.
-- **Companion system**: `companion_files_registry` + `wad_companions` junction table. `companion_service.rs` handles MD5 dedup + managed storage at `~/.local/share/caco/companions/{md5[:12]}_{filename}`. DEH/BEX auto-detected; `-deh` for non-zdoom, `-file` for zdoom. Because files are deduplicated by MD5, one managed file can serve several WADs, so unlinking is not the same as deleting: `companion_service::plan_unregister` answers "what should happen to the file", returning `None` only when the file would be left with no owner *and* the configured policy is `ask` (the default). Both frontends must go through it — `unregister_companion` takes a resolved `OrphanPolicy`, so neither can swallow an `ask` and orphan a file unprompted. `delete_orphan` refuses while anything still links the file.
+- **Companion system**: `companion_files_registry` + `wad_companions` junction table. `companion_service.rs` handles MD5 dedup + managed storage at `<data>/companions/{md5[:12]}_{filename}`. DEH/BEX auto-detected; `-deh` for non-zdoom, `-file` for zdoom. Because files are deduplicated by MD5, one managed file can serve several WADs, so unlinking is not the same as deleting: `companion_service::plan_unregister` answers "what should happen to the file", returning `None` only when the file would be left with no owner *and* the configured policy is `ask` (the default). Both frontends must go through it — `unregister_companion` takes a resolved `OrphanPolicy`, so neither can swallow an `ask` and orphan a file unprompted. `delete_orphan` refuses while anything still links the file.
 - **WAD file placement**: `config::wad_store_dir(retrievability)` is the only
   answer to "where does this file go" — cache dir for `Automatic`, `keep_dir()`
-  (`~/.local/share/caco/wads`) for `Manual`. `wad_store_dir_in` takes both roots
+  (`<data>/wads`) for `Manual`. `wad_store_dir_in` takes both roots
   explicitly so tests cannot write into the real library, same reason as
   `GcPaths`. `dialogs/link.rs::link_picked_file` re-reads the WAD from the DB
   rather than trusting its caller, because retrievability is a property of the
@@ -122,27 +122,36 @@ egui = "0.31"
 
 ## Data Locations
 
-Split by regenerability: `~/.local/share/caco` is the portable set, `~/.cache/caco`
+Split by regenerability: the **data dir** is the portable set, the **cache dir**
 is disposable. Nothing that cannot be re-derived may be added to the cache side,
 and nothing regenerable may be added to the data side — the point of the split is
 that the data dir stays small enough to copy between machines.
 
+Both roots come from the `dirs` crate, so they are platform-native: XDG on Linux
+(honouring `XDG_DATA_HOME` / `XDG_CACHE_HOME`), `~/Library/Application Support`
+and `~/Library/Caches` on macOS. **Never spell either root literally** — call
+`config::default_data_dir` / `config::cache_home`, or a path helper built on
+them. `default_data_dir` used to hardcode `~/.local/share/caco` while
+`cache_home` already went through `dirs`, which meant a machine with
+`XDG_DATA_HOME` set split caco across two conventions; the paths below are the
+Linux-default spelling, shown for illustration only.
+
 Portable (`config::default_data_dir`, overridable via `CACO_HOME`):
-- Database: `~/.local/share/caco/library.db`
-- Config: `~/.local/share/caco/config.toml` (deliberately not `~/.config` — it is written by the settings dialog and first-run detection far more often than by hand, and keeping it here makes the portable set one directory and `CACO_HOME` a complete isolation switch)
-- Managed IWADs: `~/.local/share/caco/iwads/{variant}/{family}.wad`
-- Managed id24 WADs: `~/.local/share/caco/id24/{name}.wad`
-- WAD data: `~/.local/share/caco/data/` (per-WAD saves, stats, configs)
-- Companion files: `~/.local/share/caco/companions/{md5[:12]}_{filename}`
-- Sourceport configs: `~/.local/share/caco/sourceports/{exe}/{profile}.cfg`
-- Sourceport build recipes + patches: `~/.local/share/caco/ports/*.toml`
-- Backups: `~/.local/share/caco/backups/` (save backups + pre-migration DB snapshots)
+- Database: `<data>/library.db`
+- Config: `<data>/config.toml` (deliberately not `~/.config` — it is app-managed state written by the settings dialog and first-run detection far more often than by hand, and keeping it here makes the portable set one directory and `CACO_HOME` a complete isolation switch)
+- Managed IWADs: `<data>/iwads/{variant}/{family}.wad`
+- Managed id24 WADs: `<data>/id24/{name}.wad`
+- WAD data: `<data>/data/` (per-WAD saves, stats, configs)
+- Companion files: `<data>/companions/{md5[:12]}_{filename}`
+- Sourceport configs: `<data>/sourceports/{exe}/{profile}.cfg`
+- Sourceport build recipes + patches: `<data>/ports/*.toml`
+- Backups: `<data>/backups/` (save backups + pre-migration DB snapshots)
 
 Disposable (`config::cache_home`, overridable via `CACO_CACHE_HOME`):
-- WAD cache: `~/.cache/caco/wads/` (`CACO_CACHE_DIR` overrides just this)
-- Thumbnails cache: `~/.cache/caco/thumbnails/`
-- Built sourceport prefixes: `~/.cache/caco/ports/{name}/{ref-slug}/` (+ `update-check.toml`)
-- Sourceport checkouts + build trees: `~/.cache/caco/ports-src/`
+- WAD cache: `<cache>/wads/` (`CACO_CACHE_DIR` overrides just this)
+- Thumbnails cache: `<cache>/thumbnails/`
+- Built sourceport prefixes: `<cache>/ports/{name}/{ref-slug}/` (+ `update-check.toml`)
+- Sourceport checkouts + build trees: `<cache>/ports-src/`
 
 Caco carries **no migrations between layouts**. It is pre-1.0 and single-user;
 a layout change is applied by moving the files by hand, which is why nothing in

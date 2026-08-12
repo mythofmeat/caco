@@ -9,9 +9,13 @@ use serde::{Deserialize, Serialize};
 use crate::utils::sanitize_dirname;
 
 // ---------------------------------------------------------------------------
-// XDG-style paths (with env var overrides for testing)
+// Platform data/cache paths (with env var overrides for testing)
 //
-// CACO_HOME       — override the base data directory (~/.local/share/caco)
+// Both roots come from `dirs`, so they follow XDG on Linux and
+// ~/Library on macOS. Nothing here spells a literal path except as a
+// fallback for when `dirs` cannot answer at all.
+//
+// CACO_HOME       — override the base data directory
 // CACO_DB_PATH    — override the database file path
 // CACO_CACHE_DIR  — override the WAD cache directory
 // CACO_DATA_DIR   — override the per-WAD data directory
@@ -42,11 +46,22 @@ pub fn config_file() -> PathBuf {
 }
 
 /// Base data directory. Overridden by `CACO_HOME` env var.
+///
+/// Resolved per platform rather than hardcoded to `~/.local/share`: on Linux
+/// that means `$XDG_DATA_HOME` when it is set, on macOS
+/// `~/Library/Application Support`. [`cache_home`] has always resolved its side
+/// this way, and the mismatch meant a machine with `XDG_DATA_HOME` set scattered
+/// caco across two conventions at once.
+///
+/// Caco carries no layout migrations, so anyone who had both a set
+/// `XDG_DATA_HOME` and an existing library moves the directory by hand once.
 pub fn default_data_dir() -> PathBuf {
     if let Ok(p) = std::env::var("CACO_HOME") {
         return PathBuf::from(p);
     }
-    home_dir().join(".local/share/caco")
+    dirs::data_dir()
+        .unwrap_or_else(|| home_dir().join(".local/share"))
+        .join("caco")
 }
 
 pub fn default_db_path() -> PathBuf {

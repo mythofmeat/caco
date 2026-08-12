@@ -1,7 +1,12 @@
 # Caco configuration
 # Reference for every available option. Caco's own config lives at
-# ~/.local/share/caco/config.toml and only ever lists settings you changed —
-# anything omitted falls back to the default shown here.
+# config.toml inside the data directory and only ever lists settings you
+# changed — anything omitted falls back to the default shown here.
+#
+# <data>  = $XDG_DATA_HOME/caco, else ~/.local/share/caco
+#           (macOS: ~/Library/Application Support/caco)
+# <cache> = $XDG_CACHE_HOME/caco, else ~/.cache/caco
+#           (macOS: ~/Library/Caches/caco)
 
 # Default sourceport (full path is also acceptable)
 # sourceport = "dsda-doom"
@@ -28,19 +33,20 @@
 # sourceport_args = ["-nomusic", "-nosfx"]
 
 # Library database file path
-# db_path = "~/.local/share/caco/library.db"
+# db_path = "<data>/library.db"
 
-# WAD cache directory (downloaded WADs are stored here)
-# cache_dir = "~/.local/share/caco/wads"
+# WAD cache directory (re-downloadable WADs are stored here). WADs caco cannot
+# fetch again go to <data>/wads instead and are never touched by cleanup.
+# cache_dir = "<cache>/wads"
 
 # Managed IWAD storage directory
-# iwad_dir = "~/.local/share/caco/iwads"
+# iwad_dir = "<data>/iwads"
 
 # Per-WAD data directory (saves, stats, configs per WAD)
-# data_dir = "~/.local/share/caco/data"
+# data_dir = "<data>/data"
 
 # Sourceport config profiles directory
-# sourceport_dir = "~/.local/share/caco/sourceports"
+# sourceport_dir = "<data>/sourceports"
 
 # Preferred idgames download mirror (0-4)
 # 0 = youfailit.net (default, fastest)

@@ -106,7 +106,7 @@ pub fn create_backup(wad_id: i64, title: &str, data_dir: &Path) -> crate::Result
 /// The destination is a parameter for the reason `GcPaths` and `PortPaths`
 /// are: a function that creates files must not be able to reach the user's
 /// real library from a test. It could before — `test_backup_and_restore` wrote
-/// a zip into `~/.local/share/caco/backups` on every `cargo test` run.
+/// a zip into the real backup dir on every `cargo test` run.
 pub fn create_backup_in(
     wad_id: i64,
     title: &str,

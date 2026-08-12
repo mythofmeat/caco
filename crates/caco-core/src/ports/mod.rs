@@ -2,7 +2,7 @@
 //!
 //! Not every port is packaged — nyan-doom and uzdoom are in no distro repo —
 //! and requiring a global install makes a library non-portable in the way
-//! that matters: copying `~/.local/share/caco` to another machine should be
+//! that matters: copying the data dir to another machine should be
 //! enough to play. It is, because the thing that travels is the *recipe*. A
 //! few hundred bytes of TOML rebuild the binary on whatever machine and OS it
 //! lands on, which a binary itself could never do.

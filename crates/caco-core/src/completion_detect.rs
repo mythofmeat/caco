@@ -307,7 +307,7 @@ mod tests {
     fn check_real_wads() {
         use std::path::PathBuf;
 
-        let db_path = dirs::data_dir().unwrap().join("caco/library.db");
+        let db_path = crate::config::default_db_path();
         if !db_path.exists() {
             eprintln!("No library.db found, skipping");
             return;

@@ -167,8 +167,10 @@ as a cross-family fallback.
 
 ## Configuration
 
-Config file: `~/.local/share/caco/config.toml` — beside the database, not in
-`~/.config`, so the portable set is one directory. The Settings dialog edits the
+Config file: `config.toml` in the data directory (see Data Storage) — beside the
+database rather than in `~/.config`, so the portable set is one directory. It is
+app-managed state that happens to be readable: the settings dialog and first-run
+detection write it far more often than you will. The Settings dialog edits the
 common options; anything it does not expose survives a save untouched, so
 hand-editing the file is safe.
 
@@ -212,42 +214,50 @@ See `config.example.toml` for all available options.
 
 ## Data Storage
 
-Caco splits its files by whether they can be regenerated. Everything under
-`~/.local/share/caco` is worth carrying between machines; everything under
-`~/.cache/caco` is disposable and rebuilds itself on demand.
+Caco splits its files by whether they can be regenerated. The **data**
+directory is worth carrying between machines; the **cache** directory is
+disposable and rebuilds itself on demand. Both follow platform convention:
 
-**Keep these** — copy them to move your library to another machine:
+| | Linux | macOS |
+|---|---|---|
+| Data | `$XDG_DATA_HOME/caco`, else `~/.local/share/caco` | `~/Library/Application Support/caco` |
+| Cache | `$XDG_CACHE_HOME/caco`, else `~/.cache/caco` | `~/Library/Caches/caco` |
 
-| Location | Contents |
-|----------|----------|
-| `~/.local/share/caco/config.toml` | Configuration |
-| `~/.local/share/caco/gui-state.json` | GUI view/sort/filter state |
-| `~/.local/share/caco/library.db` | Library database |
-| `~/.local/share/caco/data/` | Per-WAD saves, stats, configs |
-| `~/.local/share/caco/wads/` | WAD files caco cannot re-download |
-| `~/.local/share/caco/iwads/` | Managed IWADs |
-| `~/.local/share/caco/id24/` | Managed id24 WADs |
-| `~/.local/share/caco/companions/` | Managed companion files |
-| `~/.local/share/caco/sourceports/` | Per-sourceport config profiles |
-| `~/.local/share/caco/ports/` | Sourceport build recipes and their patches |
-| `~/.local/share/caco/backups/` | Save backups + pre-migration DB snapshots |
+Paths in the two tables below are relative to those roots.
+
+**Keep these** — copy the data directory to move your library to another
+machine:
+
+| Path | Contents |
+|------|----------|
+| `config.toml` | Configuration |
+| `gui-state.json` | GUI view/sort/filter state |
+| `library.db` | Library database |
+| `data/` | Per-WAD saves, stats, configs |
+| `wads/` | WAD files caco cannot re-download |
+| `iwads/` | Managed IWADs |
+| `id24/` | Managed id24 WADs |
+| `companions/` | Managed companion files |
+| `sourceports/` | Per-sourceport config profiles |
+| `ports/` | Sourceport build recipes and their patches |
+| `backups/` | Save backups + pre-migration DB snapshots |
 
 **Disposable** — safe to delete at any time:
 
-| Location | Contents |
-|----------|----------|
-| `~/.cache/caco/wads/` | Cached WAD files, re-downloaded on demand |
-| `~/.cache/caco/thumbnails/` | Thumbnail cache, re-extracted from TITLEPIC |
-| `~/.cache/caco/ports/` | Built sourceport prefixes, rebuilt from the recipe |
-| `~/.cache/caco/ports-src/` | Sourceport checkouts and build trees |
+| Path | Contents |
+|------|----------|
+| `wads/` | Cached WAD files, re-downloaded on demand |
+| `thumbnails/` | Thumbnail cache, re-extracted from TITLEPIC |
+| `ports/` | Built sourceport prefixes, rebuilt from the recipe |
+| `ports-src/` | Sourceport checkouts and build trees |
 
 Which of the two `wads/` directories a file lands in is decided by whether caco
 can fetch it again on its own, and nothing else. Anything on idgames goes to the
 cache, where it is fair game for cleanup because losing it costs a download.
 Everything else — forum attachments, one-off file hosts, files you linked by
 hand — goes to the portable side and stays until you delete it deliberately.
-That is what makes copying `~/.local/share/caco` to another machine actually
-carry your library: see `retrievable:` under Queries.
+That is what makes copying the data directory to another machine actually carry
+your library: see `retrievable:` under Queries.
 
 Override the cache root with `CACO_CACHE_HOME`, or just the WAD cache with
 `CACO_CACHE_DIR`.
@@ -255,7 +265,7 @@ Override the cache root with `CACO_CACHE_HOME`, or just the WAD cache with
 ### Recovering from a bad migration
 
 Each time caco starts with pending schema migrations it first copies the live
-library to `~/.local/share/caco/backups/pre-migration-<N>.db`, where `<N>` is
+library to `backups/pre-migration-<N>.db` in the data directory, where `<N>` is
 the schema version before the migration runs. Migrations themselves are
 transactional, so a crash or SQL error rolls back cleanly; the file-level
 snapshot is for the rarer case where a migration commits successfully but
@@ -263,8 +273,9 @@ leaves user data in a bad state. To recover:
 
 ```bash
 # stop any running caco instances, then:
-cp ~/.local/share/caco/library.db ~/.local/share/caco/library.db.broken
-cp ~/.local/share/caco/backups/pre-migration-<N>.db ~/.local/share/caco/library.db
+data="${XDG_DATA_HOME:-$HOME/.local/share}/caco"   # macOS: ~/Library/Application\ Support/caco
+cp "$data/library.db" "$data/library.db.broken"
+cp "$data/backups/pre-migration-<N>.db" "$data/library.db"
 ```
 
 You will need a caco binary old enough to read schema version `N`. Please also
@@ -306,11 +317,11 @@ tell an optional dependency from a required one, so cmake stays the
 authority.
 
 Recipes for `nyan-doom` and `uzdoom` ship built in. To pin a ref, add build
-flags or attach patches, drop a file in `~/.local/share/caco/ports/` — any
+flags or attach patches, drop a file in `ports/` inside the data directory — any
 `*.toml` there is merged over the built-ins by name:
 
 ```toml
-# ~/.local/share/caco/ports/mine.toml
+# <data dir>/ports/mine.toml
 [uzdoom]
 repo = "https://github.com/UZDoom/uzdoom"
 ref = "v1.0.0"                        # a branch or tag, not a bare commit
