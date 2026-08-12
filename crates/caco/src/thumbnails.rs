@@ -206,7 +206,7 @@ impl ThumbnailManager {
             if let Some(bytes) = wiki_bytes
                 && let Ok(img) = image::load_from_memory(&bytes)
             {
-                let rgba = img.to_rgba8();
+                let rgba = downscale(img);
                 let w = rgba.width();
                 let h = rgba.height();
                 let pixels = rgba.into_raw();
@@ -261,11 +261,40 @@ impl ThumbnailManager {
     }
 }
 
+/// Longest edge any thumbnail texture may have.
+///
+/// Wiki images are whatever the uploader posted — 4200x2960 occurs in this
+/// library — and nothing downscaled them before, so each one became a ~50 MB
+/// RGBA texture to fill a card that paints at roughly 370x210 points. 1024
+/// still has headroom over a 2x HiDPI card and stays under the 2048 floor
+/// that GPUs (and the screenshot harness) guarantee.
+const MAX_THUMB_EDGE: u32 = 1024;
+
+/// Shrink to fit `MAX_THUMB_EDGE`, preserving aspect. Returns the input
+/// untouched when it already fits, which is the common case (TITLEPIC is
+/// 320x200).
+fn downscale(img: image::DynamicImage) -> image::RgbaImage {
+    use image::GenericImageView;
+    let (w, h) = img.dimensions();
+    if w <= MAX_THUMB_EDGE && h <= MAX_THUMB_EDGE {
+        return img.to_rgba8();
+    }
+    img.resize(
+        MAX_THUMB_EDGE,
+        MAX_THUMB_EDGE,
+        image::imageops::FilterType::Lanczos3,
+    )
+    .to_rgba8()
+}
+
 /// Load a PNG thumbnail from the filesystem cache, returning (width, height, rgba_pixels).
+///
+/// Downscales on read as well as on write, so caches written before the cap
+/// existed shrink instead of being trusted at face value.
 fn load_cached_thumbnail(path: &Path) -> Option<(u32, u32, Vec<u8>)> {
     let data = std::fs::read(path).ok()?;
     let img = image::load_from_memory(&data).ok()?;
-    let rgba = img.to_rgba8();
+    let rgba = downscale(img);
     Some((rgba.width(), rgba.height(), rgba.into_raw()))
 }
 
