@@ -10,7 +10,6 @@ use crate::dialogs::edit::EditDialogState;
 use crate::dialogs::link::LinkDialogState;
 use crate::dialogs::resources::ResourcesDialogState;
 use crate::dialogs::sessions::SessionsDialogState;
-use crate::dialogs::stats::StatsDialogState;
 use crate::dialogs::wad_stats::WadStatsDialogState;
 use crate::import;
 use crate::import::state::SearchSource;
@@ -331,6 +330,19 @@ impl CacoApp {
     }
 
     /// Dispatch an action request (from detail panel buttons or table shortcuts).
+    /// Switch the central panel to `mode`, asking that view to refresh.
+    ///
+    /// Public for `tests/screenshots.rs`, which walks every view the way the
+    /// sidebar does rather than poking `view_mode` and getting a stale page.
+    pub fn set_view(&mut self, mode: ViewMode) {
+        self.state.view_mode = mode;
+        match mode {
+            ViewMode::Cacowards => self.state.cacowards.needs_reload = true,
+            ViewMode::Stats => self.state.stats.needs_reload = true,
+            ViewMode::Library | ViewMode::Import => {}
+        }
+    }
+
     /// Dismiss whatever dialog is open. Public for `tests/screenshots.rs`,
     /// which walks every dialog in turn.
     pub fn close_dialog(&mut self) {
@@ -355,10 +367,6 @@ impl CacoApp {
                 if let Some(dialog) = SessionsDialogState::new(&self.conn, wad_id) {
                     self.state.active_dialog = Some(ActiveDialog::Sessions(dialog));
                 }
-            }
-            ActionRequest::Stats => {
-                let dialog = StatsDialogState::new(&self.conn);
-                self.state.active_dialog = Some(ActiveDialog::Stats(dialog));
             }
             ActionRequest::Cache => {
                 let dialog = CacheDialogState::new(&self.conn);
@@ -875,6 +883,9 @@ impl CacoApp {
         if self.state.cacowards.needs_reload && self.state.view_mode == ViewMode::Cacowards {
             self.state.reload_cacowards(&self.conn);
         }
+        if self.state.stats.needs_reload && self.state.view_mode == ViewMode::Stats {
+            self.state.reload_stats(&self.conn);
+        }
 
         // 4. Render active dialog (modal, overlays everything)
         if let Some(action) = render_active_dialog(&mut self.state, &self.conn, ctx) {
@@ -986,6 +997,14 @@ impl CacoApp {
                         if let Some(import_action) = import::render(ui, &mut self.state.import) {
                             self.dispatch_import_action(import_action);
                         }
+                    }
+                    ViewMode::Stats => {
+                        egui::ScrollArea::vertical()
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                ui.set_min_width(ui.available_width());
+                                panels::stats::render(ui, &self.state);
+                            });
                     }
                     ViewMode::Cacowards => {
                         egui::ScrollArea::vertical()

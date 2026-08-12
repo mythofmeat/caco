@@ -24,7 +24,7 @@
 
 use std::path::{Path, PathBuf};
 
-use caco::state::ActionRequest;
+use caco::state::{ActionRequest, ViewMode};
 
 /// Viewport used for every shot unless `CACO_SHOT_SIZE` says otherwise.
 /// 1200x800 is `main.rs`'s `with_inner_size`, so this is the window a user
@@ -117,6 +117,18 @@ impl Shooter {
         println!("wrote {}", path.display());
     }
 
+    /// Switch to a full-panel view and shoot it.
+    fn shot_view(&mut self, name: &str, mode: ViewMode) {
+        self.harness.state_mut().set_view(mode);
+        for _ in 0..6 {
+            self.harness.run();
+            std::thread::sleep(std::time::Duration::from_millis(80));
+        }
+        self.shot(name);
+        self.harness.state_mut().set_view(ViewMode::Library);
+        self.harness.run();
+    }
+
     /// Open a dialog through the same path a click takes, shoot it, close it.
     ///
     /// Returns how far the dialog spills outside the app window, per edge, in
@@ -175,9 +187,17 @@ fn shoot_every_surface() {
 
     s.shot("01-library-grid");
 
+    // Views, not dialogs — no overflow check applies, but a blank page is
+    // still a failure worth seeing.
+    for (name, mode) in [
+        ("02-stats", ViewMode::Stats),
+        ("03-cacowards", ViewMode::Cacowards),
+    ] {
+        s.shot_view(name, mode);
+    }
+
     let mut escaped = Vec::new();
     for (name, action) in [
-        ("stats", ActionRequest::Stats),
         ("cache", ActionRequest::Cache),
         ("profiles", ActionRequest::Profiles),
         ("companions", ActionRequest::Companions),

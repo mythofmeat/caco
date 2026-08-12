@@ -37,6 +37,7 @@ fn render_breadcrumbs(ui: &mut egui::Ui, state: &AppState) {
         let base = match state.view_mode {
             ViewMode::Import => "Import",
             ViewMode::Cacowards => "Cacowards",
+            ViewMode::Stats => "Stats",
             ViewMode::Library => "Library",
         };
 

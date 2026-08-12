@@ -2,6 +2,7 @@ pub mod cacowards;
 pub mod filter_bar;
 pub mod library;
 pub mod sort_controls;
+pub mod stats;
 pub mod wad_grid;
 pub mod wad_table;
 

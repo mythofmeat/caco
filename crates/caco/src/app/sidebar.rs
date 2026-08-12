@@ -50,6 +50,16 @@ pub(super) fn render_sidebar(
         // and keeps the year strip honest after an enrich or import.
         state.cacowards.needs_reload = true;
     }
+    if theme::sidebar_nav_item(ui, "Stats", state.view_mode == ViewMode::Stats) {
+        if state.clear_active_collection() {
+            state.needs_reload = true;
+        }
+        state.view_mode = ViewMode::Stats;
+        // Same reasoning as Cacowards: one aggregate query, and a figure that
+        // silently predates the session you just finished is worse than a
+        // brief wait.
+        state.stats.needs_reload = true;
+    }
 
     // Divider
     ui.add_space(12.0);
@@ -218,11 +228,6 @@ struct Tool {
 /// The management dialogs, in the order they appear in the sidebar: the
 /// everyday three first, then library maintenance, then setup.
 const TOOLS: &[Tool] = &[
-    Tool {
-        label: "Stats",
-        action: || ActionRequest::Stats,
-        hint: "Playtime and library totals",
-    },
     Tool {
         label: "Cache",
         action: || ActionRequest::Cache,

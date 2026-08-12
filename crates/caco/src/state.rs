@@ -23,7 +23,6 @@ use crate::dialogs::profiles::ProfilesDialogState;
 use crate::dialogs::resources::ResourcesDialogState;
 use crate::dialogs::sessions::SessionsDialogState;
 use crate::dialogs::settings::SettingsDialogState;
-use crate::dialogs::stats::StatsDialogState;
 use crate::dialogs::trash::TrashDialogState;
 use crate::dialogs::wad_data::WadDataDialogState;
 use crate::dialogs::wad_stats::WadStatsDialogState;
@@ -36,7 +35,7 @@ use crate::persist;
 // View mode (Library vs Import)
 // ---------------------------------------------------------------------------
 
-#[derive(Default, PartialEq, Eq)]
+#[derive(Default, PartialEq, Eq, Clone, Copy)]
 pub enum ViewMode {
     #[default]
     Library,
@@ -44,6 +43,9 @@ pub enum ViewMode {
     /// Magazine-style view over the `cacowards` table — see
     /// [`CacowardsState`] for the data backing it.
     Cacowards,
+    /// Library-wide playtime and completion figures. A view rather than a
+    /// dialog because nothing in it is an action — you go there to read.
+    Stats,
 }
 
 // ---------------------------------------------------------------------------
@@ -72,7 +74,6 @@ pub enum ActionRequest {
     WadData(i64),
     /// Play back a demo file (by name) from a WAD's demos directory.
     PlayDemo(i64, String),
-    Stats,
     Cache,
     Settings,
     Resources,
@@ -122,7 +123,6 @@ pub enum ActiveDialog {
     Edit(Box<EditDialogState>),
     Delete(DeleteDialogState),
     Sessions(SessionsDialogState),
-    Stats(StatsDialogState),
     Cache(CacheDialogState),
     Profiles(Box<ProfilesDialogState>),
     Collections(CollectionsDialogState),
@@ -227,6 +227,20 @@ pub struct AppState {
     /// Magazine-style Cacowards view state. Independent of `wads`/library
     /// state so switching views doesn't churn either side's cache.
     pub cacowards: CacowardsState,
+
+    /// Library statistics view state.
+    pub stats: StatsState,
+}
+
+/// Backing data for [`ViewMode::Stats`].
+///
+/// The snapshot is one aggregate query over every session, so it is pulled on
+/// entry to the view rather than per frame, and re-pulled when something that
+/// feeds it changes — a finished session, an import, a delete.
+#[derive(Default)]
+pub struct StatsState {
+    pub snapshot: Option<caco_core::db::sessions::StatsSnapshot>,
+    pub needs_reload: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -349,6 +363,7 @@ impl AppState {
             sidebar_collections: Vec::new(),
             active_collection: None,
             cacowards: CacowardsState::default(),
+            stats: StatsState::default(),
         }
     }
 
@@ -491,6 +506,12 @@ impl AppState {
     /// plus its effective status in one query, then picks the newest year
     /// as the focused tab if the previous focus is gone (e.g. after a
     /// re-enrich removed entries for that year).
+    /// Pull the library-wide stats snapshot for [`ViewMode::Stats`].
+    pub fn reload_stats(&mut self, conn: &Connection) {
+        self.stats.snapshot = caco_core::db::sessions::get_stats_snapshot(conn, "month").ok();
+        self.stats.needs_reload = false;
+    }
+
     pub fn reload_cacowards(&mut self, conn: &Connection) {
         match caco_core::db::cacowards::search_cacowards(
             conn,

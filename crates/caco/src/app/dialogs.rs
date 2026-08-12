@@ -16,7 +16,6 @@ use crate::dialogs::profiles::ProfilesResult;
 use crate::dialogs::resources::ResourcesResult;
 use crate::dialogs::sessions::SessionsResult;
 use crate::dialogs::settings::SettingsResult;
-use crate::dialogs::stats::StatsResult;
 use crate::dialogs::trash::TrashResult;
 use crate::dialogs::wad_data::WadDataResult;
 use crate::dialogs::wad_stats::WadStatsResult;
@@ -77,12 +76,6 @@ pub(super) fn render_active_dialog(
                     close_dialog = true;
                 }
                 SessionsResult::Open => {}
-            },
-            ActiveDialog::Stats(stats_state) => match stats_state.render(ctx) {
-                StatsResult::Closed => {
-                    close_dialog = true;
-                }
-                StatsResult::Open => {}
             },
             ActiveDialog::Cache(cache_state) => match cache_state.render(ctx, conn) {
                 CacheResult::Closed => {

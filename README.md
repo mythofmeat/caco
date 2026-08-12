@@ -91,13 +91,13 @@ the sourceport.
 - Right-hand detail sidebar with metadata, play stats, and quick actions
 - Cacowards view — a year-by-year browse of Doomworld's awards where entries you
   don't own yet are flagged `absent` with an inline Import button
+- Stats view — headline totals, a status breakdown, and month-by-month activity
 - Keyboard shortcuts: `j/k`, `g`/`G`, `Home`/`End`, `Enter`, `E`, `D`, `S`, `M`, `F`, `P`, `Esc`
 
 ### Dialogs
 
 | Sidebar | What it does |
 |---------|--------------|
-| Stats | Library statistics — playtime, completions, activity over time |
 | Cache | Managed WAD files; bulk clear skips anything that cannot be re-downloaded |
 | Files | Companion file registry: every managed file, the WADs using it, and orphan cleanup |
 | Profiles | Per-sourceport config profiles, edited in place |

@@ -281,11 +281,27 @@ pins the behaviour.
 
 ## GUI Surfaces
 
-Sidebar entries (`app/sidebar.rs` → `ActionRequest` → `app.rs::dispatch_action`):
+The sidebar separates **views**, which change what the central panel shows,
+from **tools**, which open a modal. They were one undifferentiated list; the
+split is why `Stats` moved — nothing in it is an action, so blocking the app
+behind a window to read four numbers was the wrong shape.
+
+Views (`app/sidebar.rs` sets `ViewMode` directly):
+
+| Entry | Panel | Backed by |
+|-------|-------|-----------|
+| Library | `panels/library.rs` + `wad_grid` / `wad_table` | `db::search_wads` |
+| Import | `import/` | `caco_sources::import_service` |
+| Cacowards | `panels/cacowards.rs` | `state::CacowardsState` |
+| Stats | `panels/stats.rs` | `state::StatsState` ← `db::sessions::get_stats_snapshot` |
+
+Each view owns a `needs_reload` flag its sidebar entry sets on entry, so a
+figure that predates the session you just finished cannot be shown.
+
+Tools (`app/sidebar.rs` → `ActionRequest` → `app.rs::dispatch_action`):
 
 | Entry | Dialog | Backed by |
 |-------|--------|-----------|
-| Stats | `dialogs/stats.rs` | `db::sessions` aggregates |
 | Cache | `dialogs/cache.rs` | `db::sessions::get_cached_wads` |
 | Files | `dialogs/companions.rs` | `companion_service` + `db::get_wads_for_companion` |
 | Profiles | `dialogs/profiles.rs` | `caco_core::profiles` |
