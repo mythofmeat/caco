@@ -236,44 +236,40 @@ impl GcDialogState {
     pub fn render(&mut self, ctx: &egui::Context, conn: &Connection) -> GcResult {
         let mut result = GcResult::Open;
 
-        egui::Window::new("Clean Up")
-            .collapsible(false)
-            .resizable(true)
-            .default_size([820.0, 560.0])
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
-                self.render_options(ui, conn);
-                ui.add_space(6.0);
-                ui.separator();
-                ui.add_space(6.0);
+        crate::dialogs::modal_window(ctx, "Clean Up", [820.0, 560.0]).show(ctx, |ui| {
+            self.render_options(ui, conn);
+            ui.add_space(6.0);
+            ui.separator();
+            ui.add_space(6.0);
 
-                if self.plan.is_empty() {
-                    ui.colored_label(theme::TEXT_SECONDARY, "Nothing to clean up.");
+            if self.plan.is_empty() {
+                ui.colored_label(theme::TEXT_SECONDARY, "Nothing to clean up.");
+            } else {
+                // Chrome: title bar, the keep-toggles row above, and the
+                // Clean/Rescan/Close row plus status line below. A constant
+                // 340 here was taller than the whole 800x400 minimum window.
+                crate::dialogs::modal_body(ctx, ui, 170.0, |ui| {
+                    for section in Section::ALL {
+                        self.render_section(ui, section);
+                    }
+                });
+            }
+
+            ui.add_space(6.0);
+            ui.separator();
+            ui.add_space(6.0);
+            self.render_actions(ui, conn, &mut result);
+
+            if let Some(status) = &self.status {
+                ui.add_space(4.0);
+                let color = if status.is_error {
+                    theme::COLOR_ERROR
                 } else {
-                    egui::ScrollArea::vertical()
-                        .max_height(340.0)
-                        .show(ui, |ui| {
-                            for section in Section::ALL {
-                                self.render_section(ui, section);
-                            }
-                        });
-                }
-
-                ui.add_space(6.0);
-                ui.separator();
-                ui.add_space(6.0);
-                self.render_actions(ui, conn, &mut result);
-
-                if let Some(status) = &self.status {
-                    ui.add_space(4.0);
-                    let color = if status.is_error {
-                        theme::COLOR_ERROR
-                    } else {
-                        theme::TEXT_SECONDARY
-                    };
-                    ui.colored_label(color, &status.text);
-                }
-            });
+                    theme::TEXT_SECONDARY
+                };
+                ui.colored_label(color, &status.text);
+            }
+        });
 
         // Escape backs out of the confirmation before it closes the dialog.
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {

@@ -39,67 +39,62 @@ impl DeleteDialogState {
     pub fn render(&self, ctx: &egui::Context, conn: &Connection) -> DeleteResult {
         let mut result = DeleteResult::Open;
 
-        egui::Window::new("Confirm Delete")
-            .collapsible(false)
-            .resizable(false)
-            .fixed_size([350.0, 200.0])
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
-                ui.spacing_mut().item_spacing.y = 8.0;
+        crate::dialogs::modal_window(ctx, "Confirm Delete", [350.0, 200.0]).show(ctx, |ui| {
+            ui.spacing_mut().item_spacing.y = 8.0;
 
+            ui.colored_label(
+                theme::TEXT_PRIMARY,
+                egui::RichText::new("Delete this WAD?").heading(),
+            );
+
+            ui.add_space(4.0);
+
+            // WAD info
+            ui.colored_label(
+                theme::TEXT_ACCENT,
+                egui::RichText::new(&self.wad_title).strong(),
+            );
+            if let Some(author) = &self.wad_author {
+                ui.colored_label(theme::TEXT_SECONDARY, format!("by {author}"));
+            }
+
+            ui.add_space(4.0);
+
+            // Stats
+            if self.session_count > 0 {
                 ui.colored_label(
-                    theme::TEXT_PRIMARY,
-                    egui::RichText::new("Delete this WAD?").heading(),
+                    theme::TEXT_SECONDARY,
+                    format!(
+                        "{} session{}, {} played",
+                        self.session_count,
+                        if self.session_count == 1 { "" } else { "s" },
+                        caco_core::player::format_duration(self.total_playtime),
+                    ),
                 );
+            }
 
-                ui.add_space(4.0);
+            ui.add_space(8.0);
+            ui.separator();
+            ui.add_space(4.0);
 
-                // WAD info
-                ui.colored_label(
-                    theme::TEXT_ACCENT,
-                    egui::RichText::new(&self.wad_title).strong(),
-                );
-                if let Some(author) = &self.wad_author {
-                    ui.colored_label(theme::TEXT_SECONDARY, format!("by {author}"));
-                }
-
-                ui.add_space(4.0);
-
-                // Stats
-                if self.session_count > 0 {
-                    ui.colored_label(
-                        theme::TEXT_SECONDARY,
-                        format!(
-                            "{} session{}, {} played",
-                            self.session_count,
-                            if self.session_count == 1 { "" } else { "s" },
-                            caco_core::player::format_duration(self.total_playtime),
-                        ),
-                    );
-                }
-
-                ui.add_space(8.0);
-                ui.separator();
-                ui.add_space(4.0);
-
-                // Buttons
-                ui.horizontal(|ui| {
-                    if ui
-                        .button(egui::RichText::new("Delete").color(crate::theme::COLOR_ERROR))
-                        .clicked()
-                    {
-                        match caco_core::db::wads::delete_wad(conn, self.wad_id, false) {
-                            Ok(_) => result = DeleteResult::Confirmed,
-                            Err(e) => {
-                                result = DeleteResult::Error(format!("Delete failed: {e}"));
-                            }
+            // Buttons
+            ui.horizontal(|ui| {
+                if ui
+                    .button(egui::RichText::new("Delete").color(crate::theme::COLOR_ERROR))
+                    .clicked()
+                {
+                    match caco_core::db::wads::delete_wad(conn, self.wad_id, false) {
+                        Ok(_) => result = DeleteResult::Confirmed,
+                        Err(e) => {
+                            result = DeleteResult::Error(format!("Delete failed: {e}"));
                         }
                     }
-                    if ui.button("Cancel").clicked() {
-                        result = DeleteResult::Cancelled;
-                    }
-                });
+                }
+                if ui.button("Cancel").clicked() {
+                    result = DeleteResult::Cancelled;
+                }
             });
+        });
 
         // Also close on Escape
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {

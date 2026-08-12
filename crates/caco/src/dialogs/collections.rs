@@ -86,93 +86,88 @@ impl CollectionsDialogState {
     pub fn render(&mut self, ctx: &egui::Context, conn: &Connection) -> CollectionsResult {
         let mut result = CollectionsResult::Open;
 
-        egui::Window::new("Collections")
-            .collapsible(false)
-            .resizable(true)
-            .default_size([600.0, 420.0])
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
-                // Table of collections
-                self.render_table(ui);
+        crate::dialogs::modal_window(ctx, "Collections", [600.0, 420.0]).show(ctx, |ui| {
+            // Table of collections
+            self.render_table(ui);
 
-                ui.add_space(4.0);
-                ui.separator();
-                ui.add_space(4.0);
+            ui.add_space(4.0);
+            ui.separator();
+            ui.add_space(4.0);
 
-                // Add/Edit form (shown when in edit mode)
-                match &self.edit_mode {
-                    EditMode::Add | EditMode::Edit(_) => {
-                        self.render_form(ui, conn);
-                    }
-                    EditMode::None => {}
+            // Add/Edit form (shown when in edit mode)
+            match &self.edit_mode {
+                EditMode::Add | EditMode::Edit(_) => {
+                    self.render_form(ui, conn);
+                }
+                EditMode::None => {}
+            }
+
+            // Status text
+            if let Some((text, is_error)) = &self.status_text {
+                let color = if *is_error {
+                    theme::COLOR_ERROR
+                } else {
+                    theme::COLOR_SUCCESS
+                };
+                ui.colored_label(color, text.as_str());
+                ui.add_space(4.0);
+            }
+
+            // Button row
+            ui.horizontal(|ui| {
+                let is_editing = !matches!(self.edit_mode, EditMode::None);
+                let has_selection = self.selected.is_some() && !self.collections.is_empty();
+
+                if ui
+                    .add_enabled(!is_editing, egui::Button::new("Add"))
+                    .clicked()
+                {
+                    self.edit_mode = EditMode::Add;
+                    self.form_name.clear();
+                    self.form_query.clear();
+                    self.form_sort.clear();
+                    self.form_desc = true;
+                    self.status_text = None;
                 }
 
-                // Status text
-                if let Some((text, is_error)) = &self.status_text {
-                    let color = if *is_error {
-                        theme::COLOR_ERROR
-                    } else {
-                        theme::COLOR_SUCCESS
-                    };
-                    ui.colored_label(color, text.as_str());
-                    ui.add_space(4.0);
+                if ui
+                    .add_enabled(has_selection && !is_editing, egui::Button::new("Edit"))
+                    .clicked()
+                    && let Some(idx) = self.selected
+                {
+                    let coll = &self.collections[idx];
+                    self.form_name = coll.name.clone();
+                    self.form_query = coll.query.clone();
+                    self.form_sort = coll.sort_by.clone().unwrap_or_default();
+                    self.form_desc = coll.sort_desc;
+                    self.edit_mode = EditMode::Edit(coll.name.clone());
+                    self.status_text = None;
                 }
 
-                // Button row
-                ui.horizontal(|ui| {
-                    let is_editing = !matches!(self.edit_mode, EditMode::None);
-                    let has_selection = self.selected.is_some() && !self.collections.is_empty();
+                if ui
+                    .add_enabled(has_selection && !is_editing, egui::Button::new("Delete"))
+                    .clicked()
+                {
+                    self.do_delete(conn);
+                }
 
-                    if ui
-                        .add_enabled(!is_editing, egui::Button::new("Add"))
-                        .clicked()
-                    {
-                        self.edit_mode = EditMode::Add;
-                        self.form_name.clear();
-                        self.form_query.clear();
-                        self.form_sort.clear();
-                        self.form_desc = true;
-                        self.status_text = None;
+                if ui
+                    .add_enabled(has_selection && !is_editing, egui::Button::new("Load"))
+                    .on_hover_text("Apply this collection's query to the library filter")
+                    .clicked()
+                    && let Some(idx) = self.selected
+                {
+                    let query = self.collections[idx].query.clone();
+                    result = CollectionsResult::LoadQuery(query);
+                }
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("Close").clicked() {
+                        result = CollectionsResult::Closed;
                     }
-
-                    if ui
-                        .add_enabled(has_selection && !is_editing, egui::Button::new("Edit"))
-                        .clicked()
-                        && let Some(idx) = self.selected
-                    {
-                        let coll = &self.collections[idx];
-                        self.form_name = coll.name.clone();
-                        self.form_query = coll.query.clone();
-                        self.form_sort = coll.sort_by.clone().unwrap_or_default();
-                        self.form_desc = coll.sort_desc;
-                        self.edit_mode = EditMode::Edit(coll.name.clone());
-                        self.status_text = None;
-                    }
-
-                    if ui
-                        .add_enabled(has_selection && !is_editing, egui::Button::new("Delete"))
-                        .clicked()
-                    {
-                        self.do_delete(conn);
-                    }
-
-                    if ui
-                        .add_enabled(has_selection && !is_editing, egui::Button::new("Load"))
-                        .on_hover_text("Apply this collection's query to the library filter")
-                        .clicked()
-                        && let Some(idx) = self.selected
-                    {
-                        let query = self.collections[idx].query.clone();
-                        result = CollectionsResult::LoadQuery(query);
-                    }
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("Close").clicked() {
-                            result = CollectionsResult::Closed;
-                        }
-                    });
                 });
             });
+        });
 
         // Escape closes (unless editing form)
         if matches!(self.edit_mode, EditMode::None)

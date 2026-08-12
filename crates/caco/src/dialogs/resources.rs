@@ -125,112 +125,107 @@ impl ResourcesDialogState {
 
         let mut result = ResourcesResult::Open;
 
-        egui::Window::new("Resources")
-            .collapsible(false)
-            .resizable(true)
-            .default_size([750.0, 500.0])
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
-                // Tab bar
-                ui.horizontal(|ui| {
-                    let iwad_active = self.active_tab == ResourceTab::Iwad;
-                    let iwad_text = egui::RichText::new("IWAD");
-                    let iwad_text = if iwad_active {
-                        iwad_text.strong().color(theme::TEXT_ACCENT)
-                    } else {
-                        iwad_text.color(theme::TEXT_SECONDARY)
-                    };
-                    if ui.selectable_label(iwad_active, iwad_text).clicked() {
-                        self.active_tab = ResourceTab::Iwad;
-                    }
-
-                    let id24_active = self.active_tab == ResourceTab::Id24;
-                    let id24_text = egui::RichText::new("id24");
-                    let id24_text = if id24_active {
-                        id24_text.strong().color(theme::TEXT_ACCENT)
-                    } else {
-                        id24_text.color(theme::TEXT_SECONDARY)
-                    };
-                    if ui.selectable_label(id24_active, id24_text).clicked() {
-                        self.active_tab = ResourceTab::Id24;
-                    }
-                });
-
-                ui.add_space(4.0);
-
-                // Table
-                match self.active_tab {
-                    ResourceTab::Iwad => self.render_iwad_table(ui),
-                    ResourceTab::Id24 => self.render_id24_table(ui),
+        crate::dialogs::modal_window(ctx, "Resources", [750.0, 500.0]).show(ctx, |ui| {
+            // Tab bar
+            ui.horizontal(|ui| {
+                let iwad_active = self.active_tab == ResourceTab::Iwad;
+                let iwad_text = egui::RichText::new("IWAD");
+                let iwad_text = if iwad_active {
+                    iwad_text.strong().color(theme::TEXT_ACCENT)
+                } else {
+                    iwad_text.color(theme::TEXT_SECONDARY)
+                };
+                if ui.selectable_label(iwad_active, iwad_text).clicked() {
+                    self.active_tab = ResourceTab::Iwad;
                 }
 
-                ui.add_space(4.0);
-                ui.separator();
-                ui.add_space(4.0);
+                let id24_active = self.active_tab == ResourceTab::Id24;
+                let id24_text = egui::RichText::new("id24");
+                let id24_text = if id24_active {
+                    id24_text.strong().color(theme::TEXT_ACCENT)
+                } else {
+                    id24_text.color(theme::TEXT_SECONDARY)
+                };
+                if ui.selectable_label(id24_active, id24_text).clicked() {
+                    self.active_tab = ResourceTab::Id24;
+                }
+            });
 
-                // Import row
-                ui.horizontal(|ui| {
-                    ui.label("Import path:");
-                    let response = ui.add(
-                        egui::TextEdit::singleline(&mut self.import_path)
-                            .desired_width(ui.available_width() - 120.0)
-                            .hint_text("Path to IWAD or id24 WAD file..."),
-                    );
-                    let enter_pressed =
-                        response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    let browse_busy = self.pending_browse.is_some();
-                    if ui
-                        .add_enabled(!browse_busy, egui::Button::new("Browse\u{2026}"))
-                        .clicked()
-                    {
-                        let mut req = crate::workers::FileDialogRequest::open()
-                            .add_filter("WAD files", &["wad"]);
-                        if let Some(dir) = dirs::home_dir() {
-                            req = req.set_directory(dir);
-                        }
-                        self.pending_browse =
-                            Some(crate::workers::spawn_file_dialog(Some(ctx.clone()), req));
-                    }
-                    if ui.button("Add").clicked() || enter_pressed {
-                        self.do_import(conn);
-                    }
-                });
+            ui.add_space(4.0);
 
-                // Status text
-                if let Some((text, is_error)) = &self.status_text {
-                    let color = if *is_error {
-                        theme::COLOR_ERROR
-                    } else {
-                        theme::COLOR_SUCCESS
-                    };
-                    ui.colored_label(color, text.as_str());
+            // Table
+            match self.active_tab {
+                ResourceTab::Iwad => self.render_iwad_table(ui),
+                ResourceTab::Id24 => self.render_id24_table(ui),
+            }
+
+            ui.add_space(4.0);
+            ui.separator();
+            ui.add_space(4.0);
+
+            // Import row
+            ui.horizontal(|ui| {
+                ui.label("Import path:");
+                let response = ui.add(
+                    egui::TextEdit::singleline(&mut self.import_path)
+                        .desired_width(ui.available_width() - 120.0)
+                        .hint_text("Path to IWAD or id24 WAD file..."),
+                );
+                let enter_pressed =
+                    response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                let browse_busy = self.pending_browse.is_some();
+                if ui
+                    .add_enabled(!browse_busy, egui::Button::new("Browse\u{2026}"))
+                    .clicked()
+                {
+                    let mut req =
+                        crate::workers::FileDialogRequest::open().add_filter("WAD files", &["wad"]);
+                    if let Some(dir) = dirs::home_dir() {
+                        req = req.set_directory(dir);
+                    }
+                    self.pending_browse =
+                        Some(crate::workers::spawn_file_dialog(Some(ctx.clone()), req));
+                }
+                if ui.button("Add").clicked() || enter_pressed {
+                    self.do_import(conn);
+                }
+            });
+
+            // Status text
+            if let Some((text, is_error)) = &self.status_text {
+                let color = if *is_error {
+                    theme::COLOR_ERROR
+                } else {
+                    theme::COLOR_SUCCESS
+                };
+                ui.colored_label(color, text.as_str());
+            }
+
+            ui.add_space(4.0);
+            ui.separator();
+            ui.add_space(4.0);
+
+            // Button row
+            ui.horizontal(|ui| {
+                let has_selection = match self.active_tab {
+                    ResourceTab::Iwad => self.selected_iwad.is_some() && !self.iwads.is_empty(),
+                    ResourceTab::Id24 => self.selected_id24.is_some() && !self.id24s.is_empty(),
+                };
+
+                if ui
+                    .add_enabled(has_selection, egui::Button::new("Delete Selected"))
+                    .clicked()
+                {
+                    self.do_delete(conn);
                 }
 
-                ui.add_space(4.0);
-                ui.separator();
-                ui.add_space(4.0);
-
-                // Button row
-                ui.horizontal(|ui| {
-                    let has_selection = match self.active_tab {
-                        ResourceTab::Iwad => self.selected_iwad.is_some() && !self.iwads.is_empty(),
-                        ResourceTab::Id24 => self.selected_id24.is_some() && !self.id24s.is_empty(),
-                    };
-
-                    if ui
-                        .add_enabled(has_selection, egui::Button::new("Delete Selected"))
-                        .clicked()
-                    {
-                        self.do_delete(conn);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("Close").clicked() {
+                        result = ResourcesResult::Closed;
                     }
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("Close").clicked() {
-                            result = ResourcesResult::Closed;
-                        }
-                    });
                 });
             });
+        });
 
         // Escape closes
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {

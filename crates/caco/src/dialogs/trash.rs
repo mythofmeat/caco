@@ -132,55 +132,50 @@ impl TrashDialogState {
     pub fn render(&mut self, ctx: &egui::Context, conn: &Connection) -> TrashResult {
         let mut result = TrashResult::Open;
 
-        egui::Window::new("Trash")
-            .collapsible(false)
-            .resizable(true)
-            .default_size([680.0, 440.0])
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
-                if self.wads.is_empty() {
-                    ui.colored_label(theme::TEXT_SECONDARY, "Trash is empty.");
-                } else {
-                    ui.colored_label(
-                        theme::TEXT_SECONDARY,
-                        format!(
-                            "{} deleted WAD{} — the rows are kept until purged.",
-                            self.wads.len(),
-                            if self.wads.len() == 1 { "" } else { "s" }
-                        ),
-                    );
-                    ui.add_space(4.0);
-                    self.render_list(ui);
-                }
-
+        crate::dialogs::modal_window(ctx, "Trash", [680.0, 440.0]).show(ctx, |ui| {
+            if self.wads.is_empty() {
+                ui.colored_label(theme::TEXT_SECONDARY, "Trash is empty.");
+            } else {
+                ui.colored_label(
+                    theme::TEXT_SECONDARY,
+                    format!(
+                        "{} deleted WAD{} — the rows are kept until purged.",
+                        self.wads.len(),
+                        if self.wads.len() == 1 { "" } else { "s" }
+                    ),
+                );
                 ui.add_space(4.0);
-                ui.separator();
+                self.render_list(ui);
+            }
+
+            ui.add_space(4.0);
+            ui.separator();
+            ui.add_space(4.0);
+
+            if let Some(prompt) = self.pending_prompt() {
+                ui.colored_label(theme::COLOR_ERROR, prompt);
+                ui.horizontal(|ui| {
+                    if ui.button("Delete Permanently").clicked() {
+                        self.run_pending(conn);
+                    }
+                    if ui.button("Cancel").clicked() {
+                        self.pending = None;
+                    }
+                });
+            } else {
+                self.render_actions(ui, conn, &mut result);
+            }
+
+            if let Some(status) = &self.status {
                 ui.add_space(4.0);
-
-                if let Some(prompt) = self.pending_prompt() {
-                    ui.colored_label(theme::COLOR_ERROR, prompt);
-                    ui.horizontal(|ui| {
-                        if ui.button("Delete Permanently").clicked() {
-                            self.run_pending(conn);
-                        }
-                        if ui.button("Cancel").clicked() {
-                            self.pending = None;
-                        }
-                    });
+                let color = if status.is_error {
+                    theme::COLOR_ERROR
                 } else {
-                    self.render_actions(ui, conn, &mut result);
-                }
-
-                if let Some(status) = &self.status {
-                    ui.add_space(4.0);
-                    let color = if status.is_error {
-                        theme::COLOR_ERROR
-                    } else {
-                        theme::TEXT_SECONDARY
-                    };
-                    ui.colored_label(color, &status.text);
-                }
-            });
+                    theme::TEXT_SECONDARY
+                };
+                ui.colored_label(color, &status.text);
+            }
+        });
 
         // Escape backs out of a confirmation before it closes the dialog.
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {

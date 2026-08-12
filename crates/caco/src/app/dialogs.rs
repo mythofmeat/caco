@@ -37,6 +37,10 @@ pub(super) fn render_active_dialog(
     let mut close_dialog = false;
     let mut follow_up_action = None;
     if let Some(dialog) = &mut state.active_dialog {
+        // Every dialog here is modal — the library behind it ignores clicks
+        // until it closes — but an undimmed one just looks like a floating
+        // panel, so a click that goes nowhere reads as the app being frozen.
+        crate::dialogs::dim_backdrop(ctx);
         match dialog {
             ActiveDialog::Edit(edit_state) => match edit_state.render(ctx, conn) {
                 EditResult::Saved => {

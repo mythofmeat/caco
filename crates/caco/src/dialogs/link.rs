@@ -82,67 +82,62 @@ impl LinkDialogState {
 
         let mut result = LinkResult::Open;
 
-        egui::Window::new("WAD Unavailable")
-            .collapsible(false)
-            .resizable(false)
-            .fixed_size([440.0, 240.0])
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
-                ui.spacing_mut().item_spacing.y = 8.0;
+        crate::dialogs::modal_window(ctx, "WAD Unavailable", [440.0, 240.0]).show(ctx, |ui| {
+            ui.spacing_mut().item_spacing.y = 8.0;
 
-                // Title
-                ui.colored_label(
-                    theme::TEXT_PRIMARY,
-                    egui::RichText::new(&self.wad_title).heading(),
-                );
+            // Title
+            ui.colored_label(
+                theme::TEXT_PRIMARY,
+                egui::RichText::new(&self.wad_title).heading(),
+            );
 
-                ui.add_space(4.0);
+            ui.add_space(4.0);
 
-                ui.colored_label(
-                    theme::TEXT_SECONDARY,
-                    "The WAD file for this entry is not available locally.\n\
+            ui.colored_label(
+                theme::TEXT_SECONDARY,
+                "The WAD file for this entry is not available locally.\n\
                      You can open the source URL to download it, or link a local file.",
-                );
+            );
 
-                ui.add_space(8.0);
-                if let Some(error) = &self.error_message {
-                    ui.colored_label(theme::COLOR_ERROR, error);
-                    ui.add_space(4.0);
-                }
-                ui.separator();
+            ui.add_space(8.0);
+            if let Some(error) = &self.error_message {
+                ui.colored_label(theme::COLOR_ERROR, error);
                 ui.add_space(4.0);
+            }
+            ui.separator();
+            ui.add_space(4.0);
 
-                // Buttons
-                ui.horizontal(|ui| {
-                    // Open Source URL button
-                    let has_url = self.source_url.is_some();
-                    if ui
-                        .add_enabled(has_url, egui::Button::new("Open Source URL"))
-                        .clicked()
-                        && let Some(url) = &self.source_url
-                    {
-                        let _ = open::that(url);
-                    }
+            // Buttons
+            ui.horizontal(|ui| {
+                // Open Source URL button
+                let has_url = self.source_url.is_some();
+                if ui
+                    .add_enabled(has_url, egui::Button::new("Open Source URL"))
+                    .clicked()
+                    && let Some(url) = &self.source_url
+                {
+                    let _ = open::that(url);
+                }
 
-                    // Link Local File button — spawn an async picker. Disabled
-                    // while one is already in flight.
-                    let picker_busy = self.pending_picker.is_some();
-                    if ui
-                        .add_enabled(!picker_busy, egui::Button::new("Link Local File"))
-                        .clicked()
-                    {
-                        self.error_message = None;
-                        let req = FileDialogRequest::open()
-                            .add_filter("WAD/ZIP files", &["wad", "zip", "WAD", "ZIP"])
-                            .set_directory(dirs::home_dir().unwrap_or_default());
-                        self.pending_picker = Some(spawn_file_dialog(Some(ctx.clone()), req));
-                    }
+                // Link Local File button — spawn an async picker. Disabled
+                // while one is already in flight.
+                let picker_busy = self.pending_picker.is_some();
+                if ui
+                    .add_enabled(!picker_busy, egui::Button::new("Link Local File"))
+                    .clicked()
+                {
+                    self.error_message = None;
+                    let req = FileDialogRequest::open()
+                        .add_filter("WAD/ZIP files", &["wad", "zip", "WAD", "ZIP"])
+                        .set_directory(dirs::home_dir().unwrap_or_default());
+                    self.pending_picker = Some(spawn_file_dialog(Some(ctx.clone()), req));
+                }
 
-                    if ui.button("Cancel").clicked() {
-                        result = LinkResult::Cancelled;
-                    }
-                });
+                if ui.button("Cancel").clicked() {
+                    result = LinkResult::Cancelled;
+                }
             });
+        });
 
         // Close on Escape
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {

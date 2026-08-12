@@ -205,12 +205,8 @@ impl EditDialogState {
         let mut result = EditResult::Open;
         let mut companion_action: Option<CompanionAction> = None;
 
-        egui::Window::new("edit_wad_dialog")
+        crate::dialogs::modal_window(ctx, "edit_wad_dialog", [560.0, 580.0])
             .title_bar(false)
-            .collapsible(false)
-            .resizable(false)
-            .fixed_size([560.0, 580.0])
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .frame(
                 egui::Frame::new()
                     .fill(egui::Color32::from_rgb(0x1a, 0x14, 0x10))

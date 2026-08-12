@@ -160,12 +160,8 @@ impl PortsDialogState {
     pub fn render(&mut self, ctx: &egui::Context) -> PortsResult {
         let mut result = PortsResult::Open;
 
-        egui::Window::new("Sourceports")
-            .collapsible(false)
-            .resizable(true)
-            .default_size([820.0, 620.0])
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
+        crate::dialogs::modal_window(ctx, "Sourceports", [820.0, 620.0]).show(ctx, |ui| {
+            crate::dialogs::modal_body(ctx, ui, 36.0, |ui| {
                 if let Some(error) = &self.error {
                     ui.colored_label(theme::COLOR_ERROR, error);
                     ui.add_space(6.0);
@@ -189,15 +185,16 @@ impl PortsDialogState {
                 ui.separator();
                 ui.add_space(6.0);
                 self.render_log(ui);
-
-                ui.add_space(6.0);
-                if ui
-                    .add_enabled(self.running.is_none(), egui::Button::new("Close"))
-                    .clicked()
-                {
-                    result = PortsResult::Closed;
-                }
             });
+
+            ui.add_space(6.0);
+            if ui
+                .add_enabled(self.running.is_none(), egui::Button::new("Close"))
+                .clicked()
+            {
+                result = PortsResult::Closed;
+            }
+        });
 
         // Escape must not close mid-build: the log would be lost with nowhere
         // to report a failure.

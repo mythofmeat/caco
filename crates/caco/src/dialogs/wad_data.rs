@@ -202,61 +202,56 @@ impl WadDataDialogState {
     pub fn render(&mut self, ctx: &egui::Context) -> WadDataResult {
         let mut result = WadDataResult::Open;
 
-        egui::Window::new("Saves & Demos")
-            .collapsible(false)
-            .resizable(true)
-            .default_size([720.0, 460.0])
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
-                ui.strong(&self.wad_title);
-                ui.colored_label(theme::TEXT_SECONDARY, self.data_dir.display().to_string());
-                ui.add_space(6.0);
+        crate::dialogs::modal_window(ctx, "Saves & Demos", [720.0, 460.0]).show(ctx, |ui| {
+            ui.strong(&self.wad_title);
+            ui.colored_label(theme::TEXT_SECONDARY, self.data_dir.display().to_string());
+            ui.add_space(6.0);
 
-                ui.horizontal(|ui| {
-                    ui.selectable_value(
-                        &mut self.tab,
-                        Tab::Saves,
-                        format!("Saves ({})", self.saves.len()),
-                    );
-                    ui.selectable_value(
-                        &mut self.tab,
-                        Tab::Backups,
-                        format!("Backups ({})", self.backups.len()),
-                    );
-                    ui.selectable_value(
-                        &mut self.tab,
-                        Tab::Demos,
-                        format!("Demos ({})", self.demos.len()),
-                    );
-                });
-                ui.add_space(6.0);
-
-                match self.tab {
-                    Tab::Saves => self.render_saves(ui),
-                    Tab::Backups => self.render_backups(ui),
-                    Tab::Demos => self.render_demos(ui),
-                }
-
-                ui.add_space(4.0);
-                ui.separator();
-                ui.add_space(4.0);
-
-                if let Some(prompt) = self.pending_prompt() {
-                    self.render_confirmation(ui, &prompt);
-                } else {
-                    self.render_actions(ui, &mut result);
-                }
-
-                if let Some(status) = &self.status {
-                    ui.add_space(4.0);
-                    let color = if status.is_error {
-                        theme::COLOR_ERROR
-                    } else {
-                        theme::TEXT_SECONDARY
-                    };
-                    ui.colored_label(color, &status.text);
-                }
+            ui.horizontal(|ui| {
+                ui.selectable_value(
+                    &mut self.tab,
+                    Tab::Saves,
+                    format!("Saves ({})", self.saves.len()),
+                );
+                ui.selectable_value(
+                    &mut self.tab,
+                    Tab::Backups,
+                    format!("Backups ({})", self.backups.len()),
+                );
+                ui.selectable_value(
+                    &mut self.tab,
+                    Tab::Demos,
+                    format!("Demos ({})", self.demos.len()),
+                );
             });
+            ui.add_space(6.0);
+
+            match self.tab {
+                Tab::Saves => self.render_saves(ui),
+                Tab::Backups => self.render_backups(ui),
+                Tab::Demos => self.render_demos(ui),
+            }
+
+            ui.add_space(4.0);
+            ui.separator();
+            ui.add_space(4.0);
+
+            if let Some(prompt) = self.pending_prompt() {
+                self.render_confirmation(ui, &prompt);
+            } else {
+                self.render_actions(ui, &mut result);
+            }
+
+            if let Some(status) = &self.status {
+                ui.add_space(4.0);
+                let color = if status.is_error {
+                    theme::COLOR_ERROR
+                } else {
+                    theme::TEXT_SECONDARY
+                };
+                ui.colored_label(color, &status.text);
+            }
+        });
 
         // Escape dismisses a pending confirmation before it closes the dialog.
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {

@@ -49,98 +49,92 @@ impl CacowardLinkDialogState {
         let mut result = CacowardLinkResult::Open;
         let mut close_with_cancel = false;
 
-        egui::Window::new("Link cacoward entry")
-            .collapsible(false)
-            .resizable(true)
-            .default_width(520.0)
-            .default_height(540.0)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
-                ui.label(
-                    egui::RichText::new(format!("Link “{}” to:", self.cacoward_title))
-                        .size(13.0)
-                        .color(theme::TEXT_SECONDARY),
-                );
-                ui.add_space(8.0);
+        crate::dialogs::modal_window(ctx, "Link cacoward entry", [520.0, 540.0]).show(ctx, |ui| {
+            ui.label(
+                egui::RichText::new(format!("Link “{}” to:", self.cacoward_title))
+                    .size(13.0)
+                    .color(theme::TEXT_SECONDARY),
+            );
+            ui.add_space(8.0);
 
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Filter").color(theme::TEXT_MUTED));
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.filter)
-                            .hint_text("title or author")
-                            .desired_width(f32::INFINITY),
-                    );
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Filter").color(theme::TEXT_MUTED));
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.filter)
+                        .hint_text("title or author")
+                        .desired_width(f32::INFINITY),
+                );
+            });
+
+            ui.add_space(6.0);
+
+            let needle = self.filter.to_lowercase();
+            let matches: Vec<&(i64, String, Option<String>)> = if needle.is_empty() {
+                self.candidates.iter().collect()
+            } else {
+                self.candidates
+                    .iter()
+                    .filter(|(_, t, a)| {
+                        t.to_lowercase().contains(&needle)
+                            || a.as_deref()
+                                .map(|s| s.to_lowercase().contains(&needle))
+                                .unwrap_or(false)
+                    })
+                    .collect()
+            };
+
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .max_height(380.0)
+                .show(ui, |ui| {
+                    for (id, title, author) in &matches {
+                        let label = match author {
+                            Some(a) if !a.is_empty() => format!("{title} — {a}"),
+                            _ => title.clone(),
+                        };
+                        let selected = self.selected == Some(*id);
+                        let row = ui.add_sized(
+                            [ui.available_width(), 24.0],
+                            egui::SelectableLabel::new(selected, label),
+                        );
+                        if row.clicked() {
+                            self.selected = Some(*id);
+                        }
+                        if row.double_clicked() {
+                            result = CacowardLinkResult::Linked(self.cacoward_pk, *id);
+                        }
+                    }
+                    if matches.is_empty() {
+                        ui.add_space(20.0);
+                        ui.vertical_centered(|ui| {
+                            ui.colored_label(theme::TEXT_MUTED, "No matching WADs.");
+                        });
+                    }
                 });
 
-                ui.add_space(6.0);
-
-                let needle = self.filter.to_lowercase();
-                let matches: Vec<&(i64, String, Option<String>)> = if needle.is_empty() {
-                    self.candidates.iter().collect()
-                } else {
-                    self.candidates
-                        .iter()
-                        .filter(|(_, t, a)| {
-                            t.to_lowercase().contains(&needle)
-                                || a.as_deref()
-                                    .map(|s| s.to_lowercase().contains(&needle))
-                                    .unwrap_or(false)
-                        })
-                        .collect()
-                };
-
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .max_height(380.0)
-                    .show(ui, |ui| {
-                        for (id, title, author) in &matches {
-                            let label = match author {
-                                Some(a) if !a.is_empty() => format!("{title} — {a}"),
-                                _ => title.clone(),
-                            };
-                            let selected = self.selected == Some(*id);
-                            let row = ui.add_sized(
-                                [ui.available_width(), 24.0],
-                                egui::SelectableLabel::new(selected, label),
-                            );
-                            if row.clicked() {
-                                self.selected = Some(*id);
-                            }
-                            if row.double_clicked() {
-                                result = CacowardLinkResult::Linked(self.cacoward_pk, *id);
-                            }
-                        }
-                        if matches.is_empty() {
-                            ui.add_space(20.0);
-                            ui.vertical_centered(|ui| {
-                                ui.colored_label(theme::TEXT_MUTED, "No matching WADs.");
-                            });
-                        }
-                    });
-
-                ui.add_space(10.0);
-                ui.horizontal(|ui| {
-                    if ui.button("Cancel").clicked() {
-                        close_with_cancel = true;
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                if ui.button("Cancel").clicked() {
+                    close_with_cancel = true;
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let confirm = ui.add_enabled(
+                        self.selected.is_some(),
+                        egui::Button::new(
+                            egui::RichText::new("Link")
+                                .color(egui::Color32::from_rgb(0x1a, 0x0a, 0x04))
+                                .strong(),
+                        )
+                        .fill(theme::TEXT_ACCENT),
+                    );
+                    if confirm.clicked()
+                        && let Some(wad_id) = self.selected
+                    {
+                        result = CacowardLinkResult::Linked(self.cacoward_pk, wad_id);
                     }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let confirm = ui.add_enabled(
-                            self.selected.is_some(),
-                            egui::Button::new(
-                                egui::RichText::new("Link")
-                                    .color(egui::Color32::from_rgb(0x1a, 0x0a, 0x04))
-                                    .strong(),
-                            )
-                            .fill(theme::TEXT_ACCENT),
-                        );
-                        if confirm.clicked()
-                            && let Some(wad_id) = self.selected
-                        {
-                            result = CacowardLinkResult::Linked(self.cacoward_pk, wad_id);
-                        }
-                    });
                 });
             });
+        });
 
         if close_with_cancel {
             CacowardLinkResult::Cancelled

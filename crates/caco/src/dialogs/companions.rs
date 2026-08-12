@@ -162,86 +162,81 @@ impl CompanionsDialogState {
     pub fn render(&mut self, ctx: &egui::Context, conn: &Connection) -> CompanionsResult {
         let mut result = CompanionsResult::Open;
 
-        egui::Window::new("Companion Files")
-            .collapsible(false)
-            .resizable(true)
-            .default_size([780.0, 480.0])
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
-                let total: i64 = self.entries.iter().map(|e| e.size).sum();
-                let orphans = self.orphan_count();
+        crate::dialogs::modal_window(ctx, "Companion Files", [780.0, 480.0]).show(ctx, |ui| {
+            let total: i64 = self.entries.iter().map(|e| e.size).sum();
+            let orphans = self.orphan_count();
+            ui.colored_label(
+                theme::TEXT_SECONDARY,
+                format!(
+                    "{} registered, {} — {} orphaned",
+                    self.entries.len(),
+                    format_size(total.max(0) as u64),
+                    orphans
+                ),
+            );
+            ui.add_space(6.0);
+
+            if self.entries.is_empty() {
                 ui.colored_label(
                     theme::TEXT_SECONDARY,
-                    format!(
-                        "{} registered, {} — {} orphaned",
-                        self.entries.len(),
-                        format_size(total.max(0) as u64),
-                        orphans
-                    ),
+                    "No companion files registered. Add one from a WAD's Edit dialog.",
                 );
-                ui.add_space(6.0);
+            } else {
+                self.render_table(ui);
+                self.render_users(ui);
+            }
 
-                if self.entries.is_empty() {
-                    ui.colored_label(
-                        theme::TEXT_SECONDARY,
-                        "No companion files registered. Add one from a WAD's Edit dialog.",
-                    );
-                } else {
-                    self.render_table(ui);
-                    self.render_users(ui);
-                }
+            ui.add_space(4.0);
+            ui.separator();
+            ui.add_space(4.0);
 
+            if let Some(idx) = self.pending_delete {
+                let name = self
+                    .entries
+                    .get(idx)
+                    .map(|e| e.filename.as_str())
+                    .unwrap_or("file");
+                ui.colored_label(
+                    theme::COLOR_ERROR,
+                    format!("Delete the managed copy of {name}?"),
+                );
+                ui.horizontal(|ui| {
+                    if ui.button("Delete").clicked() {
+                        self.pending_delete = None;
+                        self.delete_selected(conn, idx);
+                    }
+                    if ui.button("Cancel").clicked() {
+                        self.pending_delete = None;
+                    }
+                });
+            } else if self.pending_purge {
+                ui.colored_label(
+                    theme::COLOR_ERROR,
+                    format!("Delete all {orphans} orphaned companion file(s)?"),
+                );
+                ui.horizontal(|ui| {
+                    if ui.button("Delete All").clicked() {
+                        self.pending_purge = false;
+                        self.purge_orphans(conn);
+                    }
+                    if ui.button("Cancel").clicked() {
+                        self.pending_purge = false;
+                    }
+                });
+            } else {
+                self.render_actions(ui, &mut result);
+            }
+
+            if let Some(status) = &self.status {
                 ui.add_space(4.0);
-                ui.separator();
-                ui.add_space(4.0);
-
-                if let Some(idx) = self.pending_delete {
-                    let name = self
-                        .entries
-                        .get(idx)
-                        .map(|e| e.filename.as_str())
-                        .unwrap_or("file");
-                    ui.colored_label(
-                        theme::COLOR_ERROR,
-                        format!("Delete the managed copy of {name}?"),
-                    );
-                    ui.horizontal(|ui| {
-                        if ui.button("Delete").clicked() {
-                            self.pending_delete = None;
-                            self.delete_selected(conn, idx);
-                        }
-                        if ui.button("Cancel").clicked() {
-                            self.pending_delete = None;
-                        }
-                    });
-                } else if self.pending_purge {
-                    ui.colored_label(
-                        theme::COLOR_ERROR,
-                        format!("Delete all {orphans} orphaned companion file(s)?"),
-                    );
-                    ui.horizontal(|ui| {
-                        if ui.button("Delete All").clicked() {
-                            self.pending_purge = false;
-                            self.purge_orphans(conn);
-                        }
-                        if ui.button("Cancel").clicked() {
-                            self.pending_purge = false;
-                        }
-                    });
+                let color = if status.is_error {
+                    theme::COLOR_ERROR
                 } else {
-                    self.render_actions(ui, &mut result);
-                }
-
-                if let Some(status) = &self.status {
-                    ui.add_space(4.0);
-                    let color = if status.is_error {
-                        theme::COLOR_ERROR
-                    } else {
-                        theme::TEXT_SECONDARY
-                    };
-                    ui.colored_label(color, &status.text);
-                }
-            });
+                    theme::TEXT_SECONDARY
+                };
+                ui.colored_label(color, &status.text);
+            }
+        });
 
         // Escape dismisses a staged confirmation before closing the dialog.
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {

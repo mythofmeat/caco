@@ -106,33 +106,28 @@ impl EnrichDialogState {
     pub fn render(&mut self, ctx: &egui::Context) -> EnrichResult {
         let mut result = EnrichResult::Open;
 
-        egui::Window::new("Enrich")
-            .collapsible(false)
-            .resizable(true)
-            .default_size([640.0, 460.0])
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
-                self.render_library_section(ui, &mut result);
-                ui.add_space(8.0);
-                ui.separator();
-                ui.add_space(8.0);
-                self.render_cacowards_section(ui, &mut result);
+        crate::dialogs::modal_window(ctx, "Enrich", [640.0, 460.0]).show(ctx, |ui| {
+            self.render_library_section(ui, &mut result);
+            ui.add_space(8.0);
+            ui.separator();
+            ui.add_space(8.0);
+            self.render_cacowards_section(ui, &mut result);
 
-                ui.add_space(8.0);
-                ui.separator();
-                ui.add_space(6.0);
-                self.render_output(ui);
+            ui.add_space(8.0);
+            ui.separator();
+            ui.add_space(6.0);
+            self.render_output(ui);
 
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    if ui
-                        .add_enabled(!self.running, egui::Button::new("Close"))
-                        .clicked()
-                    {
-                        result = EnrichResult::Closed;
-                    }
-                });
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                if ui
+                    .add_enabled(!self.running, egui::Button::new("Close"))
+                    .clicked()
+                {
+                    result = EnrichResult::Closed;
+                }
             });
+        });
 
         // Escape must not close mid-run: the worker holds a DB connection and
         // the report would be lost with nowhere to display it.

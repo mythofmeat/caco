@@ -180,38 +180,40 @@ impl ProfilesDialogState {
     pub fn render(&mut self, ctx: &egui::Context, conn: &Connection) -> ProfilesResult {
         let mut result = ProfilesResult::Open;
 
-        egui::Window::new("Sourceport Profiles")
-            .collapsible(false)
-            .resizable(true)
-            .default_size([760.0, 480.0])
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
+        crate::dialogs::modal_window(ctx, "Sourceport Profiles", [760.0, 480.0]).show(ctx, |ui| {
+            // The two panes each capped their own scroll at a hardcoded 340pt,
+            // which together with the header and button row is taller than an
+            // 800x400 window — the Create/Save row ended up below the bottom
+            // edge. One scroll around both panes is what actually binds: the
+            // panes now size to their content and this bounds the pair.
+            crate::dialogs::modal_body(ctx, ui, 96.0, |ui| {
                 ui.horizontal_top(|ui| {
                     self.render_list(ui);
                     ui.separator();
                     self.render_editor(ui);
                 });
-
-                ui.add_space(4.0);
-                ui.separator();
-                ui.add_space(4.0);
-
-                if let Some((idx, referencing)) = self.pending_delete.clone() {
-                    self.render_delete_confirmation(ui, idx, &referencing);
-                } else {
-                    self.render_actions(ui, conn, &mut result);
-                }
-
-                if let Some(status) = &self.status {
-                    ui.add_space(4.0);
-                    let color = if status.is_error {
-                        theme::COLOR_ERROR
-                    } else {
-                        theme::TEXT_SECONDARY
-                    };
-                    ui.colored_label(color, &status.text);
-                }
             });
+
+            ui.add_space(4.0);
+            ui.separator();
+            ui.add_space(4.0);
+
+            if let Some((idx, referencing)) = self.pending_delete.clone() {
+                self.render_delete_confirmation(ui, idx, &referencing);
+            } else {
+                self.render_actions(ui, conn, &mut result);
+            }
+
+            if let Some(status) = &self.status {
+                ui.add_space(4.0);
+                let color = if status.is_error {
+                    theme::COLOR_ERROR
+                } else {
+                    theme::TEXT_SECONDARY
+                };
+                ui.colored_label(color, &status.text);
+            }
+        });
 
         // Escape closes, unless it is dismissing a pending confirmation first.
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -237,26 +239,24 @@ impl ProfilesDialogState {
                 return;
             }
 
-            egui::ScrollArea::vertical()
-                .max_height(340.0)
-                .show(ui, |ui| {
-                    let mut clicked = None;
-                    for (idx, profile) in self.profiles.iter().enumerate() {
-                        let label = format!("{}/{}", profile.sourceport, profile.name);
-                        if ui
-                            .selectable_label(self.selected == Some(idx), label)
-                            .clicked()
-                        {
-                            clicked = Some(idx);
-                        }
-                    }
-                    if let Some(idx) = clicked
-                        && self.selected != Some(idx)
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                let mut clicked = None;
+                for (idx, profile) in self.profiles.iter().enumerate() {
+                    let label = format!("{}/{}", profile.sourceport, profile.name);
+                    if ui
+                        .selectable_label(self.selected == Some(idx), label)
+                        .clicked()
                     {
-                        self.selected = Some(idx);
-                        self.load_buffer();
+                        clicked = Some(idx);
                     }
-                });
+                }
+                if let Some(idx) = clicked
+                    && self.selected != Some(idx)
+                {
+                    self.selected = Some(idx);
+                    self.load_buffer();
+                }
+            });
         });
     }
 
@@ -270,7 +270,18 @@ impl ProfilesDialogState {
                             ui.colored_label(theme::TEXT_SECONDARY, "(unsaved)");
                         }
                     });
-                    ui.colored_label(theme::TEXT_SECONDARY, p.path.display().to_string());
+                    // Wrapped, not laid out on one line: a profile path is an
+                    // absolute path into the data dir, and as a non-wrapping
+                    // label it set the editor pane's minimum width, which set
+                    // the window's — pushing the whole dialog wider than the
+                    // app window and off its right edge.
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(p.path.display().to_string())
+                                .color(theme::TEXT_SECONDARY),
+                        )
+                        .wrap(),
+                    );
                 }
                 None => {
                     ui.strong("No profile selected");
@@ -280,20 +291,18 @@ impl ProfilesDialogState {
             ui.add_space(2.0);
 
             let enabled = self.selected.is_some();
-            egui::ScrollArea::vertical()
-                .max_height(340.0)
-                .show(ui, |ui| {
-                    let response = ui.add_enabled(
-                        enabled,
-                        egui::TextEdit::multiline(&mut self.buffer)
-                            .font(egui::TextStyle::Monospace)
-                            .desired_width(f32::INFINITY)
-                            .desired_rows(18),
-                    );
-                    if response.changed() {
-                        self.dirty = true;
-                    }
-                });
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                let response = ui.add_enabled(
+                    enabled,
+                    egui::TextEdit::multiline(&mut self.buffer)
+                        .font(egui::TextStyle::Monospace)
+                        .desired_width(f32::INFINITY)
+                        .desired_rows(18),
+                );
+                if response.changed() {
+                    self.dirty = true;
+                }
+            });
         });
     }
 

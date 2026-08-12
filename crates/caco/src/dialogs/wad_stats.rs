@@ -183,47 +183,47 @@ impl WadStatsDialogState {
         // stays exactly as egui auto-sizes it — no dead space, no ballooning.
         let mut open = true;
 
-        egui::Window::new(format!("Map Stats \u{2014} {}", self.wad_title))
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(true)
-            .default_size([940.0, 540.0])
-            .min_width(780.0)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
-                if let Some(err) = self.error.clone() {
-                    ui.horizontal(|ui| {
-                        ui.colored_label(theme::COLOR_ERROR, &err);
-                        if ui.small_button("\u{2715}").clicked() {
-                            self.error = None;
-                        }
-                    });
-                    ui.add_space(4.0);
-                }
-
-                let avail = ui.available_size();
-                let left_width = (avail.x * 0.36).clamp(260.0, 340.0);
-
-                ui.horizontal_top(|ui| {
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(left_width, avail.y),
-                        egui::Layout::top_down(egui::Align::Min),
-                        |ui| {
-                            self.render_left_pane(ui, conn, &mut result);
-                        },
-                    );
-
-                    ui.separator();
-
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(ui.available_width(), avail.y),
-                        egui::Layout::top_down(egui::Align::Min),
-                        |ui| {
-                            self.render_right_pane(ui, ctx, conn, &mut result);
-                        },
-                    );
+        crate::dialogs::modal_window(
+            ctx,
+            format!("Map Stats \u{2014} {}", self.wad_title),
+            [940.0, 540.0],
+        )
+        .id(egui::Id::new("wad_stats_dialog"))
+        .open(&mut open)
+        .show(ctx, |ui| {
+            if let Some(err) = self.error.clone() {
+                ui.horizontal(|ui| {
+                    ui.colored_label(theme::COLOR_ERROR, &err);
+                    if ui.small_button("\u{2715}").clicked() {
+                        self.error = None;
+                    }
                 });
+                ui.add_space(4.0);
+            }
+
+            let avail = ui.available_size();
+            let left_width = (avail.x * 0.36).clamp(260.0, 340.0);
+
+            ui.horizontal_top(|ui| {
+                ui.allocate_ui_with_layout(
+                    egui::vec2(left_width, avail.y),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        self.render_left_pane(ui, conn, &mut result);
+                    },
+                );
+
+                ui.separator();
+
+                ui.allocate_ui_with_layout(
+                    egui::vec2(ui.available_width(), avail.y),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        self.render_right_pane(ui, ctx, conn, &mut result);
+                    },
+                );
             });
+        });
 
         if !open || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             return WadStatsResult::Closed;

@@ -176,12 +176,8 @@ impl SettingsDialogState {
     pub fn render(&mut self, ctx: &egui::Context) -> SettingsResult {
         let mut result = SettingsResult::Open;
 
-        egui::Window::new("settings_dialog")
+        crate::dialogs::modal_window(ctx, "settings_dialog", [560.0, 580.0])
             .title_bar(false)
-            .collapsible(false)
-            .resizable(false)
-            .fixed_size([560.0, 580.0])
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .frame(
                 egui::Frame::new()
                     .fill(egui::Color32::from_rgb(0x1a, 0x14, 0x10))
@@ -207,8 +203,14 @@ impl SettingsDialogState {
                             );
                             ui.colored_label(
                                 theme::TEXT_SECONDARY,
-                                egui::RichText::new("Saved to ~/.config/caco/config.toml")
-                                    .size(11.0),
+                                // Resolved, not spelled: the config lives in
+                                // the data dir (and moves with CACO_HOME or
+                                // CACO_CONFIG), never in ~/.config.
+                                egui::RichText::new(format!(
+                                    "Saved to {}",
+                                    caco_core::config::config_file().display()
+                                ))
+                                .size(11.0),
                             );
                         });
                     });
@@ -224,8 +226,13 @@ impl SettingsDialogState {
                 }
 
                 // ── Body ──
+                // Height comes from what is left after the header and the
+                // Save/Cancel row, not from a constant: 440 plus that chrome
+                // is taller than the 800x400 minimum window, which put Save
+                // below the bottom edge.
+                let body_height = crate::dialogs::modal_body_height(ctx, 150.0);
                 egui::ScrollArea::vertical()
-                    .max_height(440.0)
+                    .max_height(body_height)
                     .show(ui, |ui| {
                         egui::Frame::new()
                             .inner_margin(egui::Margin::symmetric(20, 16))
