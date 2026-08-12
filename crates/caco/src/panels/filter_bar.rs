@@ -6,6 +6,9 @@ use crate::theme;
 /// ID source for the filter TextEdit (shared with app.rs for Ctrl+F focus).
 pub const FILTER_ID_SOURCE: &str = "filter_input";
 
+/// Query the at-risk chip applies. Matches `WadRecord::is_lost`.
+const LOST_QUERY: &str = "retrievable:lost";
+
 /// Render the filter/search bar.
 pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
     let response = ui.add(
@@ -28,6 +31,33 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
         );
         if clear.on_hover_text("Clear filter").clicked() {
             state.filter.clear(Instant::now());
+        }
+    }
+
+    // At-risk chip: manual-only WADs with no local copy. Hidden when there
+    // are none, so a healthy library carries no permanent warning — and one
+    // click away when there are, which is the point of tracking it at all.
+    if state.lost_count > 0 && state.filter.input != LOST_QUERY {
+        let chip = ui.add(
+            egui::Button::new(
+                egui::RichText::new(format!(
+                    "{}{} at risk",
+                    theme::LOST_MARKER,
+                    state.lost_count
+                ))
+                .color(theme::COLOR_WARNING)
+                .size(11.0),
+            )
+            .frame(false),
+        );
+        if chip
+            .on_hover_text(
+                "WADs with no local copy that caco cannot re-download. Click to show them.",
+            )
+            .clicked()
+        {
+            state.filter.input = LOST_QUERY.to_string();
+            state.filter.mark_changed(Instant::now());
         }
     }
 

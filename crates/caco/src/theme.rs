@@ -51,6 +51,15 @@ pub fn status_bg(status: Status) -> Color32 {
     }
 }
 
+/// Marker for a WAD that is manual-only with no local copy — the library is
+/// listing something that cannot be launched or fetched. Shared by the table
+/// and grid so the two never disagree about what counts.
+pub const LOST_MARKER: &str = "\u{26a0} ";
+
+/// Tooltip explaining [`LOST_MARKER`].
+pub const LOST_HOVER: &str = "No local copy, and no idgames source to fetch one. \
+     Find the file yourself and use Link Local File to restore it.";
+
 pub fn status_display(status: Status) -> &'static str {
     status.display_name()
 }

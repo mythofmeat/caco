@@ -11,6 +11,9 @@ struct CacheEntry {
     title: String,
     path: String,
     size: Option<u64>,
+    /// Manual-only: deleting this file destroys the WAD rather than costing a
+    /// download. Kept per-row so the bulk actions can exclude them.
+    irreplaceable: bool,
 }
 
 /// State for the cache management dialog.
@@ -18,6 +21,8 @@ pub struct CacheDialogState {
     entries: Vec<CacheEntry>,
     total_size: u64,
     selected_row: Option<usize>,
+    /// Index awaiting a second click before an irreplaceable file is deleted.
+    confirming_delete: Option<usize>,
     pub modified: bool,
 }
 
@@ -34,6 +39,7 @@ impl CacheDialogState {
             entries: Vec::new(),
             total_size: 0,
             selected_row: None,
+            confirming_delete: None,
             modified: false,
         };
         state.load(conn);
@@ -46,6 +52,7 @@ impl CacheDialogState {
         self.entries = wads
             .into_iter()
             .filter_map(|w| {
+                let irreplaceable = !w.retrievability().is_automatic();
                 let path = w.cached_path?;
                 let size = fs::metadata(&path).ok().map(|m| m.len());
                 Some(CacheEntry {
@@ -53,16 +60,23 @@ impl CacheDialogState {
                     title: w.title,
                     path,
                     size,
+                    irreplaceable,
                 })
             })
             .collect();
 
         self.total_size = self.entries.iter().filter_map(|e| e.size).sum();
+        self.confirming_delete = None;
         self.selected_row = if self.entries.is_empty() {
             None
         } else {
             Some(0)
         };
+    }
+
+    /// How many entries the bulk clear would actually remove.
+    fn clearable_count(&self) -> usize {
+        self.entries.iter().filter(|e| !e.irreplaceable).count()
     }
 
     /// Render the cache dialog. Returns the dialog result.
@@ -126,7 +140,18 @@ impl CacheDialogState {
                                     ui.label(entry.wad_id.to_string());
                                 });
                                 row.col(|ui| {
-                                    ui.label(&entry.title);
+                                    if entry.irreplaceable {
+                                        ui.colored_label(
+                                            theme::COLOR_WARNING,
+                                            format!("{}{}", theme::LOST_MARKER, entry.title),
+                                        )
+                                        .on_hover_text(
+                                            "No idgames source: this file cannot be downloaded \
+                                             again. Bulk clearing skips it.",
+                                        );
+                                    } else {
+                                        ui.label(&entry.title);
+                                    }
                                 });
                                 row.col(|ui| {
                                     let color = if entry.size.is_some() {
@@ -158,27 +183,65 @@ impl CacheDialogState {
                 // Button row
                 ui.horizontal(|ui| {
                     let has_selection = self.selected_row.is_some() && !self.entries.is_empty();
-                    if ui
-                        .add_enabled(has_selection, egui::Button::new("Delete Selected"))
-                        .clicked()
+                    let selected_irreplaceable = self
+                        .selected_row
+                        .and_then(|i| self.entries.get(i))
+                        .is_some_and(|e| e.irreplaceable);
+                    let awaiting = self.confirming_delete == self.selected_row;
+
+                    let delete_label = if selected_irreplaceable && awaiting {
+                        "Delete anyway — cannot be re-downloaded"
+                    } else {
+                        "Delete Selected"
+                    };
+                    let delete_btn = if selected_irreplaceable && awaiting {
+                        egui::Button::new(
+                            egui::RichText::new(delete_label).color(theme::COLOR_ERROR),
+                        )
+                    } else {
+                        egui::Button::new(delete_label)
+                    };
+
+                    if ui.add_enabled(has_selection, delete_btn).clicked()
                         && let Some(idx) = self.selected_row
                         && idx < self.entries.len()
                     {
-                        let entry = &self.entries[idx];
-                        let _ = fs::remove_file(&entry.path);
-                        let _ = caco_core::db::sessions::clear_cached_path(conn, entry.wad_id);
-                        self.modified = true;
-                        self.load(conn);
+                        // An irreplaceable file takes two clicks: the first
+                        // only arms the button, so the confirmation cannot be
+                        // clicked through by muscle memory.
+                        if selected_irreplaceable && !awaiting {
+                            self.confirming_delete = Some(idx);
+                        } else {
+                            let entry = &self.entries[idx];
+                            let _ = fs::remove_file(&entry.path);
+                            let _ = caco_core::db::sessions::clear_cached_path(conn, entry.wad_id);
+                            self.modified = true;
+                            self.load(conn);
+                        }
                     }
 
-                    if ui
-                        .add_enabled(!self.entries.is_empty(), egui::Button::new("Clear All"))
-                        .clicked()
-                    {
-                        for entry in &self.entries {
+                    // Bulk clear never touches a file caco cannot re-fetch —
+                    // there is no selection to review, so the only safe scope
+                    // is the disposable one.
+                    let clearable = self.clearable_count();
+                    let clear_label = if clearable < self.entries.len() {
+                        format!("Clear {clearable} Re-downloadable")
+                    } else {
+                        "Clear All".to_string()
+                    };
+                    let clear = ui.add_enabled(clearable > 0, egui::Button::new(clear_label));
+                    let clear = if clearable < self.entries.len() {
+                        clear.on_hover_text(
+                            "Skips WADs with no idgames source. Delete those individually.",
+                        )
+                    } else {
+                        clear
+                    };
+                    if clear.clicked() {
+                        for entry in self.entries.iter().filter(|e| !e.irreplaceable) {
                             let _ = fs::remove_file(&entry.path);
+                            let _ = caco_core::db::sessions::clear_cached_path(conn, entry.wad_id);
                         }
-                        let _ = caco_core::db::sessions::clear_all_cached_paths(conn);
                         self.modified = true;
                         self.load(conn);
                     }
@@ -195,5 +258,40 @@ impl CacheDialogState {
         }
 
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(irreplaceable: bool) -> CacheEntry {
+        CacheEntry {
+            wad_id: 1,
+            title: "T".into(),
+            path: "/cache/t.zip".into(),
+            size: Some(10),
+            irreplaceable,
+        }
+    }
+
+    fn state(entries: Vec<CacheEntry>) -> CacheDialogState {
+        CacheDialogState {
+            entries,
+            total_size: 0,
+            selected_row: None,
+            confirming_delete: None,
+            modified: false,
+        }
+    }
+
+    /// Bulk clear must never count a file caco cannot fetch again — the label
+    /// and the loop both read this, so an off-by-one here is a deleted WAD.
+    #[test]
+    fn test_clearable_count_excludes_irreplaceable() {
+        assert_eq!(state(vec![entry(false), entry(false)]).clearable_count(), 2);
+        assert_eq!(state(vec![entry(false), entry(true)]).clearable_count(), 1);
+        assert_eq!(state(vec![entry(true), entry(true)]).clearable_count(), 0);
+        assert_eq!(state(Vec::new()).clearable_count(), 0);
     }
 }

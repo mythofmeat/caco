@@ -412,6 +412,22 @@ pub fn get_status_counts(conn: &Connection) -> Result<HashMap<String, i64>> {
     Ok(counts)
 }
 
+/// How many live WADs are manual-only with no local copy.
+///
+/// The count the library needs to admit it cannot launch everything it lists;
+/// see `WadRecord::is_lost`.
+pub fn count_lost(conn: &Connection) -> Result<usize> {
+    let count: i64 = conn.query_row(
+        &format!(
+            "SELECT COUNT(*) FROM wads WHERE deleted_at IS NULL AND {}",
+            crate::db::Retrievability::LOST_SQL
+        ),
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(count as usize)
+}
+
 /// Get all tags with their WAD counts (excluding deleted WADs).
 pub fn get_tag_counts(conn: &Connection) -> Result<Vec<(String, i64)>> {
     let mut stmt = conn.prepare(

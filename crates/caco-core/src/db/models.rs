@@ -212,6 +212,14 @@ impl Retrievability {
     pub const AUTOMATIC_SQL: &str =
         "(wads.source_type = 'idgames' OR COALESCE(wads.idgames_id, '') <> '')";
 
+    /// SQL predicate matching WADs that are `Manual` *and* have no local copy
+    /// — the set `WadRecord::is_lost` describes. Not a third variant: it is an
+    /// intersection with [`Availability`], exposed because "what can I no
+    /// longer play" is the question worth one click.
+    pub const LOST_SQL: &str = "(NOT (wads.source_type = 'idgames' \
+         OR COALESCE(wads.idgames_id, '') <> '') \
+         AND COALESCE(wads.cached_path, '') = '')";
+
     /// Classify from the two fields that decide it.
     pub fn derive(source_type: SourceType, idgames_id: Option<&str>) -> Self {
         if source_type == SourceType::Idgames || idgames_id.is_some_and(|id| !id.is_empty()) {
@@ -357,6 +365,17 @@ impl WadRecord {
     /// a URL to try.
     pub fn availability(&self) -> Availability {
         Availability::derive(self.cached_path.as_deref(), self.source_url.as_deref())
+    }
+
+    /// Manual-only with no local copy: caco cannot fetch this WAD, and the
+    /// library is listing something it cannot actually launch.
+    ///
+    /// The intersection of the two axes rather than a state of its own — a
+    /// `Manual` WAD becomes lost and unlost purely by its file coming and
+    /// going, which is what `Availability` already tracks.
+    pub fn is_lost(&self) -> bool {
+        self.retrievability() == Retrievability::Manual
+            && self.availability() != Availability::Cached
     }
 
     /// Build a `WadRecord` from a `rusqlite::Row`.

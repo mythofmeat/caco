@@ -11,7 +11,7 @@ A personal Doom WAD library manager inspired by [beets](https://beets.io). Impor
 - **Sourceports from source** — build nyan-doom or uzdoom into caco's own prefix, no system install required.
 - **Companion files** — manage DEH patches, music WADs, and other companion files with automatic deduplication.
 - **Per-WAD isolation** — saves, stats, and configs are separated per WAD so nothing gets mixed up.
-- **On-demand downloads** — idgames WADs are cached when you play, with configurable auto-cleanup.
+- **On-demand downloads** — idgames WADs are cached when you play, with configurable auto-cleanup. WADs that cannot be re-downloaded are kept on the portable side instead, and destructive actions leave them alone by default.
 - **Cacowards browser** — a magazine-style year-by-year view of Doomworld's awards, doubling as an import queue.
 - **Garbage collection** — reclaim disk space from completed / abandoned WADs, reviewing every file before it goes.
 - **Smart collections** — save queries by name and pin them to the sidebar.
@@ -81,7 +81,7 @@ the sourceport.
 | Sidebar | What it does |
 |---------|--------------|
 | Stats | Library statistics — playtime, completions, activity over time |
-| Cache | Cached downloads, with per-entry and bulk removal |
+| Cache | Managed WAD files; bulk clear skips anything that cannot be re-downloaded |
 | Files | Companion file registry: every managed file, the WADs using it, and orphan cleanup |
 | Profiles | Per-sourceport config profiles, edited in place |
 | IWADs | Registered IWADs and id24 resources |
@@ -119,6 +119,11 @@ re-download, so those copies are worth keeping.
 **`avail:`** is the other half of the picture — whether the file is on this
 machine right now. `avail:cached` has a local copy, `avail:downloadable` has a
 URL to try, `avail:unavailable` has neither.
+
+**`retrievable:lost`** is the intersection worth watching: manual-only *and* no
+local copy, meaning caco cannot produce the WAD and neither can you without
+going and finding the file again. Those rows are flagged in the library, and a
+chip beside the filter bar shows the count whenever it is not zero.
 
 **Status values:** `unplayed`, `in-progress`, `completed`, `abandoned`
 
@@ -202,6 +207,7 @@ Caco splits its files by whether they can be regenerated. Everything under
 | `~/.local/share/caco/gui-state.json` | GUI view/sort/filter state |
 | `~/.local/share/caco/library.db` | Library database |
 | `~/.local/share/caco/data/` | Per-WAD saves, stats, configs |
+| `~/.local/share/caco/wads/` | WAD files caco cannot re-download |
 | `~/.local/share/caco/iwads/` | Managed IWADs |
 | `~/.local/share/caco/id24/` | Managed id24 WADs |
 | `~/.local/share/caco/companions/` | Managed companion files |
@@ -218,11 +224,13 @@ Caco splits its files by whether they can be regenerated. Everything under
 | `~/.cache/caco/ports/` | Built sourceport prefixes, rebuilt from the recipe |
 | `~/.cache/caco/ports-src/` | Sourceport checkouts and build trees |
 
-The WAD cache is usually the largest thing caco stores and is entirely
-re-downloadable, which is why it lives on the disposable side. If you are
-upgrading from a version that kept it at `~/.local/share/caco/wads/`, caco
-moves it for you on first launch and updates `cache_dir` to match. A `cache_dir`
-you set yourself is left alone.
+Which of the two `wads/` directories a file lands in is decided by whether caco
+can fetch it again on its own, and nothing else. Anything on idgames goes to the
+cache, where it is fair game for cleanup because losing it costs a download.
+Everything else — forum attachments, one-off file hosts, files you linked by
+hand — goes to the portable side and stays until you delete it deliberately.
+That is what makes copying `~/.local/share/caco` to another machine actually
+carry your library: see `retrievable:` under Queries.
 
 Override the cache root with `CACO_CACHE_HOME`, or just the WAD cache with
 `CACO_CACHE_DIR`.

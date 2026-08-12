@@ -50,13 +50,13 @@ impl LinkDialogState {
     }
 
     #[cfg(test)]
-    fn handle_picked_file_to_cache(
+    fn handle_picked_file_into(
         &mut self,
         conn: &Connection,
         path: &Path,
-        cache_dir: &Path,
+        dest_dir: &Path,
     ) -> LinkResult {
-        match link_picked_file_to_cache(conn, self.wad_id, path, cache_dir) {
+        match link_picked_file_into(conn, self.wad_id, path, dest_dir) {
             Ok(()) => LinkResult::Linked(self.wad_id),
             Err(e) => {
                 self.error_message = Some(e);
@@ -153,29 +153,40 @@ impl LinkDialogState {
     }
 }
 
-/// Copy the selected file into the cache dir and update the WAD record.
+/// Copy the selected file into the directory its retrievability calls for,
+/// and update the WAD record.
+///
+/// A hand-picked file for a WAD caco cannot re-download is the exact case the
+/// keep dir exists for: put it in the cache and the next Clean can delete the
+/// only copy. The WAD is read back from the DB rather than trusting the
+/// caller, since retrievability is a property of the record.
 fn link_picked_file(conn: &Connection, wad_id: i64, path: &Path) -> Result<(), String> {
-    link_picked_file_to_cache(conn, wad_id, path, &caco_core::config::get_cache_dir())
+    let wad = caco_core::db::get_wad(conn, wad_id, false)
+        .map_err(|e| format!("Failed to load WAD: {e}"))?
+        .ok_or_else(|| "WAD not found".to_string())?;
+    let dest_dir = caco_core::config::wad_store_dir(wad.retrievability());
+    link_picked_file_into(conn, wad_id, path, &dest_dir)
 }
 
-fn link_picked_file_to_cache(
+fn link_picked_file_into(
     conn: &Connection,
     wad_id: i64,
     path: &Path,
-    cache_dir: &Path,
+    dest_dir: &Path,
 ) -> Result<(), String> {
     let filename = path
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "unknown.wad".to_string());
 
-    let dest = cache_dir.join(&filename);
+    let dest = dest_dir.join(&filename);
 
-    std::fs::create_dir_all(cache_dir).map_err(|e| format!("Failed to create cache dir: {e}"))?;
+    std::fs::create_dir_all(dest_dir)
+        .map_err(|e| format!("Failed to create {}: {e}", dest_dir.display()))?;
 
     // Only copy if source != destination
     if path != dest {
-        std::fs::copy(path, &dest).map_err(|e| format!("Failed to copy WAD to cache: {e}"))?;
+        std::fs::copy(path, &dest).map_err(|e| format!("Failed to copy WAD: {e}"))?;
     }
 
     let dest_str = dest.to_string_lossy().to_string();
@@ -209,7 +220,7 @@ mod tests {
         let source = source_dir.path().join("example.wad");
         std::fs::write(&source, b"PWAD").unwrap();
 
-        link_picked_file_to_cache(&conn, wad_id, &source, cache_dir.path()).unwrap();
+        link_picked_file_into(&conn, wad_id, &source, cache_dir.path()).unwrap();
 
         let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
         let expected_cached_path = cache_dir
@@ -242,14 +253,14 @@ mod tests {
         let cache_dir = tempfile::tempdir().unwrap();
         let missing_dir = tempfile::tempdir().unwrap();
         let missing = missing_dir.path().join("missing.wad");
-        let result = state.handle_picked_file_to_cache(&conn, &missing, cache_dir.path());
+        let result = state.handle_picked_file_into(&conn, &missing, cache_dir.path());
 
         assert_eq!(result, LinkResult::Open);
         assert!(
             state
                 .error_message
                 .as_deref()
-                .is_some_and(|msg| msg.contains("Failed to copy WAD to cache"))
+                .is_some_and(|msg| msg.contains("Failed to copy WAD"))
         );
     }
 }

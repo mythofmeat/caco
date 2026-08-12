@@ -96,9 +96,17 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<ActionRequest> 
                     ui.label(wad_id.to_string());
                 });
 
-                // Title
+                // Title, flagged when the file is gone for good
                 row.col(|ui| {
-                    ui.label(&wad.title);
+                    if wad.is_lost() {
+                        ui.colored_label(
+                            theme::COLOR_WARNING,
+                            format!("{}{}", theme::LOST_MARKER, wad.title),
+                        )
+                        .on_hover_text(theme::LOST_HOVER);
+                    } else {
+                        ui.label(&wad.title);
+                    }
                 });
 
                 // Author

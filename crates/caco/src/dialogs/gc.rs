@@ -93,13 +93,23 @@ impl GcDialogState {
         state
     }
 
-    /// Re-measure with the current options. Everything starts ticked, matching
-    /// the CLI's "clean all?" default, but each row can be unticked.
+    /// Re-measure with the current options.
+    ///
+    /// Rows start ticked, except those whose cache file cannot be re-fetched:
+    /// deleting one of those costs the WAD permanently rather than a download,
+    /// so reclaiming space must never take one without the user saying so. A
+    /// manual WAD with nothing at stake in the cache still starts ticked —
+    /// only its irreplaceable file is protected, not the whole entry.
     fn rescan(&mut self, conn: &Connection) {
         self.confirming = false;
         match gc::plan(conn, self.opts, &GcPaths::from_config()) {
             Ok(plan) => {
-                self.selected_wads = plan.wads.iter().map(|w| w.wad_id).collect();
+                self.selected_wads = plan
+                    .wads
+                    .iter()
+                    .filter(|w| !Self::is_at_risk(w))
+                    .map(|w| w.wad_id)
+                    .collect();
                 self.selected_orphans = [
                     (0..plan.orphan_data_dirs.len()).collect(),
                     (0..plan.orphan_companions.len()).collect(),
@@ -343,6 +353,14 @@ impl GcDialogState {
         }
     }
 
+    /// Would cleaning this row destroy the only copy of a WAD?
+    ///
+    /// Only true when there is actually a cache file queued for deletion —
+    /// `redownloadable` alone describes the WAD, not what this plan does to it.
+    fn is_at_risk(w: &caco_core::gc::WadPlanEntry) -> bool {
+        !w.redownloadable && w.cache_path.is_some()
+    }
+
     fn render_wad_rows(&mut self, ui: &mut egui::Ui) {
         // Collect first: the rows borrow `self.plan` while the ticks mutate
         // `self.selected_wads`.
@@ -356,11 +374,7 @@ impl GcDialogState {
                     detail.push(format!("data {}", format_size(w.data_size)));
                 }
                 if w.cache_size > 0 {
-                    detail.push(format!(
-                        "cache {}{}",
-                        format_size(w.cache_size),
-                        if w.redownloadable { "" } else { " (no re-DL)" }
-                    ));
+                    detail.push(format!("cache {}", format_size(w.cache_size)));
                 }
                 if w.companion_size > 0 {
                     detail.push(format!("companions {}", format_size(w.companion_size)));
@@ -368,22 +382,31 @@ impl GcDialogState {
                 (
                     w.wad_id,
                     format!(
-                        "{}  ·  {}  ·  {}",
+                        "{}{}  ·  {}  ·  {}",
+                        if Self::is_at_risk(w) { "\u{26a0} " } else { "" },
                         w.title,
                         format_size(w.total_size),
                         detail.join(", ")
                     ),
-                    w.redownloadable,
+                    Self::is_at_risk(w),
                 )
             })
             .collect();
 
-        for (wad_id, label, redownloadable) in rows {
+        for (wad_id, label, at_risk) in rows {
             let mut checked = self.selected_wads.contains(&wad_id);
-            let response = ui.checkbox(&mut checked, label);
-            if !redownloadable {
+            let response = if at_risk {
+                ui.checkbox(
+                    &mut checked,
+                    egui::RichText::new(label).color(theme::COLOR_WARNING),
+                )
+            } else {
+                ui.checkbox(&mut checked, label)
+            };
+            if at_risk {
                 response.on_hover_text(
-                    "This WAD has no idgames source — a deleted cache file cannot be re-fetched.",
+                    "No idgames source: caco cannot download this WAD again. \
+                     Deleting the cached file destroys the only copy.",
                 );
             }
             if checked {
@@ -485,5 +508,46 @@ impl GcDialogState {
                 }
             });
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use caco_core::db::Status;
+    use std::path::PathBuf;
+
+    fn entry(redownloadable: bool, cache_path: Option<&str>) -> WadPlanEntry {
+        WadPlanEntry {
+            wad_id: 1,
+            title: "T".into(),
+            status: Status::Completed,
+            redownloadable,
+            data_dir: None,
+            data_size: 0,
+            cache_path: cache_path.map(PathBuf::from),
+            cache_size: if cache_path.is_some() { 100 } else { 0 },
+            companion_ids: Vec::new(),
+            companion_size: 0,
+            total_size: 100,
+            has_stats_snapshot: false,
+        }
+    }
+
+    /// The only row worth protecting is one where this plan would delete an
+    /// irreplaceable file. A manual WAD with no cached file queued is an
+    /// ordinary row.
+    #[test]
+    fn test_at_risk_needs_both_manual_and_a_cache_file() {
+        assert!(GcDialogState::is_at_risk(&entry(
+            false,
+            Some("/cache/a.zip")
+        )));
+        assert!(!GcDialogState::is_at_risk(&entry(
+            true,
+            Some("/cache/a.zip")
+        )));
+        assert!(!GcDialogState::is_at_risk(&entry(false, None)));
+        assert!(!GcDialogState::is_at_risk(&entry(true, None)));
     }
 }

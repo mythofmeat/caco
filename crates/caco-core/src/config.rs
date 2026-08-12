@@ -98,6 +98,44 @@ pub fn default_data_subdir() -> PathBuf {
     default_data_dir().join("data")
 }
 
+/// Where WAD files live that caco cannot fetch again on its own.
+///
+/// Portable side, deliberately mirroring `~/.cache/caco/wads` in basename:
+/// both hold the same kind of thing, and which one a file lands in is
+/// decided solely by [`crate::db::Retrievability`]. A manual-only WAD in the
+/// cache is a WAD one `Clean` away from being gone for good, so it belongs
+/// with the database rather than beside the disposable downloads.
+pub fn keep_dir() -> PathBuf {
+    default_data_dir().join("wads")
+}
+
+/// The directory a WAD's file belongs in, given whether caco can re-fetch it.
+///
+/// The single placement decision — every path that brings a file under
+/// caco's management goes through here, so placement stays a consequence of
+/// retrievability instead of whatever the calling code happened to have on
+/// hand.
+pub fn wad_store_dir(retrievability: crate::db::Retrievability) -> PathBuf {
+    wad_store_dir_in(retrievability, &get_cache_dir(), &keep_dir())
+}
+
+/// [`wad_store_dir`] against explicit roots.
+///
+/// Both roots are passed rather than read, for the reason `GcPaths` takes
+/// them: this function's answer is where a file gets written, and a test that
+/// could reach the real roots is one that can drop files into the user's
+/// library.
+pub fn wad_store_dir_in(
+    retrievability: crate::db::Retrievability,
+    cache_dir: &std::path::Path,
+    keep_dir: &std::path::Path,
+) -> PathBuf {
+    match retrievability {
+        crate::db::Retrievability::Automatic => cache_dir.to_path_buf(),
+        crate::db::Retrievability::Manual => keep_dir.to_path_buf(),
+    }
+}
+
 pub fn backup_dir() -> PathBuf {
     default_data_dir().join("backups")
 }
@@ -1303,5 +1341,28 @@ window_width = 1600
         // Invalid values fall back to "ask"
         assert_eq!(validate("invalid"), "ask");
         assert_eq!(validate(""), "ask");
+    }
+
+    /// Placement follows retrievability and nothing else — not where the file
+    /// came from, not where the caller happened to be writing.
+    #[test]
+    fn test_wad_store_dir_follows_retrievability() {
+        use crate::db::Retrievability;
+        let cache = std::path::Path::new("/cache/wads");
+        let keep = std::path::Path::new("/data/wads");
+
+        assert_eq!(
+            wad_store_dir_in(Retrievability::Automatic, cache, keep),
+            cache
+        );
+        assert_eq!(wad_store_dir_in(Retrievability::Manual, cache, keep), keep);
+    }
+
+    /// The keep dir must sit under the portable data dir, since the whole
+    /// point is surviving a copy of that directory to another machine.
+    #[test]
+    fn test_keep_dir_is_on_the_portable_side() {
+        assert!(keep_dir().starts_with(default_data_dir()));
+        assert!(!keep_dir().starts_with(cache_home()));
     }
 }

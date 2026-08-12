@@ -318,6 +318,12 @@ fn build_term_sql(term: &QueryTerm) -> (String, Vec<SqlParam>) {
             vec![Box::new(term.value.to_lowercase())],
         ),
 
+        // "lost" is not a Retrievability variant — it is manual-only
+        // intersected with "no local copy", so it is matched before the parse.
+        Some("retrievable") | Some("retrievability") if term.value.eq_ignore_ascii_case("lost") => {
+            (Retrievability::LOST_SQL.into(), Vec::new())
+        }
+
         Some("retrievable") | Some("retrievability") => {
             match term.value.parse::<Retrievability>() {
                 Ok(Retrievability::Automatic) => (Retrievability::AUTOMATIC_SQL.into(), Vec::new()),
@@ -833,6 +839,47 @@ mod tests {
 
         // The empty id must land on the manual side, not the automatic one.
         assert!(manual.iter().any(|w| w.title == "dw-empty-id"));
+    }
+
+    /// `LOST_SQL` is the one predicate spanning both axes, so it gets the same
+    /// Rust-vs-SQL check as the single-axis ones.
+    #[test]
+    fn test_lost_sql_matches_rust() {
+        let conn = setup();
+        add_retrievability_fixtures(&conn);
+        // A manual WAD that still has its file is not lost.
+        let kept = add_wad(
+            &conn,
+            &NewWad::new("manual-kept", SourceType::Doomworld).cached_path("/keep/x.zip"),
+        )
+        .unwrap();
+
+        let sql_ids: Vec<i64> = conn
+            .prepare(&format!(
+                "SELECT id FROM wads WHERE {} ORDER BY id",
+                Retrievability::LOST_SQL
+            ))
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+
+        let all = search_wads(&conn, None, None, true, false, 0).unwrap();
+        let rust_ids: Vec<i64> = all.iter().filter(|w| w.is_lost()).map(|w| w.id).collect();
+
+        assert_eq!(sql_ids, rust_ids);
+        assert!(!sql_ids.is_empty(), "fixtures produced no lost rows");
+        assert!(
+            !sql_ids.contains(&kept),
+            "a manual WAD with its file is not lost"
+        );
+
+        // And the query field routes to it.
+        let hits = search_wads(&conn, Some("retrievable:lost"), None, true, false, 0).unwrap();
+        let mut hit_ids: Vec<i64> = hits.iter().map(|w| w.id).collect();
+        hit_ids.sort_unstable();
+        assert_eq!(hit_ids, sql_ids);
     }
 
     #[test]

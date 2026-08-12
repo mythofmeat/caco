@@ -96,6 +96,24 @@ egui = "0.31"
 - **Batch stats**: `get_total_playtime_batch()`, `get_last_played_batch()`, etc. — avoid N+1 queries when rendering lists.
 - **Query parser**: beets-style syntax — see Behavior below.
 - **Companion system**: `companion_files_registry` + `wad_companions` junction table. `companion_service.rs` handles MD5 dedup + managed storage at `~/.local/share/caco/companions/{md5[:12]}_{filename}`. DEH/BEX auto-detected; `-deh` for non-zdoom, `-file` for zdoom. Because files are deduplicated by MD5, one managed file can serve several WADs, so unlinking is not the same as deleting: `companion_service::plan_unregister` answers "what should happen to the file", returning `None` only when the file would be left with no owner *and* the configured policy is `ask` (the default). Both frontends must go through it — `unregister_companion` takes a resolved `OrphanPolicy`, so neither can swallow an `ask` and orphan a file unprompted. `delete_orphan` refuses while anything still links the file.
+- **WAD file placement**: `config::wad_store_dir(retrievability)` is the only
+  answer to "where does this file go" — cache dir for `Automatic`, `keep_dir()`
+  (`~/.local/share/caco/wads`) for `Manual`. `wad_store_dir_in` takes both roots
+  explicitly so tests cannot write into the real library, same reason as
+  `GcPaths`. `dialogs/link.rs::link_picked_file` re-reads the WAD from the DB
+  rather than trusting its caller, because retrievability is a property of the
+  record. The play-time download path in `app.rs` needs no branch: it refuses
+  anything without an idgames id or `/idgames/` URL, so what it fetches is
+  `Automatic` by construction.
+- **Destructive flows respect retrievability**: deleting a re-fetchable file
+  costs a download, deleting a manual one costs the WAD, so the two must not
+  look alike. `dialogs/gc.rs::is_at_risk` requires *both* manual and an actual
+  cache file queued for deletion — `redownloadable` alone describes the WAD, not
+  what the plan does to it — and those rows render warning-coloured and start
+  **unticked**. `dialogs/cache.rs` excludes them from bulk clear entirely
+  (the button relabels to "Clear N Re-downloadable" and says why) and makes a
+  single delete take two clicks. An explicit per-row tick or Select All is still
+  the user's call; only the defaults are protective.
 - **GC**: `caco_core::gc` splits cleanup in two — `plan` measures and touches nothing, `execute` deletes exactly the `GcSelection` handed back. The GUI renders the plan as a checkbox list and passes back the ticked subset, so nothing is deleted that was not shown first. `gc_ignore` column excludes a WAD; orphan detection covers data dirs, backups, and companions. `plan` takes an explicit `GcPaths { data_dir, backup_dir }` rather than reading config: every path in it is a path something gets deleted from, and planning against an empty DB makes every directory look like an orphan, so a plan built over the real data dir and executed wipes the library's saves. The required argument is what keeps that unreachable from a test — `GcPaths::from_config()` is for frontends, and `gc`'s tests build every path from a tempdir. `saves::list_backups_in` exists for the same reason.
 - **Ports build driver**: every command is assembled by a pure function (`clone_args`, `configure_args`, ...) and only then handed to a process, so flags that are load-bearing and silently fatal if dropped — uzdoom's `-DINSTALL_PK3_PATH=bin`, whose absence produces a build that succeeds and aborts at launch — are testable without a network or a compiler. `PortPaths` is passed explicitly for the same reason `GcPaths` is: a test that could reach the real roots is one that can compile 74M of C++ into a user's cache, or delete out of it. The end-to-end build lives in `tests/ports_build.rs` behind `#[ignore]` — `cargo test --workspace` must never compile a sourceport. The install prefix is not touched until the compile succeeds, so a failed rebuild leaves a working port in place, and `remove_installed` refuses any directory without caco's own manifest.
 - **Import service**: centralises duplicate checking for all sources; auto-enriches with Doom Wiki metadata; JSON import fallback for Cloudflare-blocked APIs.
@@ -146,6 +164,15 @@ wherever the cache used to be.
 
 **Status enum**: `unplayed`, `in-progress`, `completed`, `abandoned`.
 
+**Lost WADs** (`WadRecord::is_lost`, `Retrievability::LOST_SQL`, query
+`retrievable:lost`): `Manual` intersected with "no local copy" — the set caco
+can neither play nor fetch. Deliberately not a third enum variant, since a WAD
+enters and leaves it purely by its file coming and going. Surfaced as a `⚠`
+prefix on the title in both the table and grid (`theme::LOST_MARKER` /
+`LOST_HOVER`, shared so the two views cannot disagree) and as a self-hiding chip
+beside the filter bar that applies the query; `db::count_lost` feeds the chip
+from `AppState::refresh_status_counts`.
+
 **Two derived axes on a WAD, neither stored.** Both live in `db/models.rs` as an
 enum with a `derive` constructor, a SQL spelling of the same rule, a `WadRecord`
 accessor, and a test in `query.rs` asserting the Rust and SQL spellings select
@@ -157,7 +184,8 @@ the same rows. Treat that quartet as the pattern for anything similar.
   retrievability, so reading it back off the path would let the two drift the
   moment `cache_dir` or `CACO_HOME` moves. Query field `retrievable:`, SQL in
   `AUTOMATIC_SQL`. `gc.rs`'s `redownloadable` flag calls it rather than keeping
-  its own inline copy of the rule.
+  its own inline copy of the rule. `config::wad_store_dir` is the single
+  placement decision it drives — see Placement below.
 - **`Availability`** (`Cached` / `Downloadable` / `Unavailable`): is the file on
   this machine, and if not is there a URL to try — from `cached_path` +
   `source_url`, treating `""` as absent. Query field `avail:`, SQL in
