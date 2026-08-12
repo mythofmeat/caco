@@ -98,6 +98,21 @@ fn collect_save_files_recursive(base: &Path, dir: &Path, saves: &mut Vec<SaveFil
 ///
 /// Returns the path to the created backup file.
 pub fn create_backup(wad_id: i64, title: &str, data_dir: &Path) -> crate::Result<PathBuf> {
+    create_backup_in(wad_id, title, data_dir, &get_backup_dir())
+}
+
+/// [`create_backup`] writing into an explicit directory.
+///
+/// The destination is a parameter for the reason `GcPaths` and `PortPaths`
+/// are: a function that creates files must not be able to reach the user's
+/// real library from a test. It could before — `test_backup_and_restore` wrote
+/// a zip into `~/.local/share/caco/backups` on every `cargo test` run.
+pub fn create_backup_in(
+    wad_id: i64,
+    title: &str,
+    data_dir: &Path,
+    backup_dir: &Path,
+) -> crate::Result<PathBuf> {
     if !data_dir.is_dir() {
         return Err(crate::Error::FileNotFound(format!(
             "Data directory does not exist: {}",
@@ -105,8 +120,7 @@ pub fn create_backup(wad_id: i64, title: &str, data_dir: &Path) -> crate::Result
         )));
     }
 
-    let backup_dir = get_backup_dir();
-    fs::create_dir_all(&backup_dir)?;
+    fs::create_dir_all(backup_dir)?;
 
     let timestamp = Local::now().format("%Y%m%d_%H%M%S_%f").to_string();
     let sanitized = sanitize_dirname(title);
@@ -408,7 +422,8 @@ mod tests {
         fs::write(data_dir.join("save1.dsg"), b"save data 1").unwrap();
         fs::write(data_dir.join("stats.txt"), b"stats data").unwrap();
 
-        let backup_path = create_backup(42, "Test WAD", &data_dir).unwrap();
+        let backup_dir = dir.path().join("backups");
+        let backup_path = create_backup_in(42, "Test WAD", &data_dir, &backup_dir).unwrap();
         assert!(backup_path.exists());
         assert!(backup_path.to_string_lossy().contains("42_test-wad_"));
 
