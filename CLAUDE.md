@@ -277,13 +277,31 @@ A release is a pushed tag, nothing else:
 git tag v4.0.1 && git push origin v4.0.1
 ```
 
-`.github/workflows/release.yml` fires on `v*`, builds the package inside
-`archlinux:base-devel` through `contrib/arch/Dockerfile`, uploads the
-`.pkg.tar.zst` as a workflow artifact, and creates a GitHub Release with
-generated notes and the package attached. **Arch is the only target.** Adding a
-distro means another `contrib/<distro>/Dockerfile` exposing the same `artifacts`
-stage plus a matrix entry — the workflow is shaped for that but deliberately not
-generalised ahead of a second distro existing.
+`.github/workflows/release.yml` fires on `v*` and fans out from a `version` job
+that validates the tag once and hands the string to every builder. `arch` builds
+the package inside `archlinux:base-devel` through `contrib/arch/Dockerfile`;
+`macos` compiles on a `macos-15` runner and bundles through
+`contrib/macos/bundle.sh`; `release` waits on both, merges their artifacts and
+creates the GitHub Release. Adding a distro means another
+`contrib/<distro>/Dockerfile` exposing the same `artifacts` stage plus a job —
+deliberately not generalised into a matrix ahead of a second distro existing.
+
+**The macOS bundle is arm64, ad-hoc signed, and not notarised.** Three
+consequences worth knowing before touching `bundle.sh`:
+
+- `CFBundleExecutable` is a shell wrapper, not the binary. An app launched from
+  Finder inherits only `/usr/bin:/bin:/usr/sbin:/sbin`, so the wrapper prepends
+  the Homebrew prefixes. Without it `config::resolve_sourceport` finds nothing
+  and `ports/doctor.rs`'s `brew list` fails, but only when launched from the
+  Dock — from a terminal it all works, which makes it a miserable bug to chase.
+- The signature is required, not cosmetic: the kernel refuses to execute an
+  unsigned arm64 binary. Not being notarised is why the README tells you to
+  download with `gh` rather than a browser — only browsers set the quarantine
+  attribute that makes Gatekeeper care.
+- The job overrides `lto`/`codegen-units`/`opt-level` through `CARGO_PROFILE_*`
+  env vars because macOS minutes bill at 10x. The mac binary is therefore
+  larger and less optimised than the Arch one, on purpose. It also runs no
+  tests — the Arch job gates the tag, so nothing macOS-specific is covered.
 
 **The tag is the only version source.** `Cargo.toml` carries a permanent
 `version = "0.0.0"`; the Dockerfile seds the tag into it, and seds

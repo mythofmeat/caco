@@ -38,6 +38,29 @@ makepkg -si
 `makepkg` compiles the working tree it sits in, so a local build reports version
 `0.0.0` — the real version is injected from the release tag in CI.
 
+### macOS
+
+Releases also carry an `arm64` app bundle, built and ad-hoc signed on a macOS
+runner:
+
+```bash
+gh release download --repo mythofmeat/caco --pattern '*-macos-arm64.zip'
+unzip -o caco-*-macos-arm64.zip -d /Applications
+```
+
+Download it with `gh` or `curl` rather than a browser. Browsers attach the
+`com.apple.quarantine` attribute and Gatekeeper then refuses to open an app
+that is signed but not notarised; command-line downloads do not set it. If you
+do end up quarantined, `xattr -dr com.apple.quarantine /Applications/Caco.app`
+clears it.
+
+To build the bundle yourself on a Mac:
+
+```bash
+cargo build --release -p caco
+VERSION=0.0.0 contrib/macos/bundle.sh    # writes dist/Caco.app
+```
+
 ### From source
 
 ```bash

@@ -1,4 +1,5 @@
 # Build
+dist/
 contrib/arch/pkg/
 contrib/arch/src/
 contrib/arch/caco-git/
