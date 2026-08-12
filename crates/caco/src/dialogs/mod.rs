@@ -93,6 +93,43 @@ pub fn modal_body_height(ctx: &egui::Context, chrome: f32) -> f32 {
     (ctx.screen_rect().height() - DIALOG_GUTTER * 2.0 - chrome).max(80.0)
 }
 
+/// The opt-in that lets a bulk delete touch files caco cannot re-fetch.
+///
+/// Cache and Clean both delete `wads.cached_path` files, and both know which
+/// of them are irreplaceable — Manual retrievability with a file actually on
+/// disk — but they used to disagree about what a bulk action does with those.
+/// Cache excluded them outright, with no way to bulk-clear one at all. Clean
+/// merely started them unticked, and its "All" button then swept them in with
+/// one click, no relabel and no warning. Same file, same deletion, two rules.
+///
+/// One rule now: a bulk action skips them unless this is ticked. Deleting them
+/// is possible, as it must be — a library can accumulate junk that is manual
+/// only because it never came from idgames — but it is never what a button
+/// press does by default.
+///
+/// Returns true if the toggle is on. Renders nothing when `at_risk` is 0,
+/// since there is nothing to arm.
+pub fn include_at_risk_toggle(ui: &mut egui::Ui, on: &mut bool, at_risk: usize) -> bool {
+    if at_risk == 0 {
+        *on = false;
+        return false;
+    }
+    ui.checkbox(
+        on,
+        egui::RichText::new(format!(
+            "Include {at_risk} file{} that cannot be re-downloaded",
+            if at_risk == 1 { "" } else { "s" }
+        ))
+        .color(crate::theme::COLOR_WARNING)
+        .size(11.0),
+    )
+    .on_hover_text(
+        "These have no idgames source. Deleting one destroys the only copy — \
+         caco cannot fetch it again.",
+    );
+    *on
+}
+
 /// Dim the app behind a modal, so it reads as "the window is blocked" rather
 /// than as a stray floating panel.
 pub fn dim_backdrop(ctx: &egui::Context) {

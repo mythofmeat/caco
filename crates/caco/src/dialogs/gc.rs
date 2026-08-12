@@ -68,6 +68,9 @@ pub struct GcDialogState {
     selected_wads: HashSet<i64>,
     selected_orphans: [HashSet<usize>; 3],
     confirming: bool,
+    /// Opt-in that lets "All" sweep in WADs whose only copy is in the cache.
+    /// Reset by `rescan`, so it never survives the plan it was ticked against.
+    include_at_risk: bool,
     status: Option<StatusLine>,
     /// Whether anything was deleted, so the parent knows to reload.
     pub modified: bool,
@@ -86,6 +89,7 @@ impl GcDialogState {
             selected_wads: HashSet::new(),
             selected_orphans: Default::default(),
             confirming: false,
+            include_at_risk: false,
             status: None,
             modified: false,
         };
@@ -102,6 +106,7 @@ impl GcDialogState {
     /// only its irreplaceable file is protected, not the whole entry.
     fn rescan(&mut self, conn: &Connection) {
         self.confirming = false;
+        self.include_at_risk = false;
         match gc::plan(conn, self.opts, &GcPaths::from_config()) {
             Ok(plan) => {
                 self.selected_wads = plan
@@ -340,6 +345,30 @@ impl GcDialogState {
             });
         });
         ui.colored_label(theme::TEXT_MUTED, section.blurb());
+        if is_wads {
+            let at_risk = self
+                .plan
+                .wads
+                .iter()
+                .filter(|w| Self::is_at_risk(w))
+                .count();
+            let before = self.include_at_risk;
+            crate::dialogs::include_at_risk_toggle(ui, &mut self.include_at_risk, at_risk);
+            // Untick what the toggle no longer permits, so the count above the
+            // Clean button cannot claim rows the rule now excludes.
+            if before && !self.include_at_risk {
+                let doomed: Vec<i64> = self
+                    .plan
+                    .wads
+                    .iter()
+                    .filter(|w| Self::is_at_risk(w))
+                    .map(|w| w.wad_id)
+                    .collect();
+                for id in doomed {
+                    self.selected_wads.remove(&id);
+                }
+            }
+        }
         ui.add_space(2.0);
 
         if is_wads {
@@ -440,8 +469,18 @@ impl GcDialogState {
 
     fn set_all(&mut self, section: Section, on: bool) {
         if section == Section::Wads {
+            // "All" used to mean literally all, sweeping in rows that `rescan`
+            // had deliberately left unticked — one click, no warning, and the
+            // only copy of a WAD gone. It now means "all the ones this plan is
+            // allowed to touch", which the toggle beside it decides.
+            let include_at_risk = self.include_at_risk;
             self.selected_wads = if on {
-                self.plan.wads.iter().map(|w| w.wad_id).collect()
+                self.plan
+                    .wads
+                    .iter()
+                    .filter(|w| include_at_risk || !Self::is_at_risk(w))
+                    .map(|w| w.wad_id)
+                    .collect()
             } else {
                 HashSet::new()
             };
@@ -528,6 +567,60 @@ mod tests {
             total_size: 100,
             has_stats_snapshot: false,
         }
+    }
+
+    fn state(wads: Vec<WadPlanEntry>) -> GcDialogState {
+        GcDialogState {
+            opts: GcOptions::default(),
+            plan: GcPlan {
+                wads,
+                ..GcPlan::default()
+            },
+            selected_wads: HashSet::new(),
+            selected_orphans: Default::default(),
+            confirming: false,
+            include_at_risk: false,
+            status: None,
+            modified: false,
+        }
+    }
+
+    /// "All" means "all the rows this plan is allowed to touch", not literally
+    /// all of them. Sweeping in an at-risk row on one unarmed click is how the
+    /// only copy of a WAD gets deleted.
+    #[test]
+    fn test_select_all_skips_at_risk_until_armed() {
+        let safe = WadPlanEntry {
+            wad_id: 1,
+            ..entry(true, Some("/cache/a.zip"))
+        };
+        let risky = WadPlanEntry {
+            wad_id: 2,
+            ..entry(false, Some("/cache/b.zip"))
+        };
+        let mut s = state(vec![safe, risky]);
+
+        s.set_all(Section::Wads, true);
+        assert_eq!(s.selected_wads, HashSet::from([1]));
+
+        s.include_at_risk = true;
+        s.set_all(Section::Wads, true);
+        assert_eq!(s.selected_wads, HashSet::from([1, 2]));
+
+        s.set_all(Section::Wads, false);
+        assert!(s.selected_wads.is_empty());
+    }
+
+    /// A manual WAD with nothing queued in the cache is an ordinary row, so
+    /// "All" takes it whether or not the opt-in is ticked.
+    #[test]
+    fn test_select_all_takes_manual_wads_with_no_cached_file() {
+        let mut s = state(vec![WadPlanEntry {
+            wad_id: 7,
+            ..entry(false, None)
+        }]);
+        s.set_all(Section::Wads, true);
+        assert_eq!(s.selected_wads, HashSet::from([7]));
     }
 
     /// The only row worth protecting is one where this plan would delete an

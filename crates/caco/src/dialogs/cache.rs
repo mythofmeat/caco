@@ -23,6 +23,9 @@ pub struct CacheDialogState {
     selected_row: Option<usize>,
     /// Index awaiting a second click before an irreplaceable file is deleted.
     confirming_delete: Option<usize>,
+    /// Opt-in that lets the bulk clear touch irreplaceable files. Reset by
+    /// `load`, so it never survives the list it was ticked against.
+    include_at_risk: bool,
     pub modified: bool,
 }
 
@@ -40,6 +43,7 @@ impl CacheDialogState {
             total_size: 0,
             selected_row: None,
             confirming_delete: None,
+            include_at_risk: false,
             modified: false,
         };
         state.load(conn);
@@ -67,6 +71,7 @@ impl CacheDialogState {
 
         self.total_size = self.entries.iter().filter_map(|e| e.size).sum();
         self.confirming_delete = None;
+        self.include_at_risk = false;
         self.selected_row = if self.entries.is_empty() {
             None
         } else {
@@ -76,7 +81,17 @@ impl CacheDialogState {
 
     /// How many entries the bulk clear would actually remove.
     fn clearable_count(&self) -> usize {
-        self.entries.iter().filter(|e| !e.irreplaceable).count()
+        self.entries.iter().filter(|e| self.clears(e)).count()
+    }
+
+    /// How many entries the bulk clear is refusing to touch.
+    fn at_risk_count(&self) -> usize {
+        self.entries.iter().filter(|e| e.irreplaceable).count()
+    }
+
+    /// Would the bulk clear delete this entry?
+    fn clears(&self, entry: &CacheEntry) -> bool {
+        !entry.irreplaceable || self.include_at_risk
     }
 
     /// Render the cache dialog. Returns the dialog result.
@@ -104,11 +119,12 @@ impl CacheDialogState {
                 let text_height = ui.text_style_height(&egui::TextStyle::Body);
                 let row_height = text_height + 6.0;
 
-                // Reserve the button row's height, then let the table scroll
-                // inside whatever is left. Without a cap the table grows to
-                // its full row count and drags the window past the viewport,
-                // taking the Close button below the bottom edge with it.
-                let table_height = crate::dialogs::modal_body_height(ctx, 110.0);
+                // Reserve the chrome's height — title bar, summary line, the
+                // at-risk toggle and the button row — then let the table scroll
+                // inside whatever is left. Without a cap the table grows to its
+                // full row count and drags the window past the viewport, taking
+                // the Close button below the bottom edge with it.
+                let table_height = crate::dialogs::modal_body_height(ctx, 145.0);
                 let table = TableBuilder::new(ui)
                     .max_scroll_height(table_height)
                     .striped(true)
@@ -181,6 +197,9 @@ impl CacheDialogState {
             ui.separator();
             ui.add_space(4.0);
 
+            let at_risk = self.at_risk_count();
+            crate::dialogs::include_at_risk_toggle(ui, &mut self.include_at_risk, at_risk);
+
             // Button row
             ui.horizontal(|ui| {
                 let has_selection = self.selected_row.is_some() && !self.entries.is_empty();
@@ -219,27 +238,42 @@ impl CacheDialogState {
                     }
                 }
 
-                // Bulk clear never touches a file caco cannot re-fetch —
-                // there is no selection to review, so the only safe scope
-                // is the disposable one.
+                // Bulk clear skips files caco cannot re-fetch unless the
+                // toggle beside it says otherwise — see
+                // `dialogs::include_at_risk_toggle`.
                 let clearable = self.clearable_count();
-                let clear_label = if clearable < self.entries.len() {
+                let skipping = self.entries.len() - clearable;
+                let clear_label = if skipping > 0 {
                     format!("Clear {clearable} Re-downloadable")
                 } else {
-                    "Clear All".to_string()
+                    format!("Clear All ({clearable})")
                 };
-                let clear = ui.add_enabled(clearable > 0, egui::Button::new(clear_label));
-                let clear = if clearable < self.entries.len() {
-                    clear.on_hover_text(
-                        "Skips WADs with no idgames source. Delete those individually.",
+                let clear = ui
+                    .add_enabled(
+                        clearable > 0,
+                        egui::Button::new(if self.include_at_risk {
+                            egui::RichText::new(clear_label).color(theme::COLOR_ERROR)
+                        } else {
+                            egui::RichText::new(clear_label)
+                        }),
                     )
-                } else {
-                    clear
-                };
+                    .on_hover_text(if skipping > 0 {
+                        "Skips WADs with no idgames source. Tick the box to include them."
+                    } else if self.include_at_risk {
+                        "Includes files that cannot be downloaded again."
+                    } else {
+                        "Every cached file can be fetched again."
+                    });
                 if clear.clicked() {
-                    for entry in self.entries.iter().filter(|e| !e.irreplaceable) {
-                        let _ = fs::remove_file(&entry.path);
-                        let _ = caco_core::db::sessions::clear_cached_path(conn, entry.wad_id);
+                    let doomed: Vec<(i64, String)> = self
+                        .entries
+                        .iter()
+                        .filter(|e| self.clears(e))
+                        .map(|e| (e.wad_id, e.path.clone()))
+                        .collect();
+                    for (wad_id, path) in doomed {
+                        let _ = fs::remove_file(&path);
+                        let _ = caco_core::db::sessions::clear_cached_path(conn, wad_id);
                     }
                     self.modified = true;
                     self.load(conn);
@@ -280,8 +314,42 @@ mod tests {
             total_size: 0,
             selected_row: None,
             confirming_delete: None,
+            include_at_risk: false,
             modified: false,
         }
+    }
+
+    /// Ticking the opt-in is the only thing that puts an irreplaceable file
+    /// in reach of the bulk clear. The label and the deletion loop read the
+    /// same predicate, so they cannot disagree about what is about to go.
+    #[test]
+    fn test_opt_in_includes_irreplaceable() {
+        let mut s = state(vec![entry(false), entry(true), entry(true)]);
+        assert_eq!(s.clearable_count(), 1);
+        assert_eq!(s.at_risk_count(), 2);
+
+        s.include_at_risk = true;
+        assert_eq!(s.clearable_count(), 3);
+        assert_eq!(
+            s.at_risk_count(),
+            2,
+            "the count of at-risk files is a fact \
+                                           about the library, not about the toggle"
+        );
+    }
+
+    /// Reloading the list drops the opt-in. It was ticked against a set of
+    /// files that no longer exists, and carrying it silently over would arm a
+    /// bulk delete the user never armed.
+    #[test]
+    fn test_opt_in_does_not_survive_a_reload() {
+        let mut s = state(vec![entry(true)]);
+        s.include_at_risk = true;
+        s.entries.clear();
+        s.total_size = 0;
+        s.confirming_delete = None;
+        s.include_at_risk = false; // what `load` does
+        assert!(!s.include_at_risk);
     }
 
     /// Bulk clear must never count a file caco cannot fetch again — the label
