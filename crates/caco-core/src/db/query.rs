@@ -2,7 +2,8 @@ use rusqlite::Connection;
 
 use super::connection::{attach_tags, fetch_tags_batch};
 use super::models::{
-    AndGroup, OR_SEPARATOR, ParsedQuery, QueryTerm, STATUS_SHORTCUTS, SourceType, WadRecord,
+    AndGroup, OR_SEPARATOR, ParsedQuery, QueryTerm, Retrievability, STATUS_SHORTCUTS, SourceType,
+    WadRecord,
 };
 use crate::Result;
 use crate::complevel::parse_complevel;
@@ -316,6 +317,16 @@ fn build_term_sql(term: &QueryTerm) -> (String, Vec<SqlParam>) {
             "wads.source_type = ?".into(),
             vec![Box::new(term.value.to_lowercase())],
         ),
+
+        Some("retrievable") | Some("retrievability") => {
+            match term.value.parse::<Retrievability>() {
+                Ok(Retrievability::Automatic) => (Retrievability::AUTOMATIC_SQL.into(), Vec::new()),
+                Ok(Retrievability::Manual) => {
+                    (format!("NOT {}", Retrievability::AUTOMATIC_SQL), Vec::new())
+                }
+                Err(_) => return (String::new(), Vec::new()),
+            }
+        }
 
         Some("tag") => {
             let tag_pattern = term.value.to_lowercase();
@@ -744,6 +755,99 @@ mod tests {
                 .tags(vec!["megawad".into(), "slaughter".into()]),
         )
         .unwrap();
+    }
+
+    /// Every combination of the two fields retrievability is derived from,
+    /// so the SQL/Rust agreement test below has something of each kind.
+    fn add_retrievability_fixtures(conn: &Connection) {
+        let cases: &[(&str, SourceType, Option<&str>)] = &[
+            ("ig-with-id", SourceType::Idgames, Some("42")),
+            ("ig-no-id", SourceType::Idgames, None),
+            ("wiki-with-id", SourceType::Doomwiki, Some("43")),
+            ("wiki-no-id", SourceType::Doomwiki, None),
+            ("dw-with-id", SourceType::Doomworld, Some("44")),
+            ("dw-no-id", SourceType::Doomworld, None),
+            ("url-no-id", SourceType::Url, None),
+            ("local-no-id", SourceType::Local, None),
+            ("dw-empty-id", SourceType::Doomworld, Some("")),
+        ];
+
+        for (title, source_type, idgames_id) in cases {
+            let id = add_wad(conn, &NewWad::new(*title, *source_type)).unwrap();
+            if let Some(ig) = idgames_id {
+                let update =
+                    crate::db::wads::WadUpdate::new().set_text("idgames_id", Some(ig.to_string()));
+                crate::db::wads::update_wad(conn, id, &update).unwrap();
+            }
+        }
+    }
+
+    /// `Retrievability::AUTOMATIC_SQL` and `Retrievability::derive` are two
+    /// spellings of one rule, so they can drift. This is what catches it.
+    #[test]
+    fn test_retrievability_sql_matches_rust() {
+        let conn = setup();
+        add_retrievability_fixtures(&conn);
+
+        let sql_automatic: Vec<i64> = conn
+            .prepare(&format!(
+                "SELECT id FROM wads WHERE {} ORDER BY id",
+                Retrievability::AUTOMATIC_SQL
+            ))
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+
+        let rust_automatic: Vec<i64> = search_wads(&conn, None, None, true, false, 0)
+            .unwrap()
+            .into_iter()
+            .filter(|w| w.retrievability().is_automatic())
+            .map(|w| w.id)
+            .collect();
+
+        assert!(
+            !sql_automatic.is_empty(),
+            "fixtures produced no automatic rows"
+        );
+        assert_eq!(sql_automatic, rust_automatic);
+    }
+
+    #[test]
+    fn test_retrievable_query_field() {
+        let conn = setup();
+        add_retrievability_fixtures(&conn);
+
+        let auto = search_wads(&conn, Some("retrievable:auto"), None, true, false, 0).unwrap();
+        let manual = search_wads(&conn, Some("retrievable:manual"), None, true, false, 0).unwrap();
+
+        assert!(auto.iter().all(|w| w.retrievability().is_automatic()));
+        assert!(manual.iter().all(|w| !w.retrievability().is_automatic()));
+        assert_eq!(
+            auto.len() + manual.len(),
+            search_wads(&conn, None, None, true, false, 0)
+                .unwrap()
+                .len()
+        );
+
+        // The empty id must land on the manual side, not the automatic one.
+        assert!(manual.iter().any(|w| w.title == "dw-empty-id"));
+    }
+
+    #[test]
+    fn test_retrievable_query_field_negated() {
+        let conn = setup();
+        add_retrievability_fixtures(&conn);
+
+        let negated = search_wads(&conn, Some("^retrievable:auto"), None, true, false, 0).unwrap();
+        let manual = search_wads(&conn, Some("retrievable:manual"), None, true, false, 0).unwrap();
+
+        let mut a: Vec<i64> = negated.iter().map(|w| w.id).collect();
+        let mut b: Vec<i64> = manual.iter().map(|w| w.id).collect();
+        a.sort_unstable();
+        b.sort_unstable();
+        assert_eq!(a, b);
     }
 
     #[test]

@@ -50,7 +50,7 @@ pub use iwads::{
 };
 pub use models::{
     ALLOWED_UPDATE_FIELDS, AndGroup, Availability, OR_SEPARATOR, ParsedQuery, QueryTerm,
-    STATUS_METADATA, STATUS_SHORTCUTS, SourceType, Status, StatusMeta, WadRecord,
+    Retrievability, STATUS_METADATA, STATUS_SHORTCUTS, SourceType, Status, StatusMeta, WadRecord,
 };
 pub use playthroughs::{
     PlaythroughRecord, complete_playthrough, delete_playthrough, derive_status, ensure_playthrough,

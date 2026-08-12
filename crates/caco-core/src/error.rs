@@ -36,6 +36,9 @@ pub enum Error {
     #[error("invalid availability: {0}")]
     InvalidAvailability(String),
 
+    #[error("invalid retrievability: {0}")]
+    InvalidRetrievability(String),
+
     #[error("invalid source type: {0}")]
     InvalidSourceType(String),
 

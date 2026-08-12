@@ -105,9 +105,16 @@ status:in-progress , status:unplayed    OR queries
 ^status:completed               Negation
 tag:caco*                       Glob patterns
 cacoward:2023                   Cacoward entries for a year
+retrievable:manual              WADs caco cannot re-download on its own
 ```
 
-**Fields:** `id`, `title`, `author`, `year`, `filename`, `tag`, `status`, `source`, `iwad`, `complevel`, `config`, `cacoward`
+**Fields:** `id`, `title`, `author`, `year`, `filename`, `tag`, `status`, `source`, `iwad`, `complevel`, `config`, `cacoward`, `retrievable`
+
+**`retrievable:`** splits the library by whether caco can fetch the file
+again unattended. `retrievable:automatic` (`auto`, `a`) matches WADs on
+idgames; `retrievable:manual` (`m`) matches everything else — a Doomworld
+thread link or a one-off file host is not something caco can promise to
+re-download, so those copies are worth keeping.
 
 **Status values:** `unplayed`, `in-progress`, `completed`, `abandoned`
 

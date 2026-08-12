@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::Connection;
 
 use crate::config;
-use crate::db::{self, SourceType, Status, WadRecord};
+use crate::db::{self, Status, WadRecord};
 use crate::demos::DEMO_EXTENSION;
 use crate::sourceports::ALL_SAVE_EXTENSIONS;
 
@@ -244,7 +244,7 @@ fn measure_wad(
         wad_id: wad.id,
         title: wad.title.clone(),
         status: wad.status,
-        redownloadable: wad.source_type == SourceType::Idgames || wad.idgames_id.is_some(),
+        redownloadable: wad.retrievability().is_automatic(),
         data_dir,
         data_size,
         cache_path,

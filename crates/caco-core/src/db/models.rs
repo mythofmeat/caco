@@ -134,6 +134,90 @@ impl FromStr for Availability {
 }
 
 // ---------------------------------------------------------------------------
+// Retrievability enum
+// ---------------------------------------------------------------------------
+
+/// Whether caco can fetch a WAD's file again on its own.
+///
+/// Deliberately derived from source metadata rather than stored, and never
+/// from where the file currently sits on disk. Placement is a *consequence*
+/// of retrievability — a manual WAD belongs in the portable data dir whether
+/// or not its file has been downloaded yet — so reading it back off the path
+/// would make the two drift apart the moment `cache_dir` or `CACO_HOME`
+/// moves.
+///
+/// This is orthogonal to [`Availability`], which answers "is the file here
+/// right now". A WAD can be `Manual` + cached (must be kept) or `Automatic` +
+/// not cached (will be re-fetched on demand).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Retrievability {
+    /// Re-downloadable from idgames, which is archival and stable.
+    Automatic,
+    /// Only obtainable by hand. `source_url` may still be set — a Doomworld
+    /// thread or a one-off file host — but those links rot, sit behind
+    /// Cloudflare, or point at storage that has since been emptied, so they
+    /// are not something caco can promise to re-fetch.
+    Manual,
+}
+
+impl Retrievability {
+    pub const ALL: &[Retrievability] = &[Retrievability::Automatic, Retrievability::Manual];
+
+    /// SQL predicate matching [`Retrievability::Automatic`] rows.
+    ///
+    /// Must stay in lockstep with [`Retrievability::derive`];
+    /// `test_retrievability_sql_matches_rust` asserts they agree.
+    pub const AUTOMATIC_SQL: &str =
+        "(wads.source_type = 'idgames' OR COALESCE(wads.idgames_id, '') <> '')";
+
+    /// Classify from the two fields that decide it.
+    pub fn derive(source_type: SourceType, idgames_id: Option<&str>) -> Self {
+        if source_type == SourceType::Idgames || idgames_id.is_some_and(|id| !id.is_empty()) {
+            Retrievability::Automatic
+        } else {
+            Retrievability::Manual
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Retrievability::Automatic => "automatic",
+            Retrievability::Manual => "manual",
+        }
+    }
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Retrievability::Automatic => "Automatic",
+            Retrievability::Manual => "Manual",
+        }
+    }
+
+    /// True when caco can fetch the file again unattended.
+    pub fn is_automatic(self) -> bool {
+        self == Retrievability::Automatic
+    }
+}
+
+impl fmt::Display for Retrievability {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for Retrievability {
+    type Err = crate::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "automatic" | "auto" | "a" => Ok(Retrievability::Automatic),
+            "manual" | "m" => Ok(Retrievability::Manual),
+            _ => Err(crate::Error::InvalidRetrievability(s.to_string())),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // SourceType enum
 // ---------------------------------------------------------------------------
 
@@ -223,6 +307,11 @@ pub struct WadRecord {
 }
 
 impl WadRecord {
+    /// Whether caco can fetch this WAD's file again on its own.
+    pub fn retrievability(&self) -> Retrievability {
+        Retrievability::derive(self.source_type, self.idgames_id.as_deref())
+    }
+
     /// Build a `WadRecord` from a `rusqlite::Row`.
     ///
     /// Expects all wad columns to be present (SELECT *). Tags must be
@@ -509,5 +598,74 @@ mod tests {
     #[test]
     fn test_invalid_availability() {
         assert!("invalid".parse::<Availability>().is_err());
+    }
+
+    // -----------------------------------------------------------------------
+    // Retrievability tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_retrievability_as_str_roundtrip() {
+        for &r in Retrievability::ALL {
+            let s = r.as_str();
+            let parsed: Retrievability = s.parse().unwrap();
+            assert_eq!(parsed, r);
+        }
+    }
+
+    #[test]
+    fn test_retrievability_parse_shortcuts() {
+        for s in ["automatic", "auto", "a", "AUTO", "Automatic"] {
+            assert_eq!(
+                s.parse::<Retrievability>().unwrap(),
+                Retrievability::Automatic
+            );
+        }
+        for s in ["manual", "m", "Manual"] {
+            assert_eq!(s.parse::<Retrievability>().unwrap(), Retrievability::Manual);
+        }
+        assert!("nonsense".parse::<Retrievability>().is_err());
+    }
+
+    /// An idgames WAD is automatic regardless of whether the id was recorded.
+    #[test]
+    fn test_retrievability_idgames_source_is_automatic() {
+        assert_eq!(
+            Retrievability::derive(SourceType::Idgames, None),
+            Retrievability::Automatic
+        );
+    }
+
+    /// A WAD found elsewhere but mirrored on idgames is still automatic — the
+    /// id is what makes it re-fetchable, not where the metadata came from.
+    #[test]
+    fn test_retrievability_idgames_id_promotes_other_sources() {
+        for src in [
+            SourceType::Doomwiki,
+            SourceType::Doomworld,
+            SourceType::Url,
+            SourceType::Local,
+        ] {
+            assert_eq!(
+                Retrievability::derive(src, Some("12345")),
+                Retrievability::Automatic,
+                "{src} with an idgames id should be automatic"
+            );
+            assert_eq!(
+                Retrievability::derive(src, None),
+                Retrievability::Manual,
+                "{src} without an idgames id should be manual"
+            );
+        }
+    }
+
+    /// An empty id is not an id — blank text fields come back from the GUI's
+    /// edit dialog as `Some("")` rather than `None`.
+    #[test]
+    fn test_retrievability_empty_idgames_id_is_manual() {
+        assert_eq!(
+            Retrievability::derive(SourceType::Doomworld, Some("")),
+            Retrievability::Manual
+        );
     }
 }

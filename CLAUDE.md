@@ -136,14 +136,31 @@ wherever the cache used to be.
 ## Behavior
 
 **Query syntax** (beets-style — used by `ls`, `play`, `modify`, `trash`, etc.):
-- Fields: `id:`, `title:`, `author:`, `year:`, `filename:`, `tag:`, `status:`, `source:`, `iwad:`, `complevel:`, `config:`, `cacoward:`
+- Fields: `id:`, `title:`, `author:`, `year:`, `filename:`, `tag:`, `status:`, `source:`, `iwad:`, `complevel:`, `config:`, `cacoward:`, `retrievable:`
 - OR: `"status:in-progress , status:unplayed"` (comma with spaces)
 - Negation: `^status:completed`
 - Status shortcuts: `u` (unplayed), `p`/`ip` (in-progress), `c`/`f`/`done` (completed), `a`/`d` (abandoned)
+- Retrievability shortcuts: `auto`/`a` (automatic), `m` (manual)
 - Glob patterns: `tag:caco*`
 - Free text searches title, author, description
 
 **Status enum**: `unplayed`, `in-progress`, `completed`, `abandoned`.
+
+**Retrievability** (`db::models::Retrievability`, `Automatic` / `Manual`): whether
+caco can fetch a WAD's file again unattended — `source_type = idgames` or a
+non-empty `idgames_id`. Derived, never stored, and never inferred from where the
+file currently sits: placement is a *consequence* of retrievability, so reading it
+back off the path would let the two drift the moment `cache_dir` or `CACO_HOME`
+moves. Orthogonal to `Availability` (`Cached`/`Downloadable`/`Unavailable`), which
+answers "is the file here right now" and is recomputed on every write from
+`cached_path` + `source_url`. All four combinations occur in a real library, and
+`Availability::Downloadable` deliberately overstates for manual WADs — it means
+"has some `source_url`", including Doomworld threads and one-off hosts that rot.
+`gc.rs`'s `redownloadable` flag is now `wad.retrievability().is_automatic()`
+rather than its own inline copy of the rule. The `retrievable:` query field needs
+the rule as SQL too, so `Retrievability::AUTOMATIC_SQL` sits next to `derive` and
+`query.rs::test_retrievability_sql_matches_rust` asserts the two spellings agree
+against fixtures covering every source type.
 
 **IWAD detection**: PNAMES lump analysis (TNT-only 197 patches / Plutonia-only 78 patches), map lump fallback (ExMy→doom, MAPxx→doom2); self-contained WADs don't trigger detection.
 
