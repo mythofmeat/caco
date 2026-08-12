@@ -4,19 +4,8 @@ use chrono::Utc;
 use rusqlite::Connection;
 
 use super::connection::attach_tags;
-use super::models::{ALLOWED_UPDATE_FIELDS, Availability, SourceType, Status, WadRecord};
+use super::models::{ALLOWED_UPDATE_FIELDS, SourceType, Status, WadRecord};
 use crate::Result;
-
-/// Compute availability from WAD fields.
-pub fn compute_availability(cached_path: Option<&str>, source_url: Option<&str>) -> Availability {
-    if cached_path.is_some() {
-        Availability::Cached
-    } else if source_url.is_some() {
-        Availability::Downloadable
-    } else {
-        Availability::Unavailable
-    }
-}
 
 // ---------------------------------------------------------------------------
 // NewWad builder
@@ -169,11 +158,6 @@ impl WadUpdate {
         self.set_text("status", Some(status.as_str().to_string()))
     }
 
-    /// Set the availability.
-    pub fn set_availability(self, avail: Availability) -> Self {
-        self.set_text("availability", Some(avail.as_str().to_string()))
-    }
-
     /// Disable automatic completion recording when status is set to finished.
     pub fn no_completion(mut self) -> Self {
         self.record_completion = false;
@@ -200,12 +184,10 @@ impl WadUpdate {
 
 /// Add a WAD to the library. Returns the new WAD ID.
 pub fn add_wad(conn: &Connection, wad: &NewWad) -> Result<i64> {
-    let avail = compute_availability(wad.cached_path.as_deref(), wad.source_url.as_deref());
     conn.execute(
         "INSERT INTO wads (title, author, year, description, source_type,
-                          source_id, source_url, filename, cached_path, status, version,
-                          availability)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                          source_id, source_url, filename, cached_path, status, version)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         rusqlite::params![
             wad.title,
             wad.author,
@@ -218,7 +200,6 @@ pub fn add_wad(conn: &Connection, wad: &NewWad) -> Result<i64> {
             wad.cached_path,
             wad.status.as_str(),
             wad.version,
-            avail.as_str(),
         ],
     )?;
 
@@ -271,26 +252,15 @@ pub fn update_wad(conn: &Connection, wad_id: i64, update: &WadUpdate) -> Result<
             |v| matches!(v, FieldValue::Text(Some(s)) if s == Status::Completed.as_str()),
         );
 
-    // Auto-maintain availability when cached_path or source_url change.
-    let needs_avail_update = (update.fields.contains_key("cached_path")
-        || update.fields.contains_key("source_url"))
-        && !update.fields.contains_key("availability");
-
     // If we're already inside a transaction (e.g. an import service wrapping
     // add_wad + update_wad atomically), run the body directly against the
     // current connection. Otherwise open a dedicated transaction.
     if conn.is_autocommit() {
         super::connection::with_transaction(conn, |tx| {
-            update_wad_body(tx, wad_id, update, recording_completion, needs_avail_update)
+            update_wad_body(tx, wad_id, update, recording_completion)
         })
     } else {
-        update_wad_body(
-            conn,
-            wad_id,
-            update,
-            recording_completion,
-            needs_avail_update,
-        )
+        update_wad_body(conn, wad_id, update, recording_completion)
     }
 }
 
@@ -299,33 +269,7 @@ fn update_wad_body(
     wad_id: i64,
     update: &WadUpdate,
     recording_completion: bool,
-    needs_avail_update: bool,
 ) -> Result<bool> {
-    let mut extra_fields: Vec<(&str, FieldValue)> = Vec::new();
-
-    if needs_avail_update {
-        let (cur_cached, cur_source): (Option<String>, Option<String>) = tx.query_row(
-            "SELECT cached_path, source_url FROM wads WHERE id = ?1",
-            [wad_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )?;
-
-        let eff_cached = match update.fields.get("cached_path") {
-            Some(FieldValue::Text(v)) => v.as_deref(),
-            _ => cur_cached.as_deref(),
-        };
-        let eff_source = match update.fields.get("source_url") {
-            Some(FieldValue::Text(v)) => v.as_deref(),
-            _ => cur_source.as_deref(),
-        };
-
-        let avail = compute_availability(eff_cached, eff_source);
-        extra_fields.push((
-            "availability",
-            FieldValue::Text(Some(avail.as_str().to_string())),
-        ));
-    }
-
     // Only auto-record a completion when status actually transitions *into*
     // Completed. An idempotent rewrite of an already-completed WAD (e.g. the
     // GUI edit dialog saving with every field, including unchanged status)
@@ -346,14 +290,6 @@ fn update_wad_body(
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
     for (&field, value) in &update.fields {
-        set_parts.push(format!("{field} = ?"));
-        match value {
-            FieldValue::Text(v) => params.push(Box::new(v.clone())),
-            FieldValue::Int(v) => params.push(Box::new(*v)),
-        }
-    }
-
-    for (field, value) in &extra_fields {
         set_parts.push(format!("{field} = ?"));
         match value {
             FieldValue::Text(v) => params.push(Box::new(v.clone())),
@@ -501,6 +437,7 @@ pub fn get_tag_counts(conn: &Connection) -> Result<Vec<(String, i64)>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::Availability;
     use crate::db::connection::{fetch_tags, open_memory};
     use crate::db::schema::init_db;
 
@@ -835,13 +772,13 @@ mod tests {
     }
 
     #[test]
-    fn test_availability_auto_computed_on_add() {
+    fn test_availability_derived_after_add() {
         let conn = setup();
 
         // No cached_path, no source_url → unavailable
         let id1 = add_wad(&conn, &NewWad::new("No URL", SourceType::Local)).unwrap();
         let w1 = get_wad(&conn, id1, false).unwrap().unwrap();
-        assert_eq!(w1.availability, Availability::Unavailable);
+        assert_eq!(w1.availability(), Availability::Unavailable);
 
         // With source_url → downloadable
         let id2 = add_wad(
@@ -850,7 +787,7 @@ mod tests {
         )
         .unwrap();
         let w2 = get_wad(&conn, id2, false).unwrap().unwrap();
-        assert_eq!(w2.availability, Availability::Downloadable);
+        assert_eq!(w2.availability(), Availability::Downloadable);
 
         // With cached_path → cached
         let id3 = add_wad(
@@ -859,11 +796,11 @@ mod tests {
         )
         .unwrap();
         let w3 = get_wad(&conn, id3, false).unwrap().unwrap();
-        assert_eq!(w3.availability, Availability::Cached);
+        assert_eq!(w3.availability(), Availability::Cached);
     }
 
     #[test]
-    fn test_availability_auto_maintained_on_update() {
+    fn test_availability_follows_cached_path_changes() {
         let conn = setup();
         let id = add_wad(
             &conn,
@@ -873,21 +810,21 @@ mod tests {
 
         // Initially downloadable
         let wad = get_wad(&conn, id, false).unwrap().unwrap();
-        assert_eq!(wad.availability, Availability::Downloadable);
+        assert_eq!(wad.availability(), Availability::Downloadable);
 
-        // Set cached_path → should auto-update to cached
+        // Set cached_path → cached
         let update = WadUpdate::new().set_text("cached_path", Some("/tmp/test.wad".to_string()));
         update_wad(&conn, id, &update).unwrap();
 
         let wad = get_wad(&conn, id, false).unwrap().unwrap();
-        assert_eq!(wad.availability, Availability::Cached);
+        assert_eq!(wad.availability(), Availability::Cached);
 
-        // Clear cached_path → should auto-update back to downloadable
+        // Clear cached_path → back to downloadable
         let update = WadUpdate::new().set_text("cached_path", None);
         update_wad(&conn, id, &update).unwrap();
 
         let wad = get_wad(&conn, id, false).unwrap().unwrap();
-        assert_eq!(wad.availability, Availability::Downloadable);
+        assert_eq!(wad.availability(), Availability::Downloadable);
     }
 
     #[test]

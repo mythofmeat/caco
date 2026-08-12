@@ -108,13 +108,17 @@ cacoward:2023                   Cacoward entries for a year
 retrievable:manual              WADs caco cannot re-download on its own
 ```
 
-**Fields:** `id`, `title`, `author`, `year`, `filename`, `tag`, `status`, `source`, `iwad`, `complevel`, `config`, `cacoward`, `retrievable`
+**Fields:** `id`, `title`, `author`, `year`, `filename`, `tag`, `status`, `source`, `iwad`, `complevel`, `config`, `cacoward`, `retrievable`, `avail`
 
 **`retrievable:`** splits the library by whether caco can fetch the file
 again unattended. `retrievable:automatic` (`auto`, `a`) matches WADs on
 idgames; `retrievable:manual` (`m`) matches everything else — a Doomworld
 thread link or a one-off file host is not something caco can promise to
 re-download, so those copies are worth keeping.
+
+**`avail:`** is the other half of the picture — whether the file is on this
+machine right now. `avail:cached` has a local copy, `avail:downloadable` has a
+URL to try, `avail:unavailable` has neither.
 
 **Status values:** `unplayed`, `in-progress`, `completed`, `abandoned`
 

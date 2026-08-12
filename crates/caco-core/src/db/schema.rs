@@ -164,6 +164,7 @@ static MIGRATIONS: &[Migration] = &[
         "add_cacoward_supported_flag",
         migrate_add_cacoward_supported_flag,
     ),
+    (38, "drop_availability", migrate_drop_availability),
 ];
 
 // ---------------------------------------------------------------------------
@@ -474,6 +475,19 @@ fn migrate_merge_custom_complevel(conn: &Connection) -> Result<()> {
          WHERE custom_complevel IS NOT NULL
            AND complevel IS NULL",
     )?;
+    Ok(())
+}
+
+/// Drop the `availability` column.
+///
+/// It duplicated what `cached_path` + `source_url` already say, and nothing
+/// kept the copy honest: `clear_cached_path` nulls the path with raw SQL, so
+/// every cache eviction left a row still reading `cached`. `Availability` is
+/// derived on read now, which is why there is nothing to backfill here.
+fn migrate_drop_availability(conn: &Connection) -> Result<()> {
+    if has_column(conn, "wads", "availability")? {
+        conn.execute("ALTER TABLE wads DROP COLUMN availability", [])?;
+    }
     Ok(())
 }
 
@@ -848,7 +862,6 @@ mod tests {
             "complevel",
             "custom_config",
             "gc_ignore",
-            "availability",
             "zdoom_required",
             "download_urls",
         ];

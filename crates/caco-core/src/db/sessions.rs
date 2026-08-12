@@ -1273,6 +1273,39 @@ mod tests {
         assert!(get_cached_wads(&conn).unwrap().is_empty());
     }
 
+    /// Evicting from the cache used to leave `availability` reading `cached`,
+    /// because `clear_cached_path` nulls the column with raw SQL and the old
+    /// stored column was only maintained inside `update_wad`. Deriving it on
+    /// read is what fixes this; the test pins the behaviour, not the mechanism.
+    #[test]
+    fn test_eviction_downgrades_availability() {
+        let conn = setup();
+        let id = add_wad(
+            &conn,
+            &NewWad::new("Evicted", SourceType::Idgames)
+                .source_url("https://example.com/w.zip")
+                .cached_path("/cache/w.zip"),
+        )
+        .unwrap();
+        assert_eq!(
+            crate::db::get_wad(&conn, id, false)
+                .unwrap()
+                .unwrap()
+                .availability(),
+            crate::db::Availability::Cached
+        );
+
+        clear_cached_path(&conn, id).unwrap();
+
+        assert_eq!(
+            crate::db::get_wad(&conn, id, false)
+                .unwrap()
+                .unwrap()
+                .availability(),
+            crate::db::Availability::Downloadable
+        );
+    }
+
     #[test]
     fn test_get_wad_by_cached_filename() {
         let conn = setup();

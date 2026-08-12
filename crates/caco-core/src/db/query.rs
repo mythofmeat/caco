@@ -2,8 +2,8 @@ use rusqlite::Connection;
 
 use super::connection::{attach_tags, fetch_tags_batch};
 use super::models::{
-    AndGroup, OR_SEPARATOR, ParsedQuery, QueryTerm, Retrievability, STATUS_SHORTCUTS, SourceType,
-    WadRecord,
+    AndGroup, Availability, OR_SEPARATOR, ParsedQuery, QueryTerm, Retrievability, STATUS_SHORTCUTS,
+    SourceType, WadRecord,
 };
 use crate::Result;
 use crate::complevel::parse_complevel;
@@ -308,10 +308,10 @@ fn build_term_sql(term: &QueryTerm) -> (String, Vec<SqlParam>) {
             ("wads.status = ?".into(), vec![Box::new(normalized)])
         }
 
-        Some("avail") | Some("availability") => (
-            "wads.availability = ?".into(),
-            vec![Box::new(term.value.to_lowercase())],
-        ),
+        Some("avail") | Some("availability") => match term.value.parse::<Availability>() {
+            Ok(avail) => (avail.sql().into(), Vec::new()),
+            Err(_) => return (String::new(), Vec::new()),
+        },
 
         Some("source") => (
             "wads.source_type = ?".into(),
@@ -848,6 +848,82 @@ mod tests {
         a.sort_unstable();
         b.sort_unstable();
         assert_eq!(a, b);
+    }
+
+    /// `Availability::sql` and `Availability::derive` are two spellings of one
+    /// rule. Every variant must select exactly the rows the Rust side agrees
+    /// with, and the three variants must partition the table.
+    #[test]
+    fn test_availability_sql_matches_rust() {
+        let conn = setup();
+        for (title, cached, url) in [
+            ("cached-and-url", Some("/cache/a.zip"), Some("https://x/a")),
+            ("cached-only", Some("/cache/b.zip"), None),
+            ("url-only", None, Some("https://x/c")),
+            ("neither", None, None),
+        ] {
+            let mut nw = NewWad::new(title, SourceType::Local);
+            if let Some(c) = cached {
+                nw = nw.cached_path(c);
+            }
+            if let Some(u) = url {
+                nw = nw.source_url(u);
+            }
+            add_wad(&conn, &nw).unwrap();
+        }
+
+        let all = search_wads(&conn, None, None, true, false, 0).unwrap();
+        let mut covered = 0;
+
+        for &avail in Availability::ALL {
+            let sql_ids: Vec<i64> = conn
+                .prepare(&format!(
+                    "SELECT id FROM wads WHERE {} ORDER BY id",
+                    avail.sql()
+                ))
+                .unwrap()
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap();
+
+            let rust_ids: Vec<i64> = all
+                .iter()
+                .filter(|w| w.availability() == avail)
+                .map(|w| w.id)
+                .collect();
+
+            assert_eq!(sql_ids, rust_ids, "mismatch for {avail}");
+            covered += sql_ids.len();
+        }
+
+        assert_eq!(covered, all.len(), "variants must partition the table");
+    }
+
+    #[test]
+    fn test_avail_query_field() {
+        let conn = setup();
+        add_wad(
+            &conn,
+            &NewWad::new("Cached", SourceType::Local).cached_path("/cache/a.zip"),
+        )
+        .unwrap();
+        add_wad(
+            &conn,
+            &NewWad::new("Fetchable", SourceType::Idgames).source_url("https://x/b"),
+        )
+        .unwrap();
+        add_wad(&conn, &NewWad::new("Nothing", SourceType::Local)).unwrap();
+
+        for (query, expected) in [
+            ("avail:cached", "Cached"),
+            ("avail:downloadable", "Fetchable"),
+            ("avail:unavailable", "Nothing"),
+        ] {
+            let hits = search_wads(&conn, Some(query), None, true, false, 0).unwrap();
+            assert_eq!(hits.len(), 1, "{query}");
+            assert_eq!(hits[0].title, expected, "{query}");
+        }
     }
 
     #[test]

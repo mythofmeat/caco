@@ -82,7 +82,20 @@ impl FromStr for Status {
 // Availability enum
 // ---------------------------------------------------------------------------
 
-/// File availability state for a WAD (system-managed).
+/// Whether a WAD's file is on this machine right now, and if not, whether
+/// there is any URL to try.
+///
+/// Derived from `cached_path` + `source_url`, never stored. It used to be a
+/// column maintained on write, which drifted the moment anything nulled
+/// `cached_path` with raw SQL — `clear_cached_path` did exactly that, so
+/// every cache eviction left a row still claiming to be cached. Deriving it
+/// makes that unrepresentable.
+///
+/// Answers a different question from [`Retrievability`]: this one changes
+/// every time a file lands in or leaves the cache, while retrievability is a
+/// fact about where the WAD came from. Note that `Downloadable` only promises
+/// a `source_url` exists, not that fetching it will work — see
+/// [`Retrievability::Manual`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Availability {
     Cached,
@@ -96,6 +109,35 @@ impl Availability {
         Availability::Downloadable,
         Availability::Unavailable,
     ];
+
+    /// Classify from the two fields that decide it. An empty string counts as
+    /// absent — blank text fields arrive from the GUI as `Some("")`.
+    pub fn derive(cached_path: Option<&str>, source_url: Option<&str>) -> Self {
+        let present = |v: Option<&str>| v.is_some_and(|s| !s.is_empty());
+        if present(cached_path) {
+            Availability::Cached
+        } else if present(source_url) {
+            Availability::Downloadable
+        } else {
+            Availability::Unavailable
+        }
+    }
+
+    /// SQL predicate selecting rows of this variant.
+    ///
+    /// Must stay in lockstep with [`Availability::derive`];
+    /// `test_availability_sql_matches_rust` asserts they agree.
+    pub fn sql(self) -> &'static str {
+        match self {
+            Availability::Cached => "COALESCE(wads.cached_path, '') <> ''",
+            Availability::Downloadable => {
+                "(COALESCE(wads.cached_path, '') = '' AND COALESCE(wads.source_url, '') <> '')"
+            }
+            Availability::Unavailable => {
+                "(COALESCE(wads.cached_path, '') = '' AND COALESCE(wads.source_url, '') = '')"
+            }
+        }
+    }
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -277,7 +319,6 @@ pub struct WadRecord {
     pub year: Option<i32>,
     pub description: Option<String>,
     pub status: Status,
-    pub availability: Availability,
     pub rating: Option<i32>,
     pub notes: Option<String>,
     pub source_type: SourceType,
@@ -312,6 +353,12 @@ impl WadRecord {
         Retrievability::derive(self.source_type, self.idgames_id.as_deref())
     }
 
+    /// Whether this WAD's file is on the machine, and if not whether there is
+    /// a URL to try.
+    pub fn availability(&self) -> Availability {
+        Availability::derive(self.cached_path.as_deref(), self.source_url.as_deref())
+    }
+
     /// Build a `WadRecord` from a `rusqlite::Row`.
     ///
     /// Expects all wad columns to be present (SELECT *). Tags must be
@@ -319,12 +366,6 @@ impl WadRecord {
     pub fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
         let status_raw: String = row.get("status")?;
         let status = status_raw.parse().unwrap_or(Status::Unplayed);
-
-        let availability_raw: Option<String> = row.get("availability")?;
-        let availability = availability_raw
-            .as_deref()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(Availability::Unavailable);
 
         let source_type_raw: String = row.get("source_type")?;
         let source_type = source_type_raw.parse().unwrap_or(SourceType::Local);
@@ -336,7 +377,6 @@ impl WadRecord {
             year: row.get("year")?,
             description: row.get("description")?,
             status,
-            availability,
             rating: row.get("rating")?,
             notes: row.get("notes")?,
             source_type,
@@ -450,7 +490,6 @@ pub static ALLOWED_UPDATE_FIELDS: LazyLock<std::collections::HashSet<&'static st
             "deleted_at",
             "stats_snapshot",
             "gc_ignore",
-            "availability",
             "download_urls",
         ]
         .into_iter()
@@ -568,7 +607,6 @@ mod tests {
     fn test_allowed_update_fields() {
         assert!(ALLOWED_UPDATE_FIELDS.contains("title"));
         assert!(ALLOWED_UPDATE_FIELDS.contains("status"));
-        assert!(ALLOWED_UPDATE_FIELDS.contains("availability"));
         assert!(ALLOWED_UPDATE_FIELDS.contains("required_sourceport_family"));
         assert!(!ALLOWED_UPDATE_FIELDS.contains("play_state"));
         assert!(!ALLOWED_UPDATE_FIELDS.contains("intent"));

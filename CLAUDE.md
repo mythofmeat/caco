@@ -136,7 +136,7 @@ wherever the cache used to be.
 ## Behavior
 
 **Query syntax** (beets-style — used by `ls`, `play`, `modify`, `trash`, etc.):
-- Fields: `id:`, `title:`, `author:`, `year:`, `filename:`, `tag:`, `status:`, `source:`, `iwad:`, `complevel:`, `config:`, `cacoward:`, `retrievable:`
+- Fields: `id:`, `title:`, `author:`, `year:`, `filename:`, `tag:`, `status:`, `source:`, `iwad:`, `complevel:`, `config:`, `cacoward:`, `retrievable:`, `avail:`
 - OR: `"status:in-progress , status:unplayed"` (comma with spaces)
 - Negation: `^status:completed`
 - Status shortcuts: `u` (unplayed), `p`/`ip` (in-progress), `c`/`f`/`done` (completed), `a`/`d` (abandoned)
@@ -146,21 +146,36 @@ wherever the cache used to be.
 
 **Status enum**: `unplayed`, `in-progress`, `completed`, `abandoned`.
 
-**Retrievability** (`db::models::Retrievability`, `Automatic` / `Manual`): whether
-caco can fetch a WAD's file again unattended — `source_type = idgames` or a
-non-empty `idgames_id`. Derived, never stored, and never inferred from where the
-file currently sits: placement is a *consequence* of retrievability, so reading it
-back off the path would let the two drift the moment `cache_dir` or `CACO_HOME`
-moves. Orthogonal to `Availability` (`Cached`/`Downloadable`/`Unavailable`), which
-answers "is the file here right now" and is recomputed on every write from
-`cached_path` + `source_url`. All four combinations occur in a real library, and
+**Two derived axes on a WAD, neither stored.** Both live in `db/models.rs` as an
+enum with a `derive` constructor, a SQL spelling of the same rule, a `WadRecord`
+accessor, and a test in `query.rs` asserting the Rust and SQL spellings select
+the same rows. Treat that quartet as the pattern for anything similar.
+
+- **`Retrievability`** (`Automatic` / `Manual`): can caco fetch the file again
+  unattended — `source_type = idgames` or a non-empty `idgames_id`. Never
+  inferred from where the file currently sits: placement is a *consequence* of
+  retrievability, so reading it back off the path would let the two drift the
+  moment `cache_dir` or `CACO_HOME` moves. Query field `retrievable:`, SQL in
+  `AUTOMATIC_SQL`. `gc.rs`'s `redownloadable` flag calls it rather than keeping
+  its own inline copy of the rule.
+- **`Availability`** (`Cached` / `Downloadable` / `Unavailable`): is the file on
+  this machine, and if not is there a URL to try — from `cached_path` +
+  `source_url`, treating `""` as absent. Query field `avail:`, SQL in
+  `Availability::sql()`, one predicate per variant, and they partition the table.
+
+The two are orthogonal and all combinations occur in a real library.
 `Availability::Downloadable` deliberately overstates for manual WADs — it means
-"has some `source_url`", including Doomworld threads and one-off hosts that rot.
-`gc.rs`'s `redownloadable` flag is now `wad.retrievability().is_automatic()`
-rather than its own inline copy of the rule. The `retrievable:` query field needs
-the rule as SQL too, so `Retrievability::AUTOMATIC_SQL` sits next to `derive` and
-`query.rs::test_retrievability_sql_matches_rust` asserts the two spellings agree
-against fixtures covering every source type.
+"has some `source_url`", including Doomworld threads and one-off hosts that rot,
+which is exactly what `Retrievability` is for.
+
+`Availability` **was** a stored column (dropped in migration 38). Nothing kept
+the copy honest: `sessions::clear_cached_path` nulls `cached_path` with raw SQL
+while the auto-maintenance lived inside `update_wad`, so every cache eviction —
+the Cache dialog's remove and clear-all, and GC's execute step — left a row
+still reading `cached`. 22 rows had drifted in the author's library before the
+column was removed. Deriving on read makes that unrepresentable, which is why
+migration 38 has nothing to backfill; `sessions.rs::test_eviction_downgrades_availability`
+pins the behaviour.
 
 **IWAD detection**: PNAMES lump analysis (TNT-only 197 patches / Plutonia-only 78 patches), map lump fallback (ExMy→doom, MAPxx→doom2); self-contained WADs don't trigger detection.
 
@@ -172,7 +187,7 @@ against fixtures covering every source type.
 
 **Launch args layering**: global `sourceport_args` (every port) → `[port_args]` table (executable basename → args, case-insensitive fallback, applied only when that port launches) → per-WAD `custom_args` → per-launch extra args. GUI settings dialog edits args as shell-quoted strings via `shlex`.
 
-**DB migrations**: run on `init_db()`; numbered sequentially; current schema version is 23+.
+**DB migrations**: run on `init_db()`; numbered sequentially; current schema version is 38. `init_db` snapshots the DB into the backup dir whenever migrations are pending.
 
 **Cacowards**: `cacowards` table (year, category, rank, wad_title, idgames_url, doomwiki_url, wad_id, manual_override) tracks Doomworld's annual awards. Core categories: `winner`, `runner-up`, `honorable-mention`, `mordeth`. `caco enrich --cacowards --year YYYY` scrapes the Doom Wiki's `Cacowards_YYYY` page (`caco-sources/src/doomwiki/cacowards.rs`), upserts entries, and auto-links to library WADs in two passes: (1) idgames URL → `wads.idgames_id`, (2) normalized-title fallback that links only when exactly one library WAD shares the normalized title. Stale non-manual rows for the year are cleared before each re-scrape so the wiki view is canonical; `manual_override = 1` entries survive. `caco stats --cacowards` renders a year × category grid; `--year YYYY` drills into entry-level detail with linked-WAD status.
 
