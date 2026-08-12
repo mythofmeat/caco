@@ -271,25 +271,54 @@ Never write non-conventional commit subjects (e.g. `Add foo`, `Fix bar`, single-
 
 ## Releasing
 
-Releases are cut **locally** — there is no CI packaging. GitHub only ever holds source; the built packages never leave this machine. Distribution is a local pacman repo served over `file://`.
+A release is a pushed tag, nothing else:
 
 ```bash
-./contrib/arch/release.sh --init      # one time: create the repo, print the pacman.conf stanza
-./contrib/arch/release.sh             # patch bump, then build + publish + pacman -Syu
-./contrib/arch/release.sh minor       # or: major, or an explicit 4.0.0
-./contrib/arch/release.sh --repack    # rebuild the current version as pkgrel+1
+git tag v4.0.1 && git push origin v4.0.1
 ```
 
-The repo at `/var/lib/pacman-local` is shared by every locally-built program, not just caco. Another project publishes into it the same way — drop its `.pkg.tar.zst` files in, run `paccache` for retention, re-run `repo-add`. There is no shared tool to install; the three lines that do it live at the bottom of this script and are worth copying rather than abstracting.
+`.github/workflows/release.yml` fires on `v*`, builds the package inside
+`archlinux:base-devel` through `contrib/arch/Dockerfile`, uploads the
+`.pkg.tar.zst` as a workflow artifact, and creates a GitHub Release with
+generated notes and the package attached. **Arch is the only target.** Adding a
+distro means another `contrib/<distro>/Dockerfile` exposing the same `artifacts`
+stage plus a matrix entry — the workflow is shaped for that but deliberately not
+generalised ahead of a second distro existing.
 
-`release.sh` guards on a clean tree on `main` that is not behind `origin/main` and on the repo existing, runs the quality gates, rewrites the version in `Cargo.toml` (workspace version **and** the internal path-dependency `version` fields), refreshes `Cargo.lock`, syncs `pkgver` in the PKGBUILD, **builds**, and only then commits `chore(release): vX.Y.Z`, tags, pushes and publishes.
+**The tag is the only version source.** `Cargo.toml` carries a permanent
+`version = "0.0.0"`; the Dockerfile seds the tag into it, and seds
+`PACKAGE_VERSION` (the tag with `-` → `_`, because pacman forbids `-` inside
+`pkgver`) into the PKGBUILD. Three consequences, all intended:
 
-The build deliberately happens *before* the commit: a failed build must never leave a published version behind with no artifact to match it. A trap reverts the version files if anything fails before the commit is reached.
+- A binary built from a working tree reports `v0.0.0` in the sidebar and the
+  Help dialog. Only a packaged build carries a real version.
+- The internal path dependencies carry no `version` field and
+  `workspace.package` sets `publish = false`. A version requirement on a path
+  dep has to equal the dependency's actual version, so it would need rewriting
+  in lockstep with the injected one — the field only ever existed for
+  `cargo package`, which nothing runs.
+- The package build does not pass `--locked`. The injected version makes the
+  committed `Cargo.lock`'s own workspace entries stale on purpose, and cargo
+  rewrites just those three lines.
 
-**Retention** is `paccache -r -k $KEEP -c $REPO_DIR`. paccache parses package filenames and orders by version rather than mtime so rebuilding an old version cannot evict a newer one. The database is then rebuilt from scratch rather than updated incrementally, so it can never reference a file retention just deleted — that mismatch is what makes `pacman -Syu` fail against a local repo.
+`makepkg` runs `check()`, so `cargo test --workspace` gates every release; a red
+suite fails the tag build before anything is published.
 
-Env overrides: `CACO_PKG_REPO` (default `/var/lib/pacman-local`), `CACO_PKG_REPO_NAME` (default `local`), `CACO_PKG_KEEP` (default 2), `CACO_SWEEP_DAYS` (default 7; 0 disables the post-release `cargo sweep`).
+**Why the PKGBUILD has no `source=()`**: it builds the working tree the PKGBUILD
+sits in (`$startdir/../..`) rather than cloning into `$srcdir`. Cargo
+fingerprints record absolute source paths, so a `$srcdir` clone invalidates every
+artifact and forces a cold LTO rebuild of the whole workspace, *and* leaves a
+second multi-GB `target/` behind. In CI the build is cold either way; the reason
+this stays is local packaging — `cd contrib/arch && makepkg -f` against the warm
+dev `target/` is a near no-op recompile. The tradeoff is that a local package is
+only as reproducible as the tree it was built from, which is why the release path
+runs in a container instead.
 
-**Why the PKGBUILD has no `source=()`**: it builds the working tree in place rather than cloning into `$srcdir`. Cargo fingerprints record absolute source paths, so a `$srcdir` clone invalidates every artifact and forces a cold LTO rebuild of the whole workspace (~3.5 min), *and* leaves a second multi-GB `target/` behind. Building at the same path `cargo build` uses makes packaging a ~5s no-op recompile against the warm dev cache. `build()` also unsets makepkg's `CFLAGS`/`RUSTFLAGS`/`LDFLAGS` so the fingerprints match a plain `cargo build --release` exactly — otherwise every switch between a dev build and a package build would rebuild the world.
+`$startdir` rather than `$srcdir/../../..`: `cd` verifies every path component,
+and with no `source=()` there is nothing that guarantees `$srcdir` exists.
 
-The tradeoff is that the package is only as reproducible as the working tree, which is why the clean-tree guard is not optional.
+To build a package locally without tagging anything:
+
+```bash
+cd contrib/arch && makepkg -f            # pkgver stays 0.0.0
+```

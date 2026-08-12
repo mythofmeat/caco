@@ -1,0 +1,6 @@
+target
+out
+.git
+contrib/*/pkg
+contrib/*/src
+contrib/*/*.pkg.tar.zst

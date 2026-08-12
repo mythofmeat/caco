@@ -1,0 +1,44 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  arch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Derive release version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release tag: $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "PACKAGE_VERSION=${version//-/_}" >> "$GITHUB_ENV"
+
+      - run: |
+          docker build \
+            --build-arg VERSION="$VERSION" \
+            --build-arg PACKAGE_VERSION="$PACKAGE_VERSION" \
+            --target artifacts \
+            --output type=local,dest=out \
+            -f contrib/arch/Dockerfile \
+            .
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: packages-arch
+          path: out/*
+          if-no-files-found: error
+
+      - run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes out/*
+        env:
+          GH_TOKEN: ${{ github.token }}

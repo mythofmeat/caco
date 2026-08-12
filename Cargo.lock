@@ -620,7 +620,7 @@ checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 
 [[package]]
 name = "caco"
-version = "3.4.0"
+version = "0.0.0"
 dependencies = [
  "caco-core",
  "caco-sources",
@@ -642,7 +642,7 @@ dependencies = [
 
 [[package]]
 name = "caco-core"
-version = "3.4.0"
+version = "0.0.0"
 dependencies = [
  "arc-swap",
  "byteorder",
@@ -663,7 +663,7 @@ dependencies = [
 
 [[package]]
 name = "caco-sources"
-version = "3.4.0"
+version = "0.0.0"
 dependencies = [
  "caco-core",
  "html-escape",

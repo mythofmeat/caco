@@ -18,31 +18,25 @@ A personal Doom WAD library manager inspired by [beets](https://beets.io). Impor
 
 ## Installation
 
-### Arch Linux (pacman-managed, recommended)
+### Arch Linux (recommended)
 
-Caco is built locally and published to a pacman repo on your own machine.
-Nothing is built in CI and no package leaves the machine.
-
-```bash
-git clone git@github.com:mythofmeat/caco.git && cd caco
-
-# One time: set up the local pacman repo (shared by all locally-built programs)
-./contrib/arch/release.sh --init
-
-# Cut a release: bump, build, publish, upgrade
-./contrib/arch/release.sh
-```
-
-`--init` creates `/var/lib/pacman-local` and prints a `pacman.conf` stanza to
-add — do that after the first release, since an empty repo has no database for
-pacman to fetch. Every subsequent release is just `./contrib/arch/release.sh`
-followed by the `pacman -Syu` it runs for you.
-
-To build the package without cutting a release:
+Every tagged release attaches a prebuilt `x86_64` package to its
+[GitHub Release](https://github.com/mythofmeat/caco/releases):
 
 ```bash
-cd contrib/arch && makepkg -f -d --nocheck
+gh release download --repo mythofmeat/caco --pattern '*.pkg.tar.zst'
+sudo pacman -U caco-*.pkg.tar.zst
 ```
+
+To build the package yourself instead:
+
+```bash
+git clone https://github.com/mythofmeat/caco && cd caco/contrib/arch
+makepkg -si
+```
+
+`makepkg` compiles the working tree it sits in, so a local build reports version
+`0.0.0` — the real version is injected from the release tag in CI.
 
 ### From source
 

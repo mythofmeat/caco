@@ -10,7 +10,10 @@ opt-level = 1
 debug = "line-tables-only"
 
 [workspace.package]
-version = "3.4.0"
+# Placeholder. The real version comes from the release tag: contrib/arch/Dockerfile
+# rewrites this line at package time, so a build from a working tree reports 0.0.0.
+version = "0.0.0"
+publish = false
 edition = "2024"
 description = "Doom WAD library manager"
 authors = ["eshen"]
@@ -78,11 +81,9 @@ tempfile = "3"
 
 tracing = "0.1"
 
-# Internal crates. The `version` field is needed alongside `path` for
-# `cargo package --workspace` to work at all — without it cargo errors with
-# "dependency X does not specify a version". These must stay equal to
-# workspace.package.version; the release script rewrites them together with
-# workspace.package.version on every bump and aborts if any reference is left
-# behind.
-caco-core = { path = "crates/caco-core", version = "3.4.0" }
-caco-sources = { path = "crates/caco-sources", version = "3.4.0" }
+# Internal crates. Deliberately no `version` alongside `path`: nothing here is
+# published (workspace.package sets publish = false), and a version requirement
+# would have to be rewritten in lockstep with the tag-injected workspace version
+# or cargo would refuse to resolve the path dependency against it.
+caco-core = { path = "crates/caco-core" }
+caco-sources = { path = "crates/caco-sources" }

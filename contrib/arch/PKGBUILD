@@ -1,5 +1,5 @@
 pkgname=caco
-pkgver=0
+pkgver=0.0.0
 pkgrel=1
 pkgdesc="Doom WAD library manager"
 arch=('x86_64')
@@ -9,40 +9,43 @@ depends=('openssl' 'gcc-libs' 'glibc' 'hicolor-icon-theme' 'desktop-file-utils')
 optdepends=(
     'vulkan-driver: GPU-accelerated rendering'
     'xdg-desktop-portal: native file dialogs'
+    'git: building sourceports from source'
 )
-makedepends=('cargo' 'git' 'systemd')
+# clang: Arch's rust is configured to link through it but does not depend on it,
+# so a clean chroot fails at the first build script without this.
+makedepends=('rust' 'clang' 'pkgconf')
 options=('!lto' '!debug' 'strip')
 
-
-pkgver() {
-    cd "$srcdir"
-    if git rev-parse --git-dir > /dev/null 2>&1; then
-        git describe --tags --abbrev=0 | sed 's/^v//; s/-/_/'
-    else
-        echo 0
-    fi
+# There is no source=(): this builds the working tree the PKGBUILD sits in.
+# Cargo fingerprints record absolute paths, so a $srcdir copy would force a cold
+# rebuild of the whole workspace and leave a second multi-GB target/ behind.
+# $startdir is the PKGBUILD's own directory and always exists, unlike $srcdir,
+# which makepkg only creates because something else in the tree happens to.
+_worktree() {
+    cd "$startdir/../.."
 }
 
 build() {
-    cd "$srcdir/../../../"
+    _worktree
     cargo build --workspace --release
 }
 
 check() {
-    cd "$srcdir/../../../"
+    _worktree
     cargo test --workspace
 }
 
 package() {
-    install -Dm755 "$srcdir/../../../target/release/caco" "$pkgdir/usr/bin/caco"
+    _worktree
 
-    install -Dm644 "$srcdir/../../../assets/caco.desktop" \
-        "$pkgdir/usr/share/applications/caco.desktop"
+    install -Dm755 target/release/caco "$pkgdir/usr/bin/caco"
 
-    install -Dm644 "$srcdir/../../../assets/icons/caco-256.png" \
+    install -Dm644 assets/caco.desktop "$pkgdir/usr/share/applications/caco.desktop"
+
+    install -Dm644 assets/icons/caco-256.png \
         "$pkgdir/usr/share/icons/hicolor/256x256/apps/caco.png"
-    install -Dm644 "$srcdir/../../../assets/icons/caco-128.png" \
+    install -Dm644 assets/icons/caco-128.png \
         "$pkgdir/usr/share/icons/hicolor/128x128/apps/caco.png"
 
-    install -Dm644 "$srcdir/../../../LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
