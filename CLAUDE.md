@@ -40,6 +40,10 @@ cargo run -p caco
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+
+# Look at the GUI without a display server (see Screenshots below)
+cargo test -p caco --test screenshots -- --ignored --nocapture
+CACO_SHOT_SIZE=800x400 cargo test -p caco --test screenshots -- --ignored --nocapture
 ```
 
 ## Architecture
@@ -119,6 +123,47 @@ egui = "0.31"
 - **Import service**: centralises duplicate checking for all sources; auto-enriches with Doom Wiki metadata; JSON import fallback for Cloudflare-blocked APIs.
 - **Player**: wraps sourceport execution; injects companion files, data dir args, complevel args, config profile; returns `PlayResult` with crash detection.
 - **GUI background work**: egui is immediate-mode; `CacoApp` holds all state; background workers for search/import/play use `std::thread` + `std::sync::mpsc`.
+- **Modal sizing**: `dialogs::modal_window` is the only place a dialog's size is
+  decided, and `dialogs::modal_body` the only place its scrolling is. Every
+  dialog used to spell out its own `default_size([W, H])` picked for a
+  comfortable window and never checked against a small one, so at the 800x400
+  minimum window four of them rendered past the app's edges with their button
+  rows unreachable. Clamping alone does not fix that: egui resolves a window as
+  `natural.at_most(max).at_least(min)`, so a body with a large *minimum* —
+  a full-length list, an unwrappable absolute path — beats the cap. The body
+  must be able to shrink, which is what `modal_body` (and `TableBuilder`'s
+  `max_scroll_height`) provides. Heights come from `modal_body_height`, which
+  budgets off `ctx.screen_rect()` rather than `ui.available_height()`: inside a
+  window that is still settling the latter reports last frame's size, so a cap
+  derived from it never converges.
+- **Sidebar rows size to `ui.available_width()`**: `ui.horizontal` does not
+  wrap, and a row wider than a `SidePanel` is not merely clipped — egui sizes a
+  panel from the rect its contents actually occupied, so the overflow displaces
+  every panel after it. Ten management buttons in one row cost five of them
+  (Clean, Trash, IWADs, Ports, Settings were unreachable) *and* 180pt of the
+  library grid. Stacked `theme::sidebar_tool_item` rows cannot do either.
+
+## Screenshots
+
+`crates/caco/tests/screenshots.rs` renders every GUI surface to
+`target/screenshots/*.png` with no display server, through `egui_kittest` +
+wgpu. It exists because whether a row fits inside its panel is decided at paint
+time against a real font atlas and a real viewport — there is no unit test for
+it, and reading the layout code is how the two bugs above survived.
+
+- `#[ignore]`d, like `ports_build.rs`: `cargo test --workspace` must not need a
+  GPU. Run it explicitly.
+- It also *asserts*, not just captures: after opening each dialog it reads
+  egui's own area rects and fails if any window escapes the viewport. Run it at
+  `CACO_SHOT_SIZE=800x400` (the `min_inner_size` in `main.rs`) when touching
+  dialog layout — that is the size things break at, and a PNG cannot tell a
+  window clipped at the screen edge from one that merely ends there.
+- The library is a copy of the real `library.db` into a temp `CACO_HOME`, so
+  shots show real WADs and nothing can write to the real library.
+- `CacoApp::render(ctx)` exists only so this can drive the app: `eframe::Frame`
+  cannot be constructed outside a window. `dispatch_action` and `close_dialog`
+  are public for the same reason — the harness opens dialogs the way a click
+  does rather than building dialog state by hand.
 
 ## Data Locations
 
