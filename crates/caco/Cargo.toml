@@ -25,4 +25,5 @@ open.workspace = true
 shlex.workspace = true
 
 [dev-dependencies]
+egui_kittest = { version = "0.31", features = ["wgpu", "snapshot"] }
 tempfile.workspace = true

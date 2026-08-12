@@ -331,7 +331,15 @@ impl CacoApp {
     }
 
     /// Dispatch an action request (from detail panel buttons or table shortcuts).
-    fn dispatch_action(&mut self, action: ActionRequest) {
+    /// Dismiss whatever dialog is open. Public for `tests/screenshots.rs`,
+    /// which walks every dialog in turn.
+    pub fn close_dialog(&mut self) {
+        self.state.active_dialog = None;
+    }
+
+    /// Public so `tests/screenshots.rs` can open any dialog the same way a
+    /// click does, instead of reconstructing dialog state by hand.
+    pub fn dispatch_action(&mut self, action: ActionRequest) {
         match action {
             ActionRequest::Edit(wad_id) => {
                 if let Some(dialog) = EditDialogState::new(&self.conn, wad_id) {
@@ -659,6 +667,17 @@ impl eframe::App for CacoApp {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.render(ctx);
+    }
+}
+
+impl CacoApp {
+    /// One frame of UI, independent of eframe.
+    ///
+    /// `update` is only a thin shim over this because `eframe::Frame` cannot
+    /// be constructed outside a real window, and the screenshot harness in
+    /// `tests/screenshots.rs` needs to drive the whole app off-screen.
+    pub fn render(&mut self, ctx: &egui::Context) {
         // 1. Drain background messages
         for msg in self.bg.drain() {
             match msg {
