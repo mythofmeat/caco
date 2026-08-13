@@ -26,7 +26,7 @@ pub enum BuildSystem {
     Cmake,
 }
 
-/// How to configure and build a port once it is checked out.
+/// How to configure and build a sourceport once it is checked out.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BuildSpec {
     pub system: BuildSystem,
@@ -36,7 +36,7 @@ pub struct BuildSpec {
     /// Extra configure flags, appended after the ones caco supplies.
     #[serde(default)]
     pub args: Vec<String>,
-    /// Whether `cmake --install` runs. Effectively always true: every port
+    /// Whether `cmake --install` runs. Effectively always true: every sourceport
     /// caco supports needs its data wad or pk3s next to the binary, and the
     /// bare executable out of the build tree is useless.
     #[serde(default = "default_true")]
@@ -72,7 +72,7 @@ impl DepSpec {
 
 /// Everything needed to turn a git URL into a runnable sourceport.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PortRecipe {
+pub struct SourceportRecipe {
     /// Key the recipe was filed under. Also the sourceport name caco matches
     /// against `config.sourceport`, so it must equal an executable name known
     /// to [`crate::sourceports`] for family features to apply.
@@ -97,7 +97,7 @@ pub struct PortRecipe {
     pub patches: Vec<String>,
 }
 
-impl PortRecipe {
+impl SourceportRecipe {
     /// Directory name for this recipe's install prefix.
     ///
     /// Refs can contain path separators (`origin/master`), so they cannot be
@@ -127,8 +127,8 @@ pub fn slugify_ref(git_ref: &str) -> String {
 }
 
 /// Parse a TOML document holding one or more `[name]` recipe tables.
-pub fn parse_recipes(toml_str: &str) -> crate::Result<Vec<PortRecipe>> {
-    let map: BTreeMap<String, PortRecipe> = toml::from_str(toml_str)?;
+pub fn parse_recipes(toml_str: &str) -> crate::Result<Vec<SourceportRecipe>> {
+    let map: BTreeMap<String, SourceportRecipe> = toml::from_str(toml_str)?;
     Ok(map
         .into_iter()
         .map(|(name, mut recipe)| {
@@ -142,7 +142,7 @@ pub fn parse_recipes(toml_str: &str) -> crate::Result<Vec<PortRecipe>> {
 ///
 /// Panics only if `recipes.toml` is malformed, which is a build-time mistake
 /// caught by the test at the bottom of this file.
-pub fn builtin_recipes() -> Vec<PortRecipe> {
+pub fn builtin_recipes() -> Vec<SourceportRecipe> {
     parse_recipes(BUILTIN).expect("built-in recipes.toml is malformed")
 }
 
@@ -154,8 +154,8 @@ pub fn builtin_recipes() -> Vec<PortRecipe> {
 /// them resolves predictably. A malformed file is reported rather than
 /// skipped — silently ignoring it would look identical to the override not
 /// being picked up.
-pub fn load_recipes(recipe_dir: &Path) -> crate::Result<Vec<PortRecipe>> {
-    let mut merged: BTreeMap<String, PortRecipe> = builtin_recipes()
+pub fn load_recipes(recipe_dir: &Path) -> crate::Result<Vec<SourceportRecipe>> {
+    let mut merged: BTreeMap<String, SourceportRecipe> = builtin_recipes()
         .into_iter()
         .map(|r| (r.name.clone(), r))
         .collect();
@@ -195,7 +195,7 @@ fn strip_prefix(msg: &str) -> String {
 }
 
 /// Look up a single recipe by name.
-pub fn find_recipe(recipe_dir: &Path, name: &str) -> crate::Result<PortRecipe> {
+pub fn find_recipe(recipe_dir: &Path, name: &str) -> crate::Result<SourceportRecipe> {
     load_recipes(recipe_dir)?
         .into_iter()
         .find(|r| r.name == name)

@@ -90,7 +90,7 @@ fn render_results_table(
 
     let extra_header = match source {
         SearchSource::Idgames => "Rating/Date",
-        SearchSource::Doomwiki => "Year/Port",
+        SearchSource::Doomwiki => "Year/Sourceport",
     };
 
     let mut clicked_row = None;
@@ -194,7 +194,7 @@ fn render_preview(ui: &mut egui::Ui, state: &SearchState, action: &mut Option<Se
                     preview_row(ui, "IWAD", i);
                 }
                 if let Some(p) = port {
-                    preview_row(ui, "Port", p);
+                    preview_row(ui, "Sourceport", p);
                 }
             }
         }

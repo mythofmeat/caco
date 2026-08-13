@@ -25,6 +25,7 @@
 use std::path::{Path, PathBuf};
 
 use caco::dialogs::storage::StorageTab;
+use caco::message::AppMessage;
 use caco::state::{ActionRequest, ViewMode};
 
 /// Viewport used for every shot unless `CACO_SHOT_SIZE` says otherwise.
@@ -137,10 +138,25 @@ impl Shooter {
     /// part of the dialog — a title bar above the top edge, a Close button
     /// below the bottom one.
     fn shot_dialog(&mut self, name: &str, action: ActionRequest) -> f32 {
+        self.shot_dialog_after(name, action, |_| {})
+    }
+
+    /// Same, but drive the open dialog into a state only a worker can produce
+    /// before shooting it — a build with a step and a log, for one.
+    fn shot_dialog_after(
+        &mut self,
+        name: &str,
+        action: ActionRequest,
+        after_open: impl FnOnce(&mut Self),
+    ) -> f32 {
         self.harness.state_mut().dispatch_action(action);
         for _ in 0..4 {
             self.harness.run();
             std::thread::sleep(std::time::Duration::from_millis(60));
+        }
+        after_open(self);
+        for _ in 0..4 {
+            self.harness.run();
         }
         self.shot(name);
         let overflow = self.worst_overflow();
@@ -208,7 +224,7 @@ fn shoot_every_surface() {
         ("profiles", ActionRequest::Profiles),
         ("enrich", ActionRequest::Enrich),
         ("resources", ActionRequest::Resources),
-        ("ports", ActionRequest::Ports),
+        ("sourceports", ActionRequest::Sourceports),
         ("collections", ActionRequest::Collections),
         ("settings", ActionRequest::Settings),
     ] {
@@ -218,6 +234,31 @@ fn shoot_every_surface() {
         if over > 1.0 {
             escaped.push(format!("{name} (+{over:.0}pt)"));
         }
+    }
+
+    // A finished build with output is the state the Sourceports dialog exists
+    // for, and its tallest: status row plus log pane on top of the sourceport list.
+    // Posted the way the build worker posts it, so the shot proves the app can
+    // actually reach this layout and not just that it renders.
+    let over = s.shot_dialog_after(
+        "dlg-sourceports-build-log",
+        ActionRequest::Sourceports,
+        |s| {
+            let tx = s.harness.state_mut().background_sender();
+            tx.send(AppMessage::SourceportBuildStep("Compiling".to_string()));
+            for i in 1..=200 {
+                tx.send(AppMessage::SourceportBuildLine(format!(
+                    "[{i}/1636] Building CXX object src/CMakeFiles/nyan-doom.dir/p_map.c.o"
+                )));
+            }
+            tx.send(AppMessage::SourceportBuildComplete(Err(
+                "compile failed: see log".to_string(),
+            )));
+        },
+    );
+    println!("  sourceports-build-log: overflow {over:.0}pt");
+    if over > 1.0 {
+        escaped.push(format!("sourceports-build-log (+{over:.0}pt)"));
     }
 
     assert!(

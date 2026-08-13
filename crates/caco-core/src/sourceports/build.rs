@@ -12,18 +12,18 @@ use std::sync::mpsc;
 
 use crate::error::Error;
 
-use super::manifest::{InstalledPort, PortManifest, write_manifest};
-use super::recipe::PortRecipe;
+use super::manifest::{InstalledSourceport, SourceportManifest, write_manifest};
+use super::recipe::SourceportRecipe;
 
 /// Filesystem roots a build reads and writes.
 ///
 /// Passed explicitly rather than read from config inside the driver: every
 /// path in here is one a build creates and `remove` deletes from, and a test
 /// that could reach the real roots is a test that can compile 74M of C++ into
-/// a user's cache — or delete out of it. [`PortPaths::from_config`] is for
+/// a user's cache — or delete out of it. [`SourceportPaths::from_config`] is for
 /// frontends; tests build these from a tempdir.
 #[derive(Debug, Clone)]
-pub struct PortPaths {
+pub struct SourceportPaths {
     /// Where user recipes and their patch files live.
     pub recipe_dir: PathBuf,
     /// Where checkouts and build trees go.
@@ -32,12 +32,12 @@ pub struct PortPaths {
     pub prefix_root: PathBuf,
 }
 
-impl PortPaths {
+impl SourceportPaths {
     pub fn from_config() -> Self {
         Self {
-            recipe_dir: crate::config::port_recipe_dir(),
-            src_root: crate::config::port_src_root(),
-            prefix_root: crate::config::port_prefix_root(),
+            recipe_dir: crate::config::sourceport_recipe_dir(),
+            src_root: crate::config::sourceport_src_root(),
+            prefix_root: crate::config::sourceport_prefix_root(),
         }
     }
 
@@ -53,7 +53,7 @@ impl PortPaths {
     }
 
     /// Install prefix for a recipe at its current ref.
-    pub fn prefix(&self, recipe: &PortRecipe) -> PathBuf {
+    pub fn prefix(&self, recipe: &SourceportRecipe) -> PathBuf {
         self.prefix_root.join(&recipe.name).join(recipe.ref_slug())
     }
 }
@@ -110,7 +110,7 @@ const ERROR_TAIL_LINES: usize = 25;
 /// Shallow: the full uzdoom history is 221M and no part of caco reads it.
 /// `--branch` accepts a branch or a tag but not a bare commit SHA, which is
 /// the one ref form a recipe cannot use.
-pub fn clone_args(recipe: &PortRecipe, dest: &Path) -> Vec<String> {
+pub fn clone_args(recipe: &SourceportRecipe, dest: &Path) -> Vec<String> {
     vec![
         "clone".into(),
         "--depth".into(),
@@ -125,7 +125,7 @@ pub fn clone_args(recipe: &PortRecipe, dest: &Path) -> Vec<String> {
 }
 
 /// `git fetch` to move an existing checkout to the recipe's ref.
-pub fn fetch_args(recipe: &PortRecipe) -> Vec<String> {
+pub fn fetch_args(recipe: &SourceportRecipe) -> Vec<String> {
     vec![
         "fetch".into(),
         "--depth".into(),
@@ -165,7 +165,7 @@ pub fn patch_args(patch: &Path) -> Vec<String> {
 /// The recipe's own args go last so a user override can win over anything
 /// caco supplies.
 pub fn configure_args(
-    recipe: &PortRecipe,
+    recipe: &SourceportRecipe,
     checkout: &Path,
     build_dir: &Path,
     prefix: &Path,
@@ -211,14 +211,14 @@ pub fn install_args(build_dir: &Path) -> Vec<String> {
 /// Build `recipe` and install it into its prefix.
 ///
 /// The install prefix is not touched until the compile has succeeded, so a
-/// failed rebuild leaves the previously working port in place.
+/// failed rebuild leaves the previously working sourceport in place.
 pub fn install(
-    recipe: &PortRecipe,
-    paths: &PortPaths,
+    recipe: &SourceportRecipe,
+    paths: &SourceportPaths,
     opts: &BuildOptions,
     progress: &mut dyn FnMut(BuildProgress<'_>),
     cancel: &dyn Fn() -> bool,
-) -> crate::Result<InstalledPort> {
+) -> crate::Result<InstalledSourceport> {
     require_tools(recipe)?;
 
     let checkout = paths.checkout_dir(&recipe.name);
@@ -277,7 +277,7 @@ pub fn install(
             let path = resolve_patch(&paths.recipe_dir, patch);
             if !path.is_file() {
                 return Err(Error::PortBuild {
-                    port: recipe.name.clone(),
+                    sourceport: recipe.name.clone(),
                     step: BuildStep::Patch.label(),
                     detail: format!("patch not found: {}", path.display()),
                 });
@@ -315,7 +315,7 @@ pub fn install(
 
     // --- install ---
     // Only now is the old prefix disturbed: everything above can fail without
-    // costing the user a port that currently works.
+    // costing the user a sourceport that currently works.
     if recipe.build.install {
         progress(BuildProgress::Step(BuildStep::Install));
         let _ = std::fs::remove_dir_all(&prefix);
@@ -329,7 +329,7 @@ pub fn install(
     }
 
     let commit = resolve_commit(&checkout);
-    let manifest = PortManifest {
+    let manifest = SourceportManifest {
         name: recipe.name.clone(),
         repo: recipe.repo.clone(),
         git_ref: recipe.git_ref.clone(),
@@ -343,10 +343,10 @@ pub fn install(
     // check interval expired.
     super::update::invalidate(&paths.prefix_root, &recipe.name);
 
-    let installed = InstalledPort { manifest, prefix };
+    let installed = InstalledSourceport { manifest, prefix };
     if !installed.is_usable() {
         return Err(Error::PortBuild {
-            port: recipe.name.clone(),
+            sourceport: recipe.name.clone(),
             step: BuildStep::Install.label(),
             detail: format!(
                 "build succeeded but {} is missing — check `binary` in the recipe",
@@ -361,7 +361,7 @@ pub fn install(
 ///
 /// Checked up front so a missing generator fails in a second rather than
 /// after a 221M clone.
-fn require_tools(recipe: &PortRecipe) -> crate::Result<()> {
+fn require_tools(recipe: &SourceportRecipe) -> crate::Result<()> {
     match missing_tool(&required_tools(recipe)) {
         Some(tool) => Err(Error::MissingTool(tool)),
         None => Ok(()),
@@ -377,7 +377,7 @@ fn missing_tool(tools: &[String]) -> Option<String> {
 }
 
 /// Executables that must be on PATH to build `recipe`.
-pub fn required_tools(recipe: &PortRecipe) -> Vec<String> {
+pub fn required_tools(recipe: &SourceportRecipe) -> Vec<String> {
     let mut tools = vec!["git".to_string(), "cmake".to_string()];
     if let Some(generator) = &recipe.build.generator {
         // "Ninja", "Unix Makefiles" — only the single-word generators name a
@@ -410,7 +410,7 @@ fn cmake(args: Vec<String>, cwd: Option<&Path>) -> Command {
 }
 
 fn git(
-    recipe: &PortRecipe,
+    recipe: &SourceportRecipe,
     step: BuildStep,
     cwd: &Path,
     args: Vec<String>,
@@ -444,7 +444,7 @@ fn resolve_commit(checkout: &Path) -> String {
 /// reader threads own the pipe ends, and returning while they are still
 /// blocked would leak a thread per cancelled build.
 fn run(
-    recipe: &PortRecipe,
+    recipe: &SourceportRecipe,
     step: BuildStep,
     mut cmd: Command,
     progress: &mut dyn FnMut(BuildProgress<'_>),
@@ -455,7 +455,7 @@ fn run(
         .stderr(Stdio::piped());
 
     let mut child = cmd.spawn().map_err(|e| Error::PortBuild {
-        port: recipe.name.clone(),
+        sourceport: recipe.name.clone(),
         step: step.label(),
         detail: e.to_string(),
     })?;
@@ -500,7 +500,7 @@ fn run(
     }
 
     let status = child.wait().map_err(|e| Error::PortBuild {
-        port: recipe.name.clone(),
+        sourceport: recipe.name.clone(),
         step: step.label(),
         detail: e.to_string(),
     })?;
@@ -515,7 +515,7 @@ fn run(
             format!("exited with {status}\n{}", tail.join("\n"))
         };
         return Err(Error::PortBuild {
-            port: recipe.name.clone(),
+            sourceport: recipe.name.clone(),
             step: step.label(),
             detail,
         });
@@ -526,9 +526,9 @@ fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ports::recipe::builtin_recipes;
+    use crate::sourceports::recipe::builtin_recipes;
 
-    fn recipe(name: &str) -> PortRecipe {
+    fn recipe(name: &str) -> SourceportRecipe {
         builtin_recipes()
             .into_iter()
             .find(|r| r.name == name)
@@ -537,8 +537,8 @@ mod tests {
 
     /// Roots under a tempdir. Nothing in this module's tests may run a build
     /// or touch a path outside one of these.
-    fn paths(root: &Path) -> PortPaths {
-        PortPaths {
+    fn paths(root: &Path) -> SourceportPaths {
+        SourceportPaths {
             recipe_dir: root.join("recipes"),
             src_root: root.join("src"),
             prefix_root: root.join("prefix"),

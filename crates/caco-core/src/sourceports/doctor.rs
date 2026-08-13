@@ -1,4 +1,4 @@
-//! Answer "can this machine build this port?" before a build spends minutes
+//! Answer "can this machine build this sourceport?" before a build spends minutes
 //! finding out that it cannot.
 //!
 //! Reporting only — caco never installs system packages on the user's behalf.
@@ -7,7 +7,7 @@
 
 use std::process::Command;
 
-use super::recipe::PortRecipe;
+use super::recipe::SourceportRecipe;
 
 /// Which package manager caco was able to ask.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,7 +22,7 @@ pub enum PackageCheck {
 /// What a machine is missing before it can build a recipe.
 #[derive(Debug, Clone)]
 pub struct DoctorReport {
-    pub port: String,
+    pub sourceport: String,
     /// Build tools absent from PATH. Hard blockers.
     pub missing_tools: Vec<String>,
     /// System packages the recipe lists that are not installed.
@@ -62,7 +62,7 @@ impl DoctorReport {
 }
 
 /// Check tools and system packages for one recipe.
-pub fn doctor(recipe: &PortRecipe) -> DoctorReport {
+pub fn doctor(recipe: &SourceportRecipe) -> DoctorReport {
     let missing_tools = super::build::required_tools(recipe)
         .into_iter()
         .filter(|t| crate::config::which(t).is_none())
@@ -72,7 +72,7 @@ pub fn doctor(recipe: &PortRecipe) -> DoctorReport {
     let (missing_packages, package_check) = check_packages(deps);
 
     DoctorReport {
-        port: recipe.name.clone(),
+        sourceport: recipe.name.clone(),
         missing_tools,
         missing_packages,
         package_check,
@@ -162,7 +162,7 @@ mod tests {
 
     fn report(missing_tools: Vec<&str>, missing_packages: Vec<&str>) -> DoctorReport {
         DoctorReport {
-            port: "uzdoom".to_string(),
+            sourceport: "uzdoom".to_string(),
             missing_tools: missing_tools.into_iter().map(String::from).collect(),
             missing_packages: missing_packages.into_iter().map(String::from).collect(),
             package_check: PackageCheck::Checked,
@@ -214,10 +214,10 @@ mod tests {
 
     #[test]
     fn doctor_reports_a_port_by_name() {
-        let recipe = crate::ports::recipe::builtin_recipes()
+        let recipe = crate::sourceports::recipe::builtin_recipes()
             .into_iter()
             .find(|r| r.name == "uzdoom")
             .unwrap();
-        assert_eq!(doctor(&recipe).port, "uzdoom");
+        assert_eq!(doctor(&recipe).sourceport, "uzdoom");
     }
 }

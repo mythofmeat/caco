@@ -27,8 +27,8 @@ fn main() -> eframe::Result<()> {
     // Adopt an installed sourceport when none is configured, so a fresh
     // install can launch something without a trip to Settings first.
     let detected = caco_core::config::ensure_sourceport_defaults();
-    if let Some(ref port) = detected.sourceport {
-        eprintln!("Detected sourceport: {port}");
+    if let Some(ref sourceport) = detected.sourceport {
+        eprintln!("Detected sourceport: {sourceport}");
     }
 
     let db_path = db_path.unwrap_or_else(caco_core::config::get_db_path);
@@ -71,8 +71,8 @@ fn main() -> eframe::Result<()> {
                     .unwrap_or(0);
 
             let mut app = caco::app::CacoApp::new(conn, db_path.clone(), &cc.egui_ctx);
-            if let Some(ref port) = detected.sourceport {
-                app.notify(format!("Detected {port}. Change it in Settings."));
+            if let Some(ref sourceport) = detected.sourceport {
+                app.notify(format!("Detected {sourceport}. Change it in Settings."));
             } else if relinked > 0 {
                 app.notify(format!("Relinked {relinked} cached WAD file(s)."));
             }

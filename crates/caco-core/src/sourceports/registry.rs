@@ -127,7 +127,7 @@ pub fn family_name(executable: &str) -> Option<&'static str> {
 
 /// Detect sourceports installed on the system.
 ///
-/// Returns a list of `(executable_name, full_path, family_name)` for found ports.
+/// Returns a list of `(executable_name, full_path, family_name)` for found sourceports.
 pub fn detect_sourceports() -> Vec<(&'static str, String, &'static str)> {
     let path_var = match std::env::var("PATH") {
         Ok(p) => p,
@@ -151,7 +151,7 @@ pub fn detect_sourceports() -> Vec<(&'static str, String, &'static str)> {
 
 /// Return `true` if this sourceport uses `-deh` for DEH/BEX files.
 ///
-/// ZDoom-family ports load DEH via `-file`; all others use `-deh`.
+/// ZDoom-family sourceports load DEH via `-file`; all others use `-deh`.
 pub fn uses_deh_flag(executable: &str) -> bool {
     match identify_family(executable) {
         Some(f) => f.name != "zdoom",
@@ -179,7 +179,7 @@ pub fn config_ext(executable: &str) -> &'static str {
 
 /// Return CLI args to set the config file for the sourceport.
 ///
-/// dsda, helion, and zdoom-family ports support `-config`.
+/// dsda, helion, and zdoom-family sourceports support `-config`.
 pub fn get_config_args(executable: &str, config_path: &str) -> Vec<String> {
     match family_name(executable) {
         Some("dsda" | "helion" | "zdoom") => {
@@ -210,7 +210,7 @@ pub fn get_dsda_save_dir(executable: &str, data_dir: &str, iwad: &str, wad_path:
 
 /// Return CLI args to redirect sourceport data/save dirs.
 ///
-/// For dsda-family ports with iwad+wad_path, `-save` points to the nested
+/// For dsda-family sourceports with iwad+wad_path, `-save` points to the nested
 /// directory where stats live so saves end up alongside them.
 pub fn get_data_dir_args(
     executable: &str,
@@ -261,7 +261,7 @@ mod tests {
         assert_eq!(identify_family("woof").unwrap().name, "woof");
         assert_eq!(identify_family("eternity").unwrap().name, "eternity");
         assert_eq!(identify_family("helion").unwrap().name, "helion");
-        assert!(identify_family("unknown-port").is_none());
+        assert!(identify_family("unknown-sourceport").is_none());
     }
 
     #[test]
@@ -278,7 +278,7 @@ mod tests {
         assert!(uses_deh_flag("dsda-doom"));
         assert!(uses_deh_flag("woof"));
         assert!(!uses_deh_flag("gzdoom"));
-        assert!(uses_deh_flag("unknown-port"));
+        assert!(uses_deh_flag("unknown-sourceport"));
     }
 
     #[test]
@@ -308,7 +308,7 @@ mod tests {
             vec!["-config", "/path/to/config.ini"]
         );
         assert!(get_config_args("chocolate-doom", "/path/to/config.cfg").is_empty());
-        assert!(get_config_args("unknown-port", "/path/to/config.cfg").is_empty());
+        assert!(get_config_args("unknown-sourceport", "/path/to/config.cfg").is_empty());
     }
 
     #[test]
@@ -330,7 +330,7 @@ mod tests {
 
     #[test]
     fn test_get_data_dir_args_unknown() {
-        assert!(get_data_dir_args("unknown-port", "/data", None, None).is_empty());
+        assert!(get_data_dir_args("unknown-sourceport", "/data", None, None).is_empty());
     }
 
     #[test]
@@ -392,7 +392,9 @@ mod tests {
     #[test]
     fn test_identify_with_deep_path() {
         assert_eq!(
-            identify_family("/opt/doom/ports/gzdoom").unwrap().name,
+            identify_family("/opt/doom/sourceports/gzdoom")
+                .unwrap()
+                .name,
             "zdoom"
         );
     }
@@ -502,7 +504,7 @@ mod tests {
 
     #[test]
     fn test_get_config_args_unknown() {
-        assert!(get_config_args("unknown-port", "/path/to/config.cfg").is_empty());
+        assert!(get_config_args("unknown-sourceport", "/path/to/config.cfg").is_empty());
     }
 
     #[test]
@@ -561,7 +563,7 @@ mod tests {
         assert_eq!(config_ext("uzdoom"), "ini");
         assert_eq!(config_ext("zdoom"), "ini");
         assert_eq!(config_ext("helion"), "ini");
-        assert_eq!(config_ext("unknown-port"), "cfg");
+        assert_eq!(config_ext("unknown-sourceport"), "cfg");
     }
 
     #[test]

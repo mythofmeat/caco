@@ -103,7 +103,7 @@ pub fn create_backup(wad_id: i64, title: &str, data_dir: &Path) -> crate::Result
 
 /// [`create_backup`] writing into an explicit directory.
 ///
-/// The destination is a parameter for the reason `GcPaths` and `PortPaths`
+/// The destination is a parameter for the reason `GcPaths` and `SourceportPaths`
 /// are: a function that creates files must not be able to reach the user's
 /// real library from a test. It could before — `test_backup_and_restore` wrote
 /// a zip into the real backup dir on every `cargo test` run.

@@ -10,7 +10,6 @@ pub mod gc;
 pub mod iwad_detect;
 pub mod mapinfo;
 pub mod player;
-pub mod ports;
 pub mod profiles;
 pub mod resource_service;
 pub mod saves;

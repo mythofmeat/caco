@@ -1,6 +1,6 @@
 //! Build and manage sourceports from source.
 //!
-//! The GUI half of `caco_core::ports`. Ports that no distro packages —
+//! The GUI half of `caco_core::sourceports`. Sourceports no distro packages —
 //! nyan-doom, uzdoom — are cloned, compiled and installed into a caco-owned
 //! prefix, and `resolve_sourceport` finds them without anything being
 //! installed system-wide.
@@ -11,34 +11,39 @@
 //! is the pre-flight check: `doctor` answers "will this even build here?"
 //! against the host package manager before the user spends four minutes
 //! finding out that it will not.
+//!
+//! The log is not part of the scrolling body. It is reserved out of the
+//! window's height and pinned above the button row, because the output is the
+//! reason the dialog is open and anything that has to be scrolled into view
+//! during a four-minute compile may as well not be shown.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use caco_core::ports::{self, DoctorReport, PackageCheck, PortPaths, PortStatus};
+use caco_core::sourceports::{self, DoctorReport, PackageCheck, SourceportPaths, SourceportStatus};
 use caco_core::utils::format_size;
 
 use crate::theme;
 
 /// A build the dialog is asking the app to start.
-pub struct PortBuildRequest {
-    pub port: String,
+pub struct SourceportBuildRequest {
+    pub sourceport: String,
     pub git_ref: String,
     pub clean: bool,
     pub cancel: Arc<AtomicBool>,
 }
 
-pub struct PortVersionsRequest {
-    pub port: String,
+pub struct SourceportVersionsRequest {
+    pub sourceport: String,
     pub repo: String,
 }
 
-pub enum PortsResult {
+pub enum SourceportsResult {
     Open,
     Closed,
-    Start(PortBuildRequest),
-    CheckVersions(PortVersionsRequest),
+    Start(SourceportBuildRequest),
+    CheckVersions(SourceportVersionsRequest),
 }
 
 /// Cap on retained log lines.
@@ -48,21 +53,40 @@ pub enum PortsResult {
 /// scrolls back to. A failure is always in the tail.
 const LOG_LIMIT: usize = 2000;
 
-pub struct PortsDialogState {
-    ports: Vec<PortStatus>,
+/// Height of the Close row pinned below everything else.
+const FOOTER: f32 = 36.0;
+
+/// Height of the one-line "building X: step" / outcome row above the log.
+const STATUS_ROW: f32 = 24.0;
+
+/// Separator and spacing between the body and the log pane.
+const LOG_CHROME: f32 = 16.0;
+
+/// How much of the window the build log may claim.
+///
+/// Proportional rather than fixed: at the 800x400 minimum window a fixed pane
+/// large enough to be useful leaves nothing for the sourceport list, and at 1200x800
+/// a pane small enough to fit there wastes the room that makes a compile
+/// readable. The clamp keeps both ends sane.
+fn log_pane_height(ctx: &egui::Context) -> f32 {
+    (ctx.screen_rect().height() * 0.35).clamp(90.0, 300.0)
+}
+
+pub struct SourceportsDialogState {
+    sourceports: Vec<SourceportStatus>,
     selected: Option<String>,
-    /// Build ref selected per port. Kept in dialog state only: choosing a
+    /// Build ref selected per sourceport. Kept in dialog state only: choosing a
     /// one-off older version must not rewrite a user's recipe.
     selected_refs: BTreeMap<String, String>,
     /// Remote refs are intentionally absent until "Check versions" is used.
-    remote_refs: BTreeMap<String, ports::RemoteRefs>,
+    remote_refs: BTreeMap<String, sourceports::RemoteRefs>,
     checking_versions: Option<String>,
     version_error: Option<(String, String)>,
-    /// Cached pre-flight for the selected port. Re-run on selection change
+    /// Cached pre-flight for the selected sourceport. Re-run on selection change
     /// rather than per frame — it shells out to pacman.
     doctor: Option<DoctorReport>,
     clean: bool,
-    /// Name of the port being built, if any.
+    /// Name of the sourceport being built, if any.
     running: Option<String>,
     step: Option<String>,
     log: Vec<String>,
@@ -73,10 +97,10 @@ pub struct PortsDialogState {
     pub modified: bool,
 }
 
-impl PortsDialogState {
+impl SourceportsDialogState {
     pub fn new() -> Self {
         let mut state = Self {
-            ports: Vec::new(),
+            sourceports: Vec::new(),
             selected: None,
             selected_refs: BTreeMap::new(),
             remote_refs: BTreeMap::new(),
@@ -97,18 +121,18 @@ impl PortsDialogState {
     }
 
     fn reload(&mut self) {
-        match ports::status(&PortPaths::from_config()) {
-            Ok(ports) => {
-                self.ports = ports;
-                for port in &self.ports {
+        match sourceports::status(&SourceportPaths::from_config()) {
+            Ok(sourceports) => {
+                self.sourceports = sourceports;
+                for sourceport in &self.sourceports {
                     self.selected_refs
-                        .entry(port.recipe.name.clone())
-                        .or_insert_with(|| port.recipe.git_ref.clone());
+                        .entry(sourceport.recipe.name.clone())
+                        .or_insert_with(|| sourceport.recipe.git_ref.clone());
                 }
                 self.error = None;
             }
             Err(e) => {
-                self.ports = Vec::new();
+                self.sourceports = Vec::new();
                 self.error = Some(e.to_string());
             }
         }
@@ -116,20 +140,20 @@ impl PortsDialogState {
         let still_there = self
             .selected
             .as_ref()
-            .is_some_and(|name| self.ports.iter().any(|p| &p.recipe.name == name));
+            .is_some_and(|name| self.sourceports.iter().any(|p| &p.recipe.name == name));
         if !still_there {
-            self.selected = self.ports.first().map(|p| p.recipe.name.clone());
+            self.selected = self.sourceports.first().map(|p| p.recipe.name.clone());
         }
         self.refresh_doctor();
     }
 
     fn refresh_doctor(&mut self) {
-        self.doctor = self.selected_port().map(|p| ports::doctor(&p.recipe));
+        self.doctor = self.selected_port().map(|p| sourceports::doctor(&p.recipe));
     }
 
-    fn selected_port(&self) -> Option<&PortStatus> {
+    fn selected_port(&self) -> Option<&SourceportStatus> {
         let name = self.selected.as_ref()?;
-        self.ports.iter().find(|p| &p.recipe.name == name)
+        self.sourceports.iter().find(|p| &p.recipe.name == name)
     }
 
     fn select(&mut self, name: &str) {
@@ -166,40 +190,44 @@ impl PortsDialogState {
     }
 
     /// Called when the on-demand remote ref lookup finishes.
-    pub fn versions_loaded(&mut self, port: String, outcome: Result<ports::RemoteRefs, String>) {
-        if self.checking_versions.as_deref() == Some(&port) {
+    pub fn versions_loaded(
+        &mut self,
+        sourceport: String,
+        outcome: Result<sourceports::RemoteRefs, String>,
+    ) {
+        if self.checking_versions.as_deref() == Some(&sourceport) {
             self.checking_versions = None;
         }
         match outcome {
             Ok(refs) => {
-                self.remote_refs.insert(port.clone(), refs);
+                self.remote_refs.insert(sourceport.clone(), refs);
                 if self
                     .version_error
                     .as_ref()
-                    .is_some_and(|(name, _)| name == &port)
+                    .is_some_and(|(name, _)| name == &sourceport)
                 {
                     self.version_error = None;
                 }
             }
-            Err(error) => self.version_error = Some((port, error)),
+            Err(error) => self.version_error = Some((sourceport, error)),
         }
     }
 
-    fn check_versions(&mut self, port: String, repo: String) -> PortVersionsRequest {
-        self.checking_versions = Some(port.clone());
+    fn check_versions(&mut self, sourceport: String, repo: String) -> SourceportVersionsRequest {
+        self.checking_versions = Some(sourceport.clone());
         self.version_error = None;
-        PortVersionsRequest { port, repo }
+        SourceportVersionsRequest { sourceport, repo }
     }
 
-    fn start(&mut self, port: String, git_ref: String) -> PortBuildRequest {
+    fn start(&mut self, sourceport: String, git_ref: String) -> SourceportBuildRequest {
         // A fresh flag per run: reusing a cancelled one would abort instantly.
         self.cancel = Arc::new(AtomicBool::new(false));
-        self.running = Some(port.clone());
+        self.running = Some(sourceport.clone());
         self.log.clear();
         self.outcome = None;
         self.step = None;
-        PortBuildRequest {
-            port,
+        SourceportBuildRequest {
+            sourceport,
             git_ref,
             clean: self.clean,
             cancel: Arc::clone(&self.cancel),
@@ -208,49 +236,72 @@ impl PortsDialogState {
 
     // -- rendering ---------------------------------------------------------
 
-    pub fn render(&mut self, ctx: &egui::Context) -> PortsResult {
-        let mut result = PortsResult::Open;
+    pub fn render(&mut self, ctx: &egui::Context) -> SourceportsResult {
+        let mut result = SourceportsResult::Open;
+
+        // What the log costs this frame, taken out of the body's budget rather
+        // than rendered after it inside the same scroll area. A compile is the
+        // whole reason this dialog is open, and output that has to be scrolled
+        // into view is output nobody watches — so the sourceport list and the details
+        // shrink and the log stays on screen from the first line to the last.
+        let showing_status = self.running.is_some() || self.outcome.is_some();
+        let log_height = if self.log.is_empty() {
+            0.0
+        } else {
+            log_pane_height(ctx)
+        };
+        let reserved = FOOTER
+            + if showing_status { STATUS_ROW } else { 0.0 }
+            + if log_height > 0.0 {
+                log_height + LOG_CHROME
+            } else {
+                0.0
+            };
+        let body_height = crate::dialogs::modal_body_height(ctx, reserved);
 
         crate::dialogs::modal_window(ctx, "Sourceports", [820.0, 620.0]).show(ctx, |ui| {
-            crate::dialogs::modal_body(ctx, ui, 36.0, |ui| {
+            crate::dialogs::scroll_body(ui, body_height, |ui| {
                 if let Some(error) = &self.error {
                     ui.colored_label(theme::COLOR_ERROR, error);
                     ui.add_space(6.0);
                 }
 
-                ui.colored_label(
-                    theme::TEXT_SECONDARY,
-                    "Builds a sourceport from source into caco's own prefix. Nothing is \
-                     installed system-wide, and the recipe travels with your library so \
-                     another machine can rebuild it.",
-                );
-                ui.add_space(8.0);
+                // Dropped once there is output to read. It explains what the
+                // dialog is for, which stops being the question the moment a
+                // build is underway, and at the 800x400 minimum window it is
+                // two lines the sourceport list needs more.
+                if self.log.is_empty() {
+                    ui.colored_label(
+                        theme::TEXT_SECONDARY,
+                        "Builds a sourceport from source into caco's own prefix. Nothing is \
+                         installed system-wide, and the recipe travels with your library so \
+                         another machine can rebuild it.",
+                    );
+                    ui.add_space(8.0);
+                }
 
                 ui.horizontal_top(|ui| {
                     self.render_list(ui);
                     ui.separator();
                     ui.vertical(|ui| self.render_details(ui, &mut result));
                 });
-
-                ui.add_space(6.0);
-                ui.separator();
-                ui.add_space(6.0);
-                self.render_log(ui);
             });
+
+            self.render_log(ui, log_height);
 
             ui.add_space(6.0);
             if ui
                 .add_enabled(self.running.is_none(), egui::Button::new("Close"))
                 .clicked()
             {
-                result = PortsResult::Closed;
+                result = SourceportsResult::Closed;
             }
         });
 
         // Escape must not close mid-build: the log would be lost with nowhere
         // to report a failure.
         if self.running.is_none() && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            return PortsResult::Closed;
+            return SourceportsResult::Closed;
         }
 
         result
@@ -261,7 +312,7 @@ impl PortsDialogState {
             ui.set_min_width(200.0);
             ui.set_max_width(200.0);
             let entries: Vec<(String, String, egui::Color32)> = self
-                .ports
+                .sourceports
                 .iter()
                 .map(|p| {
                     // Two distinct reasons a rebuild would change something:
@@ -296,14 +347,14 @@ impl PortsDialogState {
         });
     }
 
-    fn render_details(&mut self, ui: &mut egui::Ui, result: &mut PortsResult) {
-        let Some(port) = self.selected_port().cloned() else {
+    fn render_details(&mut self, ui: &mut egui::Ui, result: &mut SourceportsResult) {
+        let Some(sourceport) = self.selected_port().cloned() else {
             ui.colored_label(theme::TEXT_SECONDARY, "No recipes.");
             return;
         };
 
-        let name = port.recipe.name.clone();
-        let recipe_ref = port.recipe.git_ref.clone();
+        let name = sourceport.recipe.name.clone();
+        let recipe_ref = sourceport.recipe.git_ref.clone();
         let running_this = self.running.as_deref() == Some(name.as_str());
         let busy = self.running.is_some();
 
@@ -311,12 +362,12 @@ impl PortsDialogState {
             ui.strong(&name);
             ui.colored_label(
                 theme::TEXT_MUTED,
-                format!("{} @ {}", port.recipe.repo, port.recipe.git_ref),
+                format!("{} @ {}", sourceport.recipe.repo, sourceport.recipe.git_ref),
             );
         });
         ui.add_space(4.0);
 
-        match &port.installed {
+        match &sourceport.installed {
             Some(installed) => {
                 let commit = installed
                     .manifest
@@ -343,16 +394,16 @@ impl PortsDialogState {
                     theme::TEXT_MUTED,
                     installed.binary_path().display().to_string(),
                 );
-                if port.ref_changed {
+                if sourceport.ref_changed {
                     ui.colored_label(
                         theme::COLOR_WARNING,
                         format!(
                             "Recipe now asks for '{}' — rebuild to switch.",
-                            port.recipe.git_ref
+                            sourceport.recipe.git_ref
                         ),
                     );
-                } else if port.update_available() {
-                    let remote = port
+                } else if sourceport.update_available() {
+                    let remote = sourceport
                         .remote_commit
                         .as_deref()
                         .unwrap_or_default()
@@ -371,7 +422,7 @@ impl PortsDialogState {
         }
 
         ui.add_space(8.0);
-        self.render_version_picker(ui, &port, result);
+        self.render_version_picker(ui, &sourceport, result);
         ui.add_space(8.0);
         self.render_doctor(ui);
         ui.add_space(8.0);
@@ -395,7 +446,7 @@ impl PortsDialogState {
                 .clicked()
             {
                 let git_ref = self.selected_refs.get(&name).cloned().unwrap_or(recipe_ref);
-                *result = PortsResult::Start(self.start(name.clone(), git_ref));
+                *result = SourceportsResult::Start(self.start(name.clone(), git_ref));
             }
             if ui
                 .add_enabled(running_this, egui::Button::new("Cancel"))
@@ -415,7 +466,7 @@ impl PortsDialogState {
             ui.horizontal(|ui| {
                 if ui
                     .add_enabled(!busy, egui::Button::new("Use as default sourceport"))
-                    .on_hover_text("Sets this port as the one caco launches WADs with")
+                    .on_hover_text("Sets this sourceport as the one caco launches WADs with")
                     .clicked()
                 {
                     match set_default_sourceport(&name) {
@@ -432,7 +483,7 @@ impl PortsDialogState {
                     .on_hover_text("Deletes the install prefix. The recipe stays.")
                     .clicked()
                 {
-                    match ports::remove_installed(&installed.prefix) {
+                    match sourceports::remove_installed(&installed.prefix) {
                         Ok(()) => {
                             self.modified = true;
                             self.outcome = Some(Ok(format!("Removed {name}")));
@@ -448,11 +499,11 @@ impl PortsDialogState {
     fn render_version_picker(
         &mut self,
         ui: &mut egui::Ui,
-        port: &PortStatus,
-        result: &mut PortsResult,
+        sourceport: &SourceportStatus,
+        result: &mut SourceportsResult,
     ) {
-        let name = &port.recipe.name;
-        let recipe_ref = &port.recipe.git_ref;
+        let name = &sourceport.recipe.name;
+        let recipe_ref = &sourceport.recipe.git_ref;
         let mut selected = self
             .selected_refs
             .get(name)
@@ -466,7 +517,7 @@ impl PortsDialogState {
         ui.horizontal(|ui| {
             ui.label("Build from");
             if let Some(refs) = &refs {
-                egui::ComboBox::from_id_salt(("port-build-ref", name))
+                egui::ComboBox::from_id_salt(("sourceport-build-ref", name))
                     .selected_text(selected.as_str())
                     .width(210.0)
                     .show_ui(ui, |ui| {
@@ -518,19 +569,20 @@ impl PortsDialogState {
         });
         self.selected_refs.insert(name.clone(), selected);
         if check_clicked {
-            *result = PortsResult::CheckVersions(
-                self.check_versions(name.clone(), port.recipe.repo.clone()),
+            *result = SourceportsResult::CheckVersions(
+                self.check_versions(name.clone(), sourceport.recipe.repo.clone()),
             );
         }
 
         if let Some(refs) = &refs {
             match refs.latest_release() {
                 Some(latest) => {
-                    let installed_release = port.installed.as_ref().is_some_and(|installed| {
-                        refs.releases.contains(&installed.manifest.git_ref)
-                    });
+                    let installed_release =
+                        sourceport.installed.as_ref().is_some_and(|installed| {
+                            refs.releases.contains(&installed.manifest.git_ref)
+                        });
                     let newer_release = installed_release
-                        && port
+                        && sourceport
                             .installed
                             .as_ref()
                             .is_some_and(|installed| installed.manifest.git_ref != latest);
@@ -603,15 +655,22 @@ impl PortsDialogState {
         }
     }
 
-    fn render_log(&self, ui: &mut egui::Ui) {
-        if let Some(port) = &self.running {
+    /// Status line plus the build log, pinned below the scrolling body.
+    ///
+    /// `height` is handed in rather than asked for: whoever sized the body
+    /// already subtracted this pane from the window, and the two numbers have
+    /// to be the same one or the window grows past what it reserved.
+    fn render_log(&self, ui: &mut egui::Ui, height: f32) {
+        if let Some(sourceport) = &self.running {
             ui.horizontal(|ui| {
                 ui.spinner();
                 match &self.step {
                     Some(step) => {
-                        ui.colored_label(theme::TEXT_SECONDARY, format!("{port}: {step}"))
+                        ui.colored_label(theme::TEXT_SECONDARY, format!("{sourceport}: {step}"))
                     }
-                    None => ui.colored_label(theme::TEXT_SECONDARY, format!("{port}: starting")),
+                    None => {
+                        ui.colored_label(theme::TEXT_SECONDARY, format!("{sourceport}: starting"))
+                    }
                 };
             });
         } else if let Some(outcome) = &self.outcome {
@@ -621,12 +680,18 @@ impl PortsDialogState {
             };
         }
 
-        if self.log.is_empty() {
+        if height <= 0.0 {
             return;
         }
         ui.add_space(4.0);
+        ui.separator();
+        // `auto_shrink` off so the pane is its reserved size from the first
+        // line onward: a log that grows the window as output arrives makes
+        // every control below it move while the user is reading.
         egui::ScrollArea::vertical()
-            .max_height(220.0)
+            .id_salt("sourceport-build-log")
+            .max_height(height)
+            .auto_shrink([false, false])
             .stick_to_bottom(true)
             .show(ui, |ui| {
                 for line in &self.log {
@@ -636,13 +701,13 @@ impl PortsDialogState {
     }
 }
 
-impl Default for PortsDialogState {
+impl Default for SourceportsDialogState {
     fn default() -> Self {
         Self::new()
     }
 }
 
-/// Point `config.sourceport` at a freshly built port.
+/// Point `config.sourceport` at a freshly built sourceport.
 ///
 /// Written through the same load/save path the settings dialog uses, so the
 /// keys it does not touch survive, and reloaded so the next launch sees it

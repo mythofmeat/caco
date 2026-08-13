@@ -1,4 +1,4 @@
-//! The record a built port leaves in its own install prefix.
+//! The record a built sourceport leaves in its own install prefix.
 //!
 //! Kept inside the prefix rather than in the database on purpose: the prefix
 //! lives on the cache side and can be deleted wholesale, and a database row
@@ -11,11 +11,11 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 /// Filename of the manifest inside an install prefix.
-pub const MANIFEST_NAME: &str = "caco-port.toml";
+pub const MANIFEST_NAME: &str = "caco-sourceport.toml";
 
 /// What was built, from where, and when.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PortManifest {
+pub struct SourceportManifest {
     pub name: String,
     pub repo: String,
     /// The ref as the recipe asked for it — a branch name is not reproducible.
@@ -29,14 +29,14 @@ pub struct PortManifest {
     pub built_at: String,
 }
 
-/// A port present on disk.
+/// A sourceport present on disk.
 #[derive(Debug, Clone)]
-pub struct InstalledPort {
-    pub manifest: PortManifest,
+pub struct InstalledSourceport {
+    pub manifest: SourceportManifest,
     pub prefix: PathBuf,
 }
 
-impl InstalledPort {
+impl InstalledSourceport {
     /// Absolute path to the executable.
     pub fn binary_path(&self) -> PathBuf {
         self.prefix.join("bin").join(&self.manifest.binary)
@@ -71,7 +71,7 @@ fn dir_size(path: &Path) -> u64 {
         .sum()
 }
 
-pub fn write_manifest(prefix: &Path, manifest: &PortManifest) -> crate::Result<()> {
+pub fn write_manifest(prefix: &Path, manifest: &SourceportManifest) -> crate::Result<()> {
     std::fs::create_dir_all(prefix)?;
     let text = toml::to_string_pretty(manifest)?;
     std::fs::write(prefix.join(MANIFEST_NAME), text)?;
@@ -79,16 +79,16 @@ pub fn write_manifest(prefix: &Path, manifest: &PortManifest) -> crate::Result<(
 }
 
 /// Read the manifest out of a prefix, or `None` if there isn't a readable one.
-pub fn read_manifest(prefix: &Path) -> Option<PortManifest> {
+pub fn read_manifest(prefix: &Path) -> Option<SourceportManifest> {
     let text = std::fs::read_to_string(prefix.join(MANIFEST_NAME)).ok()?;
     toml::from_str(&text).ok()
 }
 
-/// Every port installed under `prefix_root`, newest build first.
+/// Every sourceport installed under `prefix_root`, newest build first.
 ///
 /// The layout is `<prefix_root>/<name>/<ref-slug>/`, so a name can have
 /// several refs installed side by side.
-pub fn list_installed(prefix_root: &Path) -> Vec<InstalledPort> {
+pub fn list_installed(prefix_root: &Path) -> Vec<InstalledSourceport> {
     let mut found = Vec::new();
     let Ok(names) = std::fs::read_dir(prefix_root) else {
         return found;
@@ -100,7 +100,7 @@ pub fn list_installed(prefix_root: &Path) -> Vec<InstalledPort> {
         for ref_entry in refs.flatten() {
             let prefix = ref_entry.path();
             if let Some(manifest) = read_manifest(&prefix) {
-                found.push(InstalledPort { manifest, prefix });
+                found.push(InstalledSourceport { manifest, prefix });
             }
         }
     }
@@ -110,7 +110,7 @@ pub fn list_installed(prefix_root: &Path) -> Vec<InstalledPort> {
 }
 
 /// The most recently built usable install of `name`, if any.
-pub fn find_installed(prefix_root: &Path, name: &str) -> Option<InstalledPort> {
+pub fn find_installed(prefix_root: &Path, name: &str) -> Option<InstalledSourceport> {
     list_installed(prefix_root)
         .into_iter()
         .find(|p| p.manifest.name == name && p.is_usable())
@@ -126,12 +126,12 @@ pub fn find_installed(prefix_root: &Path, name: &str) -> Option<InstalledPort> {
 pub fn remove_installed(prefix: &Path) -> crate::Result<()> {
     if read_manifest(prefix).is_none() {
         return Err(crate::error::Error::Config(format!(
-            "{} is not a caco port install (no {MANIFEST_NAME})",
+            "{} is not a caco sourceport install (no {MANIFEST_NAME})",
             prefix.display()
         )));
     }
     std::fs::remove_dir_all(prefix)?;
-    // Drop the now-empty per-name directory so `ls` does not show a port with
+    // Drop the now-empty per-name directory so `ls` does not show a sourceport with
     // no builds under it.
     if let Some(parent) = prefix.parent()
         && parent.read_dir().is_ok_and(|mut d| d.next().is_none())
@@ -145,8 +145,8 @@ pub fn remove_installed(prefix: &Path) -> crate::Result<()> {
 mod tests {
     use super::*;
 
-    fn manifest(name: &str, built_at: &str) -> PortManifest {
-        PortManifest {
+    fn manifest(name: &str, built_at: &str) -> SourceportManifest {
+        SourceportManifest {
             name: name.to_string(),
             repo: "https://example.invalid/x".to_string(),
             git_ref: "master".to_string(),

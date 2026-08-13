@@ -46,7 +46,7 @@ impl EnrichOutcome {
     /// Whether anything worth reporting was detected.
     ///
     /// `zdoom_required: Some(false)` is a real detection but not news — it
-    /// only records that the WAD does *not* need a zdoom-family port.
+    /// only records that the WAD does *not* need a zdoom-family sourceport.
     pub fn has_changes(&self) -> bool {
         self.complevel.is_some() || self.iwad.is_some() || self.zdoom_required == Some(true)
     }
@@ -183,7 +183,7 @@ pub fn enrich_one(
     }
 
     // Stage 2: Doom Wiki, only for the gaps the file could not fill. The IWAD
-    // is deliberately not looked up here — the wiki's port field says nothing
+    // is deliberately not looked up here — the wiki's sourceport field says nothing
     // about which IWAD a PWAD needs.
     let still_needs_complevel = outcome.complevel.is_none() && needs_complevel;
     let still_needs_zdoom = outcome.zdoom_required.is_none() && needs_zdoom;
@@ -214,7 +214,7 @@ pub fn enrich_one(
     outcome
 }
 
-/// Look up a WAD's port requirement on the Doom Wiki.
+/// Look up a WAD's sourceport requirement on the Doom Wiki.
 ///
 /// Returns the port field text of the first search hit whose title matches,
 /// or `None` — a failed lookup is not an error worth propagating, it just

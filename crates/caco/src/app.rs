@@ -71,34 +71,46 @@ impl CacoApp {
             bg,
             thumbnails: ThumbnailManager::new(),
         };
-        app.spawn_port_update_check();
+        app.spawn_sourceport_update_check();
         app
+    }
+
+    /// The handle background workers answer on.
+    ///
+    /// Public for the same reason `render` is: the screenshot harness has to
+    /// reach states only a worker can produce — a build in flight, with a step
+    /// and a log — and posting the messages a worker would post is the honest
+    /// way to get there. Reaching into the dialog's private state instead would
+    /// prove a shot renders and nothing about whether the app can get there.
+    pub fn background_sender(&self) -> crate::workers::BackgroundSender {
+        self.bg.sender()
     }
 
     /// Ask each built sourceport's remote whether its ref has moved.
     ///
     /// Fire-and-forget on a worker thread: one `git ls-remote` per installed
-    /// port, throttled to `port_update_check_days` and answered from cache in
+    /// sourceport, throttled to `sourceport_update_check_days` and answered from cache in
     /// between, so most launches do no network at all. A user with nothing
     /// built never sees a thread do any work, and an offline machine gets
     /// silence rather than a stall — the window is already up either way.
-    fn spawn_port_update_check(&self) {
-        use caco_core::ports::{self, PortPaths};
+    fn spawn_sourceport_update_check(&self) {
+        use caco_core::sourceports::{self, SourceportPaths};
 
-        let interval = caco_core::config::load_config().port_update_check_days;
+        let interval = caco_core::config::load_config().sourceport_update_check_days;
         if interval <= 0 {
             return;
         }
         let sender = self.bg.sender();
         std::thread::spawn(move || {
-            let paths = PortPaths::from_config();
-            let behind: Vec<String> = ports::check_updates(&paths, interval, chrono::Local::now())
-                .into_iter()
-                .filter(ports::UpdateStatus::is_behind)
-                .map(|s| s.name)
-                .collect();
+            let paths = SourceportPaths::from_config();
+            let behind: Vec<String> =
+                sourceports::check_updates(&paths, interval, chrono::Local::now())
+                    .into_iter()
+                    .filter(sourceports::UpdateStatus::is_behind)
+                    .map(|s| s.name)
+                    .collect();
             if !behind.is_empty() {
-                sender.send(AppMessage::PortUpdatesAvailable(behind));
+                sender.send(AppMessage::SourceportUpdatesAvailable(behind));
             }
         });
     }
@@ -174,42 +186,45 @@ impl CacoApp {
     ///
     /// A compile is minutes long (uzdoom measured at 3m45s on 16 threads) and
     /// runs several child processes, so nothing about it can happen on the UI
-    /// thread. Unlike enrichment this needs no database connection — ports
+    /// thread. Unlike enrichment this needs no database connection — sourceports
     /// live entirely on the filesystem.
-    fn spawn_port_build(&mut self, request: crate::dialogs::ports::PortBuildRequest) {
-        use caco_core::ports::{self, BuildOptions, BuildProgress, PortPaths};
+    fn spawn_sourceport_build(
+        &mut self,
+        request: crate::dialogs::sourceports::SourceportBuildRequest,
+    ) {
+        use caco_core::sourceports::{self, BuildOptions, BuildProgress, SourceportPaths};
         use std::sync::atomic::Ordering;
 
         let sender = self.bg.sender();
-        let crate::dialogs::ports::PortBuildRequest {
-            port,
+        let crate::dialogs::sourceports::SourceportBuildRequest {
+            sourceport,
             git_ref,
             clean,
             cancel,
         } = request;
 
         std::thread::spawn(move || {
-            let paths = PortPaths::from_config();
-            let mut recipe = match ports::find_recipe(&paths.recipe_dir, &port) {
+            let paths = SourceportPaths::from_config();
+            let mut recipe = match sourceports::find_recipe(&paths.recipe_dir, &sourceport) {
                 Ok(r) => r,
                 Err(e) => {
-                    sender.send(AppMessage::PortBuildComplete(Err(e.to_string())));
+                    sender.send(AppMessage::SourceportBuildComplete(Err(e.to_string())));
                     return;
                 }
             };
             recipe.git_ref = git_ref;
 
             let opts = BuildOptions { jobs: None, clean };
-            let outcome = ports::build::install(
+            let outcome = sourceports::build::install(
                 &recipe,
                 &paths,
                 &opts,
                 &mut |progress| match progress {
                     BuildProgress::Step(step) => {
-                        sender.send(AppMessage::PortBuildStep(step.label().to_string()));
+                        sender.send(AppMessage::SourceportBuildStep(step.label().to_string()));
                     }
                     BuildProgress::Line(line) => {
-                        sender.send(AppMessage::PortBuildLine(line.to_string()));
+                        sender.send(AppMessage::SourceportBuildLine(line.to_string()));
                     }
                 },
                 &|| cancel.load(Ordering::Relaxed),
@@ -224,17 +239,21 @@ impl CacoApp {
                     )
                 })
                 .map_err(|e| e.to_string());
-            sender.send(AppMessage::PortBuildComplete(message));
+            sender.send(AppMessage::SourceportBuildComplete(message));
         });
     }
 
     /// Discover selectable releases and branches without blocking the UI.
-    fn spawn_port_version_check(&self, request: crate::dialogs::ports::PortVersionsRequest) {
+    fn spawn_sourceport_version_check(
+        &self,
+        request: crate::dialogs::sourceports::SourceportVersionsRequest,
+    ) {
         let sender = self.bg.sender();
         std::thread::spawn(move || {
-            let outcome = caco_core::ports::remote_refs(&request.repo).map_err(|e| e.to_string());
-            sender.send(AppMessage::PortVersionsLoaded {
-                port: request.port,
+            let outcome =
+                caco_core::sourceports::remote_refs(&request.repo).map_err(|e| e.to_string());
+            sender.send(AppMessage::SourceportVersionsLoaded {
+                sourceport: request.sourceport,
                 outcome,
             });
         });
@@ -413,15 +432,15 @@ impl CacoApp {
             ActionRequest::StartEnrich(request) => {
                 self.spawn_enrich(*request);
             }
-            ActionRequest::Ports => {
-                let dialog = crate::dialogs::ports::PortsDialogState::new();
-                self.state.active_dialog = Some(ActiveDialog::Ports(Box::new(dialog)));
+            ActionRequest::Sourceports => {
+                let dialog = crate::dialogs::sourceports::SourceportsDialogState::new();
+                self.state.active_dialog = Some(ActiveDialog::Sourceports(Box::new(dialog)));
             }
-            ActionRequest::StartPortBuild(request) => {
-                self.spawn_port_build(*request);
+            ActionRequest::StartSourceportBuild(request) => {
+                self.spawn_sourceport_build(*request);
             }
-            ActionRequest::CheckPortVersions(request) => {
-                self.spawn_port_version_check(request);
+            ActionRequest::CheckSourceportVersions(request) => {
+                self.spawn_sourceport_version_check(request);
             }
             ActionRequest::EditCollection(name) => {
                 let dialog = CollectionsDialogState::new_editing(&self.conn, &name);
@@ -763,21 +782,21 @@ impl CacoApp {
                     }
                     self.state.invalidate_wad_views();
                 }
-                AppMessage::PortBuildStep(step) => {
-                    if let Some(ActiveDialog::Ports(dialog)) = &mut self.state.active_dialog {
+                AppMessage::SourceportBuildStep(step) => {
+                    if let Some(ActiveDialog::Sourceports(dialog)) = &mut self.state.active_dialog {
                         dialog.set_step(step);
                     }
                 }
-                AppMessage::PortBuildLine(line) => {
-                    if let Some(ActiveDialog::Ports(dialog)) = &mut self.state.active_dialog {
+                AppMessage::SourceportBuildLine(line) => {
+                    if let Some(ActiveDialog::Sourceports(dialog)) = &mut self.state.active_dialog {
                         dialog.push_log(line);
                     }
                 }
-                AppMessage::PortBuildComplete(outcome) => {
+                AppMessage::SourceportBuildComplete(outcome) => {
                     // As with enrichment: the dialog owns the log, so a run
                     // the user closed out from under still reports failure.
                     match &mut self.state.active_dialog {
-                        Some(ActiveDialog::Ports(dialog)) => dialog.finish(outcome),
+                        Some(ActiveDialog::Sourceports(dialog)) => dialog.finish(outcome),
                         _ => {
                             self.state.notification = Some(match outcome {
                                 Ok(msg) => Notification::info(msg),
@@ -786,18 +805,21 @@ impl CacoApp {
                         }
                     }
                 }
-                AppMessage::PortVersionsLoaded { port, outcome } => {
-                    if let Some(ActiveDialog::Ports(dialog)) = &mut self.state.active_dialog {
-                        dialog.versions_loaded(port, outcome);
+                AppMessage::SourceportVersionsLoaded {
+                    sourceport,
+                    outcome,
+                } => {
+                    if let Some(ActiveDialog::Sourceports(dialog)) = &mut self.state.active_dialog {
+                        dialog.versions_loaded(sourceport, outcome);
                     }
                 }
-                AppMessage::PortUpdatesAvailable(names) => {
+                AppMessage::SourceportUpdatesAvailable(names) => {
                     // Informational only — never interrupts, and never starts
                     // a build the user did not ask for.
                     let text = match names.as_slice() {
-                        [one] => format!("{one} has an update. Rebuild it from Ports."),
+                        [one] => format!("{one} has an update. Rebuild it from Sourceports."),
                         many => format!(
-                            "{} sourceports have updates ({}). Rebuild from Ports.",
+                            "{} sourceports have updates ({}). Rebuild from Sourceports.",
                             many.len(),
                             many.join(", ")
                         ),

@@ -1,14 +1,14 @@
-//! Notice when an installed port has fallen behind its recipe's ref.
+//! Notice when an installed sourceport has fallen behind its recipe's ref.
 //!
 //! A recipe usually tracks a branch, so "is there a new version" is really
 //! "does the remote ref still point at the commit we built". `git ls-remote`
 //! answers that in one round trip without fetching an object, which is what
 //! makes this cheap enough to run at startup.
 //!
-//! The answer is cached and throttled, for two reasons: a port that updates
+//! The answer is cached and throttled, for two reasons: a sourceport that updates
 //! weekly does not need to be asked about on every launch, and a machine
-//! with no network must not pay a DNS timeout per port before the window
-//! appears. The cache lives in the ports cache directory — it is a fact about
+//! with no network must not pay a DNS timeout per sourceport before the window
+//! appears. The cache lives in the sourceports cache directory — it is a fact about
 //! a remote, so losing it costs one more round trip.
 
 use std::cmp::Ordering;
@@ -19,7 +19,7 @@ use std::process::Command;
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 
-use super::build::PortPaths;
+use super::build::SourceportPaths;
 use super::manifest::list_installed;
 
 /// Filename of the check cache, inside the prefix root.
@@ -28,7 +28,7 @@ use super::manifest::list_installed;
 /// descends into directories that carry a manifest.
 const CACHE_NAME: &str = "update-check.toml";
 
-/// Where one installed port stands against its remote.
+/// Where one installed sourceport stands against its remote.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpdateStatus {
     pub name: String,
@@ -40,10 +40,10 @@ pub struct UpdateStatus {
     pub remote_commit: Option<String>,
 }
 
-/// Branches and release tags advertised by a port's remote.
+/// Branches and release tags advertised by a sourceport's remote.
 ///
 /// This is deliberately not populated by [`status`](super::status): listing
-/// every ref can be noticeably slower than rendering the Ports dialog. The
+/// every ref can be noticeably slower than rendering the Sourceports dialog. The
 /// frontend asks for it only when the user clicks "Check versions".
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RemoteRefs {
@@ -83,7 +83,7 @@ impl UpdateStatus {
     }
 }
 
-/// What a previous check found, per port.
+/// What a previous check found, per sourceport.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CachedCheck {
     /// RFC 3339 timestamp of the check.
@@ -95,7 +95,7 @@ pub struct CachedCheck {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateCache {
     #[serde(default)]
-    pub ports: BTreeMap<String, CachedCheck>,
+    pub sourceports: BTreeMap<String, CachedCheck>,
 }
 
 pub fn cache_path(prefix_root: &Path) -> PathBuf {
@@ -125,7 +125,7 @@ pub fn is_due(cache: &UpdateCache, name: &str, now: DateTime<Local>, interval_da
     if interval_days <= 0 {
         return false;
     }
-    let Some(entry) = cache.ports.get(name) else {
+    let Some(entry) = cache.sourceports.get(name) else {
         return true;
     };
     // An unparseable timestamp means the cache was hand-edited or written by
@@ -267,16 +267,16 @@ fn parse_ls_remote(stdout: &str, git_ref: &str) -> Option<String> {
     None
 }
 
-/// Check every installed port against its recipe's remote.
+/// Check every installed sourceport against its recipe's remote.
 ///
-/// Returns a status per installed port, in name order — the caller decides
-/// what to do with the ones that are behind. Ports whose check is not yet due
+/// Returns a status per installed sourceport, in name order — the caller decides
+/// what to do with the ones that are behind. Sourceports whose check is not yet due
 /// are answered from the cache, so this is free on most launches.
 ///
-/// A remote that cannot be reached is not an error: the port keeps whatever
+/// A remote that cannot be reached is not an error: the sourceport keeps whatever
 /// the cache last knew, or reports `None`, and the next run tries again.
 pub fn check_updates(
-    paths: &PortPaths,
+    paths: &SourceportPaths,
     interval_days: i64,
     now: DateTime<Local>,
 ) -> Vec<UpdateStatus> {
@@ -301,7 +301,7 @@ pub fn check_updates(
         let remote = if is_due(&cache, &name, now, interval_days) {
             match remote_commit(&repo, &git_ref) {
                 Ok(commit) => {
-                    cache.ports.insert(
+                    cache.sourceports.insert(
                         name.clone(),
                         CachedCheck {
                             checked_at: now.to_rfc3339(),
@@ -312,10 +312,16 @@ pub fn check_updates(
                     Some(commit)
                 }
                 // Offline, or the ref is gone. Fall back to what we knew.
-                Err(_) => cache.ports.get(&name).map(|c| c.remote_commit.clone()),
+                Err(_) => cache
+                    .sourceports
+                    .get(&name)
+                    .map(|c| c.remote_commit.clone()),
             }
         } else {
-            cache.ports.get(&name).map(|c| c.remote_commit.clone())
+            cache
+                .sourceports
+                .get(&name)
+                .map(|c| c.remote_commit.clone())
         };
 
         statuses.push(UpdateStatus {
@@ -333,14 +339,14 @@ pub fn check_updates(
     statuses
 }
 
-/// Forget the cached check for a port, so the next run asks the remote again.
+/// Forget the cached check for a sourceport, so the next run asks the remote again.
 ///
 /// Called after a build: the freshly recorded commit is the answer, and
 /// leaving a stale entry would keep the update badge lit until the interval
 /// expired.
 pub fn invalidate(prefix_root: &Path, name: &str) {
     let mut cache = load_cache(prefix_root);
-    if cache.ports.remove(name).is_some() {
+    if cache.sourceports.remove(name).is_some() {
         let _ = save_cache(prefix_root, &cache);
     }
 }
@@ -348,7 +354,7 @@ pub fn invalidate(prefix_root: &Path, name: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ports::manifest::{PortManifest, write_manifest};
+    use crate::sourceports::manifest::{SourceportManifest, write_manifest};
 
     fn now() -> DateTime<Local> {
         DateTime::parse_from_rfc3339("2026-08-10T12:00:00+00:00")
@@ -358,7 +364,7 @@ mod tests {
 
     fn cache_with(name: &str, checked_at: &str, commit: &str) -> UpdateCache {
         let mut cache = UpdateCache::default();
-        cache.ports.insert(
+        cache.sourceports.insert(
             name.to_string(),
             CachedCheck {
                 checked_at: checked_at.to_string(),
@@ -368,8 +374,8 @@ mod tests {
         cache
     }
 
-    fn paths(root: &Path) -> PortPaths {
-        PortPaths {
+    fn paths(root: &Path) -> SourceportPaths {
+        SourceportPaths {
             recipe_dir: root.join("recipes"),
             src_root: root.join("src"),
             prefix_root: root.join("prefix"),
@@ -384,10 +390,10 @@ mod tests {
         let prefix = root
             .join("prefix")
             .join(name)
-            .join(crate::ports::recipe::slugify_ref(git_ref));
+            .join(crate::sourceports::recipe::slugify_ref(git_ref));
         write_manifest(
             &prefix,
-            &PortManifest {
+            &SourceportManifest {
                 name: name.to_string(),
                 repo: "https://example.invalid/x".to_string(),
                 git_ref: git_ref.to_string(),
@@ -555,8 +561,8 @@ mod tests {
         let cache = cache_with("uzdoom", "2026-08-10T06:00:00+00:00", "abc");
         save_cache(dir.path(), &cache).unwrap();
         assert_eq!(
-            load_cache(dir.path()).ports.get("uzdoom"),
-            cache.ports.get("uzdoom")
+            load_cache(dir.path()).sourceports.get("uzdoom"),
+            cache.sourceports.get("uzdoom")
         );
     }
 
@@ -564,7 +570,7 @@ mod tests {
     fn a_corrupt_cache_reads_as_empty_rather_than_failing() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(cache_path(dir.path()), "not toml =").unwrap();
-        assert!(load_cache(dir.path()).ports.is_empty());
+        assert!(load_cache(dir.path()).sourceports.is_empty());
     }
 
     #[test]
@@ -580,7 +586,7 @@ mod tests {
     fn invalidate_drops_only_the_named_port() {
         let dir = tempfile::tempdir().unwrap();
         let mut cache = cache_with("uzdoom", "2026-08-10T06:00:00+00:00", "abc");
-        cache.ports.insert(
+        cache.sourceports.insert(
             "nyan-doom".to_string(),
             CachedCheck {
                 checked_at: "2026-08-10T06:00:00+00:00".to_string(),
@@ -591,8 +597,8 @@ mod tests {
 
         invalidate(dir.path(), "uzdoom");
         let after = load_cache(dir.path());
-        assert!(!after.ports.contains_key("uzdoom"));
-        assert!(after.ports.contains_key("nyan-doom"));
+        assert!(!after.sourceports.contains_key("uzdoom"));
+        assert!(after.sourceports.contains_key("nyan-doom"));
     }
 
     // -- driver ------------------------------------------------------------

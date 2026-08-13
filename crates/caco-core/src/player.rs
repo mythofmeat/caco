@@ -98,11 +98,11 @@ enum LaunchMode<'a> {
 struct BuiltLaunch {
     cmd: Command,
     /// Resolved sourceport executable (path or bare name).
-    port: String,
+    sourceport: String,
     wad_path: PathBuf,
     /// Managed data dir, when `manage_data_dirs` is on.
     data_dir: Option<PathBuf>,
-    /// Demo being recorded, if any (no extension — the port appends `.lmp`).
+    /// Demo being recorded, if any (no extension — the sourceport appends `.lmp`).
     demo_path: Option<String>,
     is_zdoom: bool,
     is_helion: bool,
@@ -172,14 +172,14 @@ fn select_sourceport(
     sourceport_preferences: &HashMap<String, String>,
     installed_sourceports: &[(String, String)],
 ) -> String {
-    if let Some(port) = non_empty(cli_sourceport) {
-        return port.to_string();
+    if let Some(sourceport) = non_empty(cli_sourceport) {
+        return sourceport.to_string();
     }
-    if let Some(port) = non_empty(custom_sourceport) {
-        return port.to_string();
+    if let Some(sourceport) = non_empty(custom_sourceport) {
+        return sourceport.to_string();
     }
     if let Some(family) = non_empty(required_sourceport_family)
-        && let Some(port) = choose_family_sourceport(
+        && let Some(sourceport) = choose_family_sourceport(
             family,
             default_sourceport,
             zdoom_sourceport,
@@ -187,7 +187,7 @@ fn select_sourceport(
             installed_sourceports,
         )
     {
-        return port;
+        return sourceport;
     }
     default_sourceport.to_string()
 }
@@ -267,7 +267,7 @@ fn archive_stats_files(data_dir: &Path) {
 /// Shared by [`play`] and [`play_demo`] so a demo is played back under exactly
 /// the configuration it was recorded under. Has side effects by design: it
 /// persists auto-detected IWAD and complevel values and creates the managed
-/// data, save, and config directories the port expects to already exist.
+/// data, save, and config directories the sourceport expects to already exist.
 fn build_launch(
     conn: &Connection,
     wad_id: i64,
@@ -304,7 +304,7 @@ fn build_launch(
         .into_iter()
         .map(|(exe, _path, family)| (exe.to_string(), family.to_string()))
         .collect();
-    let port = select_sourceport(
+    let sourceport = select_sourceport(
         opts.sourceport.as_deref(),
         wad.custom_sourceport.as_deref(),
         wad.required_sourceport_family.as_deref(),
@@ -314,14 +314,14 @@ fn build_launch(
         &installed_sourceports,
     );
 
-    if port.is_empty() {
+    if sourceport.is_empty() {
         return Err(crate::Error::Config(
             "No sourceport specified and no default configured".to_string(),
         ));
     }
 
-    let port = config::resolve_sourceport(&port);
-    let mut cmd = Command::new(&port);
+    let sourceport = config::resolve_sourceport(&sourceport);
+    let mut cmd = Command::new(&sourceport);
 
     // Auto-detect IWAD if not explicitly set
     let mut custom_iwad = wad.custom_iwad.clone();
@@ -360,21 +360,21 @@ fn build_launch(
         cmd.args(["-iwad", &resolved]);
     }
 
-    // Add default sourceport args from global config, then per-port args
+    // Add default sourceport args from global config, then per-sourceport args
     let mut default_args = config::get_sourceport_args();
-    default_args.extend(config::get_port_args(&port));
+    default_args.extend(config::get_executable_args(&sourceport));
     if !default_args.is_empty() {
         cmd.args(&default_args);
     }
 
     // Inject complevel flag if set and not already present in args
     if let Some(cl) = complevel {
-        let all_args: Vec<String> = std::iter::once(port.clone())
+        let all_args: Vec<String> = std::iter::once(sourceport.clone())
             .chain(default_args.iter().cloned())
             .chain(opts.extra_args.iter().cloned())
             .collect();
         if !all_args.iter().any(|a| a == "-complevel") {
-            let cl_args = sourceports::get_complevel_args(&port, cl);
+            let cl_args = sourceports::get_complevel_args(&sourceport, cl);
             if !cl_args.is_empty() {
                 cmd.args(&cl_args);
             }
@@ -394,8 +394,8 @@ fn build_launch(
         .as_deref()
         .or(wad.custom_config.as_deref())
         .unwrap_or("default");
-    let profile_path = config::get_profile_path(&port, profile_name);
-    let config_args = sourceports::get_config_args(&port, &profile_path.to_string_lossy());
+    let profile_path = config::get_profile_path(&sourceport, profile_name);
+    let config_args = sourceports::get_config_args(&sourceport, &profile_path.to_string_lossy());
     if !config_args.is_empty() {
         if let Some(parent) = profile_path.parent()
             && let Err(e) = std::fs::create_dir_all(parent)
@@ -419,12 +419,12 @@ fn build_launch(
             tracing::warn!("failed to create WAD data dir {data_dir:?}: {e}");
         }
         let iwad_for_data = iwad_name.as_deref();
-        // For dsda-family ports, ensure the nested save directory exists
-        if let (Some(iw), Some(family)) = (iwad_for_data, sourceports::identify_family(&port))
+        // For dsda-family sourceports, ensure the nested save directory exists
+        if let (Some(iw), Some(family)) = (iwad_for_data, sourceports::identify_family(&sourceport))
             && family.name == "dsda"
         {
             let save_dir = sourceports::get_dsda_save_dir(
-                &port,
+                &sourceport,
                 &data_dir.to_string_lossy(),
                 iw,
                 &wad_path.to_string_lossy(),
@@ -434,7 +434,7 @@ fn build_launch(
             }
         }
         let data_args = sourceports::get_data_dir_args(
-            &port,
+            &sourceport,
             &data_dir.to_string_lossy(),
             iwad_for_data,
             Some(&wad_path.to_string_lossy()),
@@ -489,7 +489,7 @@ fn build_launch(
                 continue;
             }
             if crate::companion_service::is_deh_bex(comp_path) {
-                if sourceports::uses_deh_flag(&port) {
+                if sourceports::uses_deh_flag(&sourceport) {
                     deh_args.extend(["-deh".to_string(), comp.path]);
                 } else {
                     file_args.push(comp.path);
@@ -500,9 +500,9 @@ fn build_launch(
         }
     }
 
-    // For zdoom-family ports, inject the stats reporter PK3 mod
-    let is_zdoom = sourceports::family_name(&port) == Some("zdoom");
-    let is_helion = sourceports::family_name(&port) == Some("helion");
+    // For zdoom-family sourceports, inject the stats reporter PK3 mod
+    let is_zdoom = sourceports::family_name(&sourceport) == Some("zdoom");
+    let is_helion = sourceports::family_name(&sourceport) == Some("helion");
     if is_zdoom
         && config::get_auto_stats()
         && let Ok(pk3_path) = stats_watcher::ensure_stats_mod()
@@ -529,7 +529,7 @@ fn build_launch(
     // map exits the user did not just make, and absorbing those would inflate
     // progress and could auto-complete the WAD from a recording.
     if matches!(mode, LaunchMode::Play) {
-        // For zdoom-family ports, set up logfile for stats collection
+        // For zdoom-family sourceports, set up logfile for stats collection
         if is_zdoom
             && config::get_auto_stats()
             && let Some(ref data_dir) = wad_data_dir
@@ -558,7 +558,7 @@ fn build_launch(
 
     Ok(BuiltLaunch {
         cmd,
-        port,
+        sourceport,
         wad_path,
         data_dir: wad_data_dir,
         demo_path,
@@ -571,7 +571,7 @@ fn build_launch(
 pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result<PlayResult> {
     let BuiltLaunch {
         mut cmd,
-        port,
+        sourceport,
         wad_path,
         data_dir: wad_data_dir,
         demo_path,
@@ -600,7 +600,10 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
     let session_start = std::time::SystemTime::now();
     cmd.stdin(std::process::Stdio::null());
     let mut child = cmd.spawn().map_err(|e| {
-        crate::Error::FileNotFound(format!("Failed to launch sourceport '{}': {}", port, e))
+        crate::Error::FileNotFound(format!(
+            "Failed to launch sourceport '{}': {}",
+            sourceport, e
+        ))
     })?;
 
     // Start a session and link it to the active playthrough if one already
@@ -609,7 +612,7 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
     // level progress. This prevents an unplayed WAD from being marked
     // in-progress just because the user launched-and-exited.
     let session_id = db::with_transaction(conn, |tx| {
-        let session_id = db::start_session(tx, wad_id, Some(&port))?;
+        let session_id = db::start_session(tx, wad_id, Some(&sourceport))?;
         if let Some(pt) = db::get_active_playthrough(tx, wad_id)? {
             tx.execute(
                 "UPDATE sessions SET playthrough_id = ?1 WHERE id = ?2",
@@ -626,7 +629,7 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
     // End session
     db::end_session(conn, session_id, None, status.code())?;
 
-    // For zdoom-family ports, parse the log and write managed stats.txt
+    // For zdoom-family sourceports, parse the log and write managed stats.txt
     if is_zdoom
         && config::get_auto_stats()
         && let Some(ref data_dir) = wad_data_dir
@@ -720,7 +723,10 @@ pub fn play_demo(
         .cmd
         .spawn()
         .map_err(|e| {
-            crate::Error::FileNotFound(format!("Failed to launch sourceport '{}': {e}", built.port))
+            crate::Error::FileNotFound(format!(
+                "Failed to launch sourceport '{}': {e}",
+                built.sourceport
+            ))
         })?
         .wait()?;
 
@@ -752,30 +758,30 @@ pub fn play_iwad(
     }
 
     // Determine sourceport
-    let port = sourceport
+    let sourceport = sourceport
         .map(|s| s.to_string())
         .unwrap_or_else(config::get_default_sourceport);
-    if port.is_empty() {
+    if sourceport.is_empty() {
         return Err(crate::Error::Config(
             "No sourceport specified and no default configured".to_string(),
         ));
     }
 
-    let port = config::resolve_sourceport(&port);
-    let mut cmd = Command::new(&port);
+    let sourceport = config::resolve_sourceport(&sourceport);
+    let mut cmd = Command::new(&sourceport);
     cmd.args(["-iwad", &resolved]);
 
-    // Add default sourceport args, then per-port args
+    // Add default sourceport args, then per-sourceport args
     let mut default_args = config::get_sourceport_args();
-    default_args.extend(config::get_port_args(&port));
+    default_args.extend(config::get_executable_args(&sourceport));
     if !default_args.is_empty() {
         cmd.args(&default_args);
     }
 
     // Inject config profile
     let profile_name = config_profile.unwrap_or("default");
-    let profile_path = config::get_profile_path(&port, profile_name);
-    let config_args = sourceports::get_config_args(&port, &profile_path.to_string_lossy());
+    let profile_path = config::get_profile_path(&sourceport, profile_name);
+    let config_args = sourceports::get_config_args(&sourceport, &profile_path.to_string_lossy());
     if !config_args.is_empty() {
         if let Some(parent) = profile_path.parent()
             && let Err(e) = std::fs::create_dir_all(parent)
@@ -797,7 +803,10 @@ pub fn play_iwad(
     // Launch
     cmd.stdin(std::process::Stdio::null());
     let mut child = cmd.spawn().map_err(|e| {
-        crate::Error::FileNotFound(format!("Failed to launch sourceport '{}': {}", port, e))
+        crate::Error::FileNotFound(format!(
+            "Failed to launch sourceport '{}': {}",
+            sourceport, e
+        ))
     })?;
 
     let start = Instant::now();
@@ -1179,14 +1188,15 @@ mod tests {
     #[test]
     fn test_select_sourceport_default_satisfies_required_family() {
         let prefs = HashMap::new();
-        let port = select_sourceport(None, None, Some("dsda"), "nyan-doom", "gzdoom", &prefs, &[]);
-        assert_eq!(port, "nyan-doom");
+        let sourceport =
+            select_sourceport(None, None, Some("dsda"), "nyan-doom", "gzdoom", &prefs, &[]);
+        assert_eq!(sourceport, "nyan-doom");
     }
 
     #[test]
     fn test_select_sourceport_custom_beats_required_family() {
         let prefs = HashMap::new();
-        let port = select_sourceport(
+        let sourceport = select_sourceport(
             None,
             Some("dsda-doom"),
             Some("zdoom"),
@@ -1195,13 +1205,13 @@ mod tests {
             &prefs,
             &[],
         );
-        assert_eq!(port, "dsda-doom");
+        assert_eq!(sourceport, "dsda-doom");
     }
 
     #[test]
     fn test_select_sourceport_cli_beats_everything() {
         let prefs = HashMap::new();
-        let port = select_sourceport(
+        let sourceport = select_sourceport(
             Some("woof"),
             Some("dsda-doom"),
             Some("zdoom"),
@@ -1210,13 +1220,13 @@ mod tests {
             &prefs,
             &[],
         );
-        assert_eq!(port, "woof");
+        assert_eq!(sourceport, "woof");
     }
 
     #[test]
     fn test_select_sourceport_zdoom_family_uses_configured_zdoom_port() {
         let prefs = HashMap::new();
-        let port = select_sourceport(
+        let sourceport = select_sourceport(
             None,
             None,
             Some("zdoom"),
@@ -1225,35 +1235,38 @@ mod tests {
             &prefs,
             &[],
         );
-        assert_eq!(port, "uzdoom");
+        assert_eq!(sourceport, "uzdoom");
     }
 
     #[test]
     fn test_select_sourceport_zdoom_port_beats_same_family_default() {
         let prefs = HashMap::new();
-        let port = select_sourceport(None, None, Some("zdoom"), "gzdoom", "uzdoom", &prefs, &[]);
-        assert_eq!(port, "uzdoom");
+        let sourceport =
+            select_sourceport(None, None, Some("zdoom"), "gzdoom", "uzdoom", &prefs, &[]);
+        assert_eq!(sourceport, "uzdoom");
     }
 
     #[test]
     fn test_select_sourceport_uses_family_preference() {
         let prefs = HashMap::from([("dsda".to_string(), "nugget-doom".to_string())]);
-        let port = select_sourceport(None, None, Some("dsda"), "gzdoom", "uzdoom", &prefs, &[]);
-        assert_eq!(port, "nugget-doom");
+        let sourceport =
+            select_sourceport(None, None, Some("dsda"), "gzdoom", "uzdoom", &prefs, &[]);
+        assert_eq!(sourceport, "nugget-doom");
     }
 
     #[test]
     fn test_select_sourceport_preference_beats_same_family_default() {
         let prefs = HashMap::from([("dsda".to_string(), "nugget-doom".to_string())]);
-        let port = select_sourceport(None, None, Some("dsda"), "nyan-doom", "uzdoom", &prefs, &[]);
-        assert_eq!(port, "nugget-doom");
+        let sourceport =
+            select_sourceport(None, None, Some("dsda"), "nyan-doom", "uzdoom", &prefs, &[]);
+        assert_eq!(sourceport, "nugget-doom");
     }
 
     #[test]
     fn test_select_sourceport_uses_installed_family_port() {
         let prefs = HashMap::new();
         let installed = vec![("nugget-doom".to_string(), "dsda".to_string())];
-        let port = select_sourceport(
+        let sourceport = select_sourceport(
             None,
             None,
             Some("dsda"),
@@ -1262,7 +1275,7 @@ mod tests {
             &prefs,
             &installed,
         );
-        assert_eq!(port, "nugget-doom");
+        assert_eq!(sourceport, "nugget-doom");
     }
 
     #[test]
@@ -1272,7 +1285,7 @@ mod tests {
         let update = db::WadUpdate::new().set_int("zdoom_required", Some(1));
         db::update_wad(&conn, wad_id, &update).unwrap();
 
-        let port = select_sourceport(
+        let sourceport = select_sourceport(
             None,
             None,
             None,
@@ -1282,7 +1295,7 @@ mod tests {
             &[],
         );
 
-        assert_eq!(port, "nyan-doom");
+        assert_eq!(sourceport, "nyan-doom");
         let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
         assert!(wad.required_sourceport_family.is_none());
     }
@@ -1304,7 +1317,7 @@ mod tests {
         .unwrap();
 
         detect_and_persist_zdoom_required_if_missing(&conn, wad_id, None, &wad_path).unwrap();
-        let port = select_sourceport(
+        let sourceport = select_sourceport(
             None,
             None,
             None,
@@ -1314,7 +1327,7 @@ mod tests {
             &[],
         );
 
-        assert_eq!(port, "nyan-doom");
+        assert_eq!(sourceport, "nyan-doom");
         let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
         assert_eq!(wad.zdoom_required, Some(1));
         assert!(wad.required_sourceport_family.is_none());
@@ -1322,7 +1335,7 @@ mod tests {
 
     #[test]
     fn test_explicit_family_wins_over_zdoom_required() {
-        let port = select_sourceport(
+        let sourceport = select_sourceport(
             None,
             None,
             Some("dsda"),
@@ -1332,7 +1345,7 @@ mod tests {
             &[],
         );
 
-        assert_eq!(port, "dsda-doom");
+        assert_eq!(sourceport, "dsda-doom");
     }
 
     #[test]

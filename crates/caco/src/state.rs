@@ -15,11 +15,11 @@ use crate::dialogs::delete::DeleteDialogState;
 use crate::dialogs::edit::EditDialogState;
 use crate::dialogs::enrich::EnrichDialogState;
 use crate::dialogs::link::LinkDialogState;
-use crate::dialogs::ports::PortsDialogState;
 use crate::dialogs::profiles::ProfilesDialogState;
 use crate::dialogs::resources::ResourcesDialogState;
 use crate::dialogs::sessions::SessionsDialogState;
 use crate::dialogs::settings::SettingsDialogState;
+use crate::dialogs::sourceports::SourceportsDialogState;
 use crate::dialogs::storage::{StorageDialogState, StorageTab};
 use crate::dialogs::wad_data::WadDataDialogState;
 use crate::dialogs::wad_stats::WadStatsDialogState;
@@ -81,11 +81,11 @@ pub enum ActionRequest {
     /// Open the metadata / Cacowards enrichment dialog.
     Enrich,
     /// Open the sourceport build manager.
-    Ports,
-    /// Build a sourceport the ports dialog has selected, on a worker thread.
-    StartPortBuild(Box<crate::dialogs::ports::PortBuildRequest>),
+    Sourceports,
+    /// Build a sourceport the sourceports dialog has selected, on a worker thread.
+    StartSourceportBuild(Box<crate::dialogs::sourceports::SourceportBuildRequest>),
     /// Lazily discover a sourceport's release tags and branches.
-    CheckPortVersions(crate::dialogs::ports::PortVersionsRequest),
+    CheckSourceportVersions(crate::dialogs::sourceports::SourceportVersionsRequest),
     /// Run an enrichment the dialog has configured, on a worker thread.
     StartEnrich(Box<crate::dialogs::enrich::EnrichRequest>),
     EditCollection(String),
@@ -123,7 +123,7 @@ pub enum ActiveDialog {
     Profiles(Box<ProfilesDialogState>),
     Collections(CollectionsDialogState),
     Enrich(Box<EnrichDialogState>),
-    Ports(Box<PortsDialogState>),
+    Sourceports(Box<SourceportsDialogState>),
     Resources(ResourcesDialogState),
     WadStats(WadStatsDialogState),
     WadData(Box<WadDataDialogState>),

@@ -159,35 +159,40 @@ pub fn companion_dir() -> PathBuf {
     default_data_dir().join("companions")
 }
 
-pub fn default_sourceport_dir() -> PathBuf {
-    default_data_dir().join("sourceports")
+/// Where per-sourceport config profiles live, as `{exe}/{profile}.{ext}`.
+///
+/// Named for what it holds rather than for what writes it. It used to be
+/// `<data>/sourceports`, which read as "the sourceports themselves" and left
+/// no room for the recipes that actually describe one.
+pub fn profile_dir() -> PathBuf {
+    default_data_dir().join("profiles")
 }
 
 /// Where user sourceport build recipes live.
 ///
 /// On the portable side, because the recipe *is* the portable artifact: it is
-/// a few hundred bytes that rebuild the port anywhere, whereas the binary it
-/// produces is ABI- and OS-specific. Patch files referenced by a recipe
-/// resolve against this directory for the same reason.
-pub fn port_recipe_dir() -> PathBuf {
-    default_data_dir().join("ports")
+/// a few hundred bytes that rebuild the sourceport anywhere, whereas the
+/// binary it produces is ABI- and OS-specific. Patch files referenced by a
+/// recipe resolve against this directory for the same reason.
+pub fn sourceport_recipe_dir() -> PathBuf {
+    default_data_dir().join("sourceports")
 }
 
 /// Root of the managed sourceport install prefixes.
 ///
-/// Cache side: a built port is regenerable from its recipe, and the install
-/// trees are large (7.6M for nyan-doom, 74M for uzdoom) next to a data dir
-/// meant to stay copyable.
-pub fn port_prefix_root() -> PathBuf {
-    cache_home().join("ports")
+/// Cache side: a built sourceport is regenerable from its recipe, and the
+/// install trees are large (7.6M for nyan-doom, 74M for uzdoom) next to a data
+/// dir meant to stay copyable.
+pub fn sourceport_prefix_root() -> PathBuf {
+    cache_home().join("sourceports")
 }
 
-/// Root of the git checkouts and build trees ports are built in.
+/// Root of the git checkouts and build trees sourceports are built in.
 ///
 /// Throwaway even by cache standards — uzdoom's checkout alone is 221M — and
 /// kept only so a rebuild is an incremental one.
-pub fn port_src_root() -> PathBuf {
-    cache_home().join("ports-src")
+pub fn sourceport_src_root() -> PathBuf {
+    cache_home().join("sourceports-src")
 }
 
 // ---------------------------------------------------------------------------
@@ -216,10 +221,10 @@ pub struct Config {
     pub cache_auto_clean: bool,
     /// How often to ask each built sourceport's remote whether its ref has
     /// moved. `0` disables the check, so caco touches no network at startup.
-    pub port_update_check_days: i64,
+    pub sourceport_update_check_days: i64,
     pub data_dir: String,
     pub iwad_dir: String,
-    pub sourceport_dir: String,
+    pub profile_dir: String,
     pub companion_orphan_cleanup: String,
     pub zdoom_sourceport: String,
     pub sourceport_preferences: HashMap<String, String>,
@@ -227,7 +232,7 @@ pub struct Config {
     /// keyed by executable basename (e.g. `"nyan-doom"`, `"helion"`).
     /// Appended after the global `sourceport_args`.
     #[serde(default)]
-    pub port_args: HashMap<String, Vec<String>>,
+    pub executable_args: HashMap<String, Vec<String>>,
 
     #[serde(default)]
     pub gui: GuiConfig,
@@ -256,14 +261,14 @@ impl Default for Config {
             cache_max_size_gb: 0.0,
             cache_max_age_days: 0,
             cache_auto_clean: false,
-            port_update_check_days: 1,
+            sourceport_update_check_days: 1,
             data_dir: default_data_subdir().to_string_lossy().into_owned(),
             iwad_dir: iwad_dir().to_string_lossy().into_owned(),
-            sourceport_dir: String::new(),
+            profile_dir: String::new(),
             companion_orphan_cleanup: "ask".to_string(),
             zdoom_sourceport: String::new(),
             sourceport_preferences: HashMap::new(),
-            port_args: HashMap::new(),
+            executable_args: HashMap::new(),
             gui: GuiConfig::default(),
             list: ListConfig::default(),
             iwad_priority: HashMap::new(),
@@ -478,14 +483,14 @@ pub fn get_cache_dir() -> PathBuf {
 
 /// What [`ensure_sourceport_defaults`] picked, if anything.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct DetectedPorts {
+pub struct DetectedSourceports {
     /// Newly chosen default sourceport.
     pub sourceport: Option<String>,
     /// Newly chosen zdoom-family sourceport.
     pub zdoom_sourceport: Option<String>,
 }
 
-impl DetectedPorts {
+impl DetectedSourceports {
     pub fn is_empty(&self) -> bool {
         self.sourceport.is_none() && self.zdoom_sourceport.is_none()
     }
@@ -495,22 +500,22 @@ impl DetectedPorts {
 ///
 /// An empty `sourceport` means launching fails until the user goes looking for
 /// the setting, which is a poor first five minutes. Only ever fills in blanks —
-/// a port the user chose is never second-guessed, including one that is not
+/// a sourceport the user chose is never second-guessed, including one that is not
 /// currently on `PATH` (they may be about to install it).
-pub fn ensure_sourceport_defaults() -> DetectedPorts {
+pub fn ensure_sourceport_defaults() -> DetectedSourceports {
     let cfg = load_config();
     let needs_default = cfg.sourceport.trim().is_empty();
     let needs_zdoom = cfg.zdoom_sourceport.trim().is_empty();
     if !needs_default && !needs_zdoom {
-        return DetectedPorts::default();
+        return DetectedSourceports::default();
     }
 
     let installed = crate::sourceports::detect_sourceports();
     if installed.is_empty() {
-        return DetectedPorts::default();
+        return DetectedSourceports::default();
     }
 
-    let mut found = DetectedPorts::default();
+    let mut found = DetectedSourceports::default();
     // FAMILIES order is the preference order, and detect_sourceports walks it,
     // so the first hit is the best available.
     if needs_default {
@@ -524,19 +529,19 @@ pub fn ensure_sourceport_defaults() -> DetectedPorts {
     }
 
     if found.is_empty() {
-        return DetectedPorts::default();
+        return DetectedSourceports::default();
     }
 
     let mut updated = (*cfg).clone();
-    if let Some(ref port) = found.sourceport {
-        updated.sourceport = port.clone();
+    if let Some(ref sourceport) = found.sourceport {
+        updated.sourceport = sourceport.clone();
     }
-    if let Some(ref port) = found.zdoom_sourceport {
-        updated.zdoom_sourceport = port.clone();
+    if let Some(ref sourceport) = found.zdoom_sourceport {
+        updated.zdoom_sourceport = sourceport.clone();
     }
 
     if save_config(&updated).is_err() {
-        return DetectedPorts::default();
+        return DetectedSourceports::default();
     }
     reload_config();
     found
@@ -584,11 +589,11 @@ pub fn get_data_dir() -> PathBuf {
 }
 
 /// Get the sourceport config profiles directory.
-pub fn get_sourceport_dir() -> PathBuf {
+pub fn get_profile_dir() -> PathBuf {
     let cfg = load_config();
-    let p = &cfg.sourceport_dir;
+    let p = &cfg.profile_dir;
     if p.is_empty() {
-        default_sourceport_dir()
+        profile_dir()
     } else {
         expand_tilde(p)
     }
@@ -648,26 +653,26 @@ pub fn get_sourceport_args() -> Vec<String> {
     load_config().sourceport_args.clone()
 }
 
-/// Get per-port launch args for a sourceport executable.
+/// Get per-sourceport launch args for a sourceport executable.
 ///
-/// Keys in `[port_args]` are executable basenames (extension stripped,
+/// Keys in `[executable_args]` are executable basenames (extension stripped,
 /// matching `sourceports::identify_family`); `executable` may be a bare
 /// name or full path. Lookup is exact first, then case-insensitive (Helion
 /// ships as both `helion` and `Helion`). Returns an empty vec when no
 /// entry exists.
-pub fn get_port_args(executable: &str) -> Vec<String> {
-    lookup_port_args(&load_config(), executable)
+pub fn get_executable_args(executable: &str) -> Vec<String> {
+    lookup_executable_args(&load_config(), executable)
 }
 
-fn lookup_port_args(cfg: &Config, executable: &str) -> Vec<String> {
+fn lookup_executable_args(cfg: &Config, executable: &str) -> Vec<String> {
     let basename = Path::new(executable)
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or(executable);
-    if let Some(args) = cfg.port_args.get(basename) {
+    if let Some(args) = cfg.executable_args.get(basename) {
         return args.clone();
     }
-    cfg.port_args
+    cfg.executable_args
         .iter()
         .find(|(k, _)| k.eq_ignore_ascii_case(basename))
         .map(|(_, v)| v.clone())
@@ -716,20 +721,20 @@ pub fn get_cache_auto_clean() -> bool {
 
 /// Resolve a sourceport name to a full path.
 ///
-/// An absolute path is taken as given. Otherwise a caco-built port wins over
+/// An absolute path is taken as given. Otherwise a caco-built sourceport wins over
 /// `PATH`: if the user asked caco to build `uzdoom`, that build is the one
 /// they meant even when a distro package of the same name exists. Falls back
 /// to `which`, then to the bare name so the eventual spawn failure names
 /// something the user recognises.
 ///
-/// This is the only place managed ports are wired in — every launch path
+/// This is the only place managed sourceports are wired in — every launch path
 /// already funnels through here.
 pub fn resolve_sourceport(name: &str) -> String {
     let p = Path::new(name);
     if p.is_absolute() {
         return name.to_string();
     }
-    if let Some(managed) = crate::ports::managed_binary(name) {
+    if let Some(managed) = crate::sourceports::managed_binary(name) {
         return managed;
     }
     which(name).unwrap_or_else(|| name.to_string())
@@ -765,7 +770,7 @@ pub fn find_wad_data_dir(wad_id: i64) -> Option<PathBuf> {
 
 /// Get the path to a sourceport config profile file.
 ///
-/// Path: `{sourceport_dir}/{basename}/{profile}.{ext}`
+/// Path: `{profile_dir}/{basename}/{profile}.{ext}`
 ///
 /// Extension is determined by the sourceport family (e.g. `.ini` for Helion,
 /// `.cfg` for everything else).
@@ -775,25 +780,25 @@ pub fn get_profile_path(sourceport: &str, profile: &str) -> PathBuf {
         .and_then(|s| s.to_str())
         .unwrap_or(sourceport);
     let ext = crate::sourceports::config_ext(sourceport);
-    get_sourceport_dir()
+    get_profile_dir()
         .join(basename)
         .join(format!("{profile}.{ext}"))
 }
 
 /// Scan the sourceport config directory for profiles.
 pub fn list_profiles(sourceport: Option<&str>) -> HashMap<String, Vec<String>> {
-    let sp_dir = get_sourceport_dir();
+    let sp_dir = get_profile_dir();
     if !sp_dir.is_dir() {
         return HashMap::new();
     }
 
     let mut result = HashMap::new();
 
-    if let Some(port) = sourceport {
-        let basename = Path::new(port)
+    if let Some(sourceport) = sourceport {
+        let basename = Path::new(sourceport)
             .file_stem()
             .and_then(|s| s.to_str())
-            .unwrap_or(port);
+            .unwrap_or(sourceport);
         let port_dir = sp_dir.join(basename);
         if port_dir.is_dir() {
             let mut profiles = collect_profile_stems(&port_dir);
@@ -994,36 +999,39 @@ zdoom = "uzdoom"
     #[test]
     fn test_config_port_args() {
         let toml_str = r#"
-[port_args]
+[executable_args]
 nyan-doom = ["-geometry", "1920x1200"]
 helion = ["-loglevel", "info"]
 "#;
         let cfg: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(
-            lookup_port_args(&cfg, "nyan-doom"),
+            lookup_executable_args(&cfg, "nyan-doom"),
             vec!["-geometry", "1920x1200"]
         );
         // Full path resolves to basename
         assert_eq!(
-            lookup_port_args(&cfg, "/usr/bin/nyan-doom"),
+            lookup_executable_args(&cfg, "/usr/bin/nyan-doom"),
             vec!["-geometry", "1920x1200"]
         );
         // Case-insensitive fallback (Helion ships as helion or Helion)
-        assert_eq!(lookup_port_args(&cfg, "Helion"), vec!["-loglevel", "info"]);
+        assert_eq!(
+            lookup_executable_args(&cfg, "Helion"),
+            vec!["-loglevel", "info"]
+        );
         // Windows-style extension is stripped
         assert_eq!(
-            lookup_port_args(&cfg, "nyan-doom.exe"),
+            lookup_executable_args(&cfg, "nyan-doom.exe"),
             vec!["-geometry", "1920x1200"]
         );
-        // Unknown port gets nothing
-        assert!(lookup_port_args(&cfg, "gzdoom").is_empty());
+        // Unknown sourceport gets nothing
+        assert!(lookup_executable_args(&cfg, "gzdoom").is_empty());
     }
 
     #[test]
     fn test_config_port_args_default_empty() {
         let cfg: Config = toml::from_str("").unwrap();
-        assert!(cfg.port_args.is_empty());
-        assert!(lookup_port_args(&cfg, "nyan-doom").is_empty());
+        assert!(cfg.executable_args.is_empty());
+        assert!(lookup_executable_args(&cfg, "nyan-doom").is_empty());
     }
 
     #[test]
@@ -1128,15 +1136,15 @@ helion = ["-loglevel", "info"]
 
     #[test]
     fn test_minimal_toml_keeps_populated_maps() {
-        let mut port_args = HashMap::new();
-        port_args.insert("nyan-doom".to_string(), vec!["-geometry".to_string()]);
+        let mut executable_args = HashMap::new();
+        executable_args.insert("nyan-doom".to_string(), vec!["-geometry".to_string()]);
         let cfg = Config {
-            port_args,
+            executable_args,
             ..Default::default()
         };
 
         let table: toml::Table = minimal_toml(&cfg).unwrap().parse().unwrap();
-        assert!(table.get("port_args").is_some());
+        assert!(table.get("executable_args").is_some());
     }
 
     #[test]

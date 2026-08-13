@@ -1,7 +1,7 @@
 //! Sourceport config profile management.
 //!
 //! A profile is a named sourceport config file living at
-//! `{sourceport_dir}/{exe}/{profile}.{ext}` — see [`config::get_profile_path`].
+//! `{profile_dir}/{exe}/{profile}.{ext}` — see [`config::get_profile_path`].
 //! WADs reference profiles by name through their `custom_config` column.
 //!
 //! This module owns the profile *operations*; how a profile is edited is left
@@ -31,30 +31,30 @@ pub struct Profile {
 /// Errors rather than returning an empty string, since every operation here
 /// needs a real sourceport to build a path from.
 pub fn resolve_sourceport(explicit: Option<&str>) -> Result<String> {
-    let port = explicit
+    let sourceport = explicit
         .map(str::to_string)
         .unwrap_or_else(config::get_default_sourceport);
-    if port.is_empty() {
+    if sourceport.is_empty() {
         return Err(Error::NoSourceport);
     }
-    Ok(port)
+    Ok(sourceport)
 }
 
 /// Every profile, flattened and sorted by sourceport then name.
 ///
-/// Pass `sourceport` to restrict to one port. Returns an empty vec when the
+/// Pass `sourceport` to restrict to one sourceport. Returns an empty vec when the
 /// profile directory does not exist yet.
 pub fn list(sourceport: Option<&str>) -> Vec<Profile> {
     let grouped = config::list_profiles(sourceport);
-    let mut ports: Vec<_> = grouped.into_iter().collect();
-    ports.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut sourceports: Vec<_> = grouped.into_iter().collect();
+    sourceports.sort_by(|a, b| a.0.cmp(&b.0));
 
-    ports
+    sourceports
         .into_iter()
-        .flat_map(|(port, names)| {
+        .flat_map(|(sourceport, names)| {
             names.into_iter().map(move |name| Profile {
-                path: config::get_profile_path(&port, &name),
-                sourceport: port.clone(),
+                path: config::get_profile_path(&sourceport, &name),
+                sourceport: sourceport.clone(),
                 name,
             })
         })
@@ -180,7 +180,7 @@ mod tests {
 
     /// Point the profile directory at a temp dir for the duration of a test.
     ///
-    /// `config::get_sourceport_dir` reads the process environment, so these
+    /// `config::get_profile_dir` reads the process environment, so these
     /// tests share one serialized guard rather than running in parallel.
     fn with_profile_dir<T>(f: impl FnOnce(&std::path::Path) -> T) -> T {
         use std::sync::Mutex;

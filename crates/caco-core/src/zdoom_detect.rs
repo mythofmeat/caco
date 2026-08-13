@@ -2,7 +2,7 @@
 //!
 //! The only reliable file-level signal is **UDMF map format**: maps stored as
 //! TEXTMAP lumps instead of standard THINGS/LINEDEFS/etc. dsda-doom and other
-//! Boom-lineage ports cannot parse UDMF maps at all.
+//! Boom-lineage sourceports cannot parse UDMF maps at all.
 //!
 //! Other ZDoom-associated lumps (ZSCRIPT, DECORATE, GLDEFS, MENUDEF, MODELDEF,
 //! VOXELDEF, SBARINFO) are intentionally NOT checked — WAD authors commonly

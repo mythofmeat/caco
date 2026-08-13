@@ -9,14 +9,14 @@
 //! ```
 //!
 //! Every path it uses comes from a tempdir. It must never call
-//! `PortPaths::from_config()`.
+//! `SourceportPaths::from_config()`.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use caco_core::ports::{BuildOptions, BuildProgress, PortPaths, build, recipe};
+use caco_core::sourceports::{BuildOptions, BuildProgress, SourceportPaths, build, recipe};
 
-fn sandbox(root: &std::path::Path) -> PortPaths {
-    PortPaths {
+fn sandbox(root: &std::path::Path) -> SourceportPaths {
+    SourceportPaths {
         recipe_dir: root.join("recipes"),
         src_root: root.join("src"),
         prefix_root: root.join("prefix"),
@@ -157,7 +157,7 @@ fn cancel_stops_a_build_in_flight() {
         "got {err}"
     );
     // A cancelled build must not leave a prefix a launch would resolve to.
-    assert!(caco_core::ports::find_installed(&paths.prefix_root, "nyan-doom").is_none());
+    assert!(caco_core::sourceports::find_installed(&paths.prefix_root, "nyan-doom").is_none());
 }
 
 /// Print what this machine is missing for every built-in recipe.
@@ -170,8 +170,8 @@ fn cancel_stops_a_build_in_flight() {
 #[ignore = "reports on the host machine"]
 fn doctor_report_for_this_machine() {
     for recipe in recipe::builtin_recipes() {
-        let report = caco_core::ports::doctor(&recipe);
-        eprintln!("== {}", report.port);
+        let report = caco_core::sourceports::doctor(&recipe);
+        eprintln!("== {}", report.sourceport);
         eprintln!("   can build:        {}", report.can_build());
         eprintln!("   missing tools:    {:?}", report.missing_tools);
         eprintln!("   package check:    {:?}", report.package_check);
@@ -189,7 +189,7 @@ fn doctor_report_for_this_machine() {
 #[ignore = "hits the network"]
 fn every_builtin_ref_exists_on_its_remote() {
     for recipe in recipe::builtin_recipes() {
-        let commit = caco_core::ports::update::remote_commit(&recipe.repo, &recipe.git_ref)
+        let commit = caco_core::sourceports::update::remote_commit(&recipe.repo, &recipe.git_ref)
             .unwrap_or_else(|e| panic!("{} @ {}: {e}", recipe.name, recipe.git_ref));
         eprintln!("{} @ {} -> {commit}", recipe.name, recipe.git_ref);
         assert_eq!(commit.len(), 40, "not a sha: {commit}");

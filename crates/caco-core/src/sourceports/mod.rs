@@ -1,42 +1,56 @@
-//! Build and manage sourceports from source into a caco-owned prefix.
+//! Everything caco knows about sourceports: which families exist and how they
+//! are spelled on a command line ([`registry`]), and how to build the ones no
+//! distro packages ([`build`]).
 //!
-//! Not every port is packaged — nyan-doom and uzdoom are in no distro repo —
-//! and requiring a global install makes a library non-portable in the way
-//! that matters: copying the data dir to another machine should be
-//! enough to play. It is, because the thing that travels is the *recipe*. A
-//! few hundred bytes of TOML rebuild the binary on whatever machine and OS it
-//! lands on, which a binary itself could never do.
+//! The two halves used to be `sourceports.rs` and `sourceports/`, which put the
+//! word "sourceport" in the tree for something that is never called that outside
+//! caco's own source — every Doom engine is a *sourceport*, and a "sourceport" is a
+//! different thing entirely. They also belong together: a built binary is only
+//! useful because the registry already knows `nyan-doom` is dsda-flavoured and
+//! `uzdoom` zdoom-flavoured, so complevel args, save directories and config
+//! profiles work the moment the binary exists.
+//!
+//! On the build half: not every sourceport is packaged — nyan-doom and uzdoom
+//! are in no distro repo — and requiring a global install makes a library
+//! non-portable in the way that matters, since copying the data dir to another
+//! machine should be enough to play. It is, because the thing that travels is
+//! the *recipe*. A few hundred bytes of TOML rebuild the binary on whatever
+//! machine and OS it lands on, which a binary itself could never do.
 //!
 //! That split is why the pieces live where they do: recipes and their patches
 //! sit beside the database on the portable side, while checkouts, build trees
 //! and install prefixes sit in the cache with the WAD downloads. Deleting the
 //! cache costs a rebuild, never a reconfiguration.
 //!
-//! Nothing in [`crate::sourceports`] needs to know a port was built here.
-//! `nyan-doom` and `uzdoom` were already mapped to the dsda and zdoom
-//! families, so complevel args, save directories and config profiles start
-//! working the moment a managed binary exists. The single integration point
-//! is [`crate::config::resolve_sourceport`], which every launch already goes
+//! The single integration point for a managed build is
+//! [`crate::config::resolve_sourceport`], which every launch already goes
 //! through.
 
 pub mod build;
 pub mod doctor;
 pub mod manifest;
 pub mod recipe;
+pub mod registry;
 pub mod update;
 
-pub use build::{BuildOptions, BuildProgress, BuildStep, PortPaths};
+pub use build::{BuildOptions, BuildProgress, BuildStep, SourceportPaths};
 pub use doctor::{DoctorReport, PackageCheck, doctor};
-pub use manifest::{InstalledPort, PortManifest, find_installed, list_installed, remove_installed};
-pub use recipe::{PortRecipe, builtin_recipes, find_recipe, load_recipes};
+pub use manifest::{
+    InstalledSourceport, SourceportManifest, find_installed, list_installed, remove_installed,
+};
+pub use recipe::{SourceportRecipe, builtin_recipes, find_recipe, load_recipes};
 pub use update::{RemoteRefs, UpdateStatus, check_updates, remote_refs};
+
+// Flat, because every caller has always said `sourceports::identify_family`
+// and there is no reason for the file split to show up at the call site.
+pub use registry::*;
 
 /// A recipe paired with whatever is installed for it.
 #[derive(Debug, Clone)]
-pub struct PortStatus {
-    pub recipe: PortRecipe,
+pub struct SourceportStatus {
+    pub recipe: SourceportRecipe,
     /// Most recent usable install, if there is one.
-    pub installed: Option<InstalledPort>,
+    pub installed: Option<InstalledSourceport>,
     /// True when something is installed but at a different ref than the
     /// recipe now asks for — the case a rebuild fixes.
     pub ref_changed: bool,
@@ -45,7 +59,7 @@ pub struct PortStatus {
     pub remote_commit: Option<String>,
 }
 
-impl PortStatus {
+impl SourceportStatus {
     /// Whether the remote has moved past the installed build.
     ///
     /// Distinct from [`Self::ref_changed`]: that is the user repointing the
@@ -58,10 +72,10 @@ impl PortStatus {
     }
 }
 
-/// Every known recipe with its install state, for the ports UI.
+/// Every known recipe with its install state, for the sourceports UI.
 /// Never reaches the network — remote state comes from whatever the last
 /// update check cached, so opening the dialog is instant.
-pub fn status(paths: &PortPaths) -> crate::Result<Vec<PortStatus>> {
+pub fn status(paths: &SourceportPaths) -> crate::Result<Vec<SourceportStatus>> {
     let installed = list_installed(&paths.prefix_root);
     let cache = update::load_cache(&paths.prefix_root);
     let mut out = Vec::new();
@@ -74,10 +88,10 @@ pub fn status(paths: &PortPaths) -> crate::Result<Vec<PortStatus>> {
             .as_ref()
             .is_some_and(|p| p.manifest.git_ref != recipe.git_ref);
         let remote_commit = cache
-            .ports
+            .sourceports
             .get(&recipe.name)
             .map(|c| c.remote_commit.clone());
-        out.push(PortStatus {
+        out.push(SourceportStatus {
             recipe,
             installed: current,
             ref_changed,
@@ -89,11 +103,11 @@ pub fn status(paths: &PortPaths) -> crate::Result<Vec<PortStatus>> {
 
 /// Path to a managed build of `name`, if one is installed and usable.
 ///
-/// Consulted by [`crate::config::resolve_sourceport`] ahead of `PATH`: a port
+/// Consulted by [`crate::config::resolve_sourceport`] ahead of `PATH`: a sourceport
 /// the user asked caco to build is the one they meant, even when a distro
 /// package of the same name happens to exist.
 pub fn managed_binary(name: &str) -> Option<String> {
-    let installed = find_installed(&crate::config::port_prefix_root(), name)?;
+    let installed = find_installed(&crate::config::sourceport_prefix_root(), name)?;
     Some(installed.binary_path().display().to_string())
 }
 
@@ -101,8 +115,8 @@ pub fn managed_binary(name: &str) -> Option<String> {
 mod tests {
     use super::*;
 
-    fn paths(root: &std::path::Path) -> PortPaths {
-        PortPaths {
+    fn paths(root: &std::path::Path) -> SourceportPaths {
+        SourceportPaths {
             recipe_dir: root.join("recipes"),
             src_root: root.join("src"),
             prefix_root: root.join("prefix"),
@@ -127,7 +141,7 @@ mod tests {
         let prefix = p.prefix_root.join("uzdoom").join("master");
         manifest::write_manifest(
             &prefix,
-            &PortManifest {
+            &SourceportManifest {
                 name: "uzdoom".into(),
                 repo: "https://github.com/UZDoom/uzdoom".into(),
                 git_ref: "master".into(),

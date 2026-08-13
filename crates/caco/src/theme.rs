@@ -241,7 +241,7 @@ pub fn sidebar_nav_item(ui: &mut egui::Ui, label: &str, is_active: bool) -> bool
     response.clicked()
 }
 
-/// Render a compact sidebar row for the management tools (Stats, Ports, …).
+/// Render a compact sidebar row for the management tools (Stats, Sourceports, …).
 ///
 /// Same shape as [`sidebar_nav_item`] but shorter and quieter, because these
 /// open a dialog rather than switching what the main panel shows. Crucially it

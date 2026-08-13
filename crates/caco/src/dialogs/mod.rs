@@ -9,11 +9,11 @@ pub mod edit;
 pub mod enrich;
 pub mod gc;
 pub mod link;
-pub mod ports;
 pub mod profiles;
 pub mod resources;
 pub mod sessions;
 pub mod settings;
+pub mod sourceports;
 pub mod storage;
 pub mod trash;
 pub mod wad_data;
@@ -28,7 +28,7 @@ const DIALOG_GUTTER: f32 = 24.0;
 /// .default_size([W, H]).anchor(CENTER_CENTER)`, with `W`/`H` picked for a
 /// comfortable window and never checked against a small one. Since egui only
 /// treats `default_size` as a starting point and lets content push a window
-/// past the viewport, dialogs like Ports (820x620) rendered larger than the
+/// past the viewport, dialogs like Sourceports (820x620) rendered larger than the
 /// 800x400 minimum window — title bar above the top edge, buttons below the
 /// bottom one, and no way to reach either.
 ///

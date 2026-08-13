@@ -56,10 +56,10 @@ impl ProfilesDialogState {
         self.pending_delete = None;
 
         self.selected = match keep_selected {
-            Some((port, name)) => self
+            Some((sourceport, name)) => self
                 .profiles
                 .iter()
-                .position(|p| p.sourceport == port && p.name == name),
+                .position(|p| p.sourceport == sourceport && p.name == name),
             None => None,
         };
         if self.selected.is_none() && !self.profiles.is_empty() {
@@ -103,11 +103,11 @@ impl ProfilesDialogState {
         let Some(p) = self.selected.and_then(|i| self.profiles.get(i)) else {
             return;
         };
-        let (port, name) = (p.sourceport.clone(), p.name.clone());
-        match profiles::write(&port, &name, &self.buffer) {
+        let (sourceport, name) = (p.sourceport.clone(), p.name.clone());
+        match profiles::write(&sourceport, &name, &self.buffer) {
             Ok(()) => {
                 self.dirty = false;
-                self.set_info(format!("Saved {port}/{name}."));
+                self.set_info(format!("Saved {sourceport}/{name}."));
             }
             Err(e) => self.set_error(e.to_string()),
         }
@@ -120,7 +120,7 @@ impl ProfilesDialogState {
             return;
         }
 
-        let port = match self.target_sourceport() {
+        let sourceport = match self.target_sourceport() {
             Ok(p) => p,
             Err(e) => {
                 self.set_error(e);
@@ -136,11 +136,11 @@ impl ProfilesDialogState {
             None
         };
 
-        match profiles::create(&port, &name, source.as_deref()) {
+        match profiles::create(&sourceport, &name, source.as_deref()) {
             Ok(_) => {
                 self.new_name.clear();
-                self.set_info(format!("Created {port}/{name}."));
-                self.reload(Some((port, name)));
+                self.set_info(format!("Created {sourceport}/{name}."));
+                self.reload(Some((sourceport, name)));
             }
             Err(e) => self.set_error(e.to_string()),
         }
@@ -167,10 +167,10 @@ impl ProfilesDialogState {
         let Some(p) = self.profiles.get(idx) else {
             return;
         };
-        let (port, name) = (p.sourceport.clone(), p.name.clone());
-        match profiles::remove(&port, &name) {
+        let (sourceport, name) = (p.sourceport.clone(), p.name.clone());
+        match profiles::remove(&sourceport, &name) {
             Ok(()) => {
-                self.set_info(format!("Deleted {port}/{name}."));
+                self.set_info(format!("Deleted {sourceport}/{name}."));
                 self.reload(None);
             }
             Err(e) => self.set_error(e.to_string()),

@@ -59,11 +59,11 @@ crates/
 - `config.rs` — TOML config + path resolution + `ensure_config_keys` autofill
 - `player.rs` — sourceport launcher, playtime tracking, companion injection. `build_launch` is the single command builder behind both `play` and `play_demo`, parameterised by a private `LaunchMode`: playback needs an identical file set, complevel and load order to the recording (any difference desyncs the demo) but must not record a session or collect stats, since a replayed map exit is not progress the user just made.
 - `companion_service.rs`, `resource_service.rs` — MD5 dedup + managed storage; IWAD/id24 registration
-- `sourceports.rs`, `complevel.rs`, `complevel_detect.rs`, `iwad_detect.rs` — family registry + detection heuristics (COMPLVL, UMAPINFO, DEHACKED, PNAMES, map lumps)
-- `ports/` — build sourceports from source into a caco-owned prefix. `recipe.rs` holds the TOML schema and the built-in `recipes.toml` (nyan-doom, uzdoom), merged with any `*.toml` in `config::port_recipe_dir()`; `build.rs` is the clone → patch → configure → compile → install driver; `manifest.rs` records what was built inside the prefix; `doctor.rs` answers "can this machine build it" against pacman / brew; `update.rs` asks each built port's remote whether its ref has moved, via one `git ls-remote` per port (no objects fetched), cached in `<prefix_root>/update-check.toml` and throttled by `config.port_update_check_days` (0 disables). A build invalidates its own cache entry, or the badge would stay lit until the interval expired. `app.rs::spawn_port_update_check` runs it at startup and notifies; it never starts a rebuild on its own. The recipe is the portable artifact and lives in the data dir, while checkouts and install prefixes live in the cache — a built port is regenerable and the trees are large. `config::resolve_sourceport` is the only integration point, and a managed build wins over `PATH`. `sourceports.rs` needed no change: nyan-doom was already mapped to dsda and uzdoom to zdoom.
+- `complevel.rs`, `complevel_detect.rs`, `iwad_detect.rs` — detection heuristics (COMPLVL, UMAPINFO, DEHACKED, PNAMES, map lumps)
+- `sourceports/` — everything about sourceports, in one module because the two halves are one subject. **Never call these "ports"** anywhere a user or a reader can see it: outside caco's own history that word means something else entirely, and every Doom engine is a *sourceport*. `registry.rs` (was the top-level `sourceports.rs`) is the family table — which flags each family spells for data dirs, save dirs, complevels and configs — flat-re-exported from `mod.rs`, so every existing `sourceports::identify_family` call site was untouched by the merge. The rest builds sourceports from source into a caco-owned prefix: `recipe.rs` holds the TOML schema and the built-in `recipes.toml` (nyan-doom, uzdoom), merged with any `*.toml` in `config::sourceport_recipe_dir()`; `build.rs` is the clone → patch → configure → compile → install driver; `manifest.rs` records what was built inside the prefix, in a `caco-sourceport.toml` marker `remove_installed` refuses to delete without; `doctor.rs` answers "can this machine build it" against pacman / brew; `update.rs` asks each built sourceport's remote whether its ref has moved, via one `git ls-remote` each (no objects fetched), cached in `<prefix_root>/update-check.toml` and throttled by `config.sourceport_update_check_days` (0 disables). A build invalidates its own cache entry, or the badge would stay lit until the interval expired. `app.rs::spawn_sourceport_update_check` runs it at startup and notifies; it never starts a rebuild on its own. The recipe is the portable artifact and lives in the data dir, while checkouts and install prefixes live in the cache — a built sourceport is regenerable and the trees are large. `config::resolve_sourceport` is the only integration point, and a managed build wins over `PATH`. The registry needed no change when builds were added: nyan-doom was already mapped to dsda and uzdoom to zdoom.
 - `profiles.rs` — sourceport config profile operations (list/create/copy/remove/read/write + `referencing_wads`). Owns the operations but deliberately not *editing*, which the GUI does in a text buffer through `read`/`write`.
 - `wad_stats.rs` — per-map stats parser (stats.txt + levelstat.txt)
-- `stats_watcher.rs` — stats collection for ports without native stats.txt: zdoom (ZScript reporter PK3 + `+logfile` parsing) and helion (`-levelstat`, consuming its global `~/.config/Helion/levelstat.txt` — unpadded-milliseconds time format — into the managed stats.txt)
+- `stats_watcher.rs` — stats collection for sourceports without native stats.txt: zdoom (ZScript reporter PK3 + `+logfile` parsing) and helion (`-levelstat`, consuming its global `~/.config/Helion/levelstat.txt` — unpadded-milliseconds time format — into the managed stats.txt)
 - `saves.rs`, `demos.rs` — save/backup/restore and demo discovery. `demos::resolve_demo_path` picks by mtime rather than filename order, so a restored or hand-copied demo still resolves as "most recent".
 - `titlepic.rs`, `utils.rs`
 - `db/` — schema, migrations (23+), models, query parser, wads, sessions, iwads, id24, companions
@@ -119,7 +119,7 @@ egui = "0.31"
   single delete take two clicks. An explicit per-row tick or Select All is still
   the user's call; only the defaults are protective.
 - **GC**: `caco_core::gc` splits cleanup in two — `plan` measures and touches nothing, `execute` deletes exactly the `GcSelection` handed back. The GUI renders the plan as a checkbox list and passes back the ticked subset, so nothing is deleted that was not shown first. `gc_ignore` column excludes a WAD; orphan detection covers data dirs, backups, and companions. `plan` takes an explicit `GcPaths { data_dir, backup_dir }` rather than reading config: every path in it is a path something gets deleted from, and planning against an empty DB makes every directory look like an orphan, so a plan built over the real data dir and executed wipes the library's saves. The required argument is what keeps that unreachable from a test — `GcPaths::from_config()` is for frontends, and `gc`'s tests build every path from a tempdir. `saves::list_backups_in` exists for the same reason.
-- **Ports build driver**: every command is assembled by a pure function (`clone_args`, `configure_args`, ...) and only then handed to a process, so flags that are load-bearing and silently fatal if dropped — uzdoom's `-DINSTALL_PK3_PATH=bin`, whose absence produces a build that succeeds and aborts at launch — are testable without a network or a compiler. `PortPaths` is passed explicitly for the same reason `GcPaths` is: a test that could reach the real roots is one that can compile 74M of C++ into a user's cache, or delete out of it. The end-to-end build lives in `tests/ports_build.rs` behind `#[ignore]` — `cargo test --workspace` must never compile a sourceport. The install prefix is not touched until the compile succeeds, so a failed rebuild leaves a working port in place, and `remove_installed` refuses any directory without caco's own manifest.
+- **Sourceport build driver**: every command is assembled by a pure function (`clone_args`, `configure_args`, ...) and only then handed to a process, so flags that are load-bearing and silently fatal if dropped — uzdoom's `-DINSTALL_PK3_PATH=bin`, whose absence produces a build that succeeds and aborts at launch — are testable without a network or a compiler. `SourceportPaths` is passed explicitly for the same reason `GcPaths` is: a test that could reach the real roots is one that can compile 74M of C++ into a user's cache, or delete out of it. The end-to-end build lives in `tests/sourceports_build.rs` behind `#[ignore]` — `cargo test --workspace` must never compile a sourceport. The install prefix is not touched until the compile succeeds, so a failed rebuild leaves a working sourceport in place, and `remove_installed` refuses any directory without caco's own manifest.
 - **Import service**: centralises duplicate checking for all sources; auto-enriches with Doom Wiki metadata; JSON import fallback for Cloudflare-blocked APIs.
 - **Player**: wraps sourceport execution; injects companion files, data dir args, complevel args, config profile; returns `PlayResult` with crash detection.
 - **GUI background work**: egui is immediate-mode; `CacoApp` holds all state; background workers for search/import/play use `std::thread` + `std::sync::mpsc`.
@@ -150,7 +150,7 @@ egui = "0.31"
   wrap, and a row wider than a `SidePanel` is not merely clipped — egui sizes a
   panel from the rect its contents actually occupied, so the overflow displaces
   every panel after it. Ten management buttons in one row cost five of them
-  (Clean, Trash, IWADs, Ports, Settings were unreachable) *and* 180pt of the
+  (Clean, Trash, IWADs, Sourceports, Settings were unreachable) *and* 180pt of the
   library grid. Stacked `theme::sidebar_tool_item` rows cannot do either.
 
 ## Screenshots
@@ -161,7 +161,7 @@ wgpu. It exists because whether a row fits inside its panel is decided at paint
 time against a real font atlas and a real viewport — there is no unit test for
 it, and reading the layout code is how the two bugs above survived.
 
-- `#[ignore]`d, like `ports_build.rs`: `cargo test --workspace` must not need a
+- `#[ignore]`d, like `sourceports_build.rs`: `cargo test --workspace` must not need a
   GPU. Run it explicitly.
 - It also *asserts*, not just captures: after opening each dialog it reads
   egui's own area rects and fails if any window escapes the viewport. Run it at
@@ -198,15 +198,15 @@ Portable (`config::default_data_dir`, overridable via `CACO_HOME`):
 - Managed id24 WADs: `<data>/id24/{name}.wad`
 - WAD data: `<data>/data/` (per-WAD saves, stats, configs)
 - Companion files: `<data>/companions/{md5[:12]}_{filename}`
-- Sourceport configs: `<data>/sourceports/{exe}/{profile}.cfg`
-- Sourceport build recipes + patches: `<data>/ports/*.toml`
+- Sourceport config profiles: `<data>/profiles/{exe}/{profile}.cfg`
+- Sourceport build recipes + patches: `<data>/sourceports/*.toml`
 - Backups: `<data>/backups/` (save backups + pre-migration DB snapshots)
 
 Disposable (`config::cache_home`, overridable via `CACO_CACHE_HOME`):
 - WAD cache: `<cache>/wads/` (`CACO_CACHE_DIR` overrides just this)
 - Thumbnails cache: `<cache>/thumbnails/`
-- Built sourceport prefixes: `<cache>/ports/{name}/{ref-slug}/` (+ `update-check.toml`)
-- Sourceport checkouts + build trees: `<cache>/ports-src/`
+- Built sourceport prefixes: `<cache>/sourceports/{name}/{ref-slug}/` (+ `update-check.toml`)
+- Sourceport checkouts + build trees: `<cache>/sourceports-src/`
 
 Caco carries **no migrations between layouts**. It is pre-1.0 and single-user;
 a layout change is applied by moving the files by hand, which is why nothing in
@@ -277,7 +277,7 @@ pins the behaviour.
 
 **Per-WAD config columns**: `custom_iwad`, `custom_sourceport`, `custom_args` (JSON), `complevel` (INT), `custom_config` (TEXT).
 
-**Launch args layering**: global `sourceport_args` (every port) → `[port_args]` table (executable basename → args, case-insensitive fallback, applied only when that port launches) → per-WAD `custom_args` → per-launch extra args. GUI settings dialog edits args as shell-quoted strings via `shlex`.
+**Launch args layering**: global `sourceport_args` (every sourceport) → `[executable_args]` table (executable basename → args, case-insensitive fallback, applied only when that executable launches) → per-WAD `custom_args` → per-launch extra args. GUI settings dialog edits args as shell-quoted strings via `shlex`.
 
 **DB migrations**: run on `init_db()`; numbered sequentially; current schema version is 38. `init_db` snapshots the DB into the backup dir whenever migrations are pending.
 
@@ -315,7 +315,7 @@ Tools (`app/sidebar.rs` → `ActionRequest` → `app.rs::dispatch_action`):
 | Storage | `dialogs/storage.rs` | four tabs, below |
 | Profiles | `dialogs/profiles.rs` | `caco_core::profiles` |
 | IWADs | `dialogs/resources.rs` | `resource_service` |
-| Ports | `dialogs/ports.rs` | `caco_core::ports` (worker thread) |
+| Sourceports | `dialogs/sourceports.rs` | `caco_core::sourceports` (worker thread) |
 | Enrich | `dialogs/enrich.rs` | `caco_sources::enrich_service` (worker thread) |
 | Settings | `dialogs/settings.rs` | `config::save_config` + `reload_config` |
 
@@ -391,7 +391,7 @@ consequences worth knowing before touching `bundle.sh`:
 - `CFBundleExecutable` is a shell wrapper, not the binary. An app launched from
   Finder inherits only `/usr/bin:/bin:/usr/sbin:/sbin`, so the wrapper prepends
   the Homebrew prefixes. Without it `config::resolve_sourceport` finds nothing
-  and `ports/doctor.rs`'s `brew list` fails, but only when launched from the
+  and `sourceports/doctor.rs`'s `brew list` fails, but only when launched from the
   Dock — from a terminal it all works, which makes it a miserable bug to chase.
 - The signature is required, not cosmetic: the kernel refuses to execute an
   unsigned arm64 binary. Not being notarised is why the README tells you to

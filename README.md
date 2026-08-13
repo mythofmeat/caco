@@ -101,8 +101,8 @@ the sourceport.
 | Storage | Everything caco keeps on disk, in four tabs — see below |
 | Profiles | Per-sourceport config profiles, edited in place |
 | IWADs | Registered IWADs and id24 resources |
-| Ports | Build sourceports from source into caco's own prefix |
-| Enrich | Re-run complevel / IWAD / port detection across the library, plus per-year Cacowards refresh |
+| Sourceports | Build sourceports from source into caco's own prefix |
+| Enrich | Re-run complevel / IWAD / sourceport detection across the library, plus per-year Cacowards refresh |
 | Settings | Sourceports, launch args, behavior toggles, cache limits, paths |
 
 Storage tabs:
@@ -201,10 +201,10 @@ auto_detect_complevel = true
 auto_doomwiki_enrich = true
 cache_max_size_gb = 20.0
 cache_auto_clean = true
-port_update_check_days = 1              # 0 = never check built ports for updates
+sourceport_update_check_days = 1        # 0 = never check built sourceports for updates
 
-# Extra args for specific ports only (appended after sourceport_args)
-[port_args]
+# Extra args for specific executables only (appended after sourceport_args)
+[executable_args]
 nyan-doom = ["-geometry", "1920x1200"]
 
 [list]
@@ -244,8 +244,8 @@ machine:
 | `iwads/` | Managed IWADs |
 | `id24/` | Managed id24 WADs |
 | `companions/` | Managed companion files |
-| `sourceports/` | Per-sourceport config profiles |
-| `ports/` | Sourceport build recipes and their patches |
+| `profiles/` | Per-sourceport config profiles |
+| `sourceports/` | Sourceport build recipes and their patches |
 | `backups/` | Save backups + pre-migration DB snapshots |
 
 **Disposable** — safe to delete at any time:
@@ -254,8 +254,8 @@ machine:
 |------|----------|
 | `wads/` | Cached WAD files, re-downloaded on demand |
 | `thumbnails/` | Thumbnail cache, re-extracted from TITLEPIC |
-| `ports/` | Built sourceport prefixes, rebuilt from the recipe |
-| `ports-src/` | Sourceport checkouts and build trees |
+| `sourceports/` | Built sourceport prefixes, rebuilt from the recipe |
+| `sourceports-src/` | Sourceport checkouts and build trees |
 
 Which of the two `wads/` directories a file lands in is decided by whether caco
 can fetch it again on its own, and nothing else. Anything on idgames goes to the
@@ -302,24 +302,24 @@ Caco recognises six sourceport families. Family membership determines which per-
 
 Unknown sourceports still launch, they just skip isolation and auto-injection.
 
-### Building ports from source
+### Building sourceports from source
 
-Not every port is packaged — nyan-doom and uzdoom are in no distro repo — and
+Not every sourceport is packaged — nyan-doom and uzdoom are in no distro repo — and
 requiring a global install undercuts the point of a portable library. The
-**Ports** dialog clones, builds and installs a port into caco's own prefix,
+**Sourceports** dialog clones, builds and installs one into caco's own prefix,
 and caco launches it from there without anything being installed
 system-wide. A managed build wins over a same-named binary on `PATH`.
 
-Use **Check versions** in that dialog to lazily ask the port's git remote for
+Use **Check versions** in that dialog to lazily ask the sourceport's git remote for
 its tags (treated as releases) and branches. Nothing is fetched when the dialog
 opens. Once checked, **Build from** can target the latest release, a specific
 release, or a development branch such as `main`, `master`, or `trunk`; the
 choice applies to that build and does not rewrite the recipe. Caco also
 performs a lightweight, throttled startup check for new commits on the ref
-already being tracked, as controlled by `port_update_check_days`.
+already being tracked, as controlled by `sourceport_update_check_days`.
 
 What travels between machines is the **recipe**, not the binary: a few
-hundred bytes of TOML that rebuild the port on whatever machine and OS it
+hundred bytes of TOML that rebuild the sourceport on whatever machine and OS it
 lands on. That is why recipes live in the portable data dir while the built
 prefixes live in the cache with the WAD downloads — deleting the cache costs
 a rebuild, never a reconfiguration.
@@ -331,11 +331,11 @@ tell an optional dependency from a required one, so cmake stays the
 authority.
 
 Recipes for `nyan-doom` and `uzdoom` ship built in. To pin a ref, add build
-flags or attach patches, drop a file in `ports/` inside the data directory — any
+flags or attach patches, drop a file in `sourceports/` inside the data directory — any
 `*.toml` there is merged over the built-ins by name:
 
 ```toml
-# <data dir>/ports/mine.toml
+# <data dir>/sourceports/mine.toml
 [uzdoom]
 repo = "https://github.com/UZDoom/uzdoom"
 ref = "v1.0.0"                        # a branch or tag, not a bare commit
@@ -365,12 +365,12 @@ profiles quietly stop applying.
 
 Since a recipe usually tracks a branch, "is there a new version" means "does
 the remote ref still point at the commit we built". At startup caco asks each
-built port's remote exactly that, with one `git ls-remote` per port — no
-objects are fetched — and shows a notification if any has moved. The Ports
-dialog marks them `update available`; rebuilding is always your call.
+built sourceport's remote exactly that, with one `git ls-remote` each — no
+objects are fetched — and shows a notification if any has moved. The
+**Sourceports** dialog marks them `update available`; rebuilding is always your call.
 
 The answer is cached and checked at most once a day, so most launches do no
-network at all. Set `port_update_check_days = 0` (or the Settings field) to
+network at all. Set `sourceport_update_check_days = 0` (or the Settings field) to
 turn it off entirely.
 
 Per-map stat tracking (which feeds completion detection and progress bars) works with:
@@ -388,10 +388,10 @@ cargo fmt --all -- --check
 ```
 
 The sourceport build driver has an end-to-end test that clones and compiles a
-real port, kept out of the default run:
+real sourceport, kept out of the default run:
 
 ```bash
-cargo test -p caco-core --test ports_build -- --ignored --nocapture
+cargo test -p caco-core --test sourceports_build -- --ignored --nocapture
 ```
 
 ## License

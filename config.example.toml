@@ -46,7 +46,7 @@
 # data_dir = "<data>/data"
 
 # Sourceport config profiles directory
-# sourceport_dir = "<data>/sourceports"
+# profile_dir = "<data>/profiles"
 
 # Preferred idgames download mirror (0-4)
 # 0 = youfailit.net (default, fastest)

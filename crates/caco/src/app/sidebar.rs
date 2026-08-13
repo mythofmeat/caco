@@ -169,29 +169,34 @@ pub(super) fn render_sidebar(
         // they are wanted. The open state belongs to this bit of UI, so egui's
         // persisted memory is enough; it does not need to become application
         // state or configuration.
-        ui.vertical(|ui| {
-            let open_id = ui.make_persistent_id("sidebar_manage_open");
-            let mut open = ui.data_mut(|data| data.get_persisted::<bool>(open_id).unwrap_or(false));
-            let label = if open { "Manage  ▾" } else { "Manage  ▸" };
-            if theme::sidebar_tool_item(ui, label).clicked() {
-                open = !open;
-                ui.data_mut(|data| data.insert_persisted(open_id, open));
-            }
+        //
+        // Emitted bottom-up, so the rows are written back to front: the first
+        // one placed sits lowest. Wrapping them in a `ui.vertical` would read
+        // in order, but a child region inside a bottom-up parent is handed the
+        // whole remaining rect and then lays out top-down inside it — which is
+        // exactly what parked this block under Collections instead of at the
+        // panel's bottom edge.
+        let open_id = ui.make_persistent_id("sidebar_manage_open");
+        let open = ui.data_mut(|data| data.get_persisted::<bool>(open_id).unwrap_or(false));
 
-            if open {
-                for tool in TOOLS {
-                    let resp = theme::sidebar_tool_item(ui, tool.label);
-                    let resp = if tool.hint.is_empty() {
-                        resp
-                    } else {
-                        resp.on_hover_text(tool.hint)
-                    };
-                    if resp.clicked() {
-                        actions.push((tool.action)());
-                    }
+        if open {
+            for tool in TOOLS.iter().rev() {
+                let resp = theme::sidebar_tool_item(ui, tool.label);
+                let resp = if tool.hint.is_empty() {
+                    resp
+                } else {
+                    resp.on_hover_text(tool.hint)
+                };
+                if resp.clicked() {
+                    actions.push((tool.action)());
                 }
             }
-        });
+        }
+
+        let label = if open { "Manage  ▾" } else { "Manage  ▸" };
+        if theme::sidebar_tool_item(ui, label).clicked() {
+            ui.data_mut(|data| data.insert_persisted(open_id, !open));
+        }
         ui.add_space(4.0);
     });
 }
@@ -225,8 +230,8 @@ const TOOLS: &[Tool] = &[
         hint: "Managed IWADs and id24",
     },
     Tool {
-        label: "Ports",
-        action: || ActionRequest::Ports,
+        label: "Sourceports",
+        action: || ActionRequest::Sourceports,
         hint: "Build and manage sourceports from source",
     },
     Tool {

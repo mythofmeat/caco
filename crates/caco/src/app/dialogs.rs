@@ -8,11 +8,11 @@ use crate::dialogs::delete::DeleteResult;
 use crate::dialogs::edit::EditResult;
 use crate::dialogs::enrich::EnrichResult;
 use crate::dialogs::link::LinkResult;
-use crate::dialogs::ports::PortsResult;
 use crate::dialogs::profiles::ProfilesResult;
 use crate::dialogs::resources::ResourcesResult;
 use crate::dialogs::sessions::SessionsResult;
 use crate::dialogs::settings::SettingsResult;
+use crate::dialogs::sourceports::SourceportsResult;
 use crate::dialogs::storage::StorageResult;
 use crate::dialogs::wad_data::WadDataResult;
 use crate::dialogs::wad_stats::WadStatsResult;
@@ -131,17 +131,17 @@ pub(super) fn render_active_dialog(
                 }
                 EnrichResult::Open => {}
             },
-            ActiveDialog::Ports(ports_state) => match ports_state.render(ctx) {
-                PortsResult::Closed => {
+            ActiveDialog::Sourceports(sourceports_state) => match sourceports_state.render(ctx) {
+                SourceportsResult::Closed => {
                     close_dialog = true;
                 }
-                PortsResult::Start(request) => {
-                    follow_up_action = Some(ActionRequest::StartPortBuild(Box::new(request)));
+                SourceportsResult::Start(request) => {
+                    follow_up_action = Some(ActionRequest::StartSourceportBuild(Box::new(request)));
                 }
-                PortsResult::CheckVersions(request) => {
-                    follow_up_action = Some(ActionRequest::CheckPortVersions(request));
+                SourceportsResult::CheckVersions(request) => {
+                    follow_up_action = Some(ActionRequest::CheckSourceportVersions(request));
                 }
-                PortsResult::Open => {}
+                SourceportsResult::Open => {}
             },
             ActiveDialog::Resources(resources_state) => match resources_state.render(ctx, conn) {
                 ResourcesResult::Closed => {
@@ -216,9 +216,9 @@ pub(super) fn render_active_dialog(
         // the state.
         let was_modified = match &state.active_dialog {
             Some(ActiveDialog::Collections(s)) => s.modified,
-            // A build or a default-port change alters what the next launch
+            // A build or a default-sourceport change alters what the next launch
             // resolves to, which the detail panel shows.
-            Some(ActiveDialog::Ports(s)) => s.modified,
+            Some(ActiveDialog::Sourceports(s)) => s.modified,
             Some(ActiveDialog::Resources(s)) => s.modified,
             _ => false,
         };

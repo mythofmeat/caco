@@ -19,11 +19,11 @@ pub struct SettingsDialogState {
     zdoom_sourceport: String,
     /// Shell-style quoted argument string (parsed with shlex).
     sourceport_args: String,
-    /// Per-port launch args: (executable basename, shlex arg string).
-    port_args: Vec<(String, String)>,
-    /// Entry field for adding a port to the per-port args list.
-    new_port_name: String,
-    detected_ports: Vec<String>,
+    /// Per-sourceport launch args: (executable basename, shlex arg string).
+    executable_args: Vec<(String, String)>,
+    /// Entry field for adding a sourceport to the per-sourceport args list.
+    new_sourceport_name: String,
+    detected_sourceports: Vec<String>,
 
     // Behavior
     iwad: String,
@@ -40,13 +40,13 @@ pub struct SettingsDialogState {
     cache_auto_clean: bool,
     cache_max_size_gb: f64,
     cache_max_age_days: i64,
-    port_update_check_days: i64,
+    sourceport_update_check_days: i64,
 
     // Paths
     cache_dir: String,
     data_dir: String,
     iwad_dir: String,
-    sourceport_dir: String,
+    profile_dir: String,
     db_path: String,
 
     error: Option<String>,
@@ -69,26 +69,26 @@ impl SettingsDialogState {
     /// Create the dialog from the current config snapshot.
     pub fn new() -> Self {
         let cfg = config::load_config();
-        let mut detected_ports: Vec<String> = sourceports::detect_sourceports()
+        let mut detected_sourceports: Vec<String> = sourceports::detect_sourceports()
             .into_iter()
             .map(|(exe, _path, _family)| exe.to_string())
             .collect();
-        detected_ports.dedup();
+        detected_sourceports.dedup();
 
-        let mut port_args: Vec<(String, String)> = cfg
-            .port_args
+        let mut executable_args: Vec<(String, String)> = cfg
+            .executable_args
             .iter()
-            .map(|(port, args)| (port.clone(), join_args(args)))
+            .map(|(sourceport, args)| (sourceport.clone(), join_args(args)))
             .collect();
-        port_args.sort_by(|a, b| a.0.cmp(&b.0));
+        executable_args.sort_by(|a, b| a.0.cmp(&b.0));
 
         Self {
             sourceport: cfg.sourceport.clone(),
             zdoom_sourceport: cfg.zdoom_sourceport.clone(),
             sourceport_args: join_args(&cfg.sourceport_args),
-            port_args,
-            new_port_name: String::new(),
-            detected_ports,
+            executable_args,
+            new_sourceport_name: String::new(),
+            detected_sourceports,
             iwad: cfg.iwad.clone(),
             link_mode: cfg.link_mode.clone(),
             companion_orphan_cleanup: cfg.companion_orphan_cleanup.clone(),
@@ -101,11 +101,11 @@ impl SettingsDialogState {
             cache_auto_clean: cfg.cache_auto_clean,
             cache_max_size_gb: cfg.cache_max_size_gb,
             cache_max_age_days: cfg.cache_max_age_days,
-            port_update_check_days: cfg.port_update_check_days,
+            sourceport_update_check_days: cfg.sourceport_update_check_days,
             cache_dir: cfg.cache_dir.clone(),
             data_dir: cfg.data_dir.clone(),
             iwad_dir: cfg.iwad_dir.clone(),
-            sourceport_dir: cfg.sourceport_dir.clone(),
+            profile_dir: cfg.profile_dir.clone(),
             db_path: cfg.db_path.clone(),
             error: None,
         }
@@ -120,14 +120,14 @@ impl SettingsDialogState {
         cfg.zdoom_sourceport = self.zdoom_sourceport.trim().to_string();
         cfg.sourceport_args =
             parse_args(&self.sourceport_args).ok_or("Global launch args: unbalanced quotes")?;
-        cfg.port_args = self
-            .port_args
+        cfg.executable_args = self
+            .executable_args
             .iter()
-            .filter(|(port, _)| !port.trim().is_empty())
-            .map(|(port, args)| {
+            .filter(|(sourceport, _)| !sourceport.trim().is_empty())
+            .map(|(sourceport, args)| {
                 let parsed = parse_args(args)
-                    .ok_or_else(|| format!("Launch args for {port}: unbalanced quotes"))?;
-                Ok((port.trim().to_string(), parsed))
+                    .ok_or_else(|| format!("Launch args for {sourceport}: unbalanced quotes"))?;
+                Ok((sourceport.trim().to_string(), parsed))
             })
             .filter(|r| !matches!(r, Ok((_, args)) if args.is_empty()))
             .collect::<Result<_, String>>()?;
@@ -143,11 +143,11 @@ impl SettingsDialogState {
         cfg.cache_auto_clean = self.cache_auto_clean;
         cfg.cache_max_size_gb = self.cache_max_size_gb.max(0.0);
         cfg.cache_max_age_days = self.cache_max_age_days.max(0);
-        cfg.port_update_check_days = self.port_update_check_days.max(0);
+        cfg.sourceport_update_check_days = self.sourceport_update_check_days.max(0);
         cfg.cache_dir = self.cache_dir.trim().to_string();
         cfg.data_dir = self.data_dir.trim().to_string();
         cfg.iwad_dir = self.iwad_dir.trim().to_string();
-        cfg.sourceport_dir = self.sourceport_dir.trim().to_string();
+        cfg.profile_dir = self.profile_dir.trim().to_string();
         cfg.db_path = self.db_path.trim().to_string();
         Ok(cfg)
     }
@@ -308,23 +308,23 @@ impl SettingsDialogState {
                         .desired_width(field_w)
                         .text_color(theme::TEXT_PRIMARY),
                 );
-                if !self.detected_ports.is_empty() {
-                    egui::ComboBox::from_id_salt("detected_ports")
+                if !self.detected_sourceports.is_empty() {
+                    egui::ComboBox::from_id_salt("detected_sourceports")
                         .selected_text("detected")
                         .width(combo_w)
                         .show_ui(ui, |ui| {
-                            for port in &self.detected_ports {
+                            for sourceport in &self.detected_sourceports {
                                 if ui
-                                    .selectable_label(self.sourceport == *port, port)
+                                    .selectable_label(self.sourceport == *sourceport, sourceport)
                                     .clicked()
                                 {
-                                    self.sourceport = port.clone();
+                                    self.sourceport = sourceport.clone();
                                 }
                             }
                         });
                 }
             });
-            form_label(&mut cols[1], "ZDoom-family port");
+            form_label(&mut cols[1], "ZDoom-family sourceport");
             cols[1]
                 .add(
                     egui::TextEdit::singleline(&mut self.zdoom_sourceport)
@@ -345,17 +345,17 @@ impl SettingsDialogState {
         self.subsection_port_args(ui);
     }
 
-    /// Per-port launch args list: one row per port, plus an add row.
+    /// Per-sourceport launch args list: one row per sourceport, plus an add row.
     fn subsection_port_args(&mut self, ui: &mut egui::Ui) {
-        form_label(ui, "Per-port launch args");
+        form_label(ui, "Per-sourceport launch args");
 
         let mut remove: Option<usize> = None;
-        for (idx, (port, args)) in self.port_args.iter_mut().enumerate() {
+        for (idx, (sourceport, args)) in self.executable_args.iter_mut().enumerate() {
             ui.horizontal(|ui| {
                 ui.add_sized(
                     [130.0, 18.0],
                     egui::Label::new(
-                        egui::RichText::new(port.as_str())
+                        egui::RichText::new(sourceport.as_str())
                             .size(12.0)
                             .color(theme::TEXT_PRIMARY),
                     )
@@ -380,37 +380,44 @@ impl SettingsDialogState {
             });
         }
         if let Some(idx) = remove {
-            self.port_args.remove(idx);
+            self.executable_args.remove(idx);
         }
 
-        // Add row: pick a detected port not yet listed, or type a name
+        // Add row: pick a detected sourceport not yet listed, or type a name
         ui.horizontal(|ui| {
-            let listed: Vec<&str> = self.port_args.iter().map(|(p, _)| p.as_str()).collect();
+            let listed: Vec<&str> = self
+                .executable_args
+                .iter()
+                .map(|(p, _)| p.as_str())
+                .collect();
             egui::ComboBox::from_id_salt("add_port_args")
-                .selected_text(if self.new_port_name.is_empty() {
-                    "add port…"
+                .selected_text(if self.new_sourceport_name.is_empty() {
+                    "add sourceport…"
                 } else {
-                    self.new_port_name.as_str()
+                    self.new_sourceport_name.as_str()
                 })
                 .width(130.0)
                 .show_ui(ui, |ui| {
-                    for port in &self.detected_ports {
-                        if !listed.contains(&port.as_str())
+                    for sourceport in &self.detected_sourceports {
+                        if !listed.contains(&sourceport.as_str())
                             && ui
-                                .selectable_label(self.new_port_name == *port, port)
+                                .selectable_label(
+                                    self.new_sourceport_name == *sourceport,
+                                    sourceport,
+                                )
                                 .clicked()
                         {
-                            self.new_port_name = port.clone();
+                            self.new_sourceport_name = sourceport.clone();
                         }
                     }
                 });
             ui.add(
-                egui::TextEdit::singleline(&mut self.new_port_name)
+                egui::TextEdit::singleline(&mut self.new_sourceport_name)
                     .desired_width(140.0)
                     .text_color(theme::TEXT_PRIMARY)
                     .hint_text("or type a name"),
             );
-            let name = self.new_port_name.trim().to_string();
+            let name = self.new_sourceport_name.trim().to_string();
             if ui
                 .add_enabled(
                     !name.is_empty() && !listed.contains(&name.as_str()),
@@ -418,8 +425,8 @@ impl SettingsDialogState {
                 )
                 .clicked()
             {
-                self.port_args.push((name, String::new()));
-                self.new_port_name.clear();
+                self.executable_args.push((name, String::new()));
+                self.new_sourceport_name.clear();
             }
         });
     }
@@ -492,11 +499,11 @@ impl SettingsDialogState {
         ui.horizontal(|ui| {
             form_label(ui, "Check built sourceports for updates every (days)");
             ui.add(
-                egui::DragValue::new(&mut self.port_update_check_days)
+                egui::DragValue::new(&mut self.sourceport_update_check_days)
                     .speed(1)
                     .range(0..=i64::MAX),
             )
-            .on_hover_text("One `git ls-remote` per built port at startup. 0 = never check.");
+            .on_hover_text("One `git ls-remote` per built sourceport at startup. 0 = never check.");
         });
     }
 
@@ -528,7 +535,7 @@ impl SettingsDialogState {
             ("WAD cache dir", &mut self.cache_dir),
             ("Data dir", &mut self.data_dir),
             ("IWAD dir", &mut self.iwad_dir),
-            ("Sourceport config dir", &mut self.sourceport_dir),
+            ("Sourceport config dir", &mut self.profile_dir),
         ] {
             form_label(ui, label);
             ui.add(

@@ -72,9 +72,9 @@ pub enum Error {
     #[error("required tool not found on PATH: {0}")]
     MissingTool(String),
 
-    #[error("{step} failed for '{port}': {detail}")]
+    #[error("{step} failed for '{sourceport}': {detail}")]
     PortBuild {
-        port: String,
+        sourceport: String,
         step: &'static str,
         detail: String,
     },
