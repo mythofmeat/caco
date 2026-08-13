@@ -253,24 +253,14 @@ pub fn render(
                     let body_x = rect.min.x + 14.0;
                     let body_top = thumb_rect.max.y + 10.0;
 
-                    // Title, flagged when the file is gone for good
-                    let lost = wad.is_lost();
+                    // Title
                     let title = caco_core::utils::truncate(&wad.title, 26, "..");
-                    let title = if lost {
-                        format!("{}{}", theme::LOST_MARKER, title)
-                    } else {
-                        title
-                    };
                     painter.text(
                         egui::pos2(body_x, body_top),
                         egui::Align2::LEFT_TOP,
                         &title,
                         egui::FontId::proportional(14.0),
-                        if lost {
-                            theme::COLOR_WARNING
-                        } else {
-                            theme::TEXT_PRIMARY
-                        },
+                        theme::TEXT_PRIMARY,
                     );
 
                     // Author

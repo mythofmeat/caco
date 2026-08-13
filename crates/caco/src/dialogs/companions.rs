@@ -44,8 +44,6 @@ const FURNITURE: f32 = 115.0;
 pub struct CompanionsDialogState {
     entries: Vec<Entry>,
     selected: Option<usize>,
-    /// Index staged for deletion, awaiting confirmation.
-    pending_delete: Option<usize>,
     /// Set when the "delete every orphan" action is awaiting confirmation.
     pending_purge: bool,
     status: Option<StatusLine>,
@@ -58,7 +56,6 @@ impl CompanionsDialogState {
         let mut state = Self {
             entries: Vec::new(),
             selected: None,
-            pending_delete: None,
             pending_purge: false,
             status: None,
             modified: false,
@@ -87,7 +84,6 @@ impl CompanionsDialogState {
             })
             .collect();
 
-        self.pending_delete = None;
         self.pending_purge = false;
         self.selected = (!self.entries.is_empty()).then_some(0);
     }
@@ -187,26 +183,7 @@ impl CompanionsDialogState {
         ui.separator();
         ui.add_space(4.0);
 
-        if let Some(idx) = self.pending_delete {
-            let name = self
-                .entries
-                .get(idx)
-                .map(|e| e.filename.as_str())
-                .unwrap_or("file");
-            ui.colored_label(
-                theme::COLOR_ERROR,
-                format!("Delete the managed copy of {name}?"),
-            );
-            ui.horizontal(|ui| {
-                if ui.button("Delete").clicked() {
-                    self.pending_delete = None;
-                    self.delete_selected(conn, idx);
-                }
-                if ui.button("Cancel").clicked() {
-                    self.pending_delete = None;
-                }
-            });
-        } else if self.pending_purge {
+        if self.pending_purge {
             ui.colored_label(
                 theme::COLOR_ERROR,
                 format!("Delete all {orphans} orphaned companion file(s)?"),
@@ -221,7 +198,7 @@ impl CompanionsDialogState {
                 }
             });
         } else {
-            self.render_actions(ui);
+            self.render_actions(ui, conn);
         }
 
         if let Some(status) = &self.status {
@@ -237,8 +214,7 @@ impl CompanionsDialogState {
 
     /// Escape. Dismisses a staged confirmation before it closes Storage.
     pub fn escape(&mut self) -> bool {
-        if self.pending_delete.is_some() || self.pending_purge {
-            self.pending_delete = None;
+        if self.pending_purge {
             self.pending_purge = false;
             return false;
         }
@@ -325,7 +301,7 @@ impl CompanionsDialogState {
         );
     }
 
-    fn render_actions(&mut self, ui: &mut egui::Ui) {
+    fn render_actions(&mut self, ui: &mut egui::Ui, conn: &Connection) {
         ui.horizontal(|ui| {
             let selected_is_orphan = self
                 .selected
@@ -336,8 +312,9 @@ impl CompanionsDialogState {
                 .add_enabled(selected_is_orphan, egui::Button::new("Delete Selected"))
                 .on_hover_text("Only files no WAD links can be deleted")
                 .clicked()
+                && let Some(idx) = self.selected
             {
-                self.pending_delete = self.selected;
+                self.delete_selected(conn, idx);
             }
 
             if ui

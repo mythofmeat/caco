@@ -13,7 +13,6 @@ use crate::theme;
 
 /// A destructive action awaiting confirmation.
 enum Pending {
-    Purge(usize),
     PurgeAll,
 }
 
@@ -90,20 +89,6 @@ impl TrashDialogState {
             return;
         };
         match pending {
-            Pending::Purge(idx) => {
-                let Some(wad) = self.wads.get(idx) else {
-                    return;
-                };
-                let (id, title) = (wad.id, wad.title.clone());
-                match db::delete_wad(conn, id, true) {
-                    Ok(_) => {
-                        self.modified = true;
-                        self.reload(conn);
-                        self.set_info(format!("Permanently deleted '{title}'."));
-                    }
-                    Err(e) => self.set_error(e.to_string()),
-                }
-            }
             Pending::PurgeAll => match db::purge_all_deleted(conn) {
                 Ok(count) => {
                     self.modified = true;
@@ -117,10 +102,6 @@ impl TrashDialogState {
 
     fn pending_prompt(&self) -> Option<String> {
         Some(match self.pending.as_ref()? {
-            Pending::Purge(idx) => format!(
-                "Permanently delete '{}'? Its play history and completions go too.",
-                self.wads.get(*idx).map(|w| w.title.as_str()).unwrap_or("")
-            ),
             Pending::PurgeAll => format!(
                 "Permanently delete all {} trashed WAD(s)? Play history and completions go too.",
                 self.wads.len()
@@ -219,10 +200,28 @@ impl TrashDialogState {
             }
 
             if ui
-                .add_enabled(has_selection, egui::Button::new("Delete Permanently"))
+                .add_enabled(
+                    has_selection,
+                    egui::Button::new(
+                        egui::RichText::new("Delete Permanently").color(theme::COLOR_ERROR),
+                    ),
+                )
+                .on_hover_text("Also deletes this WAD's play history and completions")
                 .clicked()
+                && let Some(idx) = self.selected
             {
-                self.pending = self.selected.map(Pending::Purge);
+                let Some(wad) = self.wads.get(idx) else {
+                    return;
+                };
+                let (id, title) = (wad.id, wad.title.clone());
+                match db::delete_wad(conn, id, true) {
+                    Ok(_) => {
+                        self.modified = true;
+                        self.reload(conn);
+                        self.set_info(format!("Permanently deleted '{title}'."));
+                    }
+                    Err(e) => self.set_error(e.to_string()),
+                }
             }
 
             if ui

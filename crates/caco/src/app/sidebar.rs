@@ -165,37 +165,32 @@ pub(super) fn render_sidebar(
         );
         ui.add_space(12.0);
 
-        // Management tools.
-        //
-        // These were one `ui.horizontal` of ten buttons. `horizontal` does not
-        // wrap, so the row measured about 380pt wide inside a 200pt panel:
-        // everything past "Enrich" was clipped away — Clean, Trash, IWADs,
-        // Ports and Settings were unreachable from the GUI entirely — and
-        // because egui sizes a panel from the rect its contents actually
-        // occupied, the overflow shoved the top bar and central panel ~180pt
-        // to the right and left a dead strip beside the sidebar.
-        //
-        // Stacked rows can't overflow: each sizes to `available_width`.
-        // Bottom-up layout means this list is written last-to-first.
-        for tool in TOOLS.iter().rev() {
-            let resp = theme::sidebar_tool_item(ui, tool.label);
-            let resp = if tool.hint.is_empty() {
-                resp
-            } else {
-                resp.on_hover_text(tool.hint)
-            };
-            if resp.clicked() {
-                actions.push((tool.action)());
+        // Keep the maintenance controls out of the navigation hierarchy until
+        // they are wanted. The open state belongs to this bit of UI, so egui's
+        // persisted memory is enough; it does not need to become application
+        // state or configuration.
+        ui.vertical(|ui| {
+            let open_id = ui.make_persistent_id("sidebar_manage_open");
+            let mut open = ui.data_mut(|data| data.get_persisted::<bool>(open_id).unwrap_or(false));
+            let label = if open { "Manage  ▾" } else { "Manage  ▸" };
+            if theme::sidebar_tool_item(ui, label).clicked() {
+                open = !open;
+                ui.data_mut(|data| data.insert_persisted(open_id, open));
             }
-        }
 
-        ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            ui.add_space(20.0);
-            ui.colored_label(
-                theme::TEXT_MUTED,
-                egui::RichText::new("MANAGE").size(11.0).strong(),
-            );
+            if open {
+                for tool in TOOLS {
+                    let resp = theme::sidebar_tool_item(ui, tool.label);
+                    let resp = if tool.hint.is_empty() {
+                        resp
+                    } else {
+                        resp.on_hover_text(tool.hint)
+                    };
+                    if resp.clicked() {
+                        actions.push((tool.action)());
+                    }
+                }
+            }
         });
         ui.add_space(4.0);
     });

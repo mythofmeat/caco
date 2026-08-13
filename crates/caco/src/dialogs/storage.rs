@@ -241,9 +241,9 @@ impl StorageDialogState {
 
     /// Route Escape to the active tab first.
     ///
-    /// Every tab stages its destructive actions behind a confirmation, and the
-    /// key that dismisses one must not also close the dialog around it —
-    /// otherwise backing out of "Empty Trash?" throws away the whole view.
+    /// Bulk destructive actions are staged behind a confirmation, and the key
+    /// that dismisses one must not also close the dialog around it — otherwise
+    /// backing out of "Empty Trash?" throws away the whole view.
     /// Returns true when the tab had nothing staged and Storage should close.
     fn escape(&mut self) -> bool {
         match self.tab {

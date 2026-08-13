@@ -209,8 +209,6 @@ pub struct AppState {
     // Sidebar status counts (status → count)
     pub status_counts: HashMap<String, usize>,
     pub total_wad_count: usize,
-    /// Live WADs that are manual-only with no local copy.
-    pub lost_count: usize,
 
     // Sidebar collections (cached for display)
     pub sidebar_collections: Vec<CollectionRecord>,
@@ -339,7 +337,6 @@ impl AppState {
             sort_field_index,
             sort_desc: persisted.sort_desc,
             wads: Vec::new(),
-            lost_count: 0,
             stats_map: HashMap::new(),
             analyses_map: HashMap::new(),
             selected_wad_id: None,
@@ -386,7 +383,6 @@ impl AppState {
     pub fn refresh_status_counts(&mut self, conn: &Connection) {
         self.status_counts.clear();
         self.total_wad_count = 0;
-        self.lost_count = caco_core::db::count_lost(conn).unwrap_or(0);
         if let Ok(counts) = caco_core::db::get_status_counts(conn) {
             for (status, count) in counts {
                 let count = count as usize;

@@ -111,7 +111,7 @@ pub fn modal_body_height(ctx: &egui::Context, chrome: f32) -> f32 {
 /// with a usable scrollbar than collapse to nothing.
 const MIN_BODY_HEIGHT: f32 = 80.0;
 
-/// The opt-in that lets a bulk delete touch files caco cannot re-fetch.
+/// The opt-in that lets a bulk delete touch manually added files.
 ///
 /// Cache and Clean both delete `wads.cached_path` files, and both know which
 /// of them are irreplaceable — Manual retrievability with a file actually on
@@ -125,25 +125,23 @@ const MIN_BODY_HEIGHT: f32 = 80.0;
 /// only because it never came from idgames — but it is never what a button
 /// press does by default.
 ///
-/// Returns true if the toggle is on. Renders nothing when `at_risk` is 0,
+/// Returns true if the toggle is on. Renders nothing when `manual_files` is 0,
 /// since there is nothing to arm.
-pub fn include_at_risk_toggle(ui: &mut egui::Ui, on: &mut bool, at_risk: usize) -> bool {
-    if at_risk == 0 {
+pub fn include_at_risk_toggle(ui: &mut egui::Ui, on: &mut bool, manual_files: usize) -> bool {
+    if manual_files == 0 {
         *on = false;
         return false;
     }
     ui.checkbox(
         on,
         egui::RichText::new(format!(
-            "Include {at_risk} file{} that cannot be re-downloaded",
-            if at_risk == 1 { "" } else { "s" }
+            "Include {manual_files} manually added file{}",
+            if manual_files == 1 { "" } else { "s" }
         ))
-        .color(crate::theme::COLOR_WARNING)
         .size(11.0),
     )
     .on_hover_text(
-        "These have no idgames source. Deleting one destroys the only copy — \
-         caco cannot fetch it again.",
+        "These files did not come from idgames, so caco cannot download them again after deletion.",
     );
     *on
 }

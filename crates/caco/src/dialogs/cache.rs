@@ -25,8 +25,6 @@ pub struct CacheDialogState {
     entries: Vec<CacheEntry>,
     total_size: u64,
     selected_row: Option<usize>,
-    /// Index awaiting a second click before an irreplaceable file is deleted.
-    confirming_delete: Option<usize>,
     /// Opt-in that lets the bulk clear touch irreplaceable files. Reset by
     /// `load`, so it never survives the list it was ticked against.
     include_at_risk: bool,
@@ -40,7 +38,6 @@ impl CacheDialogState {
             entries: Vec::new(),
             total_size: 0,
             selected_row: None,
-            confirming_delete: None,
             include_at_risk: false,
             modified: false,
         };
@@ -68,7 +65,6 @@ impl CacheDialogState {
             .collect();
 
         self.total_size = self.entries.iter().filter_map(|e| e.size).sum();
-        self.confirming_delete = None;
         self.include_at_risk = false;
         self.selected_row = if self.entries.is_empty() {
             None
@@ -152,18 +148,7 @@ impl CacheDialogState {
                             ui.label(entry.wad_id.to_string());
                         });
                         row.col(|ui| {
-                            if entry.irreplaceable {
-                                ui.colored_label(
-                                    theme::COLOR_WARNING,
-                                    format!("{}{}", theme::LOST_MARKER, entry.title),
-                                )
-                                .on_hover_text(
-                                    "No idgames source: this file cannot be downloaded \
-                                             again. Bulk clearing skips it.",
-                                );
-                            } else {
-                                ui.label(&entry.title);
-                            }
+                            ui.label(&entry.title);
                         });
                         row.col(|ui| {
                             let color = if entry.size.is_some() {
@@ -202,14 +187,12 @@ impl CacheDialogState {
                 .selected_row
                 .and_then(|i| self.entries.get(i))
                 .is_some_and(|e| e.irreplaceable);
-            let awaiting = self.confirming_delete == self.selected_row;
-
-            let delete_label = if selected_irreplaceable && awaiting {
-                "Delete anyway — cannot be re-downloaded"
+            let delete_label = if selected_irreplaceable {
+                "Delete Selected — cannot re-download"
             } else {
                 "Delete Selected"
             };
-            let delete_btn = if selected_irreplaceable && awaiting {
+            let delete_btn = if selected_irreplaceable {
                 egui::Button::new(egui::RichText::new(delete_label).color(theme::COLOR_ERROR))
             } else {
                 egui::Button::new(delete_label)
@@ -219,18 +202,11 @@ impl CacheDialogState {
                 && let Some(idx) = self.selected_row
                 && idx < self.entries.len()
             {
-                // An irreplaceable file takes two clicks: the first
-                // only arms the button, so the confirmation cannot be
-                // clicked through by muscle memory.
-                if selected_irreplaceable && !awaiting {
-                    self.confirming_delete = Some(idx);
-                } else {
-                    let entry = &self.entries[idx];
-                    let _ = fs::remove_file(&entry.path);
-                    let _ = caco_core::db::sessions::clear_cached_path(conn, entry.wad_id);
-                    self.modified = true;
-                    self.load(conn);
-                }
+                let entry = &self.entries[idx];
+                let _ = fs::remove_file(&entry.path);
+                let _ = caco_core::db::sessions::clear_cached_path(conn, entry.wad_id);
+                self.modified = true;
+                self.load(conn);
             }
 
             // Bulk clear skips files caco cannot re-fetch unless the
@@ -276,13 +252,8 @@ impl CacheDialogState {
         });
     }
 
-    /// Escape. Returns true when Storage itself should close, false when this
-    /// tab consumed the key to back out of an armed delete instead.
+    /// Escape closes Storage from this tab.
     pub fn escape(&mut self) -> bool {
-        if self.confirming_delete.is_some() {
-            self.confirming_delete = None;
-            return false;
-        }
         true
     }
 }
@@ -306,7 +277,6 @@ mod tests {
             entries,
             total_size: 0,
             selected_row: None,
-            confirming_delete: None,
             include_at_risk: false,
             modified: false,
         }
@@ -340,7 +310,6 @@ mod tests {
         s.include_at_risk = true;
         s.entries.clear();
         s.total_size = 0;
-        s.confirming_delete = None;
         s.include_at_risk = false; // what `load` does
         assert!(!s.include_at_risk);
     }

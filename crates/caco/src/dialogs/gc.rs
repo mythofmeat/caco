@@ -401,8 +401,7 @@ impl GcDialogState {
                 (
                     w.wad_id,
                     format!(
-                        "{}{}  ·  {}  ·  {}",
-                        if Self::is_at_risk(w) { "\u{26a0} " } else { "" },
+                        "{}  ·  {}  ·  {}",
                         w.title,
                         format_size(w.total_size),
                         detail.join(", ")
@@ -414,18 +413,10 @@ impl GcDialogState {
 
         for (wad_id, label, at_risk) in rows {
             let mut checked = self.selected_wads.contains(&wad_id);
-            let response = if at_risk {
-                ui.checkbox(
-                    &mut checked,
-                    egui::RichText::new(label).color(theme::COLOR_WARNING),
-                )
-            } else {
-                ui.checkbox(&mut checked, label)
-            };
+            let response = ui.checkbox(&mut checked, label);
             if at_risk {
                 response.on_hover_text(
-                    "No idgames source: caco cannot download this WAD again. \
-                     Deleting the cached file destroys the only copy.",
+                    "This manually added file cannot be downloaded again after deletion.",
                 );
             }
             if checked {
