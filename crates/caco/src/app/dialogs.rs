@@ -169,10 +169,7 @@ pub(super) fn render_active_dialog(
             ActiveDialog::Link(link_state) => match link_state.render(ctx, conn) {
                 LinkResult::Linked(wad_id) => {
                     close_dialog = true;
-                    state.needs_reload = true;
-                    state.notification = Some(Notification::info(
-                        "WAD file linked; launching...".to_string(),
-                    ));
+                    mark_linked(state);
                     follow_up_action = Some(ActionRequest::Play(wad_id));
                 }
                 LinkResult::Cancelled => {
@@ -230,4 +227,35 @@ pub(super) fn render_active_dialog(
         state.active_dialog = None;
     }
     follow_up_action
+}
+
+/// Invalidate every view that holds its own copy of a linked WAD record.
+///
+/// The Cacowards view hydrates linked WADs separately from the library, so
+/// refreshing only the library leaves a card looking unavailable after the
+/// file has already been copied and recorded in the database.
+fn mark_linked(state: &mut AppState) {
+    state.needs_reload = true;
+    state.cacowards.needs_reload = true;
+    state.notification = Some(Notification::info(
+        "WAD file linked; launching...".to_string(),
+    ));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn linked_wad_invalidates_library_and_cacowards_views() {
+        let mut state = AppState::new(std::path::PathBuf::from("test-library.db"));
+        state.needs_reload = false;
+        state.cacowards.needs_reload = false;
+
+        mark_linked(&mut state);
+
+        assert!(state.needs_reload);
+        assert!(state.cacowards.needs_reload);
+        assert!(state.notification.is_some());
+    }
 }
