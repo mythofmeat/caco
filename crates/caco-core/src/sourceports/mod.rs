@@ -51,19 +51,25 @@ pub struct SourceportStatus {
     pub recipe: SourceportRecipe,
     /// Most recent usable install, if there is one.
     pub installed: Option<InstalledSourceport>,
-    /// True when something is installed but at a different ref than the
-    /// recipe now asks for — the case a rebuild fixes.
-    pub ref_changed: bool,
     /// Commit the ref pointed at as of the last update check, if one has
     /// run. Read from the cache, so building this list stays offline.
     pub remote_commit: Option<String>,
 }
 
 impl SourceportStatus {
-    /// Whether the remote has moved past the installed build.
+    /// Whether rebuilding from the currently selected ref would switch refs.
     ///
-    /// Distinct from [`Self::ref_changed`]: that is the user repointing the
-    /// recipe, this is upstream committing.
+    /// The selection belongs to the frontend rather than the recipe: a user
+    /// can intentionally build a stable release while the recipe defaults to
+    /// a development branch. Comparing only with the recipe would report that
+    /// perfectly intentional release build as needing attention forever.
+    pub fn selected_ref_changed(&self, selected_ref: &str) -> bool {
+        self.installed
+            .as_ref()
+            .is_some_and(|installed| installed.manifest.git_ref != selected_ref)
+    }
+
+    /// Whether the remote has moved past the installed build.
     pub fn update_available(&self) -> bool {
         let (Some(installed), Some(remote)) = (&self.installed, &self.remote_commit) else {
             return false;
@@ -84,9 +90,6 @@ pub fn status(paths: &SourceportPaths) -> crate::Result<Vec<SourceportStatus>> {
             .iter()
             .find(|p| p.manifest.name == recipe.name && p.is_usable())
             .cloned();
-        let ref_changed = current
-            .as_ref()
-            .is_some_and(|p| p.manifest.git_ref != recipe.git_ref);
         let remote_commit = cache
             .sourceports
             .get(&recipe.name)
@@ -94,7 +97,6 @@ pub fn status(paths: &SourceportPaths) -> crate::Result<Vec<SourceportStatus>> {
         out.push(SourceportStatus {
             recipe,
             installed: current,
-            ref_changed,
             remote_commit,
         });
     }
@@ -129,22 +131,22 @@ mod tests {
         let all = status(&paths(dir.path())).unwrap();
         assert_eq!(all.len(), builtin_recipes().len());
         assert!(all.iter().all(|s| s.installed.is_none()));
-        assert!(all.iter().all(|s| !s.ref_changed));
+        assert!(all.iter().all(|s| !s.selected_ref_changed("master")));
     }
 
     #[test]
-    fn status_flags_an_install_left_behind_by_a_ref_change() {
+    fn status_compares_an_install_with_the_selected_ref_not_the_recipe_default() {
         let dir = tempfile::tempdir().unwrap();
         let p = paths(dir.path());
 
-        // Installed at master...
-        let prefix = p.prefix_root.join("uzdoom").join("master");
+        // Installed from a deliberately selected stable release...
+        let prefix = p.prefix_root.join("uzdoom").join("v1.0.0");
         manifest::write_manifest(
             &prefix,
             &SourceportManifest {
                 name: "uzdoom".into(),
                 repo: "https://github.com/UZDoom/uzdoom".into(),
-                git_ref: "master".into(),
+                git_ref: "v1.0.0".into(),
                 commit: "deadbeef".into(),
                 binary: "uzdoom".into(),
                 built_at: "2026-01-01T00:00:00+00:00".into(),
@@ -154,14 +156,14 @@ mod tests {
         std::fs::create_dir_all(prefix.join("bin")).unwrap();
         std::fs::write(prefix.join("bin").join("uzdoom"), b"x").unwrap();
 
-        // ...but the recipe now pins a tag.
+        // ...while the recipe still defaults to the development branch.
         std::fs::create_dir_all(&p.recipe_dir).unwrap();
         std::fs::write(
             p.recipe_dir.join("pin.toml"),
             r#"
 [uzdoom]
 repo = "https://github.com/UZDoom/uzdoom"
-ref = "v1.0.0"
+ref = "master"
 binary = "uzdoom"
 [uzdoom.build]
 system = "cmake"
@@ -175,6 +177,7 @@ system = "cmake"
             .find(|s| s.recipe.name == "uzdoom")
             .unwrap();
         assert!(uzdoom.installed.is_some());
-        assert!(uzdoom.ref_changed);
+        assert!(!uzdoom.selected_ref_changed("v1.0.0"));
+        assert!(uzdoom.selected_ref_changed("master"));
     }
 }

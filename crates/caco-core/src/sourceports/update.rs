@@ -57,6 +57,18 @@ impl RemoteRefs {
     pub fn latest_release(&self) -> Option<&str> {
         self.releases.first().map(String::as_str)
     }
+
+    /// The latest release when `git_ref` is an older advertised release.
+    ///
+    /// A branch is deliberately not treated as an old release. Branch users
+    /// track commits through [`check_updates`]; release users track new tags
+    /// through the version list.
+    pub fn newer_release_than(&self, git_ref: &str) -> Option<&str> {
+        if !self.releases.iter().any(|release| release == git_ref) {
+            return None;
+        }
+        self.latest_release().filter(|latest| *latest != git_ref)
+    }
 }
 
 impl UpdateStatus {
@@ -459,6 +471,9 @@ mod tests {
         assert_eq!(refs.branches, vec!["main", "release/4.0"]);
         assert_eq!(refs.releases, vec!["v4.10.0", "v4.9.0"]);
         assert_eq!(refs.latest_release(), Some("v4.10.0"));
+        assert_eq!(refs.newer_release_than("v4.9.0"), Some("v4.10.0"));
+        assert_eq!(refs.newer_release_than("v4.10.0"), None);
+        assert_eq!(refs.newer_release_than("main"), None);
     }
 
     #[test]

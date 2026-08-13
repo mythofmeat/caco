@@ -72,6 +72,16 @@ fn log_pane_height(ctx: &egui::Context) -> f32 {
     (ctx.screen_rect().height() * 0.35).clamp(90.0, 300.0)
 }
 
+/// Continue from the active install when the dialog opens. The recipe is only
+/// the fallback for a sourceport that has not been built yet.
+fn initial_selected_ref(sourceport: &SourceportStatus) -> String {
+    sourceport
+        .installed
+        .as_ref()
+        .map(|installed| installed.manifest.git_ref.clone())
+        .unwrap_or_else(|| sourceport.recipe.git_ref.clone())
+}
+
 pub struct SourceportsDialogState {
     sourceports: Vec<SourceportStatus>,
     selected: Option<String>,
@@ -127,7 +137,7 @@ impl SourceportsDialogState {
                 for sourceport in &self.sourceports {
                     self.selected_refs
                         .entry(sourceport.recipe.name.clone())
-                        .or_insert_with(|| sourceport.recipe.git_ref.clone());
+                        .or_insert_with(|| initial_selected_ref(sourceport));
                 }
                 self.error = None;
             }
@@ -315,12 +325,25 @@ impl SourceportsDialogState {
                 .sourceports
                 .iter()
                 .map(|p| {
-                    // Two distinct reasons a rebuild would change something:
-                    // the user repointed the recipe, or upstream committed.
+                    let selected_ref = self
+                        .selected_refs
+                        .get(&p.recipe.name)
+                        .map(String::as_str)
+                        .unwrap_or(&p.recipe.git_ref);
+                    let newer_release = p.installed.as_ref().is_some_and(|installed| {
+                        self.remote_refs
+                            .get(&p.recipe.name)
+                            .and_then(|refs| refs.newer_release_than(&installed.manifest.git_ref))
+                            .is_some()
+                    });
+                    // A rebuild can switch the selected ref, advance to a new
+                    // release tag, or pick up commits on the current branch.
                     let (label, color) = match &p.installed {
                         None => ("not built", theme::TEXT_MUTED),
-                        Some(_) if p.ref_changed => ("ref changed", theme::COLOR_WARNING),
-                        Some(_) if p.update_available() => {
+                        Some(_) if p.selected_ref_changed(selected_ref) => {
+                            ("version selected", theme::COLOR_WARNING)
+                        }
+                        Some(_) if newer_release || p.update_available() => {
                             ("update available", theme::COLOR_WARNING)
                         }
                         Some(_) => ("installed", theme::COLOR_SUCCESS),
@@ -355,6 +378,11 @@ impl SourceportsDialogState {
 
         let name = sourceport.recipe.name.clone();
         let recipe_ref = sourceport.recipe.git_ref.clone();
+        let selected_ref = self
+            .selected_refs
+            .get(&name)
+            .cloned()
+            .unwrap_or_else(|| recipe_ref.clone());
         let running_this = self.running.as_deref() == Some(name.as_str());
         let busy = self.running.is_some();
 
@@ -362,7 +390,7 @@ impl SourceportsDialogState {
             ui.strong(&name);
             ui.colored_label(
                 theme::TEXT_MUTED,
-                format!("{} @ {}", sourceport.recipe.repo, sourceport.recipe.git_ref),
+                format!("{} @ {}", sourceport.recipe.repo, selected_ref),
             );
         });
         ui.add_space(4.0);
@@ -394,12 +422,12 @@ impl SourceportsDialogState {
                     theme::TEXT_MUTED,
                     installed.binary_path().display().to_string(),
                 );
-                if sourceport.ref_changed {
+                if sourceport.selected_ref_changed(&selected_ref) {
                     ui.colored_label(
                         theme::COLOR_WARNING,
                         format!(
-                            "Recipe now asks for '{}' — rebuild to switch.",
-                            sourceport.recipe.git_ref
+                            "Selected version is '{}' — rebuild to switch.",
+                            selected_ref
                         ),
                     );
                 } else if sourceport.update_available() {
@@ -577,15 +605,10 @@ impl SourceportsDialogState {
         if let Some(refs) = &refs {
             match refs.latest_release() {
                 Some(latest) => {
-                    let installed_release =
-                        sourceport.installed.as_ref().is_some_and(|installed| {
-                            refs.releases.contains(&installed.manifest.git_ref)
-                        });
-                    let newer_release = installed_release
-                        && sourceport
-                            .installed
-                            .as_ref()
-                            .is_some_and(|installed| installed.manifest.git_ref != latest);
+                    let newer_release = sourceport.installed.as_ref().is_some_and(|installed| {
+                        refs.newer_release_than(&installed.manifest.git_ref)
+                            .is_some()
+                    });
                     ui.colored_label(
                         if newer_release {
                             theme::COLOR_WARNING
@@ -718,4 +741,49 @@ fn set_default_sourceport(name: &str) -> Result<(), String> {
     caco_core::config::save_config(&config).map_err(|e| e.to_string())?;
     caco_core::config::reload_config();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use caco_core::sourceports::{InstalledSourceport, SourceportManifest};
+
+    use super::*;
+
+    fn sourceport_status(installed_ref: Option<&str>) -> SourceportStatus {
+        let recipe = sourceports::builtin_recipes()
+            .into_iter()
+            .find(|recipe| recipe.name == "nyan-doom")
+            .unwrap();
+        let installed = installed_ref.map(|git_ref| InstalledSourceport {
+            manifest: SourceportManifest {
+                name: recipe.name.clone(),
+                repo: recipe.repo.clone(),
+                git_ref: git_ref.to_string(),
+                commit: "deadbeef".into(),
+                binary: recipe.binary.clone(),
+                built_at: "2026-01-01T00:00:00+00:00".into(),
+            },
+            prefix: PathBuf::from("/unused"),
+        });
+        SourceportStatus {
+            recipe,
+            installed,
+            remote_commit: None,
+        }
+    }
+
+    #[test]
+    fn an_installed_release_stays_selected_instead_of_the_recipe_branch() {
+        let status = sourceport_status(Some("v1.2.3"));
+        assert_eq!(status.recipe.git_ref, "master");
+        assert_eq!(initial_selected_ref(&status), "v1.2.3");
+    }
+
+    #[test]
+    fn an_unbuilt_sourceport_starts_from_the_recipe() {
+        let status = sourceport_status(None);
+        assert_eq!(initial_selected_ref(&status), "master");
+    }
 }
