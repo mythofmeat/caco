@@ -41,7 +41,7 @@ pub(super) fn render_active_dialog(
             ActiveDialog::Edit(edit_state) => match edit_state.render(ctx, conn) {
                 EditResult::Saved => {
                     close_dialog = true;
-                    state.needs_reload = true;
+                    state.invalidate_wad_views();
                     state.notification = Some(Notification::info("WAD updated".to_string()));
                 }
                 EditResult::Cancelled => {
@@ -49,14 +49,14 @@ pub(super) fn render_active_dialog(
                 }
                 EditResult::Modified => {
                     close_dialog = true;
-                    state.needs_reload = true;
+                    state.invalidate_wad_views();
                 }
                 EditResult::Open => {}
             },
             ActiveDialog::Delete(delete_state) => match delete_state.render(ctx, conn) {
                 DeleteResult::Confirmed => {
                     close_dialog = true;
-                    state.needs_reload = true;
+                    state.invalidate_wad_views();
                     state.notification = Some(Notification::info("WAD deleted".to_string()));
                 }
                 DeleteResult::Error(msg) => {
@@ -76,6 +76,9 @@ pub(super) fn render_active_dialog(
             },
             ActiveDialog::Storage(storage_state) => match storage_state.render(ctx, conn) {
                 StorageResult::Closed => {
+                    if storage_state.modified() {
+                        state.invalidate_wad_views();
+                    }
                     close_dialog = true;
                 }
                 StorageResult::Open => {}
@@ -121,8 +124,7 @@ pub(super) fn render_active_dialog(
                     close_dialog = true;
                     // Enrichment writes complevel / IWAD / zdoom flags, so the
                     // library view is stale by the time the dialog closes.
-                    state.needs_reload = true;
-                    state.cacowards.needs_reload = true;
+                    state.invalidate_wad_views();
                 }
                 EnrichResult::Start(request) => {
                     follow_up_action = Some(ActionRequest::StartEnrich(Box::new(request)));
@@ -151,7 +153,7 @@ pub(super) fn render_active_dialog(
                 WadStatsResult::Modified => {
                     // Stay open so the user can keep managing entries; just
                     // ask the parent to refresh library data.
-                    state.needs_reload = true;
+                    state.invalidate_wad_views();
                 }
                 WadStatsResult::Open => {}
             },
@@ -206,14 +208,10 @@ pub(super) fn render_active_dialog(
         }
     }
     if close_dialog {
-        // Cache/Collections/Resources expose a `modified` flag that's only
+        // Collections/Resources expose a `modified` flag that's only
         // meaningful when the dialog is still in scope — read it before we drop
         // the state.
         let was_modified = match &state.active_dialog {
-            // Storage asks its tabs: a purge removes library rows and a cache
-            // clear changes availability, but a tab that was never opened
-            // cannot report a change it did not make.
-            Some(ActiveDialog::Storage(s)) => s.modified(),
             Some(ActiveDialog::Collections(s)) => s.modified,
             // A build or a default-port change alters what the next launch
             // resolves to, which the detail panel shows.
@@ -235,8 +233,7 @@ pub(super) fn render_active_dialog(
 /// refreshing only the library leaves a card looking unavailable after the
 /// file has already been copied and recorded in the database.
 fn mark_linked(state: &mut AppState) {
-    state.needs_reload = true;
-    state.cacowards.needs_reload = true;
+    state.invalidate_wad_views();
     state.notification = Some(Notification::info(
         "WAD file linked; launching...".to_string(),
     ));
@@ -251,11 +248,13 @@ mod tests {
         let mut state = AppState::new(std::path::PathBuf::from("test-library.db"));
         state.needs_reload = false;
         state.cacowards.needs_reload = false;
+        state.stats.needs_reload = false;
 
         mark_linked(&mut state);
 
         assert!(state.needs_reload);
         assert!(state.cacowards.needs_reload);
+        assert!(state.stats.needs_reload);
         assert!(state.notification.is_some());
     }
 }

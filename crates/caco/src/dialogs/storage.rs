@@ -72,6 +72,7 @@ const DESIRED: [f32; 2] = [860.0, 600.0];
 
 pub struct StorageDialogState {
     tab: StorageTab,
+    modified: bool,
     // Built on first visit, not up front: `GcDialogState::new` runs a full
     // `gc::plan`, which walks the data dir, the backup dir and every cached
     // file. Opening Storage to look at Trash must not pay for that.
@@ -85,6 +86,7 @@ impl StorageDialogState {
     pub fn new(tab: StorageTab) -> Self {
         Self {
             tab,
+            modified: false,
             cache: None,
             gc: None,
             trash: None,
@@ -97,7 +99,8 @@ impl StorageDialogState {
     /// Asked once when the dialog closes, so an untouched tab that was never
     /// opened cannot report a change it did not make.
     pub fn modified(&self) -> bool {
-        self.cache.as_ref().is_some_and(|s| s.modified)
+        self.modified
+            || self.cache.as_ref().is_some_and(|s| s.modified)
             || self.gc.as_ref().is_some_and(|s| s.modified)
             || self.trash.as_ref().is_some_and(|s| s.modified)
             || self.files.as_ref().is_some_and(|s| s.modified)
@@ -171,23 +174,68 @@ impl StorageDialogState {
     }
 
     fn render_active_tab(&mut self, ui: &mut egui::Ui, conn: &Connection, avail: f32) {
+        let changed = match self.tab {
+            StorageTab::Cache => {
+                let state = self
+                    .cache
+                    .get_or_insert_with(|| CacheDialogState::new(conn));
+                state.render_body(ui, conn, avail);
+                std::mem::take(&mut state.modified)
+            }
+            StorageTab::Clean => {
+                let state = self
+                    .gc
+                    .get_or_insert_with(|| Box::new(GcDialogState::new(conn)));
+                state.render_body(ui, conn, avail);
+                std::mem::take(&mut state.modified)
+            }
+            StorageTab::Trash => {
+                let state = self
+                    .trash
+                    .get_or_insert_with(|| TrashDialogState::new(conn));
+                state.render_body(ui, conn, avail);
+                std::mem::take(&mut state.modified)
+            }
+            StorageTab::Files => {
+                let state = self
+                    .files
+                    .get_or_insert_with(|| CompanionsDialogState::new(conn));
+                state.render_body(ui, conn, avail);
+                std::mem::take(&mut state.modified)
+            }
+        };
+
+        if changed {
+            self.record_change();
+        }
+    }
+
+    fn record_change(&mut self) {
+        self.modified = true;
+        // Every tab is a cached view over overlapping files and rows. Drop
+        // the inactive snapshots now so returning to one rebuilds it from the
+        // post-mutation state instead of showing stale entries.
         match self.tab {
-            StorageTab::Cache => self
-                .cache
-                .get_or_insert_with(|| CacheDialogState::new(conn))
-                .render_body(ui, conn, avail),
-            StorageTab::Clean => self
-                .gc
-                .get_or_insert_with(|| Box::new(GcDialogState::new(conn)))
-                .render_body(ui, conn, avail),
-            StorageTab::Trash => self
-                .trash
-                .get_or_insert_with(|| TrashDialogState::new(conn))
-                .render_body(ui, conn, avail),
-            StorageTab::Files => self
-                .files
-                .get_or_insert_with(|| CompanionsDialogState::new(conn))
-                .render_body(ui, conn, avail),
+            StorageTab::Cache => {
+                self.gc = None;
+                self.trash = None;
+                self.files = None;
+            }
+            StorageTab::Clean => {
+                self.cache = None;
+                self.trash = None;
+                self.files = None;
+            }
+            StorageTab::Trash => {
+                self.cache = None;
+                self.gc = None;
+                self.files = None;
+            }
+            StorageTab::Files => {
+                self.cache = None;
+                self.gc = None;
+                self.trash = None;
+            }
         }
     }
 
@@ -207,5 +255,27 @@ impl StorageDialogState {
                 .as_mut()
                 .is_none_or(CompanionsDialogState::escape),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn storage_change_discards_inactive_tab_snapshots() {
+        let conn = caco_core::db::open_memory().unwrap();
+        caco_core::db::init_db(&conn).unwrap();
+        let mut state = StorageDialogState::new(StorageTab::Cache);
+        state.cache = Some(CacheDialogState::new(&conn));
+        state.trash = Some(TrashDialogState::new(&conn));
+        state.files = Some(CompanionsDialogState::new(&conn));
+
+        state.record_change();
+
+        assert!(state.modified());
+        assert!(state.cache.is_some());
+        assert!(state.trash.is_none());
+        assert!(state.files.is_none());
     }
 }

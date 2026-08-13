@@ -412,14 +412,7 @@ impl CacoApp {
             }
             ActionRequest::DeleteCollection(name) => {
                 if let Ok(true) = caco_core::db::collections::delete_collection(&self.conn, &name) {
-                    // Clear active collection if we just deleted it
-                    if self.state.active_collection.as_deref() == Some(&name) {
-                        self.state.active_collection = None;
-                        self.state.filter.set_both(String::new());
-                    }
-                    self.state.sidebar_collections =
-                        caco_core::db::collections::get_all_collections(&self.conn)
-                            .unwrap_or_default();
+                    self.state.refresh_collections(&self.conn);
                     self.state.needs_reload = true;
                     self.state.notification =
                         Some(Notification::info(format!("Deleted collection '{name}'")));
@@ -508,7 +501,7 @@ impl CacoApp {
             ActionRequest::StartNewPlaythrough(wad_id) => {
                 match caco_core::player::start_new_playthrough(&self.conn, wad_id) {
                     Ok(_) => {
-                        self.state.needs_reload = true;
+                        self.state.invalidate_wad_views();
                         self.state.notification = Some(Notification::info(
                             "New playthrough started — stats reset".to_string(),
                         ));
@@ -693,7 +686,7 @@ impl CacoApp {
                 }
                 AppMessage::PlayFinished { wad_id, outcome } => {
                     self.state.play_state = PlayState::Idle;
-                    self.state.needs_reload = true;
+                    self.state.invalidate_wad_views();
 
                     match outcome {
                         Err(err) => {
@@ -751,8 +744,7 @@ impl CacoApp {
                             }
                         }
                     }
-                    self.state.needs_reload = true;
-                    self.state.cacowards.needs_reload = true;
+                    self.state.invalidate_wad_views();
                 }
                 AppMessage::PortBuildStep(step) => {
                     if let Some(ActiveDialog::Ports(dialog)) = &mut self.state.active_dialog {
@@ -825,6 +817,10 @@ impl CacoApp {
 
                     match result {
                         Ok(ir) => {
+                            // A duplicate Cacoward import can still link the
+                            // existing WAD to the award row, so every successful
+                            // result may have changed a cached projection.
+                            self.state.invalidate_wad_views();
                             if ir.is_duplicate {
                                 let title =
                                     ir.duplicate_title.unwrap_or_else(|| "unknown".to_string());
@@ -836,11 +832,6 @@ impl CacoApp {
                                 self.state.notification = Some(Notification::info(
                                     "WAD imported successfully".to_string(),
                                 ));
-                                self.state.needs_reload = true;
-                                // If the Cacowards panel is the source of
-                                // this import (or just open), force a
-                                // refresh so the new wad link shows up.
-                                self.state.cacowards.needs_reload = true;
                                 // Reset only the active form on success
                                 match active {
                                     2 => self.state.import.doomworld.reset(),
