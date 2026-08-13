@@ -120,24 +120,9 @@ pub(super) fn render_sidebar(
                 && state.active_collection.as_deref() == Some(name.as_str());
             let resp = theme::sidebar_collection_item(ui, name, is_active);
 
-            if resp.clicked() {
-                // Find the collection and load its query + sort
-                if let Some(coll) = state.sidebar_collections.iter().find(|c| c.name == *name) {
-                    state.active_collection = Some(name.clone());
-                    state.filter.set_both(coll.query.clone());
-                    // Apply collection sort settings
-                    if let Some(ref sort_by) = coll.sort_by {
-                        if let Some(idx) = crate::state::SORT_FIELDS
-                            .iter()
-                            .position(|(key, _)| *key == sort_by.as_str())
-                        {
-                            state.sort_field_index = idx;
-                        }
-                        state.sort_desc = coll.sort_desc;
-                    }
-                    state.view_mode = ViewMode::Library;
-                    state.needs_reload = true;
-                }
+            if resp.clicked() && state.activate_collection(name) {
+                state.view_mode = ViewMode::Library;
+                state.needs_reload = true;
             }
 
             // Right-click context menu

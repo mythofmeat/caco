@@ -370,6 +370,18 @@ impl AppState {
         matches!(self.play_state, PlayState::Playing { .. })
     }
 
+    /// Mark every projection derived from WAD rows or play history stale.
+    ///
+    /// Library, Cacowards and Stats deliberately keep independent snapshots
+    /// so switching views is cheap. The corresponding cost is that a write
+    /// must invalidate all three: linked Cacoward cards embed `WadRecord`s,
+    /// while Stats aggregates statuses, sessions and completions.
+    pub fn invalidate_wad_views(&mut self) {
+        self.needs_reload = true;
+        self.cacowards.needs_reload = true;
+        self.stats.needs_reload = true;
+    }
+
     /// Refresh sidebar status counts from the database.
     pub fn refresh_status_counts(&mut self, conn: &Connection) {
         self.status_counts.clear();
@@ -402,14 +414,44 @@ impl AppState {
         }
     }
 
+    /// Apply a saved collection to the library's active query and sort.
+    /// Returns false when the named collection no longer exists.
+    pub fn activate_collection(&mut self, name: &str) -> bool {
+        let Some(collection) = self
+            .sidebar_collections
+            .iter()
+            .find(|collection| collection.name == name)
+            .cloned()
+        else {
+            return false;
+        };
+
+        self.active_collection = Some(collection.name);
+        self.filter.set_both(collection.query);
+        if let Some(sort_by) = collection.sort_by
+            && let Some(idx) = SORT_FIELDS
+                .iter()
+                .position(|(key, _)| *key == sort_by.as_str())
+        {
+            self.sort_field_index = idx;
+            self.sort_desc = collection.sort_desc;
+        }
+        true
+    }
+
     /// Refresh the sidebar collections list from the database.
     pub fn refresh_collections(&mut self, conn: &Connection) {
         self.sidebar_collections = collections::get_all_collections(conn).unwrap_or_default();
-        // Clear active collection if it was deleted
-        if let Some(ref name) = self.active_collection
-            && !self.sidebar_collections.iter().any(|c| c.name == *name)
-        {
+        let Some(name) = self.active_collection.clone() else {
+            return;
+        };
+
+        // The manager can edit or delete the collection currently scoping the
+        // library. Keep that live scope in lockstep with the refreshed row;
+        // merely reloading the WAD query would otherwise reuse the old text.
+        if !self.activate_collection(&name) {
             self.active_collection = None;
+            self.filter.set_both(String::new());
         }
     }
 
@@ -683,5 +725,70 @@ impl AppState {
             status_filters: self.status_filters.iter().cloned().collect(),
             status_filter: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn setup() -> (Connection, AppState) {
+        let conn = caco_core::db::open_memory().unwrap();
+        caco_core::db::init_db(&conn).unwrap();
+        let state = AppState::new(PathBuf::from("test-library.db"));
+        (conn, state)
+    }
+
+    #[test]
+    fn wad_mutation_invalidates_every_dependent_view() {
+        let (_, mut state) = setup();
+        state.needs_reload = false;
+        state.cacowards.needs_reload = false;
+        state.stats.needs_reload = false;
+
+        state.invalidate_wad_views();
+
+        assert!(state.needs_reload);
+        assert!(state.cacowards.needs_reload);
+        assert!(state.stats.needs_reload);
+    }
+
+    #[test]
+    fn refreshing_collections_updates_the_active_scope() {
+        let (conn, mut state) = setup();
+        collections::create_collection(&conn, "active", "status:queued", Some("title"), true)
+            .unwrap();
+        state.active_collection = Some("active".to_string());
+        state.filter.set_both("status:old".to_string());
+
+        collections::update_collection(
+            &conn,
+            "active",
+            Some("status:playing"),
+            Some(Some("year")),
+            Some(false),
+        )
+        .unwrap();
+        state.refresh_collections(&conn);
+
+        assert_eq!(state.filter.input, "status:playing");
+        assert_eq!(state.filter.applied, "status:playing");
+        assert_eq!(SORT_FIELDS[state.sort_field_index].0, "year");
+        assert!(!state.sort_desc);
+    }
+
+    #[test]
+    fn refreshing_collections_clears_a_deleted_active_scope() {
+        let (conn, mut state) = setup();
+        collections::create_collection(&conn, "active", "status:queued", None, true).unwrap();
+        state.active_collection = Some("active".to_string());
+        state.filter.set_both("status:queued".to_string());
+        collections::delete_collection(&conn, "active").unwrap();
+
+        state.refresh_collections(&conn);
+
+        assert!(state.active_collection.is_none());
+        assert!(state.filter.input.is_empty());
+        assert!(state.filter.applied.is_empty());
     }
 }
