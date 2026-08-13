@@ -14,6 +14,7 @@ pub mod profiles;
 pub mod resources;
 pub mod sessions;
 pub mod settings;
+pub mod storage;
 pub mod trash;
 pub mod wad_data;
 pub mod wad_stats;
@@ -74,9 +75,21 @@ pub fn modal_body<R>(
     footer: f32,
     add: impl FnOnce(&mut egui::Ui) -> R,
 ) -> R {
+    scroll_body(ui, modal_body_height(ctx, footer), add)
+}
+
+/// Scroll a region whose height has already been decided by whoever owns the
+/// window.
+///
+/// [`modal_body`] budgets against the screen, which is right for a dialog that
+/// *is* the window and wrong for one rendered inside another — a Storage tab
+/// asking the screen how tall it may be gets an answer that ignores the tab
+/// strip and the Close button above and below it, and every tab then overflows
+/// by the same amount. The tab is handed its budget instead.
+pub fn scroll_body<R>(ui: &mut egui::Ui, height: f32, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
-        .max_height(modal_body_height(ctx, footer))
+        .max_height(height.max(MIN_BODY_HEIGHT))
         .show(ui, add)
         .inner
 }
@@ -90,8 +103,13 @@ pub fn modal_body<R>(
 /// tail and lands a few points too generous — enough to push a button row off
 /// the bottom edge and never converge. The screen does not move.
 pub fn modal_body_height(ctx: &egui::Context, chrome: f32) -> f32 {
-    (ctx.screen_rect().height() - DIALOG_GUTTER * 2.0 - chrome).max(80.0)
+    (ctx.screen_rect().height() - DIALOG_GUTTER * 2.0 - chrome).max(MIN_BODY_HEIGHT)
 }
+
+/// Floor for any scrolling body. Below this a list is not worth showing, and
+/// the window is going to spill whatever we do — better it spill by a little
+/// with a usable scrollbar than collapse to nothing.
+const MIN_BODY_HEIGHT: f32 = 80.0;
 
 /// The opt-in that lets a bulk delete touch files caco cannot re-fetch.
 ///

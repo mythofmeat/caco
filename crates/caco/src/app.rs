@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use egui::Color32;
 use rusqlite::Connection;
 
-use crate::dialogs::cache::CacheDialogState;
 use crate::dialogs::collections::CollectionsDialogState;
 use crate::dialogs::delete::DeleteDialogState;
 use crate::dialogs::edit::EditDialogState;
@@ -368,9 +367,9 @@ impl CacoApp {
                     self.state.active_dialog = Some(ActiveDialog::Sessions(dialog));
                 }
             }
-            ActionRequest::Cache => {
-                let dialog = CacheDialogState::new(&self.conn);
-                self.state.active_dialog = Some(ActiveDialog::Cache(dialog));
+            ActionRequest::Storage(tab) => {
+                let dialog = crate::dialogs::storage::StorageDialogState::new(tab);
+                self.state.active_dialog = Some(ActiveDialog::Storage(Box::new(dialog)));
             }
             ActionRequest::Profiles => {
                 let dialog = crate::dialogs::profiles::ProfilesDialogState::new();
@@ -406,18 +405,6 @@ impl CacoApp {
             }
             ActionRequest::StartPortBuild(request) => {
                 self.spawn_port_build(*request);
-            }
-            ActionRequest::Trash => {
-                let dialog = crate::dialogs::trash::TrashDialogState::new(&self.conn);
-                self.state.active_dialog = Some(ActiveDialog::Trash(dialog));
-            }
-            ActionRequest::Gc => {
-                let dialog = crate::dialogs::gc::GcDialogState::new(&self.conn);
-                self.state.active_dialog = Some(ActiveDialog::Gc(Box::new(dialog)));
-            }
-            ActionRequest::Companions => {
-                let dialog = crate::dialogs::companions::CompanionsDialogState::new(&self.conn);
-                self.state.active_dialog = Some(ActiveDialog::Companions(dialog));
             }
             ActionRequest::EditCollection(name) => {
                 let dialog = CollectionsDialogState::new_editing(&self.conn, &name);

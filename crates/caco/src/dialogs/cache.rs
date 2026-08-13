@@ -16,6 +16,10 @@ struct CacheEntry {
     irreplaceable: bool,
 }
 
+/// Height of everything this tab draws outside its table: the summary line,
+/// the at-risk toggle, the separator, the button row and the status line.
+const FURNITURE: f32 = 160.0;
+
 /// State for the cache management dialog.
 pub struct CacheDialogState {
     entries: Vec<CacheEntry>,
@@ -27,12 +31,6 @@ pub struct CacheDialogState {
     /// `load`, so it never survives the list it was ticked against.
     include_at_risk: bool,
     pub modified: bool,
-}
-
-/// Result of showing the cache dialog.
-pub enum CacheResult {
-    Open,
-    Closed,
 }
 
 impl CacheDialogState {
@@ -94,8 +92,8 @@ impl CacheDialogState {
         !entry.irreplaceable || self.include_at_risk
     }
 
-    /// Render the cache dialog. Returns the dialog result.
-    pub fn render_body(&mut self, ctx: &egui::Context, ui: &mut egui::Ui, conn: &Connection) {
+    /// Render the Cache tab inside `avail` points of vertical space.
+    pub fn render_body(&mut self, ui: &mut egui::Ui, conn: &Connection, avail: f32) {
         // Summary line
         ui.horizontal(|ui| {
             ui.colored_label(
@@ -116,12 +114,12 @@ impl CacheDialogState {
             let text_height = ui.text_style_height(&egui::TextStyle::Body);
             let row_height = text_height + 6.0;
 
-            // Reserve the chrome's height — title bar, summary line, the
-            // at-risk toggle and the button row — then let the table scroll
-            // inside whatever is left. Without a cap the table grows to its
-            // full row count and drags the window past the viewport, taking
-            // the Close button below the bottom edge with it.
-            let table_height = crate::dialogs::modal_body_height(ctx, 145.0);
+            // Reserve this tab's own furniture — summary line, at-risk
+            // toggle, button row, status — out of the budget, then let the
+            // table scroll inside what is left. Without a cap the table grows
+            // to its full row count and drags the window past the viewport,
+            // taking the Close button below the bottom edge with it.
+            let table_height = (avail - FURNITURE).max(80.0);
             let table = TableBuilder::new(ui)
                 .max_scroll_height(table_height)
                 .striped(true)

@@ -1,5 +1,6 @@
 //! Left navigation sidebar — logo, view toggle, collections, admin links.
 
+use crate::dialogs::storage::StorageTab;
 use crate::state::{ActionRequest, AppState, ViewMode};
 use crate::theme;
 
@@ -225,28 +226,13 @@ struct Tool {
     hint: &'static str,
 }
 
-/// The management dialogs, in the order they appear in the sidebar: the
-/// everyday three first, then library maintenance, then setup.
+/// The management dialogs, in the order they appear in the sidebar: disk
+/// first, then library maintenance, then setup.
 const TOOLS: &[Tool] = &[
     Tool {
-        label: "Cache",
-        action: || ActionRequest::Cache,
-        hint: "Downloaded WAD files on disk",
-    },
-    Tool {
-        label: "Files",
-        action: || ActionRequest::Companions,
-        hint: "Companion file registry",
-    },
-    Tool {
-        label: "Clean",
-        action: || ActionRequest::Gc,
-        hint: "Reclaim disk space from finished WADs and orphans",
-    },
-    Tool {
-        label: "Trash",
-        action: || ActionRequest::Trash,
-        hint: "Restore or permanently delete removed WADs",
+        label: "Storage",
+        action: || ActionRequest::Storage(StorageTab::Cache),
+        hint: "Cached files, cleanup, trash and companion files",
     },
     Tool {
         label: "Enrich",

@@ -60,6 +60,16 @@ pub enum StorageResult {
     Closed,
 }
 
+/// Height of what this window draws around whichever tab is showing: the title
+/// bar, the tab strip, the blurb, both separators and the Close row.
+const CHROME: f32 = 150.0;
+
+/// Sized for the widest tab (Clean's row list). Every tab gets the same body
+/// height whatever it holds, so switching tabs cannot resize the window under
+/// the pointer — and an empty Trash does not leave a full-screen window with
+/// three rows in it.
+const DESIRED: [f32; 2] = [860.0, 600.0];
+
 pub struct StorageDialogState {
     tab: StorageTab,
     // Built on first visit, not up front: `GcDialogState::new` runs a full
@@ -96,9 +106,7 @@ impl StorageDialogState {
     pub fn render(&mut self, ctx: &egui::Context, conn: &Connection) -> StorageResult {
         let mut result = StorageResult::Open;
 
-        // Sized for the widest tab (Clean's row list) so switching tabs does
-        // not resize the window under the pointer.
-        crate::dialogs::modal_window(ctx, "Storage", [860.0, 600.0]).show(ctx, |ui| {
+        crate::dialogs::modal_window(ctx, "Storage", DESIRED).show(ctx, |ui| {
             self.render_tab_strip(ui);
             ui.add_space(6.0);
             ui.colored_label(theme::TEXT_MUTED, self.tab.blurb());
@@ -106,8 +114,19 @@ impl StorageDialogState {
             ui.separator();
             ui.add_space(6.0);
 
-            crate::dialogs::modal_body(ctx, ui, 110.0, |ui| {
-                self.render_active_tab(ctx, ui, conn);
+            // One budget for the whole tab, handed down. The tabs used to ask
+            // the screen how tall they could be, which ignored everything this
+            // window draws around them and overflowed the viewport by the
+            // same amount on every tab.
+            //
+            // The tab is also wrapped in the budget rather than merely told
+            // about it: a tab's own furniture — Cache's summary, at-risk
+            // toggle and two-button row — can exceed the whole budget at the
+            // 800x400 minimum window, and then no cap on its list saves it.
+            // This scroller only engages in that case.
+            let avail = crate::dialogs::modal_body_height(ctx, CHROME).min(DESIRED[1] - CHROME);
+            crate::dialogs::scroll_body(ui, avail, |ui| {
+                self.render_active_tab(ui, conn, avail);
             });
 
             ui.add_space(6.0);
@@ -133,11 +152,13 @@ impl StorageDialogState {
         ui.horizontal(|ui| {
             for tab in StorageTab::ALL {
                 let active = self.tab == tab;
-                let text = egui::RichText::new(tab.label()).size(13.0).color(if active {
-                    theme::TEXT_ACCENT
-                } else {
-                    theme::TEXT_SECONDARY
-                });
+                let text = egui::RichText::new(tab.label())
+                    .size(13.0)
+                    .color(if active {
+                        theme::TEXT_ACCENT
+                    } else {
+                        theme::TEXT_SECONDARY
+                    });
                 if ui
                     .selectable_label(active, text)
                     .on_hover_text(tab.blurb())
@@ -149,24 +170,24 @@ impl StorageDialogState {
         });
     }
 
-    fn render_active_tab(&mut self, ctx: &egui::Context, ui: &mut egui::Ui, conn: &Connection) {
+    fn render_active_tab(&mut self, ui: &mut egui::Ui, conn: &Connection, avail: f32) {
         match self.tab {
             StorageTab::Cache => self
                 .cache
                 .get_or_insert_with(|| CacheDialogState::new(conn))
-                .render_body(ctx, ui, conn),
+                .render_body(ui, conn, avail),
             StorageTab::Clean => self
                 .gc
                 .get_or_insert_with(|| Box::new(GcDialogState::new(conn)))
-                .render_body(ctx, ui, conn),
+                .render_body(ui, conn, avail),
             StorageTab::Trash => self
                 .trash
                 .get_or_insert_with(|| TrashDialogState::new(conn))
-                .render_body(ctx, ui, conn),
+                .render_body(ui, conn, avail),
             StorageTab::Files => self
                 .files
                 .get_or_insert_with(|| CompanionsDialogState::new(conn))
-                .render_body(ctx, ui, conn),
+                .render_body(ui, conn, avail),
         }
     }
 

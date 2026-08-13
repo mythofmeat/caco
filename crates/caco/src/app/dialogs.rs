@@ -2,21 +2,18 @@
 
 use rusqlite::Connection;
 
-use crate::dialogs::cache::CacheResult;
 use crate::dialogs::cacoward_link::CacowardLinkResult;
 use crate::dialogs::collections::CollectionsResult;
-use crate::dialogs::companions::CompanionsResult;
 use crate::dialogs::delete::DeleteResult;
 use crate::dialogs::edit::EditResult;
 use crate::dialogs::enrich::EnrichResult;
-use crate::dialogs::gc::GcResult;
 use crate::dialogs::link::LinkResult;
 use crate::dialogs::ports::PortsResult;
 use crate::dialogs::profiles::ProfilesResult;
 use crate::dialogs::resources::ResourcesResult;
 use crate::dialogs::sessions::SessionsResult;
 use crate::dialogs::settings::SettingsResult;
-use crate::dialogs::trash::TrashResult;
+use crate::dialogs::storage::StorageResult;
 use crate::dialogs::wad_data::WadDataResult;
 use crate::dialogs::wad_stats::WadStatsResult;
 use crate::message::Notification;
@@ -77,11 +74,11 @@ pub(super) fn render_active_dialog(
                 }
                 SessionsResult::Open => {}
             },
-            ActiveDialog::Cache(cache_state) => match cache_state.render(ctx, conn) {
-                CacheResult::Closed => {
+            ActiveDialog::Storage(storage_state) => match storage_state.render(ctx, conn) {
+                StorageResult::Closed => {
                     close_dialog = true;
                 }
-                CacheResult::Open => {}
+                StorageResult::Open => {}
             },
             ActiveDialog::Profiles(profiles_state) => match profiles_state.render(ctx, conn) {
                 ProfilesResult::Closed => {
@@ -132,18 +129,6 @@ pub(super) fn render_active_dialog(
                 }
                 EnrichResult::Open => {}
             },
-            ActiveDialog::Trash(trash_state) => match trash_state.render(ctx, conn) {
-                TrashResult::Closed => {
-                    close_dialog = true;
-                }
-                TrashResult::Open => {}
-            },
-            ActiveDialog::Gc(gc_state) => match gc_state.render(ctx, conn) {
-                GcResult::Closed => {
-                    close_dialog = true;
-                }
-                GcResult::Open => {}
-            },
             ActiveDialog::Ports(ports_state) => match ports_state.render(ctx) {
                 PortsResult::Closed => {
                     close_dialog = true;
@@ -153,14 +138,6 @@ pub(super) fn render_active_dialog(
                 }
                 PortsResult::Open => {}
             },
-            ActiveDialog::Companions(companions_state) => {
-                match companions_state.render(ctx, conn) {
-                    CompanionsResult::Closed => {
-                        close_dialog = true;
-                    }
-                    CompanionsResult::Open => {}
-                }
-            }
             ActiveDialog::Resources(resources_state) => match resources_state.render(ctx, conn) {
                 ResourcesResult::Closed => {
                     close_dialog = true;
@@ -236,14 +213,14 @@ pub(super) fn render_active_dialog(
         // meaningful when the dialog is still in scope — read it before we drop
         // the state.
         let was_modified = match &state.active_dialog {
-            Some(ActiveDialog::Cache(s)) => s.modified,
+            // Storage asks its tabs: a purge removes library rows and a cache
+            // clear changes availability, but a tab that was never opened
+            // cannot report a change it did not make.
+            Some(ActiveDialog::Storage(s)) => s.modified(),
             Some(ActiveDialog::Collections(s)) => s.modified,
-            Some(ActiveDialog::Companions(s)) => s.modified,
-            Some(ActiveDialog::Gc(s)) => s.modified,
             // A build or a default-port change alters what the next launch
             // resolves to, which the detail panel shows.
             Some(ActiveDialog::Ports(s)) => s.modified,
-            Some(ActiveDialog::Trash(s)) => s.modified,
             Some(ActiveDialog::Resources(s)) => s.modified,
             _ => false,
         };

@@ -75,7 +75,7 @@ crates/
 - `json_import.rs` — offline JSON fallback for Cloudflare-blocked APIs
 - `idgames/`, `doomwiki/`, `doomworld/` — per-source API clients + parsers
 
-**caco**: `app.rs` hosts the `CacoApp` state machine. Panels in `src/panels/`, dialogs in `src/dialogs/`, import flow in `src/import/`. `thumbnails.rs` extracts and caches TITLEPIC; `wiki_scraper.rs` fetches Doom Wiki thumbs; `workers.rs` coordinates background search/import/play via mpsc channels. The Cacowards view (`ViewMode::Cacowards`) is rendered by `panels/cacowards.rs` in a deliberately editorial layout (hero banner + year strip + category card grid) to signal the curated-external-feed origin while sharing the rest of the GUI chrome. Imports kicked off from cacoward cards spawn through `import::workers::spawn_import_cacoward` so they reuse the existing duplicate-detection and auto-link plumbing. `dialogs/settings.rs` is the GUI settings editor: it snapshots the live `Config`, edits a curated field subset (sourceports, behavior, cache, paths), and on Save writes the full struct via `config::save_config` + `config::reload_config` so unexposed sections (list, sourceport_preferences, iwad_priority) survive round-trips and changes apply without restart. `dialogs/profiles.rs` manages sourceport config profiles (list on the left, contents editable on the right); it is the GUI counterpart to `caco profile` and shares `caco_core::profiles` with it. Deleting a profile stages a confirmation that lists the WADs still referencing it rather than warning after the fact. `dialogs/gc.rs` is the cleanup panel: keep-toggles across the top re-measure the plan on change, every row is a checkbox (so one WAD's saves can be kept while another's go), and Clean stages a confirmation naming the item count and size. `dialogs/enrich.rs` drives `caco_sources::enrich_service` from the GUI: it owns only the request, live progress and the report, while `app.rs::spawn_enrich` runs the work on a thread and streams `AppMessage::EnrichProgress` / `EnrichComplete` back. Cancellation is an `Arc<AtomicBool>` the dialog shares with the worker; a fresh one is minted per run so a previously cancelled flag can't abort the next one instantly. `dialogs/companions.rs` is the library-wide companion registry (`caco companion ls` with no query): every managed file with its size, MD5 and the WADs still linking it, plus per-row and bulk orphan deletion. Per-WAD linking stays in the edit dialog's Companions tab, which stages the orphan question when `plan_unregister` returns `None`. `dialogs/wad_data.rs` is the per-WAD Saves / Backups / Demos dialog (`caco saves` + `caco demos` in one place, since both act on the same data dir); every destructive action stages a confirmation, and demo playback returns `WadDataResult::PlayDemo` so `app.rs` can run the blocking launch on a worker thread while the dialog stays open.
+**caco**: `app.rs` hosts the `CacoApp` state machine. Panels in `src/panels/`, dialogs in `src/dialogs/`, import flow in `src/import/`. `thumbnails.rs` extracts and caches TITLEPIC; `wiki_scraper.rs` fetches Doom Wiki thumbs; `workers.rs` coordinates background search/import/play via mpsc channels. The Cacowards view (`ViewMode::Cacowards`) is rendered by `panels/cacowards.rs` in a deliberately editorial layout (hero banner + year strip + category card grid) to signal the curated-external-feed origin while sharing the rest of the GUI chrome. Imports kicked off from cacoward cards spawn through `import::workers::spawn_import_cacoward` so they reuse the existing duplicate-detection and auto-link plumbing. `dialogs/settings.rs` is the GUI settings editor: it snapshots the live `Config`, edits a curated field subset (sourceports, behavior, cache, paths), and on Save writes the full struct via `config::save_config` + `config::reload_config` so unexposed sections (list, sourceport_preferences, iwad_priority) survive round-trips and changes apply without restart. `dialogs/profiles.rs` manages sourceport config profiles (list on the left, contents editable on the right); it is the GUI counterpart to `caco profile` and shares `caco_core::profiles` with it. Deleting a profile stages a confirmation that lists the WADs still referencing it rather than warning after the fact. `dialogs/gc.rs` is the cleanup panel (Storage's Clean tab): keep-toggles across the top re-measure the plan on change, every row is a checkbox (so one WAD's saves can be kept while another's go), and Clean stages a confirmation naming the item count and size. `dialogs/enrich.rs` drives `caco_sources::enrich_service` from the GUI: it owns only the request, live progress and the report, while `app.rs::spawn_enrich` runs the work on a thread and streams `AppMessage::EnrichProgress` / `EnrichComplete` back. Cancellation is an `Arc<AtomicBool>` the dialog shares with the worker; a fresh one is minted per run so a previously cancelled flag can't abort the next one instantly. `dialogs/companions.rs` is the library-wide companion registry (Storage's Files tab, `caco companion ls` with no query): every managed file with its size, MD5 and the WADs still linking it, plus per-row and bulk orphan deletion. Per-WAD linking stays in the edit dialog's Companions tab, which stages the orphan question when `plan_unregister` returns `None`. `dialogs/wad_data.rs` is the per-WAD Saves / Backups / Demos dialog (`caco saves` + `caco demos` in one place, since both act on the same data dir); every destructive action stages a confirmation, and demo playback returns `WadDataResult::PlayDemo` so `app.rs` can run the blocking launch on a worker thread while the dialog stays open.
 
 ## Dependencies (key crates)
 
@@ -136,6 +136,16 @@ egui = "0.31"
   budgets off `ctx.screen_rect()` rather than `ui.available_height()`: inside a
   window that is still settling the latter reports last frame's size, so a cap
   derived from it never converges.
+- **A body rendered inside another dialog is handed its height, never asks for
+  it**: `modal_body` budgets against the screen, which is right for a body that
+  *is* the window and wrong for a Storage tab — asking the screen ignores the
+  tab strip and Close row above and below it, so every tab overflowed by the
+  same amount. `dialogs::scroll_body(ui, height, ..)` takes the budget instead,
+  and `storage.rs` derives it once from `CHROME`, passes it to the tab, *and*
+  wraps the tab in it. Both, because a tab's own furniture (Cache's summary,
+  at-risk toggle and button row) can exceed the whole budget at the 800x400
+  minimum, and then no cap on its list would save it; the wrapper's scrollbar
+  only ever appears in that case.
 - **Sidebar rows size to `ui.available_width()`**: `ui.horizontal` does not
   wrap, and a row wider than a `SidePanel` is not merely clipped — egui sizes a
   panel from the rect its contents actually occupied, so the overflow displaces
@@ -302,21 +312,40 @@ Tools (`app/sidebar.rs` → `ActionRequest` → `app.rs::dispatch_action`):
 
 | Entry | Dialog | Backed by |
 |-------|--------|-----------|
-| Cache | `dialogs/cache.rs` | `db::sessions::get_cached_wads` |
-| Files | `dialogs/companions.rs` | `companion_service` + `db::get_wads_for_companion` |
+| Storage | `dialogs/storage.rs` | four tabs, below |
 | Profiles | `dialogs/profiles.rs` | `caco_core::profiles` |
 | IWADs | `dialogs/resources.rs` | `resource_service` |
 | Ports | `dialogs/ports.rs` | `caco_core::ports` (worker thread) |
 | Enrich | `dialogs/enrich.rs` | `caco_sources::enrich_service` (worker thread) |
+| Settings | `dialogs/settings.rs` | `config::save_config` + `reload_config` |
+
+**Storage** is one window over four tabs, because they are one question — what
+is on disk and how do I get space back — and they overlap: Cache and Clean
+delete the same `wads.cached_path` files, and Files and Clean both remove
+orphaned companions. Four entry points to overlapping deletions is how Cache
+and Clean came to disagree about irreplaceable files in the first place.
+
+| Tab | Module | Backed by |
+|-----|--------|-----------|
+| Cache | `dialogs/cache.rs` | `db::sessions::get_cached_wads` |
 | Clean | `dialogs/gc.rs` | `caco_core::gc` plan/execute |
 | Trash | `dialogs/trash.rs` | `db::restore_wad` / `purge_all_deleted` |
-| Settings | `dialogs/settings.rs` | `config::save_config` + `reload_config` |
+| Files | `dialogs/companions.rs` | `companion_service` + `db::get_wads_for_companion` |
+
+Each tab keeps its own module and its own state, and exposes three things to
+`storage.rs`: `render_body(ui, conn, avail)`, `escape() -> bool` (false when it
+consumed the key to back out of a staged confirmation, so dismissing "Empty
+Trash?" cannot also close the window), and a `modified` flag. Tab state is
+built on first visit — `GcDialogState::new` runs a full `gc::plan` over the
+data dir, the backup dir and every cached file, which opening Storage to look
+at Trash must not pay for — and `StorageDialogState::modified()` therefore
+reports nothing for a tab that was never opened.
 
 Per-WAD, from the context menu or a shortcut: Edit (`E`), Delete (`D`),
 Sessions (`S`), Map Stats (`M`), Saves & Demos (`F`), Play (`Enter`/`P`).
 
-Deleting a WAD soft-deletes it (`deleted_at`), so the Trash dialog is the only
-route back — without it a soft delete would be indistinguishable from a
+Deleting a WAD soft-deletes it (`deleted_at`), so Storage's Trash tab is the
+only route back — without it a soft delete would be indistinguishable from a
 permanent one, and the play history it preserves would be unreachable.
 
 ## Git Instructions

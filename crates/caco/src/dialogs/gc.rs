@@ -61,6 +61,10 @@ struct StatusLine {
     is_error: bool,
 }
 
+/// Height of everything this tab draws outside its scrolling row list: the
+/// keep-toggles, the separators, the Clean/Rescan row and the status line.
+const FURNITURE: f32 = 140.0;
+
 pub struct GcDialogState {
     opts: GcOptions,
     plan: GcPlan,
@@ -74,11 +78,6 @@ pub struct GcDialogState {
     status: Option<StatusLine>,
     /// Whether anything was deleted, so the parent knows to reload.
     pub modified: bool,
-}
-
-pub enum GcResult {
-    Open,
-    Closed,
 }
 
 impl GcDialogState {
@@ -238,7 +237,8 @@ impl GcDialogState {
         }
     }
 
-    pub fn render_body(&mut self, ctx: &egui::Context, ui: &mut egui::Ui, conn: &Connection) {
+    /// Render the Clean tab inside `avail` points of vertical space.
+    pub fn render_body(&mut self, ui: &mut egui::Ui, conn: &Connection, avail: f32) {
         self.render_options(ui, conn);
         ui.add_space(6.0);
         ui.separator();
@@ -247,10 +247,10 @@ impl GcDialogState {
         if self.plan.is_empty() {
             ui.colored_label(theme::TEXT_SECONDARY, "Nothing to clean up.");
         } else {
-            // Chrome: title bar, the keep-toggles row above, and the
-            // Clean/Rescan/Close row plus status line below. A constant
-            // 340 here was taller than the whole 800x400 minimum window.
-            crate::dialogs::modal_body(ctx, ui, 170.0, |ui| {
+            // Only the row list scrolls: the keep-toggles above and the
+            // Clean/Rescan row plus status line below must stay put, or the
+            // button that performs the deletion scrolls out of reach.
+            crate::dialogs::scroll_body(ui, avail - FURNITURE, |ui| {
                 for section in Section::ALL {
                     self.render_section(ui, section);
                 }

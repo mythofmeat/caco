@@ -22,6 +22,10 @@ struct StatusLine {
     is_error: bool,
 }
 
+/// Height of everything this tab draws outside its scrolling list: the count
+/// line, the separator, the Restore/Purge row and the status line.
+const FURNITURE: f32 = 100.0;
+
 pub struct TrashDialogState {
     wads: Vec<WadRecord>,
     selected: Option<usize>,
@@ -29,11 +33,6 @@ pub struct TrashDialogState {
     status: Option<StatusLine>,
     /// Whether anything was restored or purged, so the parent reloads.
     pub modified: bool,
-}
-
-pub enum TrashResult {
-    Open,
-    Closed,
 }
 
 impl TrashDialogState {
@@ -129,7 +128,8 @@ impl TrashDialogState {
         })
     }
 
-    pub fn render_body(&mut self, ctx: &egui::Context, ui: &mut egui::Ui, conn: &Connection) {
+    /// Render the Trash tab inside `avail` points of vertical space.
+    pub fn render_body(&mut self, ui: &mut egui::Ui, conn: &Connection, avail: f32) {
         if self.wads.is_empty() {
             ui.colored_label(theme::TEXT_SECONDARY, "Trash is empty.");
         } else {
@@ -142,7 +142,7 @@ impl TrashDialogState {
                 ),
             );
             ui.add_space(4.0);
-            self.render_list(ui);
+            self.render_list(ui, avail - FURNITURE);
         }
 
         ui.add_space(4.0);
@@ -183,7 +183,7 @@ impl TrashDialogState {
         true
     }
 
-    fn render_list(&mut self, ui: &mut egui::Ui) {
+    fn render_list(&mut self, ui: &mut egui::Ui, height: f32) {
         let rows: Vec<(usize, String)> = self
             .wads
             .iter()
@@ -194,18 +194,16 @@ impl TrashDialogState {
             })
             .collect();
 
-        egui::ScrollArea::vertical()
-            .max_height(280.0)
-            .show(ui, |ui| {
-                for (idx, label) in rows {
-                    if ui
-                        .selectable_label(self.selected == Some(idx), label)
-                        .clicked()
-                    {
-                        self.selected = Some(idx);
-                    }
+        crate::dialogs::scroll_body(ui, height, |ui| {
+            for (idx, label) in rows {
+                if ui
+                    .selectable_label(self.selected == Some(idx), label)
+                    .clicked()
+                {
+                    self.selected = Some(idx);
                 }
-            });
+            }
+        });
     }
 
     fn render_actions(&mut self, ui: &mut egui::Ui, conn: &Connection) {

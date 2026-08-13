@@ -98,15 +98,21 @@ the sourceport.
 
 | Sidebar | What it does |
 |---------|--------------|
-| Cache | Managed WAD files; bulk clear skips anything that cannot be re-downloaded |
-| Files | Companion file registry: every managed file, the WADs using it, and orphan cleanup |
+| Storage | Everything caco keeps on disk, in four tabs — see below |
 | Profiles | Per-sourceport config profiles, edited in place |
 | IWADs | Registered IWADs and id24 resources |
 | Ports | Build sourceports from source into caco's own prefix |
 | Enrich | Re-run complevel / IWAD / port detection across the library, plus per-year Cacowards refresh |
+| Settings | Sourceports, launch args, behavior toggles, cache limits, paths |
+
+Storage tabs:
+
+| Tab | What it does |
+|-----|--------------|
+| Cache | Downloaded WAD files; bulk clear skips anything that cannot be re-downloaded |
 | Clean | Reclaim disk space, reviewing every file first |
 | Trash | Restore or permanently delete removed WADs |
-| Settings | Sourceports, launch args, behavior toggles, cache limits, paths |
+| Files | Companion file registry: every managed file, the WADs using it, and orphan cleanup |
 
 Per-WAD dialogs come from the context menu or a shortcut: **Edit** (`E`),
 **Sessions** (`S`), **Map Stats** (`M`), **Saves & Demos** (`F`).

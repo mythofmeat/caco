@@ -9,21 +9,18 @@ use caco_core::db::sessions::WadStats;
 use caco_core::wad_analysis::WadAnalysis;
 use rusqlite::Connection;
 
-use crate::dialogs::cache::CacheDialogState;
 use crate::dialogs::cacoward_link::CacowardLinkDialogState;
 use crate::dialogs::collections::CollectionsDialogState;
-use crate::dialogs::companions::CompanionsDialogState;
 use crate::dialogs::delete::DeleteDialogState;
 use crate::dialogs::edit::EditDialogState;
 use crate::dialogs::enrich::EnrichDialogState;
-use crate::dialogs::gc::GcDialogState;
 use crate::dialogs::link::LinkDialogState;
 use crate::dialogs::ports::PortsDialogState;
 use crate::dialogs::profiles::ProfilesDialogState;
 use crate::dialogs::resources::ResourcesDialogState;
 use crate::dialogs::sessions::SessionsDialogState;
 use crate::dialogs::settings::SettingsDialogState;
-use crate::dialogs::trash::TrashDialogState;
+use crate::dialogs::storage::{StorageDialogState, StorageTab};
 use crate::dialogs::wad_data::WadDataDialogState;
 use crate::dialogs::wad_stats::WadStatsDialogState;
 use crate::filter_query::{FilterCheck, FilterQuery};
@@ -74,23 +71,19 @@ pub enum ActionRequest {
     WadData(i64),
     /// Play back a demo file (by name) from a WAD's demos directory.
     PlayDemo(i64, String),
-    Cache,
+    /// Open the disk-management dialog on a given tab — cached files, cleanup,
+    /// trash and the companion registry all live in there.
+    Storage(StorageTab),
     Settings,
     Resources,
     Profiles,
     Collections,
-    /// Open the library-wide companion file registry.
-    Companions,
     /// Open the metadata / Cacowards enrichment dialog.
     Enrich,
     /// Open the sourceport build manager.
     Ports,
     /// Build a sourceport the ports dialog has selected, on a worker thread.
     StartPortBuild(Box<crate::dialogs::ports::PortBuildRequest>),
-    /// Open the disk cleanup dialog.
-    Gc,
-    /// Open the trash browser for soft-deleted WADs.
-    Trash,
     /// Run an enrichment the dialog has configured, on a worker thread.
     StartEnrich(Box<crate::dialogs::enrich::EnrichRequest>),
     EditCollection(String),
@@ -123,14 +116,12 @@ pub enum ActiveDialog {
     Edit(Box<EditDialogState>),
     Delete(DeleteDialogState),
     Sessions(SessionsDialogState),
-    Cache(CacheDialogState),
+    /// Cache / Clean / Trash / Files, tabbed — see [`StorageDialogState`].
+    Storage(Box<StorageDialogState>),
     Profiles(Box<ProfilesDialogState>),
     Collections(CollectionsDialogState),
-    Companions(CompanionsDialogState),
     Enrich(Box<EnrichDialogState>),
-    Gc(Box<GcDialogState>),
     Ports(Box<PortsDialogState>),
-    Trash(TrashDialogState),
     Resources(ResourcesDialogState),
     WadStats(WadStatsDialogState),
     WadData(Box<WadDataDialogState>),

@@ -24,6 +24,7 @@
 
 use std::path::{Path, PathBuf};
 
+use caco::dialogs::storage::StorageTab;
 use caco::state::{ActionRequest, ViewMode};
 
 /// Viewport used for every shot unless `CACO_SHOT_SIZE` says otherwise.
@@ -198,12 +199,14 @@ fn shoot_every_surface() {
 
     let mut escaped = Vec::new();
     for (name, action) in [
-        ("cache", ActionRequest::Cache),
+        // One shot per Storage tab: they share a window but not a body, and
+        // the tab that overflows is the one that has to be named.
+        ("storage-cache", ActionRequest::Storage(StorageTab::Cache)),
+        ("storage-clean", ActionRequest::Storage(StorageTab::Clean)),
+        ("storage-trash", ActionRequest::Storage(StorageTab::Trash)),
+        ("storage-files", ActionRequest::Storage(StorageTab::Files)),
         ("profiles", ActionRequest::Profiles),
-        ("companions", ActionRequest::Companions),
         ("enrich", ActionRequest::Enrich),
-        ("gc", ActionRequest::Gc),
-        ("trash", ActionRequest::Trash),
         ("resources", ActionRequest::Resources),
         ("ports", ActionRequest::Ports),
         ("collections", ActionRequest::Collections),

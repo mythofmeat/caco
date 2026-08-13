@@ -37,6 +37,10 @@ struct StatusLine {
     is_error: bool,
 }
 
+/// Height of everything this tab draws outside its table: the summary line,
+/// the "used by" line, the separator, the button row and the status line.
+const FURNITURE: f32 = 115.0;
+
 pub struct CompanionsDialogState {
     entries: Vec<Entry>,
     selected: Option<usize>,
@@ -47,11 +51,6 @@ pub struct CompanionsDialogState {
     status: Option<StatusLine>,
     /// Whether anything changed, so the parent knows to reload.
     pub modified: bool,
-}
-
-pub enum CompanionsResult {
-    Open,
-    Closed,
 }
 
 impl CompanionsDialogState {
@@ -159,7 +158,8 @@ impl CompanionsDialogState {
         }
     }
 
-    pub fn render_body(&mut self, ctx: &egui::Context, ui: &mut egui::Ui, conn: &Connection) {
+    /// Render the Files tab inside `avail` points of vertical space.
+    pub fn render_body(&mut self, ui: &mut egui::Ui, conn: &Connection, avail: f32) {
         let total: i64 = self.entries.iter().map(|e| e.size).sum();
         let orphans = self.orphan_count();
         ui.colored_label(
@@ -179,7 +179,7 @@ impl CompanionsDialogState {
                 "No companion files registered. Add one from a WAD's Edit dialog.",
             );
         } else {
-            self.render_table(ui);
+            self.render_table(ui, avail - FURNITURE);
             self.render_users(ui);
         }
 
@@ -245,7 +245,7 @@ impl CompanionsDialogState {
         true
     }
 
-    fn render_table(&mut self, ui: &mut egui::Ui) {
+    fn render_table(&mut self, ui: &mut egui::Ui, height: f32) {
         let row_height = ui.text_style_height(&egui::TextStyle::Body) + 6.0;
         let mut clicked = None;
         let selected = self.selected;
@@ -259,7 +259,7 @@ impl CompanionsDialogState {
             .column(Column::initial(80.0).at_least(60.0)) // Size
             .column(Column::initial(110.0).at_least(80.0)) // MD5
             .column(Column::initial(110.0).at_least(70.0)) // Used by
-            .max_scroll_height(280.0)
+            .max_scroll_height(height.max(80.0))
             .header(row_height + 2.0, |mut header| {
                 for label in ["Filename", "Size", "MD5", "Used by"] {
                     header.col(|ui| {
