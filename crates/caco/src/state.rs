@@ -84,6 +84,8 @@ pub enum ActionRequest {
     Ports,
     /// Build a sourceport the ports dialog has selected, on a worker thread.
     StartPortBuild(Box<crate::dialogs::ports::PortBuildRequest>),
+    /// Lazily discover a sourceport's release tags and branches.
+    CheckPortVersions(crate::dialogs::ports::PortVersionsRequest),
     /// Run an enrichment the dialog has configured, on a worker thread.
     StartEnrich(Box<crate::dialogs::enrich::EnrichRequest>),
     EditCollection(String),

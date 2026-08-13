@@ -183,19 +183,21 @@ impl CacoApp {
         let sender = self.bg.sender();
         let crate::dialogs::ports::PortBuildRequest {
             port,
+            git_ref,
             clean,
             cancel,
         } = request;
 
         std::thread::spawn(move || {
             let paths = PortPaths::from_config();
-            let recipe = match ports::find_recipe(&paths.recipe_dir, &port) {
+            let mut recipe = match ports::find_recipe(&paths.recipe_dir, &port) {
                 Ok(r) => r,
                 Err(e) => {
                     sender.send(AppMessage::PortBuildComplete(Err(e.to_string())));
                     return;
                 }
             };
+            recipe.git_ref = git_ref;
 
             let opts = BuildOptions { jobs: None, clean };
             let outcome = ports::build::install(
@@ -223,6 +225,18 @@ impl CacoApp {
                 })
                 .map_err(|e| e.to_string());
             sender.send(AppMessage::PortBuildComplete(message));
+        });
+    }
+
+    /// Discover selectable releases and branches without blocking the UI.
+    fn spawn_port_version_check(&self, request: crate::dialogs::ports::PortVersionsRequest) {
+        let sender = self.bg.sender();
+        std::thread::spawn(move || {
+            let outcome = caco_core::ports::remote_refs(&request.repo).map_err(|e| e.to_string());
+            sender.send(AppMessage::PortVersionsLoaded {
+                port: request.port,
+                outcome,
+            });
         });
     }
 
@@ -405,6 +419,9 @@ impl CacoApp {
             }
             ActionRequest::StartPortBuild(request) => {
                 self.spawn_port_build(*request);
+            }
+            ActionRequest::CheckPortVersions(request) => {
+                self.spawn_port_version_check(request);
             }
             ActionRequest::EditCollection(name) => {
                 let dialog = CollectionsDialogState::new_editing(&self.conn, &name);
@@ -775,6 +792,11 @@ impl CacoApp {
                                 Err(e) => Notification::error(format!("Build failed: {e}")),
                             });
                         }
+                    }
+                }
+                AppMessage::PortVersionsLoaded { port, outcome } => {
+                    if let Some(ActiveDialog::Ports(dialog)) = &mut self.state.active_dialog {
+                        dialog.versions_loaded(port, outcome);
                     }
                 }
                 AppMessage::PortUpdatesAvailable(names) => {

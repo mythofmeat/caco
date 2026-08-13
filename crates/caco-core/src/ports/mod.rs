@@ -29,7 +29,7 @@ pub use build::{BuildOptions, BuildProgress, BuildStep, PortPaths};
 pub use doctor::{DoctorReport, PackageCheck, doctor};
 pub use manifest::{InstalledPort, PortManifest, find_installed, list_installed, remove_installed};
 pub use recipe::{PortRecipe, builtin_recipes, find_recipe, load_recipes};
-pub use update::{UpdateStatus, check_updates};
+pub use update::{RemoteRefs, UpdateStatus, check_updates, remote_refs};
 
 /// A recipe paired with whatever is installed for it.
 #[derive(Debug, Clone)]

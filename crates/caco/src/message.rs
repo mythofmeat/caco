@@ -112,6 +112,11 @@ pub enum AppMessage {
     /// The build finished: `Ok` carries the message to show, `Err` the
     /// failure with the tail of the output that produced it.
     PortBuildComplete(Result<String, String>),
+    /// Result of an explicit, on-demand branch/tag lookup from the Ports dialog.
+    PortVersionsLoaded {
+        port: String,
+        outcome: Result<caco_core::ports::RemoteRefs, String>,
+    },
     /// Names of built sourceports whose remote has moved past the installed
     /// commit. Only sent when the list is non-empty — a startup check that
     /// finds nothing says nothing.

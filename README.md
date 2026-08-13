@@ -310,6 +310,14 @@ requiring a global install undercuts the point of a portable library. The
 and caco launches it from there without anything being installed
 system-wide. A managed build wins over a same-named binary on `PATH`.
 
+Use **Check versions** in that dialog to lazily ask the port's git remote for
+its tags (treated as releases) and branches. Nothing is fetched when the dialog
+opens. Once checked, **Build from** can target the latest release, a specific
+release, or a development branch such as `main`, `master`, or `trunk`; the
+choice applies to that build and does not rewrite the recipe. Caco also
+performs a lightweight, throttled startup check for new commits on the ref
+already being tracked, as controlled by `port_update_check_days`.
+
 What travels between machines is the **recipe**, not the binary: a few
 hundred bytes of TOML that rebuild the port on whatever machine and OS it
 lands on. That is why recipes live in the portable data dir while the built

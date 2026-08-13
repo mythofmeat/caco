@@ -11,7 +11,8 @@
 //! appears. The cache lives in the ports cache directory — it is a fact about
 //! a remote, so losing it costs one more round trip.
 
-use std::collections::BTreeMap;
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -20,7 +21,6 @@ use serde::{Deserialize, Serialize};
 
 use super::build::PortPaths;
 use super::manifest::list_installed;
-use super::recipe::load_recipes;
 
 /// Filename of the check cache, inside the prefix root.
 ///
@@ -38,6 +38,25 @@ pub struct UpdateStatus {
     /// Commit the ref points at now, or `None` if the remote could not be
     /// reached and nothing was cached.
     pub remote_commit: Option<String>,
+}
+
+/// Branches and release tags advertised by a port's remote.
+///
+/// This is deliberately not populated by [`status`](super::status): listing
+/// every ref can be noticeably slower than rendering the Ports dialog. The
+/// frontend asks for it only when the user clicks "Check versions".
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RemoteRefs {
+    pub branches: Vec<String>,
+    /// Tags in version-like descending order, so the first item is the best
+    /// generic-git approximation of "latest release".
+    pub releases: Vec<String>,
+}
+
+impl RemoteRefs {
+    pub fn latest_release(&self) -> Option<&str> {
+        self.releases.first().map(String::as_str)
+    }
 }
 
 impl UpdateStatus {
@@ -133,6 +152,89 @@ pub fn remote_commit(repo: &str, git_ref: &str) -> crate::Result<String> {
         .ok_or_else(|| crate::error::Error::Config(format!("remote has no ref '{git_ref}'")))
 }
 
+/// Lazily list the branches and tags a sourceport can be built from.
+///
+/// This uses git rather than a hosting-provider API, so custom recipes on
+/// GitLab, Codeberg or a private server get the same version picker as GitHub
+/// recipes. In that provider-neutral model, a release is a git tag.
+pub fn remote_refs(repo: &str) -> crate::Result<RemoteRefs> {
+    let output = Command::new("git")
+        .args(["ls-remote", "--heads", "--tags", repo])
+        .output()
+        .map_err(|e| crate::error::Error::Config(format!("git ls-remote failed: {e}")))?;
+    if !output.status.success() {
+        return Err(crate::error::Error::Config(format!(
+            "git ls-remote {repo}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    Ok(parse_remote_refs(&String::from_utf8_lossy(&output.stdout)))
+}
+
+fn parse_remote_refs(stdout: &str) -> RemoteRefs {
+    let mut branches = BTreeSet::new();
+    let mut releases = BTreeSet::new();
+    for line in stdout.lines() {
+        let Some((_, full_ref)) = line.split_once('\t') else {
+            continue;
+        };
+        if let Some(name) = full_ref.strip_prefix("refs/heads/") {
+            branches.insert(name.to_string());
+        } else if let Some(name) = full_ref.strip_prefix("refs/tags/") {
+            // Annotated tags appear twice; their peeled commit ends in ^{}.
+            releases.insert(name.trim_end_matches("^{}").to_string());
+        }
+    }
+    let mut releases: Vec<_> = releases.into_iter().collect();
+    releases.sort_by(|a, b| versionish_cmp(b, a));
+    RemoteRefs {
+        branches: branches.into_iter().collect(),
+        releases,
+    }
+}
+
+/// Compare names in the way people expect version tags to sort: numeric runs
+/// compare numerically, while everything else remains deterministic. This
+/// handles `v4.14.3` without imposing semver rules on projects that tag as
+/// `release-2026-08` or use some other convention.
+fn versionish_cmp(a: &str, b: &str) -> Ordering {
+    let mut left = a.as_bytes().iter().copied().peekable();
+    let mut right = b.as_bytes().iter().copied().peekable();
+    loop {
+        match (left.peek().copied(), right.peek().copied()) {
+            (Some(x), Some(y)) if x.is_ascii_digit() && y.is_ascii_digit() => {
+                let mut ln = Vec::new();
+                let mut rn = Vec::new();
+                while left.peek().is_some_and(u8::is_ascii_digit) {
+                    ln.push(left.next().unwrap());
+                }
+                while right.peek().is_some_and(u8::is_ascii_digit) {
+                    rn.push(right.next().unwrap());
+                }
+                let ltrim = ln.iter().position(|c| *c != b'0').unwrap_or(ln.len());
+                let rtrim = rn.iter().position(|c| *c != b'0').unwrap_or(rn.len());
+                let lnum = &ln[ltrim..];
+                let rnum = &rn[rtrim..];
+                match lnum.len().cmp(&rnum.len()).then_with(|| lnum.cmp(rnum)) {
+                    Ordering::Equal => {}
+                    other => return other,
+                }
+            }
+            (Some(x), Some(y)) => {
+                left.next();
+                right.next();
+                match x.to_ascii_lowercase().cmp(&y.to_ascii_lowercase()) {
+                    Ordering::Equal => {}
+                    other => return other,
+                }
+            }
+            (None, None) => return Ordering::Equal,
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+        }
+    }
+}
+
 /// Pick the commit for `git_ref` out of `git ls-remote` output.
 ///
 /// An annotated tag yields two lines: the tag object and, suffixed `^{}`, the
@@ -178,22 +280,23 @@ pub fn check_updates(
     interval_days: i64,
     now: DateTime<Local>,
 ) -> Vec<UpdateStatus> {
-    let recipes = load_recipes(&paths.recipe_dir).unwrap_or_default();
     let mut cache = load_cache(&paths.prefix_root);
     let mut changed = false;
     let mut statuses = Vec::new();
+    let mut seen = BTreeSet::new();
 
     for installed in list_installed(&paths.prefix_root) {
         let name = installed.manifest.name.clone();
-        // The recipe is the authority on what to track: a user who repoints
-        // the ref should be told about the new ref, not the old one.
-        let (repo, git_ref) = match recipes.iter().find(|r| r.name == name) {
-            Some(recipe) => (recipe.repo.clone(), recipe.git_ref.clone()),
-            None => (
-                installed.manifest.repo.clone(),
-                installed.manifest.git_ref.clone(),
-            ),
-        };
+        // Several refs may be installed side by side. list_installed is
+        // newest-first, and that is also the build managed_binary launches,
+        // so only check that active install. Track the ref it was actually
+        // built from: a release chosen in the UI must not be compared to the
+        // recipe's development branch and reported as perpetually behind.
+        if !installed.is_usable() || !seen.insert(name.clone()) {
+            continue;
+        }
+        let repo = installed.manifest.repo.clone();
+        let git_ref = installed.manifest.git_ref.clone();
 
         let remote = if is_due(&cache, &name, now, interval_days) {
             match remote_commit(&repo, &git_ref) {
@@ -274,16 +377,23 @@ mod tests {
     }
 
     fn install(root: &Path, name: &str, commit: &str) {
-        let prefix = root.join("prefix").join(name).join("master");
+        install_ref(root, name, "master", commit, "2026-01-01T00:00:00+00:00");
+    }
+
+    fn install_ref(root: &Path, name: &str, git_ref: &str, commit: &str, built_at: &str) {
+        let prefix = root
+            .join("prefix")
+            .join(name)
+            .join(crate::ports::recipe::slugify_ref(git_ref));
         write_manifest(
             &prefix,
             &PortManifest {
                 name: name.to_string(),
                 repo: "https://example.invalid/x".to_string(),
-                git_ref: "master".to_string(),
+                git_ref: git_ref.to_string(),
                 commit: commit.to_string(),
                 binary: name.to_string(),
-                built_at: "2026-01-01T00:00:00+00:00".to_string(),
+                built_at: built_at.to_string(),
             },
         )
         .unwrap();
@@ -329,6 +439,33 @@ mod tests {
     #[test]
     fn empty_output_resolves_to_nothing() {
         assert_eq!(parse_ls_remote("", "master"), None);
+    }
+
+    #[test]
+    fn remote_refs_separate_branches_and_deduplicate_annotated_tags() {
+        let refs = parse_remote_refs(
+            "a\trefs/heads/main\n\
+             b\trefs/heads/release/4.0\n\
+             c\trefs/tags/v4.9.0\n\
+             d\trefs/tags/v4.10.0\n\
+             e\trefs/tags/v4.10.0^{}\n",
+        );
+        assert_eq!(refs.branches, vec!["main", "release/4.0"]);
+        assert_eq!(refs.releases, vec!["v4.10.0", "v4.9.0"]);
+        assert_eq!(refs.latest_release(), Some("v4.10.0"));
+    }
+
+    #[test]
+    fn release_sorting_accepts_non_semver_tags() {
+        let refs = parse_remote_refs(
+            "a\trefs/tags/release-2025-12\n\
+             b\trefs/tags/release-2026-2\n\
+             c\trefs/tags/release-2026-10\n",
+        );
+        assert_eq!(
+            refs.releases,
+            vec!["release-2026-10", "release-2026-2", "release-2025-12"]
+        );
     }
 
     // -- throttling --------------------------------------------------------
@@ -497,5 +634,30 @@ mod tests {
         assert_eq!(statuses.len(), 1);
         assert_eq!(statuses[0].remote_commit, None);
         assert!(!statuses[0].is_behind());
+    }
+
+    #[test]
+    fn only_the_newest_usable_ref_is_checked_for_each_port() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = paths(dir.path());
+        install_ref(
+            dir.path(),
+            "uzdoom",
+            "trunk",
+            "old",
+            "2026-01-01T00:00:00+00:00",
+        );
+        install_ref(
+            dir.path(),
+            "uzdoom",
+            "4.14.3",
+            "new",
+            "2026-02-01T00:00:00+00:00",
+        );
+
+        let statuses = check_updates(&p, 0, now());
+        assert_eq!(statuses.len(), 1);
+        assert_eq!(statuses[0].git_ref, "4.14.3");
+        assert_eq!(statuses[0].installed_commit, "new");
     }
 }

@@ -12,6 +12,7 @@
 //! against the host package manager before the user spends four minutes
 //! finding out that it will not.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -23,14 +24,21 @@ use crate::theme;
 /// A build the dialog is asking the app to start.
 pub struct PortBuildRequest {
     pub port: String,
+    pub git_ref: String,
     pub clean: bool,
     pub cancel: Arc<AtomicBool>,
+}
+
+pub struct PortVersionsRequest {
+    pub port: String,
+    pub repo: String,
 }
 
 pub enum PortsResult {
     Open,
     Closed,
     Start(PortBuildRequest),
+    CheckVersions(PortVersionsRequest),
 }
 
 /// Cap on retained log lines.
@@ -43,6 +51,13 @@ const LOG_LIMIT: usize = 2000;
 pub struct PortsDialogState {
     ports: Vec<PortStatus>,
     selected: Option<String>,
+    /// Build ref selected per port. Kept in dialog state only: choosing a
+    /// one-off older version must not rewrite a user's recipe.
+    selected_refs: BTreeMap<String, String>,
+    /// Remote refs are intentionally absent until "Check versions" is used.
+    remote_refs: BTreeMap<String, ports::RemoteRefs>,
+    checking_versions: Option<String>,
+    version_error: Option<(String, String)>,
     /// Cached pre-flight for the selected port. Re-run on selection change
     /// rather than per frame — it shells out to pacman.
     doctor: Option<DoctorReport>,
@@ -63,6 +78,10 @@ impl PortsDialogState {
         let mut state = Self {
             ports: Vec::new(),
             selected: None,
+            selected_refs: BTreeMap::new(),
+            remote_refs: BTreeMap::new(),
+            checking_versions: None,
+            version_error: None,
             doctor: None,
             clean: false,
             running: None,
@@ -81,6 +100,11 @@ impl PortsDialogState {
         match ports::status(&PortPaths::from_config()) {
             Ok(ports) => {
                 self.ports = ports;
+                for port in &self.ports {
+                    self.selected_refs
+                        .entry(port.recipe.name.clone())
+                        .or_insert_with(|| port.recipe.git_ref.clone());
+                }
                 self.error = None;
             }
             Err(e) => {
@@ -141,7 +165,33 @@ impl PortsDialogState {
         self.reload();
     }
 
-    fn start(&mut self, port: String) -> PortBuildRequest {
+    /// Called when the on-demand remote ref lookup finishes.
+    pub fn versions_loaded(&mut self, port: String, outcome: Result<ports::RemoteRefs, String>) {
+        if self.checking_versions.as_deref() == Some(&port) {
+            self.checking_versions = None;
+        }
+        match outcome {
+            Ok(refs) => {
+                self.remote_refs.insert(port.clone(), refs);
+                if self
+                    .version_error
+                    .as_ref()
+                    .is_some_and(|(name, _)| name == &port)
+                {
+                    self.version_error = None;
+                }
+            }
+            Err(error) => self.version_error = Some((port, error)),
+        }
+    }
+
+    fn check_versions(&mut self, port: String, repo: String) -> PortVersionsRequest {
+        self.checking_versions = Some(port.clone());
+        self.version_error = None;
+        PortVersionsRequest { port, repo }
+    }
+
+    fn start(&mut self, port: String, git_ref: String) -> PortBuildRequest {
         // A fresh flag per run: reusing a cancelled one would abort instantly.
         self.cancel = Arc::new(AtomicBool::new(false));
         self.running = Some(port.clone());
@@ -150,6 +200,7 @@ impl PortsDialogState {
         self.step = None;
         PortBuildRequest {
             port,
+            git_ref,
             clean: self.clean,
             cancel: Arc::clone(&self.cancel),
         }
@@ -246,12 +297,13 @@ impl PortsDialogState {
     }
 
     fn render_details(&mut self, ui: &mut egui::Ui, result: &mut PortsResult) {
-        let Some(port) = self.selected_port() else {
+        let Some(port) = self.selected_port().cloned() else {
             ui.colored_label(theme::TEXT_SECONDARY, "No recipes.");
             return;
         };
 
         let name = port.recipe.name.clone();
+        let recipe_ref = port.recipe.git_ref.clone();
         let running_this = self.running.as_deref() == Some(name.as_str());
         let busy = self.running.is_some();
 
@@ -319,6 +371,8 @@ impl PortsDialogState {
         }
 
         ui.add_space(8.0);
+        self.render_version_picker(ui, &port, result);
+        ui.add_space(8.0);
         self.render_doctor(ui);
         ui.add_space(8.0);
 
@@ -340,7 +394,8 @@ impl PortsDialogState {
                 })
                 .clicked()
             {
-                *result = PortsResult::Start(self.start(name.clone()));
+                let git_ref = self.selected_refs.get(&name).cloned().unwrap_or(recipe_ref);
+                *result = PortsResult::Start(self.start(name.clone(), git_ref));
             }
             if ui
                 .add_enabled(running_this, egui::Button::new("Cancel"))
@@ -387,6 +442,126 @@ impl PortsDialogState {
                     }
                 }
             });
+        }
+    }
+
+    fn render_version_picker(
+        &mut self,
+        ui: &mut egui::Ui,
+        port: &PortStatus,
+        result: &mut PortsResult,
+    ) {
+        let name = &port.recipe.name;
+        let recipe_ref = &port.recipe.git_ref;
+        let mut selected = self
+            .selected_refs
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| recipe_ref.clone());
+        let refs = self.remote_refs.get(name).cloned();
+        let checking = self.checking_versions.as_deref() == Some(name);
+        let has_refs = refs.is_some();
+        let mut check_clicked = false;
+
+        ui.horizontal(|ui| {
+            ui.label("Build from");
+            if let Some(refs) = &refs {
+                egui::ComboBox::from_id_salt(("port-build-ref", name))
+                    .selected_text(selected.as_str())
+                    .width(210.0)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut selected,
+                            recipe_ref.clone(),
+                            format!("Recipe default — {recipe_ref}"),
+                        );
+                        if let Some(latest) = refs.latest_release() {
+                            ui.selectable_value(
+                                &mut selected,
+                                latest.to_string(),
+                                format!("Latest release — {latest}"),
+                            );
+                        }
+                        if !refs.releases.is_empty() {
+                            ui.separator();
+                            ui.label(egui::RichText::new("Releases").small().strong());
+                            for release in &refs.releases {
+                                ui.selectable_value(&mut selected, release.clone(), release);
+                            }
+                        }
+                        if !refs.branches.is_empty() {
+                            ui.separator();
+                            ui.label(egui::RichText::new("Branches").small().strong());
+                            for branch in &refs.branches {
+                                ui.selectable_value(&mut selected, branch.clone(), branch);
+                            }
+                        }
+                    });
+            } else {
+                ui.monospace(selected.as_str());
+            }
+
+            if checking {
+                ui.spinner();
+                ui.colored_label(theme::TEXT_MUTED, "Checking…");
+            } else if ui
+                .small_button(if has_refs {
+                    "Refresh"
+                } else {
+                    "Check versions"
+                })
+                .on_hover_text("Ask the git remote for release tags and branches")
+                .clicked()
+            {
+                check_clicked = true;
+            }
+        });
+        self.selected_refs.insert(name.clone(), selected);
+        if check_clicked {
+            *result = PortsResult::CheckVersions(
+                self.check_versions(name.clone(), port.recipe.repo.clone()),
+            );
+        }
+
+        if let Some(refs) = &refs {
+            match refs.latest_release() {
+                Some(latest) => {
+                    let installed_release = port.installed.as_ref().is_some_and(|installed| {
+                        refs.releases.contains(&installed.manifest.git_ref)
+                    });
+                    let newer_release = installed_release
+                        && port
+                            .installed
+                            .as_ref()
+                            .is_some_and(|installed| installed.manifest.git_ref != latest);
+                    ui.colored_label(
+                        if newer_release {
+                            theme::COLOR_WARNING
+                        } else {
+                            theme::TEXT_MUTED
+                        },
+                        if newer_release {
+                            format!("New release available: {latest}")
+                        } else {
+                            format!("Latest release tag: {latest}")
+                        },
+                    );
+                }
+                None => {
+                    ui.colored_label(
+                        theme::TEXT_MUTED,
+                        "This remote does not advertise release tags.",
+                    );
+                }
+            }
+        }
+        if let Some((error_port, error)) = &self.version_error
+            && error_port == name
+        {
+            ui.colored_label(
+                theme::COLOR_ERROR,
+                format!("Could not check versions: {error}"),
+            );
         }
     }
 

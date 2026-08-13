@@ -136,6 +136,9 @@ pub(super) fn render_active_dialog(
                 PortsResult::Start(request) => {
                     follow_up_action = Some(ActionRequest::StartPortBuild(Box::new(request)));
                 }
+                PortsResult::CheckVersions(request) => {
+                    follow_up_action = Some(ActionRequest::CheckPortVersions(request));
+                }
                 PortsResult::Open => {}
             },
             ActiveDialog::Resources(resources_state) => match resources_state.render(ctx, conn) {
