@@ -940,8 +940,26 @@ fn read_stats_snapshot(wad_id: i64) -> Option<String> {
     wad_stats::stats_to_json(&merged).ok()
 }
 
+/// The stats baseline a session's delta is measured against.
+///
+/// Prefers the sourceport's own stats file, falling back to the DB snapshot
+/// when legacy or imported progress has not been materialized on disk yet.
 fn read_session_stats_before(conn: &Connection, wad_id: i64) -> Option<String> {
-    read_stats_snapshot(wad_id).or_else(|| {
+    session_stats_before_with(read_stats_snapshot(wad_id), conn, wad_id)
+}
+
+/// Inner logic for [`read_session_stats_before`] without filesystem dependencies.
+///
+/// The on-disk snapshot is the caller's to supply for the same reason
+/// [`reconcile_stats_with`] takes one: `read_stats_snapshot` resolves the data
+/// dir through global config, so a test calling the outer function reads
+/// whatever WAD happens to share its id in the developer's own library.
+fn session_stats_before_with(
+    disk: Option<String>,
+    conn: &Connection,
+    wad_id: i64,
+) -> Option<String> {
+    disk.or_else(|| {
         db::get_wad(conn, wad_id, false)
             .ok()
             .flatten()
@@ -1430,7 +1448,7 @@ mod tests {
     }
 
     #[test]
-    fn test_read_session_stats_before_falls_back_to_db_snapshot() {
+    fn test_session_stats_before_falls_back_to_db_snapshot() {
         use crate::db;
         let (conn, wad_id) = fresh_db_with_wad();
         let snapshot = stats_json_one_map("MAP04", 1, 4);
@@ -1438,9 +1456,33 @@ mod tests {
         db::update_wad(&conn, wad_id, &update).unwrap();
 
         assert_eq!(
-            read_session_stats_before(&conn, wad_id).as_deref(),
+            session_stats_before_with(None, &conn, wad_id).as_deref(),
             Some(snapshot.as_str())
         );
+    }
+
+    #[test]
+    fn test_session_stats_before_prefers_disk_over_db_snapshot() {
+        use crate::db;
+        let (conn, wad_id) = fresh_db_with_wad();
+        let stale = stats_json_one_map("MAP04", 1, 4);
+        let update = db::WadUpdate::new().set_text("stats_snapshot", Some(stale.clone()));
+        db::update_wad(&conn, wad_id, &update).unwrap();
+
+        // A sourceport that has since exited MAP07 outranks the DB's MAP04:
+        // the DB snapshot is only a stand-in for a stats file that does not
+        // exist yet, so it must never win once one does.
+        let disk = stats_json_one_map("MAP07", 1, 4);
+        assert_eq!(
+            session_stats_before_with(Some(disk.clone()), &conn, wad_id).as_deref(),
+            Some(disk.as_str())
+        );
+    }
+
+    #[test]
+    fn test_session_stats_before_none_when_neither_side_has_stats() {
+        let (conn, wad_id) = fresh_db_with_wad();
+        assert_eq!(session_stats_before_with(None, &conn, wad_id), None);
     }
 
     #[test]
