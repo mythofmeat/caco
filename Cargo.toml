@@ -35,7 +35,7 @@ serde_json = "1"
 toml = "0.8"
 
 # Database
-rusqlite = { version = "0.34", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 
 # Date/time
 chrono = { version = "0.4", features = ["serde"] }
