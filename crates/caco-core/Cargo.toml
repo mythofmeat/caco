@@ -14,6 +14,7 @@ dirs.workspace = true
 arc-swap.workspace = true
 regex.workspace = true
 md-5.workspace = true
+hex.workspace = true
 byteorder.workspace = true
 image.workspace = true
 zip.workspace = true

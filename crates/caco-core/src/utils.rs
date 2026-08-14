@@ -74,7 +74,7 @@ pub fn compute_md5(path: &Path) -> crate::Result<String> {
         }
         hasher.update(&buf[..n]);
     }
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok(hex::encode(hasher.finalize()))
 }
 
 /// Extract a 4-digit year from a date string (e.g. "2023-03-01").
