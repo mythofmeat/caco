@@ -10,7 +10,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<ActionRequest> 
     let mut action = None;
 
     // Handle keyboard shortcuts when no dialog is open and no text input is focused
-    if !state.has_dialog() && !ui.ctx().wants_keyboard_input() {
+    if !state.has_dialog() && !ui.ctx().egui_wants_keyboard_input() {
         if ui.input(|i| i.key_pressed(egui::Key::J) || i.key_pressed(egui::Key::ArrowDown)) {
             state.select_next();
         }

@@ -21,34 +21,34 @@ pub fn wad_context_menu(
     response.context_menu(|ui| {
         if ui.button("Play").clicked() {
             action = Some(ActionRequest::Play(wad_id));
-            ui.close_menu();
+            ui.close();
         }
         if matches!(status, Status::Completed | Status::Abandoned)
             && ui.button("Start New Playthrough").clicked()
         {
             action = Some(ActionRequest::StartNewPlaythrough(wad_id));
-            ui.close_menu();
+            ui.close();
         }
         if ui.button("Edit").clicked() {
             action = Some(ActionRequest::Edit(wad_id));
-            ui.close_menu();
+            ui.close();
         }
         if ui.button("Delete").clicked() {
             action = Some(ActionRequest::Delete(wad_id));
-            ui.close_menu();
+            ui.close();
         }
         ui.separator();
         if ui.button("Sessions").clicked() {
             action = Some(ActionRequest::Sessions(wad_id));
-            ui.close_menu();
+            ui.close();
         }
         if ui.button("Map Stats").clicked() {
             action = Some(ActionRequest::MapStats(wad_id));
-            ui.close_menu();
+            ui.close();
         }
         if ui.button("Saves & Demos").clicked() {
             action = Some(ActionRequest::WadData(wad_id));
-            ui.close_menu();
+            ui.close();
         }
     });
     action

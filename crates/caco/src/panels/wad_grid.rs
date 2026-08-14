@@ -41,7 +41,7 @@ pub fn render(
             .max(1.0) as usize;
 
         // Handle keyboard shortcuts
-        if !state.has_dialog() && !ui.ctx().wants_keyboard_input() {
+        if !state.has_dialog() && !ui.ctx().egui_wants_keyboard_input() {
             if ui.input(|i| i.key_pressed(egui::Key::J) || i.key_pressed(egui::Key::ArrowDown)) {
                 state.select_down_grid(columns);
             }

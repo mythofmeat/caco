@@ -72,7 +72,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut ImportState) -> Option<ImportAction
     }
 
     // Number key shortcuts for source switching (only when nothing focused)
-    if !ui.ctx().wants_keyboard_input() {
+    if !ui.ctx().egui_wants_keyboard_input() {
         ui.input(|i| {
             for (idx, key) in [
                 egui::Key::Num1,

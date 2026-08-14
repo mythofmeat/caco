@@ -686,22 +686,23 @@ impl CacoApp {
 }
 
 impl eframe::App for CacoApp {
-    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+    fn on_exit(&mut self) {
         persist::save(&self.state.to_persisted());
     }
 
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.render(ctx);
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.render(ui);
     }
 }
 
 impl CacoApp {
     /// One frame of UI, independent of eframe.
     ///
-    /// `update` is only a thin shim over this because `eframe::Frame` cannot
+    /// `ui` is only a thin shim over this because `eframe::Frame` cannot
     /// be constructed outside a real window, and the screenshot harness in
     /// `tests/screenshots.rs` needs to drive the whole app off-screen.
-    pub fn render(&mut self, ctx: &egui::Context) {
+    pub fn render(&mut self, ui: &mut egui::Ui) {
+        let ctx = &ui.ctx().clone();
         // 1. Drain background messages
         for msg in self.bg.drain() {
             match msg {
@@ -944,42 +945,42 @@ impl CacoApp {
         let mut actions: Vec<ActionRequest> = Vec::new();
 
         // ── Left sidebar ──
-        egui::SidePanel::left("sidebar_nav")
-            .exact_width(200.0)
+        egui::Panel::left("sidebar_nav")
+            .exact_size(200.0)
             .resizable(false)
             .frame(egui::Frame::new().fill(theme::BG_SIDEBAR).inner_margin(0.0))
-            .show(ctx, |ui| {
+            .show(ui, |ui| {
                 render_sidebar(ui, &mut self.state, &mut actions);
             });
 
         // ── Top bar (breadcrumbs + search + sort) ──
-        egui::TopBottomPanel::top("topbar")
+        egui::Panel::top("topbar")
             .frame(
                 egui::Frame::new()
                     .fill(Color32::from_rgb(0x1a, 0x14, 0x10))
                     .inner_margin(egui::Margin::symmetric(16, 8))
                     .stroke(egui::Stroke::new(1.0_f32, theme::BORDER)),
             )
-            .show(ctx, |ui| {
+            .show(ui, |ui| {
                 render_topbar(ui, &mut self.state, &mut actions);
             });
 
         // ── Bottom status bar ──
-        egui::TopBottomPanel::bottom("status_bar")
+        egui::Panel::bottom("status_bar")
             .frame(
                 egui::Frame::new()
                     .fill(theme::BG_DARK)
                     .inner_margin(egui::Margin::symmetric(16, 4))
                     .stroke(egui::Stroke::new(1.0_f32, theme::BORDER)),
             )
-            .show(ctx, |ui| {
+            .show(ui, |ui| {
                 render_status_bar(ui, &mut self.state);
             });
 
         // ── Central panel (main content) ──
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(theme::BG_DARK).inner_margin(0.0))
-            .show(ctx, |ui| {
+            .show(ui, |ui| {
                 match self.state.view_mode {
                     ViewMode::Library => {
                         egui::ScrollArea::vertical()

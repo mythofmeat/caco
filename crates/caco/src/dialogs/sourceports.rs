@@ -69,7 +69,7 @@ const LOG_CHROME: f32 = 16.0;
 /// a pane small enough to fit there wastes the room that makes a compile
 /// readable. The clamp keeps both ends sane.
 fn log_pane_height(ctx: &egui::Context) -> f32 {
-    (ctx.screen_rect().height() * 0.35).clamp(90.0, 300.0)
+    (ctx.content_rect().height() * 0.35).clamp(90.0, 300.0)
 }
 
 /// Continue from the active install when the dialog opens. The recipe is only
@@ -354,7 +354,7 @@ impl SourceportsDialogState {
 
             for (name, label, color) in entries {
                 let selected = self.selected.as_deref() == Some(name.as_str());
-                let response = ui.add(egui::SelectableLabel::new(
+                let response = ui.add(egui::Button::selectable(
                     selected,
                     egui::RichText::new(&name).strong(),
                 ));

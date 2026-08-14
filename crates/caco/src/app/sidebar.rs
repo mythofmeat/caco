@@ -130,11 +130,11 @@ pub(super) fn render_sidebar(
             resp.context_menu(|ui| {
                 if ui.button("Edit").clicked() {
                     actions.push(ActionRequest::EditCollection(ctx_name.clone()));
-                    ui.close_menu();
+                    ui.close();
                 }
                 if ui.button("Delete").clicked() {
                     actions.push(ActionRequest::DeleteCollection(ctx_name.clone()));
-                    ui.close_menu();
+                    ui.close();
                 }
             });
         }

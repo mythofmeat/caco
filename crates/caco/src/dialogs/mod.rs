@@ -45,7 +45,7 @@ pub fn modal_window(
     title: impl Into<egui::WidgetText>,
     desired: [f32; 2],
 ) -> egui::Window<'static> {
-    let avail = ctx.screen_rect().size() - egui::vec2(DIALOG_GUTTER * 2.0, DIALOG_GUTTER * 2.0);
+    let avail = ctx.content_rect().size() - egui::vec2(DIALOG_GUTTER * 2.0, DIALOG_GUTTER * 2.0);
     let max = egui::vec2(avail.x.max(240.0), avail.y.max(160.0));
     let size = egui::vec2(desired[0].min(max.x), desired[1].min(max.y));
 
@@ -103,7 +103,7 @@ pub fn scroll_body<R>(ui: &mut egui::Ui, height: f32, add: impl FnOnce(&mut egui
 /// tail and lands a few points too generous — enough to push a button row off
 /// the bottom edge and never converge. The screen does not move.
 pub fn modal_body_height(ctx: &egui::Context, chrome: f32) -> f32 {
-    (ctx.screen_rect().height() - DIALOG_GUTTER * 2.0 - chrome).max(MIN_BODY_HEIGHT)
+    (ctx.content_rect().height() - DIALOG_GUTTER * 2.0 - chrome).max(MIN_BODY_HEIGHT)
 }
 
 /// Floor for any scrolling body. Below this a list is not worth showing, and
@@ -149,7 +149,7 @@ pub fn include_at_risk_toggle(ui: &mut egui::Ui, on: &mut bool, manual_files: us
 /// Dim the app behind a modal, so it reads as "the window is blocked" rather
 /// than as a stray floating panel.
 pub fn dim_backdrop(ctx: &egui::Context) {
-    let screen = ctx.screen_rect();
+    let screen = ctx.content_rect();
     ctx.layer_painter(egui::LayerId::new(
         egui::Order::Background,
         egui::Id::new("modal_backdrop"),

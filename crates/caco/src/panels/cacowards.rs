@@ -568,11 +568,11 @@ fn render_card(
     response.context_menu(|ui| {
         if ui.button("Link to library WAD…").clicked() {
             menu_action = Some(ActionRequest::LinkCacoward(record.id));
-            ui.close_menu();
+            ui.close();
         }
         if record.wad_id.is_some() && ui.button("Unlink").clicked() {
             menu_action = Some(ActionRequest::UnlinkCacoward(record.id));
-            ui.close_menu();
+            ui.close();
         }
         ui.separator();
         let toggle_label = if record.supported {
@@ -585,7 +585,7 @@ fn render_card(
                 record.id,
                 !record.supported,
             ));
-            ui.close_menu();
+            ui.close();
         }
     });
 

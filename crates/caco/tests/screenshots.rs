@@ -92,7 +92,7 @@ impl Shooter {
 
         let harness = egui_kittest::Harness::builder()
             .with_size(shot_size())
-            .build_state(|ctx, app: &mut caco::app::CacoApp| app.render(ctx), app);
+            .build_ui_state(|ui, app: &mut caco::app::CacoApp| app.render(ui), app);
 
         let mut me = Self { harness };
         caco::theme::apply_doom_theme(&me.harness.ctx);
@@ -172,7 +172,7 @@ impl Shooter {
     /// end there look identical in a PNG.
     fn worst_overflow(&self) -> f32 {
         let ctx = &self.harness.ctx;
-        let screen = ctx.screen_rect();
+        let screen = ctx.content_rect();
         let layers: Vec<egui::LayerId> = ctx.memory(|m| {
             m.areas()
                 .visible_layer_ids()

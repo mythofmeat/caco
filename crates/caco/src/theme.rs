@@ -406,9 +406,11 @@ pub fn apply_doom_theme(ctx: &egui::Context) {
 
     ctx.set_visuals(visuals);
 
-    // Spacing defaults
-    let mut style = (*ctx.style()).clone();
-    style.spacing.item_spacing = egui::vec2(8.0, 4.0);
-    style.spacing.button_padding = egui::vec2(10.0, 4.0);
-    ctx.set_style(style);
+    // Spacing defaults. `all_styles_mut` rather than the old single
+    // `set_style`: 0.36 keeps a Style per theme, and spacing is not a
+    // light/dark decision, so both have to carry the same values.
+    ctx.all_styles_mut(|style| {
+        style.spacing.item_spacing = egui::vec2(8.0, 4.0);
+        style.spacing.button_padding = egui::vec2(10.0, 4.0);
+    });
 }

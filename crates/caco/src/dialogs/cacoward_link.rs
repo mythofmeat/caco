@@ -95,7 +95,7 @@ impl CacowardLinkDialogState {
                         let selected = self.selected == Some(*id);
                         let row = ui.add_sized(
                             [ui.available_width(), 24.0],
-                            egui::SelectableLabel::new(selected, label),
+                            egui::Button::selectable(selected, label),
                         );
                         if row.clicked() {
                             self.selected = Some(*id);

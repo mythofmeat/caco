@@ -80,18 +80,18 @@ crates/
 ## Dependencies (key crates)
 
 ```toml
-rusqlite = "0.34"       # SQLite (bundled)
+rusqlite = "0.40"       # SQLite (bundled)
 serde / serde_json
-toml = "0.8"
+toml = "1.1"
 chrono = "0.4"
 thiserror = "2"
 regex = "1"
-md-5 = "0.10"           # companion dedup
-zip = "2"
+md-5 = "0.11"           # companion dedup (hex::encode — digest 0.11 dropped LowerHex)
+zip = "8"
 image = "0.25"          # thumbnails
-reqwest = "0.12"        # HTTP (blocking)
-eframe = "0.31"         # GUI
-egui = "0.31"
+reqwest = "0.13"        # HTTP (blocking, rustls; `query` feature is opt-in)
+eframe = "0.36"         # GUI (wgpu renderer by default since 0.36)
+egui = "0.36"
 ```
 
 ## Key Patterns
@@ -133,9 +133,10 @@ egui = "0.31"
   a full-length list, an unwrappable absolute path — beats the cap. The body
   must be able to shrink, which is what `modal_body` (and `TableBuilder`'s
   `max_scroll_height`) provides. Heights come from `modal_body_height`, which
-  budgets off `ctx.screen_rect()` rather than `ui.available_height()`: inside a
+  budgets off `ctx.content_rect()` rather than `ui.available_height()`: inside a
   window that is still settling the latter reports last frame's size, so a cap
-  derived from it never converges.
+  derived from it never converges. (`content_rect` was `screen_rect` before egui
+  0.36 — same rect on desktop, minus any OS status bar or display notch.)
 - **A body rendered inside another dialog is handed its height, never asks for
   it**: `modal_body` budgets against the screen, which is right for a body that
   *is* the window and wrong for a Storage tab — asking the screen ignores the
@@ -170,10 +171,13 @@ it, and reading the layout code is how the two bugs above survived.
   window clipped at the screen edge from one that merely ends there.
 - The library is a copy of the real `library.db` into a temp `CACO_HOME`, so
   shots show real WADs and nothing can write to the real library.
-- `CacoApp::render(ctx)` exists only so this can drive the app: `eframe::Frame`
+- `CacoApp::render(ui)` exists only so this can drive the app: `eframe::Frame`
   cannot be constructed outside a window. `dispatch_action` and `close_dialog`
   are public for the same reason — the harness opens dialogs the way a click
-  does rather than building dialog state by hand.
+  does rather than building dialog state by hand. It takes a `&mut Ui` rather
+  than a `&Context` because egui 0.36 turned panels into children of a `Ui`
+  instead of the context, and `eframe::App::update` became `App::ui` to match;
+  the harness follows with `build_ui_state`.
 
 ## Data Locations
 
