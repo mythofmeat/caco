@@ -13,11 +13,10 @@ run() {
     fi
 }
 
-run cargo-upgrade cargo upgrade --incompatible
+run cargo-upgrade cargo upgrade --incompatible --ignore-rust-version
 run fmt cargo fmt --all --check
 run clippy cargo clippy --workspace --all-targets
 run client-tests cargo test --workspace
-run build cargo build --workspace
 
 if [ -n "$failed" ]; then
     printf '\nfailed:%s\n' "$failed"

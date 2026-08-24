@@ -11,16 +11,9 @@ optdepends=(
     'xdg-desktop-portal: native file dialogs'
     'git: building sourceports from source'
 )
-# clang: Arch's rust is configured to link through it but does not depend on it,
-# so a clean chroot fails at the first build script without this.
-makedepends=('rust' 'clang' 'pkgconf')
+makedepends=('rust' 'pkgconf')
 options=('!lto' '!debug' 'strip')
 
-# There is no source=(): this builds the working tree the PKGBUILD sits in.
-# Cargo fingerprints record absolute paths, so a $srcdir copy would force a cold
-# rebuild of the whole workspace and leave a second multi-GB target/ behind.
-# $startdir is the PKGBUILD's own directory and always exists, unlike $srcdir,
-# which makepkg only creates because something else in the tree happens to.
 _worktree() {
     cd "$startdir/../.."
 }
