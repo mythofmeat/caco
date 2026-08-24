@@ -1,5 +1,4 @@
 # Build
-dist/
 contrib/arch/pkg/
 contrib/arch/src/
 contrib/arch/caco-git/
@@ -43,8 +42,8 @@ pytest-of-*/
 .mcp.json
 .ripgreprc
 
-# Bare git objects (sandbox artifacts). Keep these anchored so release-plz can
-# copy a complete .git directory into its temporary repo.
+# Bare git objects (sandbox artifacts). Anchored to the repo root so they
+# cannot match anything inside the real .git directory.
 /HEAD
 /config
 /hooks

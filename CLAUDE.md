@@ -360,7 +360,7 @@ permanent one, and the play history it preserves would be unreachable.
 
 ### Commit messages
 
-**Every commit MUST use Conventional Commits**: `type(scope): subject`. The user delegates all commit-writing to Claude. Versioning is no longer automated from commit types (release-plz was removed — see Releasing below), but the convention is still enforced: it is what makes `git log` readable enough to choose a bump level by hand.
+**Every commit MUST use Conventional Commits**: `type(scope): subject`. The user delegates all commit-writing to Claude. Versioning is not automated from commit types (see Versioning and packaging below), but the convention is still enforced: it is what makes `git log` readable enough to choose a bump level by hand.
 
 Semantic meaning of the types, used to pick the bump level when releasing:
 - `feat:` → minor bump
@@ -372,74 +372,46 @@ Common scopes in this repo: `db`, `core`, `gui`, `sources`, `cli`, `arch`, `comp
 
 Never write non-conventional commit subjects (e.g. `Add foo`, `Fix bar`, single-word like `gitignore`).
 
-## Releasing
+## Versioning and packaging
 
-A release is a pushed tag, nothing else:
+**There is no CI, no release automation and no distribution pipeline.** The
+GitHub Actions release workflow, the macOS bundle script and the Arch Docker
+build were all removed; `contrib/arch/PKGBUILD` is the only packaging artifact
+left, and it builds the working tree it sits in:
 
 ```bash
-git tag v4.0.1 && git push origin v4.0.1
+cd contrib/arch && makepkg -f            # pkgver stays 0.0.0
 ```
-
-`.github/workflows/release.yml` fires on `v*` and fans out from a `version` job
-that validates the tag once and hands the string to every builder. `arch` builds
-the package inside `archlinux:base-devel` through `contrib/arch/Dockerfile`;
-`macos` compiles on a `macos-15` runner and bundles through
-`contrib/macos/bundle.sh`; `release` waits on both, merges their artifacts and
-creates the GitHub Release. Adding a distro means another
-`contrib/<distro>/Dockerfile` exposing the same `artifacts` stage plus a job —
-deliberately not generalised into a matrix ahead of a second distro existing.
-
-**The macOS bundle is arm64, ad-hoc signed, and not notarised.** Three
-consequences worth knowing before touching `bundle.sh`:
-
-- `CFBundleExecutable` is a shell wrapper, not the binary. An app launched from
-  Finder inherits only `/usr/bin:/bin:/usr/sbin:/sbin`, so the wrapper prepends
-  the Homebrew prefixes. Without it `config::resolve_sourceport` finds nothing
-  and `sourceports/doctor.rs`'s `brew list` fails, but only when launched from the
-  Dock — from a terminal it all works, which makes it a miserable bug to chase.
-- The signature is required, not cosmetic: the kernel refuses to execute an
-  unsigned arm64 binary. Not being notarised is why the README tells you to
-  download with `gh` rather than a browser — only browsers set the quarantine
-  attribute that makes Gatekeeper care.
-- The job overrides `lto`/`codegen-units`/`opt-level` through `CARGO_PROFILE_*`
-  env vars because macOS minutes bill at 10x. The mac binary is therefore
-  larger and less optimised than the Arch one, on purpose. It also runs no
-  tests — the Arch job gates the tag, so nothing macOS-specific is covered.
-
-**The tag is the only version source.** `Cargo.toml` carries a permanent
-`version = "0.0.0"`; the Dockerfile seds the tag into it, and seds
-`PACKAGE_VERSION` (the tag with `-` → `_`, because pacman forbids `-` inside
-`pkgver`) into the PKGBUILD. Three consequences, all intended:
-
-- A binary built from a working tree reports `v0.0.0` in the sidebar and the
-  Help dialog. Only a packaged build carries a real version.
-- The internal path dependencies carry no `version` field and
-  `workspace.package` sets `publish = false`. A version requirement on a path
-  dep has to equal the dependency's actual version, so it would need rewriting
-  in lockstep with the injected one — the field only ever existed for
-  `cargo package`, which nothing runs.
-- The package build does not pass `--locked`. The injected version makes the
-  committed `Cargo.lock`'s own workspace entries stale on purpose, and cargo
-  rewrites just those three lines.
-
-`makepkg` runs `check()`, so `cargo test --workspace` gates every release; a red
-suite fails the tag build before anything is published.
 
 **Why the PKGBUILD has no `source=()`**: it builds the working tree the PKGBUILD
 sits in (`$startdir/../..`) rather than cloning into `$srcdir`. Cargo
 fingerprints record absolute source paths, so a `$srcdir` clone invalidates every
 artifact and forces a cold LTO rebuild of the whole workspace, *and* leaves a
-second multi-GB `target/` behind. In CI the build is cold either way; the reason
-this stays is local packaging — `cd contrib/arch && makepkg -f` against the warm
-dev `target/` is a near no-op recompile. The tradeoff is that a local package is
-only as reproducible as the tree it was built from, which is why the release path
-runs in a container instead.
+second multi-GB `target/` behind. `cd contrib/arch && makepkg -f` against the
+warm dev `target/` is a near no-op recompile. `$startdir` rather than
+`$srcdir/../../..`: `cd` verifies every path component, and with no `source=()`
+there is nothing that guarantees `$srcdir` exists.
 
-`$startdir` rather than `$srcdir/../../..`: `cd` verifies every path component,
-and with no `source=()` there is nothing that guarantees `$srcdir` exists.
+`makepkg` runs `check()`, so `cargo test --workspace` gates every package build.
 
-To build a package locally without tagging anything:
+**The version the binary reports comes from git, not from Cargo.** `Cargo.toml`
+carries a permanent `version = "0.0.0"` and nothing rewrites it any more.
+`crates/caco/build.rs` runs `git describe --tags --dirty --always`, strips the
+leading `v`, and emits it as the `CACO_VERSION` compile-time env var;
+`caco::VERSION` is the single accessor, read by the sidebar footer and the About
+dialog. Consequences:
 
-```bash
-cd contrib/arch && makepkg -f            # pkgver stays 0.0.0
-```
+- A tagged commit reports `4.0.5`, nine commits later `4.0.5-9-g2243dac`, a
+  dirty tree gains `-dirty`. Releasing is still just `git tag v4.0.6`, but the
+  tag now only has to exist locally for a build to pick it up.
+- The build script watches `.git/HEAD`, `.git/packed-refs` and `.git/refs/tags`
+  through `rerun-if-changed`, because otherwise the version is baked in at the
+  first compile and a later `git tag` stays invisible.
+- Outside a checkout (source tarball, no git installed) it falls back to
+  `CARGO_PKG_VERSION`, i.e. `0.0.0`. Set `CACO_VERSION` in the environment to
+  override — that is the packager's escape hatch, and it takes precedence over
+  git.
+- The internal path dependencies still carry no `version` field and
+  `workspace.package` sets `publish = false`; nothing runs `cargo package`.
+- The Arch package's own `pkgver` is unrelated to this and stays `0.0.0` unless
+  edited by hand. The PKGBUILD is deliberately left untouched.

@@ -10,8 +10,9 @@ opt-level = 1
 debug = "line-tables-only"
 
 [workspace.package]
-# Placeholder. The real version comes from the release tag: contrib/arch/Dockerfile
-# rewrites this line at package time, so a build from a working tree reports 0.0.0.
+# Permanent placeholder — nothing rewrites it. The version the binary reports
+# comes from `git describe --tags` via crates/caco/build.rs; this is only the
+# fallback for a build with no git history to read.
 version = "0.0.0"
 publish = false
 edition = "2024"
@@ -83,7 +84,6 @@ tracing = "0.1"
 
 # Internal crates. Deliberately no `version` alongside `path`: nothing here is
 # published (workspace.package sets publish = false), and a version requirement
-# would have to be rewritten in lockstep with the tag-injected workspace version
-# or cargo would refuse to resolve the path dependency against it.
+# would have to equal the placeholder above to resolve at all.
 caco-core = { path = "crates/caco-core" }
 caco-sources = { path = "crates/caco-sources" }

@@ -149,7 +149,7 @@ pub(super) fn render_sidebar(
             ui.add_space(20.0);
             ui.colored_label(
                 theme::TEXT_MUTED,
-                egui::RichText::new(format!("v{}", env!("CARGO_PKG_VERSION"))).size(11.0),
+                egui::RichText::new(format!("v{}", crate::VERSION)).size(11.0),
             );
         });
         ui.add_space(4.0);

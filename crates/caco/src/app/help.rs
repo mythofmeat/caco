@@ -81,7 +81,7 @@ pub(super) fn render_about_dialog(ctx: &egui::Context) -> bool {
     let mut closed = false;
     crate::dialogs::modal_window(ctx, "About Caco", [320.0, 200.0]).show(ctx, |ui| {
         ui.heading("Caco");
-        ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
+        ui.label(format!("Version {}", crate::VERSION));
         ui.add_space(4.0);
         ui.label("A Doom WAD library manager");
         ui.add_space(8.0);

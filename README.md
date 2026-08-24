@@ -18,48 +18,7 @@ A personal Doom WAD library manager inspired by [beets](https://beets.io). Impor
 
 ## Installation
 
-### Arch Linux (recommended)
-
-Every tagged release attaches a prebuilt `x86_64` package to its
-[GitHub Release](https://github.com/mythofmeat/caco/releases):
-
-```bash
-gh release download --repo mythofmeat/caco --pattern '*.pkg.tar.zst'
-sudo pacman -U caco-*.pkg.tar.zst
-```
-
-To build the package yourself instead:
-
-```bash
-git clone https://github.com/mythofmeat/caco && cd caco/contrib/arch
-makepkg -si
-```
-
-`makepkg` compiles the working tree it sits in, so a local build reports version
-`0.0.0` — the real version is injected from the release tag in CI.
-
-### macOS
-
-Releases also carry an `arm64` app bundle, built and ad-hoc signed on a macOS
-runner:
-
-```bash
-gh release download --repo mythofmeat/caco --pattern '*-macos-arm64.zip'
-unzip -o caco-*-macos-arm64.zip -d /Applications
-```
-
-Download it with `gh` or `curl` rather than a browser. Browsers attach the
-`com.apple.quarantine` attribute and Gatekeeper then refuses to open an app
-that is signed but not notarised; command-line downloads do not set it. If you
-do end up quarantined, `xattr -dr com.apple.quarantine /Applications/Caco.app`
-clears it.
-
-To build the bundle yourself on a Mac:
-
-```bash
-cargo build --release -p caco
-VERSION=0.0.0 contrib/macos/bundle.sh    # writes dist/Caco.app
-```
+There are no prebuilt packages — caco is built from a checkout.
 
 ### From source
 
@@ -67,6 +26,26 @@ VERSION=0.0.0 contrib/macos/bundle.sh    # writes dist/Caco.app
 git clone https://github.com/mythofmeat/caco && cd caco
 cargo install --path crates/caco
 ```
+
+### Arch Linux
+
+```bash
+git clone https://github.com/mythofmeat/caco && cd caco/contrib/arch
+makepkg -si
+```
+
+`makepkg` compiles the working tree it sits in, so the package version stays
+`0.0.0` regardless of the tag; the binary itself still reports the real version
+(see below).
+
+### Versioning
+
+The version shown in the sidebar and the About dialog comes from `git
+describe --tags` at compile time, not from `Cargo.toml` (which carries a
+permanent `0.0.0` placeholder). A build from a tagged commit reports `4.0.5`;
+nine commits later it reports `4.0.5-9-g2243dac`, and a dirty tree gets a
+`-dirty` suffix. Building outside a git checkout — a source tarball, say —
+falls back to `0.0.0` unless you set `CACO_VERSION` in the environment.
 
 ## Quick Start
 
