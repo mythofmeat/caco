@@ -385,25 +385,14 @@ Never write non-conventional commit subjects (e.g. `Add foo`, `Fix bar`, single-
 
 ## Versioning and packaging
 
-**There is no CI, no release automation and no distribution pipeline.** The
-GitHub Actions release workflow, the macOS bundle script and the Arch Docker
-build were all removed; `contrib/arch/PKGBUILD` is the only packaging artifact
-left, and it builds the working tree it sits in:
-
-```bash
-cd contrib/arch && makepkg -f            # pkgver stays 0.0.0
-```
-
-**Why the PKGBUILD has no `source=()`**: it builds the working tree the PKGBUILD
-sits in (`$startdir/../..`) rather than cloning into `$srcdir`. Cargo
-fingerprints record absolute source paths, so a `$srcdir` clone invalidates every
-artifact and forces a cold LTO rebuild of the whole workspace, *and* leaves a
-second multi-GB `target/` behind. `cd contrib/arch && makepkg -f` against the
-warm dev `target/` is a near no-op recompile. `$startdir` rather than
-`$srcdir/../../..`: `cd` verifies every path component, and with no `source=()`
-there is nothing that guarantees `$srcdir` exists.
-
-`makepkg` runs `check()`, so `cargo test --workspace` gates every package build.
+**There is no CI, no release automation and no packaging in this repo.** The
+GitHub Actions release workflow and the Arch Docker build were removed, and the
+Arch PKGBUILD lives outside the repo, in the user's own package repo at
+`/opt/mythofmeat-repo-arch/caco/PKGBUILD`. It builds a pinned `v$pkgver` tag
+from GitHub and installs `assets/caco.desktop` and `assets/caco.svg`, so
+renaming or moving either breaks the next package build. `makepkg` runs
+`check()`, so `cargo test --workspace` gates every package build.
+`contrib/macos/bundle.sh` assembles a macOS `.app` from an already-built binary.
 
 **The version the binary reports comes from git, not from Cargo.** `Cargo.toml`
 carries a permanent `version = "0.0.0"` and nothing rewrites it any more.
@@ -424,5 +413,5 @@ dialog. Consequences:
   git.
 - The internal path dependencies still carry no `version` field and
   `workspace.package` sets `publish = false`; nothing runs `cargo package`.
-- The Arch package's own `pkgver` is unrelated to this and stays `0.0.0` unless
-  edited by hand. The PKGBUILD is deliberately left untouched.
+- The Arch package's `pkgver` is set by hand in the PKGBUILD and names the tag
+  it builds.

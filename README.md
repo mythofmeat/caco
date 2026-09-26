@@ -36,17 +36,6 @@ install -Dm644 assets/caco.desktop ~/.local/share/applications/caco.desktop
 install -Dm644 assets/caco.svg ~/.local/share/icons/hicolor/scalable/apps/caco.svg
 ```
 
-### Arch Linux
-
-```bash
-git clone https://github.com/mythofmeat/caco && cd caco/contrib/arch
-makepkg -si
-```
-
-`makepkg` compiles the working tree it sits in, so the package version stays
-`0.0.0` regardless of the tag; the binary itself still reports the real version
-(see below).
-
 ### Versioning
 
 The version shown in the sidebar and the About dialog comes from `git
