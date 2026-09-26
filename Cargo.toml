@@ -41,7 +41,7 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 chrono = { version = "0.4", features = ["serde"] }
 
 # System paths
-dirs = "6"
+dirs = "7"
 
 # Concurrency
 arc-swap = "1"
