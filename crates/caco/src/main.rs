@@ -1,18 +1,16 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-const ICON_BYTES: &[u8] = include_bytes!("../assets/caco.png");
+/// `assets/caco.svg`, rasterised by `build.rs` to square straight RGBA.
+const ICON_RGBA: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/icon.rgba"));
 
-/// Decode the embedded icon PNG into `egui::IconData`. Returns `None` if
-/// decoding fails so a bad asset never panics startup.
-fn load_icon() -> Option<egui::IconData> {
-    let img = image::load_from_memory(ICON_BYTES).ok()?.into_rgba8();
-    let (width, height) = img.dimensions();
-    Some(egui::IconData {
-        rgba: img.into_raw(),
-        width,
-        height,
-    })
+fn icon() -> egui::IconData {
+    let side = (ICON_RGBA.len() / 4).isqrt() as u32;
+    egui::IconData {
+        rgba: ICON_RGBA.to_vec(),
+        width: side,
+        height: side,
+    }
 }
 
 fn main() -> eframe::Result<()> {
@@ -37,14 +35,12 @@ fn main() -> eframe::Result<()> {
     // compositors map the window to caco.desktop and show its icon.
     // Without this, Wayland ignores `with_icon()` and falls back to a
     // generic icon.
-    let mut viewport = egui::ViewportBuilder::default()
+    let viewport = egui::ViewportBuilder::default()
         .with_app_id("caco")
         .with_title("Caco")
         .with_inner_size([1200.0, 800.0])
-        .with_min_inner_size([800.0, 400.0]);
-    if let Some(icon) = load_icon() {
-        viewport = viewport.with_icon(Arc::new(icon));
-    }
+        .with_min_inner_size([800.0, 400.0])
+        .with_icon(Arc::new(icon()));
 
     let options = eframe::NativeOptions {
         viewport,

@@ -179,6 +179,17 @@ it, and reading the layout code is how the two bugs above survived.
   instead of the context, and `eframe::App::update` became `App::ui` to match;
   the harness follows with `build_ui_state`.
 
+## Icon
+
+`assets/caco.svg` is the only icon file. Window APIs take RGBA, not SVG, so
+`crates/caco/build.rs` rasterises it with `resvg` (a build-dependency, never
+linked into the binary) into `$OUT_DIR/icon.rgba`, which `main.rs` embeds for
+`with_icon()`. Do not check in a PNG beside it: a second copy is one that
+drifts. Linux desktops use the SVG directly, installed to
+`hicolor/scalable/apps/caco.svg` beside `assets/caco.desktop` (`Icon=caco`,
+matched to the window through `with_app_id("caco")`). `contrib/macos/bundle.sh`
+renders every `.icns` size from the SVG with the `resvg` CLI.
+
 ## Data Locations
 
 Split by regenerability: the **data dir** is the portable set, the **cache dir**

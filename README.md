@@ -27,6 +27,15 @@ git clone https://github.com/mythofmeat/caco && cd caco
 cargo install --path crates/caco
 ```
 
+On Linux, install the desktop entry and the scalable icon so launchers and
+Wayland taskbars can find caco (the window icon is built into the binary, so
+this only matters for desktop integration):
+
+```bash
+install -Dm644 assets/caco.desktop ~/.local/share/applications/caco.desktop
+install -Dm644 assets/caco.svg ~/.local/share/icons/hicolor/scalable/apps/caco.svg
+```
+
 ### Arch Linux
 
 ```bash
