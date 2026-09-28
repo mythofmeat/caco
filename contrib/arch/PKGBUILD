@@ -1,0 +1,40 @@
+# Maintainer: eshen <mythofmeat>
+
+pkgname=caco
+pkgver=4.0.8
+pkgrel=1
+pkgdesc="Doom WAD library manager"
+arch=('x86_64')
+url="https://github.com/mythofmeat/caco"
+source=("$pkgname"::git+ssh://git@github.com/mythofmeat/"$pkgname".git#tag=v$pkgver)
+license=('MIT')
+depends=('openssl' 'gcc-libs' 'glibc' 'hicolor-icon-theme' 'desktop-file-utils')
+optdepends=(
+    'vulkan-driver: GPU-accelerated rendering'
+    'xdg-desktop-portal: native file dialogs'
+    'git: building sourceports from source'
+)
+makedepends=('rust' 'sccache' 'pkgconf' 'git')
+options=('!lto' '!debug' 'strip')
+sha256sums=('SKIP')
+
+export RUSTC_WRAPPER="sccache"
+
+build() {
+    cd "$srcdir/$pkgname" || exit
+    cargo build --workspace --release
+}
+
+check() {
+    cd "$srcdir/$pkgname" || exit
+    cargo test --workspace
+}
+
+package() {
+    cd "$srcdir/$pkgname" || exit
+    install -Dm755 target/release/caco "$pkgdir/usr/bin/caco"
+    install -Dm644 assets/caco.desktop "$pkgdir/usr/share/applications/caco.desktop"
+    install -Dm644 assets/caco.svg \
+        "$pkgdir/usr/share/icons/hicolor/scalable/apps/caco.svg"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
