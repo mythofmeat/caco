@@ -34,18 +34,13 @@ git clone https://github.com/mythofmeat/caco && cd caco/contrib/arch
 makepkg -si
 ```
 
-`makepkg` compiles the working tree it sits in, so the package version stays
-`0.0.0` regardless of the tag; the binary itself still reports the real version
-(see below).
+`makepkg` compiles the working tree it sits in.
 
 ### Versioning
 
-The version shown in the sidebar and the About dialog comes from `git
-describe --tags` at compile time, not from `Cargo.toml` (which carries a
-permanent `0.0.0` placeholder). A build from a tagged commit reports `4.0.5`;
-nine commits later it reports `4.0.5-9-g2243dac`, and a dirty tree gets a
-`-dirty` suffix. Building outside a git checkout — a source tarball, say —
-falls back to `0.0.0` unless you set `CACO_VERSION` in the environment.
+The version shown in the sidebar and the About dialog is the workspace
+`version` in the root `Cargo.toml`. To release, bump it there, commit, and tag
+the commit to match (`git tag v4.0.9`).
 
 ## Quick Start
 

@@ -394,24 +394,18 @@ there is nothing that guarantees `$srcdir` exists.
 
 `makepkg` runs `check()`, so `cargo test --workspace` gates every package build.
 
-**The version the binary reports comes from git, not from Cargo.** `Cargo.toml`
-carries a permanent `version = "0.0.0"` and nothing rewrites it any more.
-`crates/caco/build.rs` runs `git describe --tags --dirty --always`, strips the
-leading `v`, and emits it as the `CACO_VERSION` compile-time env var;
-`caco::VERSION` is the single accessor, read by the sidebar footer and the About
-dialog. Consequences:
+**The version the binary reports comes from `Cargo.toml`.** The root
+`[workspace.package] version` is the single source; every crate inherits it via
+`version.workspace = true`, and `caco::VERSION` (read by the sidebar footer and
+the About dialog) is `env!("CARGO_PKG_VERSION")`. There is no build script and
+nothing derives the version from git. Releasing:
 
-- A tagged commit reports `4.0.5`, nine commits later `4.0.5-9-g2243dac`, a
-  dirty tree gains `-dirty`. Releasing is still just `git tag v4.0.6`, but the
-  tag now only has to exist locally for a build to pick it up.
-- The build script watches `.git/HEAD`, `.git/packed-refs` and `.git/refs/tags`
-  through `rerun-if-changed`, because otherwise the version is baked in at the
-  first compile and a later `git tag` stays invisible.
-- Outside a checkout (source tarball, no git installed) it falls back to
-  `CARGO_PKG_VERSION`, i.e. `0.0.0`. Set `CACO_VERSION` in the environment to
-  override — that is the packager's escape hatch, and it takes precedence over
-  git.
-- The internal path dependencies still carry no `version` field and
-  `workspace.package` sets `publish = false`; nothing runs `cargo package`.
-- The Arch package's own `pkgver` is unrelated to this and stays `0.0.0` unless
-  edited by hand. The PKGBUILD is deliberately left untouched.
+1. Bump `version` in the root `Cargo.toml` (pick the level from the
+   conventional-commit types since the last tag), let `Cargo.lock` update.
+2. Commit as `chore(release): vX.Y.Z`.
+3. `git tag vX.Y.Z` — the tag must match the Cargo version; pushing it triggers
+   `.github/workflows/homebrew.yml`.
+
+`contrib/macos/bundle.sh` defaults its Info.plist `VERSION` to the same Cargo
+version. The internal path dependencies carry no `version` field and
+`workspace.package` sets `publish = false`; nothing runs `cargo package`.

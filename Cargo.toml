@@ -10,10 +10,9 @@ opt-level = 1
 debug = "line-tables-only"
 
 [workspace.package]
-# Permanent placeholder — nothing rewrites it. The version the binary reports
-# comes from `git describe --tags` via crates/caco/build.rs; this is only the
-# fallback for a build with no git history to read.
-version = "0.0.0"
+# The single source of the version the binary reports (`caco::VERSION` reads
+# CARGO_PKG_VERSION). Bump it here, then tag the release commit to match.
+version = "4.0.8"
 publish = false
 edition = "2024"
 description = "Doom WAD library manager"
@@ -84,6 +83,6 @@ tracing = "0.1"
 
 # Internal crates. Deliberately no `version` alongside `path`: nothing here is
 # published (workspace.package sets publish = false), and a version requirement
-# would have to equal the placeholder above to resolve at all.
+# would only be one more place to bump.
 caco-core = { path = "crates/caco-core" }
 caco-sources = { path = "crates/caco-sources" }

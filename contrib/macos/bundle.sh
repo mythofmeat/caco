@@ -5,17 +5,17 @@
 #
 #   VERSION=4.1.0 contrib/macos/bundle.sh [binary] [outdir]
 #
-# Defaults to target/release/caco and dist/. VERSION only reaches Info.plist —
-# the binary itself reports whatever crates/caco/build.rs derived (CACO_VERSION,
-# else `git describe`, else CARGO_PKG_VERSION), independent of this script.
+# Defaults to target/release/caco and dist/. VERSION only reaches Info.plist,
+# and defaults to the workspace version in Cargo.toml — the same one the binary
+# itself reports.
 set -euo pipefail
 
 BIN="${1:-target/release/caco}"
 OUTDIR="${2:-dist}"
-VERSION="${VERSION:-0.0.0}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
+VERSION="${VERSION:-$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n1)}"
 
 [[ -f "$BIN" ]] || { echo "no binary at $BIN" >&2; exit 1; }
 
