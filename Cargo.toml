@@ -12,7 +12,7 @@ debug = "line-tables-only"
 [workspace.package]
 # The single source of the version the binary reports (`caco::VERSION` reads
 # CARGO_PKG_VERSION). Bump it here, then tag the release commit to match.
-version = "4.1.0"
+version = "4.1.1"
 publish = false
 edition = "2024"
 description = "Doom WAD library manager"
