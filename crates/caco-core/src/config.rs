@@ -400,7 +400,7 @@ pub fn reload_config() {
 ///   data directory; left absent they resolve at runtime on whatever machine
 ///   is reading them.
 /// - A config that lists only real choices is one a person can read. The
-///   defaults are documented in `config.example.toml`, not echoed back.
+///   defaults live on `Config` itself, not echoed back.
 fn strip_defaults(current: toml::Table, default: &toml::Table) -> toml::Table {
     let mut out = toml::Table::new();
 

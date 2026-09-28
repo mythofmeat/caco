@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Assemble Caco.app from an already-built binary. macOS only: it shells out to
-# sips, iconutil and codesign, none of which exist elsewhere. Nothing here
+# iconutil and codesign, none of which exist elsewhere, plus resvg
+# (`brew install resvg`) to rasterise the icon. Nothing here
 # compiles anything, so the caller decides how the binary was built.
 #
 #   VERSION=4.1.0 contrib/macos/bundle.sh [binary] [outdir]
@@ -24,17 +25,18 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 # --- icon ------------------------------------------------------------------
-# assets/caco.png is 1024x1024, which is exactly the largest size an .icns
-# wants, so every variant is a downscale and none are invented.
+# Every size is rendered straight from assets/caco.svg rather than scaled from
+# one large bitmap. resvg is the same renderer build.rs uses for the window
+# icon, so the Dock and the window cannot disagree.
 SCRATCH="$(mktemp -d)"
 trap 'rm -rf "$SCRATCH"' EXIT
 ICONSET="$SCRATCH/caco.iconset"
 mkdir -p "$ICONSET"
 for size in 16 32 128 256 512; do
-    sips -z "$size" "$size" assets/caco.png \
-        --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
-    sips -z "$((size * 2))" "$((size * 2))" assets/caco.png \
-        --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
+    resvg -w "$size" -h "$size" assets/caco.svg \
+        "$ICONSET/icon_${size}x${size}.png"
+    resvg -w "$((size * 2))" -h "$((size * 2))" assets/caco.svg \
+        "$ICONSET/icon_${size}x${size}@2x.png"
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/caco.icns"
 

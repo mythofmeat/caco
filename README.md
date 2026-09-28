@@ -190,7 +190,7 @@ default_view = "list"
 thumbnail_size = 160
 ```
 
-See `config.example.toml` for all available options.
+Caco writes only the settings that differ from their defaults, so `config.toml` stays short. Every option and its default is defined on the `Config` struct in `crates/caco-core/src/config.rs`; most are also editable from the Settings dialog.
 
 ## Data Storage
 

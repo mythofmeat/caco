@@ -24,6 +24,11 @@ dirs.workspace = true
 open.workspace = true
 shlex.workspace = true
 
+[build-dependencies]
+# Rasterises assets/caco.svg into the window icon. The icon has no text or
+# embedded images, so the font stack behind the default features is dead weight.
+resvg = { version = "0.48", default-features = false }
+
 [dev-dependencies]
 egui_kittest = { version = "0.36", features = ["wgpu", "snapshot"] }
 tempfile.workspace = true
