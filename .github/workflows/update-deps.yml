@@ -1,0 +1,30 @@
+name: update dependencies
+
+on:
+  schedule:
+    - cron: "0 18 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup update stable --no-self-update
+      - run: cargo install cargo-edit --locked
+      - run: cargo upgrade --incompatible && cargo update
+      # Pull requests opened with the default GITHUB_TOKEN don't trigger other workflows, so verify
+      # would never run on this one.
+      - uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ secrets.DEPS_PR_TOKEN }}
+          branch: deps/weekly
+          delete-branch: true
+          commit-message: "chore(deps): update"
+          title: "chore(deps): update"
+          body: |
+            Every crate at its latest version, majors included. Merging this doesn't cut a release.
