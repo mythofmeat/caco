@@ -379,7 +379,9 @@ projects release the same way:
 
 - `verify.yml` — fmt, clippy (`-D warnings`, since the workspace has no
   `[lints]` table) and `cargo test --workspace` on every pull request and push
-  to `main`. The job is named `rust` so a ruleset can require it.
+  to `main`, plus `brew style` and `brew audit --strict` on the Homebrew
+  formula. The jobs are named `rust` and `homebrew` so a ruleset can require
+  them.
 - `update-deps.yml` — every Sunday, `cargo upgrade --incompatible` plus
   `cargo update`, opened as a pull request on `deps/weekly`. It uses the
   `DEPS_PR_TOKEN` secret because a pull request opened with the default
@@ -389,15 +391,14 @@ projects release the same way:
   `chore(release): vX.Y.Z`, tags it and pushes both atomically (refusing if
   started from anything but `main`, or if the version files disagree), builds
   the Arch package from the tag in an `archlinux:base-devel` container,
-  creates the GitHub release with that package and generated notes, and moves
-  `Formula/caco.rb` in `mythofmeat/homebrew-tap` to the tag with
-  `TAP_GITHUB_TOKEN`.
+  and creates the GitHub release with that package and generated notes.
 
 Never bump the version by hand; the release workflow is the only writer. The
 version files it moves together are the root `Cargo.toml`, the three
-`caco*` entries in `Cargo.lock`, and the PKGBUILD's `pkgver` (with `pkgrel`
-reset to 1). A new workspace crate needs adding to its `Cargo.lock` pattern, or
-the agreement check fails the next release.
+`caco*` entries in `Cargo.lock`, the PKGBUILD's `pkgver` (with `pkgrel`
+reset to 1) and the `tag:` in `HomebrewFormula/caco.rb`. A new workspace crate
+needs adding to its `Cargo.lock` pattern, or the agreement check fails the next
+release.
 
 **The PKGBUILD clones the tag over SSH** (`#tag=v$pkgver`), because the
 repository is private and a machine with a key needs nothing else. The release
@@ -412,7 +413,19 @@ every package build.
 the About dialog) is `env!("CARGO_PKG_VERSION")`. There is no build script and
 nothing derives the version from git.
 
-`contrib/macos/bundle.sh` defaults its Info.plist `VERSION` to the same Cargo
-version; the Homebrew formula runs it on the user's machine, so no macOS runner
-is involved. The internal path dependencies carry no `version` field and
+**This repository is its own Homebrew tap**, as shore and ttsd are:
+`HomebrewFormula/caco.rb` (Homebrew looks in that directory of any tapped
+repository), tapped as `mythofmeat/caco` over SSH. It moved out of
+`mythofmeat/homebrew-tap` so the formula's tag changes in the release commit
+itself instead of in a second repository behind a second token. The formula
+pins the tag with no `revision:`, since the release commit would have to
+contain its own hash, and Homebrew reads the version from the tag. Its `url`
+is HTTPS even though the repository is private: `brew audit --strict` demands
+a revision beside a tag for any git URL except a GitHub HTTPS one, so the Mac
+needs GitHub HTTPS credentials (`gh auth setup-git`) to install. The formula
+builds on the user's machine and runs `contrib/macos/bundle.sh` there, which
+is why it build-depends on `resvg`, and why no macOS runner is involved.
+`bundle.sh` defaults its Info.plist `VERSION` to the same Cargo version.
+
+The internal path dependencies carry no `version` field and
 `workspace.package` sets `publish = false`; nothing runs `cargo package`.

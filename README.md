@@ -43,9 +43,12 @@ the last release rather than the working tree.
 ### macOS
 
 ```bash
-brew tap mythofmeat/tap git@github.com:mythofmeat/homebrew-tap.git
-brew install caco
+brew tap mythofmeat/caco git@github.com:mythofmeat/caco.git
+brew install mythofmeat/caco/caco
 ```
+
+The repository is its own tap. It is private and the formula clones it over
+HTTPS, so git needs GitHub HTTPS credentials first (`gh auth setup-git`).
 
 ### Versioning
 
