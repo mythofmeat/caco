@@ -404,7 +404,12 @@ release.
 repository is private and a machine with a key needs nothing else. The release
 container has no key, so the `arch` job rewrites `ssh://git@github.com/` to
 HTTPS with the job's own token through git's `insteadOf`, leaving the PKGBUILD
-usable by hand. `makepkg` runs `check()`, so `cargo test --workspace` gates
+usable by hand. The rewrite lives in `/etc/makepkg.d/gitconfig`, not the
+builder's `~/.gitconfig`: makepkg exports `GIT_CONFIG_GLOBAL=/dev/null` and
+points `GIT_CONFIG_SYSTEM` at that file, so a global rewrite is silently
+ignored and git falls back to `ssh`, which the container does not have. The
+first workflow release (v4.1.4) failed exactly that way, after its tag had
+already been pushed. `makepkg` runs `check()`, so `cargo test --workspace` gates
 every package build.
 
 **The version the binary reports comes from `Cargo.toml`.** The root
