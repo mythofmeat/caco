@@ -18,7 +18,8 @@ A personal Doom WAD library manager inspired by [beets](https://beets.io). Impor
 
 ## Installation
 
-There are no prebuilt packages — caco is built from a checkout.
+Each [GitHub release](https://github.com/mythofmeat/caco/releases) carries a
+prebuilt Arch package. Otherwise caco is built from source.
 
 ### From source
 
@@ -29,18 +30,28 @@ cargo install --path crates/caco
 
 ### Arch Linux
 
+Install the `.pkg.tar.zst` from a release with `pacman -U`, or build it:
+
 ```bash
 git clone https://github.com/mythofmeat/caco && cd caco/contrib/arch
 makepkg -si
 ```
 
-`makepkg` compiles the working tree it sits in.
+`makepkg` clones the tag matching the PKGBUILD's `pkgver` over SSH, so it builds
+the last release rather than the working tree.
+
+### macOS
+
+```bash
+brew tap mythofmeat/tap git@github.com:mythofmeat/homebrew-tap.git
+brew install caco
+```
 
 ### Versioning
 
 The version shown in the sidebar and the About dialog is the workspace
-`version` in the root `Cargo.toml`. To release, bump it there, commit, and tag
-the commit to match (`git tag v4.0.9`).
+`version` in the root `Cargo.toml`. Releases are cut by the **release** workflow
+in the Actions tab, which bumps it — see `CLAUDE.md` for what it does.
 
 ## Quick Start
 
