@@ -8,7 +8,7 @@ arch=('x86_64')
 url="https://github.com/mythofmeat/caco"
 source=("$pkgname"::git+ssh://git@github.com/mythofmeat/"$pkgname".git#tag=v$pkgver)
 license=('MIT')
-depends=('openssl' 'gcc-libs' 'glibc' 'hicolor-icon-theme' 'desktop-file-utils')
+depends=('gcc-libs' 'glibc' 'hicolor-icon-theme' 'desktop-file-utils')
 optdepends=(
     'vulkan-driver: GPU-accelerated rendering'
     'xdg-desktop-portal: native file dialogs'

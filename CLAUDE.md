@@ -356,11 +356,11 @@ permanent one, and the play history it preserves would be unreachable.
 
 - Commit working changes to git; keep the tree green between commits.
 - Update README.md and CLAUDE.md when adding or changing user-visible features.
-- Quality gates before any commit: `cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`.
+- Quality gates before any commit: `cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`. `.github/workflows/verify.yml` runs the same three on every pull request and push to `main`; there is no pre-commit hook, so CI is what enforces them.
 
 ### Commit messages
 
-**Every commit MUST use Conventional Commits**: `type(scope): subject`. The user delegates all commit-writing to Claude. Versioning is not automated from commit types (see Versioning and packaging below), but the convention is still enforced: it is what makes `git log` readable enough to choose a bump level by hand.
+**Every commit MUST use Conventional Commits**: `type(scope): subject`. The user delegates all commit-writing to Claude. The release workflow takes the bump level as an input rather than deriving it from commit types (see Versioning and packaging below), but the convention is still enforced: it is what makes `git log` readable enough to choose that level.
 
 Semantic meaning of the types, used to pick the bump level when releasing:
 - `feat:` → minor bump
@@ -374,38 +374,45 @@ Never write non-conventional commit subjects (e.g. `Add foo`, `Fix bar`, single-
 
 ## Versioning and packaging
 
-**There is no CI, no release automation and no distribution pipeline.** The
-GitHub Actions release workflow, the macOS bundle script and the Arch Docker
-build were all removed; `contrib/arch/PKGBUILD` is the only packaging artifact
-left, and it builds the working tree it sits in:
+Three workflows in `.github/workflows/`, mirroring the ones in shore so the two
+projects release the same way:
 
-```bash
-cd contrib/arch && makepkg -f            # pkgver stays 0.0.0
-```
+- `verify.yml` — fmt, clippy (`-D warnings`, since the workspace has no
+  `[lints]` table) and `cargo test --workspace` on every pull request and push
+  to `main`. The job is named `rust` so a ruleset can require it.
+- `update-deps.yml` — every Sunday, `cargo upgrade --incompatible` plus
+  `cargo update`, opened as a pull request on `deps/weekly`. It uses the
+  `DEPS_PR_TOKEN` secret because a pull request opened with the default
+  `GITHUB_TOKEN` would never start `verify`. Merging it does not release.
+- `release.yml` — started by hand from the Actions tab with `patch`, `minor`
+  or `major`. It runs `verify`, then bumps every version file, commits
+  `chore(release): vX.Y.Z`, tags it and pushes both atomically (refusing if
+  started from anything but `main`, or if the version files disagree), builds
+  the Arch package from the tag in an `archlinux:base-devel` container,
+  creates the GitHub release with that package and generated notes, and moves
+  `Formula/caco.rb` in `mythofmeat/homebrew-tap` to the tag with
+  `TAP_GITHUB_TOKEN`.
 
-**Why the PKGBUILD has no `source=()`**: it builds the working tree the PKGBUILD
-sits in (`$startdir/../..`) rather than cloning into `$srcdir`. Cargo
-fingerprints record absolute source paths, so a `$srcdir` clone invalidates every
-artifact and forces a cold LTO rebuild of the whole workspace, *and* leaves a
-second multi-GB `target/` behind. `cd contrib/arch && makepkg -f` against the
-warm dev `target/` is a near no-op recompile. `$startdir` rather than
-`$srcdir/../../..`: `cd` verifies every path component, and with no `source=()`
-there is nothing that guarantees `$srcdir` exists.
+Never bump the version by hand; the release workflow is the only writer. The
+version files it moves together are the root `Cargo.toml`, the three
+`caco*` entries in `Cargo.lock`, and the PKGBUILD's `pkgver` (with `pkgrel`
+reset to 1). A new workspace crate needs adding to its `Cargo.lock` pattern, or
+the agreement check fails the next release.
 
-`makepkg` runs `check()`, so `cargo test --workspace` gates every package build.
+**The PKGBUILD clones the tag over SSH** (`#tag=v$pkgver`), because the
+repository is private and a machine with a key needs nothing else. The release
+container has no key, so the `arch` job rewrites `ssh://git@github.com/` to
+HTTPS with the job's own token through git's `insteadOf`, leaving the PKGBUILD
+usable by hand. `makepkg` runs `check()`, so `cargo test --workspace` gates
+every package build.
 
 **The version the binary reports comes from `Cargo.toml`.** The root
 `[workspace.package] version` is the single source; every crate inherits it via
 `version.workspace = true`, and `caco::VERSION` (read by the sidebar footer and
 the About dialog) is `env!("CARGO_PKG_VERSION")`. There is no build script and
-nothing derives the version from git. Releasing:
-
-1. Bump `version` in the root `Cargo.toml` (pick the level from the
-   conventional-commit types since the last tag), let `Cargo.lock` update.
-2. Commit as `chore(release): vX.Y.Z`.
-3. `git tag vX.Y.Z` — the tag must match the Cargo version; pushing it triggers
-   `.github/workflows/homebrew.yml`.
+nothing derives the version from git.
 
 `contrib/macos/bundle.sh` defaults its Info.plist `VERSION` to the same Cargo
-version. The internal path dependencies carry no `version` field and
+version; the Homebrew formula runs it on the user's machine, so no macOS runner
+is involved. The internal path dependencies carry no `version` field and
 `workspace.package` sets `publish = false`; nothing runs `cargo package`.
