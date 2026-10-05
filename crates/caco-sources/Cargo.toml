@@ -9,6 +9,7 @@ thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 reqwest.workspace = true
+cc.workspace = true
 regex.workspace = true
 html-escape.workspace = true
 unicode-normalization.workspace = true

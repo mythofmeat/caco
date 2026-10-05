@@ -18,6 +18,11 @@ jobs:
   rust:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    # makepkg exports CFLAGS with -O2 and the arch release job builds under it; a plain cargo run
+    # exports none. Without this, a C dependency that breaks under optimisation flags passes here
+    # and fails only after the release has already pushed its tag (v4.1.6, aws-lc-sys + cc 1.6).
+    env:
+      CFLAGS: -O2
     steps:
       - uses: actions/checkout@v7
       - run: rustup update stable --no-self-update && rustup component add clippy rustfmt

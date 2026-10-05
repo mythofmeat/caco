@@ -63,6 +63,14 @@ zip = { version = "8", default-features = false, features = ["deflate"] }
 # `query` became opt-in in 0.13; it was unconditional in 0.12. The idgames and
 # Doom Wiki clients both build their requests with `RequestBuilder::query`.
 reqwest = { version = "0.13", features = ["json", "blocking", "query"] }
+# Not used directly: a pin on reqwest's TLS stack. aws-lc-sys must compile its
+# jitterentropy source at -O0 and does so by rewriting CFLAGS in its build
+# script; cc 1.6 snapshots the environment before that rewrite lands, so any
+# CFLAGS carrying -O2 (makepkg always exports one) wins and the build dies with
+# "must not be compiled with optimizations". Drop this once an aws-lc-sys
+# release builds under `CFLAGS=-O2` with cc >= 1.6 — verify.yml sets that
+# CFLAGS, so the weekly deps PR will say when. `cargo upgrade` skips `=` pins.
+cc = "=1.5.1"
 
 # Text processing (sources)
 html-escape = "0.2"

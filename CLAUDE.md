@@ -381,7 +381,10 @@ projects release the same way:
   `[lints]` table) and `cargo test --workspace` on every pull request and push
   to `main`, plus `brew style` and `brew audit --strict` on the Homebrew
   formula. The jobs are named `rust` and `homebrew` so a ruleset can require
-  them.
+  them. The `rust` job exports `CFLAGS=-O2`, as makepkg does: v4.1.6 tagged
+  and then failed its Arch build because `cc` 1.6 stopped `aws-lc-sys` from
+  forcing `-O0` on jitterentropy, and a CFLAGS-free verify could not see it.
+  `cc` is pinned `=1.5.1` in the workspace manifest until that is fixed upstream.
 - `update-deps.yml` — every Sunday, `cargo upgrade --incompatible` plus
   `cargo update`, opened as a pull request on `deps/weekly`. It uses the
   `DEPS_PR_TOKEN` secret because a pull request opened with the default
