@@ -18,6 +18,11 @@ jobs:
   rust:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    # makepkg exports CFLAGS with -O2 and the arch release job builds under it; a plain cargo run
+    # exports none. Without this, a C dependency that breaks under optimisation flags passes here
+    # and fails only after the release has already pushed its tag (v4.1.6, aws-lc-sys + cc 1.6).
+    env:
+      CFLAGS: -O2
     steps:
       - uses: actions/checkout@v7
       - run: rustup update stable --no-self-update && rustup component add clippy rustfmt
@@ -28,16 +33,16 @@ jobs:
       - run: cargo test --workspace
 
   homebrew:
-    runs-on: ubuntu-24.04
+    runs-on: macos-latest
     timeout-minutes: 15
-    env:
-      HOMEBREW_NO_AUTO_UPDATE: "1"
     steps:
       - uses: actions/checkout@v7
-      - run: echo /home/linuxbrew/.linuxbrew/bin >>"$GITHUB_PATH"
-      # brew style and audit only apply the formula rules to a tapped formula, so the checkout is linked in as the mythofmeat/caco tap.
+      # The runner image's brew lags; audit against the brew users install with, which is the one
+      # that knows postflight_steps and rejects the legacy postflight block.
+      - run: brew update
+      # brew style and audit only apply the cask rules to a tapped cask, so the checkout is linked in as the mythofmeat/caco tap.
       - run: |
           mkdir -p "$(brew --repository)/Library/Taps/mythofmeat"
           ln -s "$GITHUB_WORKSPACE" "$(brew --repository)/Library/Taps/mythofmeat/homebrew-caco"
-      - run: brew style mythofmeat/caco/caco
-      - run: brew audit --strict mythofmeat/caco/caco
+      - run: brew style --cask mythofmeat/caco/caco
+      - run: brew audit --cask --strict mythofmeat/caco/caco
