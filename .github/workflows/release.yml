@@ -39,7 +39,6 @@ jobs:
             sed -n '/^\[workspace\.package\]$/,/^\[/s/^version = "\(.*\)"$/\1/p' Cargo.toml
             sed -n '/^name = "caco\(-core\|-sources\)\?"$/{n;s/^version = "\(.*\)"$/\1/p}' Cargo.lock
             sed -n 's/^pkgver=//p' contrib/arch/PKGBUILD
-            sed -n 's/^      tag: "v\(.*\)"$/\1/p' HomebrewFormula/caco.rb
           }
           current=$(versions | sort -u)
           if [ "$(printf '%s\n' "$current" | wc -l)" -ne 1 ]; then
@@ -55,7 +54,6 @@ jobs:
           sed -i "/^\[workspace\.package\]$/,/^\[/s/^version = \".*\"$/version = \"$version\"/" Cargo.toml
           sed -i "/^name = \"caco\(-core\|-sources\)\?\"$/{n;s/^version = .*/version = \"$version\"/}" Cargo.lock
           sed -i -e "s/^pkgver=.*/pkgver=$version/" -e "s/^pkgrel=.*/pkgrel=1/" contrib/arch/PKGBUILD
-          sed -i "s/^      tag: \"v.*\"$/      tag: \"v$version\"/" HomebrewFormula/caco.rb
           if [ "$(versions | sort -u)" != "$version" ]; then
             echo "::error::Not every version file moved to $version."
             exit 1
@@ -80,15 +78,6 @@ jobs:
       - run: |
           useradd --create-home builder
           echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
-      # The repository is private, so the PKGBUILD clones it over SSH, which works from a machine
-      # with a key. This container has none: rewrite that URL to HTTPS with the job's token.
-      # makepkg sets GIT_CONFIG_GLOBAL=/dev/null and reads only /etc/makepkg.d/gitconfig, so the
-      # rewrite has to go there; the builder's ~/.gitconfig is ignored.
-      - run: >-
-          git config --file /etc/makepkg.d/gitconfig
-          url."https://x-access-token:${TOKEN}@github.com/".insteadOf "ssh://git@github.com/"
-        env:
-          TOKEN: ${{ github.token }}
       - run: |
           mkdir /build
           cp contrib/arch/PKGBUILD /build/
@@ -100,8 +89,31 @@ jobs:
           name: arch
           path: /build/*.pkg.tar.zst
 
+  macos:
+    needs: version
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.version.outputs.tag }}
+      - run: rustup update stable --no-self-update
+      - run: brew install resvg
+      - run: cargo build --release -p caco
+      # bundle.sh reads VERSION from Cargo.toml, which the checked-out tag already carries.
+      # ditto, not zip: it keeps the bundle's extended attributes and the ad-hoc signature intact.
+      - run: |
+          contrib/macos/bundle.sh target/release/caco dist
+          ditto -c -k --keepParent dist/Caco.app "caco-${TAG#v}-macos-arm64.zip"
+        env:
+          TAG: ${{ needs.version.outputs.tag }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: macos
+          path: caco-*-macos-arm64.zip
+
   release:
-    needs: [version, arch]
+    needs: [version, arch, macos]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -114,4 +126,31 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.version.outputs.tag }}
+
+  # The cask's sha256 is the zip's, which exists only after the tag, so the cask is not one of the
+  # version files the release commit moves: it follows in a commit of its own once the zip is out.
+  cask:
+    needs: [version, release]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - uses: actions/download-artifact@v8
+        with:
+          name: macos
+          path: assets
+      - run: |
+          version="${TAG#v}"
+          sha=$(sha256sum "assets/caco-$version-macos-arm64.zip" | cut -d' ' -f1)
+          sed -i -e "s/^  version \".*\"$/  version \"$version\"/" \
+                 -e "s/^  sha256 \".*\"$/  sha256 \"$sha\"/" Casks/caco.rb
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore(release): cask $TAG"
+          git push origin HEAD:main
+        env:
           TAG: ${{ needs.version.outputs.tag }}

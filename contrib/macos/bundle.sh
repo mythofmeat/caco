@@ -43,7 +43,7 @@ iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/caco.icns"
 # --- executable ------------------------------------------------------------
 # The real binary is caco-bin and CFBundleExecutable is a wrapper, because a
 # Finder-launched app inherits only /usr/bin:/bin:/usr/sbin:/sbin. Caco resolves
-# sourceports off PATH and ports/doctor.rs runs `brew list`, so without this the
+# sourceports off PATH and sourceports/doctor.rs runs `brew list`, so without this the
 # app finds nothing from the Dock while working fine from a terminal.
 install -m 755 "$BIN" "$APP/Contents/MacOS/caco-bin"
 

@@ -6,7 +6,7 @@ pkgrel=1
 pkgdesc="Doom WAD library manager"
 arch=('x86_64')
 url="https://github.com/mythofmeat/caco"
-source=("$pkgname"::git+ssh://git@github.com/mythofmeat/"$pkgname".git#tag=v$pkgver)
+source=("$pkgname"::git+https://github.com/mythofmeat/"$pkgname".git#tag=v$pkgver)
 license=('MIT')
 depends=('gcc-libs' 'glibc' 'hicolor-icon-theme' 'desktop-file-utils')
 optdepends=(

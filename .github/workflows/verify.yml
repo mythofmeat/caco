@@ -33,16 +33,15 @@ jobs:
       - run: cargo test --workspace
 
   homebrew:
-    runs-on: ubuntu-24.04
+    runs-on: macos-latest
     timeout-minutes: 15
     env:
       HOMEBREW_NO_AUTO_UPDATE: "1"
     steps:
       - uses: actions/checkout@v7
-      - run: echo /home/linuxbrew/.linuxbrew/bin >>"$GITHUB_PATH"
-      # brew style and audit only apply the formula rules to a tapped formula, so the checkout is linked in as the mythofmeat/caco tap.
+      # brew style and audit only apply the cask rules to a tapped cask, so the checkout is linked in as the mythofmeat/caco tap.
       - run: |
           mkdir -p "$(brew --repository)/Library/Taps/mythofmeat"
           ln -s "$GITHUB_WORKSPACE" "$(brew --repository)/Library/Taps/mythofmeat/homebrew-caco"
-      - run: brew style mythofmeat/caco/caco
-      - run: brew audit --strict mythofmeat/caco/caco
+      - run: brew style --cask mythofmeat/caco/caco
+      - run: brew audit --cask --strict mythofmeat/caco/caco
