@@ -10,7 +10,7 @@ class Caco < Formula
   desc "Doom WAD library manager"
   homepage "https://github.com/mythofmeat/caco"
   url "https://github.com/mythofmeat/caco.git",
-      tag: "v4.1.5"
+      tag: "v4.1.6"
   license "MIT"
 
   depends_on "resvg" => :build
