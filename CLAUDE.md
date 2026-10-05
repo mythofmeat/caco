@@ -425,8 +425,10 @@ per upgrade — where a cask unpacks the `Caco.app` the release's `macos` job
 already built with `contrib/macos/bundle.sh`. Its `binary` stanza links
 `Contents/MacOS/caco-bin`, not the bundle's wrapper: the wrapper locates
 `caco-bin` beside `$0`, which through a symlink is the Homebrew bin dir. The app
-is signed ad hoc and not notarised, so a `postflight` strips the quarantine flag
-or Gatekeeper would refuse it. arm64 only.
+is signed ad hoc and not notarised, so a `postflight_steps` `run` strips the
+quarantine flag or Gatekeeper would refuse it (brew 7 rejects a free-form
+`postflight` block, and steps take `{{appdir}}` rather than Ruby interpolation).
+arm64 only.
 
 The cask's `version` and `sha256` are written by the release's last job, after
 the zip exists, and are deliberately outside the version-agreement check: a

@@ -35,10 +35,11 @@ jobs:
   homebrew:
     runs-on: macos-latest
     timeout-minutes: 15
-    env:
-      HOMEBREW_NO_AUTO_UPDATE: "1"
     steps:
       - uses: actions/checkout@v7
+      # The runner image's brew lags; audit against the brew users install with, which is the one
+      # that knows postflight_steps and rejects the legacy postflight block.
+      - run: brew update
       # brew style and audit only apply the cask rules to a tapped cask, so the checkout is linked in as the mythofmeat/caco tap.
       - run: |
           mkdir -p "$(brew --repository)/Library/Taps/mythofmeat"

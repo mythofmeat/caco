@@ -13,7 +13,7 @@ cask "caco" do
   homepage "https://github.com/mythofmeat/caco"
 
   depends_on arch: :arm64
-  depends_on macos: ">= :big_sur"
+  depends_on :macos
 
   app "Caco.app"
   # The real binary, not the bundle's PATH-extending wrapper: a terminal already
@@ -22,10 +22,13 @@ cask "caco" do
   binary "#{appdir}/Caco.app/Contents/MacOS/caco-bin", target: "caco"
 
   # The bundle is signed ad hoc, not notarised, so Gatekeeper refuses to open a
-  # quarantined copy.
-  postflight do
-    system_command "/usr/bin/xattr",
-                   args: ["-dr", "com.apple.quarantine", "#{appdir}/Caco.app"]
+  # quarantined copy. Steps take {{appdir}}, not Ruby interpolation, and run
+  # sandboxed: the app is the only thing xattr may write.
+  postflight_steps do
+    run "/usr/bin/xattr",
+        args:           ["-dr", "com.apple.quarantine", "{{appdir}}/Caco.app"],
+        writable_paths: ["Caco.app"],
+        writable_base:  :appdir
   end
 
   zap trash: [
