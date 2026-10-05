@@ -1,7 +1,7 @@
 # Maintainer: eshen <mythofmeat>
 
 pkgname=caco
-pkgver=4.1.6
+pkgver=4.1.7
 pkgrel=1
 pkgdesc="Doom WAD library manager"
 arch=('x86_64')
