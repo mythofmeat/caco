@@ -164,8 +164,8 @@ fn cancel_stops_a_build_in_flight() {
 ///
 /// Not an assertion — a machine with everything installed and a machine with
 /// nothing are both valid. It exists so `doctor` can be eyeballed against a
-/// real package manager, which is the only way to know the `pacman -T` and
-/// `brew list` parsing is right.
+/// real package manager, which is the only way to know the `pacman -T`
+/// parsing is right.
 #[test]
 #[ignore = "reports on the host machine"]
 fn doctor_report_for_this_machine() {

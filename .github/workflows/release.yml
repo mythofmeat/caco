@@ -89,31 +89,8 @@ jobs:
           name: arch
           path: /build/*.pkg.tar.zst
 
-  macos:
-    needs: version
-    runs-on: macos-latest
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.version.outputs.tag }}
-      - run: rustup update stable --no-self-update
-      - run: brew install resvg
-      - run: cargo build --release -p caco
-      # bundle.sh reads VERSION from Cargo.toml, which the checked-out tag already carries.
-      # ditto, not zip: it keeps the bundle's extended attributes and the ad-hoc signature intact.
-      - run: |
-          contrib/macos/bundle.sh target/release/caco dist
-          ditto -c -k --keepParent dist/Caco.app "caco-${TAG#v}-macos-arm64.zip"
-        env:
-          TAG: ${{ needs.version.outputs.tag }}
-      - uses: actions/upload-artifact@v7
-        with:
-          name: macos
-          path: caco-*-macos-arm64.zip
-
   release:
-    needs: [version, arch, macos]
+    needs: [version, arch]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -128,29 +105,3 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.version.outputs.tag }}
 
-  # The cask's sha256 is the zip's, which exists only after the tag, so the cask is not one of the
-  # version files the release commit moves: it follows in a commit of its own once the zip is out.
-  cask:
-    needs: [version, release]
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: main
-      - uses: actions/download-artifact@v8
-        with:
-          name: macos
-          path: assets
-      - run: |
-          version="${TAG#v}"
-          sha=$(sha256sum "assets/caco-$version-macos-arm64.zip" | cut -d' ' -f1)
-          sed -i -e "s/^  version \".*\"$/  version \"$version\"/" \
-                 -e "s/^  sha256 \".*\"$/  sha256 \"$sha\"/" Casks/caco.rb
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -am "chore(release): cask $TAG"
-          git push origin HEAD:main
-        env:
-          TAG: ${{ needs.version.outputs.tag }}

@@ -23,11 +23,6 @@ arch = [
     "sdl2-compat", "sdl2_image", "sdl2_mixer", "libvorbis", "libsndfile",
     "libzip", "glu", "mesa",
 ]
-brew = [
-    "cmake", "ninja", "pkgconf", "fluid-synth", "libsndfile", "libvorbis",
-    "libxmp", "libzip", "mad", "portmidi", "sdl2-compat", "sdl2_image",
-    "sdl2_mixer",
-]
 
 [uzdoom]
 repo = "https://github.com/UZDoom/uzdoom"
@@ -53,4 +48,3 @@ arch = [
     "cmake", "ninja", "openal", "sdl2-compat", "libwebp", "bzip2", "libvpx",
     "waylandpp", "zlib",
 ]
-brew = ["cmake", "ninja", "openal-soft", "sdl2", "webp", "bzip2", "libvpx"]

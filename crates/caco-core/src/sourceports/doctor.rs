@@ -12,7 +12,7 @@ use super::recipe::SourceportRecipe;
 /// Which package manager caco was able to ask.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PackageCheck {
-    /// Packages were checked against `pacman -T` or `brew list`.
+    /// Packages were checked against `pacman -T`.
     Checked,
     /// No package list is known for this platform, or the package manager
     /// caco knows about is not installed. Deps are reported unverified.
@@ -51,9 +51,7 @@ impl DoctorReport {
                 all.push(tool);
             }
         }
-        if cfg!(target_os = "macos") {
-            Some(format!("brew install {}", all.join(" ")))
-        } else if cfg!(target_os = "linux") && which_exists("pacman") {
+        if cfg!(target_os = "linux") && which_exists("pacman") {
             Some(format!("sudo pacman -S --needed {}", all.join(" ")))
         } else {
             None
@@ -90,21 +88,6 @@ fn check_packages(deps: &[String]) -> (Vec<String>, PackageCheck) {
             Vec::new(),
             PackageCheck::Unsupported("no dependency list for this platform".to_string()),
         );
-    }
-    if cfg!(target_os = "macos") {
-        return match brew_installed() {
-            Some(installed) => (
-                deps.iter()
-                    .filter(|d| !installed.iter().any(|i| i == *d))
-                    .cloned()
-                    .collect(),
-                PackageCheck::Checked,
-            ),
-            None => (
-                Vec::new(),
-                PackageCheck::Unsupported("brew is not installed".to_string()),
-            ),
-        };
     }
     if cfg!(target_os = "linux") {
         if !which_exists("pacman") {
@@ -143,17 +126,6 @@ fn parse_pacman_output(stdout: &str) -> Vec<String> {
         .filter(|l| !l.is_empty())
         .map(str::to_string)
         .collect()
-}
-
-fn brew_installed() -> Option<Vec<String>> {
-    let out = Command::new("brew")
-        .args(["list", "--formula", "-1"])
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    Some(parse_pacman_output(&String::from_utf8_lossy(&out.stdout)))
 }
 
 #[cfg(test)]

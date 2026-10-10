@@ -19,8 +19,7 @@ A personal Doom WAD library manager inspired by [beets](https://beets.io). Impor
 ## Installation
 
 Each [GitHub release](https://github.com/mythofmeat/caco/releases) carries a
-prebuilt Arch package and a macOS app (Apple silicon). Otherwise caco is built
-from source.
+prebuilt Arch package. Otherwise caco is built from source.
 
 ### From source
 
@@ -40,18 +39,6 @@ makepkg -si
 
 `makepkg` clones the tag matching the PKGBUILD's `pkgver`, so it builds the
 last release rather than the working tree.
-
-### macOS
-
-```bash
-brew tap mythofmeat/caco https://github.com/mythofmeat/caco
-brew install --cask mythofmeat/caco/caco
-```
-
-The repository is its own tap. The cask installs the prebuilt `Caco.app` from
-the latest release into `/Applications` and links `caco` onto your `PATH`;
-nothing is compiled. The app is signed ad hoc rather than notarised, so the
-cask clears its quarantine flag on install. Apple silicon only.
 
 ### Versioning
 
@@ -213,12 +200,13 @@ Caco writes only the settings that differ from their defaults, so `config.toml` 
 
 Caco splits its files by whether they can be regenerated. The **data**
 directory is worth carrying between machines; the **cache** directory is
-disposable and rebuilds itself on demand. Both follow platform convention:
+disposable and rebuilds itself on demand. Both follow the XDG base directory
+spec:
 
-| | Linux | macOS |
-|---|---|---|
-| Data | `$XDG_DATA_HOME/caco`, else `~/.local/share/caco` | `~/Library/Application Support/caco` |
-| Cache | `$XDG_CACHE_HOME/caco`, else `~/.cache/caco` | `~/Library/Caches/caco` |
+| | |
+|---|---|
+| Data | `$XDG_DATA_HOME/caco`, else `~/.local/share/caco` |
+| Cache | `$XDG_CACHE_HOME/caco`, else `~/.cache/caco` |
 
 Paths in the two tables below are relative to those roots.
 
@@ -270,7 +258,7 @@ leaves user data in a bad state. To recover:
 
 ```bash
 # stop any running caco instances, then:
-data="${XDG_DATA_HOME:-$HOME/.local/share}/caco"   # macOS: ~/Library/Application\ Support/caco
+data="${XDG_DATA_HOME:-$HOME/.local/share}/caco"
 cp "$data/library.db" "$data/library.db.broken"
 cp "$data/backups/pre-migration-<N>.db" "$data/library.db"
 ```
@@ -316,7 +304,7 @@ prefixes live in the cache with the WAD downloads — deleting the cache costs
 a rebuild, never a reconfiguration.
 
 Before building, caco checks the toolchain and asks your package manager
-(`pacman -T` or `brew list`) which dependencies are missing, and shows the
+(`pacman -T`) which dependencies are missing, and shows the
 exact install command. Missing packages warn rather than block: caco cannot
 tell an optional dependency from a required one, so cmake stays the
 authority.
@@ -340,7 +328,6 @@ args = ["-DCMAKE_BUILD_TYPE=Release", "-DINSTALL_PK3_PATH=bin"]
 
 [uzdoom.deps]
 arch = ["cmake", "ninja", "openal", "sdl2-compat", "libwebp", "bzip2", "libvpx", "zlib"]
-brew = ["cmake", "ninja", "openal-soft", "sdl2", "webp", "bzip2", "libvpx"]
 ```
 
 `-DINSTALL_PK3_PATH=bin` on uzdoom is load-bearing. Its default install puts
