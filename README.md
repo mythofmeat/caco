@@ -19,7 +19,8 @@ A personal Doom WAD library manager inspired by [beets](https://beets.io). Impor
 ## Installation
 
 Each [GitHub release](https://github.com/mythofmeat/caco/releases) carries a
-prebuilt Arch package. Otherwise caco is built from source.
+prebuilt Arch package for x86_64 and a Fedora package for aarch64 (Asahi
+Linux). Otherwise caco is built from source.
 
 ### From source
 
@@ -39,6 +40,23 @@ makepkg -si
 
 `makepkg` clones the tag matching the PKGBUILD's `pkgver`, so it builds the
 last release rather than the working tree.
+
+### Fedora
+
+Install the `.rpm` from a release with `sudo dnf install ./caco-*.rpm`. It is
+built on Fedora 43 and installs on 43 and anything newer. To build one
+yourself, with Rust from [rustup](https://rustup.rs):
+
+```bash
+sudo dnf install rpm-build gcc desktop-file-utils
+git clone https://github.com/mythofmeat/caco && cd caco
+version=$(sed -n 's/^Version: *//p' contrib/fedora/caco.spec)
+git archive --prefix="caco-$version/" -o "caco-$version.tar.gz" HEAD
+rpmbuild -bb contrib/fedora/caco.spec --define "_sourcedir $PWD"
+```
+
+Unlike `makepkg`, this packages the checked-out commit. The package lands
+under `~/rpmbuild/RPMS/`.
 
 ### Versioning
 

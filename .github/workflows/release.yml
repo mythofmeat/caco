@@ -39,6 +39,7 @@ jobs:
             sed -n '/^\[workspace\.package\]$/,/^\[/s/^version = "\(.*\)"$/\1/p' Cargo.toml
             sed -n '/^name = "caco\(-core\|-sources\)\?"$/{n;s/^version = "\(.*\)"$/\1/p}' Cargo.lock
             sed -n 's/^pkgver=//p' contrib/arch/PKGBUILD
+            sed -n 's/^Version: *//p' contrib/fedora/caco.spec
           }
           current=$(versions | sort -u)
           if [ "$(printf '%s\n' "$current" | wc -l)" -ne 1 ]; then
@@ -54,6 +55,7 @@ jobs:
           sed -i "/^\[workspace\.package\]$/,/^\[/s/^version = \".*\"$/version = \"$version\"/" Cargo.toml
           sed -i "/^name = \"caco\(-core\|-sources\)\?\"$/{n;s/^version = .*/version = \"$version\"/}" Cargo.lock
           sed -i -e "s/^pkgver=.*/pkgver=$version/" -e "s/^pkgrel=.*/pkgrel=1/" contrib/arch/PKGBUILD
+          sed -i -e "s/^\(Version: *\).*/\1$version/" -e "s/^\(Release: *\)[0-9]*/\11/" contrib/fedora/caco.spec
           if [ "$(versions | sort -u)" != "$version" ]; then
             echo "::error::Not every version file moved to $version."
             exit 1
@@ -65,32 +67,14 @@ jobs:
           git push --atomic origin HEAD "refs/tags/v$version"
           echo "tag=v$version" >>"$GITHUB_OUTPUT"
 
-  arch:
+  packages:
     needs: version
-    runs-on: ubuntu-24.04
-    container: archlinux:base-devel
-    steps:
-      - run: pacman -Syu --noconfirm git
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.version.outputs.tag }}
-      # makepkg refuses to run as root, and makepkg --syncdeps installs the build dependencies with sudo.
-      - run: |
-          useradd --create-home builder
-          echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
-      - run: |
-          mkdir /build
-          cp contrib/arch/PKGBUILD /build/
-          chown -R builder /build
-          cd /build
-          sudo -u builder makepkg --syncdeps --noconfirm
-      - uses: actions/upload-artifact@v7
-        with:
-          name: arch
-          path: /build/*.pkg.tar.zst
+    uses: ./.github/workflows/package.yml
+    with:
+      ref: ${{ needs.version.outputs.tag }}
 
   release:
-    needs: [version, arch]
+    needs: [version, packages]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

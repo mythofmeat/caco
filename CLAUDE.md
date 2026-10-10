@@ -373,33 +373,46 @@ Never write non-conventional commit subjects (e.g. `Add foo`, `Fix bar`, single-
 
 ## Versioning and packaging
 
-Three workflows in `.github/workflows/`, mirroring the ones in shore so the two
+Four workflows in `.github/workflows/`, mirroring the ones in shore so the two
 projects release the same way:
 
 - `verify.yml` — fmt, clippy (`-D warnings`, since the workspace has no
   `[lints]` table) and `cargo test --workspace` on every pull request and push
   to `main`. The job is named `rust` so a ruleset can require it. It exports
-  `CFLAGS=-O2`, as makepkg does: v4.1.6 tagged and then failed its Arch build
-  because `cc` 1.6 stopped `aws-lc-sys` from forcing `-O0` on jitterentropy,
-  and a CFLAGS-free verify could not see it. `cc` is pinned `=1.5.1` in the
-  workspace manifest until that is fixed upstream.
+  `CFLAGS=-O2`, as makepkg and rpmbuild do: v4.1.6 tagged and then failed its
+  Arch build because `cc` 1.6 stopped `aws-lc-sys` from forcing `-O0` on
+  jitterentropy, and a CFLAGS-free verify could not see it. `cc` is pinned
+  `=1.5.1` in the workspace manifest until that is fixed upstream.
 - `update-deps.yml` — every Sunday, `cargo upgrade --incompatible` plus
   `cargo update`, opened as a pull request on `deps/weekly`. It uses the
   `DEPS_PR_TOKEN` secret because a pull request opened with the default
   `GITHUB_TOKEN` would never start `verify`. Merging it does not release.
+- `package.yml` — builds the Arch package for x86_64 in an
+  `archlinux:base-devel` container and the Fedora package for aarch64 in a
+  `fedora:43` container on GitHub's arm64 runner. The release calls it with
+  the new tag; it also runs on any pull request that touches `contrib/`, the
+  installed assets or itself, since nothing else would catch a broken recipe
+  before a release.
 - `release.yml` — started by hand from the Actions tab with `patch`, `minor`
   or `major`. It runs `verify`, then bumps every version file, commits
   `chore(release): vX.Y.Z`, tags it and pushes both atomically (refusing if
-  started from anything but `main`, or if the version files disagree), builds
-  the Arch package from the tag in an `archlinux:base-devel` container, and
-  creates the GitHub release with it and generated notes.
+  started from anything but `main`, or if the version files disagree), runs
+  `package` on the tag, and creates the GitHub release with both packages and
+  generated notes.
 
 Never bump the version by hand; the release workflow is the only writer. The
 version files it moves together are the root `Cargo.toml`, the three
 `caco*` entries in `Cargo.lock`, the PKGBUILD's `pkgver` (with `pkgrel`
-reset to 1). A new workspace crate
-needs adding to its `Cargo.lock` pattern, or the agreement check fails the next
-release.
+reset to 1) and the Fedora spec's `Version` (with `Release` reset to 1). A new
+workspace crate needs adding to its `Cargo.lock` pattern, or the agreement
+check fails the next release.
+
+Nothing in this repository publishes the packages anywhere but the GitHub
+release. A scheduled job on the author's Gitea polls the latest release and
+mirrors its `.pkg.tar.zst` and `.rpm` into the Arch and RPM registries there.
+It picks the files out by extension and reads each package's name and version
+from the file name, so the release must attach the packages themselves under
+the names makepkg and rpmbuild give them.
 
 **The PKGBUILD clones the tag over HTTPS** (`#tag=v$pkgver`), which needs
 the repository to be public. It was private until the macOS cask, and the
@@ -407,6 +420,20 @@ the repository to be public. It was private until the macOS cask, and the
 `/etc/makepkg.d/gitconfig` (makepkg sets `GIT_CONFIG_GLOBAL=/dev/null`, so
 nothing else is read). `makepkg` runs `check()`, so `cargo test --workspace`
 gates every package build.
+
+**The Fedora package is for the author's Asahi MacBook**, which replaced the
+macOS cask. `contrib/fedora/caco.spec` builds from a `git archive` of the
+checkout, so unlike the PKGBUILD it packages the commit in hand. Cargo comes
+from rustup rather than Fedora, since the weekly dependency updates can need a
+newer Rust than Fedora ships. `%build` and `%check` unset Fedora's
+`RUSTFLAGS`, which add full debug info and turn stripping off and so override
+the workspace's release profile. `%check` runs `cargo test --workspace`, as
+`check()` does, and is the only place the tests run on aarch64. The spec's
+`Requires` name the libraries winit and wgpu `dlopen`, which rpm's dependency
+scan cannot see: a minimal install without them died at startup under X11 on
+a missing libXcursor. They come from `/proc/<pid>/maps` of a running caco
+under Xvfb and headless weston, so re-derive them that way after a winit or
+wgpu upgrade rather than guessing.
 
 **The version the binary reports comes from `Cargo.toml`.** The root
 `[workspace.package] version` is the single source; every crate inherits it via

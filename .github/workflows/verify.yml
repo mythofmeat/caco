@@ -18,8 +18,8 @@ jobs:
   rust:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    # makepkg exports CFLAGS with -O2 and the arch release job builds under it; a plain cargo run
-    # exports none. Without this, a C dependency that breaks under optimisation flags passes here
+    # makepkg and rpmbuild export CFLAGS with -O2 and the package jobs build under it; a plain cargo
+    # run exports none. Without this, a C dependency that breaks under optimisation flags passes here
     # and fails only after the release has already pushed its tag (v4.1.6, aws-lc-sys + cc 1.6).
     env:
       CFLAGS: -O2
