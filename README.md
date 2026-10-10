@@ -322,10 +322,11 @@ prefixes live in the cache with the WAD downloads — deleting the cache costs
 a rebuild, never a reconfiguration.
 
 Before building, caco checks the toolchain and asks your package manager
-(`pacman -T`) which dependencies are missing, and shows the
-exact install command. Missing packages warn rather than block: caco cannot
-tell an optional dependency from a required one, so cmake stays the
-authority.
+which dependencies are missing — `pacman -T` on Arch, `rpm -q` on Fedora, and
+the same on distributions derived from either — and shows the exact install
+command. Elsewhere it checks only the toolchain. Missing packages warn rather
+than block: caco cannot tell an optional dependency from a required one, so
+cmake stays the authority.
 
 Recipes for `nyan-doom` and `uzdoom` ship built in. To pin a ref, add build
 flags or attach patches, drop a file in `sourceports/` inside the data directory — any
@@ -345,7 +346,9 @@ generator = "Ninja"
 args = ["-DCMAKE_BUILD_TYPE=Release", "-DINSTALL_PK3_PATH=bin"]
 
 [uzdoom.deps]
-arch = ["cmake", "ninja", "openal", "sdl2-compat", "libwebp", "bzip2", "libvpx", "zlib"]
+arch = ["cmake", "ninja", "openal", "sdl2-compat", "libwebp", "bzip2", "libvpx", "zlib", "glib2"]
+fedora = ["gcc-c++", "cmake", "ninja-build", "openal-soft-devel", "sdl2-compat-devel",
+          "libwebp-devel", "bzip2-devel", "libvpx-devel", "zlib-ng-compat-devel", "glib2-devel"]
 ```
 
 `-DINSTALL_PK3_PATH=bin` on uzdoom is load-bearing. Its default install puts

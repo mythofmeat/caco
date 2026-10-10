@@ -93,7 +93,7 @@ pub struct SourceportsDialogState {
     checking_versions: Option<String>,
     version_error: Option<(String, String)>,
     /// Cached pre-flight for the selected sourceport. Re-run on selection change
-    /// rather than per frame — it shells out to pacman.
+    /// rather than per frame — it shells out to the package manager.
     doctor: Option<DoctorReport>,
     clean: bool,
     /// Name of the sourceport being built, if any.

@@ -23,6 +23,15 @@ arch = [
     "sdl2-compat", "sdl2_image", "sdl2_mixer", "libvorbis", "libsndfile",
     "libzip", "glu", "mesa",
 ]
+# zlib-ng-compat-static because the CMake config zlib-ng-compat-devel ships
+# names libz.a, and nyan-doom's find_package(ZLIB) dies at configure without it.
+fedora = [
+    "gcc-c++", "cmake", "ninja-build", "pkgconf-pkg-config",
+    "libxmp-devel", "fluidsynth-devel", "libmad-devel", "portmidi-devel",
+    "sdl2-compat-devel", "SDL2_image-devel", "SDL2_mixer-devel",
+    "libvorbis-devel", "libsndfile-devel", "libzip-devel", "mesa-libGLU-devel",
+    "mesa-libGL-devel", "zlib-ng-compat-static",
+]
 
 [uzdoom]
 repo = "https://github.com/UZDoom/uzdoom"
@@ -44,7 +53,14 @@ args = ["-DCMAKE_BUILD_TYPE=Release", "-DINSTALL_PK3_PATH=bin"]
 install = true
 
 [uzdoom.deps]
+# glib2 for the fluidsynth bundled inside ZMusic, whose configure requires
+# glib-2.0 and stops without it.
 arch = [
     "cmake", "ninja", "openal", "sdl2-compat", "libwebp", "bzip2", "libvpx",
-    "waylandpp", "zlib",
+    "waylandpp", "zlib", "glib2",
+]
+fedora = [
+    "gcc-c++", "cmake", "ninja-build", "openal-soft-devel", "sdl2-compat-devel",
+    "libwebp-devel", "bzip2-devel", "libvpx-devel", "waylandpp-devel",
+    "zlib-ng-compat-devel", "glib2-devel",
 ]
