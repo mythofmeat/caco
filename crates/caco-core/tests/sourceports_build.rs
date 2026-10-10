@@ -5,7 +5,7 @@
 //! after touching the build driver:
 //!
 //! ```bash
-//! cargo test -p caco-core --test ports_build -- --ignored --nocapture
+//! cargo test -p caco-core --test sourceports_build -- --ignored --nocapture
 //! ```
 //!
 //! Every path it uses comes from a tempdir. It must never call

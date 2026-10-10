@@ -1,8 +1,8 @@
 # Built-in sourceport build recipes.
 #
-# A file dropped in the recipe directory (see `config::port_recipe_dir`) is
-# merged over this set by name, so a user can pin a ref, add build args or
-# attach patches without patching the binary.
+# A file dropped in the recipe directory (see
+# `config::sourceport_recipe_dir`) is merged over this set by name, so a user
+# can pin a ref, add build args or attach patches without patching the binary.
 
 [nyan-doom]
 repo = "https://github.com/andrikpowell/nyan-doom"

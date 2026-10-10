@@ -8,8 +8,8 @@
 //!
 //! `egui_kittest` renders through wgpu with no display server, so this runs
 //! over ssh, in a tty, or in CI with a software adapter. It is `#[ignore]`d
-//! for the same reason `ports_build.rs` is: `cargo test --workspace` must not
-//! depend on a GPU. Run it explicitly:
+//! for the same reason `sourceports_build.rs` is: `cargo test --workspace`
+//! must not depend on a GPU. Run it explicitly:
 //!
 //! ```bash
 //! cargo test -p caco --test screenshots -- --ignored --nocapture
