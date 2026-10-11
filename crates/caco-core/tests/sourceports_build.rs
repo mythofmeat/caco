@@ -5,7 +5,7 @@
 //! after touching the build driver:
 //!
 //! ```bash
-//! cargo test -p caco-core --test ports_build -- --ignored --nocapture
+//! cargo test -p caco-core --test sourceports_build -- --ignored --nocapture
 //! ```
 //!
 //! Every path it uses comes from a tempdir. It must never call
@@ -165,7 +165,7 @@ fn cancel_stops_a_build_in_flight() {
 /// Not an assertion — a machine with everything installed and a machine with
 /// nothing are both valid. It exists so `doctor` can be eyeballed against a
 /// real package manager, which is the only way to know the `pacman -T` and
-/// `brew list` parsing is right.
+/// `rpm -q --whatprovides` parsing is right.
 #[test]
 #[ignore = "reports on the host machine"]
 fn doctor_report_for_this_machine() {

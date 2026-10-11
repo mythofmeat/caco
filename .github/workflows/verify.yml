@@ -18,8 +18,8 @@ jobs:
   rust:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    # makepkg exports CFLAGS with -O2 and the arch release job builds under it; a plain cargo run
-    # exports none. Without this, a C dependency that breaks under optimisation flags passes here
+    # makepkg and rpmbuild export CFLAGS with -O2 and the package jobs build under it; a plain cargo
+    # run exports none. Without this, a C dependency that breaks under optimisation flags passes here
     # and fails only after the release has already pushed its tag (v4.1.6, aws-lc-sys + cc 1.6).
     env:
       CFLAGS: -O2
@@ -32,17 +32,3 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
 
-  homebrew:
-    runs-on: macos-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-      # The runner image's brew lags; audit against the brew users install with, which is the one
-      # that knows postflight_steps and rejects the legacy postflight block.
-      - run: brew update
-      # brew style and audit only apply the cask rules to a tapped cask, so the checkout is linked in as the mythofmeat/caco tap.
-      - run: |
-          mkdir -p "$(brew --repository)/Library/Taps/mythofmeat"
-          ln -s "$GITHUB_WORKSPACE" "$(brew --repository)/Library/Taps/mythofmeat/homebrew-caco"
-      - run: brew style --cask mythofmeat/caco/caco
-      - run: brew audit --cask --strict mythofmeat/caco/caco

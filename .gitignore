@@ -4,7 +4,6 @@ contrib/arch/src/
 contrib/arch/caco/
 contrib/arch/caco-*.pkg.tar.zst
 contrib/arch/caco-*.tar.gz
-dist/
 
 # Rust
 target/

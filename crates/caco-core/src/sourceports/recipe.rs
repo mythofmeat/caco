@@ -47,27 +47,16 @@ fn default_true() -> bool {
     true
 }
 
-/// System packages a recipe needs, per platform package manager.
+/// System packages a recipe needs, one list per distribution. The doctor
+/// picks the list with [`super::doctor::Distro`].
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DepSpec {
     #[serde(default)]
     pub arch: Vec<String>,
+    /// Fedora splits headers into `-devel` packages and does not assume a
+    /// compiler the way Arch's base-devel does, so this list names both.
     #[serde(default)]
-    pub brew: Vec<String>,
-}
-
-impl DepSpec {
-    /// The dependency list for the platform caco is running on, or an empty
-    /// slice where caco has no package list to offer.
-    pub fn for_host(&self) -> &[String] {
-        if cfg!(target_os = "macos") {
-            &self.brew
-        } else if cfg!(target_os = "linux") {
-            &self.arch
-        } else {
-            &[]
-        }
-    }
+    pub fedora: Vec<String>,
 }
 
 /// Everything needed to turn a git URL into a runnable sourceport.
