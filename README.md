@@ -19,8 +19,13 @@ A personal Doom WAD library manager inspired by [beets](https://beets.io). Impor
 ## Installation
 
 Each [GitHub release](https://github.com/mythofmeat/caco/releases) carries a
+<<<<<<< HEAD
 prebuilt Arch package for x86_64 and a Fedora package for aarch64 (Asahi
 Linux). Otherwise caco is built from source.
+=======
+prebuilt Arch package and a macOS app (Apple silicon). Otherwise caco is built
+from source.
+>>>>>>> parent of 7533371 (chore: drop macOS support)
 
 ### From source
 
@@ -41,6 +46,7 @@ makepkg -si
 `makepkg` clones the tag matching the PKGBUILD's `pkgver`, so it builds the
 last release rather than the working tree.
 
+<<<<<<< HEAD
 ### Fedora
 
 Install the `.rpm` from a release with `sudo dnf install ./caco-*.rpm`. It is
@@ -57,6 +63,19 @@ rpmbuild -bb contrib/fedora/caco.spec --define "_sourcedir $PWD"
 
 Unlike `makepkg`, this packages the checked-out commit. The package lands
 under `~/rpmbuild/RPMS/`.
+=======
+### macOS
+
+```bash
+brew tap mythofmeat/caco https://github.com/mythofmeat/caco
+brew install --cask mythofmeat/caco/caco
+```
+
+The repository is its own tap. The cask installs the prebuilt `Caco.app` from
+the latest release into `/Applications` and links `caco` onto your `PATH`;
+nothing is compiled. The app is signed ad hoc rather than notarised, so the
+cask clears its quarantine flag on install. Apple silicon only.
+>>>>>>> parent of 7533371 (chore: drop macOS support)
 
 ### Versioning
 
@@ -218,13 +237,12 @@ Caco writes only the settings that differ from their defaults, so `config.toml` 
 
 Caco splits its files by whether they can be regenerated. The **data**
 directory is worth carrying between machines; the **cache** directory is
-disposable and rebuilds itself on demand. Both follow the XDG base directory
-spec:
+disposable and rebuilds itself on demand. Both follow platform convention:
 
-| | |
-|---|---|
-| Data | `$XDG_DATA_HOME/caco`, else `~/.local/share/caco` |
-| Cache | `$XDG_CACHE_HOME/caco`, else `~/.cache/caco` |
+| | Linux | macOS |
+|---|---|---|
+| Data | `$XDG_DATA_HOME/caco`, else `~/.local/share/caco` | `~/Library/Application Support/caco` |
+| Cache | `$XDG_CACHE_HOME/caco`, else `~/.cache/caco` | `~/Library/Caches/caco` |
 
 Paths in the two tables below are relative to those roots.
 
@@ -276,7 +294,7 @@ leaves user data in a bad state. To recover:
 
 ```bash
 # stop any running caco instances, then:
-data="${XDG_DATA_HOME:-$HOME/.local/share}/caco"
+data="${XDG_DATA_HOME:-$HOME/.local/share}/caco"   # macOS: ~/Library/Application\ Support/caco
 cp "$data/library.db" "$data/library.db.broken"
 cp "$data/backups/pre-migration-<N>.db" "$data/library.db"
 ```
@@ -322,11 +340,18 @@ prefixes live in the cache with the WAD downloads — deleting the cache costs
 a rebuild, never a reconfiguration.
 
 Before building, caco checks the toolchain and asks your package manager
+<<<<<<< HEAD
 which dependencies are missing — `pacman -T` on Arch, `rpm -q` on Fedora, and
 the same on distributions derived from either — and shows the exact install
 command. Elsewhere it checks only the toolchain. Missing packages warn rather
 than block: caco cannot tell an optional dependency from a required one, so
 cmake stays the authority.
+=======
+(`pacman -T` or `brew list`) which dependencies are missing, and shows the
+exact install command. Missing packages warn rather than block: caco cannot
+tell an optional dependency from a required one, so cmake stays the
+authority.
+>>>>>>> parent of 7533371 (chore: drop macOS support)
 
 Recipes for `nyan-doom` and `uzdoom` ship built in. To pin a ref, add build
 flags or attach patches, drop a file in `sourceports/` inside the data directory — any
@@ -346,9 +371,14 @@ generator = "Ninja"
 args = ["-DCMAKE_BUILD_TYPE=Release", "-DINSTALL_PK3_PATH=bin"]
 
 [uzdoom.deps]
+<<<<<<< HEAD
 arch = ["cmake", "ninja", "openal", "sdl2-compat", "libwebp", "bzip2", "libvpx", "zlib", "glib2"]
 fedora = ["gcc-c++", "cmake", "ninja-build", "openal-soft-devel", "sdl2-compat-devel",
           "libwebp-devel", "bzip2-devel", "libvpx-devel", "zlib-ng-compat-devel", "glib2-devel"]
+=======
+arch = ["cmake", "ninja", "openal", "sdl2-compat", "libwebp", "bzip2", "libvpx", "zlib"]
+brew = ["cmake", "ninja", "openal-soft", "sdl2", "webp", "bzip2", "libvpx"]
+>>>>>>> parent of 7533371 (chore: drop macOS support)
 ```
 
 `-DINSTALL_PK3_PATH=bin` on uzdoom is load-bearing. Its default install puts

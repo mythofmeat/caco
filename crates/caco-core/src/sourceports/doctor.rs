@@ -126,7 +126,11 @@ impl Distro {
 /// Which package manager caco was able to ask.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PackageCheck {
+<<<<<<< HEAD
     /// Packages were checked against the distribution's package manager.
+=======
+    /// Packages were checked against `pacman -T` or `brew list`.
+>>>>>>> parent of 7533371 (chore: drop macOS support)
     Checked,
     /// No package list is known for this distribution, or its package manager
     /// could not be asked. Deps are reported unverified.
@@ -170,7 +174,17 @@ impl DoctorReport {
                 all.push(package);
             }
         }
+<<<<<<< HEAD
         Some(distro.install_command(&all))
+=======
+        if cfg!(target_os = "macos") {
+            Some(format!("brew install {}", all.join(" ")))
+        } else if cfg!(target_os = "linux") && which_exists("pacman") {
+            Some(format!("sudo pacman -S --needed {}", all.join(" ")))
+        } else {
+            None
+        }
+>>>>>>> parent of 7533371 (chore: drop macOS support)
     }
 }
 
@@ -207,9 +221,43 @@ fn check_packages(distro: Option<Distro>, deps: &DepSpec) -> (Vec<String>, Packa
     if packages.is_empty() {
         return unchecked(format!("the recipe lists no {} packages", distro.name()));
     }
+<<<<<<< HEAD
     match distro.missing(packages) {
         Some(missing) => (missing, PackageCheck::Checked),
         None => unchecked(format!("could not ask {}", distro.package_manager())),
+=======
+    if cfg!(target_os = "macos") {
+        return match brew_installed() {
+            Some(installed) => (
+                deps.iter()
+                    .filter(|d| !installed.iter().any(|i| i == *d))
+                    .cloned()
+                    .collect(),
+                PackageCheck::Checked,
+            ),
+            None => (
+                Vec::new(),
+                PackageCheck::Unsupported("brew is not installed".to_string()),
+            ),
+        };
+    }
+    if cfg!(target_os = "linux") {
+        if !which_exists("pacman") {
+            return (
+                Vec::new(),
+                PackageCheck::Unsupported(
+                    "package names are Arch's; check them against your distribution".to_string(),
+                ),
+            );
+        }
+        return match pacman_missing(deps) {
+            Some(missing) => (missing, PackageCheck::Checked),
+            None => (
+                Vec::new(),
+                PackageCheck::Unsupported("pacman -T failed".to_string()),
+            ),
+        };
+>>>>>>> parent of 7533371 (chore: drop macOS support)
     }
 }
 
@@ -222,6 +270,7 @@ fn parse_pacman_output(stdout: &str) -> Vec<String> {
         .collect()
 }
 
+<<<<<<< HEAD
 /// `rpm -q --whatprovides` prints the providing package for each capability
 /// it can satisfy and `no package provides X` for each it cannot.
 fn parse_rpm_output(stdout: &str) -> Vec<String> {
@@ -230,6 +279,17 @@ fn parse_rpm_output(stdout: &str) -> Vec<String> {
         .filter_map(|l| l.trim().strip_prefix("no package provides "))
         .map(str::to_string)
         .collect()
+=======
+fn brew_installed() -> Option<Vec<String>> {
+    let out = Command::new("brew")
+        .args(["list", "--formula", "-1"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    Some(parse_pacman_output(&String::from_utf8_lossy(&out.stdout)))
+>>>>>>> parent of 7533371 (chore: drop macOS support)
 }
 
 #[cfg(test)]
