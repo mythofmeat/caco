@@ -9,21 +9,26 @@ use std::process::Command;
 
 use super::recipe::{DepSpec, SourceportRecipe};
 
-/// The distributions caco keeps package lists for.
+/// The package ecosystems caco keeps lists for: two Linux distributions and
+/// Homebrew on macOS.
 ///
-/// A recipe carries one list per distribution because the names differ —
-/// Arch's `sdl2_image` is Fedora's `SDL2_image-devel` — so the doctor has to
-/// know which list applies before it can ask anything.
+/// A recipe carries one list per host because the names differ — Arch's
+/// `sdl2_image` is Fedora's `SDL2_image-devel` — so the doctor has to know
+/// which list applies before it can ask anything.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Distro {
+pub enum Host {
     Arch,
     Fedora,
+    Macos,
 }
 
-impl Distro {
-    /// The host's distribution per os-release(5), or `None` when caco has no
-    /// package list for it.
-    pub fn detect() -> Option<Distro> {
+impl Host {
+    /// The host caco is running on, or `None` when caco has no package list
+    /// for it. On Linux that is the distribution per os-release(5).
+    pub fn detect() -> Option<Host> {
+        if cfg!(target_os = "macos") {
+            return Some(Host::Macos);
+        }
         ["/etc/os-release", "/usr/lib/os-release"]
             .iter()
             .find_map(|path| std::fs::read_to_string(path).ok())
@@ -33,7 +38,7 @@ impl Distro {
     /// `ID` first, then each `ID_LIKE` entry in order, so a derivative such as
     /// EndeavourOS or the Fedora Asahi Remix gets the list of the distribution
     /// it is built from.
-    fn from_os_release(text: &str) -> Option<Distro> {
+    fn from_os_release(text: &str) -> Option<Host> {
         let field = |key: &str| {
             text.lines().find_map(|line| {
                 let value = line.strip_prefix(key)?.strip_prefix('=')?;
@@ -44,30 +49,33 @@ impl Distro {
             .into_iter()
             .chain(field("ID_LIKE").into_iter().flat_map(str::split_whitespace))
             .find_map(|id| match id {
-                "arch" => Some(Distro::Arch),
-                "fedora" => Some(Distro::Fedora),
+                "arch" => Some(Host::Arch),
+                "fedora" => Some(Host::Fedora),
                 _ => None,
             })
     }
 
     fn name(self) -> &'static str {
         match self {
-            Distro::Arch => "Arch",
-            Distro::Fedora => "Fedora",
+            Host::Arch => "Arch",
+            Host::Fedora => "Fedora",
+            Host::Macos => "Homebrew",
         }
     }
 
     fn package_manager(self) -> &'static str {
         match self {
-            Distro::Arch => "pacman",
-            Distro::Fedora => "rpm",
+            Host::Arch => "pacman",
+            Host::Fedora => "rpm",
+            Host::Macos => "brew",
         }
     }
 
     fn packages(self, deps: &DepSpec) -> &[String] {
         match self {
-            Distro::Arch => &deps.arch,
-            Distro::Fedora => &deps.fedora,
+            Host::Arch => &deps.arch,
+            Host::Fedora => &deps.fedora,
+            Host::Macos => &deps.brew,
         }
     }
 
@@ -75,7 +83,7 @@ impl Distro {
     /// `ninja-build`, and `dnf install ninja` finds nothing.
     fn tool_package(self, tool: &str) -> &str {
         match (self, tool) {
-            (Distro::Fedora, "ninja") => "ninja-build",
+            (Host::Fedora, "ninja") => "ninja-build",
             _ => tool,
         }
     }
@@ -83,54 +91,71 @@ impl Distro {
     fn install_command(self, packages: &[&str]) -> String {
         let packages = packages.join(" ");
         match self {
-            Distro::Arch => format!("sudo pacman -S --needed {packages}"),
-            Distro::Fedora => format!("sudo dnf install {packages}"),
+            Host::Arch => format!("sudo pacman -S --needed {packages}"),
+            Host::Fedora => format!("sudo dnf install {packages}"),
+            Host::Macos => format!("brew install {packages}"),
         }
     }
 
     /// Which of `packages` are not installed, or `None` when the package
     /// manager could not be asked.
-    ///
-    /// Both queries exit non-zero exactly when something is missing, so a
-    /// failure that names nothing is the query itself failing, not a machine
-    /// with everything installed.
     fn missing(self, packages: &[String]) -> Option<Vec<String>> {
-        let (out, parse): (_, fn(&str) -> Vec<String>) = match self {
+        match self {
             // The "which of these are unsatisfied" query: it prints the unmet
             // ones, one per line.
-            Distro::Arch => (
-                Command::new("pacman").arg("-T").args(packages).output(),
+            Host::Arch => query_missing(
+                Command::new("pacman").arg("-T").args(packages),
                 parse_pacman_output,
             ),
             // --whatprovides, so a list may name a capability as well as a
             // package. LC_ALL because the "no package provides" line is
             // translated.
-            Distro::Fedora => (
+            Host::Fedora => query_missing(
                 Command::new("rpm")
                     .args(["-q", "--whatprovides"])
                     .args(packages)
-                    .env("LC_ALL", "C")
-                    .output(),
+                    .env("LC_ALL", "C"),
                 parse_rpm_output,
             ),
-        };
-        let out = out.ok()?;
-        let missing = parse(&String::from_utf8_lossy(&out.stdout));
-        if !out.status.success() && missing.is_empty() {
-            return None;
+            // brew has no "which of these is missing" query, so list every
+            // installed formula and subtract.
+            Host::Macos => {
+                let out = Command::new("brew")
+                    .args(["list", "--formula", "-1"])
+                    .output()
+                    .ok()?;
+                if !out.status.success() {
+                    return None;
+                }
+                let installed = parse_pacman_output(&String::from_utf8_lossy(&out.stdout));
+                Some(
+                    packages
+                        .iter()
+                        .filter(|p| !installed.contains(p))
+                        .cloned()
+                        .collect(),
+                )
+            }
         }
-        Some(missing)
     }
+}
+
+/// Run a query that exits non-zero exactly when something is missing and
+/// names what in its output, so a failure that names nothing is the query
+/// itself failing, not a machine with everything installed.
+fn query_missing(command: &mut Command, parse: fn(&str) -> Vec<String>) -> Option<Vec<String>> {
+    let out = command.output().ok()?;
+    let missing = parse(&String::from_utf8_lossy(&out.stdout));
+    if !out.status.success() && missing.is_empty() {
+        return None;
+    }
+    Some(missing)
 }
 
 /// Which package manager caco was able to ask.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PackageCheck {
-<<<<<<< HEAD
-    /// Packages were checked against the distribution's package manager.
-=======
-    /// Packages were checked against `pacman -T` or `brew list`.
->>>>>>> parent of 7533371 (chore: drop macOS support)
+    /// Packages were checked against the host's package manager.
     Checked,
     /// No package list is known for this distribution, or its package manager
     /// could not be asked. Deps are reported unverified.
@@ -148,7 +173,7 @@ pub struct DoctorReport {
     pub package_check: PackageCheck,
     /// Which distribution's names `missing_packages` uses, and so which
     /// package manager the install hint addresses.
-    pub distro: Option<Distro>,
+    pub host: Option<Host>,
 }
 
 impl DoctorReport {
@@ -163,28 +188,18 @@ impl DoctorReport {
 
     /// The command that would install everything missing, if caco knows one.
     pub fn install_hint(&self) -> Option<String> {
-        let distro = self.distro?;
+        let host = self.host?;
         if self.missing_packages.is_empty() && self.missing_tools.is_empty() {
             return None;
         }
         let mut all: Vec<&str> = self.missing_packages.iter().map(String::as_str).collect();
         for tool in &self.missing_tools {
-            let package = distro.tool_package(tool);
+            let package = host.tool_package(tool);
             if !all.contains(&package) {
                 all.push(package);
             }
         }
-<<<<<<< HEAD
-        Some(distro.install_command(&all))
-=======
-        if cfg!(target_os = "macos") {
-            Some(format!("brew install {}", all.join(" ")))
-        } else if cfg!(target_os = "linux") && which_exists("pacman") {
-            Some(format!("sudo pacman -S --needed {}", all.join(" ")))
-        } else {
-            None
-        }
->>>>>>> parent of 7533371 (chore: drop macOS support)
+        Some(host.install_command(&all))
     }
 }
 
@@ -195,69 +210,35 @@ pub fn doctor(recipe: &SourceportRecipe) -> DoctorReport {
         .filter(|t| crate::config::which(t).is_none())
         .collect();
 
-    let distro = Distro::detect();
-    let (missing_packages, package_check) = check_packages(distro, &recipe.deps);
+    let host = Host::detect();
+    let (missing_packages, package_check) = check_packages(host, &recipe.deps);
 
     DoctorReport {
         sourceport: recipe.name.clone(),
         missing_tools,
         missing_packages,
         package_check,
-        distro,
+        host,
     }
 }
 
 /// Ask the host package manager which of the recipe's packages are missing.
-fn check_packages(distro: Option<Distro>, deps: &DepSpec) -> (Vec<String>, PackageCheck) {
+fn check_packages(host: Option<Host>, deps: &DepSpec) -> (Vec<String>, PackageCheck) {
     let unchecked = |reason: String| (Vec::new(), PackageCheck::Unsupported(reason));
-    let Some(distro) = distro else {
+    let Some(host) = host else {
         return unchecked(
-            "caco keeps package lists for Arch and Fedora; check the recipe's against your \
-             distribution"
+            "caco keeps package lists for Arch, Fedora and Homebrew; check the recipe's \
+             against your distribution"
                 .to_string(),
         );
     };
-    let packages = distro.packages(deps);
+    let packages = host.packages(deps);
     if packages.is_empty() {
-        return unchecked(format!("the recipe lists no {} packages", distro.name()));
+        return unchecked(format!("the recipe lists no {} packages", host.name()));
     }
-<<<<<<< HEAD
-    match distro.missing(packages) {
+    match host.missing(packages) {
         Some(missing) => (missing, PackageCheck::Checked),
-        None => unchecked(format!("could not ask {}", distro.package_manager())),
-=======
-    if cfg!(target_os = "macos") {
-        return match brew_installed() {
-            Some(installed) => (
-                deps.iter()
-                    .filter(|d| !installed.iter().any(|i| i == *d))
-                    .cloned()
-                    .collect(),
-                PackageCheck::Checked,
-            ),
-            None => (
-                Vec::new(),
-                PackageCheck::Unsupported("brew is not installed".to_string()),
-            ),
-        };
-    }
-    if cfg!(target_os = "linux") {
-        if !which_exists("pacman") {
-            return (
-                Vec::new(),
-                PackageCheck::Unsupported(
-                    "package names are Arch's; check them against your distribution".to_string(),
-                ),
-            );
-        }
-        return match pacman_missing(deps) {
-            Some(missing) => (missing, PackageCheck::Checked),
-            None => (
-                Vec::new(),
-                PackageCheck::Unsupported("pacman -T failed".to_string()),
-            ),
-        };
->>>>>>> parent of 7533371 (chore: drop macOS support)
+        None => unchecked(format!("could not ask {}", host.package_manager())),
     }
 }
 
@@ -270,7 +251,6 @@ fn parse_pacman_output(stdout: &str) -> Vec<String> {
         .collect()
 }
 
-<<<<<<< HEAD
 /// `rpm -q --whatprovides` prints the providing package for each capability
 /// it can satisfy and `no package provides X` for each it cannot.
 fn parse_rpm_output(stdout: &str) -> Vec<String> {
@@ -279,17 +259,6 @@ fn parse_rpm_output(stdout: &str) -> Vec<String> {
         .filter_map(|l| l.trim().strip_prefix("no package provides "))
         .map(str::to_string)
         .collect()
-=======
-fn brew_installed() -> Option<Vec<String>> {
-    let out = Command::new("brew")
-        .args(["list", "--formula", "-1"])
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    Some(parse_pacman_output(&String::from_utf8_lossy(&out.stdout)))
->>>>>>> parent of 7533371 (chore: drop macOS support)
 }
 
 #[cfg(test)]
@@ -297,7 +266,7 @@ mod tests {
     use super::*;
 
     fn report(
-        distro: Option<Distro>,
+        host: Option<Host>,
         missing_tools: Vec<&str>,
         missing_packages: Vec<&str>,
     ) -> DoctorReport {
@@ -306,7 +275,7 @@ mod tests {
             missing_tools: missing_tools.into_iter().map(String::from).collect(),
             missing_packages: missing_packages.into_iter().map(String::from).collect(),
             package_check: PackageCheck::Checked,
-            distro,
+            host,
         }
     }
 
@@ -314,14 +283,14 @@ mod tests {
     fn missing_packages_alone_do_not_block_a_build() {
         // waylandpp is optional for uzdoom; cmake is the authority on what is
         // actually required, so caco reports rather than refuses.
-        assert!(report(Some(Distro::Arch), vec![], vec!["waylandpp"]).can_build());
-        assert!(!report(Some(Distro::Arch), vec!["ninja"], vec![]).can_build());
+        assert!(report(Some(Host::Arch), vec![], vec!["waylandpp"]).can_build());
+        assert!(!report(Some(Host::Arch), vec!["ninja"], vec![]).can_build());
     }
 
     #[test]
     fn a_clean_machine_gets_no_install_hint() {
         assert!(
-            report(Some(Distro::Arch), vec![], vec![])
+            report(Some(Host::Arch), vec![], vec![])
                 .install_hint()
                 .is_none()
         );
@@ -339,7 +308,7 @@ mod tests {
     #[test]
     fn the_hint_covers_tools_and_packages_without_duplicates() {
         let hint = report(
-            Some(Distro::Arch),
+            Some(Host::Arch),
             vec!["cmake", "ninja"],
             vec!["openal", "cmake"],
         )
@@ -353,7 +322,7 @@ mod tests {
         // Missing as a package and as a tool: ninja-build once, bare ninja never,
         // since dnf has no package by that name.
         let hint = report(
-            Some(Distro::Fedora),
+            Some(Host::Fedora),
             vec!["git", "ninja"],
             vec!["ninja-build", "openal-soft-devel"],
         )
@@ -361,36 +330,44 @@ mod tests {
         .unwrap();
         assert_eq!(hint, "sudo dnf install ninja-build openal-soft-devel git");
 
-        let hint = report(Some(Distro::Fedora), vec!["ninja"], vec![])
+        let hint = report(Some(Host::Fedora), vec!["ninja"], vec![])
             .install_hint()
             .unwrap();
         assert_eq!(hint, "sudo dnf install ninja-build");
     }
 
     #[test]
+    fn the_homebrew_hint_installs_without_sudo() {
+        let hint = report(Some(Host::Macos), vec!["ninja"], vec!["openal-soft"])
+            .install_hint()
+            .unwrap();
+        assert_eq!(hint, "brew install openal-soft ninja");
+    }
+
+    #[test]
     fn os_release_id_picks_the_distribution() {
         let arch = "NAME=\"Arch Linux\"\nID=arch\nBUILD_ID=rolling\n";
-        assert_eq!(Distro::from_os_release(arch), Some(Distro::Arch));
+        assert_eq!(Host::from_os_release(arch), Some(Host::Arch));
         let fedora = "NAME=\"Fedora Linux\"\nVERSION_ID=43\nID=fedora\n";
-        assert_eq!(Distro::from_os_release(fedora), Some(Distro::Fedora));
+        assert_eq!(Host::from_os_release(fedora), Some(Host::Fedora));
     }
 
     #[test]
     fn a_derivative_gets_the_list_of_the_distribution_it_is_like() {
         let endeavour = "ID=endeavouros\nID_LIKE=arch\n";
-        assert_eq!(Distro::from_os_release(endeavour), Some(Distro::Arch));
+        assert_eq!(Host::from_os_release(endeavour), Some(Host::Arch));
         let asahi =
             "NAME=\"Fedora Linux Asahi Remix\"\nID=fedora-asahi-remix\nID_LIKE=\"fedora\"\n";
-        assert_eq!(Distro::from_os_release(asahi), Some(Distro::Fedora));
+        assert_eq!(Host::from_os_release(asahi), Some(Host::Fedora));
         let nobara = "ID=nobara\nID_LIKE=\"rhel centos fedora\"\n";
-        assert_eq!(Distro::from_os_release(nobara), Some(Distro::Fedora));
+        assert_eq!(Host::from_os_release(nobara), Some(Host::Fedora));
     }
 
     #[test]
     fn a_distribution_without_lists_is_none() {
         let ubuntu = "ID=ubuntu\nID_LIKE=debian\nVERSION_ID=\"26.04\"\n";
-        assert_eq!(Distro::from_os_release(ubuntu), None);
-        assert_eq!(Distro::from_os_release(""), None);
+        assert_eq!(Host::from_os_release(ubuntu), None);
+        assert_eq!(Host::from_os_release(""), None);
     }
 
     #[test]
@@ -419,9 +396,9 @@ mod tests {
     fn an_empty_dep_list_is_reported_as_unchecked_not_satisfied() {
         let deps = DepSpec {
             arch: vec!["cmake".to_string()],
-            fedora: Vec::new(),
+            ..DepSpec::default()
         };
-        let (missing, check) = check_packages(Some(Distro::Fedora), &deps);
+        let (missing, check) = check_packages(Some(Host::Fedora), &deps);
         assert!(missing.is_empty());
         assert!(matches!(check, PackageCheck::Unsupported(_)));
     }
@@ -431,6 +408,7 @@ mod tests {
         let deps = DepSpec {
             arch: vec!["cmake".to_string()],
             fedora: vec!["cmake".to_string()],
+            brew: vec!["cmake".to_string()],
         };
         let (missing, check) = check_packages(None, &deps);
         assert!(missing.is_empty());
@@ -438,14 +416,14 @@ mod tests {
     }
 
     #[test]
-    fn every_builtin_recipe_has_a_list_for_every_distribution() {
+    fn every_builtin_recipe_has_a_list_for_every_host() {
         for recipe in crate::sourceports::recipe::builtin_recipes() {
-            for distro in [Distro::Arch, Distro::Fedora] {
+            for host in [Host::Arch, Host::Fedora, Host::Macos] {
                 assert!(
-                    !distro.packages(&recipe.deps).is_empty(),
+                    !host.packages(&recipe.deps).is_empty(),
                     "{} has no {} packages",
                     recipe.name,
-                    distro.name()
+                    host.name()
                 );
             }
         }

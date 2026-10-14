@@ -97,11 +97,7 @@ jobs:
           path: caco-*-macos-arm64.zip
 
   release:
-<<<<<<< HEAD
-    needs: [version, packages]
-=======
-    needs: [version, arch, macos]
->>>>>>> parent of 7533371 (chore: drop macOS support)
+    needs: [version, packages, macos]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

@@ -60,11 +60,7 @@ crates/
 - `player.rs` — sourceport launcher, playtime tracking, companion injection. `build_launch` is the single command builder behind both `play` and `play_demo`, parameterised by a private `LaunchMode`: playback needs an identical file set, complevel and load order to the recording (any difference desyncs the demo) but must not record a session or collect stats, since a replayed map exit is not progress the user just made.
 - `companion_service.rs`, `resource_service.rs` — MD5 dedup + managed storage; IWAD/id24 registration
 - `complevel.rs`, `complevel_detect.rs`, `iwad_detect.rs` — detection heuristics (COMPLVL, UMAPINFO, DEHACKED, PNAMES, map lumps)
-<<<<<<< HEAD
-- `sourceports/` — everything about sourceports, in one module because the two halves are one subject. **Never call these "ports"** anywhere a user or a reader can see it: outside caco's own history that word means something else entirely, and every Doom engine is a *sourceport*. `registry.rs` (was the top-level `sourceports.rs`) is the family table — which flags each family spells for data dirs, save dirs, complevels and configs — flat-re-exported from `mod.rs`, so every existing `sourceports::identify_family` call site was untouched by the merge. The rest builds sourceports from source into a caco-owned prefix: `recipe.rs` holds the TOML schema and the built-in `recipes.toml` (nyan-doom, uzdoom), merged with any `*.toml` in `config::sourceport_recipe_dir()`; `build.rs` is the clone → patch → configure → compile → install driver; `manifest.rs` records what was built inside the prefix, in a `caco-sourceport.toml` marker `remove_installed` refuses to delete without; `doctor.rs` answers "can this machine build it" against pacman or rpm, picking the recipe's `arch` or `fedora` package list from os-release's `ID` then `ID_LIKE` (`Distro`), and stores the `Distro` in the report so the install hint is pure; `update.rs` asks each built sourceport's remote whether its ref has moved, via one `git ls-remote` each (no objects fetched), cached in `<prefix_root>/update-check.toml` and throttled by `config.sourceport_update_check_days` (0 disables). A build invalidates its own cache entry, or the badge would stay lit until the interval expired. `app.rs::spawn_sourceport_update_check` runs it at startup and notifies; it never starts a rebuild on its own. The recipe is the portable artifact and lives in the data dir, while checkouts and install prefixes live in the cache — a built sourceport is regenerable and the trees are large. `config::resolve_sourceport` is the only integration point, and a managed build wins over `PATH`. The registry needed no change when builds were added: nyan-doom was already mapped to dsda and uzdoom to zdoom.
-=======
-- `sourceports/` — everything about sourceports, in one module because the two halves are one subject. **Never call these "ports"** anywhere a user or a reader can see it: outside caco's own history that word means something else entirely, and every Doom engine is a *sourceport*. `registry.rs` (was the top-level `sourceports.rs`) is the family table — which flags each family spells for data dirs, save dirs, complevels and configs — flat-re-exported from `mod.rs`, so every existing `sourceports::identify_family` call site was untouched by the merge. The rest builds sourceports from source into a caco-owned prefix: `recipe.rs` holds the TOML schema and the built-in `recipes.toml` (nyan-doom, uzdoom), merged with any `*.toml` in `config::sourceport_recipe_dir()`; `build.rs` is the clone → patch → configure → compile → install driver; `manifest.rs` records what was built inside the prefix, in a `caco-sourceport.toml` marker `remove_installed` refuses to delete without; `doctor.rs` answers "can this machine build it" against pacman / brew; `update.rs` asks each built sourceport's remote whether its ref has moved, via one `git ls-remote` each (no objects fetched), cached in `<prefix_root>/update-check.toml` and throttled by `config.sourceport_update_check_days` (0 disables). A build invalidates its own cache entry, or the badge would stay lit until the interval expired. `app.rs::spawn_sourceport_update_check` runs it at startup and notifies; it never starts a rebuild on its own. The recipe is the portable artifact and lives in the data dir, while checkouts and install prefixes live in the cache — a built sourceport is regenerable and the trees are large. `config::resolve_sourceport` is the only integration point, and a managed build wins over `PATH`. The registry needed no change when builds were added: nyan-doom was already mapped to dsda and uzdoom to zdoom.
->>>>>>> parent of 7533371 (chore: drop macOS support)
+- `sourceports/` — everything about sourceports, in one module because the two halves are one subject. **Never call these "ports"** anywhere a user or a reader can see it: outside caco's own history that word means something else entirely, and every Doom engine is a *sourceport*. `registry.rs` (was the top-level `sourceports.rs`) is the family table — which flags each family spells for data dirs, save dirs, complevels and configs — flat-re-exported from `mod.rs`, so every existing `sourceports::identify_family` call site was untouched by the merge. The rest builds sourceports from source into a caco-owned prefix: `recipe.rs` holds the TOML schema and the built-in `recipes.toml` (nyan-doom, uzdoom), merged with any `*.toml` in `config::sourceport_recipe_dir()`; `build.rs` is the clone → patch → configure → compile → install driver; `manifest.rs` records what was built inside the prefix, in a `caco-sourceport.toml` marker `remove_installed` refuses to delete without; `doctor.rs` answers "can this machine build it" against pacman, rpm or brew (`Host`): `Macos` on a Mac, otherwise the recipe's `arch` or `fedora` package list picked from os-release's `ID` then `ID_LIKE`; the report stores the `Host` so the install hint is pure; `update.rs` asks each built sourceport's remote whether its ref has moved, via one `git ls-remote` each (no objects fetched), cached in `<prefix_root>/update-check.toml` and throttled by `config.sourceport_update_check_days` (0 disables). A build invalidates its own cache entry, or the badge would stay lit until the interval expired. `app.rs::spawn_sourceport_update_check` runs it at startup and notifies; it never starts a rebuild on its own. The recipe is the portable artifact and lives in the data dir, while checkouts and install prefixes live in the cache — a built sourceport is regenerable and the trees are large. `config::resolve_sourceport` is the only integration point, and a managed build wins over `PATH`. The registry needed no change when builds were added: nyan-doom was already mapped to dsda and uzdoom to zdoom.
 - `profiles.rs` — sourceport config profile operations (list/create/copy/remove/read/write + `referencing_wads`). Owns the operations but deliberately not *editing*, which the GUI does in a text buffer through `read`/`write`.
 - `wad_stats.rs` — per-map stats parser (stats.txt + levelstat.txt)
 - `stats_watcher.rs` — stats collection for sourceports without native stats.txt: zdoom (ZScript reporter PK3 + `+logfile` parsing) and helion (`-levelstat`, consuming its global `~/.config/Helion/levelstat.txt` — unpadded-milliseconds time format — into the managed stats.txt)
@@ -383,20 +379,13 @@ projects release the same way:
 
 - `verify.yml` — fmt, clippy (`-D warnings`, since the workspace has no
   `[lints]` table) and `cargo test --workspace` on every pull request and push
-<<<<<<< HEAD
-  to `main`. The job is named `rust` so a ruleset can require it. It exports
-  `CFLAGS=-O2`, as makepkg and rpmbuild do: v4.1.6 tagged and then failed its
-  Arch build because `cc` 1.6 stopped `aws-lc-sys` from forcing `-O0` on
-  jitterentropy, and a CFLAGS-free verify could not see it. `cc` is pinned
-  `=1.5.1` in the workspace manifest until that is fixed upstream.
-=======
   to `main`, plus `brew style` and `brew audit --strict` on the Homebrew
-  cask (on a macOS runner, since cask rules only apply there). The jobs are named `rust` and `homebrew` so a ruleset can require
-  them. The `rust` job exports `CFLAGS=-O2`, as makepkg does: v4.1.6 tagged
-  and then failed its Arch build because `cc` 1.6 stopped `aws-lc-sys` from
-  forcing `-O0` on jitterentropy, and a CFLAGS-free verify could not see it.
-  `cc` is pinned `=1.5.1` in the workspace manifest until that is fixed upstream.
->>>>>>> parent of 7533371 (chore: drop macOS support)
+  cask (on a macOS runner, since cask rules only apply there). The jobs are
+  named `rust` and `homebrew` so a ruleset can require them. The `rust` job
+  exports `CFLAGS=-O2`, as makepkg and rpmbuild do: v4.1.6 tagged and then
+  failed its Arch build because `cc` 1.6 stopped `aws-lc-sys` from forcing
+  `-O0` on jitterentropy, and a CFLAGS-free verify could not see it. `cc` is
+  pinned `=1.5.1` in the workspace manifest until that is fixed upstream.
 - `update-deps.yml` — every Sunday, `cargo upgrade --incompatible` plus
   `cargo update`, opened as a pull request on `deps/weekly`. It uses the
   `DEPS_PR_TOKEN` secret because a pull request opened with the default
@@ -410,17 +399,11 @@ projects release the same way:
 - `release.yml` — started by hand from the Actions tab with `patch`, `minor`
   or `major`. It runs `verify`, then bumps every version file, commits
   `chore(release): vX.Y.Z`, tags it and pushes both atomically (refusing if
-<<<<<<< HEAD
   started from anything but `main`, or if the version files disagree), runs
-  `package` on the tag, and creates the GitHub release with both packages and
-  generated notes.
-=======
-  started from anything but `main`, or if the version files disagree), builds
-  the Arch package from the tag in an `archlinux:base-devel` container and
-  `Caco.app` on an arm64 macOS runner, creates the GitHub release with both
-  and generated notes, and finally commits `chore(release): cask vX.Y.Z` to
-  point the cask at the new zip.
->>>>>>> parent of 7533371 (chore: drop macOS support)
+  `package` on the tag and builds `Caco.app` on an arm64 macOS runner in
+  parallel, creates the GitHub release with all three and generated notes,
+  and finally commits `chore(release): cask vX.Y.Z` to point the cask at the
+  new zip.
 
 Never bump the version by hand; the release workflow is the only writer. The
 version files it moves together are the root `Cargo.toml`, the three
@@ -443,8 +426,8 @@ used to rewrite an SSH URL to a token-authenticated one through
 nothing else is read). `makepkg` runs `check()`, so `cargo test --workspace`
 gates every package build.
 
-**The Fedora package is for the author's Asahi MacBook**, which replaced the
-macOS cask. `contrib/fedora/caco.spec` builds from a `git archive` of the
+**The Fedora package is for the author's Asahi MacBook**, alongside the
+macOS cask on the same hardware. `contrib/fedora/caco.spec` builds from a `git archive` of the
 checkout, so unlike the PKGBUILD it packages the commit in hand. Cargo comes
 from rustup rather than Fedora, since the weekly dependency updates can need a
 newer Rust than Fedora ships. `%build` and `%check` unset Fedora's

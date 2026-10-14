@@ -23,7 +23,6 @@ arch = [
     "sdl2-compat", "sdl2_image", "sdl2_mixer", "libvorbis", "libsndfile",
     "libzip", "glu", "mesa",
 ]
-<<<<<<< HEAD
 # zlib-ng-compat-static because the CMake config zlib-ng-compat-devel ships
 # names libz.a, and nyan-doom's find_package(ZLIB) dies at configure without it.
 fedora = [
@@ -32,12 +31,11 @@ fedora = [
     "sdl2-compat-devel", "SDL2_image-devel", "SDL2_mixer-devel",
     "libvorbis-devel", "libsndfile-devel", "libzip-devel", "mesa-libGLU-devel",
     "mesa-libGL-devel", "zlib-ng-compat-static",
-=======
+]
 brew = [
     "cmake", "ninja", "pkgconf", "fluid-synth", "libsndfile", "libvorbis",
     "libxmp", "libzip", "mad", "portmidi", "sdl2-compat", "sdl2_image",
     "sdl2_mixer",
->>>>>>> parent of 7533371 (chore: drop macOS support)
 ]
 
 [uzdoom]
@@ -71,4 +69,6 @@ fedora = [
     "libwebp-devel", "bzip2-devel", "libvpx-devel", "waylandpp-devel",
     "zlib-ng-compat-devel", "glib2-devel",
 ]
-brew = ["cmake", "ninja", "openal-soft", "sdl2", "webp", "bzip2", "libvpx"]
+brew = [
+    "cmake", "ninja", "openal-soft", "sdl2-compat", "webp", "bzip2", "libvpx", "glib",
+]
