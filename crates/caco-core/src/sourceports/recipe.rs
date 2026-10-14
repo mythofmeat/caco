@@ -47,8 +47,8 @@ fn default_true() -> bool {
     true
 }
 
-/// System packages a recipe needs, one list per distribution. The doctor
-/// picks the list with [`super::doctor::Distro`].
+/// System packages a recipe needs, one list per host. The doctor picks the
+/// list with [`super::doctor::Host`].
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DepSpec {
     #[serde(default)]
@@ -57,6 +57,8 @@ pub struct DepSpec {
     /// compiler the way Arch's base-devel does, so this list names both.
     #[serde(default)]
     pub fedora: Vec<String>,
+    #[serde(default)]
+    pub brew: Vec<String>,
 }
 
 /// Everything needed to turn a git URL into a runnable sourceport.

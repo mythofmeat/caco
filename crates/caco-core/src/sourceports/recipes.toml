@@ -32,6 +32,11 @@ fedora = [
     "libvorbis-devel", "libsndfile-devel", "libzip-devel", "mesa-libGLU-devel",
     "mesa-libGL-devel", "zlib-ng-compat-static",
 ]
+brew = [
+    "cmake", "ninja", "pkgconf", "fluid-synth", "libsndfile", "libvorbis",
+    "libxmp", "libzip", "mad", "portmidi", "sdl2-compat", "sdl2_image",
+    "sdl2_mixer",
+]
 
 [uzdoom]
 repo = "https://github.com/UZDoom/uzdoom"
@@ -63,4 +68,7 @@ fedora = [
     "gcc-c++", "cmake", "ninja-build", "openal-soft-devel", "sdl2-compat-devel",
     "libwebp-devel", "bzip2-devel", "libvpx-devel", "waylandpp-devel",
     "zlib-ng-compat-devel", "glib2-devel",
+]
+brew = [
+    "cmake", "ninja", "openal-soft", "sdl2-compat", "webp", "bzip2", "libvpx", "glib",
 ]

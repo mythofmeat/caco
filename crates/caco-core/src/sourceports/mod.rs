@@ -34,7 +34,7 @@ pub mod registry;
 pub mod update;
 
 pub use build::{BuildOptions, BuildProgress, BuildStep, SourceportPaths};
-pub use doctor::{Distro, DoctorReport, PackageCheck, doctor};
+pub use doctor::{DoctorReport, Host, PackageCheck, doctor};
 pub use manifest::{
     InstalledSourceport, SourceportManifest, find_installed, list_installed, remove_installed,
 };
