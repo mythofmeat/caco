@@ -57,7 +57,7 @@ hex = "0.4"
 image = { version = "0.25", default-features = false, features = ["png"] }
 
 # Archive
-zip = { version = "8", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 
 # HTTP
 # `query` became opt-in in 0.13; it was unconditional in 0.12. The idgames and

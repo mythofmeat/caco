@@ -18,7 +18,7 @@ use std::path::Path;
 use regex::Regex;
 use std::sync::LazyLock;
 
-use crate::utils::{load_wad_data, parse_wad_directory};
+use crate::utils::{load_wad_data, parse_wad_directory, zip_entry_names};
 
 static MAP_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(E[1-9]M[0-9]|MAP[0-9][0-9])$").unwrap());
@@ -78,24 +78,23 @@ fn detect_from_pk3(pk3_path: &Path) -> Option<bool> {
     let file = File::open(pk3_path).ok()?;
     let mut archive = zip::ZipArchive::new(file).ok()?;
 
-    for i in 0..archive.len() {
-        let is_wad = archive
-            .name_for_index(i)
-            .is_some_and(|n| n.to_lowercase().ends_with(".wad"));
+    let wad_indices: Vec<usize> = zip_entry_names(&archive)
+        .filter(|(_, name)| name.to_lowercase().ends_with(".wad"))
+        .map(|(i, _)| i)
+        .collect();
 
-        if is_wad {
-            let mut entry = match archive.by_index(i) {
-                Ok(e) => e,
-                Err(_) => continue,
-            };
-            let mut buf = Vec::with_capacity(entry.size() as usize);
-            if entry.read_to_end(&mut buf).is_err() {
-                continue;
-            }
-            let directory = parse_wad_directory(&buf);
-            if has_udmf_maps(&directory) {
-                return Some(true);
-            }
+    for i in wad_indices {
+        let mut entry = match archive.by_index(i) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        let mut buf = Vec::with_capacity(entry.size() as usize);
+        if entry.read_to_end(&mut buf).is_err() {
+            continue;
+        }
+        let directory = parse_wad_directory(&buf);
+        if has_udmf_maps(&directory) {
+            return Some(true);
         }
     }
 

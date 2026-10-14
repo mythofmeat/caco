@@ -1,5 +1,6 @@
+use std::borrow::Cow;
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Seek};
 use std::path::Path;
 use std::sync::LazyLock;
 
@@ -177,14 +178,9 @@ fn try_read_wad_from_zip(path: &Path) -> Option<Vec<u8>> {
     let file = File::open(path).ok()?;
     let mut archive = ZipArchive::new(file).ok()?;
 
-    // Collect indices of .wad entries
-    let wad_indices: Vec<usize> = (0..archive.len())
-        .filter(|&i| {
-            archive
-                .by_index(i)
-                .map(|e| e.name().to_lowercase().ends_with(".wad"))
-                .unwrap_or(false)
-        })
+    let wad_indices: Vec<usize> = zip_entry_names(&archive)
+        .filter(|(_, name)| name.to_lowercase().ends_with(".wad"))
+        .map(|(i, _)| i)
         .collect();
 
     if wad_indices.is_empty() {
@@ -231,6 +227,21 @@ fn try_read_wad_from_zip(path: &Path) -> Option<Vec<u8>> {
 
     // Fallback: first WAD if none had maps
     first_wad
+}
+
+/// Every entry in a zip as `(index, name)`, in archive order, without opening any of them.
+///
+/// Callers keep the index and reopen with `by_index`, never `by_name` with this name: the archive
+/// is keyed by each name's raw bytes, and a name that is not UTF-8 comes back decoded from CP437,
+/// which `by_name` then cannot find. zip hands each name back as a `Result`, but that decode cannot
+/// fail (CP437 maps every byte), so an entry is only ever skipped in principle.
+pub(crate) fn zip_entry_names<R: Read + Seek>(
+    archive: &ZipArchive<R>,
+) -> impl Iterator<Item = (usize, Cow<'_, str>)> {
+    archive
+        .file_names()
+        .enumerate()
+        .filter_map(|(i, name)| Some((i, name.ok()?)))
 }
 
 /// Render a rating as filled/empty star characters (e.g., "★★★☆☆").
