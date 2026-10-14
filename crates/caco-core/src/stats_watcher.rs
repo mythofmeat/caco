@@ -1508,11 +1508,8 @@ mod tests {
         write_stats_mod(&pk3_path).unwrap();
 
         let archive = zip::ZipArchive::new(std::fs::File::open(&pk3_path).unwrap()).unwrap();
-        let names: Vec<&str> = (0..archive.len())
-            .map(|i| archive.name_for_index(i).unwrap())
-            .collect();
-        assert!(names.contains(&"zscript.zs"));
-        assert!(names.contains(&"MAPINFO"));
-        assert!(names.contains(&"CVARINFO"));
+        for lump in ["zscript.zs", "MAPINFO", "CVARINFO"] {
+            assert!(archive.index_for_name(lump).is_some(), "missing {lump}");
+        }
     }
 }

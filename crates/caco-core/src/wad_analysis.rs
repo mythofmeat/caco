@@ -19,7 +19,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use crate::utils::parse_wad_directory;
+use crate::utils::{parse_wad_directory, zip_entry_names};
 
 // ---------------------------------------------------------------------------
 // Map name patterns
@@ -613,21 +613,17 @@ pub fn analyze_pk3(pk3_path: &std::path::Path) -> Option<WadAnalysis> {
     let mut monsters: HashMap<String, usize> = HashMap::new();
 
     // Try maps/ directory first (one map per WAD)
-    let map_wad_names: Vec<String> = (0..archive.len())
-        .filter_map(|i| {
-            let entry = archive.by_index(i).ok()?;
-            let name = entry.name().to_string();
-            if name.to_lowercase().starts_with("maps/") && name.to_lowercase().ends_with(".wad") {
-                Some(name)
-            } else {
-                None
-            }
+    let map_wads: Vec<(usize, String)> = zip_entry_names(&archive)
+        .filter(|(_, name)| {
+            let lower = name.to_lowercase();
+            lower.starts_with("maps/") && lower.ends_with(".wad")
         })
+        .map(|(i, name)| (i, name.into_owned()))
         .collect();
 
-    if !map_wad_names.is_empty() {
-        for entry_name in &map_wad_names {
-            let mut entry = archive.by_name(entry_name).ok()?;
+    if !map_wads.is_empty() {
+        for (index, entry_name) in &map_wads {
+            let mut entry = archive.by_index(*index).ok()?;
             let mut data = Vec::new();
             entry.read_to_end(&mut data).ok()?;
 
@@ -645,20 +641,13 @@ pub fn analyze_pk3(pk3_path: &std::path::Path) -> Option<WadAnalysis> {
         }
     } else {
         // Fallback: scan root-level WAD files for embedded maps
-        let root_wad_names: Vec<String> = (0..archive.len())
-            .filter_map(|i| {
-                let entry = archive.by_index(i).ok()?;
-                let name = entry.name().to_string();
-                if !name.contains('/') && name.to_lowercase().ends_with(".wad") {
-                    Some(name)
-                } else {
-                    None
-                }
-            })
+        let root_wads: Vec<usize> = zip_entry_names(&archive)
+            .filter(|(_, name)| !name.contains('/') && name.to_lowercase().ends_with(".wad"))
+            .map(|(i, _)| i)
             .collect();
 
-        for entry_name in &root_wad_names {
-            let mut entry = archive.by_name(entry_name).ok()?;
+        for index in root_wads {
+            let mut entry = archive.by_index(index).ok()?;
             let mut data = Vec::new();
             entry.read_to_end(&mut data).ok()?;
 
@@ -684,23 +673,15 @@ pub fn analyze_pk3(pk3_path: &std::path::Path) -> Option<WadAnalysis> {
 
     // --- Step 2: Read and parse MAPINFO/ZMAPINFO ---
     let mut mapinfo_text = String::new();
-    let mapinfo_names: Vec<String> = (0..archive.len())
-        .filter_map(|i| {
-            let entry = archive.by_index(i).ok()?;
-            let name = entry.name().to_string();
+    let mapinfos: Vec<usize> = zip_entry_names(&archive)
+        .filter(|(_, name)| {
             let lower = name.to_lowercase();
-            if !name.contains('/')
-                && !name.ends_with('/')
-                && (lower.starts_with("mapinfo") || lower.starts_with("zmapinfo"))
-            {
-                Some(name)
-            } else {
-                None
-            }
+            !name.contains('/') && (lower.starts_with("mapinfo") || lower.starts_with("zmapinfo"))
         })
+        .map(|(i, _)| i)
         .collect();
-    for entry_name in &mapinfo_names {
-        if let Ok(mut entry) = archive.by_name(entry_name) {
+    for index in mapinfos {
+        if let Ok(mut entry) = archive.by_index(index) {
             let mut text = String::new();
             if entry.read_to_string(&mut text).is_ok() {
                 mapinfo_text.push('\n');
@@ -1908,5 +1889,51 @@ MAP MAP03
         let a = analyze_wad(&wad).unwrap();
         assert_eq!(classify_of(&a, "MAP02"), MapClassification::Unreachable);
         assert_eq!(classify_of(&a, "MAP03"), MapClassification::Required);
+    }
+
+    // -----------------------------------------------------------------------
+    // PK3
+    // -----------------------------------------------------------------------
+
+    /// A zip holding one entry whose name is raw CP437, as archivers that predate zip's UTF-8 flag
+    /// wrote it. `ZipWriter` only writes UTF-8, so the entry goes in under an ASCII stand-in of the
+    /// same length and the raw bytes are swapped in afterwards: nothing in a zip checksums a name.
+    fn zip_with_raw_name(stand_in: &str, raw: &[u8], data: &[u8]) -> Vec<u8> {
+        use std::io::Write;
+        assert_eq!(stand_in.len(), raw.len());
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        writer
+            .start_file(stand_in, zip::write::SimpleFileOptions::default())
+            .unwrap();
+        writer.write_all(data).unwrap();
+        let mut bytes = writer.finish().unwrap().into_inner();
+
+        // Once in the local header, once in the central directory.
+        let mut replaced = 0;
+        while let Some(at) = bytes
+            .windows(stand_in.len())
+            .position(|w| w == stand_in.as_bytes())
+        {
+            bytes[at..at + raw.len()].copy_from_slice(raw);
+            replaced += 1;
+        }
+        assert_eq!(replaced, 2);
+        bytes
+    }
+
+    #[test]
+    fn test_pk3_reads_wad_with_cp437_name() {
+        // zip keys entries by their raw name bytes but decodes this one to "MAPä.wad", so a lookup
+        // by the decoded name finds nothing and the PK3 would read as having no maps.
+        let things = playable_things(5);
+        let wad = build_wad(&[("MAP01", &[]), ("THINGS", &things)]);
+        let pk3 = zip_with_raw_name("MAP#.wad", b"MAP\x84.wad", &wad);
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cp437.pk3");
+        std::fs::write(&path, pk3).unwrap();
+
+        let a = analyze_pk3(&path).expect("the WAD's maps are found");
+        assert_eq!(classify_of(&a, "MAP01"), MapClassification::Required);
     }
 }

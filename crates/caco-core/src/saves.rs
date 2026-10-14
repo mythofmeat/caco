@@ -183,12 +183,7 @@ pub fn restore_backup(backup_path: &Path, data_dir: &Path) -> crate::Result<usiz
     let mut archive =
         ZipArchive::new(file).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
-    let count = archive
-        .file_names()
-        .filter(|name| !name.ends_with('/'))
-        .count();
-
-    // Extract all files
+    let mut count = 0;
     for i in 0..archive.len() {
         let mut entry = archive
             .by_index(i)
@@ -198,7 +193,10 @@ pub fn restore_backup(backup_path: &Path, data_dir: &Path) -> crate::Result<usiz
         // is defence-in-depth in case of future zip-crate changes or symlink
         // races after directory creation.
         let Some(enclosed) = entry.enclosed_name() else {
-            tracing::warn!("skipping zip entry with unsafe name: {}", entry.name());
+            tracing::warn!(
+                "skipping zip entry with unsafe name: {}",
+                String::from_utf8_lossy(entry.name_raw())
+            );
             continue;
         };
         let outpath = data_dir.join(&enclosed);
@@ -229,6 +227,7 @@ pub fn restore_backup(backup_path: &Path, data_dir: &Path) -> crate::Result<usiz
             }
             let mut outfile = File::create(&outpath)?;
             io::copy(&mut entry, &mut outfile)?;
+            count += 1;
         }
     }
 
