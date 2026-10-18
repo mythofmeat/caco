@@ -73,14 +73,14 @@ reqwest = { version = "0.13", features = ["json", "blocking", "query"] }
 cc = "=1.5.1"
 
 # Text processing (sources)
-html-escape = "0.2"
+html-escape = "0.3"
 unicode-normalization = "0.1"
 urlencoding = "2"
 
 # GUI
-eframe = "0.36"
-egui = "0.36"
-egui_extras = { version = "0.36", features = ["syntect"] }
+eframe = "0.37"
+egui = "0.37"
+egui_extras = { version = "0.37", features = ["syntect"] }
 rfd = "0.17"
 open = "5"
 
