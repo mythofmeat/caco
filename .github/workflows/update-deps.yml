@@ -40,10 +40,14 @@ jobs:
     if: needs.update.outputs.operation == 'created' || needs.update.outputs.operation == 'updated'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    # gh pr checks reads the checks and statuses, which a private repository's token can't without
+    # these two.
     permissions:
       actions: write
+      checks: read
       contents: write
       pull-requests: write
+      statuses: read
     steps:
       # Nothing runs between opening the pull request and this job, so verify may not have started
       # yet: wait for its run on this exact commit before reading the checks.
