@@ -389,7 +389,11 @@ projects release the same way:
 - `update-deps.yml` — every Sunday, `cargo upgrade --incompatible` plus
   `cargo update`, opened as a pull request on `deps/weekly`. It uses the
   `DEPS_PR_TOKEN` secret because a pull request opened with the default
-  `GITHUB_TOKEN` would never start `verify`. Merging it does not release.
+  `GITHUB_TOKEN` would never start `verify`. When the run opened or updated
+  the pull request, a second job waits for `verify` on that exact commit,
+  squash-merges it with `--match-head-commit` once every check passes, and
+  dispatches `release.yml` with `patch`. If any check fails the pull request
+  stays open and nothing is released.
 - `package.yml` — builds the Arch package for x86_64 in an
   `archlinux:base-devel` container and the Fedora package for aarch64 in a
   `fedora:43` container on GitHub's arm64 runner. The release calls it with
@@ -397,7 +401,7 @@ projects release the same way:
   installed assets or itself, since nothing else would catch a broken recipe
   before a release.
 - `release.yml` — started by hand from the Actions tab with `patch`, `minor`
-  or `major`. It runs `verify`, then bumps every version file, commits
+  or `major`, or by `update-deps` with `patch`. It runs `verify`, then bumps every version file, commits
   `chore(release): vX.Y.Z`, tags it and pushes both atomically (refusing if
   started from anything but `main`, or if the version files disagree), runs
   `package` on the tag and builds `Caco.app` on an arm64 macOS runner in
