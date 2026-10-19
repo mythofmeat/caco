@@ -188,7 +188,7 @@ impl WadStatsDialogState {
             format!("Map Stats \u{2014} {}", self.wad_title),
             [940.0, 540.0],
         )
-        .id(egui::Id::new("wad_stats_dialog"))
+        .id(egui::Id::unique("wad_stats_dialog"))
         .open(&mut open)
         .show(ctx, |ui| {
             if let Some(err) = self.error.clone() {

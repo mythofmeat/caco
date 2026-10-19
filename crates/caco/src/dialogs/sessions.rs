@@ -98,7 +98,7 @@ impl SessionsDialogState {
             format!("Sessions \u{2014} {}", self.wad_title),
             [700.0, 450.0],
         )
-        .id(egui::Id::new("sessions_dialog"))
+        .id(egui::Id::unique("sessions_dialog"))
         .open(&mut open)
         .show(ctx, |ui| {
             if self.sessions.is_empty() {

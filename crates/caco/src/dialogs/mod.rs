@@ -152,7 +152,7 @@ pub fn dim_backdrop(ctx: &egui::Context) {
     let screen = ctx.content_rect();
     ctx.layer_painter(egui::LayerId::new(
         egui::Order::Background,
-        egui::Id::new("modal_backdrop"),
+        egui::Id::unique("modal_backdrop"),
     ))
     .rect_filled(screen, 0.0, egui::Color32::from_black_alpha(160));
 }

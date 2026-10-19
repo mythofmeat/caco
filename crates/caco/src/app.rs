@@ -925,7 +925,7 @@ impl CacoApp {
                 quit = true;
             }
             if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::F)) {
-                let id = egui::Id::new(panels::filter_bar::FILTER_ID_SOURCE);
+                let id = egui::Id::unique(panels::filter_bar::FILTER_ID_SOURCE);
                 ctx.memory_mut(|m| m.request_focus(id));
             }
             // Ctrl+R — reload config from disk. Already-cached state (e.g. window
