@@ -13,7 +13,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
             .hint_text("Filter WADs...")
             .text_color(theme::TEXT_PRIMARY)
             .desired_width(250.0)
-            .id(egui::Id::new(FILTER_ID_SOURCE)),
+            .id(egui::Id::unique(FILTER_ID_SOURCE)),
     );
 
     if response.changed() {

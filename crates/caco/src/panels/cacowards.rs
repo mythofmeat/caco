@@ -316,7 +316,7 @@ fn render_year_strip(ui: &mut egui::Ui, state: &AppState) -> Option<i64> {
         }
         let response = ui.interact(
             chip_rect,
-            ui.id().with(("cacoward-year", year)),
+            ui.scope_id().with(("cacoward-year", year)),
             egui::Sense::click(),
         );
         draw_year_chip(
