@@ -12,6 +12,10 @@ jobs:
   update:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    outputs:
+      number: ${{ steps.pr.outputs.pull-request-number }}
+      operation: ${{ steps.pr.outputs.pull-request-operation }}
+      sha: ${{ steps.pr.outputs.pull-request-head-sha }}
     steps:
       - uses: actions/checkout@v7
       - run: rustup update stable --no-self-update
@@ -19,7 +23,8 @@ jobs:
       - run: cargo upgrade --incompatible && cargo update
       # Pull requests opened with the default GITHUB_TOKEN don't trigger other workflows, so verify
       # would never run on this one.
-      - uses: peter-evans/create-pull-request@v8
+      - id: pr
+        uses: peter-evans/create-pull-request@v8
         with:
           token: ${{ secrets.DEPS_PR_TOKEN }}
           branch: deps/weekly
@@ -27,4 +32,46 @@ jobs:
           commit-message: "chore(deps): update"
           title: "chore(deps): update"
           body: |
-            Every crate at its latest version, majors included. Merging this doesn't cut a release.
+            Every crate at its latest version, majors included. The weekly workflow merges this once
+            every check succeeds on it, then cuts a patch release.
+
+  merge:
+    needs: update
+    if: needs.update.outputs.operation == 'created' || needs.update.outputs.operation == 'updated'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: write
+    steps:
+      # Nothing runs between opening the pull request and this job, so verify may not have started
+      # yet: wait for its run on this exact commit before reading the checks.
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ needs.update.outputs.number }}
+          SHA: ${{ needs.update.outputs.sha }}
+        run: |
+          for _ in $(seq 30); do
+            run=$(gh run list --workflow verify.yml --commit "$SHA" --event pull_request --json databaseId --jq '.[0].databaseId')
+            [ -n "$run" ] && break
+            sleep 10
+          done
+          if [ -z "$run" ]; then
+            echo "::error::verify never started on $SHA, so #$PR stays open and nothing is released."
+            exit 1
+          fi
+          gh run watch "$run" --interval 30 >/dev/null || true
+          gh pr checks "$PR" --watch --interval 30 >/dev/null || true
+          failed=$(gh pr checks "$PR" --json name,bucket \
+            --jq '[.[] | select(.bucket != "pass" and .bucket != "skipping") | .name] | join(", ")')
+          if [ -n "$failed" ]; then
+            echo "::error::#$PR stays open and nothing is released: $failed did not pass."
+            exit 1
+          fi
+          if ! gh pr merge "$PR" --squash --match-head-commit "$SHA"; then
+            echo "::error::#$PR could not be merged as $SHA; if main moved, update the branch and merge it by hand."
+            exit 1
+          fi
+          gh workflow run release.yml --ref main -f bump=patch
