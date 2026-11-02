@@ -44,5 +44,10 @@ jobs:
       - run: |
           mkdir -p "$(brew --repository)/Library/Taps/mythofmeat"
           ln -s "$GITHUB_WORKSPACE" "$(brew --repository)/Library/Taps/mythofmeat/homebrew-caco"
+      # Homebrew 7 refuses to load anything from an untrusted third-party tap, and audit has to load
+      # the cask (style only lints the file, which is why it kept passing). Trust the one cask rather
+      # than the tap: installing the fully qualified name grants users exactly that, so the audit runs
+      # under the same trust a real install has.
+      - run: brew trust --cask mythofmeat/caco/caco
       - run: brew style --cask mythofmeat/caco/caco
       - run: brew audit --cask --strict mythofmeat/caco/caco

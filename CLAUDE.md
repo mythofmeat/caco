@@ -380,7 +380,10 @@ projects release the same way:
 - `verify.yml` — fmt, clippy (`-D warnings`, since the workspace has no
   `[lints]` table) and `cargo test --workspace` on every pull request and push
   to `main`, plus `brew style` and `brew audit --strict` on the Homebrew
-  cask (on a macOS runner, since cask rules only apply there). The jobs are
+  cask (on a macOS runner, since cask rules only apply there). The
+  `homebrew` job runs `brew trust --cask` on the linked-in tap first: since
+  Homebrew 7, audit refuses to load a cask from an untrusted tap, and that
+  failure kept the 2026-11-01 weekly update from merging. The jobs are
   named `rust` and `homebrew` so a ruleset can require them. The `rust` job
   exports `CFLAGS=-O2`, as makepkg and rpmbuild do: v4.1.6 tagged and then
   failed its Arch build because `cc` 1.6 stopped `aws-lc-sys` from forcing
