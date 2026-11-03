@@ -298,7 +298,7 @@ impl SettingsDialogState {
         Self::section_header(ui, "Sourceports");
 
         ui.columns(2, |cols| {
-            form_label(&mut cols[0], "Default sourceport");
+            let label = form_label(&mut cols[0], "Default sourceport");
             cols[0].horizontal(|ui| {
                 let combo_w = 110.0;
                 let field_w =
@@ -307,7 +307,8 @@ impl SettingsDialogState {
                     egui::TextEdit::singleline(&mut self.sourceport)
                         .desired_width(field_w)
                         .text_color(theme::TEXT_PRIMARY),
-                );
+                )
+                .labelled_by(label.id);
                 if !self.detected_sourceports.is_empty() {
                     egui::ComboBox::from_id_salt("detected_sourceports")
                         .selected_text("detected")
@@ -321,26 +322,30 @@ impl SettingsDialogState {
                                     self.sourceport = sourceport.clone();
                                 }
                             }
-                        });
+                        })
+                        .response
+                        .accessible_name("Detected sourceports");
                 }
             });
-            form_label(&mut cols[1], "ZDoom-family sourceport");
+            let label = form_label(&mut cols[1], "ZDoom-family sourceport");
             cols[1]
                 .add(
                     egui::TextEdit::singleline(&mut self.zdoom_sourceport)
                         .desired_width(f32::INFINITY)
                         .text_color(theme::TEXT_PRIMARY),
                 )
+                .labelled_by(label.id)
                 .on_hover_text("Used for WADs that require a zdoom-family sourceport");
         });
 
-        form_label(ui, "Global launch args (every sourceport)");
+        let label = form_label(ui, "Global launch args (every sourceport)");
         ui.add(
             egui::TextEdit::singleline(&mut self.sourceport_args)
                 .desired_width(f32::INFINITY)
                 .text_color(theme::TEXT_PRIMARY)
                 .hint_text("e.g. -nomusic — quote args containing spaces"),
-        );
+        )
+        .labelled_by(label.id);
 
         self.subsection_port_args(ui);
     }
@@ -352,7 +357,7 @@ impl SettingsDialogState {
         let mut remove: Option<usize> = None;
         for (idx, (sourceport, args)) in self.executable_args.iter_mut().enumerate() {
             ui.horizontal(|ui| {
-                ui.add_sized(
+                let label = ui.add_sized(
                     [130.0, 18.0],
                     egui::Label::new(
                         egui::RichText::new(sourceport.as_str())
@@ -369,7 +374,8 @@ impl SettingsDialogState {
                         .desired_width(field_w)
                         .text_color(theme::TEXT_PRIMARY)
                         .hint_text("e.g. -geometry 1920x1200"),
-                );
+                )
+                .labelled_by(label.id);
                 if ui
                     .add(egui::Button::new("\u{2715}").frame(false))
                     .on_hover_text("Remove")
@@ -410,13 +416,16 @@ impl SettingsDialogState {
                             self.new_sourceport_name = sourceport.clone();
                         }
                     }
-                });
+                })
+                .response
+                .accessible_name("Add a detected sourceport");
             ui.add(
                 egui::TextEdit::singleline(&mut self.new_sourceport_name)
                     .desired_width(140.0)
                     .text_color(theme::TEXT_PRIMARY)
                     .hint_text("or type a name"),
-            );
+            )
+            .accessible_name("Sourceport to add");
             let name = self.new_sourceport_name.trim().to_string();
             if ui
                 .add_enabled(
@@ -435,14 +444,16 @@ impl SettingsDialogState {
         Self::section_header(ui, "Behavior");
 
         ui.columns(2, |cols| {
-            form_label(&mut cols[0], "Default IWAD");
-            cols[0].add(
-                egui::TextEdit::singleline(&mut self.iwad)
-                    .desired_width(f32::INFINITY)
-                    .text_color(theme::TEXT_PRIMARY)
-                    .hint_text("empty = auto-detect"),
-            );
-            form_label(&mut cols[1], "idgames mirror");
+            let label = form_label(&mut cols[0], "Default IWAD");
+            cols[0]
+                .add(
+                    egui::TextEdit::singleline(&mut self.iwad)
+                        .desired_width(f32::INFINITY)
+                        .text_color(theme::TEXT_PRIMARY)
+                        .hint_text("empty = auto-detect"),
+                )
+                .labelled_by(label.id);
+            let label = form_label(&mut cols[1], "idgames mirror");
             egui::ComboBox::from_id_salt("download_mirror")
                 .selected_text(mirror_label(self.download_mirror))
                 .width(cols[1].available_width())
@@ -454,11 +465,13 @@ impl SettingsDialogState {
                             mirror_label(i as i64),
                         );
                     }
-                });
+                })
+                .response
+                .labelled_by(label.id);
         });
 
         ui.columns(2, |cols| {
-            form_label(&mut cols[0], "Import link mode");
+            let label = form_label(&mut cols[0], "Import link mode");
             egui::ComboBox::from_id_salt("link_mode")
                 .selected_text(&self.link_mode)
                 .width(cols[0].available_width())
@@ -466,8 +479,10 @@ impl SettingsDialogState {
                     for mode in ["move", "copy"] {
                         ui.selectable_value(&mut self.link_mode, mode.to_string(), mode);
                     }
-                });
-            form_label(&mut cols[1], "Orphaned companions");
+                })
+                .response
+                .labelled_by(label.id);
+            let label = form_label(&mut cols[1], "Orphaned companions");
             egui::ComboBox::from_id_salt("companion_orphan_cleanup")
                 .selected_text(&self.companion_orphan_cleanup)
                 .width(cols[1].available_width())
@@ -479,7 +494,9 @@ impl SettingsDialogState {
                             mode,
                         );
                     }
-                });
+                })
+                .response
+                .labelled_by(label.id);
         });
 
         ui.add_space(4.0);
@@ -497,12 +514,13 @@ impl SettingsDialogState {
 
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            form_label(ui, "Check built sourceports for updates every (days)");
+            let label = form_label(ui, "Check built sourceports for updates every (days)");
             ui.add(
                 egui::DragValue::new(&mut self.sourceport_update_check_days)
                     .speed(1)
                     .range(0..=i64::MAX),
             )
+            .labelled_by(label.id)
             .on_hover_text("One `git ls-remote` per built sourceport at startup. 0 = never check.");
         });
     }
@@ -511,55 +529,62 @@ impl SettingsDialogState {
         Self::section_header(ui, "WAD cache");
         ui.checkbox(&mut self.cache_auto_clean, "Auto-clean cache after play");
         ui.horizontal(|ui| {
-            form_label(ui, "Max size (GB)");
+            let label = form_label(ui, "Max size (GB)");
             ui.add(
                 egui::DragValue::new(&mut self.cache_max_size_gb)
                     .speed(0.5)
                     .range(0.0..=f64::MAX),
             )
+            .labelled_by(label.id)
             .on_hover_text("0 = unlimited");
             ui.add_space(16.0);
-            form_label(ui, "Max age (days)");
+            let label = form_label(ui, "Max age (days)");
             ui.add(
                 egui::DragValue::new(&mut self.cache_max_age_days)
                     .speed(1)
                     .range(0..=i64::MAX),
             )
+            .labelled_by(label.id)
             .on_hover_text("0 = unlimited");
         });
     }
 
     fn section_paths(&mut self, ui: &mut egui::Ui) {
         Self::section_header(ui, "Paths");
-        for (label, value) in [
+        for (text, value) in [
             ("WAD cache dir", &mut self.cache_dir),
             ("Data dir", &mut self.data_dir),
             ("IWAD dir", &mut self.iwad_dir),
             ("Sourceport config dir", &mut self.profile_dir),
         ] {
-            form_label(ui, label);
+            let label = form_label(ui, text);
             ui.add(
                 egui::TextEdit::singleline(value)
                     .desired_width(f32::INFINITY)
                     .text_color(theme::TEXT_PRIMARY),
-            );
+            )
+            .labelled_by(label.id);
         }
 
-        form_label(ui, "Database path");
+        let label = form_label(ui, "Database path");
         ui.add(
             egui::TextEdit::singleline(&mut self.db_path)
                 .desired_width(f32::INFINITY)
                 .text_color(theme::TEXT_PRIMARY),
         )
+        .labelled_by(label.id)
         .on_hover_text("Takes effect after restarting caco");
     }
 }
 
-fn form_label(ui: &mut egui::Ui, label: &str) {
+/// A field's visible label. Returned so the field can name itself after it
+/// with `labelled_by`: without that, seeing the two side by side is the only
+/// thing connecting them.
+fn form_label(ui: &mut egui::Ui, label: &str) -> egui::Response {
     ui.colored_label(
         theme::TEXT_SECONDARY,
         egui::RichText::new(label).size(12.0).strong(),
-    );
+    )
 }
 
 /// Join an args vec into a shell-style string (quoting where needed).

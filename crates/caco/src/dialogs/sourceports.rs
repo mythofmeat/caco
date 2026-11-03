@@ -543,7 +543,7 @@ impl SourceportsDialogState {
         let mut check_clicked = false;
 
         ui.horizontal(|ui| {
-            ui.label("Build from");
+            let label = ui.label("Build from");
             if let Some(refs) = &refs {
                 egui::ComboBox::from_id_salt(("sourceport-build-ref", name))
                     .selected_text(selected.as_str())
@@ -575,7 +575,9 @@ impl SourceportsDialogState {
                                 ui.selectable_value(&mut selected, branch.clone(), branch);
                             }
                         }
-                    });
+                    })
+                    .response
+                    .labelled_by(label.id);
             } else {
                 ui.monospace(selected.as_str());
             }

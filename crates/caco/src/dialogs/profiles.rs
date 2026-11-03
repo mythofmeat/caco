@@ -292,13 +292,15 @@ impl ProfilesDialogState {
 
             let enabled = self.selected.is_some();
             egui::ScrollArea::vertical().show(ui, |ui| {
-                let response = ui.add_enabled(
-                    enabled,
-                    egui::TextEdit::multiline(&mut self.buffer)
-                        .font(egui::TextStyle::Monospace)
-                        .desired_width(f32::INFINITY)
-                        .desired_rows(18),
-                );
+                let response = ui
+                    .add_enabled(
+                        enabled,
+                        egui::TextEdit::multiline(&mut self.buffer)
+                            .font(egui::TextStyle::Monospace)
+                            .desired_width(f32::INFINITY)
+                            .desired_rows(18),
+                    )
+                    .accessible_name("Profile contents");
                 if response.changed() {
                     self.dirty = true;
                 }
