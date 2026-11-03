@@ -1,11 +1,10 @@
-use reqwest::blocking::Client;
+use reqwest::blocking::{Client, Response};
 
 use super::models::ForumThread;
 use super::parser::DoomworldParser;
 use crate::error::{Result, SourceError};
-use crate::http::build_client;
+use crate::http::{build_client, waf_challenge};
 
-const BASE_URL: &str = "https://www.doomworld.com";
 const USER_AGENT: &str = "Caco/1.0 (Doom WAD library manager; https://github.com/eshen/caco)";
 
 /// Client for fetching Doomworld forum threads.
@@ -25,14 +24,6 @@ impl DoomworldClient {
         }
     }
 
-    /// Create a client with a custom reqwest client (for testing).
-    pub fn with_client(client: Client) -> Self {
-        Self {
-            client,
-            parser: DoomworldParser::new(),
-        }
-    }
-
     /// Fetch and parse a forum thread by URL.
     ///
     /// Validates URL, fetches HTML, and parses metadata.
@@ -46,13 +37,7 @@ impl DoomworldClient {
         }
 
         let response = self.client.get(url).send()?;
-
-        if response.status() == reqwest::StatusCode::NOT_FOUND {
-            return Err(SourceError::Api(format!("Thread not found: {url}")));
-        }
-        response.error_for_status_ref()?;
-
-        let html_content = response.text()?;
+        let html_content = read_thread_page(response, url)?;
         let thread = self.parser.parse(&html_content, url);
 
         if thread.thread_id == 0 {
@@ -63,14 +48,6 @@ impl DoomworldClient {
 
         Ok(thread)
     }
-
-    /// Fetch a forum thread by its numeric ID.
-    ///
-    /// Constructs a URL and delegates to `get_thread`.
-    pub fn get_thread_by_id(&self, thread_id: i64) -> Result<ForumThread> {
-        let url = format!("{BASE_URL}/forum/topic/{thread_id}/");
-        self.get_thread(&url)
-    }
 }
 
 impl Default for DoomworldClient {
@@ -79,9 +56,103 @@ impl Default for DoomworldClient {
     }
 }
 
+/// Turn a forum response into the thread's HTML, or the error it amounts to.
+fn read_thread_page(response: Response, url: &str) -> Result<String> {
+    if let Some(kind) = waf_challenge(&response) {
+        return Err(SourceError::WafBlocked {
+            site: "Doomworld",
+            kind,
+        });
+    }
+
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Err(SourceError::Api(format!("Thread not found: {url}")));
+    }
+    response.error_for_status_ref()?;
+
+    Ok(response.text()?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::http::{WafKind, canned_response};
+
+    const URL: &str = "https://www.doomworld.com/forum/topic/134292-myhousewad/";
+
+    /// The bug this client had: it looked for no challenge at all.
+    #[test]
+    fn test_read_thread_page_reports_a_cloudflare_challenge_as_blocked() {
+        let err = read_thread_page(
+            canned_response(
+                403,
+                &[("server", "cloudflare"), ("cf-mitigated", "challenge")],
+                "<html>Just a moment...</html>",
+            ),
+            URL,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            SourceError::WafBlocked {
+                site: "Doomworld",
+                kind: WafKind::Cloudflare,
+            }
+        ));
+    }
+
+    /// The worst way to miss one: a 202 passes `error_for_status`, the parser
+    /// accepts any HTML, and the thread id comes from the URL, so the interstitial
+    /// would import as a library row carrying its title, or none.
+    #[test]
+    fn test_read_thread_page_does_not_parse_an_aws_challenge() {
+        let err = read_thread_page(
+            canned_response(
+                202,
+                &[("x-amzn-waf-action", "challenge")],
+                "<html>challenge script</html>",
+            ),
+            URL,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            SourceError::WafBlocked {
+                kind: WafKind::AwsWaf,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn test_read_thread_page_reports_a_missing_thread() {
+        let err = read_thread_page(canned_response(404, &[], "Not Found"), URL).unwrap_err();
+
+        assert!(matches!(err, SourceError::Api(msg) if msg.contains("Thread not found")));
+    }
+
+    #[test]
+    fn test_read_thread_page_keeps_the_status_of_a_plain_403() {
+        let err = read_thread_page(canned_response(403, &[], "Forbidden"), URL).unwrap_err();
+
+        let SourceError::Http(http) = err else {
+            panic!("expected an HTTP error, got {err:?}");
+        };
+        assert_eq!(http.status(), Some(reqwest::StatusCode::FORBIDDEN));
+    }
+
+    #[test]
+    fn test_read_thread_page_returns_the_html() {
+        let html = read_thread_page(
+            canned_response(200, &[("server", "cloudflare")], "<html>a thread</html>"),
+            URL,
+        )
+        .unwrap();
+
+        assert_eq!(html, "<html>a thread</html>");
+    }
 
     #[test]
     fn test_invalid_url() {

@@ -86,6 +86,10 @@ open = "5"
 
 # Testing
 tempfile = "3"
+# Only for canned responses in tests: a `reqwest::blocking::Response` can only be
+# built by hand from an `http::Response`, which reqwest does not re-export. Has to
+# stay on the major version reqwest uses, or that `From` impl stops applying.
+http = "1"
 
 tracing = "0.1"
 

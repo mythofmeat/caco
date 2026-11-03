@@ -22,21 +22,21 @@ fn non_empty(s: &str) -> Option<String> {
 
 pub fn spawn_search(sender: BackgroundSender, source: SearchSource, query: String) {
     thread::spawn(move || {
-        let results = match source {
+        let outcome = match source {
             SearchSource::Idgames => search_idgames(&query),
             SearchSource::Doomwiki => search_doomwiki(&query),
         };
-        sender.send(AppMessage::SearchComplete(source, results));
+        sender.send(AppMessage::SearchComplete(
+            source,
+            outcome.map_err(|e| e.to_string()),
+        ));
     });
 }
 
-fn search_idgames(query: &str) -> Vec<SearchResultEntry> {
+fn search_idgames(query: &str) -> caco_sources::Result<Vec<SearchResultEntry>> {
     let client = caco_sources::idgames::IdgamesClient::new();
-    let entries = match client.search(query, None, None, None) {
-        Ok(r) => r,
-        Err(_) => return Vec::new(),
-    };
-    entries
+    let entries = client.search(query, None, None, None)?;
+    Ok(entries
         .into_iter()
         .map(|e| SearchResultEntry {
             title: e.title.clone(),
@@ -49,16 +49,13 @@ fn search_idgames(query: &str) -> Vec<SearchResultEntry> {
                 filename: non_empty(&e.filename),
             },
         })
-        .collect()
+        .collect())
 }
 
-fn search_doomwiki(query: &str) -> Vec<SearchResultEntry> {
+fn search_doomwiki(query: &str) -> caco_sources::Result<Vec<SearchResultEntry>> {
     let client = caco_sources::doomwiki::DoomwikiClient::new();
-    let entries = match client.search_wads(query, 50) {
-        Ok(r) => r,
-        Err(_) => return Vec::new(),
-    };
-    entries
+    let entries = client.search_wads(query, 50)?;
+    Ok(entries
         .into_iter()
         .map(|e| SearchResultEntry {
             title: e.title.clone(),
@@ -70,7 +67,7 @@ fn search_doomwiki(query: &str) -> Vec<SearchResultEntry> {
                 port: non_empty(&e.port),
             },
         })
-        .collect()
+        .collect())
 }
 
 // ---------------------------------------------------------------------------

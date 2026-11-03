@@ -1,9 +1,9 @@
-use reqwest::blocking::Client;
+use reqwest::blocking::{Client, Response};
 
 use super::models::{SearchResult, WikiEntry};
 use super::parser::WikitextParser;
 use crate::error::{Result, SourceError};
-use crate::http::build_client;
+use crate::http::{build_client, waf_challenge};
 
 const API_URL: &str = "https://doomwiki.org/w/api.php";
 const USER_AGENT: &str = "Caco/1.0 (Doom WAD library manager; https://github.com/eshen/caco)";
@@ -23,46 +23,17 @@ impl DoomwikiClient {
         }
     }
 
-    /// Create a client with a custom reqwest client (for testing).
-    pub fn with_client(client: Client) -> Self {
-        Self {
-            client,
-            parser: WikitextParser::new(),
-        }
-    }
-
     /// Make a request to the MediaWiki API.
     fn request(&self, params: &[(&str, &str)]) -> Result<serde_json::Value> {
         let mut query: Vec<(&str, &str)> = params.to_vec();
         query.push(("format", "json"));
 
         let response = self.client.get(API_URL).query(&query).send()?;
-
-        // Detect AWS WAF challenge (Doom Wiki uses AWS)
-        if crate::http::is_aws_waf_challenged(&response) {
-            return Err(SourceError::WafBlocked {
-                api_name: "doomwiki".to_string(),
-                message: "Doom Wiki blocked the request (WAF challenge). Try again later or import manually.".to_string(),
-            });
-        }
-
-        response.error_for_status_ref()?;
-
-        let data: serde_json::Value = response.json()?;
-
-        if let Some(error) = data.get("error") {
-            let msg = error
-                .get("info")
-                .and_then(|m| m.as_str())
-                .unwrap_or("Unknown error");
-            return Err(SourceError::Api(msg.to_string()));
-        }
-
-        Ok(data)
+        read_api_response(response)
     }
 
     /// Search the wiki for pages matching the query.
-    pub fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>> {
+    fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>> {
         let limit_str = limit.to_string();
         let data = self.request(&[
             ("action", "query"),
@@ -101,7 +72,7 @@ impl DoomwikiClient {
     /// Get the raw wikitext content of a page by title.
     ///
     /// Returns `(page_id, wikitext)` or `None` if the page doesn't exist.
-    pub fn get_page_content(&self, title: &str) -> Result<Option<(i64, String)>> {
+    pub(crate) fn get_page_content(&self, title: &str) -> Result<Option<(i64, String)>> {
         let data = self.request(&[
             ("action", "query"),
             ("titles", title),
@@ -112,92 +83,25 @@ impl DoomwikiClient {
         Ok(extract_page_content(&data))
     }
 
-    /// Get the raw wikitext content of a page by ID.
-    ///
-    /// Returns `(title, wikitext)` or `None` if the page doesn't exist.
-    pub fn get_page_content_by_id(&self, page_id: i64) -> Result<Option<(String, String)>> {
-        let id_str = page_id.to_string();
-        let data = self.request(&[
-            ("action", "query"),
-            ("pageids", &id_str),
-            ("prop", "revisions"),
-            ("rvprop", "content"),
-        ])?;
-
-        if let Some(pages) = data
-            .get("query")
-            .and_then(|q| q.get("pages"))
-            .and_then(|p| p.as_object())
-        {
-            let page_data = match pages.get(&id_str) {
-                Some(p) => p,
-                None => return Ok(None),
-            };
-
-            if page_data.get("missing").is_some() {
-                return Ok(None);
-            }
-
-            let title = page_data
-                .get("title")
-                .and_then(|t| t.as_str())
-                .unwrap_or("")
-                .to_string();
-
-            if let Some(content) = extract_revision_content(page_data) {
-                return Ok(Some((title, content)));
-            }
-        }
-
-        Ok(None)
-    }
-
     /// Get parsed WAD entry for a wiki page by title.
     ///
     /// Returns `Ok(None)` both when the page is missing *and* when it exists
     /// but has no `{{Wad}}` infobox — matches the filter `search_wads`
-    /// applies. Use [`get_entry_permissive`](Self::get_entry_permissive) to
-    /// distinguish missing from non-WAD (needed by the CLI's `--force` path).
+    /// applies.
     pub fn get_entry(&self, title: &str) -> Result<Option<WikiEntry>> {
-        Ok(self
-            .get_entry_permissive(title)?
-            .filter(|(_, has_infobox)| *has_infobox)
-            .map(|(entry, _)| entry))
-    }
-
-    /// Get parsed WAD entry for a wiki page by ID.
-    ///
-    /// Same `{{Wad}}`-infobox filter as [`get_entry`](Self::get_entry).
-    pub fn get_entry_by_id(&self, page_id: i64) -> Result<Option<WikiEntry>> {
-        let Some((title, wikitext)) = self.get_page_content_by_id(page_id)? else {
+        let Some((page_id, wikitext)) = self.get_page_content(title)? else {
             return Ok(None);
         };
         if !self.parser.has_wad_template(&wikitext) {
             return Ok(None);
         }
-        Ok(Some(self.parser.parse(&wikitext, &title, page_id)))
-    }
-
-    /// Parse a wiki page regardless of whether it carries a `{{Wad}}` infobox.
-    ///
-    /// Returns `Ok(None)` only when the page is missing. When the page exists,
-    /// returns the parsed entry and a flag indicating whether the infobox
-    /// was present — callers can decide whether to accept non-WAD pages.
-    pub fn get_entry_permissive(&self, title: &str) -> Result<Option<(WikiEntry, bool)>> {
-        let Some((page_id, wikitext)) = self.get_page_content(title)? else {
-            return Ok(None);
-        };
-        let has_infobox = self.parser.has_wad_template(&wikitext);
-        Ok(Some((
-            self.parser.parse(&wikitext, title, page_id),
-            has_infobox,
-        )))
+        Ok(Some(self.parser.parse(&wikitext, title, page_id)))
     }
 
     /// Fetch multiple page contents in a single API request.
     ///
     /// Uses MediaWiki pipe-separated titles API (max 50 per request).
-    pub fn get_pages_batch(
+    fn get_pages_batch(
         &self,
         titles: &[String],
     ) -> Result<std::collections::HashMap<String, (i64, String)>> {
@@ -278,6 +182,30 @@ impl Default for DoomwikiClient {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
+/// Turn a MediaWiki API response into its JSON, or the error it amounts to.
+fn read_api_response(response: Response) -> Result<serde_json::Value> {
+    if let Some(kind) = waf_challenge(&response) {
+        return Err(SourceError::WafBlocked {
+            site: "Doom Wiki",
+            kind,
+        });
+    }
+
+    response.error_for_status_ref()?;
+
+    let data: serde_json::Value = response.json()?;
+
+    if let Some(error) = data.get("error") {
+        let msg = error
+            .get("info")
+            .and_then(|m| m.as_str())
+            .unwrap_or("Unknown error");
+        return Err(SourceError::Api(msg.to_string()));
+    }
+
+    Ok(data)
+}
+
 /// Extract (page_id, wikitext) from a MediaWiki query response.
 fn extract_page_content(data: &serde_json::Value) -> Option<(i64, String)> {
     let pages = data.get("query")?.get("pages")?.as_object()?;
@@ -306,6 +234,90 @@ fn extract_revision_content(page_data: &serde_json::Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::http::{WafKind, canned_response};
+
+    /// The bug this client had: a Cloudflare challenge read as a bare HTTP 403.
+    #[test]
+    fn test_read_api_response_reports_a_cloudflare_challenge_as_blocked() {
+        let err = read_api_response(canned_response(
+            403,
+            &[("server", "cloudflare"), ("cf-mitigated", "challenge")],
+            "<html>Just a moment...</html>",
+        ))
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            SourceError::WafBlocked {
+                site: "Doom Wiki",
+                kind: WafKind::Cloudflare,
+            }
+        ));
+        assert_eq!(
+            err.to_string(),
+            "Doom Wiki blocked the request (Cloudflare challenge). \
+             Try again later or import manually."
+        );
+    }
+
+    /// A 202 passes `error_for_status`, so this would otherwise surface as a
+    /// JSON decode failure on the interstitial.
+    #[test]
+    fn test_read_api_response_reports_an_aws_challenge_as_blocked() {
+        let err = read_api_response(canned_response(
+            202,
+            &[("x-amzn-waf-action", "challenge")],
+            "<html>challenge script</html>",
+        ))
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            SourceError::WafBlocked {
+                kind: WafKind::AwsWaf,
+                ..
+            }
+        ));
+        assert_eq!(
+            err.to_string(),
+            "Doom Wiki blocked the request (AWS WAF challenge). \
+             Try again later or import manually."
+        );
+    }
+
+    #[test]
+    fn test_read_api_response_keeps_the_status_of_a_plain_403() {
+        let err = read_api_response(canned_response(403, &[], "Forbidden")).unwrap_err();
+
+        let SourceError::Http(http) = err else {
+            panic!("expected an HTTP error, got {err:?}");
+        };
+        assert_eq!(http.status(), Some(reqwest::StatusCode::FORBIDDEN));
+    }
+
+    #[test]
+    fn test_read_api_response_returns_the_json() {
+        let data = read_api_response(canned_response(
+            200,
+            &[("server", "cloudflare")],
+            r#"{"query": {"search": []}}"#,
+        ))
+        .unwrap();
+
+        assert!(data.get("query").is_some());
+    }
+
+    #[test]
+    fn test_read_api_response_reports_a_mediawiki_error() {
+        let err = read_api_response(canned_response(
+            200,
+            &[],
+            r#"{"error": {"code": "badvalue", "info": "Unrecognized value"}}"#,
+        ))
+        .unwrap_err();
+
+        assert!(matches!(err, SourceError::Api(msg) if msg == "Unrecognized value"));
+    }
 
     #[test]
     fn test_extract_page_content() {

@@ -80,6 +80,8 @@ fn render_results_table(
     if state.results.is_empty() {
         if state.is_searching {
             ui.colored_label(theme::TEXT_SECONDARY, "Searching...");
+        } else if let Some(error) = &state.error {
+            ui.colored_label(theme::COLOR_ERROR, error);
         } else if state.status_text.is_empty() {
             ui.colored_label(theme::TEXT_SECONDARY, "Enter a search query above");
         } else {

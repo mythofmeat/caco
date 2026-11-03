@@ -121,7 +121,7 @@ pub enum AppMessage {
     /// commit. Only sent when the list is non-empty — a startup check that
     /// finds nothing says nothing.
     SourceportUpdatesAvailable(Vec<String>),
-    SearchComplete(SearchSource, Vec<SearchResultEntry>),
+    SearchComplete(SearchSource, Result<Vec<SearchResultEntry>, String>),
     ImportComplete(Result<ImportResult, String>),
     ThumbnailReady {
         wad_id: i64,

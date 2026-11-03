@@ -60,6 +60,10 @@ pub struct SearchState {
     pub selected_row: Option<usize>,
     pub is_searching: bool,
     pub status_text: String,
+    /// Why the last search failed. Not the same as empty `results`, which means
+    /// the source answered and has nothing: "No results" for a search that never
+    /// ran would say the WAD does not exist.
+    pub error: Option<String>,
 }
 
 impl SearchState {
@@ -70,6 +74,19 @@ impl SearchState {
         self.status_text = format!("{count} result{}", if count == 1 { "" } else { "s" });
         self.selected_row = if results.is_empty() { None } else { Some(0) };
         self.results = results;
+        self.error = None;
+    }
+
+    /// Update state after a search fails.
+    ///
+    /// Drops the previous results too: they answered an earlier query, and left
+    /// in the table they would stand in for the reason this one failed.
+    pub fn set_error(&mut self, error: String) {
+        self.is_searching = false;
+        self.status_text = "Search failed".to_string();
+        self.selected_row = None;
+        self.results.clear();
+        self.error = Some(error);
     }
 }
 
@@ -288,6 +305,31 @@ mod tests {
         let mut s = SearchState::default();
         s.set_results(vec![idgames_entry(1, "solo")]);
         assert_eq!(s.status_text, "1 result");
+    }
+
+    #[test]
+    fn set_error_stops_searching_and_drops_old_results() {
+        let mut s = SearchState {
+            results: vec![idgames_entry(1, "from an earlier query")],
+            selected_row: Some(0),
+            is_searching: true,
+            ..SearchState::default()
+        };
+        s.set_error("blocked".to_string());
+        assert_eq!(s.error.as_deref(), Some("blocked"));
+        assert_eq!(s.status_text, "Search failed");
+        assert!(!s.is_searching);
+        assert!(s.results.is_empty());
+        assert_eq!(s.selected_row, None);
+    }
+
+    #[test]
+    fn set_results_clears_a_previous_error() {
+        let mut s = SearchState::default();
+        s.set_error("blocked".to_string());
+        s.set_results(vec![]);
+        assert_eq!(s.error, None);
+        assert_eq!(s.status_text, "0 results");
     }
 
     #[test]

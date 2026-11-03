@@ -647,6 +647,7 @@ dependencies = [
  "caco-core",
  "cc",
  "html-escape",
+ "http",
  "regex",
  "reqwest",
  "rusqlite",

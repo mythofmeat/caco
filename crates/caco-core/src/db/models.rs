@@ -196,9 +196,9 @@ pub enum Retrievability {
     /// Re-downloadable from idgames, which is archival and stable.
     Automatic,
     /// Only obtainable by hand. `source_url` may still be set — a Doomworld
-    /// thread or a one-off file host — but those links rot, sit behind
-    /// Cloudflare, or point at storage that has since been emptied, so they
-    /// are not something caco can promise to re-fetch.
+    /// thread or a one-off file host — but those links rot, sit behind a WAF,
+    /// or point at storage that has since been emptied, so they are not
+    /// something caco can promise to re-fetch.
     Manual,
 }
 
