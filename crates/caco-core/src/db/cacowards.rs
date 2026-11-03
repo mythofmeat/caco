@@ -2,9 +2,9 @@
 //!
 //! The `cacowards` table is independent of `wads` — entries exist whether or
 //! not the user owns the WAD, so the completion-rate grid can compute
-//! "x of N runners-up beaten." Linking to a `wads` row is best-effort: the
-//! enrichment pipeline tries to match by idgames URL, and the user can pin or
-//! correct a link via `manual_override`.
+//! "x of N runners-up beaten." Linking to a `wads` row is best-effort: caco-sources'
+//! `cacoward_link` matches rows to WADs when a year is scraped and when a WAD is
+//! imported, and the user can pin or correct a link via `manual_override`.
 
 use rusqlite::{Connection, OptionalExtension};
 
@@ -195,6 +195,25 @@ pub fn get_years(conn: &Connection) -> Result<Vec<i64>> {
         .collect::<std::result::Result<Vec<_>, _>>()?)
 }
 
+/// Rows auto-linking may still claim: not pinned, and with no live WAD behind
+/// them. A link to a trashed WAD counts as no link, the same way
+/// [`search_cacowards`] reports such a row as [`EffectiveStatus::Absent`].
+///
+/// A pin outlives its WAD being trashed, since the WAD can come back, but not
+/// being purged: the foreign key nulls `wad_id` and leaves a pin on nothing,
+/// which would otherwise block the row for good.
+pub fn get_linkable_cacowards(conn: &Connection) -> Result<Vec<CacowardRecord>> {
+    let mut stmt = conn.prepare(
+        "SELECT c.* FROM cacowards c
+         LEFT JOIN wads w ON w.id = c.wad_id AND w.deleted_at IS NULL
+         WHERE w.id IS NULL AND (c.manual_override = 0 OR c.wad_id IS NULL)
+         ORDER BY c.id",
+    )?;
+    Ok(stmt
+        .query_map([], CacowardRecord::from_row)?
+        .collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
 /// Link a Cacoward entry to a WAD. If `manual` is true, the link is pinned —
 /// subsequent auto-linking passes will not overwrite it.
 pub fn link_wad(conn: &Connection, cacoward_id: i64, wad_id: i64, manual: bool) -> Result<()> {
@@ -216,7 +235,7 @@ pub fn unlink_wad(conn: &Connection, cacoward_id: i64) -> Result<()> {
 }
 
 /// Find a WAD whose `idgames_id` matches the given numeric idgames id string.
-/// Returns the first match, or None. Used by the enrichment auto-linker.
+/// Returns the first match, or None. Used by the Cacoward auto-linker.
 pub fn find_wad_by_idgames_id(conn: &Connection, idgames_id: &str) -> Result<Option<i64>> {
     let mut stmt =
         conn.prepare("SELECT id FROM wads WHERE idgames_id = ?1 AND deleted_at IS NULL LIMIT 1")?;
@@ -589,6 +608,42 @@ mod tests {
         let record = get_cacoward(&conn, id).unwrap().unwrap();
         assert!(record.wad_id.is_none());
         assert!(!record.manual_override);
+    }
+
+    #[test]
+    fn linkable_rows_are_the_unpinned_ones_with_no_live_wad() {
+        let conn = setup();
+        conn.execute_batch(
+            "INSERT INTO wads (id, title, source_type) VALUES (1, 'live', 'manual');
+             INSERT INTO wads (id, title, source_type, deleted_at)
+                 VALUES (2, 'trashed', 'manual', CURRENT_TIMESTAMP);
+             INSERT INTO wads (id, title, source_type) VALUES (3, 'purged', 'manual');",
+        )
+        .unwrap();
+
+        let unlinked = upsert_cacoward(&conn, &sample(2025, CATEGORY_WINNER, "Unlinked")).unwrap();
+        let on_trash = upsert_cacoward(&conn, &sample(2025, CATEGORY_WINNER, "OnTrash")).unwrap();
+        link_wad(&conn, on_trash, 2, false).unwrap();
+
+        let on_live = upsert_cacoward(&conn, &sample(2025, CATEGORY_WINNER, "OnLive")).unwrap();
+        link_wad(&conn, on_live, 1, false).unwrap();
+        let pinned_live =
+            upsert_cacoward(&conn, &sample(2025, CATEGORY_WINNER, "PinnedLive")).unwrap();
+        link_wad(&conn, pinned_live, 1, true).unwrap();
+        let pinned_trash =
+            upsert_cacoward(&conn, &sample(2025, CATEGORY_WINNER, "PinnedTrash")).unwrap();
+        link_wad(&conn, pinned_trash, 2, true).unwrap();
+        let pinned_purged =
+            upsert_cacoward(&conn, &sample(2025, CATEGORY_WINNER, "PinnedPurged")).unwrap();
+        link_wad(&conn, pinned_purged, 3, true).unwrap();
+        conn.execute("DELETE FROM wads WHERE id = 3", []).unwrap();
+
+        let ids: Vec<i64> = get_linkable_cacowards(&conn)
+            .unwrap()
+            .iter()
+            .map(|row| row.id)
+            .collect();
+        assert_eq!(ids, vec![unlinked, on_trash, pinned_purged]);
     }
 
     #[test]

@@ -7,6 +7,7 @@ use unicode_normalization::UnicodeNormalization;
 
 static PUNCTUATION_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[^a-z0-9\s]").unwrap());
 
+use crate::cacoward_link;
 use crate::doomwiki::DoomwikiClient;
 use crate::doomworld::ForumThread;
 use crate::idgames::{
@@ -179,18 +180,10 @@ impl ImportService {
             wad = wad.tags(t);
         }
 
-        let result = db::with_transaction(conn, |tx| {
-            let wad_id = db::add_wad(tx, &wad)?;
-            // Auto-enrich with Doom Wiki metadata inside the same transaction
-            // so a mid-enrich failure rolls the WAD insert back.
+        insert_wad(conn, &wad, |tx, wad_id| {
             self.auto_enrich_doomwiki(tx, wad_id, &entry.title);
-            Ok(wad_id)
-        });
-
-        match result {
-            Ok(wad_id) => ImportResult::success(wad_id),
-            Err(e) => ImportResult::error(e.to_string()),
-        }
+            Ok(())
+        })
     }
 
     /// Import from Doom Wiki.
@@ -235,8 +228,7 @@ impl ImportService {
             wad = wad.tags(t);
         }
 
-        let result = db::with_transaction(conn, |tx| {
-            let wad_id = db::add_wad(tx, &wad)?;
+        insert_wad(conn, &wad, |tx, wad_id| {
             if !entry.iwad.is_empty() {
                 auto_link_iwad(tx, wad_id, &entry.iwad);
             }
@@ -248,13 +240,8 @@ impl ImportService {
             if !entry.link.is_empty() {
                 self.auto_link_idgames_from_url(tx, wad_id, &entry.link);
             }
-            Ok(wad_id)
-        });
-
-        match result {
-            Ok(wad_id) => ImportResult::success(wad_id),
-            Err(e) => ImportResult::error(e.to_string()),
-        }
+            Ok(())
+        })
     }
 
     /// Import from a Doomworld forum thread.
@@ -327,9 +314,7 @@ impl ImportService {
             wad = wad.tags(t);
         }
 
-        let result = db::with_transaction(conn, |tx| {
-            let wad_id = db::add_wad(tx, &wad)?;
-
+        insert_wad(conn, &wad, |tx, wad_id| {
             if let Some(cl) = thread.complevel {
                 let update = WadUpdate::new().set_int("complevel", Some(cl as i64));
                 db::update_wad(tx, wad_id, &update)?;
@@ -358,13 +343,8 @@ impl ImportService {
 
             // Auto-enrich with Doom Wiki metadata
             self.auto_enrich_doomwiki(tx, wad_id, final_title);
-            Ok(wad_id)
-        });
-
-        match result {
-            Ok(wad_id) => ImportResult::success(wad_id),
-            Err(e) => ImportResult::error(e.to_string()),
-        }
+            Ok(())
+        })
     }
 
     /// Import from a direct URL.
@@ -403,16 +383,10 @@ impl ImportService {
             wad = wad.tags(t);
         }
 
-        let result = db::with_transaction(conn, |tx| {
-            let wad_id = db::add_wad(tx, &wad)?;
+        insert_wad(conn, &wad, |tx, wad_id| {
             self.auto_enrich_doomwiki(tx, wad_id, title);
-            Ok(wad_id)
-        });
-
-        match result {
-            Ok(wad_id) => ImportResult::success(wad_id),
-            Err(e) => ImportResult::error(e.to_string()),
-        }
+            Ok(())
+        })
     }
 
     /// Import a local file.
@@ -466,16 +440,10 @@ impl ImportService {
             wad = wad.tags(t);
         }
 
-        let result = db::with_transaction(conn, |tx| {
-            let wad_id = db::add_wad(tx, &wad)?;
+        insert_wad(conn, &wad, |tx, wad_id| {
             self.auto_enrich_doomwiki(tx, wad_id, title);
-            Ok(wad_id)
-        });
-
-        match result {
-            Ok(wad_id) => ImportResult::success(wad_id),
-            Err(e) => ImportResult::error(e.to_string()),
-        }
+            Ok(())
+        })
     }
 
     /// Auto-enrich a WAD with Doom Wiki metadata after import.
@@ -555,6 +523,31 @@ impl ImportService {
 
         // Silently ignore errors
         let _ = result;
+    }
+}
+
+/// Put a WAD in the library: the one path every import route takes, so none of
+/// them can skip a step.
+///
+/// `enrich` attaches what the source knows. Cacoward linking comes last because
+/// a Doom Wiki import only learns its idgames id during `enrich`. All of it is
+/// one transaction: if linking fails the import reports an error and can simply
+/// be retried, rather than leaving a WAD that nothing would ever link again.
+fn insert_wad(
+    conn: &Connection,
+    wad: &NewWad,
+    enrich: impl FnOnce(&Connection, i64) -> caco_core::Result<()>,
+) -> ImportResult {
+    let result = db::with_transaction(conn, |tx| {
+        let wad_id = db::add_wad(tx, wad)?;
+        enrich(tx, wad_id)?;
+        cacoward_link::link_imported_wad(tx, wad_id)?;
+        Ok(wad_id)
+    });
+
+    match result {
+        Ok(wad_id) => ImportResult::success(wad_id),
+        Err(e) => ImportResult::error(e.to_string()),
     }
 }
 
@@ -1465,6 +1458,216 @@ mod tests {
         let desc = wad.description.unwrap();
         assert!(desc.len() <= 2003); // 1997 + "..."
         assert!(desc.ends_with("..."));
+    }
+
+    // -- Cacoward linking at import time --
+
+    /// A Cacoward row already in the table, as the scrape would leave it.
+    fn add_cacoward(conn: &Connection, title: &str, idgames_id: Option<i64>) -> i64 {
+        db::upsert_cacoward(
+            conn,
+            &db::NewCacoward {
+                year: 2025,
+                category: db::CATEGORY_WINNER.to_string(),
+                wad_title: title.to_string(),
+                idgames_url: idgames_id
+                    .map(|id| format!("https://www.doomworld.com/idgames/?id={id}")),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+    }
+
+    fn linked_wad(conn: &Connection, cacoward: i64) -> Option<i64> {
+        db::get_cacoward(conn, cacoward).unwrap().unwrap().wad_id
+    }
+
+    fn idgames_entry(id: i64, title: &str) -> FileEntry {
+        serde_json::from_value(serde_json::json!({ "id": id, "title": title })).unwrap()
+    }
+
+    fn doomworld_thread(thread_id: i64, title: &str) -> ForumThread {
+        ForumThread {
+            thread_id,
+            title: title.to_string(),
+            author: String::new(),
+            posted_date: String::new(),
+            first_post_html: String::new(),
+            first_post_text: String::new(),
+            thread_url: format!("https://www.doomworld.com/vb/thread/{thread_id}"),
+            download_links: Vec::new(),
+            complevel: None,
+            iwad: None,
+            sourceport: None,
+            version: None,
+        }
+    }
+
+    fn wiki_entry(page_id: i64, title: &str, link: &str) -> crate::doomwiki::WikiEntry {
+        crate::doomwiki::WikiEntry {
+            page_id,
+            title: title.to_string(),
+            name: title.to_string(),
+            author: String::new(),
+            year: None,
+            iwad: String::new(),
+            port: String::new(),
+            link: link.to_string(),
+            description: String::new(),
+            wiki_url: String::new(),
+        }
+    }
+
+    #[test]
+    fn test_import_idgames_links_cacoward_by_id_when_titles_differ() {
+        let conn = setup();
+        let row = add_cacoward(&conn, "TNT: Overcharged", Some(19951));
+
+        let result = ImportService::new().import_idgames(
+            &conn,
+            &idgames_entry(19951, "TNT:Overcharged"),
+            None,
+            false,
+        );
+
+        assert_eq!(linked_wad(&conn, row), result.wad_id);
+        assert!(result.wad_id.is_some());
+    }
+
+    #[test]
+    fn test_import_doomwiki_links_cacoward_by_the_idgames_id_on_its_page() {
+        // The id only reaches the row during enrichment, so this fails if
+        // linking ever moves ahead of it.
+        let conn = setup();
+        let row = add_cacoward(&conn, "A Differently Named Entry", Some(18184));
+
+        let result = ImportService::new().import_doomwiki(
+            &conn,
+            &wiki_entry(1, "Scythe", "https://www.doomworld.com/idgames/?id=18184"),
+            None,
+            false,
+        );
+
+        assert_eq!(linked_wad(&conn, row), result.wad_id);
+        assert!(result.wad_id.is_some());
+    }
+
+    #[test]
+    fn test_import_doomwiki_links_cacoward_by_title() {
+        let conn = setup();
+        let row = add_cacoward(&conn, "Dreamblood", None);
+
+        let result = ImportService::new().import_doomwiki(
+            &conn,
+            &wiki_entry(2, "Dreamblood", ""),
+            None,
+            false,
+        );
+
+        assert_eq!(linked_wad(&conn, row), result.wad_id);
+        assert!(result.wad_id.is_some());
+    }
+
+    #[test]
+    fn test_import_doomworld_links_cacoward_by_title() {
+        let conn = setup();
+        let row = add_cacoward(&conn, "Eisberg", None);
+
+        let result = ImportService::new().import_doomworld(
+            &conn,
+            &doomworld_thread(152701, "EISBERG"),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+
+        assert_eq!(linked_wad(&conn, row), result.wad_id);
+        assert!(result.wad_id.is_some());
+    }
+
+    #[test]
+    fn test_import_url_links_cacoward_by_title() {
+        let conn = setup();
+        let row = add_cacoward(&conn, "Purgatory", None);
+
+        let result = ImportService::new().import_url(
+            &conn,
+            "Purgatory",
+            "https://example.com/purgatory.zip",
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+
+        assert_eq!(linked_wad(&conn, row), result.wad_id);
+        assert!(result.wad_id.is_some());
+    }
+
+    #[test]
+    fn test_import_local_links_cacoward_by_title() {
+        let conn = setup();
+        let row = add_cacoward(&conn, "Aftercare Sessions", None);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("aftercare.wad");
+        std::fs::write(&path, b"PWAD").unwrap();
+
+        let result = ImportService::new().import_local(
+            &conn,
+            "Aftercare Sessions",
+            &path,
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+
+        assert_eq!(linked_wad(&conn, row), result.wad_id);
+        assert!(result.wad_id.is_some());
+    }
+
+    #[test]
+    fn test_import_leaves_cacowards_it_does_not_match_alone() {
+        let conn = setup();
+        let row = add_cacoward(&conn, "Something Else", Some(1));
+
+        let result =
+            ImportService::new().import_idgames(&conn, &idgames_entry(2, "Sunlust"), None, false);
+
+        assert!(result.ok());
+        assert_eq!(linked_wad(&conn, row), None);
+    }
+
+    #[test]
+    fn test_failed_cacoward_link_rolls_the_import_back() {
+        let conn = setup();
+        add_cacoward(&conn, "Purgatory", None);
+        conn.execute_batch(
+            "CREATE TRIGGER refuse_link BEFORE UPDATE OF wad_id ON cacowards
+             BEGIN SELECT RAISE(ABORT, 'refused'); END;",
+        )
+        .unwrap();
+
+        let result = ImportService::new().import_url(
+            &conn,
+            "Purgatory",
+            "https://example.com/purgatory.zip",
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+
+        assert!(result.error.is_some());
+        let wads: i64 = conn
+            .query_row("SELECT COUNT(*) FROM wads", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(wads, 0);
     }
 
     #[test]
