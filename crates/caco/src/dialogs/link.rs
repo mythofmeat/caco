@@ -10,6 +10,10 @@ pub struct LinkDialogState {
     pub wad_id: i64,
     pub wad_title: String,
     pub source_url: Option<String>,
+    /// Where the file was the last time caco found it, if it ever had one —
+    /// what turns "not available" into "on another machine, or a drive that
+    /// is not mounted".
+    last_seen: Option<String>,
     error_message: Option<String>,
     /// Active file picker, if the user clicked "Link Local File". Polled
     /// each frame; resolves to `Some(path)` or `None` (cancelled).
@@ -34,6 +38,7 @@ impl LinkDialogState {
             wad_id,
             wad_title: wad.title,
             source_url: wad.source_url,
+            last_seen: wad.last_known_path.filter(|path| !path.is_empty()),
             error_message: None,
             pending_picker: None,
         })
@@ -93,11 +98,32 @@ impl LinkDialogState {
 
             ui.add_space(4.0);
 
-            ui.colored_label(
-                theme::TEXT_SECONDARY,
-                "The WAD file for this entry is not available locally.\n\
-                     You can open the source URL to download it, or link a local file.",
-            );
+            match &self.last_seen {
+                Some(path) => {
+                    ui.colored_label(
+                        theme::TEXT_SECONDARY,
+                        "This WAD's file is not on this machine. It was last seen at:",
+                    );
+                    ui.label(
+                        egui::RichText::new(path)
+                            .monospace()
+                            .color(theme::TEXT_PRIMARY),
+                    );
+                    ui.colored_label(
+                        theme::TEXT_SECONDARY,
+                        "On another machine, or on a drive that isn't mounted? Once it's \
+                         back there, Play will find it. Otherwise, open the source URL to \
+                         download it again, or link a local copy.",
+                    );
+                }
+                None => {
+                    ui.colored_label(
+                        theme::TEXT_SECONDARY,
+                        "The WAD file for this entry is not available locally.\n\
+                         You can open the source URL to download it, or link a local file.",
+                    );
+                }
+            }
 
             ui.add_space(8.0);
             if let Some(error) = &self.error_message {
@@ -208,8 +234,34 @@ mod tests {
     }
 
     #[test]
+    fn test_dialog_says_where_the_file_was_last_seen() {
+        let (conn, wad_id) = setup_conn();
+        let last_seen =
+            |conn: &rusqlite::Connection| LinkDialogState::new(conn, wad_id).unwrap().last_seen;
+        assert_eq!(last_seen(&conn), None);
+
+        for (stored, shown) in [
+            ("", None),
+            ("/mnt/nas/myhouse.pk3", Some("/mnt/nas/myhouse.pk3")),
+        ] {
+            conn.execute(
+                "UPDATE wads SET last_known_path = ?1 WHERE id = ?2",
+                rusqlite::params![stored, wad_id],
+            )
+            .unwrap();
+            assert_eq!(last_seen(&conn).as_deref(), shown);
+        }
+    }
+
+    #[test]
     fn test_link_picked_file_updates_cached_path_and_filename() {
         let (conn, wad_id) = setup_conn();
+        // Linking a copy answers "where did it go", so the old answer goes.
+        conn.execute(
+            "UPDATE wads SET last_known_path = '/mnt/nas/example.wad' WHERE id = ?1",
+            [wad_id],
+        )
+        .unwrap();
         let source_dir = tempfile::tempdir().unwrap();
         let cache_dir = tempfile::tempdir().unwrap();
         let source = source_dir.path().join("example.wad");
@@ -228,6 +280,7 @@ mod tests {
             wad.cached_path.as_deref(),
             Some(expected_cached_path.as_str())
         );
+        assert_eq!(wad.last_known_path, None);
         assert_eq!(
             std::fs::read(cache_dir.path().join("example.wad")).unwrap(),
             b"PWAD"
@@ -241,6 +294,7 @@ mod tests {
             wad_id,
             wad_title: "Linked WAD".to_string(),
             source_url: None,
+            last_seen: None,
             error_message: None,
             pending_picker: None,
         };

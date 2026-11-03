@@ -160,6 +160,14 @@ impl WadUpdate {
             "source_url" => value.map(|url| clean_source_url(&url).to_string()),
             _ => value,
         };
+        // A file caco has a path for supersedes wherever one was last seen, and
+        // the two columns must never both be set: `presence` would otherwise
+        // read a stale last-known location back as somewhere to restore from.
+        // Not an allowed field of its own because `presence` is its only writer.
+        if field == "cached_path" && value.as_deref().is_some_and(|p| !p.is_empty()) {
+            self.fields
+                .insert("last_known_path", FieldValue::Text(None));
+        }
         self.fields.insert(field, FieldValue::Text(value));
         self
     }
@@ -809,6 +817,34 @@ mod tests {
 
         let wad = get_wad(&conn, id, false).unwrap().unwrap();
         assert_eq!(wad.availability(), Availability::Downloadable);
+    }
+
+    /// `presence` restores a row from `last_known_path`, so a row that has a
+    /// file again must not keep one: evicting the new copy would otherwise
+    /// bring back a link to wherever the old one used to be.
+    #[test]
+    fn test_setting_cached_path_forgets_last_known_path() {
+        let conn = setup();
+        let id = add_wad(&conn, &NewWad::new("Test", SourceType::Doomworld)).unwrap();
+        conn.execute(
+            "UPDATE wads SET last_known_path = '/mnt/nas/test.wad' WHERE id = ?1",
+            [id],
+        )
+        .unwrap();
+        let last_known =
+            |conn: &Connection| get_wad(conn, id, false).unwrap().unwrap().last_known_path;
+
+        // Clearing a path, or writing a blank one, is not finding the file.
+        for blank in [None, Some(String::new())] {
+            update_wad(&conn, id, &WadUpdate::new().set_text("cached_path", blank)).unwrap();
+            assert_eq!(last_known(&conn).as_deref(), Some("/mnt/nas/test.wad"));
+        }
+
+        let found = WadUpdate::new().set_text("cached_path", Some("/keep/test.wad".to_string()));
+        update_wad(&conn, id, &found).unwrap();
+        let wad = get_wad(&conn, id, false).unwrap().unwrap();
+        assert_eq!(wad.cached_path.as_deref(), Some("/keep/test.wad"));
+        assert_eq!(wad.last_known_path, None);
     }
 
     #[test]

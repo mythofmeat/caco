@@ -1,4 +1,5 @@
 use std::io;
+use std::path::PathBuf;
 
 /// Central error type for caco-core.
 #[derive(Debug, thiserror::Error)]
@@ -48,6 +49,16 @@ pub enum Error {
     #[error("file not found: {0}")]
     FileNotFound(String),
 
+    /// A WAD's file is not on this machine. Its own variant because callers
+    /// act on it — the GUI offers to link a copy — where any other failure to
+    /// launch is only reported.
+    #[error("'{title}' is not on this machine{}", last_seen_suffix(.last_seen))]
+    WadFileMissing {
+        title: String,
+        /// Where the file was the last time caco found it, if it ever had one.
+        last_seen: Option<PathBuf>,
+    },
+
     #[error("invalid WAD format: {0}")]
     InvalidWadFormat(String),
 
@@ -83,5 +94,35 @@ pub enum Error {
     PortBuildCancelled(String),
 }
 
+fn last_seen_suffix(last_seen: &Option<PathBuf>) -> String {
+    last_seen
+        .as_ref()
+        .map(|path| format!(" (last seen at {})", path.display()))
+        .unwrap_or_default()
+}
+
 /// Convenience alias used throughout caco-core.
 pub type Result<T> = std::result::Result<T, Error>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_wad_file_missing_says_where_it_was_last_seen() {
+        let seen = Error::WadFileMissing {
+            title: "My House".to_string(),
+            last_seen: Some(PathBuf::from("/mnt/nas/myhouse.pk3")),
+        };
+        assert_eq!(
+            seen.to_string(),
+            "'My House' is not on this machine (last seen at /mnt/nas/myhouse.pk3)"
+        );
+
+        let never = Error::WadFileMissing {
+            title: "My House".to_string(),
+            last_seen: None,
+        };
+        assert_eq!(never.to_string(), "'My House' is not on this machine");
+    }
+}

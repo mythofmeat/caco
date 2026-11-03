@@ -90,14 +90,17 @@ pub enum EnrichReport {
 pub enum AppMessage {
     Notify(Notification),
     PlayFinished {
-        wad_id: i64,
         outcome: Result<PlayResult, String>,
     },
-    /// WAD could not be played because no downloadable source was available.
-    /// Triggers the "WAD Unavailable" link dialog.
+    /// The WAD's file is not on this machine and caco could not fetch it.
+    /// Triggers the "WAD Unavailable" link dialog, which says where the file
+    /// was last seen.
     PlayUnavailable {
         wad_id: i64,
     },
+    /// The startup check of every recorded WAD file wrote something back.
+    /// Only sent when it did, so the library reloads only when it is stale.
+    FilesChecked(caco_core::presence::CheckReport),
     /// An enrichment run moved on to another WAD. `done` counts WADs already
     /// finished, so `done / total` drives a progress bar directly.
     EnrichProgress {

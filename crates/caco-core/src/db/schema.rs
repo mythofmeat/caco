@@ -170,6 +170,7 @@ static MIGRATIONS: &[Migration] = &[
         "backfill_idgames_id_trim_source_url",
         migrate_backfill_idgames_id_trim_source_url,
     ),
+    (40, "add_last_known_path", migrate_add_last_known_path),
 ];
 
 // ---------------------------------------------------------------------------
@@ -511,6 +512,17 @@ fn migrate_backfill_idgames_id_trim_source_url(conn: &Connection) -> Result<()> 
          WHERE source_url <> TRIM(source_url, char(9, 10, 11, 12, 13, 32));",
     )?;
     Ok(())
+}
+
+/// Add `last_known_path`: where a WAD's file was the last time caco found it.
+///
+/// A record of history rather than a copy of something derivable, so it does
+/// not bring back the drift migration 38 removed — see `crate::presence`, its
+/// only writer. Nothing is backfilled: the startup check that runs after
+/// `init_db` finds the dangling paths, and finding them here would put a `stat`,
+/// which blocks for as long as a dead network mount does, inside a migration.
+fn migrate_add_last_known_path(conn: &Connection) -> Result<()> {
+    add_column_if_missing(conn, "wads", "last_known_path", "TEXT")
 }
 
 fn migrate_drop_custom_complevel(conn: &Connection) -> Result<()> {
@@ -871,6 +883,7 @@ mod tests {
             "idgames_id",
             "filename",
             "cached_path",
+            "last_known_path",
             "custom_iwad",
             "custom_sourceport",
             "required_sourceport_family",
@@ -943,7 +956,9 @@ mod tests {
                     'https://www.doomworld.com/vb/thread/149498' || char(13), NULL),
                 (7, 'both ends', 'url', NULL, NULL,
                     char(32, 9) || 'https://example.com/a b.zip' || char(13, 10), NULL);
-             DELETE FROM schema_migrations WHERE version = 39;",
+             -- `init_db` resumes after the highest recorded version, so every
+             -- later one has to go too for 39 to run again.
+             DELETE FROM schema_migrations WHERE version >= 39;",
         )
         .unwrap();
 

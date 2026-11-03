@@ -101,6 +101,7 @@ fn put_sourceport_on_path(home: &Path) {
 
 struct Shooter {
     harness: egui_kittest::Harness<'static, caco::app::CacoApp>,
+    home: PathBuf,
 }
 
 impl Shooter {
@@ -120,7 +121,7 @@ impl Shooter {
                 caco::app::CacoApp::new(conn, db_path, &cc.egui_ctx)
             });
 
-        let mut me = Self { harness };
+        let mut me = Self { harness, home };
         // First frame loads the library, later frames pick up thumbnails as
         // the worker threads answer.
         me.settle(8, WORKER_PAUSE);
@@ -220,6 +221,38 @@ impl Shooter {
         })));
         self.settle(2, WORKER_PAUSE);
         self.harness.get_by_label_contains("could not be checked");
+    }
+
+    /// A manual-only WAD whose file is gone, in the state the library is in
+    /// once a data dir arrives from a machine that had it: a recorded path
+    /// that resolves to nothing. Play is what finds that out, so the shot goes
+    /// through it.
+    ///
+    /// The path is long on purpose, since a path that cannot wrap is what has
+    /// pushed dialogs off the screen before, and the file name is one no real
+    /// cache holds, because Play looks for it by name in the cache dir too.
+    fn add_lost_wad(&self) -> i64 {
+        use caco_core::db::{self, NewWad, SourceType, WadUpdate};
+
+        let gone = self
+            .home
+            .join("mnt/nas-that-is-not-mounted/doom/cacowards/2025/runners-up")
+            .join("caco-screenshots-purgatory-v1.1-final-with-the-music-fix.pk3");
+        let conn = db::open_connection(&self.home.join("library.db")).expect("open db");
+        let id = db::add_wad(
+            &conn,
+            &NewWad::new("Purgatory", SourceType::Doomworld)
+                .source_url("https://www.doomworld.com/forum/topic/150000-purgatory/"),
+        )
+        .expect("add lost WAD");
+        let recorded = WadUpdate::new().set_text("cached_path", Some(gone.display().to_string()));
+        db::update_wad(&conn, id, &recorded).expect("record its file");
+        id
+    }
+
+    fn purge_wad(&self, id: i64) {
+        let conn = caco_core::db::open_connection(&self.home.join("library.db")).expect("open db");
+        caco_core::db::delete_wad(&conn, id, true).expect("purge WAD");
     }
 
     /// Largest distance by which any floating window escapes the viewport.
@@ -384,6 +417,18 @@ fn shoot_every_surface() {
             },
         ),
     );
+
+    // Only Play reaches the link dialog, and only for a WAD whose file is not
+    // here. Last, because the WAD it adds is in the library from then on.
+    let lost = s.add_lost_wad();
+    record(
+        "link-last-seen",
+        s.shot_dialog_after("dlg-link-last-seen", ActionRequest::Play(lost), |s| {
+            s.settle(4, WORKER_PAUSE);
+            s.harness.get_by_label_contains("It was last seen at");
+        }),
+    );
+    s.purge_wad(lost);
 
     assert!(
         escaped.is_empty(),

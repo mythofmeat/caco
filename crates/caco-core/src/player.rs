@@ -12,6 +12,7 @@ use crate::config;
 use crate::db;
 use crate::demos;
 use crate::iwad_detect;
+use crate::presence;
 use crate::sourceports;
 use crate::stats_watcher;
 use crate::wad_stats;
@@ -276,19 +277,17 @@ fn build_launch(
 ) -> crate::Result<BuiltLaunch> {
     let wad = db::get_wad(conn, wad_id, false)?.ok_or(crate::Error::WadNotFound(wad_id))?;
 
-    // Get WAD file path (must already be cached/linked)
-    let wad_path = wad.cached_path.as_deref().and_then(|p| {
-        let path = PathBuf::from(p);
-        if path.exists() { Some(path) } else { None }
-    });
-
-    let wad_path = match wad_path {
-        Some(p) => p,
-        None => {
-            return Err(crate::Error::FileNotFound(format!(
-                "No WAD file linked for '{}'. Download and link with: caco modify id:{} --link /path/to/wad",
-                wad.title, wad_id
-            )));
+    // The file has to be on this machine. Asking `presence` rather than the
+    // path means a file deleted since startup, or on a drive unmounted since,
+    // fails here, says where it was last seen, and is recorded as missing — and
+    // one that has come back is relinked instead of failing at all.
+    let wad_path = match presence::check_wad(conn, &wad, &presence::StorePaths::from_config())? {
+        presence::Presence::Here(path) => path,
+        presence::Presence::Missing { last_seen } => {
+            return Err(crate::Error::WadFileMissing {
+                title: wad.title,
+                last_seen,
+            });
         }
     };
 
