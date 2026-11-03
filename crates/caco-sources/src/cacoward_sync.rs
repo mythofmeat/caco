@@ -239,8 +239,12 @@ mod tests {
     fn an_unchanged_dataset_does_not_need_the_write_lock() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("library.db");
+        // By way of memory, because `init_db` on a file snapshots it into the real
+        // backup dir, and a test must not write there.
+        setup()
+            .execute("VACUUM INTO ?1", [path.to_str().unwrap()])
+            .unwrap();
         let conn = open_connection(&path).unwrap();
-        init_db(&conn).unwrap();
         let data = dataset(vec![winner("One")]);
         sync_cacowards(&conn, &data).unwrap();
 
