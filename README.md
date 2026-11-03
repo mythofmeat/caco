@@ -117,7 +117,8 @@ the sourceport.
 | IWADs | Registered IWADs and id24 resources |
 | Sourceports | Build sourceports from source into caco's own prefix |
 | Enrich | Re-run complevel / IWAD / sourceport detection across the library |
-| Settings | Sourceports, launch args, behavior toggles, cache limits, mirrors, paths |
+| Mirrors | Your own stores of WAD files: set one up, fill it, change it — see [Mirrors](#mirrors) |
+| Settings | Sourceports, launch args, behavior toggles, cache limits, paths |
 
 Storage tabs:
 
@@ -248,40 +249,51 @@ machine with your library can get them back from.
 
 caco ships no mirror and never will. Many WAD text files restrict redistribution, and
 while a private archive of files you downloaded is your business, a default URL in
-caco would be caco's. Add one in Settings, or in `config.toml`:
+caco would be caco's.
 
-```toml
-[[mirrors]]
-name      = "home"
-url       = "https://files.example.lan/doom"   # or: path = "/mnt/nas/doom-mirror"
-token_env = "CACO_MIRROR_TOKEN"                # optional: the variable holding a bearer token
-write     = true                               # caco may upload
-```
+### Setting one up
 
-| Kind of store | Set | Notes |
+Everything happens in **Manage → Mirrors**, with nothing to edit by hand. The first time
+it opens on a wizard, which asks where you want to keep it and says what to do for that
+kind of store:
+
+| Kind of store | What it needs | caco does the rest |
 |---|---|---|
-| A directory, such as a NAS mount | `path` | It has to exist already. caco will not create one on a drive that is not mounted. |
-| A static file server | `url` | Read only, so leave `write` off. |
-| A WebDAV server | `url` | Reads and writes. |
-| Gitea's generic package registry | `url = "https://gitea.example.com/api/packages/<owner>/generic/<name>"` | Needs a token with package access to write, and to read if the owner is private. |
+| **A folder**, such as a NAS mount, an external drive or a synced folder | A path | Creates the folder if it isn't there |
+| **Gitea**'s package registry | The server, an owner, and a token with `package` set to Read and Write | Opens Gitea's token page for you, and the package appears by itself |
+| **WebDAV**: Nextcloud, a Synology or QNAP NAS, Apache, nginx, or anything else that speaks it | The address of a folder, and a username and password if it has a login | Creates the folder on the server. There is a one-line `rclone` command to copy if you have no server |
+| **A web server**, read only | The address of a folder something else fills | Nothing to do: it only reads |
 
-The token stays out of the config, which is meant to travel between machines, so set
-the variable in the environment caco starts in. A desktop launcher often does not see
-what a shell's rc file exports, and caco says so if a mirror refuses it for that.
+**Test It** tries the mirror before anything is saved: it reads the index and, if caco may
+upload, writes a small file and removes it again. If that fails it says why and what to
+check. A mirror that is down right now can be added anyway. **Finish** makes it ready, then
+offers to upload what you already have: the WADs with a file on this machine that nothing
+else could give you back, listed before anything goes anywhere.
+
+From then on the Mirrors list shows what each one holds, says when one can't be read, and
+can add more, edit, reorder, remove or fill them. Removing a mirror deletes nothing on it.
+
+Tokens and passwords you paste in are saved in `~/.config/caco/mirror-tokens.toml` on
+Linux and `~/Library/Preferences/caco/mirror-tokens.toml` on a Mac, readable only by you.
+They are never written to the data directory, which you may copy or keep in git, so a
+second machine asks for its own. If you would rather not save one at all, the wizard can
+read it from an environment variable instead, which has to be set wherever caco starts: a
+desktop launcher often does not see what a shell's rc file exports.
+
+### What a mirror does
 
 **Fetching.** Play looks on your mirrors before anywhere else for a WAD that is not on
-this machine, in the order you listed them. A download is checked against the size and
+this machine, in the order they are listed. A download is checked against the size and
 SHA-256 in the mirror's index, so a corrupt or replaced file never reaches the
 sourceport. If it fails, Play falls back to idgames for a WAD that is on it, and
 otherwise says what went wrong.
 
 **Uploading.** When you link a file or import one for a WAD caco could not otherwise
 get back, it offers to upload it to each writable mirror, after the game closes if
-linking launched one. For a file that was already here when you set the mirror up, use
-**Upload** in Edit's Sources tab.
+linking launched one. **Upload** in Edit's Sources tab does the same for any one WAD.
 
 **Which WADs a mirror has.** caco reads each mirror's index when it starts and when you
-save Settings. It finds a WAD's file by hash if the WAD has one: the same file, or the
+ask it to. It finds a WAD's file by hash if the WAD has one: the same file, or the
 same WAD in a different zip. A WAD with a hash goes by nothing else, so a mirror holding
 a newer release is not a silent upgrade. A WAD that has never had a file goes by idgames
 id, Cacoward, Doomworld thread or Doom Wiki page, and the newest upload wins.
@@ -290,7 +302,22 @@ A WAD a mirror holds counts as one caco can fetch, like one on idgames: it stops
 lost, a new copy goes in the cache, and Clean and Cache treat its file as re-downloadable.
 A mirror that does not answer at startup keeps counting for what it held the last time,
 with a warning in the status bar, so that a laptop away from home does not see half its
-library go manual. So if a mirror is gone for good, remove it from Settings.
+library go manual. So if a mirror is gone for good, remove it.
+
+### In `config.toml`
+
+The wizard writes this, and it can be edited by hand like anything else there:
+
+```toml
+[[mirrors]]
+name      = "home"
+url       = "https://files.example.lan/doom"   # or: path = "/mnt/nas/doom-mirror"
+username  = "doom"                             # for a store that wants a login
+token_env = "CACO_MIRROR_TOKEN"                # read the token or password from here
+write     = true                               # caco may upload
+```
+
+A Gitea mirror's `url` is `https://gitea.example.com/api/packages/<owner>/generic/<name>`.
 
 ### Layout
 
@@ -411,6 +438,12 @@ machine:
 | `sourceports/` | Sourceport build recipes and their patches |
 | `cacowards/` | Your corrections and additions to the Cacowards list |
 | `backups/` | Save backups + pre-migration DB snapshots |
+
+**On this machine only** — neither copied between machines nor regenerable:
+
+| | Linux | macOS |
+|---|---|---|
+| Tokens and passwords for your [mirrors](#mirrors) | `~/.config/caco/mirror-tokens.toml` | `~/Library/Preferences/caco/mirror-tokens.toml` |
 
 **Disposable** — safe to delete at any time:
 
