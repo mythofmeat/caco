@@ -13,7 +13,7 @@ A personal Doom WAD library manager inspired by [beets](https://beets.io). Impor
 - **Per-WAD isolation** — saves, stats, and configs are separated per WAD so nothing gets mixed up.
 - **On-demand downloads** — idgames WADs are cached when you play, with configurable auto-cleanup. WADs that cannot be re-downloaded are kept on the portable side instead, and destructive actions leave them alone by default.
 - **Content identity** — every WAD file is hashed, along with the WADs inside a zip, so caco notices when a file has changed since you last played it and asks before launching it: saves and demos made with one version of a WAD often fail with another.
-- **Cacowards browser** — a magazine-style year-by-year view of Doomworld's awards, doubling as an import queue.
+- **Cacowards browser** — a magazine-style year-by-year view of every WAD Doomworld has awarded since 2004, doubling as an import queue. The list ships with caco, so it works offline and needs no site to be up.
 - **Garbage collection** — reclaim disk space from completed / abandoned WADs, reviewing every file before it goes.
 - **Smart collections** — save queries by name and pin them to the sidebar.
 
@@ -100,7 +100,10 @@ the sourceport.
 - Right-hand detail sidebar with metadata, play stats, and quick actions
 - Cacowards view — a year-by-year browse of Doomworld's awards where entries you
   don't own yet are flagged `absent` with an inline Import button. A WAD imported
-  any other way links itself to its entry, by idgames id or an exact title match
+  any other way links itself to its entry, by file hash, idgames id, Doomworld
+  thread, Doom Wiki page or an exact title match. A year's total counts the winners,
+  runners-up, honorable mentions and Mordeth award; its other awards are listed
+  under them
 - Stats view — headline totals, a status breakdown, and month-by-month activity
 - Keyboard shortcuts: `j/k`, `g`/`G`, `Home`/`End`, `Enter`, `E`, `D`, `S`, `M`, `F`, `P`, `Esc`
 
@@ -112,7 +115,7 @@ the sourceport.
 | Profiles | Per-sourceport config profiles, edited in place |
 | IWADs | Registered IWADs and id24 resources |
 | Sourceports | Build sourceports from source into caco's own prefix |
-| Enrich | Re-run complevel / IWAD / sourceport detection across the library, plus per-year Cacowards refresh |
+| Enrich | Re-run complevel / IWAD / sourceport detection across the library |
 | Settings | Sourceports, launch args, behavior toggles, cache limits, paths |
 
 Storage tabs:
@@ -140,7 +143,8 @@ title:scythe author:alm         Field queries (AND)
 status:in-progress , status:unplayed    OR queries
 ^status:completed               Negation
 tag:caco*                       Glob patterns
-cacoward:2023                   Cacoward entries for a year
+cacoward:2023                   WADs that won something in a year
+cacoward:doom-moma              WADs given a particular award
 retrievable:manual              WADs caco cannot re-download on its own
 hash:a9993e36                   A WAD by any hash of its file, or the start of one
 dup:yes                         WADs that are in the library twice
@@ -197,6 +201,41 @@ description, IWAD). Duplicate detection warns before re-importing.
 A site can answer with a WAF challenge instead of the page caco asked for. The
 error then names the site and the WAF. Retrying may not help, but you can still
 add the WAD by hand with the URL or local form.
+
+## Cacowards
+
+Every WAD Doomworld has awarded since 2004 ships with caco, so the Cacowards view
+needs no site to be up. The write-ups stay on Doomworld, linked from each year. A WAD
+you import links itself to its entry by the strongest evidence it has: the file's hash,
+an idgames id, a Doomworld thread, a Doom Wiki page, or failing those a title that
+only one WAD in your library has. Anything else takes one right-click on the card.
+
+The list covers what you can play. Awards to people and to tools (Creator of the
+Year, the Espi, the Codeaward) aren't on it, and only the winners, runners-up,
+honorable mentions and the Mordeth award count towards a year's total, since a
+deathmatch map has no ending to reach.
+
+To correct an entry or add your own, drop a `*.toml` file in `cacowards/` inside the
+data directory. An entry repeating a built-in `key` replaces it, and any other adds
+to the list. caco reads these at startup, and says in the status bar if one has a
+mistake in it:
+
+```toml
+# <data dir>/cacowards/mine.toml
+year = 2024
+
+[[entry]]
+key       = "2024-runner-up-tnt-overcharged"
+category  = "runner-up"
+order     = 12                  # where it falls in the category
+title     = "TNT: Overcharged"
+author    = "Veemon"
+idgames   = 19951
+# Also: doomworld = 151858 (forum topic), doomwiki = "TNT:_Overcharged" (page),
+# sha256 = "...", and supported = false for what no sourceport can run.
+```
+
+Your links and the card menu's "Mark as unsupported" outlive any update to the list.
 
 ## IWADs
 
@@ -280,6 +319,7 @@ machine:
 | `companions/` | Managed companion files |
 | `profiles/` | Per-sourceport config profiles |
 | `sourceports/` | Sourceport build recipes and their patches |
+| `cacowards/` | Your corrections and additions to the Cacowards list |
 | `backups/` | Save backups + pre-migration DB snapshots |
 
 **Disposable** — safe to delete at any time:

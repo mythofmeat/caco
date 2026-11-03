@@ -1,1 +1,531 @@
+# Facts from Doomworld's Cacowards, by way of the Doom Wiki.
 year = 2021
+page = "https://www.doomworld.com/cacowards/2021/"
+
+# Not entries, being people or tools: Codeaward, Most Promising Newcomers, Creator of the Year, Espi award.
+
+[[entry]]
+key       = "2021-winner-heartland"
+category  = "winner"
+order     = 1
+title     = "Heartland"
+author    = "Paul DeBruyne (skillsaw)"
+idgames   = 19867
+doomwiki  = "Heartland"
+
+[[entry]]
+key       = "2021-winner-lullaby"
+category  = "winner"
+order     = 2
+title     = "Lullaby"
+author    = "Daniel Alexander (Danlex)"
+doomworld = 119819
+doomwiki  = "Lullaby"
+
+[[entry]]
+key       = "2021-winner-ashes-afterglow"
+category  = "winner"
+order     = 3
+title     = "Ashes: Afterglow"
+author    = "Vostyok and ReformedJoe"
+doomwiki  = "Ashes:_Afterglow"
+
+[[entry]]
+key       = "2021-winner-tarnsmans-projectile-hell"
+category  = "winner"
+order     = 4
+title     = "Tarnsman's Projectile Hell"
+author    = "Richard Frei (Tarnsman)"
+idgames   = 20204
+doomwiki  = "Tarnsman's_Projectile_Hell"
+
+[[entry]]
+key       = "2021-winner-fractured-worlds"
+category  = "winner"
+order     = 5
+title     = "Fractured Worlds"
+author    = "Nirvana, Alex Scott (Scotty) and Insane_Gazebo"
+idgames   = 20097
+doomwiki  = "Fractured_Worlds"
+
+[[entry]]
+key       = "2021-winner-unhallowed"
+category  = "winner"
+order     = 6
+title     = "Unhallowed"
+author    = "Cyano Blugron"
+idgames   = 21978
+doomworld = 118390
+doomwiki  = "Unhallowed"
+
+[[entry]]
+key       = "2021-winner-doom-2-in-spain-only"
+category  = "winner"
+order     = 7
+title     = "Doom 2 in Spain Only"
+author    = "Richard Frei (Tarnsman) et al."
+idgames   = 20031
+doomwiki  = "Doom_2_in_Spain_Only"
+
+[[entry]]
+key       = "2021-winner-infraworld-coma-moonlight"
+category  = "winner"
+order     = 8
+title     = "Infraworld - Coma Moonlight"
+author    = "StormCatcher.77"
+idgames   = 19909
+doomwiki  = "Infraworld_-_Coma_Moonlight"
+
+[[entry]]
+key       = "2021-winner-arrival"
+category  = "winner"
+order     = 9
+title     = "Arrival"
+author    = "Walker Wright (Pavera)"
+idgames   = 20460
+doomworld = 121263
+doomwiki  = "Arrival"
+
+[[entry]]
+key       = "2021-winner-haste"
+category  = "winner"
+order     = 10
+title     = "Haste"
+author    = "Various"
+idgames   = 20141
+doomwiki  = "Haste_(WAD)"
+
+[[entry]]
+key       = "2021-winner-infested-episode-1"
+category  = "winner"
+order     = 11
+title     = "Infested Episode 1"
+author    = "Chris Polan (ginc)"
+doomworld = 125484
+doomwiki  = "Infested"
+
+[[entry]]
+key       = "2021-winner-1000-lines-3-community-project"
+category  = "winner"
+order     = 12
+title     = "1000 Lines 3: Community Project"
+author    = "Various"
+idgames   = 21319
+doomwiki  = "1000_Lines_3:_Community_Project"
+
+[[entry]]
+key       = "2021-runner-up-intergalactic-xenology-2"
+category  = "runner-up"
+order     = 1
+title     = "Intergalactic Xenology 2"
+author    = "Dreadopp and Lord_Z"
+idgames   = 19932
+doomwiki  = "Intergalactic_Xenology_2"
+
+[[entry]]
+key       = "2021-runner-up-cydonia"
+category  = "runner-up"
+order     = 2
+title     = "Cydonia"
+author    = "Brayden Hart (AD_79) and Alex Scott (Scotty)"
+idgames   = 20142
+doomwiki  = "Cydonia"
+
+[[entry]]
+key       = "2021-runner-up-time-tripper-circuit-1"
+category  = "runner-up"
+order     = 3
+title     = "Time Tripper Circuit 1"
+author    = "em essex (msx2plus)"
+doomwiki  = "Time_Tripper"
+
+[[entry]]
+key       = "2021-runner-up-sold-soul"
+category  = "runner-up"
+order     = 4
+title     = "Sold Soul"
+author    = "Fryuko"
+idgames   = 20041
+doomwiki  = "Sold_Soul"
+
+[[entry]]
+key       = "2021-runner-up-arceon"
+category  = "runner-up"
+order     = 5
+title     = "Arceon"
+author    = "DMPhobos"
+idgames   = 20053
+doomwiki  = "Arceon"
+
+[[entry]]
+key       = "2021-runner-up-i-h-n-i-episode-1"
+category  = "runner-up"
+order     = 6
+title     = "I.H.N.I. Episode 1"
+author    = "Kraja"
+doomworld = 118199
+doomwiki  = "I.H.N.I."
+
+[[entry]]
+key       = "2021-runner-up-atmospheric-extinction"
+category  = "runner-up"
+order     = 7
+title     = "Atmospheric Extinction"
+author    = "Kevin Martins (Velvetic)"
+idgames   = 20042
+doomwiki  = "Atmospheric_Extinction"
+
+[[entry]]
+key       = "2021-runner-up-ure2020-unexpected-retro-experience"
+category  = "runner-up"
+order     = 8
+title     = "URE2020: Unexpected Retro Experience"
+author    = "Zylinderkatze"
+idgames   = 19884
+doomwiki  = "URE2020:_Unexpected_Retro_Experience"
+
+[[entry]]
+key       = "2021-runner-up-old-still-life"
+category  = "runner-up"
+order     = 9
+title     = "Old Still Life"
+author    = "Rednov"
+doomworld = 124976
+doomwiki  = "Old_Still_Life"
+
+[[entry]]
+key       = "2021-runner-up-down-the-drain"
+category  = "runner-up"
+order     = 10
+title     = "Down the Drain"
+author    = "Benjogami"
+idgames   = 20102
+doomwiki  = "Down_the_Drain"
+
+[[entry]]
+key       = "2021-runner-up-deadly-standards-3"
+category  = "runner-up"
+order     = 11
+title     = "Deadly Standards 3"
+author    = "Various"
+idgames   = 19996
+doomwiki  = "Deadly_Standards_3"
+
+[[entry]]
+key       = "2021-runner-up-dbp37-auger-zenith"
+category  = "runner-up"
+order     = 12
+title     = "DBP37: AUGER;ZENITH"
+author    = "Various"
+idgames   = 19987
+doomwiki  = "DBP37:_AUGER;ZENITH"
+
+[[entry]]
+key       = "2021-honorable-mention-nameless"
+category  = "honorable-mention"
+order     = 1
+title     = "Nameless"
+author    = "James Paddock (Jimmy)"
+idgames   = 20237
+doomworld = 123801
+doomwiki  = "Nameless"
+
+[[entry]]
+key       = "2021-honorable-mention-judgment"
+category  = "honorable-mention"
+order     = 2
+title     = "Judgment"
+author    = "Blake Collins (Rayziik)"
+idgames   = 20134
+doomworld = 125238
+doomwiki  = "Judgment"
+
+[[entry]]
+key       = "2021-honorable-mention-boaty-mcboatwad"
+category  = "honorable-mention"
+order     = 3
+title     = "Boaty McBoatwad"
+author    = "Various"
+idgames   = 19778
+doomwiki  = "Boaty_McBoatwad"
+
+[[entry]]
+key       = "2021-honorable-mention-the-long-trek-back-home"
+category  = "honorable-mention"
+order     = 4
+title     = "The Long Trek Back Home"
+author    = "hervoheebo"
+idgames   = 20048
+doomwiki  = "The_Long_Trek_Back_Home"
+
+[[entry]]
+key       = "2021-honorable-mention-uprising"
+category  = "honorable-mention"
+order     = 5
+title     = "Uprising"
+author    = "Cheesewheel"
+idgames   = 20219
+doomworld = 124224
+doomwiki  = "Uprising"
+
+[[entry]]
+key       = "2021-honorable-mention-perpetual-powers"
+category  = "honorable-mention"
+order     = 6
+title     = "Perpetual Powers"
+author    = "Michal Kurowski (Lorenzo)"
+idgames   = 20034
+doomwiki  = "Perpetual_Powers"
+
+[[entry]]
+key       = "2021-honorable-mention-skulltiverse"
+category  = "honorable-mention"
+order     = 7
+title     = "Skulltiverse"
+author    = "Various"
+idgames   = 20001
+doomwiki  = "Skulltiverse"
+
+[[entry]]
+key       = "2021-honorable-mention-dbk01-dungeon-synths"
+category  = "honorable-mention"
+order     = 8
+title     = "DBK01: Dungeon Synths"
+author    = "Various"
+idgames   = 21064
+doomwiki  = "DBK01:_Dungeon_Synths"
+
+[[entry]]
+key       = "2021-honorable-mention-zone-400"
+category  = "honorable-mention"
+order     = 9
+title     = "Zone 400"
+author    = "Paul Corfiatis"
+idgames   = 19981
+doomwiki  = "Zone_400"
+
+[[entry]]
+key       = "2021-honorable-mention-sucker-punch-2"
+category  = "honorable-mention"
+order     = 10
+title     = "Sucker Punch 2"
+author    = "Andy Johnson (Rook)"
+idgames   = 19995
+doomwiki  = "Sucker_Punch_2"
+
+[[entry]]
+key       = "2021-honorable-mention-tetraptykon"
+category  = "honorable-mention"
+order     = 11
+title     = "Tetraptykon"
+author    = "Vladimir Bespalov (Demonologist)"
+idgames   = 19918
+doomworld = 121463
+doomwiki  = "Tetraptykon"
+
+[[entry]]
+key       = "2021-honorable-mention-ray-mohawk-2"
+category  = "honorable-mention"
+order     = 12
+title     = "Ray Mohawk 2"
+author    = "Doomkid"
+idgames   = 20113
+doomwiki  = "Ray_Mohawk_2:_Ray_Wreaks_Havoc!"
+
+[[entry]]
+key       = "2021-honorable-mention-micro-slaughter-community-project"
+category  = "honorable-mention"
+order     = 13
+title     = "Micro Slaughter Community Project"
+author    = "Various"
+doomworld = 119448
+doomwiki  = "Micro_Slaughter_Community_Project"
+
+[[entry]]
+key       = "2021-honorable-mention-wormwood-the-horror"
+category  = "honorable-mention"
+order     = 14
+title     = "Wormwood ]|[ - The Horror"
+author    = "Zachary Stephens (Ribbiks) and Grain of Salt"
+doomworld = 125529
+doomwiki  = "Wormwood_III_-_The_Horror"
+
+[[entry]]
+key       = "2021-honorable-mention-dereliction-derby"
+category  = "honorable-mention"
+order     = 15
+title     = "Dereliction Derby"
+author    = "PinkKittyRose"
+idgames   = 20366
+doomwiki  = "Dereliction_Derby"
+
+[[entry]]
+key       = "2021-honorable-mention-testing-pool"
+category  = "honorable-mention"
+order     = 16
+title     = "Testing Pool"
+author    = "Zan-zan-zawa-veia"
+idgames   = 19901
+doomworld = 121567
+doomwiki  = "Testing_Pool"
+
+[[entry]]
+key       = "2021-honorable-mention-bourgeois-megawad"
+category  = "honorable-mention"
+order     = 17
+title     = "Bourgeois Megawad"
+author    = "Decay, Doomkid and Razgriz"
+idgames   = 19852
+doomwiki  = "Bourgeois_Megawad"
+
+[[entry]]
+key       = "2021-honorable-mention-noreasons-speedmaps-3"
+category  = "honorable-mention"
+order     = 18
+title     = "NoReason's Speedmaps 3"
+author    = "NoReason"
+idgames   = 20076
+doomwiki  = "NoReason's_Speedmaps_3"
+
+[[entry]]
+key       = "2021-honorable-mention-literalism"
+category  = "honorable-mention"
+order     = 19
+title     = "Literalism"
+author    = "Various"
+idgames   = 20722
+doomworld = 124896
+doomwiki  = "Literalism"
+
+[[entry]]
+key       = "2021-honorable-mention-archi-tek"
+category  = "honorable-mention"
+order     = 20
+title     = "Archi-TEK"
+author    = "Romsu89"
+doomworld = 120426
+doomwiki  = "Archi-TEK"
+
+[[entry]]
+key       = "2021-honorable-mention-the-event-horizon"
+category  = "honorable-mention"
+order     = 21
+title     = "The Event Horizon"
+author    = "Killer5"
+idgames   = 19920
+doomwiki  = "The_Event_Horizon"
+
+[[entry]]
+key       = "2021-honorable-mention-10-years-of-doom-contest"
+category  = "honorable-mention"
+order     = 22
+title     = "10 Years of Doom contest"
+author    = "Various"
+doomworld = 121127
+doomwiki  = "10_Years_of_Doom_(Mapping_Contest)"
+
+[[entry]]
+key       = "2021-honorable-mention-15-years-a-doomer-contest"
+category  = "honorable-mention"
+order     = 23
+title     = "15 Years a Doomer contest"
+author    = "Various"
+doomworld = 120642
+doomwiki  = "15_Years_a_Doomer"
+
+[[entry]]
+key       = "2021-honorable-mention-rabbits-all-comers-mapping-project-ramp"
+category  = "honorable-mention"
+order     = 24
+title     = "Rabbit's All-comers Mapping Project (RAMP)"
+author    = "Various"
+doomwiki  = "Rabbit's_All-comers_Mapping_Project"
+
+[[entry]]
+key       = "2021-multiplayer-rott-zone"
+category  = "multiplayer"
+order     = 1
+title     = "Rott!Zone"
+author    = "Matt Cibulas (RottKing)"
+doomworld = 124214
+doomwiki  = "Rott!Zone"
+
+[[entry]]
+key       = "2021-multiplayer-insanity-deathmatch"
+category  = "multiplayer"
+order     = 2
+title     = "Insanity Deathmatch"
+author    = "Kalle Soittila (Kaapeli47)"
+doomworld = 125636
+doomwiki  = "Insanity_Deathmatch"
+
+[[entry]]
+key       = "2021-multiplayer-strife-coop-patch-project"
+category  = "multiplayer"
+order     = 3
+title     = "Strife Coop Patch Project"
+author    = "Nash Muhandes"
+doomwiki  = "Strife_Coop_Patch_Project"
+
+[[entry]]
+key       = "2021-gameplay-mod-painslayer"
+category  = "gameplay-mod"
+order     = 1
+title     = "Painslayer"
+author    = "Jekyll Grim Payne"
+doomwiki  = "Painslayer"
+
+[[entry]]
+key       = "2021-gameplay-mod-widepix"
+category  = "gameplay-mod"
+order     = 2
+title     = "WidePix"
+author    = "Nash Muhandes"
+doomwiki  = "WidePix"
+
+[[entry]]
+key       = "2021-gameplay-mod-corruption-cards"
+category  = "gameplay-mod"
+order     = 3
+title     = "Corruption Cards"
+author    = "Mike Hill (CutmanMike)"
+doomwiki  = "Corruption_Cards"
+
+[[entry]]
+key       = "2021-mordeth-doom-32x-resurrection"
+category  = "mordeth"
+order     = 1
+title     = "Doom 32X: Resurrection"
+author    = "Victor Luchits et al"
+doomworld = 119202
+doomwiki  = "Doom_32X:_Resurrection"
+supported = false
+
+[[entry]]
+key       = "2021-machaward-the-unmaking"
+category  = "machaward"
+order     = 1
+title     = "The UnMaking"
+author    = "scwiba"
+idgames   = 20337
+doomworld = 125606
+doomwiki  = "The_UnMaking"
+supported = false
+
+[[entry]]
+key       = "2021-odyssey-of-noises-arrival-ost"
+category  = "odyssey-of-noises"
+order     = 1
+title     = "Arrival OST"
+author    = "Brayden Hart (AD_79)"
+idgames   = 20460
+doomworld = 121263
+doomwiki  = "Arrival"
+
+[[entry]]
+key       = "2021-odyssey-of-noises-ashes-afterglow-ost"
+category  = "odyssey-of-noises"
+order     = 2
+title     = "Ashes: Afterglow OST"
+author    = "John Weekley (PRIMEVAL)"
+doomwiki  = "Ashes:_Afterglow"

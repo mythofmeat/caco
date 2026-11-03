@@ -1,1 +1,191 @@
+# Facts from Doomworld's Cacowards, by way of the Doom Wiki.
 year = 2010
+page = "https://www.doomworld.com/17years/"
+
+# Not entries, being people or tools: Mapper of the Year.
+
+[[entry]]
+key       = "2010-winner-no-rest-for-the-living"
+category  = "winner"
+order     = 1
+title     = "No Rest for the Living"
+author    = "Nerve Software"
+doomwiki  = "No_Rest_for_the_Living"
+
+[[entry]]
+key       = "2010-winner-arcadia-demade"
+category  = "winner"
+order     = 2
+title     = "Arcadia Demade"
+author    = "J.P. LeBreton"
+idgames   = 16179
+doomwiki  = "Arcadia_Demade"
+
+[[entry]]
+key       = "2010-winner-curse-of-dsparil"
+category  = "winner"
+order     = 3
+title     = "Curse of D'Sparil"
+author    = "Kristus"
+idgames   = 15999
+doomwiki  = "Curse_of_D'Sparil"
+
+[[entry]]
+key       = "2010-winner-uac-ultra"
+category  = "winner"
+order     = 4
+title     = "UAC Ultra"
+author    = "40oz & SuperJamie"
+idgames   = 16038
+doomwiki  = "UAC_Ultra"
+
+[[entry]]
+key       = "2010-winner-unloved"
+category  = "winner"
+order     = 5
+title     = "Unloved"
+author    = "BlueEagle"
+idgames   = 16060
+doomwiki  = "Unloved"
+
+[[entry]]
+key       = "2010-winner-valhalla"
+category  = "winner"
+order     = 6
+title     = "Valhalla"
+author    = "Ed"
+idgames   = 16255
+doomwiki  = "Valhalla"
+
+[[entry]]
+key       = "2010-winner-speed-of-doom"
+category  = "winner"
+order     = 7
+title     = "Speed of Doom"
+author    = "Joshy & Darkwave0000"
+idgames   = 16040
+doomwiki  = "Speed_of_Doom"
+
+[[entry]]
+key       = "2010-winner-drip-feed"
+category  = "winner"
+order     = 8
+title     = "Drip Feed"
+author    = "Iori"
+idgames   = 16084
+doomwiki  = "Drip_Feed"
+
+[[entry]]
+key       = "2010-winner-epic-2"
+category  = "winner"
+order     = 9
+title     = "Epic 2"
+author    = "Alexander \"Eternal\" S."
+idgames   = 16262
+doomwiki  = "Epic_2"
+
+[[entry]]
+key       = "2010-winner-stronghold"
+category  = "winner"
+order     = 10
+title     = "Stronghold"
+author    = "Tormentor667 & Stronghold team"
+idgames   = 16248
+doomwiki  = "Stronghold"
+
+[[entry]]
+key       = "2010-runner-up-beyond-revival"
+category  = "runner-up"
+order     = 1
+title     = "Beyond Revival"
+author    = "Fiend"
+idgames   = 16273
+doomwiki  = "Beyond_Revival"
+
+[[entry]]
+key       = "2010-runner-up-base-ganymede-episode-2"
+category  = "runner-up"
+order     = 2
+title     = "Base Ganymede Episode 2"
+author    = "Adam Woodmansey (Khorus)"
+idgames   = 16256
+doomwiki  = "Base_Ganymede"
+
+[[entry]]
+key       = "2010-honorable-mention-threshold-of-pain"
+category  = "honorable-mention"
+order     = 1
+title     = "Threshold of Pain"
+author    = "John Gourley (scalliano)"
+idgames   = 16196
+doomwiki  = "Threshold_of_Pain"
+
+[[entry]]
+key       = "2010-honorable-mention-realm-of-cheogsh"
+category  = "honorable-mention"
+order     = 2
+title     = "Realm of Cheogsh"
+author    = "Shadowman"
+idgames   = 16174
+doomwiki  = "Realm_of_Cheogsh"
+
+[[entry]]
+key       = "2010-honorable-mention-serpent-resurrection"
+category  = "honorable-mention"
+order     = 3
+title     = "Serpent: Resurrection"
+author    = "Stephen Clark (The Ultimate DooMer)"
+idgames   = 16211
+doomwiki  = "Serpent:_Resurrection"
+
+[[entry]]
+key       = "2010-honorable-mention-temple-of-the-lizardmen-2"
+category  = "honorable-mention"
+order     = 4
+title     = "Temple of the Lizardmen 2"
+author    = "Alando1"
+idgames   = 16274
+doomwiki  = "Temple_of_the_Lizardmen_2"
+
+[[entry]]
+key       = "2010-honorable-mention-paranoid"
+category  = "honorable-mention"
+order     = 5
+title     = "Paranoid"
+author    = "The Persecution Complex"
+idgames   = 16290
+doomwiki  = "Paranoid"
+
+[[entry]]
+key       = "2010-multiplayer-megaman-8-bit-deathmatch"
+category  = "multiplayer"
+order     = 1
+title     = "Megaman 8-bit Deathmatch"
+author    = "Cutmanmike et al."
+doomwiki  = "Mega_Man_8-Bit_Deathmatch"
+
+[[entry]]
+key       = "2010-worst-wad-aeons-of-death"
+category  = "worst-wad"
+order     = 1
+title     = "Æons of Death"
+author    = "DBThanatos et al."
+doomwiki  = "Æons_of_Death"
+
+[[entry]]
+key       = "2010-mordeth-stronghold"
+category  = "mordeth"
+order     = 1
+title     = "Stronghold"
+author    = "Tormentor667 & Stronghold team"
+idgames   = 16248
+doomwiki  = "Stronghold"
+
+[[entry]]
+key       = "2010-mockaward-turbocharged-arcade"
+category  = "mockaward"
+order     = 1
+title     = "TurboCharged Arcade!"
+author    = "Xaser & Jimmy"
+idgames   = 16299
+doomwiki  = "TurboCharged_Arcade!"

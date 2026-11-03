@@ -1,1 +1,231 @@
+# Facts from Doomworld's Cacowards, by way of the Doom Wiki.
 year = 2018
+page = "https://www.doomworld.com/cacowards/2018/"
+
+# Not entries, being people or tools: Codeaward, Most promising newcomers, Creator of the Year, Espi award.
+
+[[entry]]
+key       = "2018-winner-avactor-end-of-the-fifth-circle"
+category  = "winner"
+order     = 1
+title     = "Avactor: End of the Fifth Circle"
+author    = "Eradrop"
+doomworld = 101647
+doomwiki  = "Avactor:_End_of_the_Fifth_Circle"
+
+[[entry]]
+key       = "2018-winner-dark-universe-part-1"
+category  = "winner"
+order     = 2
+title     = "Dark Universe, Part 1"
+author    = "Paul Dechene (Payload4367)"
+idgames   = 19060
+doomwiki  = "Dark_Universe"
+
+[[entry]]
+key       = "2018-winner-the-adventures-of-square-episode-2"
+category  = "winner"
+order     = 3
+title     = "The Adventures of Square Episode 2"
+author    = "Bigbrik Games"
+doomwiki  = "The_Adventures_of_Square"
+
+[[entry]]
+key       = "2018-winner-preacher"
+category  = "winner"
+order     = 4
+title     = "Preacher"
+author    = "Darch"
+idgames   = 19249
+doomwiki  = "Preacher"
+
+[[entry]]
+key       = "2018-winner-dimension-of-the-boomed"
+category  = "winner"
+order     = 5
+title     = "Dimension of the Boomed"
+author    = "Stephen Wadsworth (Urthar)"
+doomworld = 92574
+doomwiki  = "Dimension_of_the_Boomed"
+
+[[entry]]
+key       = "2018-winner-struggle-antaresian-legacy"
+category  = "winner"
+order     = 6
+title     = "Struggle - Antaresian Legacy"
+author    = "Seongbae Park (antares031)"
+idgames   = 19179
+doomwiki  = "Struggle_-_Antaresian_Legacy"
+
+[[entry]]
+key       = "2018-winner-rekkr"
+category  = "winner"
+order     = 7
+title     = "REKKR"
+author    = "Matthew Little (Revae) et al."
+idgames   = 19185
+doomwiki  = "REKKR"
+
+[[entry]]
+key       = "2018-winner-maskim-xul"
+category  = "winner"
+order     = 8
+title     = "Maskim Xul"
+author    = "James Caldwell (Obsidian)"
+idgames   = 19061
+doomwiki  = "Maskim_Xul"
+
+[[entry]]
+key       = "2018-winner-doom-the-golden-souls-2"
+category  = "winner"
+order     = 9
+title     = "Doom: The Golden Souls 2"
+author    = "Andrea Gori (Batandy)"
+doomwiki  = "Doom:_The_Golden_Souls_2"
+
+[[entry]]
+key       = "2018-winner-uac-invasion-the-supply-depot"
+category  = "winner"
+order     = 10
+title     = "UAC Invasion: The Supply Depot"
+author    = "DooMknight"
+idgames   = 19188
+doomwiki  = "UAC_Invasion:_The_Supply_Depot"
+
+[[entry]]
+key       = "2018-runner-up-exomoon"
+category  = "runner-up"
+order     = 1
+title     = "Exomoon"
+author    = "Tomás Soares (Deadwing)"
+idgames   = 19234
+doomwiki  = "Exomoon"
+
+[[entry]]
+key       = "2018-runner-up-man-on-the-moon"
+category  = "runner-up"
+order     = 2
+title     = "Man on the Moon"
+author    = "Yugiboy85"
+idgames   = 19238
+doomwiki  = "Man_on_the_Moon"
+
+[[entry]]
+key       = "2018-runner-up-umbra-of-fate"
+category  = "runner-up"
+order     = 3
+title     = "Umbra of Fate"
+author    = "Alexa Jones-Gonzales (Remilia Scarlet)"
+idgames   = 19083
+doomworld = 100574
+doomwiki  = "Umbra_of_Fate"
+
+[[entry]]
+key       = "2018-runner-up-port-glacia"
+category  = "runner-up"
+order     = 4
+title     = "Port Glacia"
+author    = "James Collins (an_mutt)"
+idgames   = 19070
+doomwiki  = "Port_Glacia"
+
+[[entry]]
+key       = "2018-runner-up-magnolia"
+category  = "runner-up"
+order     = 5
+title     = "Magnolia"
+author    = "Zachary Stephens (Ribbiks)"
+doomwiki  = "Magnolia"
+
+[[entry]]
+key       = "2018-runner-up-the-alfonzone"
+category  = "runner-up"
+order     = 6
+title     = "The Alfonzone"
+author    = "Pinchy"
+doomworld = 98003
+doomwiki  = "The_Alfonzone"
+
+[[entry]]
+key       = "2018-runner-up-ashes-2063"
+category  = "runner-up"
+order     = 7
+title     = "Ashes 2063"
+author    = "Vostyok"
+doomwiki  = "Ashes_2063"
+
+[[entry]]
+key       = "2018-runner-up-demonastery"
+category  = "runner-up"
+order     = 8
+title     = "Demonastery"
+author    = "Nootrac4571"
+idgames   = 19212
+doomwiki  = "Demonastery"
+
+[[entry]]
+key       = "2018-runner-up-doom-404"
+category  = "runner-up"
+order     = 9
+title     = "Doom 404"
+author    = "Adam Windsor (Capellan)"
+idgames   = 19248
+doomwiki  = "Doom_404"
+
+[[entry]]
+key       = "2018-runner-up-cryogenics"
+category  = "runner-up"
+order     = 10
+title     = "Cryogenics"
+author    = "bemused"
+idgames   = 18938
+doomwiki  = "Cryogenics"
+
+[[entry]]
+key       = "2018-multiplayer-quake-champions-doom-edition"
+category  = "multiplayer"
+order     = 1
+title     = "Quake Champions: Doom Edition"
+author    = "DBThanatos and Michaelis"
+doomwiki  = "Quake_Champions:_Doom_Edition"
+
+[[entry]]
+key       = "2018-gameplay-mod-guncaster"
+category  = "gameplay-mod"
+order     = 1
+title     = "Guncaster"
+author    = "Maciej Banowski (PillowBlaster) et al."
+doomwiki  = "Guncaster"
+
+[[entry]]
+key       = "2018-gameplay-mod-netronian-chaos"
+category  = "gameplay-mod"
+order     = 2
+title     = "Netronian Chaos"
+author    = "Captain J"
+doomwiki  = "Netronian_Chaos"
+
+[[entry]]
+key       = "2018-gameplay-mod-gmota"
+category  = "gameplay-mod"
+order     = 3
+title     = "GMOTA"
+author    = "Combine_Kegan"
+doomwiki  = "GMOTA"
+
+[[entry]]
+key       = "2018-mordeth-total-chaos"
+category  = "mordeth"
+order     = 1
+title     = "Total Chaos"
+author    = "Sam Prebble (wadaholic)"
+doomwiki  = "Total_Chaos"
+supported = false
+
+[[entry]]
+key       = "2018-machaward-mr-friendly"
+category  = "machaward"
+order     = 1
+title     = "Mr. Friendly"
+author    = "Jean-Paul LeBreton"
+doomwiki  = "Mr._Friendly"

@@ -1,1 +1,619 @@
+# Facts from Doomworld's Cacowards, by way of the Doom Wiki.
 year = 2023
+page = "https://www.doomworld.com/cacowards/2023/"
+
+# Not entries, being people or tools: Codeaward, Most Promising Newcomers, Creator of the Year, Espi award.
+
+[[entry]]
+key       = "2023-winner-dreamblood"
+category  = "winner"
+order     = 1
+title     = "Dreamblood"
+author    = "HeadshotTAS"
+doomworld = 136190
+doomwiki  = "Dreamblood"
+
+[[entry]]
+key       = "2023-winner-pina-colada"
+category  = "winner"
+order     = 2
+title     = "Piña Colada"
+author    = "Alex Decker (myolden) et al."
+idgames   = 20917
+doomwiki  = "Piña_Colada"
+
+[[entry]]
+key       = "2023-winner-insanity-edged"
+category  = "winner"
+order     = 3
+title     = "Insanity Edged"
+author    = "Pieruskwurje"
+doomworld = 132850
+doomwiki  = "Insanity_Edged"
+
+[[entry]]
+key       = "2023-winner-hardfest-2"
+category  = "winner"
+order     = 4
+title     = "Hardfest 2"
+author    = "Various"
+idgames   = 21092
+doomwiki  = "Hardfest_2"
+
+[[entry]]
+key       = "2023-winner-austrian-avian-association"
+category  = "winner"
+order     = 5
+title     = "Austrian Avian Association"
+author    = "MundyC"
+idgames   = 21128
+doomworld = 135951
+doomwiki  = "Austrian_Avian_Association"
+
+[[entry]]
+key       = "2023-winner-dbk03-shrine-of-the-silver-cyberprimate"
+category  = "winner"
+order     = 6
+title     = "DBK03: Shrine of the Silver CyberPrimate"
+author    = "Big Ol' Billy et al."
+idgames   = 21263
+doomwiki  = "DBK03:_Shrine_of_the_Silver_CyberPrimate"
+
+[[entry]]
+key       = "2023-winner-sepia"
+category  = "winner"
+order     = 7
+title     = "Sepia"
+author    = "Petyan et al."
+idgames   = 20690
+doomworld = 132145
+doomwiki  = "Sepia"
+
+[[entry]]
+key       = "2023-winner-worm-v-wood"
+category  = "winner"
+order     = 8
+title     = "worm\\V/wood"
+author    = "Zachary Stephens (Ribbiks) and Grain of Salt"
+doomworld = 141190
+doomwiki  = "worm\\V/wood"
+
+[[entry]]
+key       = "2023-winner-godless-night"
+category  = "winner"
+order     = 9
+title     = "Godless Night"
+author    = "Tango et al."
+doomworld = 141009
+doomwiki  = "Godless_Night"
+
+[[entry]]
+key       = "2023-winner-ultimate-doom-in-name-only"
+category  = "winner"
+order     = 10
+title     = "Ultimate Doom In Name Only"
+author    = "Matt Powell (cannonball) et al."
+idgames   = 20953
+doomworld = 137395
+doomwiki  = "Ultimate_Doom_In_Name_Only"
+
+[[entry]]
+key       = "2023-winner-tnt-2-devilution"
+category  = "winner"
+order     = 11
+title     = "TNT 2: Devilution"
+author    = "Various"
+idgames   = 21842
+doomworld = 104882
+doomwiki  = "TNT_2:_Devilution"
+
+[[entry]]
+key       = "2023-winner-my-house"
+category  = "winner"
+order     = 12
+title     = "My House"
+author    = "Steve Nelson (Veddge)"
+doomworld = 134292
+doomwiki  = "My_House"
+
+[[entry]]
+key       = "2023-runner-up-1x1"
+category  = "runner-up"
+order     = 1
+title     = "1x1"
+author    = "Various"
+idgames   = 20879
+doomwiki  = "1x1"
+
+[[entry]]
+key       = "2023-runner-up-boomer-beyond-vanilla"
+category  = "runner-up"
+order     = 2
+title     = "BOOMER: Beyond Vanilla"
+author    = "Fernito"
+idgames   = 20662
+doomworld = 133495
+doomwiki  = "BOOMER:_Beyond_Vanilla"
+
+[[entry]]
+key       = "2023-runner-up-el-viaje-de-diciembre"
+category  = "runner-up"
+order     = 3
+title     = "El Viaje de Diciembre"
+author    = "Cacodemon187"
+idgames   = 20809
+doomwiki  = "El_Viaje_de_Diciembre"
+
+[[entry]]
+key       = "2023-runner-up-hexen-veil-of-darkness"
+category  = "runner-up"
+order     = 4
+title     = "Hexen: Veil of Darkness"
+author    = "Captain Toenail"
+idgames   = 20928
+doomworld = 140905
+doomwiki  = "Hexen:_Veil_of_Darkness"
+
+[[entry]]
+key       = "2023-runner-up-solve-et-coagula"
+category  = "runner-up"
+order     = 5
+title     = "Solve Et Coagula"
+author    = "Nicolás Monti"
+idgames   = 20865
+doomwiki  = "Solve_Et_Coagula"
+
+[[entry]]
+key       = "2023-runner-up-what-lies-beneath"
+category  = "runner-up"
+order     = 6
+title     = "What Lies Beneath"
+author    = "ViolentBeetle et al."
+idgames   = 20787
+doomwiki  = "What_Lies_Beneath"
+
+[[entry]]
+key       = "2023-runner-up-the-settlements"
+category  = "runner-up"
+order     = 7
+title     = "The Settlements"
+author    = "dashlet"
+idgames   = 20807
+doomwiki  = "The_Settlements"
+
+[[entry]]
+key       = "2023-runner-up-machete"
+category  = "runner-up"
+order     = 8
+title     = "Machete"
+author    = "A2Rob"
+idgames   = 20612
+doomworld = 133206
+doomwiki  = "Machete"
+
+[[entry]]
+key       = "2023-runner-up-the-diseases-and-casualties-this-year-being-1632"
+category  = "runner-up"
+order     = 9
+title     = "The Diseases, and Casualties this year being 1632"
+author    = "Various"
+idgames   = 20587
+doomworld = 133295
+doomwiki  = "The_Diseases,_and_Casualties_this_year_being_1632"
+
+[[entry]]
+key       = "2023-runner-up-tetanus"
+category  = "runner-up"
+order     = 10
+title     = "Tetanus"
+author    = "Egg Boy et al."
+idgames   = 20836
+doomwiki  = "Tetanus"
+
+[[entry]]
+key       = "2023-runner-up-jaded"
+category  = "runner-up"
+order     = 11
+title     = "Jaded"
+author    = "LunchLunch"
+idgames   = 20931
+doomwiki  = "Jaded"
+
+[[entry]]
+key       = "2023-runner-up-head-trauma"
+category  = "runner-up"
+order     = 12
+title     = "Head Trauma"
+author    = "AshtralFiend"
+idgames   = 20938
+doomworld = 140572
+doomwiki  = "Head_Trauma"
+
+[[entry]]
+key       = "2023-runner-up-ad-mortem"
+category  = "runner-up"
+order     = 13
+title     = "Ad Mortem"
+author    = "Various"
+doomworld = 125461
+doomwiki  = "Ad_Mortem"
+
+[[entry]]
+key       = "2023-runner-up-glaive-3"
+category  = "runner-up"
+order     = 14
+title     = "Glaive 3"
+author    = "EANB"
+idgames   = 20717
+doomworld = 135361
+doomwiki  = "Glaive_3"
+
+[[entry]]
+key       = "2023-runner-up-corruption"
+category  = "runner-up"
+order     = 15
+title     = "Corruption"
+author    = "NinjaDelphox, EVILNECK, and Andrik Powell (Arsinikk)"
+idgames   = 20790
+doomwiki  = "Corruption"
+
+[[entry]]
+key       = "2023-honorable-mention-flesharmonic"
+category  = "honorable-mention"
+order     = 1
+title     = "Flesharmonic"
+author    = "Various"
+idgames   = 21006
+doomwiki  = "Flesharmonic"
+
+[[entry]]
+key       = "2023-honorable-mention-puss-xxviii-quoth-the-raven"
+category  = "honorable-mention"
+order     = 2
+title     = "PUSS XXVIII: Quoth the Raven"
+author    = "Various"
+idgames   = 20936
+doomwiki  = "PUSS_XXVIII:_Quoth_the_Raven"
+
+[[entry]]
+key       = "2023-honorable-mention-abscission"
+category  = "honorable-mention"
+order     = 3
+title     = "Abscission"
+author    = "Snaxalotl"
+idgames   = 20754
+doomworld = 132593
+doomwiki  = "Abscission"
+
+[[entry]]
+key       = "2023-honorable-mention-doomed-by-the-hour"
+category  = "honorable-mention"
+order     = 4
+title     = "Doomed: By the Hour"
+author    = "finnks13 and Yumheart"
+idgames   = 20817
+doomwiki  = "Doomed:_By_the_Hour"
+
+[[entry]]
+key       = "2023-honorable-mention-fallen-leaves"
+category  = "honorable-mention"
+order     = 5
+title     = "Fallen Leaves"
+author    = "Brian Irving (Bri)"
+idgames   = 20561
+doomworld = 132664
+doomwiki  = "Fallen_Leaves"
+
+[[entry]]
+key       = "2023-honorable-mention-protoslayer"
+category  = "honorable-mention"
+order     = 6
+title     = "Protoslayer"
+author    = "Volasaurus"
+doomworld = 133528
+doomwiki  = "Protoslayer"
+
+[[entry]]
+key       = "2023-honorable-mention-nostalgia-2"
+category  = "honorable-mention"
+order     = 7
+title     = "Nostalgia 2"
+author    = "Alex Decker (myolden)"
+idgames   = 20901
+doomwiki  = "Nostalgia_2"
+
+[[entry]]
+key       = "2023-honorable-mention-the-cognition-engine"
+category  = "honorable-mention"
+order     = 8
+title     = "The Cognition Engine"
+author    = "Snowy44"
+doomworld = 133796
+doomwiki  = "The_Cognition_Engine"
+
+[[entry]]
+key       = "2023-honorable-mention-junkfood"
+category  = "honorable-mention"
+order     = 9
+title     = "Junkfood"
+author    = "Various"
+idgames   = 20577
+doomwiki  = "Junkfood"
+
+[[entry]]
+key       = "2023-honorable-mention-junkfood-2-summertime-slotter"
+category  = "honorable-mention"
+order     = 10
+title     = "Junkfood 2: Summertime Slotter"
+author    = "Various"
+idgames   = 20834
+doomwiki  = "Junkfood_2:_Summertime_Slotter"
+
+[[entry]]
+key       = "2023-honorable-mention-alcazar"
+category  = "honorable-mention"
+order     = 11
+title     = "Alcázar"
+author    = "General Roasterock, Ravendesk, and Jizzwardo"
+doomworld = 141134
+doomwiki  = "Alcázar"
+
+[[entry]]
+key       = "2023-honorable-mention-deep-breath"
+category  = "honorable-mention"
+order     = 12
+title     = "Deep Breath"
+author    = "EduardoAndFriends"
+idgames   = 20816
+doomwiki  = "Deep_Breath"
+
+[[entry]]
+key       = "2023-honorable-mention-mudman"
+category  = "honorable-mention"
+order     = 13
+title     = "Mudman"
+author    = "eater29"
+idgames   = 20852
+doomworld = 138304
+doomwiki  = "Mudman"
+
+[[entry]]
+key       = "2023-honorable-mention-psx-doom-the-forgotten-chapter"
+category  = "honorable-mention"
+order     = 14
+title     = "PSX Doom: The Forgotten Chapter"
+author    = "Dant3"
+doomworld = 134303
+doomwiki  = "PSX_Doom:_The_Forgotten_Chapter"
+
+[[entry]]
+key       = "2023-honorable-mention-deadliest-dem-o-li-ti-on"
+category  = "honorable-mention"
+order     = 15
+title     = "Deadliest Dem(o(li)ti)on"
+author    = "Scypek2"
+idgames   = 20663
+doomwiki  = "Deadliest_Dem(o(li)ti)on"
+
+[[entry]]
+key       = "2023-honorable-mention-break-point"
+category  = "honorable-mention"
+order     = 16
+title     = "Break//Point//"
+author    = "Shannon O'Neill (Major Arlene)"
+idgames   = 20591
+doomwiki  = "Break//Point//"
+
+[[entry]]
+key       = "2023-honorable-mention-the-lost-magic"
+category  = "honorable-mention"
+order     = 17
+title     = "The Lost Magic"
+author    = "Vortale"
+idgames   = 20553
+doomwiki  = "The_Lost_Magic"
+
+[[entry]]
+key       = "2023-honorable-mention-venturous"
+category  = "honorable-mention"
+order     = 18
+title     = "Venturous"
+author    = "PixelFox"
+doomwiki  = "Venturous"
+
+[[entry]]
+key       = "2023-honorable-mention-final-carnage"
+category  = "honorable-mention"
+order     = 19
+title     = "Final Carnage"
+author    = "Onox"
+doomworld = 137394
+doomwiki  = "Final_Carnage"
+
+[[entry]]
+key       = "2023-honorable-mention-i-cant-give-you-any-thing"
+category  = "honorable-mention"
+order     = 20
+title     = "I CANT GIVE YOU ANY THING"
+author    = "Maribo et al."
+idgames   = 20860
+doomwiki  = "I_CANT_GIVE_YOU_ANY_THING"
+
+[[entry]]
+key       = "2023-honorable-mention-terminal-stages-of-nostalgia"
+category  = "honorable-mention"
+order     = 21
+title     = "Terminal Stages of Nostalgia"
+author    = "Brayden Hart (AD_79)"
+doomworld = 136024
+doomwiki  = "Terminal_Stages_of_Nostalgia"
+
+[[entry]]
+key       = "2023-honorable-mention-oubliette-fatalis"
+category  = "honorable-mention"
+order     = 22
+title     = "Oubliette Fatalis"
+author    = "RDETalus"
+doomworld = 132733
+doomwiki  = "Oubliette_Fatalis"
+
+[[entry]]
+key       = "2023-honorable-mention-uroboros"
+category  = "honorable-mention"
+order     = 23
+title     = "Uroboros"
+author    = "Ravendesk"
+idgames   = 20586
+doomwiki  = "Uroboros"
+
+[[entry]]
+key       = "2023-honorable-mention-crusader"
+category  = "honorable-mention"
+order     = 24
+title     = "Crusader"
+author    = "Cheesewheel"
+doomworld = 139104
+doomwiki  = "Crusader_(2023_WAD)"
+
+[[entry]]
+key       = "2023-honorable-mention-doom-64-ascension"
+category  = "honorable-mention"
+order     = 25
+title     = "Doom 64 Ascension"
+author    = "AtomicFrog"
+doomworld = 129988
+doomwiki  = "Doom_64_Ascension"
+supported = false
+
+[[entry]]
+key       = "2023-honorable-mention-heretic-quest-for-the-crystal-skulls"
+category  = "honorable-mention"
+order     = 26
+title     = "Heretic: Quest for the Crystal Skulls"
+author    = "Captain Toenail"
+idgames   = 19590
+doomwiki  = "Heretic:_Quest_for_the_Crystal_Skulls"
+
+[[entry]]
+key       = "2023-honorable-mention-diy"
+category  = "honorable-mention"
+order     = 27
+title     = "DIY"
+author    = "Various"
+idgames   = 20468
+doomwiki  = "DIY"
+
+[[entry]]
+key       = "2023-honorable-mention-caldera-of-wretchedness"
+category  = "honorable-mention"
+order     = 28
+title     = "Caldera of Wretchedness"
+author    = "Darragh Coy (intacowetrust)"
+doomworld = 125239
+doomwiki  = "Caldera_of_Wretchedness"
+
+[[entry]]
+key       = "2023-honorable-mention-dissension"
+category  = "honorable-mention"
+order     = 29
+title     = "Dissension"
+author    = "Doom-X-Machina"
+doomworld = 124717
+doomwiki  = "Dissension"
+
+[[entry]]
+key       = "2023-multiplayer-culling-strike"
+category  = "multiplayer"
+order     = 1
+title     = "Culling Strike"
+author    = "The Hellforge"
+doomworld = 137962
+doomwiki  = "Culling_Strike"
+
+[[entry]]
+key       = "2023-multiplayer-vesper"
+category  = "multiplayer"
+order     = 2
+title     = "Vesper"
+author    = "Xaser and the Doom Central community"
+doomworld = 123800
+doomwiki  = "Vesper"
+
+[[entry]]
+key       = "2023-multiplayer-vesper-community-deathmatch"
+category  = "multiplayer"
+order     = 3
+title     = "Vesper Community Deathmatch"
+author    = "Xaser and the Doom Central community"
+doomworld = 129832
+doomwiki  = "Vesper_Community_Deathmatch"
+
+[[entry]]
+key       = "2023-multiplayer-vignettes-of-deathmatch"
+category  = "multiplayer"
+order     = 4
+title     = "Vignettes of Deathmatch"
+author    = "Shane Lopez (EmZee712)"
+idgames   = 20614
+doomwiki  = "Vignettes_of_Deathmatch"
+
+[[entry]]
+key       = "2023-gameplay-mod-doom-infinite"
+category  = "gameplay-mod"
+order     = 1
+title     = "Doom Infinite"
+author    = "DifficultOldStuff"
+doomwiki  = "Doom_Infinite"
+
+[[entry]]
+key       = "2023-gameplay-mod-volatile-material"
+category  = "gameplay-mod"
+order     = 2
+title     = "Volatile Material"
+author    = "LossForWords and Mace"
+doomwiki  = "Volatile_Material"
+
+[[entry]]
+key       = "2023-gameplay-mod-bring-your-own-class"
+category  = "gameplay-mod"
+order     = 3
+title     = "Bring Your Own Class"
+author    = "Various"
+doomwiki  = "Bring_Your_Own_Class"
+
+[[entry]]
+key       = "2023-gameplay-mod-rampancy"
+category  = "gameplay-mod"
+order     = 4
+title     = "Rampancy"
+author    = "Yholl"
+doomwiki  = "Rampancy"
+
+[[entry]]
+key       = "2023-mordeth-tnt2-map26"
+category  = "mordeth"
+order     = 1
+title     = "TNT2 MAP26"
+author    = "Michael Fraize (Marcaek)"
+idgames   = 21842
+doomworld = 104882
+doomwiki  = "TNT_2:_Devilution"
+
+[[entry]]
+key       = "2023-machaward-goodwad"
+category  = "machaward"
+order     = 1
+title     = "GOODWAD"
+author    = "em essex (msx2plus)"
+idgames   = 20699
+doomworld = 135456
+doomwiki  = "GOODWAD"
+
+[[entry]]
+key       = "2023-odyssey-of-noises-memory-entryrrrr-from-my-house"
+category  = "odyssey-of-noises"
+order     = 1
+title     = "memory=entryrrrr///// from My House"
+author    = "Sarah Mancuso (esselfortium)"
+doomworld = 134292
+doomwiki  = "My_House"

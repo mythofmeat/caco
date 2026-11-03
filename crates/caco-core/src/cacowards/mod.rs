@@ -572,6 +572,22 @@ title    = "Corrected"
     }
 
     #[test]
+    fn every_year_has_its_winners_and_its_page() {
+        // Too few would mean a section went missing on the way from the wiki.
+        let dataset = builtin();
+        for (text, name) in BUILTIN {
+            let year = parse_year_file(name, text).unwrap().year;
+            let winners = dataset
+                .entries
+                .iter()
+                .filter(|entry| entry.year == year && entry.category == "winner")
+                .count();
+            assert!(winners >= 10, "{year} has {winners} winners");
+            assert!(dataset.pages.contains_key(&year), "{year} has no page");
+        }
+    }
+
+    #[test]
     fn no_wiki_markup_survived_curation() {
         for entry in builtin().entries {
             assert!(!has_markup(&entry.wad_title), "{}", entry.key);

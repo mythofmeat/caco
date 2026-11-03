@@ -1,1 +1,794 @@
+# Facts from Doomworld's Cacowards, by way of the Doom Wiki.
 year = 2025
+page = "https://www.doomworld.com/cacowards/2025/"
+
+# Not entries, being people or tools: Codeaward, Most Promising Newcomers, Creator of the Year, Espi award.
+
+[[entry]]
+key       = "2025-winner-in-the-doghouse"
+category  = "winner"
+order     = 1
+title     = "In the Doghouse"
+author    = "Donovan Myers (Arbys550)"
+idgames   = 21654
+doomwiki  = "In_the_Doghouse"
+
+[[entry]]
+key       = "2025-winner-below-the-gaudy-goblin"
+category  = "winner"
+order     = 2
+title     = "Below the Gaudy Goblin"
+author    = "Doomax"
+doomworld = 149566
+doomwiki  = "Below_the_Gaudy_Goblin"
+
+[[entry]]
+key       = "2025-winner-neon-overdrive"
+category  = "winner"
+order     = 3
+title     = "Neon Overdrive"
+author    = "AshtralFiend"
+idgames   = 21881
+doomworld = 152555
+doomwiki  = "Neon_Overdrive"
+
+[[entry]]
+key       = "2025-winner-blues-brothers-2025"
+category  = "winner"
+order     = 4
+title     = "Blues Brothers 2025"
+author    = "General Roasterock and Ravendesk"
+idgames   = 21927
+doomworld = 155711
+doomwiki  = "Blues_Brothers_2025"
+
+[[entry]]
+key       = "2025-winner-ledge-maze"
+category  = "winner"
+order     = 5
+title     = "Ledge Maze"
+author    = "Jon Landis"
+idgames   = 21865
+doomwiki  = "Ledge_Maze"
+
+[[entry]]
+key       = "2025-winner-dead-sea-scrolls"
+category  = "winner"
+order     = 6
+title     = "Dead Sea Scrolls"
+author    = "BEG"
+idgames   = 21807
+doomwiki  = "Dead_Sea_Scrolls"
+
+[[entry]]
+key       = "2025-winner-gossip"
+category  = "winner"
+order     = 7
+title     = "Gossip"
+author    = "Bartek Karoliński (Touchdown)"
+idgames   = 22060
+doomworld = 127080
+doomwiki  = "Gossip"
+
+[[entry]]
+key       = "2025-winner-lonesome-road"
+category  = "winner"
+order     = 8
+title     = "Lonesome Road"
+author    = "Thomas Seifert (tourniquet)"
+doomworld = 151858
+doomwiki  = "Lonesome_Road"
+
+[[entry]]
+key       = "2025-winner-drake-obrien-ovational-megawad"
+category  = "winner"
+order     = 9
+title     = "Drake O'Brien Ovational Megawad"
+author    = "Various"
+doomworld = 153776
+doomwiki  = "Drake_O'Brien_Ovational_Megawad"
+
+[[entry]]
+key       = "2025-winner-doom-2-in-rural-only"
+category  = "winner"
+order     = 10
+title     = "Doom 2 In Rural Only"
+author    = "Various"
+idgames   = 21764
+doomwiki  = "Doom_2_In_Rural_Only"
+
+[[entry]]
+key       = "2025-winner-axolotl-regenerated"
+category  = "winner"
+order     = 11
+title     = "Axolotl: Regenerated"
+author    = "Devon Barnett (Xyzzy)"
+idgames   = 21450
+doomwiki  = "Axolotl:_Regenerated"
+
+[[entry]]
+key       = "2025-winner-crimson-horror"
+category  = "winner"
+order     = 12
+title     = "Crimson Horror"
+author    = "Sebastian Ratcliffe (EduardoAndFriends)"
+idgames   = 21829
+doomwiki  = "Crimson_Horror"
+
+[[entry]]
+key       = "2025-runner-up-dragon-sector-remake"
+category  = "runner-up"
+order     = 1
+title     = "Dragon Sector Remake"
+author    = "Barefootstallion and Daryn"
+doomwiki  = "Dragon_Sector_Remake"
+
+[[entry]]
+key       = "2025-runner-up-when-them-demons-cry"
+category  = "runner-up"
+order     = 2
+title     = "When Them Demons Cry"
+author    = "Slavius"
+idgames   = 21804
+doomwiki  = "When_Them_Demons_Cry"
+
+[[entry]]
+key       = "2025-runner-up-lemoncholia"
+category  = "runner-up"
+order     = 3
+title     = "Lemoncholia"
+author    = "Grain of Salt"
+doomworld = 153418
+doomwiki  = "Lemoncholia"
+
+[[entry]]
+key       = "2025-runner-up-remanence"
+category  = "runner-up"
+order     = 4
+title     = "Remanence"
+author    = "Treehouseminis"
+idgames   = 21758
+doomwiki  = "Remanence"
+
+[[entry]]
+key       = "2025-runner-up-the-warp"
+category  = "runner-up"
+order     = 5
+title     = "The Warp"
+author    = "Laocoön"
+idgames   = 21958
+doomworld = 153124
+doomwiki  = "The_Warp"
+
+[[entry]]
+key       = "2025-runner-up-witching-hour"
+category  = "runner-up"
+order     = 6
+title     = "Witching Hour"
+author    = "EANB"
+idgames   = 21617
+doomwiki  = "Witching_Hour"
+
+[[entry]]
+key       = "2025-runner-up-earthless"
+category  = "runner-up"
+order     = 7
+title     = "Earthless"
+author    = "James Paddock (Jimmy)"
+idgames   = 21691
+doomwiki  = "Earthless"
+
+[[entry]]
+key       = "2025-runner-up-entangled"
+category  = "runner-up"
+order     = 8
+title     = "Entangled"
+author    = "LerxstInWonderland"
+doomworld = 151288
+doomwiki  = "Entangled"
+
+[[entry]]
+key       = "2025-runner-up-the-chilling-winds-of-dis"
+category  = "runner-up"
+order     = 9
+title     = "The Chilling Winds of Dis"
+author    = "Pineapple Under the Sea"
+doomworld = 151566
+doomwiki  = "PUSS_XXII:_The_Chilling_Winds_of_Dis"
+
+[[entry]]
+key       = "2025-runner-up-the-smoking-dog-part-2"
+category  = "runner-up"
+order     = 10
+title     = "The Smoking Dog Part 2"
+author    = "Pablo Dictter (PabloSky)"
+idgames   = 21460
+doomwiki  = "The_Smoking_Dog_Part_2"
+
+[[entry]]
+key       = "2025-runner-up-beyond-the-zero"
+category  = "runner-up"
+order     = 11
+title     = "Beyond the Zero"
+author    = "Mercury191872"
+doomworld = 155082
+doomwiki  = "Beyond_the_Zero"
+
+[[entry]]
+key       = "2025-runner-up-cpd-2"
+category  = "runner-up"
+order     = 12
+title     = "CPD 2"
+author    = "Cheesewheel"
+doomworld = 154633
+doomwiki  = "CPD_2"
+
+[[entry]]
+key       = "2025-runner-up-forlorn"
+category  = "runner-up"
+order     = 13
+title     = "FORLORN"
+author    = "LVENdead"
+doomworld = 155539
+doomwiki  = "FORLORN"
+
+[[entry]]
+key       = "2025-runner-up-sunless-empire"
+category  = "runner-up"
+order     = 14
+title     = "Sunless Empire"
+author    = "Waffle House Team"
+idgames   = 21796
+doomwiki  = "Sunless_Empire"
+
+[[entry]]
+key       = "2025-honorable-mention-infernal-odyssey"
+category  = "honorable-mention"
+order     = 1
+title     = "Infernal Odyssey"
+author    = "Skunkbear"
+idgames   = 21671
+doomworld = 152740
+doomwiki  = "Infernal_Odyssey"
+
+[[entry]]
+key       = "2025-honorable-mention-nova-iv"
+category  = "honorable-mention"
+order     = 2
+title     = "NOVA IV"
+author    = "Various"
+idgames   = 21967
+doomworld = 152816
+doomwiki  = "NOVA_IV"
+
+[[entry]]
+key       = "2025-honorable-mention-perditions-gate-resurgence"
+category  = "honorable-mention"
+order     = 3
+title     = "Perdition's Gate Resurgence"
+author    = "Various"
+idgames   = 21753
+doomwiki  = "Perdition's_Gate_Resurgence"
+
+[[entry]]
+key       = "2025-honorable-mention-aftercare-sessions"
+category  = "honorable-mention"
+order     = 4
+title     = "Aftercare Sessions"
+author    = "MoiraHeart"
+doomworld = 149498
+doomwiki  = "Aftercare_Sessions"
+
+[[entry]]
+key       = "2025-honorable-mention-amalgoom"
+category  = "honorable-mention"
+order     = 5
+title     = "Amalgoom"
+author    = "Various"
+idgames   = 21859
+doomwiki  = "Amalgoom"
+
+[[entry]]
+key       = "2025-honorable-mention-hexen-mists-of-mauristen"
+category  = "honorable-mention"
+order     = 6
+title     = "Hexen: Mists of Mauristen"
+author    = "ArgonianLord"
+doomwiki  = "Hexen:_Mists_of_Mauristen"
+
+[[entry]]
+key       = "2025-honorable-mention-combustion"
+category  = "honorable-mention"
+order     = 7
+title     = "Combustion"
+author    = "Fiendish"
+idgames   = 21692
+doomwiki  = "Combustion"
+
+[[entry]]
+key       = "2025-honorable-mention-the-mechanism"
+category  = "honorable-mention"
+order     = 8
+title     = "The Mechanism"
+author    = "Ryan Mallon (ryiron)"
+idgames   = 21566
+doomwiki  = "The_Mechanism"
+
+[[entry]]
+key       = "2025-honorable-mention-purgatory"
+category  = "honorable-mention"
+order     = 9
+title     = "Purgatory"
+author    = "Isolation"
+doomworld = 150065
+doomwiki  = "Purgatory_(2024_WAD)"
+
+[[entry]]
+key       = "2025-honorable-mention-the-only-way-out-is-through"
+category  = "honorable-mention"
+order     = 10
+title     = "The Only Way Out Is Through"
+author    = "Laocoön"
+idgames   = 21625
+doomworld = 152160
+doomwiki  = "The_Only_Way_Out_Is_Through"
+
+[[entry]]
+key       = "2025-honorable-mention-tarnished"
+category  = "honorable-mention"
+order     = 11
+title     = "Tarnished"
+author    = "Mittens12"
+doomworld = 149509
+doomwiki  = "Tarnished"
+
+[[entry]]
+key       = "2025-honorable-mention-the-warrens-burrow-of-the-were"
+category  = "honorable-mention"
+order     = 12
+title     = "The Warrens: Burrow of the Were"
+author    = "Kan3"
+doomworld = 155820
+doomwiki  = "The_Warrens:_Burrow_of_the_Were"
+
+[[entry]]
+key       = "2025-honorable-mention-cyber-nights"
+category  = "honorable-mention"
+order     = 13
+title     = "Cyber Nights"
+author    = "Victor Gasior (RiviTheWarlock)"
+idgames   = 21727
+doomwiki  = "Cyber_Nights"
+
+[[entry]]
+key       = "2025-honorable-mention-the-meadow-at-dusk"
+category  = "honorable-mention"
+order     = 14
+title     = "The Meadow at Dusk"
+author    = "ivymagnapinna and raddicted"
+idgames   = 21665
+doomwiki  = "The_Meadow_at_Dusk"
+
+[[entry]]
+key       = "2025-honorable-mention-the-road-to-skull-city"
+category  = "honorable-mention"
+order     = 15
+title     = "The Road to Skull City"
+author    = "Quackjen"
+idgames   = 21867
+doomworld = 155979
+doomwiki  = "The_Road_to_Skull_City"
+
+[[entry]]
+key       = "2025-honorable-mention-eisberg"
+category  = "honorable-mention"
+order     = 16
+title     = "Eisberg"
+author    = "Galactic"
+doomworld = 152701
+doomwiki  = "Eisberg"
+
+[[entry]]
+key       = "2025-honorable-mention-island-of-despair"
+category  = "honorable-mention"
+order     = 17
+title     = "Island of Despair"
+author    = "iYago"
+idgames   = 21483
+doomwiki  = "Island_of_Despair"
+
+[[entry]]
+key       = "2025-honorable-mention-hardfest-3"
+category  = "honorable-mention"
+order     = 18
+title     = "Hardfest 3"
+author    = "Various"
+idgames   = 21632
+doomwiki  = "Hardfest_3"
+
+[[entry]]
+key       = "2025-honorable-mention-the-evil-reborn-resurrected"
+category  = "honorable-mention"
+order     = 19
+title     = "The Evil Reborn: Resurrected"
+author    = "Matthew Edwards (Foodles)"
+doomworld = 152129
+doomwiki  = "The_Evil_Reborn:_Resurrected"
+
+[[entry]]
+key       = "2025-honorable-mention-twilight-fortress"
+category  = "honorable-mention"
+order     = 20
+title     = "Twilight Fortress"
+author    = "Matt Napier (Napeyear)"
+idgames   = 21818
+doomwiki  = "Twilight_Fortress"
+
+[[entry]]
+key       = "2025-honorable-mention-anthropoda-power-fantasy"
+category  = "honorable-mention"
+order     = 21
+title     = "Anthropoda Power Fantasy"
+author    = "Various"
+idgames   = 22128
+doomworld = 151049
+doomwiki  = "Anthropoda_Power_Fantasy"
+
+[[entry]]
+key       = "2025-honorable-mention-marrowrot"
+category  = "honorable-mention"
+order     = 22
+title     = "Marrowrot"
+author    = "Gianluca Cilento (Remmirath)"
+idgames   = 21601
+doomwiki  = "Marrowrot"
+
+[[entry]]
+key       = "2025-honorable-mention-brownian-emotions"
+category  = "honorable-mention"
+order     = 23
+title     = "Brownian Emotions"
+author    = "apichatpong"
+idgames   = 21986
+doomworld = 152801
+doomwiki  = "Brownian_Emotions"
+
+[[entry]]
+key       = "2025-honorable-mention-doom-around-the-world"
+category  = "honorable-mention"
+order     = 24
+title     = "Doom Around the World"
+author    = "Various"
+doomworld = 152710
+doomwiki  = "Doom_Around_the_World"
+
+[[entry]]
+key       = "2025-honorable-mention-after-doom"
+category  = "honorable-mention"
+order     = 25
+title     = "After Doom"
+author    = "00_Zombie_00"
+doomworld = 73475
+doomwiki  = "After_Doom"
+
+[[entry]]
+key       = "2025-grandeur-renewed-heretic-hexen"
+category  = "grandeur-renewed"
+order     = 1
+title     = "Heretic + Hexen"
+doomwiki  = "Heretic_+_Hexen"
+supported = false
+
+[[entry]]
+key       = "2025-doom-moma-system-foxes"
+category  = "doom-moma"
+order     = 1
+title     = "System Foxes"
+author    = "97th Century Fox"
+idgames   = 21946
+doomworld = 151758
+doomwiki  = "System_Foxes"
+
+[[entry]]
+key       = "2025-doom-moma-awaiting-eschaton"
+category  = "doom-moma"
+order     = 2
+title     = "Awaiting Eschaton"
+author    = "97th Century Fox"
+idgames   = 21945
+doomworld = 154665
+doomwiki  = "Awaiting_Eschaton"
+
+[[entry]]
+key       = "2025-doom-moma-pal-hipocampo"
+category  = "doom-moma"
+order     = 3
+title     = "Pa'l Hipocampo"
+author    = "Rencoret"
+doomworld = 151920
+doomwiki  = "Pa'l_Hipocampo"
+
+[[entry]]
+key       = "2025-doom-moma-conchazumanga"
+category  = "doom-moma"
+order     = 4
+title     = "¡Conchazumanga!"
+author    = "Rencoret"
+doomworld = 150675
+doomwiki  = "¡Conchazumanga!"
+
+[[entry]]
+key       = "2025-doom-moma-prolonged-winter"
+category  = "doom-moma"
+order     = 5
+title     = "Prolonged Winter"
+author    = "Plerb"
+idgames   = 21800
+doomwiki  = "Prolonged_Winter"
+
+[[entry]]
+key       = "2025-doom-moma-content"
+category  = "doom-moma"
+order     = 6
+title     = "Content"
+author    = "OverflowingMocha"
+idgames   = 21686
+doomwiki  = "Content"
+
+[[entry]]
+key       = "2025-doom-moma-i-want"
+category  = "doom-moma"
+order     = 7
+title     = "i want"
+author    = "Synami"
+idgames   = 21663
+doomwiki  = "i_want"
+
+[[entry]]
+key       = "2025-doom-moma-the-prince-and-the-void"
+category  = "doom-moma"
+order     = 8
+title     = "The Prince and The Void"
+author    = "NiGHTS108"
+idgames   = 21579
+doomwiki  = "The_Prince_and_The_Void"
+
+[[entry]]
+key       = "2025-doom-moma-105-im-not-here-anymore"
+category  = "doom-moma"
+order     = 9
+title     = "105: i'm not here anymore"
+author    = "signaturereverie"
+idgames   = 21837
+doomworld = 154824
+doomwiki  = "105:_i'm_not_here_anymore"
+
+[[entry]]
+key       = "2025-doom-moma-calculo"
+category  = "doom-moma"
+order     = 10
+title     = "Calculo"
+author    = "dqdq1"
+doomworld = 153690
+doomwiki  = "Calculo"
+
+[[entry]]
+key       = "2025-doom-moma-pacifist-paradise-secret-santa-2"
+category  = "doom-moma"
+order     = 11
+title     = "Pacifist Paradise Secret Santa 2"
+author    = "Various"
+idgames   = 21631
+doomwiki  = "Pacifist_Paradise_Secret_Santa_2"
+
+[[entry]]
+key       = "2025-doom-moma-the-meadow-at-dusk"
+category  = "doom-moma"
+order     = 12
+title     = "The Meadow at Dusk"
+author    = "raddicted and ivymagnapinna"
+idgames   = 21665
+doomwiki  = "The_Meadow_at_Dusk"
+
+[[entry]]
+key       = "2025-doom-moma-vydotwad"
+category  = "doom-moma"
+order     = 13
+title     = "][vydotwad"
+author    = "ivymagnapinna"
+idgames   = 21773
+doomwiki  = "Iivydotwad"
+
+[[entry]]
+key       = "2025-doom-moma-sss01-lunar-lights"
+category  = "doom-moma"
+order     = 14
+title     = "SSS01: Lunar Lights"
+author    = "Various"
+idgames   = 21731
+doomwiki  = "SSS01:_Lunar_Lights"
+
+[[entry]]
+key       = "2025-past-spotlight-eye-of-the-beholder"
+category  = "past-spotlight"
+order     = 1
+title     = "Eye of the Beholder"
+author    = "Jon Landis"
+doomwiki  = "Eye_of_the_Beholder"
+
+[[entry]]
+key       = "2025-past-spotlight-valis"
+category  = "past-spotlight"
+order     = 2
+title     = "Valis"
+author    = "Galactic"
+doomworld = 132604
+doomwiki  = "Valis"
+
+[[entry]]
+key       = "2025-past-spotlight-serpents-wake"
+category  = "past-spotlight"
+order     = 3
+title     = "Serpent's Wake"
+author    = "hervoheebo"
+doomworld = 112114
+doomwiki  = "Serpent's_Wake"
+
+[[entry]]
+key       = "2025-past-spotlight-hexen-cyrgoths-revenge"
+category  = "past-spotlight"
+order     = 4
+title     = "HEXEN: Cyrgoth's Revenge"
+author    = "PWAD Pete"
+doomworld = 110040
+doomwiki  = "HEXEN:_Cyrgoth's_Revenge"
+
+[[entry]]
+key       = "2025-past-spotlight-into-sandys-cities"
+category  = "past-spotlight"
+order     = 5
+title     = "Into Sandy's Cities"
+author    = "GermanPeter"
+doomworld = 147181
+doomwiki  = "Into_Sandy's_Cities"
+
+[[entry]]
+key       = "2025-spaceship-of-theseus-mohrta"
+category  = "spaceship-of-theseus"
+order     = 1
+title     = "Mohrta"
+author    = "scumhead and Osiol"
+supported = false
+
+[[entry]]
+key       = "2025-odyssey-of-noises-gossip-ost"
+category  = "odyssey-of-noises"
+order     = 1
+title     = "Gossip OST"
+author    = "Bartek Karoliński (Touchdown)"
+idgames   = 22060
+doomworld = 127080
+doomwiki  = "Gossip"
+
+[[entry]]
+key       = "2025-odyssey-of-noises-sunless-empire-ost"
+category  = "odyssey-of-noises"
+order     = 2
+title     = "Sunless Empire OST"
+author    = "Korp, LPad, and LVENdead"
+idgames   = 21796
+doomwiki  = "Sunless_Empire"
+
+[[entry]]
+key       = "2025-odyssey-of-noises-dont-be-a-bitch-4-ost"
+category  = "odyssey-of-noises"
+order     = 3
+title     = "Don't Be A Bitch 4 OST"
+author    = "HeavenWraith and Jdagenet"
+doomworld = 146945
+doomwiki  = "Don't_Be_A_Bitch_4"
+
+[[entry]]
+key       = "2025-odyssey-of-noises-bitter-dream-ost"
+category  = "odyssey-of-noises"
+order     = 4
+title     = "Bitter Dream OST"
+author    = "LVENdead"
+idgames   = 21517
+doomworld = 148717
+doomwiki  = "Bitter_Dream"
+
+[[entry]]
+key       = "2025-multiplayer-endless-relentless"
+category  = "multiplayer"
+order     = 1
+title     = "Endless Relentless"
+author    = "Zeberpal"
+doomworld = 155966
+doomwiki  = "Endless_Relentless"
+
+[[entry]]
+key       = "2025-multiplayer-grime-dm"
+category  = "multiplayer"
+order     = 2
+title     = "Grime DM"
+author    = "Colton Murchison (Arrowhead)"
+doomworld = 149625
+doomwiki  = "Grime_DM"
+
+[[entry]]
+key       = "2025-multiplayer-32in24-18-billions-of-flags-stolen"
+category  = "multiplayer"
+order     = 3
+title     = "32in24-18: Billions of Flags Stolen"
+author    = "YEDS team"
+doomwiki  = "32in24-18:_Billions_of_Flags_Stolen"
+
+[[entry]]
+key       = "2025-multiplayer-dont-be-a-bitch-4"
+category  = "multiplayer"
+order     = 4
+title     = "Don't Be A Bitch 4"
+author    = "Mechanix Union and Ru5ty Sh4ck"
+doomworld = 146945
+doomwiki  = "Don't_Be_A_Bitch_4"
+
+[[entry]]
+key       = "2025-gameplay-mod-diamond-dragon"
+category  = "gameplay-mod"
+order     = 1
+title     = "Diamond Dragon"
+author    = "cybermonday"
+doomworld = 153613
+doomwiki  = "Diamond_Dragon"
+
+[[entry]]
+key       = "2025-gameplay-mod-pvt-stone"
+category  = "gameplay-mod"
+order     = 2
+title     = "Pvt. Stone"
+author    = "Skelegant"
+doomwiki  = "Pvt._Stone"
+
+[[entry]]
+key       = "2025-gameplay-mod-abyssal-marine"
+category  = "gameplay-mod"
+order     = 3
+title     = "Abyssal Marine"
+author    = "H3LLW4LK3R"
+doomworld = 151373
+doomwiki  = "Abyssal_Marine"
+
+[[entry]]
+key       = "2025-gameplay-mod-doom-comic-96"
+category  = "gameplay-mod"
+order     = 4
+title     = "Doom Comic '96"
+author    = "Ramirov"
+doomworld = 146746
+doomwiki  = "Doom_Comic_'96"
+
+[[entry]]
+key       = "2025-mordeth-return-to-void"
+category  = "mordeth"
+order     = 1
+title     = "Return to Void"
+author    = "Mike Watson (Cyb)"
+doomwiki  = "Return_to_Void"
+
+[[entry]]
+key       = "2025-adrians-pen-muumis-animated-skies"
+category  = "adrians-pen"
+order     = 1
+title     = "Muumi's Animated Skies"
+author    = "Muumi"
+doomworld = 130774
+
+[[entry]]
+key       = "2025-machaward-97th-century-exhibition"
+category  = "machaward"
+order     = 1
+title     = "97th Century Exhibition"
+author    = "97th Century Fox"
+doomworld = 147064
+doomwiki  = "97th_Century_Exhibition"

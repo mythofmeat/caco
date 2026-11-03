@@ -1,1 +1,635 @@
+# Facts from Doomworld's Cacowards, by way of the Doom Wiki.
 year = 2024
+page = "https://www.doomworld.com/cacowards/2024/"
+
+# Not entries, being people or tools: Codeaward, Most Promising Newcomers, Creator of the Year, Espi award.
+
+[[entry]]
+key       = "2024-winner-osterity"
+category  = "winner"
+order     = 1
+title     = "Osterity"
+author    = "Big Ol' Billy"
+idgames   = 21702
+doomwiki  = "Osterity"
+
+[[entry]]
+key       = "2024-winner-sleepwalking"
+category  = "winner"
+order     = 2
+title     = "Sleepwalking"
+author    = "Ravendesk"
+idgames   = 21437
+doomwiki  = "Sleepwalking"
+
+[[entry]]
+key       = "2024-winner-pirate-doom-ii"
+category  = "winner"
+order     = 3
+title     = "Pirate Doom II"
+author    = "Darch"
+idgames   = 21459
+doomwiki  = "Pirate_Doom_II"
+
+[[entry]]
+key       = "2024-winner-simulacrum"
+category  = "winner"
+order     = 4
+title     = "Simulacrum"
+author    = "Muumi and Alex Decker (myolden)"
+idgames   = 21230
+doomwiki  = "Simulacrum"
+
+[[entry]]
+key       = "2024-winner-squenched-avacausage"
+category  = "winner"
+order     = 5
+title     = "Squenched Avacausage"
+author    = "nova++"
+idgames   = 21714
+doomwiki  = "Squenched_Avacausage"
+
+[[entry]]
+key       = "2024-winner-house-of-dead-skin"
+category  = "winner"
+order     = 6
+title     = "House of Dead Skin"
+author    = "ivymagnapinna"
+idgames   = 21429
+doomwiki  = "House_of_Dead_Skin"
+
+[[entry]]
+key       = "2024-winner-nostalgic-entropy-neo-retro"
+category  = "winner"
+order     = 7
+title     = "Nostalgic Entropy: Neo Retro"
+author    = "AshtralFiend"
+idgames   = 21511
+doomwiki  = "Nostalgic_Entropy:_Neo_Retro"
+
+[[entry]]
+key       = "2024-winner-necromantic-thirst"
+category  = "winner"
+order     = 8
+title     = "Necromantic Thirst"
+author    = "French Doom Community"
+idgames   = 21828
+doomworld = 149103
+doomwiki  = "Necromantic_Thirst"
+
+[[entry]]
+key       = "2024-winner-umbra"
+category  = "winner"
+order     = 9
+title     = "Umbra"
+author    = "rd"
+doomworld = 148700
+doomwiki  = "Umbra"
+
+[[entry]]
+key       = "2024-winner-eviternity-ii"
+category  = "winner"
+order     = 10
+title     = "Eviternity II"
+author    = "Joshua O'Sullivan (Dragonfly) et al."
+idgames   = 21436
+doomwiki  = "Eviternity_II"
+
+[[entry]]
+key       = "2024-winner-liminal-doom-2-crossing-the-threshold"
+category  = "winner"
+order     = 11
+title     = "Liminal Doom 2: Crossing the Threshold"
+author    = "dashlet"
+idgames   = 21233
+doomwiki  = "Liminal_Doom_2:_Crossing_the_Threshold"
+
+[[entry]]
+key       = "2024-winner-doom-2-in-city-only"
+category  = "winner"
+order     = 12
+title     = "Doom 2 In City Only"
+author    = "Various"
+idgames   = 21176
+doomwiki  = "Doom_2_In_City_Only"
+
+[[entry]]
+key       = "2024-runner-up-formless-mother"
+category  = "runner-up"
+order     = 1
+title     = "Formless Mother"
+author    = "Treehouseminis"
+idgames   = 21407
+doomwiki  = "Formless_Mother"
+
+[[entry]]
+key       = "2024-runner-up-bitter-dream"
+category  = "runner-up"
+order     = 2
+title     = "Bitter Dream"
+author    = "LVENdead"
+idgames   = 21517
+doomwiki  = "Bitter_Dream"
+
+[[entry]]
+key       = "2024-runner-up-forsaken-compound"
+category  = "runner-up"
+order     = 3
+title     = "Forsaken Compound"
+author    = "ivymagnapinna"
+idgames   = 21162
+doomwiki  = "Forsaken_Compound"
+
+[[entry]]
+key       = "2024-runner-up-eraser"
+category  = "runner-up"
+order     = 4
+title     = "Eraser"
+author    = "Matt Eldrydge"
+doomworld = 147486
+doomwiki  = "Eraser"
+
+[[entry]]
+key       = "2024-runner-up-brotherhood-of-ruin-2024-element-temple-research-complex"
+category  = "runner-up"
+order     = 5
+title     = "Brotherhood of Ruin 2024: Element Temple Research Complex"
+author    = "Kristian Aro (Nebula)"
+doomworld = 134825
+doomwiki  = "Brotherhood_of_Ruin_2024:_Element_Temple_Research_Complex"
+
+[[entry]]
+key       = "2024-runner-up-realm-of-chaos-2-the-revenge-of-96"
+category  = "runner-up"
+order     = 6
+title     = "Realm of Chaos 2: The Revenge of '96!"
+author    = "Various"
+doomworld = 125506
+doomwiki  = "Realm_of_Chaos_2:_The_Revenge_of_'96!"
+
+[[entry]]
+key       = "2024-runner-up-curse-of-blood"
+category  = "runner-up"
+order     = 7
+title     = "Curse of Blood"
+author    = "Mattias Johansson (waverider) and Michael Jan Krizik (valkiriforce)"
+doomworld = 146785
+doomwiki  = "Curse_of_Blood"
+
+[[entry]]
+key       = "2024-runner-up-grand-canyon"
+category  = "runner-up"
+order     = 8
+title     = "Grand Canyon"
+author    = "Roofi"
+idgames   = 21088
+doomwiki  = "Grand_Canyon"
+
+[[entry]]
+key       = "2024-runner-up-firefly"
+category  = "runner-up"
+order     = 9
+title     = "Firefly"
+author    = "eater29"
+idgames   = 21426
+doomwiki  = "Firefly"
+
+[[entry]]
+key       = "2024-runner-up-oops-all-ghosts"
+category  = "runner-up"
+order     = 10
+title     = "Oops... All-Ghosts!"
+author    = "grapes"
+idgames   = 21409
+doomwiki  = "Oops..._All-Ghosts!"
+
+[[entry]]
+key       = "2024-runner-up-vogel-im-kafig"
+category  = "runner-up"
+order     = 11
+title     = "Vogel im Käfig"
+author    = "Slavius"
+idgames   = 21356
+doomwiki  = "Vogel_im_Käfig"
+
+[[entry]]
+key       = "2024-runner-up-tnt-overcharged"
+category  = "runner-up"
+order     = 12
+title     = "TNT: Overcharged"
+author    = "Veemon"
+idgames   = 19951
+doomwiki  = "TNT:_Overcharged"
+
+[[entry]]
+key       = "2024-runner-up-outpost-13"
+category  = "runner-up"
+order     = 13
+title     = "Outpost 13"
+author    = "Artem Brullov"
+doomworld = 142279
+doomwiki  = "Outpost_13"
+
+[[entry]]
+key       = "2024-runner-up-you-do-voodoo"
+category  = "runner-up"
+order     = 14
+title     = "You Do Voodoo"
+author    = "Grimosaur"
+idgames   = 20959
+doomwiki  = "You_Do_Voodoo"
+
+[[entry]]
+key       = "2024-honorable-mention-extra-beany-canned-doom"
+category  = "honorable-mention"
+order     = 1
+title     = "Extra Beany Canned Doom"
+author    = "Stupid Bunny"
+idgames   = 21192
+doomwiki  = "Extra_Beany_Canned_Doom"
+
+[[entry]]
+key       = "2024-honorable-mention-puzzles-and-pieces"
+category  = "honorable-mention"
+order     = 2
+title     = "Puzzles and Pieces"
+author    = "Christophine Place"
+doomworld = 145568
+doomwiki  = "Puzzles_and_Pieces"
+
+[[entry]]
+key       = "2024-honorable-mention-reds-over-world"
+category  = "honorable-mention"
+order     = 3
+title     = "Reds Over World"
+author    = "WojtTheDoomer"
+doomwiki  = "Reds_Over_World"
+
+[[entry]]
+key       = "2024-honorable-mention-spectrum-descent"
+category  = "honorable-mention"
+order     = 4
+title     = "Spectrum Descent"
+author    = "The Afternoon Crew"
+idgames   = 21254
+doomwiki  = "Spectrum_Descent"
+
+[[entry]]
+key       = "2024-honorable-mention-road-to-hades"
+category  = "honorable-mention"
+order     = 5
+title     = "Road to Hades"
+author    = "Rose Holmes"
+idgames   = 21235
+doomwiki  = "Road_to_Hades"
+
+[[entry]]
+key       = "2024-honorable-mention-paint-it-doom"
+category  = "honorable-mention"
+order     = 6
+title     = "Paint It Doom"
+author    = "Various"
+idgames   = 21443
+doomwiki  = "Paint_It_Doom"
+
+[[entry]]
+key       = "2024-honorable-mention-doomed-urbex"
+category  = "honorable-mention"
+order     = 7
+title     = "Doomed Urbex"
+author    = "Various"
+idgames   = 21481
+doomwiki  = "Doomed_Urbex"
+
+[[entry]]
+key       = "2024-honorable-mention-denapsed"
+category  = "honorable-mention"
+order     = 8
+title     = "DeNapsed"
+author    = "Napsalm et al."
+idgames   = 21974
+doomworld = 148681
+doomwiki  = "DeNapsed"
+
+[[entry]]
+key       = "2024-honorable-mention-i-cant-sleep"
+category  = "honorable-mention"
+order     = 9
+title     = "I Can't Sleep"
+author    = "OverflowingMocha"
+idgames   = 21106
+doomwiki  = "I_Can't_Sleep"
+
+[[entry]]
+key       = "2024-honorable-mention-freudian-slipgate-2"
+category  = "honorable-mention"
+order     = 10
+title     = "Freudian Slipgate 2"
+author    = "Przemek Zimny (Alter) et al."
+idgames   = 21222
+doomwiki  = "Freudian_Slipgate_2"
+
+[[entry]]
+key       = "2024-honorable-mention-rebirth-of-damnation-part-ii"
+category  = "honorable-mention"
+order     = 11
+title     = "Rebirth of Damnation Part II"
+author    = "d34thdr0n3"
+doomwiki  = "Rebirth_of_Damnation_Part_II"
+
+[[entry]]
+key       = "2024-honorable-mention-hell-frontier"
+category  = "honorable-mention"
+order     = 12
+title     = "Hell Frontier"
+author    = "ViolentBeetle"
+idgames   = 21420
+doomwiki  = "Hell_Frontier"
+
+[[entry]]
+key       = "2024-honorable-mention-plerbtonia"
+category  = "honorable-mention"
+order     = 13
+title     = "Plerbtonia"
+author    = "Plerb et al."
+idgames   = 21430
+doomwiki  = "Plerbtonia"
+
+[[entry]]
+key       = "2024-honorable-mention-dominus-diabolicus"
+category  = "honorable-mention"
+order     = 14
+title     = "Dominus Diabolicus"
+author    = "bofu"
+idgames   = 21115
+doomwiki  = "Dominus_Diabolicus"
+
+[[entry]]
+key       = "2024-honorable-mention-0x0"
+category  = "honorable-mention"
+order     = 15
+title     = "0x0"
+author    = "Daniel Alexander (Danlex)"
+doomworld = 144256
+doomwiki  = "0x0"
+
+[[entry]]
+key       = "2024-honorable-mention-the-quinary-conundrum"
+category  = "honorable-mention"
+order     = 16
+title     = "The Quinary Conundrum"
+author    = "Vortale"
+idgames   = 21099
+doomwiki  = "The_Quinary_Conundrum"
+
+[[entry]]
+key       = "2024-honorable-mention-duality"
+category  = "honorable-mention"
+order     = 17
+title     = "Duality"
+author    = "AshtralFiend"
+idgames   = 21234
+doomwiki  = "Duality"
+
+[[entry]]
+key       = "2024-honorable-mention-the-edge-of-time"
+category  = "honorable-mention"
+order     = 18
+title     = "The Edge of Time"
+author    = "FireSeraphim"
+doomworld = 109899
+doomwiki  = "The_Edge_of_Time"
+
+[[entry]]
+key       = "2024-honorable-mention-the-gap"
+category  = "honorable-mention"
+order     = 19
+title     = "The Gap"
+author    = "Hebonky"
+doomworld = 143819
+doomwiki  = "The_Gap"
+
+[[entry]]
+key       = "2024-honorable-mention-headless-chicken"
+category  = "honorable-mention"
+order     = 20
+title     = "Headless Chicken"
+author    = "Luca Pavone (Chookum)"
+idgames   = 21040
+doomwiki  = "Headless_Chicken"
+
+[[entry]]
+key       = "2024-honorable-mention-reconditus"
+category  = "honorable-mention"
+order     = 21
+title     = "Reconditus"
+author    = "Yugiboy85"
+idgames   = 21466
+doomwiki  = "Reconditus"
+
+[[entry]]
+key       = "2024-honorable-mention-not-even-remotely-fair"
+category  = "honorable-mention"
+order     = 22
+title     = "Not Even Remotely Fair"
+author    = "Various"
+idgames   = 21015
+doomwiki  = "Not_Even_Remotely_Fair"
+
+[[entry]]
+key       = "2024-honorable-mention-imp-dreams"
+category  = "honorable-mention"
+order     = 23
+title     = "Imp Dreams"
+author    = "locust.leaves"
+idgames   = 21116
+doomwiki  = "Imp_Dreams"
+
+[[entry]]
+key       = "2024-honorable-mention-constriction-1024"
+category  = "honorable-mention"
+order     = 24
+title     = "Constriction: 1024"
+author    = "Various"
+idgames   = 21362
+doomwiki  = "Constriction:_1024"
+
+[[entry]]
+key       = "2024-special-feature-legacy-of-rust"
+category  = "special-feature"
+order     = 1
+title     = "Legacy of Rust"
+doomwiki  = "Legacy_of_Rust"
+
+[[entry]]
+key       = "2024-special-feature-mystery-of-tyskie-islands"
+category  = "special-feature"
+order     = 2
+title     = "Mystery of Tyskie Islands"
+author    = "WojtTheDoomer"
+doomwiki  = "Mystery_of_Tyskie_Islands"
+
+[[entry]]
+key       = "2024-special-feature-realm-of-chaos"
+category  = "special-feature"
+order     = 3
+title     = "Realm of Chaos"
+author    = "The Macintosh Team"
+idgames   = 10513
+doomwiki  = "Realm_of_Chaos"
+
+[[entry]]
+key       = "2024-special-feature-space-cats-saga"
+category  = "special-feature"
+order     = 4
+title     = "Space Cats Saga"
+author    = "DerTimmy"
+doomworld = 123893
+doomwiki  = "Space_Cats_Saga"
+
+[[entry]]
+key       = "2024-special-feature-city-of-doom"
+category  = "special-feature"
+order     = 5
+title     = "City of Doom"
+author    = "Paul Maurone (Nowotny)"
+idgames   = 10874
+doomwiki  = "City_of_Doom"
+
+[[entry]]
+key       = "2024-special-feature-le-gars-qui-a-fait-doom"
+category  = "special-feature"
+order     = 6
+title     = "Le Gars Qui A Fait Doom"
+author    = "The French Doom Community"
+idgames   = 21156
+doomwiki  = "Le_Gars_Qui_A_Fait_Doom"
+
+[[entry]]
+key       = "2024-special-feature-enjmin-doom"
+category  = "special-feature"
+order     = 7
+title     = "Enjmin Doom"
+author    = "Various"
+doomworld = 141705
+doomwiki  = "Enjmin_Doom"
+
+[[entry]]
+key       = "2024-special-feature-endoom-mapping-contest-2024"
+category  = "special-feature"
+order     = 8
+title     = "ENDOOM Mapping Contest 2024"
+author    = "The Russian Doom Community"
+doomworld = 144151
+doomwiki  = "ENDOOM_Mapping_Contest_2024"
+
+[[entry]]
+key       = "2024-special-feature-russian-random-speedmap-pack-3"
+category  = "special-feature"
+order     = 9
+title     = "Russian Random Speedmap Pack 3"
+author    = "The Russian Doom Community"
+doomwiki  = "Russian_Random_Speedmap_Pack_3"
+
+[[entry]]
+key       = "2024-special-feature-thirty-years-with-doom"
+category  = "special-feature"
+order     = 10
+title     = "Thirty Years with Doom"
+author    = "The Russian Doom Community"
+idgames   = 21024
+doomwiki  = "Thirty_Years_with_Doom"
+
+[[entry]]
+key       = "2024-special-feature-polish-community-project"
+category  = "special-feature"
+order     = 11
+title     = "Polish Community Project"
+author    = "The Polish Doom Community"
+idgames   = 21189
+doomwiki  = "Polish_Community_Project"
+
+[[entry]]
+key       = "2024-multiplayer-freon-deathmatch"
+category  = "multiplayer"
+order     = 1
+title     = "Freon Deathmatch"
+author    = "Ru5tK1ng and the Ru5ty Sh4ck community"
+doomwiki  = "Freon_Deathmatch"
+
+[[entry]]
+key       = "2024-multiplayer-eon-weapons"
+category  = "multiplayer"
+order     = 2
+title     = "Eon Weapons"
+author    = "Ru5tK1ng and the Ru5ty Sh4ck community"
+doomwiki  = "Eon_Weapons"
+
+[[entry]]
+key       = "2024-multiplayer-floppy-disk-mod"
+category  = "multiplayer"
+order     = 3
+title     = "Floppy Disk Mod"
+author    = "br0leg and the Floppy Disk Mod team"
+doomwiki  = "Floppy_Disk_Mod"
+
+[[entry]]
+key       = "2024-gameplay-mod-doom-64-unseen-evil"
+category  = "gameplay-mod"
+order     = 1
+title     = "Doom 64: Unseen Evil"
+author    = "DrPyspy"
+doomworld = 134891
+doomwiki  = "Doom_64:_Unseen_Evil"
+
+[[entry]]
+key       = "2024-gameplay-mod-atom-rain-gamma-vektor"
+category  = "gameplay-mod"
+order     = 2
+title     = "Atom Rain: Gamma Vektor"
+author    = "TheAtomMace"
+doomwiki  = "Atom_Rain:_Gamma_Vektor"
+
+[[entry]]
+key       = "2024-gameplay-mod-red-spiral-1993"
+category  = "gameplay-mod"
+order     = 3
+title     = "Red Spiral 1993"
+author    = "LossForWords"
+doomwiki  = "Red_Spiral_1993"
+
+[[entry]]
+key       = "2024-gameplay-mod-alice-toys-of-madness"
+category  = "gameplay-mod"
+order     = 4
+title     = "Alice: Toys of Madness"
+author    = "Jekyll Grim Payne"
+doomwiki  = "Alice:_Toys_of_Madness"
+
+[[entry]]
+key       = "2024-mordeth-necromantic-thirst"
+category  = "mordeth"
+order     = 1
+title     = "Necromantic Thirst"
+author    = "French Doom Community"
+idgames   = 21828
+doomworld = 149103
+doomwiki  = "Necromantic_Thirst"
+
+[[entry]]
+key       = "2024-machaward-portraits-of-doom"
+category  = "machaward"
+order     = 1
+title     = "Portraits of Doom"
+author    = "Peccatum Mihzamiz"
+idgames   = 21583
+doomwiki  = "Portraits_of_Doom"
+
+[[entry]]
+key       = "2024-odyssey-of-noises-eviternity-ii-ost"
+category  = "odyssey-of-noises"
+order     = 1
+title     = "Eviternity II OST"
+author    = "Tristan Clark, James Paddock (Jimmy), Joshua O'Sullivan (Dragonfly), Brayden Hart (AD_79), and Kevin Martins (Velvetic)"
+idgames   = 21436
+doomwiki  = "Eviternity_II"

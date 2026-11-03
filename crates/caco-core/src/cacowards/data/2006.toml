@@ -1,1 +1,165 @@
+# Facts from Doomworld's Cacowards, by way of the Doom Wiki.
 year = 2006
+page = "https://www.doomworld.com/13years/"
+
+# Not entries, being people or tools: Mapper of the Year.
+
+[[entry]]
+key       = "2006-winner-phocas-island-2"
+category  = "winner"
+order     = 1
+title     = "Phocas Island 2"
+author    = "Chris Hopkins (chopkinsca)"
+idgames   = 14661
+doomwiki  = "Phocas_Island_2"
+
+[[entry]]
+key       = "2006-winner-ic2005"
+category  = "winner"
+order     = 2
+title     = "IC2005"
+author    = "Ian Cunnings (The Flange Peddler)"
+idgames   = 14025
+doomwiki  = "IC2005"
+
+[[entry]]
+key       = "2006-winner-hellcore-2-0"
+category  = "winner"
+order     = 3
+title     = "Hellcore 2.0"
+author    = "Devon West (Darkfyre) and Robert Babor (Fusion)"
+idgames   = 14651
+doomwiki  = "Hellcore_2.0"
+
+[[entry]]
+key       = "2006-winner-newdoom-community-project"
+category  = "winner"
+order     = 4
+title     = "Newdoom Community Project"
+author    = "Various"
+idgames   = 14102
+doomwiki  = "Newdoom_Community_Project"
+
+[[entry]]
+key       = "2006-winner-operation-overlord"
+category  = "winner"
+order     = 5
+title     = "Operation Overlord"
+author    = "Nigel Rowand (Enjay)"
+idgames   = 14095
+doomwiki  = "Operation_Overlord"
+
+[[entry]]
+key       = "2006-winner-vae-victus-2"
+category  = "winner"
+order     = 6
+title     = "Vae Victus 2"
+author    = "Derek Braun (Dittohead)"
+idgames   = 14582
+doomwiki  = "Vae_Victus_2"
+
+[[entry]]
+key       = "2006-winner-phobia-the-age"
+category  = "winner"
+order     = 7
+title     = "Phobia: The Age"
+author    = "Kristian Käll (Kristus)"
+idgames   = 14248
+doomwiki  = "Phobia"
+
+[[entry]]
+key       = "2006-winner-foreverhood-1-0"
+category  = "winner"
+order     = 8
+title     = "Foreverhood 1.0"
+author    = "Brian Goodsell (Skadoomer)"
+doomwiki  = "Foreverhood"
+
+[[entry]]
+key       = "2006-winner-the-classic-episode-part-2"
+category  = "winner"
+order     = 9
+title     = "The Classic Episode, Part 2"
+author    = "Jan Van der Veken"
+idgames   = 14090
+doomwiki  = "The_Classic_Episode,_Part_2"
+
+[[entry]]
+key       = "2006-winner-crucified-dreams"
+category  = "winner"
+order     = 10
+title     = "Crucified Dreams"
+author    = "Various"
+idgames   = 14485
+doomwiki  = "Crucified_Dreams"
+
+[[entry]]
+key       = "2006-runner-up-oniria"
+category  = "runner-up"
+order     = 1
+title     = "Oniria"
+author    = "Aluqah"
+idgames   = 14521
+doomwiki  = "Oniria"
+
+[[entry]]
+key       = "2006-runner-up-zen-dynamics"
+category  = "runner-up"
+order     = 2
+title     = "Zen Dynamics"
+author    = "Xaser"
+idgames   = 14669
+doomwiki  = "Zen_Dynamics"
+
+[[entry]]
+key       = "2006-escher-award-impossible-a-new-reality"
+category  = "escher-award"
+order     = 1
+title     = "Impossible: A New Reality"
+author    = "JK"
+idgames   = 14650
+doomwiki  = "Impossible:_A_New_Reality"
+
+[[entry]]
+key       = "2006-multiplayer-dynamite-deathmatch"
+category  = "multiplayer"
+order     = 1
+title     = "Dynamite Deathmatch"
+author    = "Matt Cibulas (RottKing)"
+idgames   = 14568
+doomwiki  = "Dynamite_Deathmatch"
+
+[[entry]]
+key       = "2006-worst-wad-nazi-auferstehung"
+category  = "worst-wad"
+order     = 1
+title     = "Nazi Auferstehung"
+author    = "Dark Exodus"
+doomwiki  = "Nazi_Auferstehung"
+
+[[entry]]
+key       = "2006-mordeth-crucified-dreams"
+category  = "mordeth"
+order     = 1
+title     = "Crucified Dreams"
+author    = "Various"
+idgames   = 14485
+doomwiki  = "Crucified_Dreams"
+
+[[entry]]
+key       = "2006-mockaward-how-not-to-be-seen"
+category  = "mockaward"
+order     = 1
+title     = "How Not To Be Seen!"
+author    = "Wills"
+idgames   = 14111
+doomwiki  = "How_Not_To_Be_Seen!"
+
+[[entry]]
+key       = "2006-mockaward-turbocharged-arcade"
+category  = "mockaward"
+order     = 2
+title     = "TurboCharged ARCADE!"
+author    = "Xaser"
+idgames   = 14671
+doomwiki  = "TurboCharged_ARCADE!"

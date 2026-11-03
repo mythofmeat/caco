@@ -1,1 +1,201 @@
+# Facts from Doomworld's Cacowards, by way of the Doom Wiki.
 year = 2016
+page = "https://www.doomworld.com/23years/"
+
+# Not entries, being people or tools: Most Promising Newcomers, Mapper of the Year, Espi Award.
+
+[[entry]]
+key       = "2016-winner-tech-gone-bad"
+category  = "winner"
+order     = 1
+title     = "Tech Gone Bad"
+author    = "John Romero"
+idgames   = 18328
+doomwiki  = "Tech_Gone_Bad"
+
+[[entry]]
+key       = "2016-winner-ancient-aliens"
+category  = "winner"
+order     = 2
+title     = "Ancient Aliens"
+author    = "Paul DeBruyne (skillsaw)"
+idgames   = 18505
+doomwiki  = "Ancient_Aliens"
+
+[[entry]]
+key       = "2016-winner-nihility-infinite-teeth"
+category  = "winner"
+order     = 3
+title     = "Nihility: Infinite Teeth"
+author    = "years"
+doomworld = 85591
+doomwiki  = "Nihility:_Infinite_Teeth"
+
+[[entry]]
+key       = "2016-winner-mutiny"
+category  = "winner"
+order     = 4
+title     = "Mutiny"
+author    = "Various"
+idgames   = 18564
+doomwiki  = "Mutiny"
+
+[[entry]]
+key       = "2016-winner-absolutely-killed"
+category  = "winner"
+order     = 5
+title     = "Absolutely Killed"
+author    = "scwiba"
+idgames   = 18491
+doomwiki  = "Absolutely_Killed"
+
+[[entry]]
+key       = "2016-winner-elf-gets-pissed"
+category  = "winner"
+order     = 6
+title     = "Elf Gets Pissed"
+author    = "Matt Cibulas (RottKing)"
+idgames   = 18363
+doomwiki  = "Elf_Gets_Pissed"
+
+[[entry]]
+key       = "2016-winner-comatose"
+category  = "winner"
+order     = 7
+title     = "Comatose"
+author    = "Lainos"
+idgames   = 18331
+doomwiki  = "Comatose"
+
+[[entry]]
+key       = "2016-winner-miasma"
+category  = "winner"
+order     = 8
+title     = "Miasma"
+author    = "Thomas Seifert (tourniquet)"
+idgames   = 18665
+doomwiki  = "Miasma"
+
+[[entry]]
+key       = "2016-winner-alpha-accident-terra-nova"
+category  = "winner"
+order     = 9
+title     = "Alpha Accident: Terra Nova"
+author    = "Wraith777"
+idgames   = 18547
+doomwiki  = "Alpha_Accident:_Terra_Nova"
+
+[[entry]]
+key       = "2016-winner-japanese-community-project"
+category  = "winner"
+order     = 10
+title     = "Japanese Community Project"
+author    = "Various"
+idgames   = 18503
+doomwiki  = "Japanese_Community_Project"
+
+[[entry]]
+key       = "2016-winner-blade-of-agony-e1"
+category  = "winner"
+order     = 11
+title     = "Blade of Agony E1"
+author    = "Daniel Gimmer (Tormentor667) et al."
+doomwiki  = "WolfenDoom:_Blade_of_Agony"
+
+[[entry]]
+key       = "2016-runner-up-warphouse"
+category  = "runner-up"
+order     = 1
+title     = "Warphouse"
+author    = "Edward Cripps (Ed)"
+idgames   = 18622
+doomwiki  = "Warphouse"
+
+[[entry]]
+key       = "2016-runner-up-tht-threnody"
+category  = "runner-up"
+order     = 2
+title     = "THT: Threnody"
+author    = "Various"
+idgames   = 18515
+doomwiki  = "THT:_Threnody"
+
+[[entry]]
+key       = "2016-runner-up-bloodstain"
+category  = "runner-up"
+order     = 3
+title     = "Bloodstain"
+author    = "Pavel Tvrzník (Pipicz)"
+idgames   = 18315
+doomwiki  = "Bloodstain"
+
+[[entry]]
+key       = "2016-runner-up-strange-aeons"
+category  = "runner-up"
+order     = 4
+title     = "Strange Aeons"
+author    = "Mike MacDee (Impie)"
+doomworld = 73102
+doomwiki  = "Strange_Aeons"
+
+[[entry]]
+key       = "2016-runner-up-echelon"
+category  = "runner-up"
+order     = 5
+title     = "Echelon"
+author    = "Sverre André Kvernmo (Cranium)"
+idgames   = 18589
+doomwiki  = "Echelon"
+
+[[entry]]
+key       = "2016-runner-up-shadow-of-the-wool-ball"
+category  = "runner-up"
+order     = 6
+title     = "Shadow of the Wool Ball"
+author    = "MSPaintR0cks"
+doomworld = 88555
+doomwiki  = "Shadow_of_the_Wool_Ball"
+
+[[entry]]
+key       = "2016-multiplayer-aeon-deathmatch"
+category  = "multiplayer"
+order     = 1
+title     = "Aeon Deathmatch"
+author    = "Mechanix Union"
+idgames   = 18656
+doomwiki  = "Aeon_Deathmatch"
+
+[[entry]]
+key       = "2016-multiplayer-32in24-16-doot-ctf"
+category  = "multiplayer"
+order     = 2
+title     = "32in24-16: DOOT CTF"
+author    = "YEDS"
+idgames   = 18910
+doomwiki  = "32in24-16:_DOOT_CTF"
+
+[[entry]]
+key       = "2016-gameplay-mod-doom-4-doom"
+category  = "gameplay-mod"
+order     = 1
+title     = "Doom 4 Doom"
+author    = "DBThanatos et al."
+doomwiki  = "Doom_4_Doom"
+
+[[entry]]
+key       = "2016-mordeth-doom-the-way-id-did-the-lost-episodes"
+category  = "mordeth"
+order     = 1
+title     = "Doom the Way id Did: The Lost Episodes"
+author    = "Various"
+idgames   = 18385
+doomwiki  = "Doom_the_Way_id_Did:_The_Lost_Episodes"
+
+[[entry]]
+key       = "2016-mockaward-ludicrium"
+category  = "mockaward"
+order     = 1
+title     = "Ludicrium"
+author    = "Seongbae Park (antares031)"
+idgames   = 18294
+doomwiki  = "Ludicrium"

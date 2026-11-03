@@ -1,1 +1,236 @@
+# Facts from Doomworld's Cacowards, by way of the Doom Wiki.
 year = 2017
+page = "https://www.doomworld.com/24years/"
+
+# Not entries, being people or tools: Codeaward, Most Promising Newcomers, Mapper of the Year, Espi Award.
+
+[[entry]]
+key       = "2017-winner-lilith"
+category  = "winner"
+order     = 1
+title     = "lilith"
+author    = "anotak"
+idgames   = 18866
+doomwiki  = "lilith"
+
+[[entry]]
+key       = "2017-winner-shadows-of-the-nightmare-realm"
+category  = "winner"
+order     = 2
+title     = "Shadows of the Nightmare Realm"
+author    = "Alexa Jones-Gonzales (Remilia Scarlet)"
+idgames   = 18808
+doomwiki  = "Shadows_of_the_Nightmare_Realm"
+
+[[entry]]
+key       = "2017-winner-no-end-in-sight"
+category  = "winner"
+order     = 3
+title     = "No End In Sight"
+author    = "Emil Brundage (NaturalTvventy) et al."
+idgames   = 18645
+doomwiki  = "No_End_In_Sight"
+
+[[entry]]
+key       = "2017-winner-dead-air"
+category  = "winner"
+order     = 4
+title     = "dead.air"
+author    = "Xaser"
+doomworld = 92135
+doomwiki  = "dead.air"
+
+[[entry]]
+key       = "2017-winner-brigandine"
+category  = "winner"
+order     = 5
+title     = "Brigandine"
+author    = "Alun Bestor (Viggles)"
+idgames   = 21431
+doomworld = 92776
+doomwiki  = "Brigandine"
+
+[[entry]]
+key       = "2017-winner-counterattack"
+category  = "winner"
+order     = 6
+title     = "Counterattack"
+author    = "Brett Harrell (Mechadon)"
+idgames   = 18726
+doomwiki  = "Counterattack"
+
+[[entry]]
+key       = "2017-winner-legacy-of-heroes"
+category  = "winner"
+order     = 7
+title     = "Legacy of Heroes"
+author    = "gaspe"
+idgames   = 18615
+doomwiki  = "Legacy_of_Heroes"
+
+[[entry]]
+key       = "2017-winner-saturnine-chapel"
+category  = "winner"
+order     = 8
+title     = "Saturnine Chapel"
+author    = "Darryl Steffen (dobu gabu maru)"
+idgames   = 18697
+doomwiki  = "Saturnine_Chapel"
+
+[[entry]]
+key       = "2017-winner-stardate-20x7"
+category  = "winner"
+order     = 9
+title     = "Stardate 20X7"
+author    = "Zachary Stephens (Ribbiks)"
+idgames   = 18807
+doomwiki  = "Stardate_20X7"
+
+[[entry]]
+key       = "2017-winner-void-and-rainbow"
+category  = "winner"
+order     = 10
+title     = "Void and Rainbow"
+author    = "Serious_MOod"
+doomworld = 97787
+doomwiki  = "Void_and_Rainbow"
+
+[[entry]]
+key       = "2017-runner-up-rise-of-the-wool-ball"
+category  = "runner-up"
+order     = 1
+title     = "Rise of the Wool Ball"
+author    = "MSPaintR0cks"
+doomworld = 94330
+doomwiki  = "Rise_of_the_Wool_Ball"
+
+[[entry]]
+key       = "2017-runner-up-return-to-hadron-episode-2"
+category  = "runner-up"
+order     = 2
+title     = "Return to Hadron Episode 2"
+author    = "Matt Powell (cannonball)"
+idgames   = 18652
+doomwiki  = "Return_to_Hadron"
+
+[[entry]]
+key       = "2017-runner-up-tnt-revilution"
+category  = "runner-up"
+order     = 3
+title     = "TNT: Revilution"
+author    = "Various"
+idgames   = 18810
+doomwiki  = "TNT:_Revilution"
+
+[[entry]]
+key       = "2017-runner-up-waterlab-gzd"
+category  = "runner-up"
+order     = 4
+title     = "Waterlab GZD"
+author    = "Nigel Rowand (Enjay)"
+doomwiki  = "Waterlab_GZD"
+
+[[entry]]
+key       = "2017-runner-up-disjunction"
+category  = "runner-up"
+order     = 5
+title     = "Disjunction"
+author    = "floatRand"
+idgames   = 18729
+doomwiki  = "Disjunction"
+
+[[entry]]
+key       = "2017-runner-up-curse-of-the-lost-gods"
+category  = "runner-up"
+order     = 6
+title     = "Curse of the Lost Gods"
+author    = "Kristian Käll (Kristus)"
+idgames   = 18816
+doomwiki  = "Curse_of_the_Lost_Gods"
+
+[[entry]]
+key       = "2017-runner-up-water-spirit"
+category  = "runner-up"
+order     = 7
+title     = "Water Spirit"
+author    = "Manbou"
+idgames   = 18724
+doomwiki  = "Water_Spirit"
+
+[[entry]]
+key       = "2017-runner-up-hellscape"
+category  = "runner-up"
+order     = 8
+title     = "Hellscape"
+author    = "Christopher Lutz"
+idgames   = 18728
+doomwiki  = "Hellscape"
+
+[[entry]]
+key       = "2017-runner-up-dark-tide"
+category  = "runner-up"
+order     = 9
+title     = "Dark Tide"
+author    = "Christopher Lutz"
+idgames   = 18927
+doomwiki  = "Dark_Tide"
+
+[[entry]]
+key       = "2017-multiplayer-pyrrhic"
+category  = "multiplayer"
+order     = 1
+title     = "Pyrrhic"
+author    = "Nick Laurent (hobomaster22)"
+idgames   = 18929
+doomwiki  = "Pyrrhic"
+
+[[entry]]
+key       = "2017-multiplayer-progressive-duel-2"
+category  = "multiplayer"
+order     = 2
+title     = "Progressive Duel 2"
+author    = "Mechanix Union"
+idgames   = 19023
+doomwiki  = "Progressive_Duel_2"
+
+[[entry]]
+key       = "2017-gameplay-mod-doom-delta"
+category  = "gameplay-mod"
+order     = 1
+title     = "Doom Delta"
+author    = "DrPyspy"
+doomwiki  = "Doom_Delta"
+
+[[entry]]
+key       = "2017-gameplay-mod-final-doomer"
+category  = "gameplay-mod"
+order     = 2
+title     = "Final Doomer"
+author    = "Sgt. Shivers, Yholl et al."
+doomwiki  = "Final_Doomer"
+
+[[entry]]
+key       = "2017-gameplay-mod-high-noon-drifter"
+category  = "gameplay-mod"
+order     = 3
+title     = "High Noon Drifter"
+author    = "TerminusEst13"
+doomwiki  = "High_Noon_Drifter"
+
+[[entry]]
+key       = "2017-mordeth-tnt-revilution"
+category  = "mordeth"
+order     = 1
+title     = "TNT: Revilution"
+author    = "Various"
+idgames   = 18810
+doomwiki  = "TNT:_Revilution"
+
+[[entry]]
+key       = "2017-machaward-the-given"
+category  = "machaward"
+order     = 1
+title     = "The Given"
+author    = "Darryl Steffen (dobu gabu maru)"
+idgames   = 19013
+doomwiki  = "The_Given"
