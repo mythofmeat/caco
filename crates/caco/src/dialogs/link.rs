@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use caco_core::config::LinkMode;
+use caco_core::downloads;
 use caco_core::placement;
 use caco_core::presence::StorePaths;
 use rusqlite::Connection;
@@ -12,7 +13,8 @@ use crate::workers::{FileDialogReceiver, FileDialogRequest, spawn_file_dialog};
 pub struct LinkDialogState {
     wad_id: i64,
     wad_title: String,
-    source_url: Option<String>,
+    /// Whether there is any page to send the user to.
+    has_page: bool,
     /// Where the file was the last time caco found it, if it ever had one —
     /// what turns "not available" into "on another machine, or a drive that
     /// is not mounted".
@@ -28,6 +30,8 @@ pub struct LinkDialogState {
 pub enum LinkResult {
     /// User linked a local file — WAD is now playable.
     Linked(i64),
+    /// User wants to get the file through their browser.
+    Get(i64),
     /// User cancelled.
     Cancelled,
     /// Dialog still open.
@@ -39,8 +43,8 @@ impl LinkDialogState {
         let wad = caco_core::db::wads::get_wad(conn, wad_id, false).ok()??;
         Some(Self {
             wad_id,
+            has_page: !downloads::pages_for_wad(&wad).is_empty(),
             wad_title: wad.title,
-            source_url: wad.source_url,
             last_seen: wad.last_known_path.filter(|path| !path.is_empty()),
             error_message: None,
             pending_picker: None,
@@ -118,18 +122,22 @@ impl LinkDialogState {
                     ui.colored_label(
                         theme::TEXT_SECONDARY,
                         "On another machine, or on a drive that isn't mounted? Once it's \
-                         back there, Play will find it. Otherwise, open the source URL to \
-                         download it again, or link a local copy.",
+                         back there, Play will find it.",
                     );
                 }
                 None => {
                     ui.colored_label(
                         theme::TEXT_SECONDARY,
-                        "The WAD file for this entry is not available locally.\n\
-                         You can open the source URL to download it, or link a local file.",
+                        "The WAD file for this entry is not available locally.",
                     );
                 }
             }
+
+            ui.colored_label(
+                theme::TEXT_SECONDARY,
+                "Get in Browser opens its page and watches your Downloads folder, so all \
+                 you do is download it. Or link a copy you already have.",
+            );
 
             ui.add_space(8.0);
             if let Some(error) = &self.error_message {
@@ -141,14 +149,12 @@ impl LinkDialogState {
 
             // Buttons
             ui.horizontal(|ui| {
-                // Open Source URL button
-                let has_url = self.source_url.is_some();
                 if ui
-                    .add_enabled(has_url, egui::Button::new("Open Source URL"))
+                    .add_enabled(self.has_page, egui::Button::new("Get in Browser"))
+                    .on_disabled_hover_text("caco knows no page for this WAD.")
                     .clicked()
-                    && let Some(url) = &self.source_url
                 {
-                    let _ = open::that(url);
+                    result = LinkResult::Get(self.wad_id);
                 }
 
                 // Link Local File button — spawn an async picker. Disabled
@@ -159,9 +165,17 @@ impl LinkDialogState {
                     .clicked()
                 {
                     self.error_message = None;
+                    // Where a file someone downloaded a while ago will be. Both cases,
+                    // because some platforms' pickers go by exact match, and a WAD
+                    // from the nineties is as likely as not to be called DOOM.WAD.
+                    let extensions: Vec<String> = downloads::WAD_SHAPED
+                        .iter()
+                        .flat_map(|ext| [ext.to_string(), ext.to_uppercase()])
+                        .collect();
+                    let extensions: Vec<&str> = extensions.iter().map(String::as_str).collect();
                     let req = FileDialogRequest::open()
-                        .add_filter("WAD/ZIP files", &["wad", "zip", "WAD", "ZIP"])
-                        .set_directory(dirs::home_dir().unwrap_or_default());
+                        .add_filter("WAD files", &extensions)
+                        .set_directory(caco_core::config::downloads_dir());
                     self.pending_picker = Some(spawn_file_dialog(Some(ctx.clone()), req));
                 }
 
@@ -250,6 +264,28 @@ mod tests {
             )
             .unwrap();
             assert_eq!(last_seen(&conn).as_deref(), shown);
+        }
+    }
+
+    /// The button that sends the user to a browser needs a page to send them to, and
+    /// a local import's `source_url` is a path on this machine.
+    #[test]
+    fn test_get_in_browser_needs_a_page_to_open() {
+        let (conn, wad_id) = setup_conn();
+        let has_page =
+            |conn: &rusqlite::Connection| LinkDialogState::new(conn, wad_id).unwrap().has_page;
+        assert!(!has_page(&conn));
+
+        for (stored, expected) in [
+            ("/home/me/doom/example.wad", false),
+            ("https://www.doomworld.com/forum/topic/1-example/", true),
+        ] {
+            conn.execute(
+                "UPDATE wads SET source_url = ?1 WHERE id = ?2",
+                rusqlite::params![stored, wad_id],
+            )
+            .unwrap();
+            assert_eq!(has_page(&conn), expected, "{stored}");
         }
     }
 
@@ -376,7 +412,7 @@ mod tests {
         let mut state = LinkDialogState {
             wad_id,
             wad_title: "Linked WAD".to_string(),
-            source_url: None,
+            has_page: false,
             last_seen: None,
             error_message: None,
             pending_picker: None,

@@ -121,7 +121,11 @@ pub fn page_host(url: &str) -> &str {
 // Which pending Get a file belongs to
 // ---------------------------------------------------------------------------
 
-/// How much a file's name looks like a name it could be expected to have, from 0 to 1.
+/// Below this, two names only have a letter or two in common, which says nothing.
+const NAMES_ARE_RELATED: f32 = 0.3;
+
+/// How much a file's name looks like a name it could be expected to have, from 0 to 1,
+/// with 0 meaning it says nothing either way.
 ///
 /// Only ever breaks a tie between Gets waiting at once. The user just asked for these
 /// WADs, so a poor score is no reason not to ask, and the question is what catches a
@@ -135,7 +139,12 @@ pub fn name_likeness(filename: &str, expected: &str) -> f32 {
     if a == b {
         return 1.0;
     }
-    dice_coefficient(&a, &b)
+    let likeness = dice_coefficient(&a, &b);
+    if likeness < NAMES_ARE_RELATED {
+        0.0
+    } else {
+        likeness
+    }
 }
 
 /// A name without its extension if that is one a WAD's file has, which keeps the
@@ -208,10 +217,10 @@ pub fn list_wad_shaped(dir: &Path) -> io::Result<Listing> {
         if !is_wad_shaped(&entry.file_name()) {
             continue;
         }
-        // A file gone since the directory was read has not arrived, and a directory
-        // called `something.zip` never will.
-        let path = entry.path();
-        let Ok(meta) = fs::metadata(&path) else {
+        // A file gone since the directory was read has not arrived, a directory called
+        // `something.zip` never will, and a link to a file somewhere else is not a
+        // download. Which is what this asks: unlike `fs::metadata`, it does not follow one.
+        let Ok(meta) = entry.metadata() else {
             continue;
         };
         if meta.is_file() {
@@ -219,7 +228,7 @@ pub fn list_wad_shaped(dir: &Path) -> io::Result<Listing> {
                 size: meta.len(),
                 modified: meta.modified().ok(),
             };
-            listing.insert(path, stamp);
+            listing.insert(entry.path(), stamp);
         }
     }
     Ok(listing)
@@ -479,7 +488,13 @@ mod tests {
         assert!(release > 0.5, "{release}");
 
         assert_eq!(name_likeness("invoice.zip", "Lonesome Road"), 0.0);
-        assert!(release > name_likeness("road.zip", "Sunder"));
+    }
+
+    /// `attachment` and `Lonesome Road` have `me` in common, and that must not outrank
+    /// whichever Get the user pressed last.
+    #[test]
+    fn test_a_stray_pair_of_letters_says_nothing() {
+        assert_eq!(name_likeness("attachment.7z", "Lonesome Road"), 0.0);
     }
 
     #[test]
@@ -626,6 +641,9 @@ mod tests {
         write("notes.txt", b"123");
         write(".hidden.wad", b"123");
         fs::create_dir(dir.path().join("folder.zip")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(dir.path().join("notes.txt"), dir.path().join("link.wad"))
+            .unwrap();
 
         let found = list_wad_shaped(dir.path()).unwrap();
 

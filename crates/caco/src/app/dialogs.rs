@@ -19,6 +19,7 @@ use crate::dialogs::sourceports::SourceportsResult;
 use crate::dialogs::storage::StorageResult;
 use crate::dialogs::wad_data::WadDataResult;
 use crate::dialogs::wad_stats::WadStatsResult;
+use crate::get::GetTarget;
 use crate::message::Notification;
 use crate::state::{ActionRequest, ActiveDialog, AppState};
 
@@ -184,7 +185,13 @@ pub(super) fn render_active_dialog(
                     close_dialog = true;
                     mark_linked(state);
                     state.mirror_offers.push_back(wad_id);
+                    // Whatever a Get was waiting for has come another way.
+                    state.gets.stop(GetTarget::Wad(wad_id));
                     follow_up_action = Some(ActionRequest::Play(wad_id));
+                }
+                LinkResult::Get(wad_id) => {
+                    close_dialog = true;
+                    follow_up_action = Some(ActionRequest::Get(GetTarget::Wad(wad_id)));
                 }
                 LinkResult::Cancelled => {
                     close_dialog = true;

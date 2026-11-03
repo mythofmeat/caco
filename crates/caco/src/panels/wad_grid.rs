@@ -119,7 +119,9 @@ pub fn render(
                     }
 
                     // Context menu on right-click
-                    if let Some(a) = super::wad_context_menu(&response, wad_id, wad.status) {
+                    if let Some(a) =
+                        super::wad_context_menu(&response, wad_id, wad.status, wad.is_lost())
+                    {
                         action = Some(a);
                     }
 

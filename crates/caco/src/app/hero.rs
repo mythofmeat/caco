@@ -101,13 +101,12 @@ pub(super) fn render_now_playing_hero(
             }
 
             // Right-click context menu
-            let wad_status = state
-                .wads
-                .iter()
-                .find(|w| w.id == wad_id)
+            let wad = state.wads.iter().find(|w| w.id == wad_id);
+            let wad_status = wad
                 .map(|w| w.status)
                 .unwrap_or(caco_core::db::Status::Unplayed);
-            if let Some(a) = panels::wad_context_menu(&thumb_resp, wad_id, wad_status) {
+            let lost = wad.is_some_and(caco_core::db::WadRecord::is_lost);
+            if let Some(a) = panels::wad_context_menu(&thumb_resp, wad_id, wad_status, lost) {
                 action = Some(a);
             }
 

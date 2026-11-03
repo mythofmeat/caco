@@ -96,6 +96,15 @@ pub enum AppMessage {
         title: String,
         change: caco_core::identity::ContentChange,
     },
+    /// A file has finished arriving in the Downloads folder while a Get was waiting.
+    DownloadLanded(caco_core::downloads::Arrival),
+    /// The file the user said to link has been dealt with.
+    GetLinked {
+        target: crate::get::GetTarget,
+        title: String,
+        filename: String,
+        outcome: Result<crate::get::GetOutcome, String>,
+    },
     /// The startup check of every recorded WAD file wrote something back.
     /// Only sent when it did, so the library reloads only when it is stale.
     FilesChecked(caco_core::presence::CheckReport),

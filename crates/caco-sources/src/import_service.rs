@@ -487,7 +487,7 @@ impl ImportService {
 
     /// [`Self::import_cacoward_file`], with enrichment passed in so that tests stay
     /// off the network.
-    fn import_cacoward_file_with(
+    pub fn import_cacoward_file_with(
         &self,
         conn: &Connection,
         record: &db::CacowardRecord,

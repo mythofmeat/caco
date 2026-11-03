@@ -27,6 +27,7 @@ use crate::dialogs::storage::{StorageDialogState, StorageTab};
 use crate::dialogs::wad_data::WadDataDialogState;
 use crate::dialogs::wad_stats::WadStatsDialogState;
 use crate::filter_query::{FilterCheck, FilterQuery};
+use crate::get::{GetTarget, Gets};
 use crate::import::state::ImportState;
 use crate::message::Notification;
 use crate::persist;
@@ -135,6 +136,10 @@ pub enum ActionRequest {
 
     /// Upload everything worth uploading to a mirror, on a worker thread.
     UploadAllToMirror(String),
+
+    /// Open the page for something caco cannot fetch, and watch the Downloads folder
+    /// for what comes of it.
+    Get(GetTarget),
 }
 
 // ---------------------------------------------------------------------------
@@ -272,6 +277,9 @@ pub struct AppState {
     /// What the last read of every mirror's index found, for the mirrors dialog to say.
     /// `None` until the first one, at startup, has finished.
     pub mirror_report: Option<caco_sources::mirror::SyncReport>,
+
+    /// Files being fetched by the user in their browser, and what has landed for them.
+    pub gets: Gets,
 }
 
 /// Where a bulk upload to a mirror has got to.
@@ -436,6 +444,7 @@ impl AppState {
             uploads: Vec::new(),
             mirror_bulk: None,
             mirror_report: None,
+            gets: Gets::default(),
         }
     }
 

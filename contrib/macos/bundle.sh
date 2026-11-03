@@ -71,6 +71,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>LSMinimumSystemVersion</key><string>11.0</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
     <key>NSHighResolutionCapable</key><true/>
+    <key>NSDownloadsFolderUsageDescription</key><string>caco watches your Downloads folder for a WAD you asked it to get.</string>
 </dict>
 </plist>
 PLIST

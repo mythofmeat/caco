@@ -151,7 +151,9 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<ActionRequest> 
                     state.selected_row = idx;
                     state.selected_wad_id = Some(wad_id);
                 }
-                if let Some(a) = super::wad_context_menu(&response, wad_id, state.wads[idx].status)
+                let wad = &state.wads[idx];
+                if let Some(a) =
+                    super::wad_context_menu(&response, wad_id, wad.status, wad.is_lost())
                 {
                     action = Some(a);
                 }
