@@ -32,9 +32,13 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use caco::dialogs::storage::StorageTab;
+use caco::import::state::SearchSource;
 use caco::message::AppMessage;
 use caco::state::{ActionRequest, ViewMode};
 use caco_core::sourceports::RemoteRefs;
+use caco_sources::SourceError;
+use caco_sources::http::WafKind;
+use egui_kittest::kittest::Queryable;
 
 /// How long to leave worker threads to answer between rounds of frames.
 const WORKER_PAUSE: Duration = Duration::from_millis(80);
@@ -154,8 +158,15 @@ impl Shooter {
 
     /// Switch to a full-panel view and shoot it.
     fn shot_view(&mut self, name: &str, mode: ViewMode) {
+        self.shot_view_after(name, mode, |_| {});
+    }
+
+    /// Same, but drive the view into a state only a worker can produce before
+    /// shooting it.
+    fn shot_view_after(&mut self, name: &str, mode: ViewMode, after_open: impl FnOnce(&mut Self)) {
         self.harness.state_mut().set_view(mode);
         self.settle(6, WORKER_PAUSE);
+        after_open(self);
         self.shot(name);
         self.harness.state_mut().set_view(ViewMode::Library);
         self.settle(1, Duration::ZERO);
@@ -237,6 +248,26 @@ fn shoot_every_surface() {
     ] {
         s.shot_view(name, mode);
     }
+
+    // A blocked source is the state this view most has to explain, and only a
+    // worker can report it. Posted the way the search worker posts it, on the tab
+    // the `2` shortcut reaches. Finding the text proves it reaches the screen; the
+    // PNG shows whether it fits there.
+    s.shot_view_after("04-import-search-blocked", ViewMode::Import, |s| {
+        s.harness.key_press(egui::Key::Num2);
+        s.settle(1, Duration::ZERO);
+        let blocked = SourceError::WafBlocked {
+            site: "Doom Wiki",
+            kind: WafKind::Cloudflare,
+        };
+        let tx = s.harness.state_mut().background_sender();
+        tx.send(AppMessage::SearchComplete(
+            SearchSource::Doomwiki,
+            Err(blocked.to_string()),
+        ));
+        s.settle(2, WORKER_PAUSE);
+        s.harness.get_by_label_contains("blocked the request");
+    });
 
     let mut escaped = Vec::new();
     let mut record = |name: &str, over: f32| {

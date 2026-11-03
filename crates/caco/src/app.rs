@@ -802,11 +802,12 @@ impl eframe::App for CacoApp {
                     };
                     self.state.notification = Some(Notification::info(text));
                 }
-                AppMessage::SearchComplete(source, results) => {
-                    self.state
-                        .import
-                        .search_state_mut(source)
-                        .set_results(results);
+                AppMessage::SearchComplete(source, outcome) => {
+                    let search = self.state.import.search_state_mut(source);
+                    match outcome {
+                        Ok(results) => search.set_results(results),
+                        Err(error) => search.set_error(error),
+                    }
                 }
                 AppMessage::ThumbnailReady {
                     wad_id,
