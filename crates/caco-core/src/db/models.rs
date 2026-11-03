@@ -515,31 +515,6 @@ pub static ALLOWED_UPDATE_FIELDS: LazyLock<std::collections::HashSet<&'static st
         .collect()
     });
 
-/// Status metadata entry: (display_name, hex_color, rich_color, css_class).
-pub type StatusMeta = (&'static str, &'static str, &'static str, &'static str);
-
-/// Canonical status metadata.
-pub static STATUS_METADATA: LazyLock<HashMap<&'static str, StatusMeta>> = LazyLock::new(|| {
-    HashMap::from([
-        (
-            "unplayed",
-            ("Unplayed", "#3366cc", "dodger_blue1", "status-unplayed"),
-        ),
-        (
-            "in-progress",
-            ("In Progress", "#33cc33", "green1", "status-in-progress"),
-        ),
-        (
-            "completed",
-            ("Completed", "#808080", "grey50", "status-completed"),
-        ),
-        (
-            "abandoned",
-            ("Abandoned", "#cc3333", "red", "status-abandoned"),
-        ),
-    ])
-});
-
 #[cfg(test)]
 mod tests {
     use super::*;

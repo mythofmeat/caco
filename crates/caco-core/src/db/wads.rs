@@ -398,21 +398,6 @@ pub fn remove_tag(conn: &Connection, wad_id: i64, tag: &str) -> Result<bool> {
     Ok(count > 0)
 }
 
-/// Remove all tags from a WAD. Returns count removed.
-pub fn remove_all_tags(conn: &Connection, wad_id: i64) -> Result<usize> {
-    let count = conn.execute("DELETE FROM tags WHERE wad_id = ?1", [wad_id])?;
-    Ok(count)
-}
-
-/// Get all unique tags.
-pub fn get_all_tags(conn: &Connection) -> Result<Vec<String>> {
-    let mut stmt = conn.prepare("SELECT DISTINCT tag FROM tags ORDER BY tag")?;
-    let tags = stmt
-        .query_map([], |row| row.get::<_, String>(0))?
-        .collect::<std::result::Result<Vec<_>, _>>()?;
-    Ok(tags)
-}
-
 /// Count non-deleted WADs grouped by status.
 ///
 /// Keyed by the raw `status` column string ("unplayed", "in-progress", etc.).
@@ -431,40 +416,6 @@ pub fn get_status_counts(conn: &Connection) -> Result<HashMap<String, i64>> {
         let (status, count) = row?;
         counts.insert(status, count);
     }
-    Ok(counts)
-}
-
-/// How many live WADs are manual-only with no local copy.
-///
-/// The count the library needs to admit it cannot launch everything it lists;
-/// see `WadRecord::is_lost`.
-pub fn count_lost(conn: &Connection) -> Result<usize> {
-    let count: i64 = conn.query_row(
-        &format!(
-            "SELECT COUNT(*) FROM wads WHERE deleted_at IS NULL AND {}",
-            crate::db::Retrievability::LOST_SQL
-        ),
-        [],
-        |row| row.get(0),
-    )?;
-    Ok(count as usize)
-}
-
-/// Get all tags with their WAD counts (excluding deleted WADs).
-pub fn get_tag_counts(conn: &Connection) -> Result<Vec<(String, i64)>> {
-    let mut stmt = conn.prepare(
-        "SELECT t.tag, COUNT(*) as count
-         FROM tags t
-         JOIN wads w ON w.id = t.wad_id
-         WHERE w.deleted_at IS NULL
-         GROUP BY t.tag
-         ORDER BY t.tag",
-    )?;
-    let counts = stmt
-        .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-        })?
-        .collect::<std::result::Result<Vec<_>, _>>()?;
     Ok(counts)
 }
 
@@ -773,64 +724,6 @@ mod tests {
 
         // Remove nonexistent tag
         assert!(!remove_tag(&conn, id, "nonexistent").unwrap());
-    }
-
-    #[test]
-    fn test_remove_all_tags() {
-        let conn = setup();
-        let id = add_test_wad(&conn);
-        add_tag(&conn, id, "a").unwrap();
-        add_tag(&conn, id, "b").unwrap();
-        add_tag(&conn, id, "c").unwrap();
-
-        let removed = remove_all_tags(&conn, id).unwrap();
-        assert_eq!(removed, 3);
-        assert!(fetch_tags(&conn, id).unwrap().is_empty());
-    }
-
-    #[test]
-    fn test_get_all_tags() {
-        let conn = setup();
-        let id1 = add_test_wad(&conn);
-        let id2 = add_test_wad(&conn);
-        add_tag(&conn, id1, "doom").unwrap();
-        add_tag(&conn, id1, "megawad").unwrap();
-        add_tag(&conn, id2, "doom").unwrap();
-        add_tag(&conn, id2, "slaughter").unwrap();
-
-        let tags = get_all_tags(&conn).unwrap();
-        assert_eq!(tags, vec!["doom", "megawad", "slaughter"]);
-    }
-
-    #[test]
-    fn test_get_tag_counts() {
-        let conn = setup();
-        let id1 = add_test_wad(&conn);
-        let id2 = add_test_wad(&conn);
-        add_tag(&conn, id1, "doom").unwrap();
-        add_tag(&conn, id2, "doom").unwrap();
-        add_tag(&conn, id1, "megawad").unwrap();
-
-        let counts = get_tag_counts(&conn).unwrap();
-        assert_eq!(
-            counts,
-            vec![("doom".to_string(), 2), ("megawad".to_string(), 1)]
-        );
-    }
-
-    #[test]
-    fn test_tag_counts_exclude_deleted() {
-        let conn = setup();
-        let id1 = add_test_wad(&conn);
-        let id2 = add_test_wad(&conn);
-        add_tag(&conn, id1, "doom").unwrap();
-        add_tag(&conn, id2, "doom").unwrap();
-
-        // Soft-delete one WAD
-        delete_wad(&conn, id2, false).unwrap();
-
-        let counts = get_tag_counts(&conn).unwrap();
-        assert_eq!(counts, vec![("doom".to_string(), 1)]);
     }
 
     #[test]

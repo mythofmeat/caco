@@ -154,8 +154,7 @@ URL to try, `avail:unavailable` has neither.
 
 **`retrievable:lost`** is the intersection worth watching: manual-only *and* no
 local copy, meaning caco cannot produce the WAD and neither can you without
-going and finding the file again. Those rows are flagged in the library, and a
-chip beside the filter bar shows the count whenever it is not zero.
+going and finding the file again.
 
 **Status values:** `unplayed`, `in-progress`, `completed`, `abandoned`
 

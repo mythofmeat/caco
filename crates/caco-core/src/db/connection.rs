@@ -144,43 +144,6 @@ pub fn batch_query_i64(
     Ok(result)
 }
 
-/// Batch query helper that returns string values.
-///
-/// Like `batch_query_i64` but for `String` result columns (e.g., timestamps).
-pub fn batch_query_string(
-    conn: &Connection,
-    wad_ids: &[i64],
-    query_template: &str,
-    result_column: &str,
-) -> Result<HashMap<i64, String>> {
-    if wad_ids.is_empty() {
-        return Ok(HashMap::new());
-    }
-
-    let mut result = HashMap::new();
-
-    for chunk in wad_ids.chunks(SQLITE_MAX_VARS) {
-        let placeholders = itertools_placeholders(chunk.len());
-        let sql = query_template.replace("{placeholders}", &placeholders);
-        let mut stmt = conn.prepare(&sql)?;
-        let params: Vec<&dyn rusqlite::types::ToSql> = chunk
-            .iter()
-            .map(|id| id as &dyn rusqlite::types::ToSql)
-            .collect();
-        let rows = stmt.query_map(params.as_slice(), |row| {
-            let wad_id: i64 = row.get("wad_id")?;
-            let val: String = row.get(result_column)?;
-            Ok((wad_id, val))
-        })?;
-        for row in rows {
-            let (wad_id, val) = row?;
-            result.insert(wad_id, val);
-        }
-    }
-
-    Ok(result)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -97,7 +97,7 @@ egui = "0.37"
 ## Key Patterns
 
 - **Builder pattern for DB writes**: `NewWad::builder()` and `WadUpdate::builder()` produce type-safe WAD creation/updates. Both trim `source_url` through `wads::clean_source_url`, and `find_duplicate` compares through it too, or a URL with a pasted `\r` would miss the row it is a duplicate of. reqwest strips that `\r` while parsing, so the fetch succeeds and nothing else notices it was there.
-- **Batch stats**: `get_total_playtime_batch()`, `get_last_played_batch()`, etc. — avoid N+1 queries when rendering lists.
+- **Batch stats**: `get_wad_stats_batch()` (playtime, last played, session count and times beaten in two queries), `get_analyses_batch()`, `get_companions_batch()` — avoid N+1 queries when rendering lists.
 - **Query parser**: beets-style syntax — see Behavior below.
 - **Companion system**: `companion_files_registry` + `wad_companions` junction table. `companion_service.rs` handles MD5 dedup + managed storage at `<data>/companions/{md5[:12]}_{filename}`. DEH/BEX auto-detected; `-deh` for non-zdoom, `-file` for zdoom. Because files are deduplicated by MD5, one managed file can serve several WADs, so unlinking is not the same as deleting: `companion_service::plan_unregister` answers "what should happen to the file", returning `None` only when the file would be left with no owner *and* the configured policy is `ask` (the default). Both frontends must go through it — `unregister_companion` takes a resolved `OrphanPolicy`, so neither can swallow an `ask` and orphan a file unprompted. `delete_orphan` refuses while anything still links the file.
 - **WAD file placement**: `config::wad_store_dir(retrievability)` is the only
@@ -265,11 +265,10 @@ wherever the cache used to be.
 **Lost WADs** (`WadRecord::is_lost`, `Retrievability::LOST_SQL`, query
 `retrievable:lost`): `Manual` intersected with "no local copy" — the set caco
 can neither play nor fetch. Deliberately not a third enum variant, since a WAD
-enters and leaves it purely by its file coming and going. Surfaced as a `⚠`
-prefix on the title in both the table and grid (`theme::LOST_MARKER` /
-`LOST_HOVER`, shared so the two views cannot disagree) and as a self-hiding chip
-beside the filter bar that applies the query; `db::count_lost` feeds the chip
-from `AppState::refresh_status_counts`.
+enters and leaves it purely by its file coming and going. The library does not
+mark these rows: the title marker and the filter-bar chip that once did were
+dropped when the storage controls were simplified, so the query is how to list
+them.
 
 **Two derived axes on a WAD, neither stored.** Both live in `db/models.rs` as an
 enum with a `derive` constructor, a SQL spelling of the same rule, a `WadRecord`
