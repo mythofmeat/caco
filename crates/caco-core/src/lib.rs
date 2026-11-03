@@ -16,6 +16,7 @@ pub mod presence;
 pub mod profiles;
 pub mod resource_service;
 pub mod saves;
+pub mod source_url;
 pub mod sourceports;
 pub mod stats_watcher;
 pub mod titlepic;
