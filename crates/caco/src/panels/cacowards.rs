@@ -1,7 +1,7 @@
 //! Magazine-style Cacowards view — the GUI surface for browsing yearly
 //! awards, completion stats, and entry-level actions (import / open / play).
 //!
-//! Layout mirrors `mockups/cacowards-gui.html`:
+//! Layout:
 //! 1. Hero banner with year and Doomworld attribution.
 //! 2. Year strip with per-year completion ratios.
 //! 3. Category sections (winner / runner-up / honorable-mention / mordeth)

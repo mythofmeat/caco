@@ -551,15 +551,14 @@ impl AppState {
     }
 
     pub fn reload_cacowards(&mut self, conn: &Connection) {
-        match caco_core::db::cacowards::search_cacowards(
-            conn,
-            &caco_core::db::cacowards::CacowardFilters::default(),
-        ) {
+        match caco_core::db::cacowards::search_cacowards(conn) {
             Ok(entries) => {
                 self.cacowards.all_entries = entries;
             }
             Err(e) => {
-                eprintln!("cacowards reload failed: {e}");
+                self.notification = Some(Notification::error(format!(
+                    "Could not load Cacowards: {e}"
+                )));
                 self.cacowards.all_entries.clear();
             }
         }

@@ -171,30 +171,6 @@ pub fn get_cacowards_by_year(conn: &Connection, year: i64) -> Result<Vec<Cacowar
         .collect::<std::result::Result<Vec<_>, _>>()?)
 }
 
-/// All Cacoward entries currently linked to a given WAD.
-pub fn get_cacowards_for_wad(conn: &Connection, wad_id: i64) -> Result<Vec<CacowardRecord>> {
-    let mut stmt =
-        conn.prepare("SELECT * FROM cacowards WHERE wad_id = ? ORDER BY year DESC, category")?;
-    Ok(stmt
-        .query_map([wad_id], CacowardRecord::from_row)?
-        .collect::<std::result::Result<Vec<_>, _>>()?)
-}
-
-pub fn get_all_cacowards(conn: &Connection) -> Result<Vec<CacowardRecord>> {
-    let mut stmt = conn.prepare("SELECT * FROM cacowards ORDER BY year DESC, category, rank")?;
-    Ok(stmt
-        .query_map([], CacowardRecord::from_row)?
-        .collect::<std::result::Result<Vec<_>, _>>()?)
-}
-
-/// Distinct years with at least one Cacoward entry, newest first.
-pub fn get_years(conn: &Connection) -> Result<Vec<i64>> {
-    let mut stmt = conn.prepare("SELECT DISTINCT year FROM cacowards ORDER BY year DESC")?;
-    Ok(stmt
-        .query_map([], |row| row.get(0))?
-        .collect::<std::result::Result<Vec<_>, _>>()?)
-}
-
 /// Rows auto-linking may still claim: not pinned, and with no live WAD behind
 /// them. A link to a trashed WAD counts as no link, the same way
 /// [`search_cacowards`] reports such a row as [`EffectiveStatus::Absent`].
@@ -242,13 +218,6 @@ pub fn find_wad_by_idgames_id(conn: &Connection, idgames_id: &str) -> Result<Opt
     Ok(stmt.query_row([idgames_id], |row| row.get(0)).optional()?)
 }
 
-/// Delete a single Cacoward entry. Mostly useful for tests and manual cleanup
-/// of entries that turn out to be wiki noise.
-pub fn delete_cacoward(conn: &Connection, id: i64) -> Result<()> {
-    conn.execute("DELETE FROM cacowards WHERE id = ?", [id])?;
-    Ok(())
-}
-
 /// Flip the `supported` flag on a Cacoward entry. Unsupported entries are
 /// preserved across re-scrapes (clear_year_unpinned respects them) so the
 /// user's marking sticks.
@@ -258,90 +227,6 @@ pub fn set_supported(conn: &Connection, cacoward_id: i64, supported: bool) -> Re
         rusqlite::params![supported as i64, cacoward_id],
     )?;
     Ok(())
-}
-
-// =============================================================================
-// Stable, human-readable identifiers
-// =============================================================================
-
-/// Reference to a Cacoward entry by either its composite key (year +
-/// category + rank-in-category) or its raw DB primary key.
-///
-/// The composite form is what's printed in `caco ls`: it's stable as long as
-/// the wiki page order doesn't shift, and a human can recognise it (`2023
-/// winner #10`). The pk form is rock-stable across any re-scrape but opaque,
-/// so it acts as the fallback when a re-scrape reorders a category.
-#[derive(Debug, Clone)]
-pub enum CacowardRef {
-    Composite {
-        year: i64,
-        category: String,
-        rank: i64,
-    },
-    Pk(i64),
-}
-
-/// Render a Cacoward entry's display ID — e.g. `c.2023.winner.10`. Falls
-/// back to the pk-style form (`c.42`) when the entry has no rank assigned.
-pub fn format_cacoward_id(record: &CacowardRecord) -> String {
-    match record.rank {
-        Some(rank) => format!("c.{}.{}.{}", record.year, record.category, rank),
-        None => format!("c.{}", record.id),
-    }
-}
-
-/// Parse a Cacoward display ID. Accepts:
-/// - `c.YEAR.CATEGORY.RANK` — composite (the displayed form)
-/// - `c.<pk>` — the raw DB id, as a stability fallback
-///
-/// The `c.` prefix is required; the parser refuses bare numbers so a
-/// fat-fingered `caco import --cacoward 42` doesn't silently target the
-/// wrong row.
-pub fn parse_cacoward_id(s: &str) -> Option<CacowardRef> {
-    let parts: Vec<&str> = s.split('.').collect();
-    if parts.first().copied() != Some("c") {
-        return None;
-    }
-    match parts.len() {
-        2 => parts[1].parse::<i64>().ok().map(CacowardRef::Pk),
-        4 => {
-            let year = parts[1].parse::<i64>().ok()?;
-            let category = parts[2].to_string();
-            let rank = parts[3].parse::<i64>().ok()?;
-            if category.is_empty() || rank <= 0 {
-                return None;
-            }
-            Some(CacowardRef::Composite {
-                year,
-                category,
-                rank,
-            })
-        }
-        _ => None,
-    }
-}
-
-/// Look up a Cacoward entry by [`CacowardRef`]. Returns `None` if no entry
-/// matches the reference.
-pub fn resolve_cacoward_ref(conn: &Connection, r: &CacowardRef) -> Result<Option<CacowardRecord>> {
-    match r {
-        CacowardRef::Pk(id) => get_cacoward(conn, *id),
-        CacowardRef::Composite {
-            year,
-            category,
-            rank,
-        } => {
-            let mut stmt = conn.prepare(
-                "SELECT * FROM cacowards WHERE year = ?1 AND category = ?2 AND rank = ?3 LIMIT 1",
-            )?;
-            Ok(stmt
-                .query_row(
-                    rusqlite::params![year, category, rank],
-                    CacowardRecord::from_row,
-                )
-                .optional()?)
-        }
-    }
 }
 
 // =============================================================================
@@ -358,55 +243,13 @@ pub enum EffectiveStatus {
     Library(Status),
 }
 
-impl EffectiveStatus {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            EffectiveStatus::Absent => "absent",
-            EffectiveStatus::Library(Status::Unplayed) => "unplayed",
-            EffectiveStatus::Library(Status::InProgress) => "in-progress",
-            EffectiveStatus::Library(Status::Completed) => "completed",
-            EffectiveStatus::Library(Status::Abandoned) => "abandoned",
-        }
-    }
-
-    /// Whether the user "hasn't played it yet" in the broad sense — covers
-    /// both "not in library at all" and "in library, status=unplayed".
-    /// This is the bucket the `status:unplayed` filter targets in cacoward
-    /// listings, since both states answer "what should I play next" the
-    /// same way.
-    pub fn is_unplayed_broadly(&self) -> bool {
-        matches!(
-            self,
-            EffectiveStatus::Absent | EffectiveStatus::Library(Status::Unplayed)
-        )
-    }
-}
-
-/// Structured filters for [`search_cacowards`]. Each non-empty `Vec`
-/// constrains the result set to entries matching ANY of its values; a
-/// completely empty filter returns every row in the table.
-#[derive(Debug, Default, Clone)]
-pub struct CacowardFilters {
-    pub years: Vec<i64>,
-    pub categories: Vec<String>,
-    pub statuses: Vec<EffectiveStatus>,
-    /// Case-insensitive substring match against title, author, and blurb.
-    pub free_text: Option<String>,
-}
-
-/// Search Cacoward entries with the given filters, joining each row to its
-/// linked WAD's status (or `Absent` if unlinked).
+/// Every Cacoward entry, joined to its linked WAD's status (or `Absent` if
+/// unlinked).
 ///
 /// Results are ordered newest year first, then by canonical category order
 /// (winner → runner-up → honorable-mention → mordeth), then by rank within
 /// the category.
-pub fn search_cacowards(
-    conn: &Connection,
-    filters: &CacowardFilters,
-) -> Result<Vec<(CacowardRecord, EffectiveStatus)>> {
-    // Single-pass scan: the table is small (low thousands of rows even with
-    // 30 years of awards), so an in-memory filter after one SELECT is
-    // simpler than building dynamic SQL with N variadic IN clauses.
+pub fn search_cacowards(conn: &Connection) -> Result<Vec<(CacowardRecord, EffectiveStatus)>> {
     let mut stmt = conn.prepare(
         "SELECT c.*, w.status AS wad_status
          FROM cacowards c
@@ -439,48 +282,7 @@ pub fn search_cacowards(
         Ok((record, effective))
     })?;
 
-    let mut out = Vec::new();
-    for r in rows {
-        let (record, status) = r?;
-        if !filters.matches(&record, status) {
-            continue;
-        }
-        out.push((record, status));
-    }
-    Ok(out)
-}
-
-impl CacowardFilters {
-    fn matches(&self, record: &CacowardRecord, status: EffectiveStatus) -> bool {
-        if !self.years.is_empty() && !self.years.contains(&record.year) {
-            return false;
-        }
-        if !self.categories.is_empty()
-            && !self
-                .categories
-                .iter()
-                .any(|c| c.eq_ignore_ascii_case(&record.category))
-        {
-            return false;
-        }
-        if !self.statuses.is_empty() && !self.statuses.contains(&status) {
-            return false;
-        }
-        if let Some(text) = self.free_text.as_deref()
-            && !text.is_empty()
-        {
-            let needle = text.to_lowercase();
-            let hay = [
-                record.wad_title.to_lowercase(),
-                record.wad_author.as_deref().unwrap_or("").to_lowercase(),
-                record.blurb.as_deref().unwrap_or("").to_lowercase(),
-            ];
-            if !hay.iter().any(|h| h.contains(&needle)) {
-                return false;
-            }
-        }
-        true
-    }
+    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
 }
 
 /// Delete every non-pinned Cacoward entry for `year`. Used by the enricher
@@ -600,9 +402,9 @@ mod tests {
         let id = upsert_cacoward(&conn, &sample(2022, CATEGORY_WINNER, "Eviternity II")).unwrap();
         link_wad(&conn, id, 42, false).unwrap();
 
-        let linked = get_cacowards_for_wad(&conn, 42).unwrap();
-        assert_eq!(linked.len(), 1);
-        assert!(!linked[0].manual_override);
+        let linked = get_cacoward(&conn, id).unwrap().unwrap();
+        assert_eq!(linked.wad_id, Some(42));
+        assert!(!linked.manual_override);
 
         unlink_wad(&conn, id).unwrap();
         let record = get_cacoward(&conn, id).unwrap().unwrap();
@@ -663,17 +465,6 @@ mod tests {
     }
 
     #[test]
-    fn get_years_returns_distinct_descending() {
-        let conn = setup();
-        upsert_cacoward(&conn, &sample(2021, CATEGORY_WINNER, "A")).unwrap();
-        upsert_cacoward(&conn, &sample(2023, CATEGORY_WINNER, "B")).unwrap();
-        upsert_cacoward(&conn, &sample(2022, CATEGORY_WINNER, "C")).unwrap();
-        upsert_cacoward(&conn, &sample(2023, CATEGORY_RUNNER_UP, "D")).unwrap();
-
-        assert_eq!(get_years(&conn).unwrap(), vec![2023, 2022, 2021]);
-    }
-
-    #[test]
     fn find_wad_by_idgames_id_matches() {
         let conn = setup();
         conn.execute(
@@ -698,102 +489,6 @@ mod tests {
     }
 
     #[test]
-    fn delete_cacoward_removes_row() {
-        let conn = setup();
-        let id = upsert_cacoward(&conn, &sample(2020, CATEGORY_WINNER, "Z")).unwrap();
-        delete_cacoward(&conn, id).unwrap();
-        assert!(get_cacoward(&conn, id).unwrap().is_none());
-    }
-
-    #[test]
-    fn format_id_uses_composite_when_rank_present() {
-        let mut record = sample_record(2023, "winner", "X");
-        record.rank = Some(10);
-        assert_eq!(format_cacoward_id(&record), "c.2023.winner.10");
-    }
-
-    #[test]
-    fn format_id_falls_back_to_pk_without_rank() {
-        let mut record = sample_record(2023, "winner", "X");
-        record.id = 42;
-        record.rank = None;
-        assert_eq!(format_cacoward_id(&record), "c.42");
-    }
-
-    #[test]
-    fn parse_id_accepts_composite_and_pk() {
-        match parse_cacoward_id("c.2023.winner.10").unwrap() {
-            CacowardRef::Composite {
-                year,
-                category,
-                rank,
-            } => {
-                assert_eq!(year, 2023);
-                assert_eq!(category, "winner");
-                assert_eq!(rank, 10);
-            }
-            other => panic!("expected composite, got {other:?}"),
-        }
-        match parse_cacoward_id("c.42").unwrap() {
-            CacowardRef::Pk(id) => assert_eq!(id, 42),
-            other => panic!("expected pk, got {other:?}"),
-        }
-        // Hyphenated categories are valid.
-        let r = parse_cacoward_id("c.2023.runner-up.3").unwrap();
-        assert!(matches!(r, CacowardRef::Composite { .. }));
-    }
-
-    #[test]
-    fn parse_id_rejects_garbage() {
-        assert!(parse_cacoward_id("42").is_none()); // missing prefix
-        assert!(parse_cacoward_id("c").is_none());
-        assert!(parse_cacoward_id("c.").is_none());
-        assert!(parse_cacoward_id("c.2023.winner").is_none()); // missing rank
-        assert!(parse_cacoward_id("c.2023.winner.0").is_none()); // rank must be > 0
-        assert!(parse_cacoward_id("c.notyear.winner.1").is_none());
-    }
-
-    #[test]
-    fn resolve_ref_composite_finds_match() {
-        let conn = setup();
-        let mut entry = sample(2023, CATEGORY_WINNER, "Foo");
-        entry.rank = Some(5);
-        let id = upsert_cacoward(&conn, &entry).unwrap();
-
-        let r = CacowardRef::Composite {
-            year: 2023,
-            category: "winner".to_string(),
-            rank: 5,
-        };
-        let found = resolve_cacoward_ref(&conn, &r).unwrap().unwrap();
-        assert_eq!(found.id, id);
-
-        let missing = CacowardRef::Composite {
-            year: 2023,
-            category: "winner".to_string(),
-            rank: 6,
-        };
-        assert!(resolve_cacoward_ref(&conn, &missing).unwrap().is_none());
-    }
-
-    #[test]
-    fn search_cacowards_filters_by_year_and_category() {
-        let conn = setup();
-        upsert_cacoward(&conn, &sample(2022, CATEGORY_WINNER, "Old")).unwrap();
-        upsert_cacoward(&conn, &sample(2023, CATEGORY_WINNER, "W")).unwrap();
-        upsert_cacoward(&conn, &sample(2023, CATEGORY_RUNNER_UP, "R")).unwrap();
-
-        let mut filters = CacowardFilters::default();
-        filters.years.push(2023);
-        filters.categories.push(CATEGORY_WINNER.to_string());
-
-        let results = search_cacowards(&conn, &filters).unwrap();
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].0.wad_title, "W");
-        assert_eq!(results[0].1, EffectiveStatus::Absent);
-    }
-
-    #[test]
     fn search_cacowards_joins_status_from_linked_wad() {
         let conn = setup();
         conn.execute(
@@ -804,47 +499,9 @@ mod tests {
         let id = upsert_cacoward(&conn, &sample(2023, CATEGORY_WINNER, "Foo")).unwrap();
         link_wad(&conn, id, 1, false).unwrap();
 
-        let results = search_cacowards(&conn, &CacowardFilters::default()).unwrap();
+        let results = search_cacowards(&conn).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].1, EffectiveStatus::Library(Status::Completed));
-    }
-
-    #[test]
-    fn search_cacowards_status_filter_matches_absent() {
-        let conn = setup();
-        // One absent, one linked-completed.
-        conn.execute(
-            "INSERT INTO wads (id, title, source_type, status) VALUES (1, 'F', 'manual', 'completed')",
-            [],
-        )
-        .unwrap();
-        let linked = upsert_cacoward(&conn, &sample(2023, CATEGORY_WINNER, "F")).unwrap();
-        link_wad(&conn, linked, 1, false).unwrap();
-        upsert_cacoward(&conn, &sample(2023, CATEGORY_WINNER, "Z")).unwrap();
-
-        let mut filters = CacowardFilters::default();
-        filters.statuses.push(EffectiveStatus::Absent);
-
-        let results = search_cacowards(&conn, &filters).unwrap();
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].0.wad_title, "Z");
-    }
-
-    fn sample_record(year: i64, cat: &str, title: &str) -> CacowardRecord {
-        CacowardRecord {
-            id: 1,
-            year,
-            category: cat.to_string(),
-            rank: Some(1),
-            wad_title: title.to_string(),
-            wad_author: None,
-            idgames_url: None,
-            doomwiki_url: None,
-            blurb: None,
-            wad_id: None,
-            manual_override: false,
-            supported: true,
-        }
     }
 
     #[test]
