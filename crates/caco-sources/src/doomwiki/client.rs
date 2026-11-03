@@ -23,14 +23,6 @@ impl DoomwikiClient {
         }
     }
 
-    /// Create a client with a custom reqwest client (for testing).
-    pub fn with_client(client: Client) -> Self {
-        Self {
-            client,
-            parser: WikitextParser::new(),
-        }
-    }
-
     /// Make a request to the MediaWiki API.
     fn request(&self, params: &[(&str, &str)]) -> Result<serde_json::Value> {
         let mut query: Vec<(&str, &str)> = params.to_vec();
@@ -62,7 +54,7 @@ impl DoomwikiClient {
     }
 
     /// Search the wiki for pages matching the query.
-    pub fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>> {
+    fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>> {
         let limit_str = limit.to_string();
         let data = self.request(&[
             ("action", "query"),
@@ -101,7 +93,7 @@ impl DoomwikiClient {
     /// Get the raw wikitext content of a page by title.
     ///
     /// Returns `(page_id, wikitext)` or `None` if the page doesn't exist.
-    pub fn get_page_content(&self, title: &str) -> Result<Option<(i64, String)>> {
+    pub(crate) fn get_page_content(&self, title: &str) -> Result<Option<(i64, String)>> {
         let data = self.request(&[
             ("action", "query"),
             ("titles", title),
@@ -112,92 +104,25 @@ impl DoomwikiClient {
         Ok(extract_page_content(&data))
     }
 
-    /// Get the raw wikitext content of a page by ID.
-    ///
-    /// Returns `(title, wikitext)` or `None` if the page doesn't exist.
-    pub fn get_page_content_by_id(&self, page_id: i64) -> Result<Option<(String, String)>> {
-        let id_str = page_id.to_string();
-        let data = self.request(&[
-            ("action", "query"),
-            ("pageids", &id_str),
-            ("prop", "revisions"),
-            ("rvprop", "content"),
-        ])?;
-
-        if let Some(pages) = data
-            .get("query")
-            .and_then(|q| q.get("pages"))
-            .and_then(|p| p.as_object())
-        {
-            let page_data = match pages.get(&id_str) {
-                Some(p) => p,
-                None => return Ok(None),
-            };
-
-            if page_data.get("missing").is_some() {
-                return Ok(None);
-            }
-
-            let title = page_data
-                .get("title")
-                .and_then(|t| t.as_str())
-                .unwrap_or("")
-                .to_string();
-
-            if let Some(content) = extract_revision_content(page_data) {
-                return Ok(Some((title, content)));
-            }
-        }
-
-        Ok(None)
-    }
-
     /// Get parsed WAD entry for a wiki page by title.
     ///
     /// Returns `Ok(None)` both when the page is missing *and* when it exists
     /// but has no `{{Wad}}` infobox — matches the filter `search_wads`
-    /// applies. Use [`get_entry_permissive`](Self::get_entry_permissive) to
-    /// distinguish missing from non-WAD (needed by the CLI's `--force` path).
+    /// applies.
     pub fn get_entry(&self, title: &str) -> Result<Option<WikiEntry>> {
-        Ok(self
-            .get_entry_permissive(title)?
-            .filter(|(_, has_infobox)| *has_infobox)
-            .map(|(entry, _)| entry))
-    }
-
-    /// Get parsed WAD entry for a wiki page by ID.
-    ///
-    /// Same `{{Wad}}`-infobox filter as [`get_entry`](Self::get_entry).
-    pub fn get_entry_by_id(&self, page_id: i64) -> Result<Option<WikiEntry>> {
-        let Some((title, wikitext)) = self.get_page_content_by_id(page_id)? else {
+        let Some((page_id, wikitext)) = self.get_page_content(title)? else {
             return Ok(None);
         };
         if !self.parser.has_wad_template(&wikitext) {
             return Ok(None);
         }
-        Ok(Some(self.parser.parse(&wikitext, &title, page_id)))
-    }
-
-    /// Parse a wiki page regardless of whether it carries a `{{Wad}}` infobox.
-    ///
-    /// Returns `Ok(None)` only when the page is missing. When the page exists,
-    /// returns the parsed entry and a flag indicating whether the infobox
-    /// was present — callers can decide whether to accept non-WAD pages.
-    pub fn get_entry_permissive(&self, title: &str) -> Result<Option<(WikiEntry, bool)>> {
-        let Some((page_id, wikitext)) = self.get_page_content(title)? else {
-            return Ok(None);
-        };
-        let has_infobox = self.parser.has_wad_template(&wikitext);
-        Ok(Some((
-            self.parser.parse(&wikitext, title, page_id),
-            has_infobox,
-        )))
+        Ok(Some(self.parser.parse(&wikitext, title, page_id)))
     }
 
     /// Fetch multiple page contents in a single API request.
     ///
     /// Uses MediaWiki pipe-separated titles API (max 50 per request).
-    pub fn get_pages_batch(
+    fn get_pages_batch(
         &self,
         titles: &[String],
     ) -> Result<std::collections::HashMap<String, (i64, String)>> {

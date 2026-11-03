@@ -5,7 +5,6 @@ use super::parser::DoomworldParser;
 use crate::error::{Result, SourceError};
 use crate::http::build_client;
 
-const BASE_URL: &str = "https://www.doomworld.com";
 const USER_AGENT: &str = "Caco/1.0 (Doom WAD library manager; https://github.com/eshen/caco)";
 
 /// Client for fetching Doomworld forum threads.
@@ -21,14 +20,6 @@ impl DoomworldClient {
     pub fn new() -> Self {
         Self {
             client: build_client(None, Some(USER_AGENT)),
-            parser: DoomworldParser::new(),
-        }
-    }
-
-    /// Create a client with a custom reqwest client (for testing).
-    pub fn with_client(client: Client) -> Self {
-        Self {
-            client,
             parser: DoomworldParser::new(),
         }
     }
@@ -62,14 +53,6 @@ impl DoomworldClient {
         }
 
         Ok(thread)
-    }
-
-    /// Fetch a forum thread by its numeric ID.
-    ///
-    /// Constructs a URL and delegates to `get_thread`.
-    pub fn get_thread_by_id(&self, thread_id: i64) -> Result<ForumThread> {
-        let url = format!("{BASE_URL}/forum/topic/{thread_id}/");
-        self.get_thread(&url)
     }
 }
 

@@ -5,7 +5,7 @@ pub mod parser;
 
 pub use cacowards::{fetch_cacowards, parse_cacowards_page};
 pub use client::DoomwikiClient;
-pub use models::{SearchResult, WikiEntry};
+pub use models::WikiEntry;
 pub use parser::WikitextParser;
 
 /// Extract the page title from a Doom Wiki article URL.

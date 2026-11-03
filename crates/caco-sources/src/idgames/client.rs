@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use reqwest::blocking::Client;
 
-use super::models::{ApiInfo, Directory, FileEntry, Review, Vote};
+use super::models::{FileEntry, Review};
 use crate::error::{Result, SourceError};
 use crate::http::build_client;
 
@@ -29,11 +29,6 @@ impl IdgamesClient {
         Self {
             client: build_client(None, None),
         }
-    }
-
-    /// Create a client with a custom reqwest client (for testing).
-    pub fn with_client(client: Client) -> Self {
-        Self { client }
     }
 
     /// Make a request to the idgames API and return the `content` object.
@@ -70,33 +65,6 @@ impl IdgamesClient {
             .unwrap_or(serde_json::Value::Null))
     }
 
-    /// Check if the API server is responding.
-    pub fn ping(&self) -> Result<String> {
-        let content = self.request("ping", &[])?;
-        Ok(content
-            .get("status")
-            .and_then(|s| s.as_str())
-            .unwrap_or("")
-            .to_string())
-    }
-
-    /// Check if the database is responding.
-    pub fn dbping(&self) -> Result<String> {
-        let content = self.request("dbping", &[])?;
-        Ok(content
-            .get("status")
-            .and_then(|s| s.as_str())
-            .unwrap_or("")
-            .to_string())
-    }
-
-    /// Get API information.
-    pub fn about(&self) -> Result<ApiInfo> {
-        let content = self.request("about", &[])?;
-        let info: ApiInfo = serde_json::from_value(content)?;
-        Ok(info)
-    }
-
     /// Look up an entry by archive path, with a filename-search fallback.
     ///
     /// The idgames API's `get(file=...)` endpoint has been observed to return
@@ -110,7 +78,7 @@ impl IdgamesClient {
     ///
     /// WAF/network errors short-circuit — no point retrying through the
     /// same cloudflare.
-    pub fn get_by_path(&self, file_path: &str) -> Result<FileEntry> {
+    pub(crate) fn get_by_path(&self, file_path: &str) -> Result<FileEntry> {
         let get_err = match self.get(None, Some(file_path)) {
             Ok(entry) => return Ok(entry),
             Err(e @ SourceError::WafBlocked { .. }) => return Err(e),
@@ -198,64 +166,8 @@ impl IdgamesClient {
         parse_file_list(&content)
     }
 
-    /// Get the latest files.
-    pub fn latest_files(&self, limit: Option<i64>, startid: Option<i64>) -> Result<Vec<FileEntry>> {
-        let mut params: Vec<(&str, String)> = Vec::new();
-        if let Some(l) = limit {
-            params.push(("limit", l.to_string()));
-        }
-        if let Some(s) = startid {
-            params.push(("startid", s.to_string()));
-        }
-        let param_refs: Vec<(&str, &str)> = params.iter().map(|(k, v)| (*k, v.as_str())).collect();
-
-        let content = self.request("latestfiles", &param_refs)?;
-        parse_file_list(&content)
-    }
-
-    /// Get the latest votes.
-    pub fn latest_votes(&self, limit: Option<i64>) -> Result<Vec<Vote>> {
-        let mut params: Vec<(&str, String)> = Vec::new();
-        if let Some(l) = limit {
-            params.push(("limit", l.to_string()));
-        }
-        let param_refs: Vec<(&str, &str)> = params.iter().map(|(k, v)| (*k, v.as_str())).collect();
-
-        let content = self.request("latestvotes", &param_refs)?;
-        if content.is_null() {
-            return Ok(Vec::new());
-        }
-        let votes_val = content
-            .get("vote")
-            .cloned()
-            .unwrap_or(serde_json::Value::Null);
-        Ok(normalize_list::<Vote>(&votes_val))
-    }
-
-    /// Get subdirectories.
-    pub fn get_dirs(&self, id: Option<i64>, name: Option<&str>) -> Result<Vec<Directory>> {
-        let mut params: Vec<(&str, String)> = Vec::new();
-        if let Some(i) = id {
-            params.push(("id", i.to_string()));
-        }
-        if let Some(n) = name {
-            params.push(("name", n.to_string()));
-        }
-        let param_refs: Vec<(&str, &str)> = params.iter().map(|(k, v)| (*k, v.as_str())).collect();
-
-        let content = self.request("getdirs", &param_refs)?;
-        if content.is_null() {
-            return Ok(Vec::new());
-        }
-        let dirs_val = content
-            .get("dir")
-            .cloned()
-            .unwrap_or(serde_json::Value::Null);
-        Ok(normalize_list::<Directory>(&dirs_val))
-    }
-
     /// Get the download URL for a file entry.
-    pub fn get_download_url(&self, entry: &FileEntry, mirror: usize) -> String {
+    fn get_download_url(&self, entry: &FileEntry, mirror: usize) -> String {
         let path = format!("{}/{}", entry.dir.trim_matches('/'), entry.filename).replace("//", "/");
         format!("{}{}", MIRRORS[mirror % MIRRORS.len()], path)
     }
@@ -434,27 +346,27 @@ mod tests {
     #[test]
     fn test_normalize_list_array() {
         let val: serde_json::Value = serde_json::json!([
-            {"id": 1, "name": "a"},
-            {"id": 2, "name": "b"},
+            {"text": "a", "vote": 1, "username": "x"},
+            {"text": "b", "vote": 2, "username": "y"},
         ]);
-        let dirs: Vec<Directory> = normalize_list(&val);
-        assert_eq!(dirs.len(), 2);
-        assert_eq!(dirs[0].name, "a");
+        let reviews: Vec<Review> = normalize_list(&val);
+        assert_eq!(reviews.len(), 2);
+        assert_eq!(reviews[0].text, "a");
     }
 
     #[test]
     fn test_normalize_list_single_object() {
-        let val: serde_json::Value = serde_json::json!({"id": 1, "name": "a"});
-        let dirs: Vec<Directory> = normalize_list(&val);
-        assert_eq!(dirs.len(), 1);
-        assert_eq!(dirs[0].name, "a");
+        let val: serde_json::Value = serde_json::json!({"text": "a", "vote": 1, "username": "x"});
+        let reviews: Vec<Review> = normalize_list(&val);
+        assert_eq!(reviews.len(), 1);
+        assert_eq!(reviews[0].text, "a");
     }
 
     #[test]
     fn test_normalize_list_null() {
         let val = serde_json::Value::Null;
-        let dirs: Vec<Directory> = normalize_list(&val);
-        assert!(dirs.is_empty());
+        let reviews: Vec<Review> = normalize_list(&val);
+        assert!(reviews.is_empty());
     }
 
     #[test]

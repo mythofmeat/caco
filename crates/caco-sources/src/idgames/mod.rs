@@ -2,7 +2,7 @@ pub mod client;
 pub mod models;
 
 pub use client::{IdgamesClient, MIRRORS};
-pub use models::{ApiInfo, Directory, FileEntry, Review, Vote};
+pub use models::{FileEntry, Review};
 
 /// Extract a numeric idgames ID from a `doomworld.com/idgames/...?id=N` URL.
 ///

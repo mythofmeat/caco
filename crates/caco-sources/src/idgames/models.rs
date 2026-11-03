@@ -61,45 +61,6 @@ pub struct FileEntry {
     pub reviews: Vec<Review>,
 }
 
-/// Directory info from the idgames archive.
-#[derive(Debug, Clone, Deserialize)]
-pub struct Directory {
-    #[serde(default, deserialize_with = "coerce_i64")]
-    pub id: i64,
-    #[serde(default, deserialize_with = "coerce_str")]
-    pub name: String,
-}
-
-/// A vote entry.
-#[derive(Debug, Clone, Deserialize)]
-pub struct Vote {
-    #[serde(default, deserialize_with = "coerce_i64")]
-    pub id: i64,
-    #[serde(default, deserialize_with = "coerce_i64")]
-    pub file: i64,
-    #[serde(default, deserialize_with = "coerce_str")]
-    pub title: String,
-    #[serde(default, deserialize_with = "coerce_str")]
-    pub author: String,
-    #[serde(default, deserialize_with = "coerce_str")]
-    pub description: String,
-    #[serde(default, deserialize_with = "coerce_f64")]
-    pub rating: f64,
-    #[serde(default, deserialize_with = "coerce_str")]
-    pub reviewtext: String,
-}
-
-/// API information from the about endpoint.
-#[derive(Debug, Clone, Deserialize)]
-pub struct ApiInfo {
-    #[serde(default, deserialize_with = "coerce_str")]
-    pub version: String,
-    #[serde(default, deserialize_with = "coerce_str")]
-    pub credits: String,
-    #[serde(default, deserialize_with = "coerce_str")]
-    pub copyright: String,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -163,28 +124,5 @@ mod tests {
         assert_eq!(review.text, "");
         assert!(review.vote.is_none());
         assert_eq!(review.username, "");
-    }
-
-    #[test]
-    fn test_directory() {
-        let json = r#"{"id": 1, "name": "levels/doom2/"}"#;
-        let dir: Directory = serde_json::from_str(json).unwrap();
-        assert_eq!(dir.id, 1);
-        assert_eq!(dir.name, "levels/doom2/");
-    }
-
-    #[test]
-    fn test_vote() {
-        let json = r#"{"id": 1, "file": 100, "title": "Test", "author": "Me", "description": "Desc", "rating": 4.5, "reviewtext": "Nice"}"#;
-        let vote: Vote = serde_json::from_str(json).unwrap();
-        assert_eq!(vote.id, 1);
-        assert_eq!(vote.rating, 4.5);
-    }
-
-    #[test]
-    fn test_api_info() {
-        let json = r#"{"version": "3", "credits": "dn", "copyright": "c"}"#;
-        let info: ApiInfo = serde_json::from_str(json).unwrap();
-        assert_eq!(info.version, "3");
     }
 }
