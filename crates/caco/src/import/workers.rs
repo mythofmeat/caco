@@ -184,7 +184,7 @@ impl CacowardSource {
                 Ok(service.import_idgames(conn, &entry, None, false))
             }
             Self::DoomworldTopic(topic) => {
-                let url = format!("https://www.doomworld.com/forum/topic/{topic}/");
+                let url = caco_core::source_url::doomworld_topic_url(*topic);
                 let thread = caco_sources::doomworld::DoomworldClient::new()
                     .get_thread(&url)
                     .map_err(|e| e.to_string())?;

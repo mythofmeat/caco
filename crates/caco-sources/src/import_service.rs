@@ -465,6 +465,87 @@ impl ImportService {
         })
     }
 
+    /// Put a Cacoward entry in the library from what the dataset says about it, for a
+    /// file the user got themselves.
+    ///
+    /// Every other route starts by asking a site, which is no use here: a site refusing
+    /// caco is why the user went and got the file. The new row has no file yet, because
+    /// where one goes depends on the row, which is the caller's next step.
+    ///
+    /// Duplicate detection: the file's content, then a WAD the entry's identifiers say
+    /// it belongs to, then its source id, which also counts the trash.
+    pub fn import_cacoward_file(
+        &self,
+        conn: &Connection,
+        record: &db::CacowardRecord,
+        file: &Path,
+    ) -> ImportResult {
+        self.import_cacoward_file_with(conn, record, file, |tx, wad_id| {
+            self.auto_enrich_doomwiki(tx, wad_id, &record.wad_title);
+        })
+    }
+
+    /// [`Self::import_cacoward_file`], with enrichment passed in so that tests stay
+    /// off the network.
+    fn import_cacoward_file_with(
+        &self,
+        conn: &Connection,
+        record: &db::CacowardRecord,
+        file: &Path,
+        enrich: impl FnOnce(&Connection, i64),
+    ) -> ImportResult {
+        let found = match identity::identify(file) {
+            Ok(found) => found,
+            Err(e) => return ImportResult::error(format!("cannot read {}: {e}", file.display())),
+        };
+        if let Ok(Some((id, title))) =
+            identity::find_by_content(conn, &found.identity.content_sha256)
+        {
+            return ImportResult::duplicate(id, &title);
+        }
+
+        match cacoward_link::owner_by_identifier(conn, record) {
+            Ok(Some(id)) => {
+                return match db::get_wad(conn, id, false) {
+                    Ok(Some(owner)) => ImportResult::duplicate(owner.id, &owner.title),
+                    Ok(None) => ImportResult::error(format!("WAD #{id} has gone")),
+                    Err(e) => ImportResult::error(e.to_string()),
+                };
+            }
+            Ok(None) => {}
+            Err(e) => return ImportResult::error(e.to_string()),
+        }
+
+        let (source_type, source_id, source_url) = cacoward_source(record);
+        if let Ok(Some(existing)) =
+            db::find_duplicate(conn, source_type, source_id.as_deref(), None, None, None)
+        {
+            return ImportResult::duplicate(existing.id, &existing.title);
+        }
+
+        let mut wad = NewWad::new(&record.wad_title, source_type);
+        if let Some(id) = &source_id {
+            wad = wad.source_id(id);
+        }
+        if let Some(url) = source_url {
+            wad = wad.source_url(url);
+        }
+        if let Some(id) = record.idgames_id {
+            wad = wad.idgames_id(id.to_string());
+        }
+        if let Some(author) = record.wad_author.as_deref() {
+            wad = wad.author(author);
+        }
+        if let Ok(year) = i32::try_from(record.year) {
+            wad = wad.year(year);
+        }
+
+        insert_wad(conn, &wad, |tx, wad_id| {
+            enrich(tx, wad_id);
+            Ok(())
+        })
+    }
+
     /// Auto-enrich a WAD with Doom Wiki metadata after import.
     ///
     /// Searches Doom Wiki for a matching title and backfills missing fields.
@@ -542,6 +623,24 @@ impl ImportService {
 
         // Silently ignore errors
         let _ = result;
+    }
+}
+
+/// What a row made from a Cacoward entry says about where it came from, spelled as the
+/// import from that source would have spelled it, so that the two recognise each other:
+/// `(source_type, source_id, source_url)`. A Doom Wiki import's `source_id` is a page
+/// id, which only the wiki knows, so that one goes by its URL.
+fn cacoward_source(record: &db::CacowardRecord) -> (SourceType, Option<String>, Option<String>) {
+    if let Some(id) = record.idgames_id {
+        let url = caco_core::source_url::idgames_id_url(id);
+        (SourceType::Idgames, Some(id.to_string()), Some(url))
+    } else if let Some(topic) = record.doomworld_id {
+        let url = caco_core::source_url::doomworld_topic_url(topic);
+        (SourceType::Doomworld, Some(topic.to_string()), Some(url))
+    } else if let Some(url) = record.doomwiki_url() {
+        (SourceType::Doomwiki, None, Some(url))
+    } else {
+        (SourceType::Local, None, None)
     }
 }
 
@@ -1705,6 +1804,270 @@ mod tests {
 
         assert_eq!(linked_wad(&conn, row), result.wad_id);
         assert!(result.wad_id.is_some());
+    }
+
+    /// Fetched through the browser because a site refused caco, so nothing here may
+    /// need one. The facts are all the dataset's.
+    fn import_entry(conn: &Connection, row: i64, file: &std::path::Path) -> ImportResult {
+        let record = db::get_cacoward(conn, row).unwrap().unwrap();
+        ImportService::new().import_cacoward_file_with(conn, &record, file, |_, _| {})
+    }
+
+    fn cacoward_entry(conn: &Connection, title: &str, entry: db::NewCacoward) -> i64 {
+        db::upsert_cacoward(
+            conn,
+            &db::NewCacoward {
+                key: format!("2025-winner-{title}"),
+                year: 2025,
+                category: "winner".to_string(),
+                page_order: 1,
+                wad_title: title.to_string(),
+                wad_author: Some("tourniquet".to_string()),
+                ..entry
+            },
+        )
+        .unwrap()
+    }
+
+    fn wad_count(conn: &Connection) -> i64 {
+        conn.query_row("SELECT COUNT(*) FROM wads", [], |row| row.get(0))
+            .unwrap()
+    }
+
+    fn downloaded(bytes: &[u8]) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("download.wad");
+        std::fs::write(&path, bytes).unwrap();
+        (dir, path)
+    }
+
+    #[test]
+    fn test_a_doomworld_only_entry_becomes_a_row_from_its_facts_alone() {
+        let conn = setup();
+        let row = cacoward_entry(
+            &conn,
+            "Lonesome Road",
+            db::NewCacoward {
+                doomworld_id: Some(151858),
+                ..Default::default()
+            },
+        );
+        let (_dir, file) = downloaded(b"PWAD road");
+
+        let result = import_entry(&conn, row, &file);
+
+        let wad = db::get_wad(&conn, result.wad_id.unwrap(), false)
+            .unwrap()
+            .unwrap();
+        assert_eq!(wad.title, "Lonesome Road");
+        assert_eq!(wad.author.as_deref(), Some("tourniquet"));
+        assert_eq!(wad.year, Some(2025));
+        assert_eq!(wad.source_type, SourceType::Doomworld);
+        assert_eq!(wad.source_id.as_deref(), Some("151858"));
+        assert_eq!(
+            wad.source_url.as_deref(),
+            Some("https://www.doomworld.com/forum/topic/151858/")
+        );
+        assert!(!wad.retrievability().is_automatic());
+        assert_eq!(wad.cached_path, None, "the file is the caller's next step");
+        assert_eq!(linked_wad(&conn, row), Some(wad.id));
+
+        // Importing the thread later recognises it, whichever route came first.
+        let again = db::find_duplicate(
+            &conn,
+            SourceType::Doomworld,
+            Some("151858"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(again.map(|wad| wad.id), Some(wad.id));
+    }
+
+    #[test]
+    fn test_an_idgames_entry_keeps_its_id_and_reads_as_fetchable() {
+        let conn = setup();
+        let row = cacoward_entry(
+            &conn,
+            "TNT Overcharged",
+            db::NewCacoward {
+                idgames_id: Some(19951),
+                doomworld_id: Some(151858),
+                ..Default::default()
+            },
+        );
+        let (_dir, file) = downloaded(b"PWAD tnt");
+
+        let result = import_entry(&conn, row, &file);
+
+        let wad = db::get_wad(&conn, result.wad_id.unwrap(), false)
+            .unwrap()
+            .unwrap();
+        assert_eq!(wad.source_type, SourceType::Idgames);
+        assert_eq!(wad.source_id.as_deref(), Some("19951"));
+        assert_eq!(wad.idgames_id.as_deref(), Some("19951"));
+        assert!(wad.retrievability().is_automatic());
+        assert_eq!(linked_wad(&conn, row), Some(wad.id));
+    }
+
+    #[test]
+    fn test_a_wiki_only_entry_links_by_its_page() {
+        let conn = setup();
+        let row = cacoward_entry(
+            &conn,
+            "Sunder",
+            db::NewCacoward {
+                doomwiki_page: Some("Sunder".to_string()),
+                ..Default::default()
+            },
+        );
+        let (_dir, file) = downloaded(b"PWAD sunder");
+
+        let result = import_entry(&conn, row, &file);
+
+        let wad = db::get_wad(&conn, result.wad_id.unwrap(), false)
+            .unwrap()
+            .unwrap();
+        assert_eq!(wad.source_type, SourceType::Doomwiki);
+        assert_eq!(
+            wad.source_url.as_deref(),
+            Some("https://doomwiki.org/wiki/Sunder")
+        );
+        assert_eq!(linked_wad(&conn, row), Some(wad.id));
+    }
+
+    #[test]
+    fn test_an_entry_naming_no_source_still_gets_a_row() {
+        let conn = setup();
+        let row = cacoward_entry(&conn, "Mystery", db::NewCacoward::default());
+        let (_dir, file) = downloaded(b"PWAD mystery");
+
+        let result = import_entry(&conn, row, &file);
+
+        let wad = db::get_wad(&conn, result.wad_id.unwrap(), false)
+            .unwrap()
+            .unwrap();
+        assert_eq!(wad.source_type, SourceType::Local);
+        assert_eq!(wad.source_url, None);
+    }
+
+    /// A file is the strongest evidence there is: the same content is the same WAD,
+    /// whatever it was imported as.
+    #[test]
+    fn test_a_file_the_library_already_has_is_that_wad() {
+        let conn = setup();
+        let row = cacoward_entry(
+            &conn,
+            "Lonesome Road",
+            db::NewCacoward {
+                doomworld_id: Some(151858),
+                ..Default::default()
+            },
+        );
+        let (dir, file) = downloaded(b"PWAD road");
+        let elsewhere = dir.path().join("road-by-another-name.wad");
+        std::fs::copy(&file, &elsewhere).unwrap();
+        let existing = import_local(&conn, "Road (old import)", &elsewhere, false)
+            .wad_id
+            .unwrap();
+
+        let result = import_entry(&conn, row, &file);
+
+        assert!(result.is_duplicate);
+        assert_eq!(result.duplicate_id, Some(existing));
+        assert_eq!(wad_count(&conn), 1);
+    }
+
+    #[test]
+    fn test_a_wad_the_entrys_identifiers_name_is_that_wad() {
+        let conn = setup();
+        let existing = db::add_wad(
+            &conn,
+            &NewWad::new("Lonesome Road | Chapter 1", SourceType::Doomworld)
+                .source_id("151858")
+                .source_url("https://www.doomworld.com/vb/thread/151858"),
+        )
+        .unwrap();
+        let row = cacoward_entry(
+            &conn,
+            "Lonesome Road",
+            db::NewCacoward {
+                doomworld_id: Some(151858),
+                ..Default::default()
+            },
+        );
+        let (_dir, file) = downloaded(b"PWAD road");
+
+        let result = import_entry(&conn, row, &file);
+
+        assert!(result.is_duplicate);
+        assert_eq!(result.duplicate_id, Some(existing));
+    }
+
+    /// The caller has to hear about it, so that it can say so, or a second row
+    /// would appear beside the one the user can get back from the trash.
+    #[test]
+    fn test_a_trashed_wad_with_the_entrys_source_counts() {
+        let conn = setup();
+        let existing = db::add_wad(
+            &conn,
+            &NewWad::new("Lonesome Road", SourceType::Doomworld).source_id("151858"),
+        )
+        .unwrap();
+        db::delete_wad(&conn, existing, false).unwrap();
+        let row = cacoward_entry(
+            &conn,
+            "Lonesome Road",
+            db::NewCacoward {
+                doomworld_id: Some(151858),
+                ..Default::default()
+            },
+        );
+        let (_dir, file) = downloaded(b"PWAD road");
+
+        let result = import_entry(&conn, row, &file);
+
+        assert!(result.is_duplicate);
+        assert_eq!(result.duplicate_id, Some(existing));
+    }
+
+    /// The user is holding a file that is not that WAD's. "Corruption" won in 2023 and
+    /// two unrelated WADs from 2007 have the same name.
+    #[test]
+    fn test_a_shared_title_alone_does_not_make_it_that_wad() {
+        let conn = setup();
+        let unrelated = db::add_wad(
+            &conn,
+            &NewWad::new("Corruption", SourceType::Local).source_url("/doom/corruption-2007.wad"),
+        )
+        .unwrap();
+        let row = cacoward_entry(
+            &conn,
+            "Corruption",
+            db::NewCacoward {
+                doomworld_id: Some(1),
+                ..Default::default()
+            },
+        );
+        let (_dir, file) = downloaded(b"PWAD corruption 2023");
+
+        let result = import_entry(&conn, row, &file);
+
+        assert!(!result.is_duplicate);
+        assert_ne!(result.wad_id, Some(unrelated));
+    }
+
+    #[test]
+    fn test_a_file_that_cannot_be_read_makes_no_row() {
+        let conn = setup();
+        let row = cacoward_entry(&conn, "Road", db::NewCacoward::default());
+        let dir = tempfile::tempdir().unwrap();
+
+        let result = import_entry(&conn, row, &dir.path().join("gone.wad"));
+
+        assert!(result.error.is_some());
+        assert_eq!(wad_count(&conn), 0);
     }
 
     /// A zip holding `entries`, as an idgames upload is.

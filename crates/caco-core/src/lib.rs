@@ -6,6 +6,7 @@ pub mod complevel_detect;
 pub mod config;
 pub mod db;
 pub mod demos;
+pub mod downloads;
 pub mod error;
 pub mod gc;
 pub mod identity;

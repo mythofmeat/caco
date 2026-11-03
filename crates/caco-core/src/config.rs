@@ -256,7 +256,11 @@ pub struct Config {
     pub iwad_dirs: Vec<String>,
     pub sourceport_args: Vec<String>,
     pub download_mirror: i64,
+    /// What Get does with a file it links out of the Downloads folder: `move` or
+    /// `copy`. See [`LinkMode`].
     pub link_mode: String,
+    /// The folder Get watches. Empty means the system's: see [`downloads_dir`].
+    pub downloads_dir: String,
     pub manage_data_dirs: bool,
     pub auto_stats: bool,
     pub auto_detect_iwad: bool,
@@ -303,6 +307,7 @@ impl Default for Config {
             sourceport_args: Vec::new(),
             download_mirror: 0,
             link_mode: "move".to_string(),
+            downloads_dir: String::new(),
             manage_data_dirs: true,
             auto_stats: true,
             auto_detect_iwad: true,
@@ -797,6 +802,29 @@ pub fn get_companion_orphan_cleanup() -> String {
     match value.as_str() {
         "delete" | "keep" | "ask" => value,
         _ => "ask".to_string(),
+    }
+}
+
+/// Where the system's browsers save files unless told otherwise.
+///
+/// `dirs` answers from `XDG_DOWNLOAD_DIR` on Linux, which a desktop without
+/// xdg-user-dirs does not set, and the folder is there all the same.
+pub fn default_downloads_dir() -> PathBuf {
+    dirs::download_dir().unwrap_or_else(|| home_dir().join("Downloads"))
+}
+
+/// The folder Get watches for a browser's download. Settable because a sandboxed
+/// browser, or one told to, can save somewhere else.
+pub fn downloads_dir() -> PathBuf {
+    downloads_dir_from(&load_config())
+}
+
+fn downloads_dir_from(config: &Config) -> PathBuf {
+    let set = config.downloads_dir.trim();
+    if set.is_empty() {
+        default_downloads_dir()
+    } else {
+        expand_tilde(set)
     }
 }
 
@@ -1685,6 +1713,21 @@ window_width = 1600
         unsafe {
             std::env::remove_var("CACO_CONFIG");
         }
+    }
+
+    #[test]
+    fn test_the_downloads_folder_is_the_systems_unless_set() {
+        let with = |value: &str| Config {
+            downloads_dir: value.to_string(),
+            ..Config::default()
+        };
+        assert_eq!(downloads_dir_from(&with("")), default_downloads_dir());
+        assert_eq!(downloads_dir_from(&with("   ")), default_downloads_dir());
+        assert_eq!(
+            downloads_dir_from(&with("/mnt/flatpak/downloads")),
+            PathBuf::from("/mnt/flatpak/downloads")
+        );
+        assert_eq!(downloads_dir_from(&with("~/dl")), home_dir().join("dl"));
     }
 
     #[test]
