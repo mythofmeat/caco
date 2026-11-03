@@ -489,6 +489,11 @@ impl CacoApp {
         self.state.uploads.len()
     }
 
+    /// Whether a bulk upload to a mirror is still running. Public for the same reason.
+    pub fn bulk_upload_running(&self) -> bool {
+        self.state.mirror_bulk.is_some()
+    }
+
     /// Dispatch an action request (from detail panel buttons or table shortcuts).
     ///
     /// Public so `tests/screenshots.rs` can open any dialog the same way a
@@ -519,7 +524,7 @@ impl CacoApp {
                 self.state.active_dialog = Some(ActiveDialog::Profiles(Box::new(dialog)));
             }
             ActionRequest::Settings => {
-                let dialog = crate::dialogs::settings::SettingsDialogState::new(&self.conn);
+                let dialog = crate::dialogs::settings::SettingsDialogState::new();
                 self.state.active_dialog = Some(ActiveDialog::Settings(dialog));
             }
             ActionRequest::Resources => {
@@ -663,8 +668,39 @@ impl CacoApp {
                 };
                 self.spawn_play(wad_id, opts);
             }
+            ActionRequest::Mirrors => {
+                let dialog = crate::dialogs::mirrors::MirrorsDialogState::new(&self.conn);
+                self.state.active_dialog = Some(ActiveDialog::Mirrors(Box::new(dialog)));
+            }
             ActionRequest::SyncMirrors => {
                 mirrors::spawn_sync(self.bg.sender(), self.state.db_path.clone());
+            }
+            ActionRequest::ProbeMirror(config) => {
+                mirrors::spawn_probe(self.bg.sender(), *config);
+            }
+            ActionRequest::SetUpMirror(config) => {
+                mirrors::spawn_set_up(self.bg.sender(), *config);
+            }
+            ActionRequest::UploadAllToMirror(mirror) => {
+                // One at a time: each rewrites the index, and two lists of the same
+                // WADs would race to send them.
+                if self.state.mirror_bulk.is_some() {
+                    return;
+                }
+                let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                self.state.mirror_bulk = Some(crate::state::MirrorBulk {
+                    mirror: mirror.clone(),
+                    done: 0,
+                    total: 0,
+                    title: String::new(),
+                    cancel: std::sync::Arc::clone(&cancel),
+                });
+                mirrors::spawn_upload_all(
+                    self.bg.sender(),
+                    self.state.db_path.clone(),
+                    mirror,
+                    cancel,
+                );
             }
             ActionRequest::UploadToMirror { wad_id, mirror } => {
                 let title = caco_core::db::get_wad(&self.conn, wad_id, false)
@@ -741,6 +777,45 @@ impl eframe::App for CacoApp {
                     }
                     if let Some(notification) = mirrors::sync_notification(&report) {
                         self.state.notification = Some(notification);
+                    }
+                    self.state.mirror_report = Some(report);
+                    if let Some(ActiveDialog::Mirrors(dialog)) = &mut self.state.active_dialog {
+                        dialog.reload(&self.conn);
+                    }
+                }
+                AppMessage::MirrorProbed(outcome) => {
+                    if let Some(ActiveDialog::Mirrors(dialog)) = &mut self.state.active_dialog {
+                        dialog.probe_finished(outcome);
+                    }
+                }
+                AppMessage::MirrorSetUp { config, outcome } => {
+                    if let Some(ActiveDialog::Mirrors(dialog)) = &mut self.state.active_dialog
+                        && dialog.set_up_finished(&self.conn, *config, outcome)
+                    {
+                        mirrors::spawn_sync(self.bg.sender(), self.state.db_path.clone());
+                    }
+                }
+                AppMessage::MirrorBulkProgress { done, total, title } => {
+                    if let Some(bulk) = &mut self.state.mirror_bulk {
+                        bulk.done = done;
+                        bulk.total = total;
+                        bulk.title = title;
+                    }
+                }
+                AppMessage::MirrorBulkFinished(outcome) => {
+                    let mirror = self
+                        .state
+                        .mirror_bulk
+                        .take()
+                        .map(|bulk| bulk.mirror)
+                        .unwrap_or_default();
+                    self.state.notification = Some(mirrors::bulk_notification(&mirror, &outcome));
+                    self.state.invalidate_wad_views();
+                    if let Some(ActiveDialog::Mirrors(dialog)) = &mut self.state.active_dialog {
+                        match outcome {
+                            Ok(report) => dialog.bulk_finished(&self.conn, &mirror, report),
+                            Err(_) => dialog.reload(&self.conn),
+                        }
                     }
                 }
                 AppMessage::MirrorUploaded { title, outcome } => {

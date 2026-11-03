@@ -20,6 +20,7 @@ use std::collections::HashMap;
 use rusqlite::Connection;
 
 use super::connection::with_transaction;
+use super::models::{WAD_COLUMNS, WadRecord};
 use crate::Result;
 use crate::mirrors::MirrorEntry;
 use crate::source_url::canonical_page;
@@ -134,6 +135,42 @@ pub fn file_counts(conn: &Connection) -> Result<HashMap<String, i64>> {
         .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
         .collect::<std::result::Result<_, _>>()?;
     Ok(counts)
+}
+
+/// How many live WADs in the library `mirror` holds a file for.
+pub fn wads_held_by(conn: &Connection, mirror: &str) -> Result<i64> {
+    let count = conn.query_row(
+        concat!(
+            "SELECT COUNT(*) FROM wads WHERE deleted_at IS NULL AND EXISTS (SELECT 1 FROM (",
+            mirror_file_matches!(),
+            ") AS x WHERE x.mirror = ?1)"
+        ),
+        [mirror],
+        |row| row.get(0),
+    )?;
+    Ok(count)
+}
+
+/// The live WADs worth uploading to `mirror`: with a file on this machine, that idgames
+/// could not give back, and that it does not hold. By title, since a person reads this
+/// list before anything goes anywhere.
+///
+/// A WAD another mirror holds is still here, because the point of a second mirror is
+/// to have a second copy.
+pub fn wads_to_upload(conn: &Connection, mirror: &str) -> Result<Vec<WadRecord>> {
+    let mut stmt = conn.prepare(&format!(
+        concat!(
+            "SELECT {} FROM wads WHERE deleted_at IS NULL AND COALESCE(cached_path, '') <> '' ",
+            "AND NOT EXISTS (SELECT 1 FROM (",
+            mirror_file_matches!(),
+            ") AS x WHERE x.mirror = ?1) ORDER BY LOWER(title)"
+        ),
+        WAD_COLUMNS
+    ))?;
+    let wads = stmt
+        .query_map([mirror], WadRecord::from_row)?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(wads.into_iter().filter(|wad| !wad.on_idgames()).collect())
 }
 
 /// One mirror file as the tables hold it, which is how two can be compared.
@@ -360,6 +397,61 @@ mod tests {
         let counts = file_counts(&conn).unwrap();
         assert_eq!(counts.get(HOME), Some(&2));
         assert_eq!(counts.get("other"), Some(&1));
+    }
+
+    #[test]
+    fn test_a_mirror_counts_the_wads_it_holds() {
+        let conn = setup();
+        holds(&conn, &[file(HASH_A)]);
+        sync_files(&conn, "other", &[file(HASH_B)]).unwrap();
+        let held = add_hashed(&conn, "Held", HASH_A, HASH_A);
+        add_hashed(&conn, "On the other", HASH_B, HASH_B);
+        add_hashed(&conn, "On neither", HASH_C, HASH_C);
+        assert_eq!(wads_held_by(&conn, HOME).unwrap(), 1);
+
+        db::delete_wad(&conn, held, false).unwrap();
+        assert_eq!(
+            wads_held_by(&conn, HOME).unwrap(),
+            0,
+            "the trash does not count"
+        );
+    }
+
+    /// What gets listed, and offered, before a bulk upload.
+    #[test]
+    fn test_what_is_worth_uploading_to_a_mirror() {
+        let conn = setup();
+        let with_file = |new: NewWad| add(&conn, new.cached_path("/keep/file.wad"));
+        holds(&conn, &[file(HASH_A)]);
+        sync_files(&conn, "other", &[file(HASH_B)]).unwrap();
+
+        let plain = with_file(NewWad::new("b manual", SourceType::Doomworld));
+        let second = with_file(NewWad::new("A on the other", SourceType::Doomworld));
+        conn.execute(
+            "UPDATE wads SET file_size = 4, file_sha256 = ?1, file_sha1 = 'x',              content_sha256 = ?1 WHERE id = ?2",
+            rusqlite::params![HASH_B, second],
+        )
+        .unwrap();
+        let held = with_file(NewWad::new("held here", SourceType::Doomworld));
+        conn.execute(
+            "UPDATE wads SET file_size = 4, file_sha256 = ?1, file_sha1 = 'x',              content_sha256 = ?1 WHERE id = ?2",
+            rusqlite::params![HASH_A, held],
+        )
+        .unwrap();
+        with_file(NewWad::new("on idgames", SourceType::Idgames));
+        with_file(NewWad::new("has an idgames id", SourceType::Doomworld).idgames_id("7"));
+        add(&conn, NewWad::new("no file here", SourceType::Doomworld));
+        let trashed = with_file(NewWad::new("trashed", SourceType::Doomworld));
+        db::delete_wad(&conn, trashed, false).unwrap();
+
+        let ids: Vec<i64> = wads_to_upload(&conn, HOME)
+            .unwrap()
+            .into_iter()
+            .map(|wad| wad.id)
+            .collect();
+
+        // By title, and a copy on another mirror is no reason to leave one out.
+        assert_eq!(ids, [second, plain]);
     }
 
     #[test]

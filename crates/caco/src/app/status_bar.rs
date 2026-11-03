@@ -12,6 +12,16 @@ pub(super) fn render_status_bar(ui: &mut egui::Ui, state: &mut AppState) {
         }
 
         // Uploads to a mirror, which outlive any one notification.
+        if let Some(bulk) = &state.mirror_bulk {
+            ui.colored_label(
+                theme::TEXT_SECONDARY,
+                format!(
+                    "Uploading to {}: {} of {}...",
+                    bulk.mirror, bulk.done, bulk.total
+                ),
+            );
+            ui.separator();
+        }
         if let Some(uploading) = uploading_label(&state.uploads) {
             ui.colored_label(theme::TEXT_SECONDARY, uploading);
             ui.separator();

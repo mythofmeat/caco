@@ -13,9 +13,11 @@
 //! CACO_TEST_MIRROR_URL=http://127.0.0.1:38317/api/packages/tester/generic/doom-mirror \
 //!     cargo test -p caco-sources --test mirror_live -- --ignored --nocapture
 //!
-//! # A WebDAV server, whose 409 means something else entirely:
-//! rclone serve webdav --addr 127.0.0.1:38318 /tmp/some-empty-dir &
-//! CACO_TEST_MIRROR_URL=http://127.0.0.1:38318 \
+//! # A WebDAV server, whose 409 means something else entirely, and which wants a
+//! # username and password. The address names a folder that is not there yet:
+//! rclone serve webdav --addr 127.0.0.1:38318 --user doom --pass secret /tmp/some-empty-dir &
+//! CACO_TEST_MIRROR_URL=http://127.0.0.1:38318/doom-mirror \
+//! CACO_TEST_MIRROR_USER=doom CACO_TEST_MIRROR_TOKEN=secret \
 //!     cargo test -p caco-sources --test mirror_live -- --ignored --nocapture
 //! ```
 //!
@@ -28,7 +30,9 @@ use caco_core::config::MirrorConfig;
 use caco_core::db::{self, NewWad, SourceType, WadRecord, WadUpdate};
 use caco_core::identity;
 use caco_core::presence::StorePaths;
-use caco_sources::mirror::{fetch_from_mirrors, sync_mirrors, upload_wad};
+use caco_sources::mirror::{
+    fetch_from_mirrors, probe_mirror, set_up_mirror, sync_mirrors, upload_wad, upload_wads,
+};
 use rusqlite::Connection;
 
 const NOW: &str = "2026-11-03T00:00:00Z";
@@ -86,12 +90,24 @@ fn a_real_store_makes_the_whole_trip() {
     let mirror = MirrorConfig {
         name: "live".to_string(),
         url: Some(url),
+        username: std::env::var("CACO_TEST_MIRROR_USER").ok(),
         token_env: Some("CACO_TEST_MIRROR_TOKEN".to_string()),
         write: true,
         ..Default::default()
     };
     let mirrors = std::slice::from_ref(&mirror);
     let run = unique();
+
+    // What the setup wizard does: try it, which leaves nothing, then make it ready.
+    let probe = probe_mirror(&mirror).unwrap();
+    assert!(probe.is_ok(), "{probe:?}");
+    assert_eq!(probe.can_write, Some(Ok(())));
+    set_up_mirror(&mirror).unwrap();
+    let probe = probe_mirror(&mirror).unwrap();
+    assert!(
+        probe.files.is_some(),
+        "it should have an index now: {probe:?}"
+    );
 
     // One upload to create the index, and another to replace it, which is where the
     // stores differ. The names are what Gitea was seen to treat differently: this one
@@ -108,6 +124,13 @@ fn a_real_store_makes_the_whole_trip() {
 
     let second = here.wad_with_file(&awkward_name, &second_bytes, run + 1);
     upload_wad(&here.conn, second.id, &mirror, NOW).unwrap();
+
+    // What filling a new mirror does, for the WADs that are not on it yet.
+    let third_bytes = format!("PWAD third {run}").into_bytes();
+    let third = here.wad_with_file(&format!("third {run}.wad"), &third_bytes, run + 2);
+    let report = upload_wads(&here.conn, &[third], &mirror, NOW, &mut |_| {}, &|| false);
+    assert_eq!(report.uploaded, 1, "{report:?}");
+    assert_eq!(report.failed, []);
 
     // Uploading the same bytes again adds nothing new, and is no failure.
     let again = upload_wad(&here.conn, first.id, &mirror, NOW).unwrap();

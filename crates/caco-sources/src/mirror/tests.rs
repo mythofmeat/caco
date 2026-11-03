@@ -3,8 +3,8 @@
 
 use std::fs;
 
+use caco_core::config::SavedToken;
 use caco_core::db::{NewWad, SourceType, WadUpdate};
-use caco_core::mirrors::MirrorEntry;
 
 use super::test_server::{Flavor, TestServer};
 use super::*;
@@ -146,19 +146,26 @@ fn test_sync_reads_a_local_index_into_the_library() {
 
     let report = sync_mirrors(&m.conn, std::slice::from_ref(&config)).unwrap();
 
-    assert_eq!(
-        report,
-        SyncReport {
-            changed: true,
-            ..Default::default()
-        }
-    );
+    assert!(report.changed);
+    assert_eq!(report.failed, []);
+    assert_eq!(report.read, [("home".to_string(), 1)]);
     assert_eq!(rows_held(&m.conn, "home"), 1);
     // The ordinary launch: nothing new, and nothing written.
-    assert_eq!(
-        sync_mirrors(&m.conn, &[config]).unwrap(),
-        SyncReport::default()
-    );
+    let again = sync_mirrors(&m.conn, &[config]).unwrap();
+    assert!(!again.changed);
+    assert_eq!(again.read, [("home".to_string(), 1)]);
+}
+
+/// What lets the Mirrors dialog say "empty" rather than "not read".
+#[test]
+fn test_an_empty_mirror_is_read_and_says_so() {
+    let m = Machine::new();
+    let root = tempfile::tempdir().unwrap();
+
+    let report = sync_mirrors(&m.conn, &[local_mirror(root.path())]).unwrap();
+
+    assert_eq!(report.read, [("home".to_string(), 0)]);
+    assert_eq!(report.failed, []);
 }
 
 #[test]
@@ -1037,7 +1044,7 @@ fn test_a_token_is_sent_when_one_is_configured() {
     // SAFETY: test-only env mutation, on a variable only this test reads.
     unsafe { std::env::set_var(VAR, "sekrit") };
     let m = Machine::new();
-    let server = TestServer::start(Flavor::Registry, Some("sekrit"));
+    let server = TestServer::start(Flavor::Registry, Some("Bearer sekrit"));
     let config = MirrorConfig {
         token_env: Some(VAR.to_string()),
         ..http_mirror(&server)
@@ -1053,7 +1060,7 @@ fn test_a_token_is_sent_when_one_is_configured() {
 #[test]
 fn test_a_refusal_says_what_is_missing() {
     let m = Machine::new();
-    let server = TestServer::start(Flavor::Registry, Some("sekrit"));
+    let server = TestServer::start(Flavor::Registry, Some("Bearer sekrit"));
 
     let unset = MirrorConfig {
         token_env: Some("CACO_TEST_MIRROR_TOKEN_NEVER_SET".to_string()),
@@ -1071,7 +1078,16 @@ fn test_a_refusal_says_what_is_missing() {
     let failure = upload(&m, m.wad_with_file("b.wad", b"PWAD b"), &none)
         .unwrap_err()
         .to_string();
-    assert!(failure.contains("may need a token"), "{failure}");
+    assert!(failure.contains("needs a token or password"), "{failure}");
+
+    let wrong = MirrorConfig {
+        saved_token: Some(SavedToken("wrong".to_string())),
+        ..http_mirror(&server)
+    };
+    let failure = upload(&m, m.wad_with_file("c.wad", b"PWAD c"), &wrong)
+        .unwrap_err()
+        .to_string();
+    assert!(failure.contains("it refused the token"), "{failure}");
 }
 
 #[test]
@@ -1134,6 +1150,312 @@ fn test_a_conflict_that_is_not_the_file_being_there_is_not_success() {
 
     assert!(failure.contains("refused"), "{failure}");
     assert_eq!(server.file(&format!("{sha256}/road.zip")), None);
+}
+
+// -- Logging in --
+
+/// `doom:secret`, as a WebDAV server wants it.
+const BASIC_LOGIN: &str = "Basic ZG9vbTpzZWNyZXQ=";
+
+fn with_login(server: &TestServer) -> MirrorConfig {
+    MirrorConfig {
+        username: Some("doom".to_string()),
+        saved_token: Some(SavedToken("secret".to_string())),
+        ..http_mirror(server)
+    }
+}
+
+/// The WebDAV servers in common use answer a bearer token with a 401, so without this
+/// a mirror on one with a password could not be used at all.
+#[test]
+fn test_a_username_and_password_log_in_to_webdav() {
+    let m = Machine::new();
+    let server = TestServer::start(Flavor::Webdav, Some(BASIC_LOGIN));
+    let config = with_login(&server);
+
+    upload(&m, m.wad_with_file("road.zip", WAD_BYTES), &config).unwrap();
+
+    let elsewhere = Machine::new();
+    let report = sync_mirrors(&elsewhere.conn, std::slice::from_ref(&config)).unwrap();
+    assert_eq!(report.failed, []);
+    assert_eq!(rows_held(&elsewhere.conn, "home"), 1);
+}
+
+#[test]
+fn test_a_saved_token_goes_as_a_bearer_token_without_a_username() {
+    let m = Machine::new();
+    let server = TestServer::start(Flavor::Registry, Some("Bearer sekrit"));
+    let config = MirrorConfig {
+        saved_token: Some(SavedToken("sekrit".to_string())),
+        ..http_mirror(&server)
+    };
+
+    upload(&m, m.wad_with_file("road.zip", WAD_BYTES), &config).unwrap();
+
+    assert_eq!(read_back(&config).len(), 1);
+}
+
+// -- Setting up --
+
+#[test]
+fn test_a_new_mirror_probes_as_empty_and_writable() {
+    let root = tempfile::tempdir().unwrap();
+    let server = TestServer::start(Flavor::Registry, None);
+
+    for config in [local_mirror(root.path()), http_mirror(&server)] {
+        assert_eq!(
+            probe_mirror(&config),
+            Ok(MirrorProbe {
+                files: None,
+                folder_missing: false,
+                can_write: Some(Ok(())),
+            })
+        );
+    }
+}
+
+/// Trying a mirror must not leave anything behind on it.
+#[test]
+fn test_a_probe_leaves_nothing_on_the_mirror() {
+    let root = tempfile::tempdir().unwrap();
+    let local = local_mirror(root.path());
+    probe_mirror(&local).unwrap();
+    assert!(!root.path().join(WRITE_TEST_PATH).exists());
+    assert!(!root.path().join(INDEX_PATH).exists());
+
+    let server = TestServer::start(Flavor::Registry, None);
+    probe_mirror(&http_mirror(&server)).unwrap();
+    assert_eq!(server.file(WRITE_TEST_PATH), None);
+    assert_eq!(server.file(WRITE_TEST_SPARE_PATH), None);
+    assert_eq!(server.file(INDEX_PATH), None);
+}
+
+#[test]
+fn test_a_probe_reports_what_a_mirror_holds() {
+    let root = tempfile::tempdir().unwrap();
+    local_store_with(root.path(), &[entry_for(WAD_BYTES, "a.wad")], WAD_BYTES);
+
+    let probe = probe_mirror(&local_mirror(root.path())).unwrap();
+
+    assert_eq!(probe.files, Some(1));
+}
+
+#[test]
+fn test_a_folder_that_is_not_there_is_not_a_failure_until_it_cannot_be_made() {
+    let parent = tempfile::tempdir().unwrap();
+    let root = parent.path().join("new-mirror");
+
+    let probe = probe_mirror(&local_mirror(&root)).unwrap();
+
+    assert!(probe.folder_missing);
+    assert!(probe.is_ok());
+    assert!(!root.exists(), "trying it creates nothing");
+}
+
+#[test]
+fn test_a_file_is_not_a_folder() {
+    let parent = tempfile::tempdir().unwrap();
+    let file = parent.path().join("a-file");
+    fs::write(&file, b"x").unwrap();
+
+    let failure = probe_mirror(&local_mirror(&file)).unwrap_err();
+
+    assert!(failure.contains("is a file"), "{failure}");
+    assert!(set_up_mirror(&local_mirror(&file)).is_err());
+}
+
+/// The check that matters: a server can answer every read and take no writes, and
+/// finding that out at the first upload is too late.
+#[test]
+fn test_a_store_that_takes_no_writes_fails_a_probe_for_a_writable_mirror() {
+    let server = TestServer::start(Flavor::Static, None);
+    server.put(INDEX_PATH, index_listing(&[]).as_bytes());
+
+    let writable = probe_mirror(&http_mirror(&server)).unwrap();
+    assert!(!writable.is_ok());
+    let failure = writable.can_write.unwrap().unwrap_err();
+    assert!(failure.contains("HTTP 405"), "{failure}");
+
+    // Which is fine if it was never going to be asked to.
+    let read_only = MirrorConfig {
+        write: false,
+        ..http_mirror(&server)
+    };
+    let probe = probe_mirror(&read_only).unwrap();
+    assert!(probe.is_ok());
+    assert_eq!(probe.can_write, None);
+    assert_eq!(probe.files, Some(0));
+}
+
+#[test]
+fn test_a_wrong_password_fails_a_probe() {
+    let server = TestServer::start(Flavor::Webdav, Some(BASIC_LOGIN));
+    let config = MirrorConfig {
+        saved_token: Some(SavedToken("wrong".to_string())),
+        ..with_login(&server)
+    };
+
+    let failure = probe_mirror(&config).unwrap_err();
+
+    assert!(
+        failure.contains("it refused the token or password"),
+        "{failure}"
+    );
+}
+
+/// Everything the wizard's Finish does to a folder.
+#[test]
+fn test_setting_up_a_folder_creates_it_and_gives_it_an_index() {
+    let parent = tempfile::tempdir().unwrap();
+    let root = parent.path().join("deep/new-mirror");
+    let config = local_mirror(&root);
+
+    set_up_mirror(&config).unwrap();
+
+    assert!(root.join(INDEX_PATH).is_file());
+    assert_eq!(probe_mirror(&config).unwrap().files, Some(0));
+    let m = Machine::new();
+    let report = sync_mirrors(&m.conn, &[config]).unwrap();
+    assert_eq!(report.read, [("home".to_string(), 0)]);
+    assert_eq!(report.failed, []);
+}
+
+/// A registry only makes a package when something is put in it, so this is what makes
+/// a new mirror on one exist. And a store that will not overwrite is fine with it.
+#[test]
+fn test_setting_up_a_registry_mirror_writes_an_index() {
+    let server = TestServer::start(Flavor::Registry, None);
+    let config = http_mirror(&server);
+
+    set_up_mirror(&config).unwrap();
+    set_up_mirror(&config).unwrap();
+
+    assert!(server.file(INDEX_PATH).is_some());
+    assert_eq!(probe_mirror(&config).unwrap().files, Some(0));
+}
+
+/// A new mirror on Nextcloud has an address naming a folder that is not there yet, and
+/// its parent directory is not there for the index either.
+#[test]
+fn test_setting_up_webdav_makes_the_folder_its_address_names() {
+    let server = TestServer::start_without_root(Some(BASIC_LOGIN));
+    let config = with_login(&server);
+
+    let probe = probe_mirror(&config).unwrap();
+    assert_eq!(
+        probe.can_write,
+        Some(Ok(())),
+        "trying it works on a new folder"
+    );
+
+    set_up_mirror(&config).unwrap();
+
+    assert!(server.file(INDEX_PATH).is_some());
+    assert!(server.log().iter().any(|line| line == "MKCOL "));
+}
+
+/// Finishing the wizard on a mirror that is already in use must not touch what is
+/// there: a second machine set up the same way, for one.
+#[test]
+fn test_setting_up_a_mirror_that_has_an_index_leaves_it_alone() {
+    let root = tempfile::tempdir().unwrap();
+    let entries = [entry_for(WAD_BYTES, "a.wad")];
+    local_store_with(root.path(), &entries, WAD_BYTES);
+    let before = fs::read_to_string(root.path().join(INDEX_PATH)).unwrap();
+
+    set_up_mirror(&local_mirror(root.path())).unwrap();
+
+    assert_eq!(
+        fs::read_to_string(root.path().join(INDEX_PATH)).unwrap(),
+        before
+    );
+}
+
+/// There is nothing to write to a read-only mirror, and it must not be tried.
+#[test]
+fn test_setting_up_a_read_only_mirror_writes_nothing() {
+    let server = TestServer::start(Flavor::Static, None);
+    let config = MirrorConfig {
+        write: false,
+        ..http_mirror(&server)
+    };
+
+    set_up_mirror(&config).unwrap();
+
+    assert!(!server.log().iter().any(|line| line.starts_with("PUT")));
+}
+
+// -- Bulk uploads --
+
+fn no_progress(_: UploadProgress<'_>) {}
+
+#[test]
+fn test_a_bulk_upload_sends_each_wad_and_says_how_far_it_got() {
+    let m = Machine::new();
+    let root = tempfile::tempdir().unwrap();
+    let config = local_mirror(root.path());
+    m.wad_with_file("a.wad", b"PWAD a");
+    m.wad_with_file("b.wad", b"PWAD b");
+    let wads = db::mirrors::wads_to_upload(&m.conn, "home").unwrap();
+    assert_eq!(wads.len(), 2);
+
+    let mut seen = Vec::new();
+    let report = upload_wads(
+        &m.conn,
+        &wads,
+        &config,
+        NOW,
+        &mut |progress| seen.push((progress.done, progress.total)),
+        &|| false,
+    );
+
+    assert_eq!(report.uploaded, 2);
+    assert_eq!(report.failed, []);
+    assert!(!report.cancelled);
+    assert_eq!(seen, [(0, 2), (1, 2)]);
+    assert_eq!(read_back(&config).len(), 2);
+    assert_eq!(
+        db::mirrors::wads_to_upload(&m.conn, "home").unwrap().len(),
+        0
+    );
+}
+
+/// Each WAD is on the mirror or not by itself, so one bad file costs that one.
+#[test]
+fn test_a_wad_that_fails_does_not_stop_the_rest() {
+    let m = Machine::new();
+    let root = tempfile::tempdir().unwrap();
+    let config = local_mirror(root.path());
+    let gone = m.wad_with_file("a.wad", b"PWAD a");
+    m.wad_with_file("b.wad", b"PWAD b");
+    fs::remove_file(m.row(gone).cached_path.unwrap()).unwrap();
+    let wads = db::mirrors::wads_to_upload(&m.conn, "home").unwrap();
+
+    let report = upload_wads(&m.conn, &wads, &config, NOW, &mut no_progress, &|| false);
+
+    assert_eq!(report.uploaded, 1);
+    assert_eq!(report.failed.len(), 1);
+    assert_eq!(report.failed[0].0, "Lonesome Road");
+}
+
+#[test]
+fn test_a_cancelled_bulk_upload_keeps_what_it_did() {
+    let m = Machine::new();
+    let root = tempfile::tempdir().unwrap();
+    let config = local_mirror(root.path());
+    m.wad_with_file("a.wad", b"PWAD a");
+    m.wad_with_file("b.wad", b"PWAD b");
+    let wads = db::mirrors::wads_to_upload(&m.conn, "home").unwrap();
+
+    let asked = std::cell::Cell::new(0);
+    let report = upload_wads(&m.conn, &wads, &config, NOW, &mut no_progress, &|| {
+        asked.set(asked.get() + 1);
+        asked.get() > 1
+    });
+
+    assert!(report.cancelled);
+    assert_eq!(report.uploaded, 1);
+    assert_eq!(read_back(&config).len(), 1);
 }
 
 // -- The whole trip --

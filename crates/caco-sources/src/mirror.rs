@@ -3,9 +3,9 @@
 //!
 //! A mirror is a directory or an HTTP file store, and [`Store`] is the only thing
 //! here that knows which. Everything an HTTP store does is plain `GET`, `PUT`,
-//! `HEAD` and `DELETE` with an optional bearer token, so a static file server (read
-//! only), a WebDAV server and Gitea's generic package registry all work, and they
-//! differ in only two ways, both handled in [`Store`]:
+//! `HEAD` and `DELETE`, with a bearer token or a username and password, so a static
+//! file server (read only), a WebDAV server and Gitea's generic package registry all
+//! work, and they differ in only two ways, both handled in [`Store`]:
 //!
 //! - A `409` from a `PUT` means the file is already there on a registry, and that
 //!   its parent directory is not on WebDAV. Which one is found out by asking.
@@ -57,6 +57,12 @@ const MAX_INDEX_BYTES: u64 = 64 << 20;
 /// replaces the real one.
 const SPARE_INDEX_PATH: &str = "index/index.json.new";
 
+/// What a check that caco can write to a store writes, and takes away again. In the
+/// index's directory, which exists on every mirror caco has set up and which a
+/// registry takes for a version, and under a name that is nothing else.
+const WRITE_TEST_PATH: &str = "index/caco-write-test";
+const WRITE_TEST_SPARE_PATH: &str = "index/caco-write-test.new";
+
 /// Held around reading an index and acting on it, so two uploads in this process
 /// cannot both read the index and have the second write away the first's entry, and
 /// a sync cannot write back rows an upload has just replaced. Another machine can
@@ -90,10 +96,35 @@ enum Store {
     Http {
         root: String,
         client: Client,
-        token: Option<String>,
+        auth: Auth,
         /// The variable the token should have come from, to say so when it did not.
         token_env: Option<String>,
     },
+}
+
+/// How to log in to an HTTP store. A bearer token where a store takes one, as Gitea
+/// does, and a username and password where it does not: the WebDAV servers in common
+/// use answer a bearer token with a 401.
+enum Auth {
+    None,
+    Bearer(String),
+    Basic {
+        username: String,
+        password: Option<String>,
+    },
+}
+
+impl Auth {
+    fn of(config: &MirrorConfig) -> Self {
+        match (config.login(), config.token()) {
+            (Some(username), password) => Auth::Basic {
+                username: username.to_string(),
+                password,
+            },
+            (None, Some(token)) => Auth::Bearer(token),
+            (None, None) => Auth::None,
+        }
+    }
 }
 
 /// What a `PUT` found out.
@@ -118,7 +149,7 @@ impl Store {
                     .user_agent(USER_AGENT)
                     .build()
                     .map_err(|e| e.to_string())?,
-                token: config.token(),
+                auth: Auth::of(config),
                 token_env: config.token_env_name().map(str::to_string),
             },
         })
@@ -320,7 +351,7 @@ impl Store {
         }
         if !self.has_any_file(path)? {
             // WebDAV's 409: there is no directory for it to go in yet.
-            self.make_parent_dir(path);
+            self.make_parent_dirs(path);
             return match self.put_text(path, text)? {
                 Put::Stored => Ok(()),
                 _ => Err(format!("it refused {path}")),
@@ -359,6 +390,14 @@ impl Store {
 
     /// Remove the file at `path`, if there is one.
     fn delete(&self, path: &str) -> StoreResult<()> {
+        if let Store::Local { root } = self {
+            return match fs::remove_file(root.join(path)) {
+                Err(e) if e.kind() != io::ErrorKind::NotFound => {
+                    Err(format!("could not remove {path}: {e}"))
+                }
+                _ => Ok(()),
+            };
+        }
         let response = self.send(self.http_request(Method::DELETE, path)?)?;
         if response.status() == StatusCode::NOT_FOUND {
             return Ok(());
@@ -367,17 +406,47 @@ impl Store {
     }
 
     /// Ask a WebDAV server for the directory `path` goes in. A store that is not one
-    /// says no, which the `PUT` this comes before will report if it matters.
-    fn make_parent_dir(&self, path: &str) {
+    /// says no, which the `PUT` this comes before will report if it matters. A 409 from
+    /// this means the mirror's own folder is not there yet either, as on a new mirror
+    /// whose address names one.
+    fn make_parent_dirs(&self, path: &str) {
         let Some((parent, _)) = path.rsplit_once('/') else {
             return;
         };
-        let Ok(method) = Method::from_bytes(b"MKCOL") else {
-            return;
-        };
-        if let Ok(request) = self.http_request(method, &format!("{parent}/")) {
-            let _ = self.send(request);
+        if self.make_dir(parent) == Some(StatusCode::CONFLICT) {
+            self.make_dir("");
+            self.make_dir(parent);
         }
+    }
+
+    /// `MKCOL`, for a directory under the mirror's root, or the root for `""`. What the
+    /// store answered, if it answered.
+    fn make_dir(&self, path: &str) -> Option<StatusCode> {
+        let method = Method::from_bytes(b"MKCOL").ok()?;
+        let request = self.http_request(method, &format!("{path}/")).ok()?;
+        self.send(request).ok().map(|response| response.status())
+    }
+
+    /// Make the place a new mirror goes, if the store can: the folder on a local store,
+    /// and on a WebDAV one too if its address names one. A registry makes its package
+    /// on the first upload and has no such step.
+    fn create_root(&self) -> StoreResult<()> {
+        match self {
+            Store::Local { root } => fs::create_dir_all(root)
+                .map_err(|e| format!("could not create {}: {e}", root.display())),
+            Store::Http { .. } => {
+                // A store that has no such thing says so, and one that already has it
+                // says that. Either way the next step finds out if it matters.
+                self.make_dir("");
+                Ok(())
+            }
+        }
+    }
+
+    /// Whether anything can be written here, found out by writing something.
+    fn check_writable(&self) -> StoreResult<()> {
+        self.replace_file(WRITE_TEST_PATH, WRITE_TEST_SPARE_PATH, "caco was here\n")?;
+        self.delete(WRITE_TEST_PATH)
     }
 
     /// Store a WAD's file, returning the name it was stored under when that is not
@@ -410,7 +479,7 @@ impl Store {
                 if self.has_file(path, size)? {
                     return Ok(true);
                 }
-                self.make_parent_dir(path);
+                self.make_parent_dirs(path);
                 match self.put_file(path, src, size)? {
                     Put::Stored => Ok(true),
                     Put::NameRefused => Ok(false),
@@ -422,10 +491,7 @@ impl Store {
 
     fn http_request(&self, method: Method, path: &str) -> StoreResult<RequestBuilder> {
         let Store::Http {
-            root,
-            client,
-            token,
-            ..
+            root, client, auth, ..
         } = self
         else {
             return Err("not an HTTP mirror".to_string());
@@ -435,9 +501,10 @@ impl Store {
             .map(|segment| urlencoding::encode(segment).into_owned())
             .collect();
         let request = client.request(method, format!("{root}/{}", segments.join("/")));
-        Ok(match token {
-            Some(token) => request.bearer_auth(token),
-            None => request,
+        Ok(match auth {
+            Auth::None => request,
+            Auth::Bearer(token) => request.bearer_auth(token),
+            Auth::Basic { username, password } => request.basic_auth(username, password.as_ref()),
         })
     }
 
@@ -455,17 +522,28 @@ impl Store {
             return Ok(response);
         }
         let Store::Http {
-            token, token_env, ..
+            auth, token_env, ..
         } = self
         else {
             return Ok(response);
         };
-        // Most of what goes wrong setting up a mirror for the first time, and a GUI
-        // app often does not inherit what a shell's rc file exports.
+        // Most of what goes wrong setting up a mirror for the first time, and on the
+        // second machine a data dir reaches: the config travels, and a token does not.
         let refused = status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN;
-        Err(match (refused, token_env, token) {
-            (true, Some(name), None) => format!("HTTP {status}: {name} is not set"),
-            (true, None, None) => format!("HTTP {status}: it may need a token (token_env)"),
+        let missing = !matches!(
+            auth,
+            Auth::Bearer(_)
+                | Auth::Basic {
+                    password: Some(_),
+                    ..
+                }
+        );
+        Err(match (refused, missing, token_env) {
+            (true, true, Some(name)) => format!("HTTP {status}: {name} is not set"),
+            (true, true, None) => {
+                format!("HTTP {status}: it needs a token or password, which Mirrors can save")
+            }
+            (true, false, _) => format!("HTTP {status}: it refused the token or password"),
             _ => format!("HTTP {status}"),
         })
     }
@@ -523,6 +601,10 @@ pub struct SyncReport {
     /// about what is on it, and a laptop away from home should not see half its
     /// library go manual.
     pub failed: Vec<(String, String)>,
+    /// Mirrors whose index was read, as `(name, how many files it lists)`. A mirror
+    /// holding nothing is here with a zero, which is how to tell one that is empty from
+    /// one that has not been read.
+    pub read: Vec<(String, usize)>,
     /// Index entries that could not be used, and were left out.
     pub skipped: usize,
 }
@@ -566,11 +648,94 @@ pub fn sync_mirrors(
                 let (entries, skipped) = index.unwrap_or_default().entries();
                 report.skipped += skipped;
                 report.changed |= mirrors::sync_files(conn, &mirror.name, &entries)?;
+                report.read.push((mirror.name.clone(), entries.len()));
             }
             Err(why) => report.failed.push((mirror.name.clone(), why)),
         }
     }
     Ok(report)
+}
+
+// ---------------------------------------------------------------------------
+// Setting up
+// ---------------------------------------------------------------------------
+
+/// What trying a mirror found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MirrorProbe {
+    /// How many files its index lists, or `None` if it has no index: a new mirror.
+    pub files: Option<usize>,
+    /// It is a local folder that is not there. Setting it up creates it.
+    pub folder_missing: bool,
+    /// Whether caco could write to it, if it was asked to and could tell.
+    pub can_write: Option<std::result::Result<(), String>>,
+}
+
+impl MirrorProbe {
+    /// Whether nothing stands in the way of using this mirror as configured.
+    pub fn is_ok(&self) -> bool {
+        !matches!(self.can_write, Some(Err(_)))
+    }
+}
+
+/// Try a mirror before relying on it, leaving nothing behind: read its index, and if
+/// caco is meant to upload, write a small file and remove it again. So a passing probe
+/// means this configuration will work, and not just that a server answered.
+///
+/// Takes the config rather than a name, because the mirror being tried is usually not
+/// saved yet. Run it off the UI thread, since it is a few requests, and however long a
+/// server that has gone takes to fail. It takes no lock, because it writes nothing the
+/// index depends on, and a bulk upload to another mirror should not make it wait.
+pub fn probe_mirror(config: &MirrorConfig) -> std::result::Result<MirrorProbe, String> {
+    let store = Store::open(config)?;
+    if let Store::Local { root } = &store
+        && !root.exists()
+    {
+        return Ok(MirrorProbe {
+            files: None,
+            folder_missing: true,
+            can_write: None,
+        });
+    }
+    if let Store::Local { root } = &store
+        && !root.is_dir()
+    {
+        return Err(format!("{} is a file, not a folder", root.display()));
+    }
+
+    let files = store.read_index()?.map(|index| index.entries().0.len());
+    let can_write = config.write.then(|| store.check_writable());
+    Ok(MirrorProbe {
+        files,
+        folder_missing: false,
+        can_write,
+    })
+}
+
+/// Make a mirror ready to use: create its folder if it is a local one that is not
+/// there, and if caco is meant to write to it and it has no index, give it an empty
+/// one. Leaves a mirror that already has an index as it is.
+///
+/// Only the setup wizard calls this, when someone has said they want a mirror there.
+/// An upload must not create a folder, because to an upload a missing one means a drive
+/// that is not mounted.
+pub fn set_up_mirror(config: &MirrorConfig) -> Result<()> {
+    let fail = |message: String| mirror_error(&config.name, message);
+    let store = Store::open(config).map_err(fail)?;
+    store.create_root().map_err(fail)?;
+    if config.write {
+        let _lock = lock_index();
+        if store.read_index().map_err(fail)?.is_none() {
+            store
+                .replace_file(
+                    INDEX_PATH,
+                    SPARE_INDEX_PATH,
+                    &MirrorIndex::default().to_json(),
+                )
+                .map_err(fail)?;
+        }
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -781,6 +946,59 @@ pub fn upload_wad(
         filename,
         already_there,
     })
+}
+
+/// Where a bulk upload has got to.
+#[derive(Debug)]
+pub struct UploadProgress<'a> {
+    /// How many are finished, so that `done / total` drives a progress bar directly.
+    pub done: usize,
+    pub total: usize,
+    /// The WAD being uploaded now.
+    pub title: &'a str,
+}
+
+/// What a bulk upload did.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UploadReport {
+    pub uploaded: usize,
+    /// The WADs that did not make it, as `(title, why)`. One failing does not stop the
+    /// rest, since each is on the mirror or not by itself.
+    pub failed: Vec<(String, String)>,
+    pub cancelled: bool,
+}
+
+/// Upload each of `wads` to a mirror, one at a time.
+///
+/// The worker's idea of a transaction, as in `enrich_service`: each WAD is finished
+/// and in the index before the next one starts, so cancelling, or closing the app, is
+/// just a shorter run. That costs one rewrite of the index per WAD, which is nothing
+/// next to sending the files.
+pub fn upload_wads(
+    conn: &Connection,
+    wads: &[WadRecord],
+    mirror: &MirrorConfig,
+    added: &str,
+    progress: &mut dyn FnMut(UploadProgress<'_>),
+    cancelled: &dyn Fn() -> bool,
+) -> UploadReport {
+    let mut report = UploadReport::default();
+    for (done, wad) in wads.iter().enumerate() {
+        if cancelled() {
+            report.cancelled = true;
+            break;
+        }
+        progress(UploadProgress {
+            done,
+            total: wads.len(),
+            title: &wad.title,
+        });
+        match upload_wad(conn, wad.id, mirror, added) {
+            Ok(_) => report.uploaded += 1,
+            Err(e) => report.failed.push((wad.title.clone(), e.to_string())),
+        }
+    }
+    report
 }
 
 #[cfg(test)]

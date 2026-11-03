@@ -28,6 +28,8 @@ struct State {
     fail_once: Vec<(String, String, u16)>,
     /// Extra headers on every response.
     headers: Vec<(String, String)>,
+    /// Whether a WebDAV store has the folder its address names.
+    root_exists: bool,
 }
 
 /// One running server. It lives until the test process does.
@@ -35,19 +37,32 @@ struct State {
 pub(crate) struct TestServer {
     pub(crate) url: String,
     flavor: Flavor,
-    token: Option<String>,
+    /// The whole `Authorization` header it wants, if it wants one.
+    login: Option<String>,
     state: Arc<Mutex<State>>,
 }
 
 impl TestServer {
-    pub(crate) fn start(flavor: Flavor, token: Option<&str>) -> Self {
+    pub(crate) fn start(flavor: Flavor, login: Option<&str>) -> Self {
+        Self::start_with(flavor, login, false)
+    }
+
+    /// A WebDAV store whose address names a folder that is not there yet.
+    pub(crate) fn start_without_root(login: Option<&str>) -> Self {
+        Self::start_with(Flavor::Webdav, login, true)
+    }
+
+    fn start_with(flavor: Flavor, login: Option<&str>, missing_root: bool) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/root", listener.local_addr().unwrap());
         let server = Self {
             url,
             flavor,
-            token: token.map(str::to_string),
-            state: Arc::new(Mutex::new(State::default())),
+            login: login.map(str::to_string),
+            state: Arc::new(Mutex::new(State {
+                root_exists: flavor != Flavor::Webdav || !missing_root,
+                ..Default::default()
+            })),
         };
         let handle = server.clone();
         std::thread::spawn(move || {
@@ -179,12 +194,10 @@ impl TestServer {
             return (status, Vec::new(), 0);
         }
 
-        let authorized = match &self.token {
-            None => true,
-            Some(token) => authorization == Some(format!("Bearer {token}").as_str()),
-        };
+        let authorized = self.login.is_none() || authorization == self.login.as_deref();
+        // A registry can have public reads, and a WebDAV server with a password has none.
         let is_write = !matches!(method, "GET" | "HEAD");
-        if is_write && !authorized {
+        if (is_write || self.flavor == Flavor::Webdav) && !authorized {
             return (401, Vec::new(), 0);
         }
 
@@ -226,6 +239,9 @@ impl TestServer {
                 {
                     return (409, Vec::new(), 0);
                 }
+                if !state.root_exists {
+                    return (409, Vec::new(), 0);
+                }
                 let existed = state
                     .files
                     .insert(path.to_string(), body.to_vec())
@@ -233,6 +249,13 @@ impl TestServer {
                 (if existed { 204 } else { 201 }, Vec::new(), 0)
             }
             (Flavor::Webdav, "MKCOL") => {
+                if path.is_empty() {
+                    state.root_exists = true;
+                    return (201, Vec::new(), 0);
+                }
+                if !state.root_exists {
+                    return (409, Vec::new(), 0);
+                }
                 state.dirs.push(path.to_string());
                 (201, Vec::new(), 0)
             }

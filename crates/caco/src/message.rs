@@ -106,6 +106,21 @@ pub enum AppMessage {
     FilesIdentified,
     /// Every mirror's index has been read, or tried.
     MirrorsSynced(caco_sources::mirror::SyncReport),
+    /// A test of the mirror in the setup wizard finished.
+    MirrorProbed(Result<caco_sources::mirror::MirrorProbe, String>),
+    /// Setting up the mirror in the wizard finished, for this config.
+    MirrorSetUp {
+        config: Box<caco_core::config::MirrorConfig>,
+        outcome: Result<(), String>,
+    },
+    /// A bulk upload moved on to another WAD. `done` counts WADs already finished.
+    MirrorBulkProgress {
+        done: usize,
+        total: usize,
+        title: String,
+    },
+    /// A bulk upload finished, or could not start.
+    MirrorBulkFinished(Result<caco_sources::mirror::UploadReport, String>),
     /// An upload to a mirror finished. Which WAD by title, since the status bar
     /// lists what is in flight by title.
     MirrorUploaded {

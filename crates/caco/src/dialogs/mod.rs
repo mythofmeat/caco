@@ -11,6 +11,8 @@ pub mod file_changed;
 pub mod gc;
 pub mod link;
 pub mod mirror_offer;
+pub mod mirror_setup;
+pub mod mirrors;
 pub mod profiles;
 pub mod resources;
 pub mod sessions;

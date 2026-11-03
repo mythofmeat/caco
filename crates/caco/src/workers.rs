@@ -126,6 +126,8 @@ pub enum FileDialogKind {
     Open,
     /// Save-as picker; `default_filename` is pre-filled.
     Save,
+    /// Pick a folder.
+    Folder,
 }
 
 /// Description of a file-picker invocation. Built up and passed to
@@ -160,6 +162,16 @@ impl FileDialogRequest {
             start_dir: None,
             default_filename: None,
             kind: FileDialogKind::Save,
+        }
+    }
+
+    /// Build a new folder-picker request.
+    pub fn folder() -> Self {
+        Self {
+            filters: Vec::new(),
+            start_dir: None,
+            default_filename: None,
+            kind: FileDialogKind::Folder,
         }
     }
 
@@ -203,6 +215,7 @@ pub fn spawn_file_dialog(ctx: Option<egui::Context>, req: FileDialogRequest) -> 
         let result = match req.kind {
             FileDialogKind::Open => dialog.pick_file(),
             FileDialogKind::Save => dialog.save_file(),
+            FileDialogKind::Folder => dialog.pick_folder(),
         };
         let _ = tx.send(result);
         if let Some(ctx) = ctx {

@@ -17,6 +17,7 @@ use crate::dialogs::enrich::EnrichDialogState;
 use crate::dialogs::file_changed::FileChangedDialogState;
 use crate::dialogs::link::LinkDialogState;
 use crate::dialogs::mirror_offer::MirrorOfferDialogState;
+use crate::dialogs::mirrors::MirrorsDialogState;
 use crate::dialogs::profiles::ProfilesDialogState;
 use crate::dialogs::resources::ResourcesDialogState;
 use crate::dialogs::sessions::SessionsDialogState;
@@ -114,14 +115,26 @@ pub enum ActionRequest {
     /// "not yet supported by caco".
     SetCacowardSupported(i64, bool),
 
+    /// Open the mirrors tool, which starts on the setup wizard if there are none.
+    Mirrors,
+
     /// Read every mirror's index again, because the list of mirrors may have changed.
     SyncMirrors,
+
+    /// Try a mirror the wizard is setting up, on a worker thread.
+    ProbeMirror(Box<caco_core::config::MirrorConfig>),
+
+    /// Make a mirror the wizard is setting up ready to use, on a worker thread.
+    SetUpMirror(Box<caco_core::config::MirrorConfig>),
 
     /// Upload a WAD's file to a mirror, on a worker thread.
     UploadToMirror {
         wad_id: i64,
         mirror: String,
     },
+
+    /// Upload everything worth uploading to a mirror, on a worker thread.
+    UploadAllToMirror(String),
 }
 
 // ---------------------------------------------------------------------------
@@ -144,6 +157,8 @@ pub enum ActiveDialog {
     Link(LinkDialogState),
     /// Asked once a WAD nothing could fetch again has a file here.
     MirrorOffer(MirrorOfferDialogState),
+    /// The mirrors tool, with its setup wizard.
+    Mirrors(Box<MirrorsDialogState>),
     /// Asked before launching a WAD whose file has changed since it was last
     /// played.
     FileChanged(FileChangedDialogState),
@@ -249,6 +264,32 @@ pub struct AppState {
 
     /// Titles of the WADs being uploaded to a mirror right now, for the status bar.
     pub uploads: Vec<String>,
+
+    /// A bulk upload in progress. Here rather than in the mirrors dialog, because it
+    /// outlives the dialog being closed.
+    pub mirror_bulk: Option<MirrorBulk>,
+
+    /// What the last read of every mirror's index found, for the mirrors dialog to say.
+    /// `None` until the first one, at startup, has finished.
+    pub mirror_report: Option<caco_sources::mirror::SyncReport>,
+}
+
+/// Where a bulk upload to a mirror has got to.
+pub struct MirrorBulk {
+    pub mirror: String,
+    pub done: usize,
+    pub total: usize,
+    /// The WAD going up now.
+    pub title: String,
+    /// Shared with the worker, which stops between WADs when this is set.
+    pub cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl MirrorBulk {
+    pub fn stop(&self) {
+        self.cancel
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
 }
 
 /// Backing data for [`ViewMode::Stats`].
@@ -393,6 +434,8 @@ impl AppState {
             stats: StatsState::default(),
             mirror_offers: VecDeque::new(),
             uploads: Vec::new(),
+            mirror_bulk: None,
+            mirror_report: None,
         }
     }
 

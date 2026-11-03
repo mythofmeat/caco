@@ -201,6 +201,29 @@ pub fn cacoward_data_dir() -> PathBuf {
     default_data_dir().join("cacowards")
 }
 
+/// Where tokens pasted into caco for its mirrors are saved: see
+/// [`crate::mirror_tokens`], which says why this is on neither side of the data split.
+///
+/// `CACO_TOKEN_FILE` overrides it. So does `CACO_HOME`, which is a complete isolation
+/// switch, though beside that directory rather than in it: a `CACO_HOME` can be a real
+/// library in a git repository as easily as a scratch one.
+pub fn mirror_token_file() -> PathBuf {
+    if let Ok(p) = std::env::var("CACO_TOKEN_FILE") {
+        return PathBuf::from(p);
+    }
+    if let Ok(home) = std::env::var("CACO_HOME") {
+        let home = PathBuf::from(home);
+        if let Some(name) = home.file_name() {
+            let beside = format!("{}.mirror-tokens.toml", name.to_string_lossy());
+            return home.with_file_name(beside);
+        }
+    }
+    dirs::preference_dir()
+        .unwrap_or_else(|| home_dir().join(".config"))
+        .join("caco")
+        .join("mirror-tokens.toml")
+}
+
 /// Root of the managed sourceport install prefixes.
 ///
 /// Cache side: a built sourceport is regenerable from its recipe, and the
@@ -315,11 +338,28 @@ pub struct MirrorConfig {
     pub url: Option<String>,
     /// Its root on a filesystem. A mirror has this or a `url`.
     pub path: Option<String>,
-    /// The environment variable holding a bearer token, so that the token itself
-    /// is not in a file meant to be copied between machines.
+    /// The login, for a store that wants a username and password, as WebDAV servers
+    /// do. The token is the password then. Without this it goes as a bearer token.
+    pub username: Option<String>,
+    /// The environment variable holding the token, for those who would rather it was
+    /// not saved anywhere. Wins over a saved one.
     pub token_env: Option<String>,
     /// Whether caco may upload to it.
     pub write: bool,
+    /// The token saved on this machine, read from [`mirror_token_file`] along with
+    /// the config. Never written to the config, which is meant to travel.
+    #[serde(skip)]
+    pub saved_token: Option<SavedToken>,
+}
+
+/// A token, kept out of anything that prints a config.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct SavedToken(pub String);
+
+impl std::fmt::Debug for SavedToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SavedToken(..)")
+    }
 }
 
 /// Where a mirror's root is, once [`MirrorConfig::location`] has checked it.
@@ -359,11 +399,20 @@ impl MirrorConfig {
         }
     }
 
-    /// The bearer token to present, if one is configured and set.
+    /// The token or password to present, if there is one on this machine.
     pub fn token(&self) -> Option<String> {
-        std::env::var(self.token_env_name()?)
-            .ok()
+        self.token_env_name()
+            .and_then(|name| std::env::var(name).ok())
             .filter(|token| !token.is_empty())
+            .or_else(|| self.saved_token.as_ref().map(|token| token.0.clone()))
+    }
+
+    /// The username to log in with, if the store wants one.
+    pub fn login(&self) -> Option<&str> {
+        self.username
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
     }
 
     /// The name of the variable the token should be in, if it should be in one.
@@ -373,26 +422,6 @@ impl MirrorConfig {
             .map(str::trim)
             .filter(|name| !name.is_empty())
     }
-}
-
-/// Whether a list of mirrors can be used as it stands. For the Settings dialog,
-/// which says so before saving. A hand-edited file gets the same answer per mirror,
-/// when the sync reads it.
-pub fn check_mirrors(mirrors: &[MirrorConfig]) -> Result<(), String> {
-    let mut seen = std::collections::HashSet::new();
-    for mirror in mirrors {
-        let name = mirror.name.trim();
-        if name.is_empty() {
-            return Err("Every mirror needs a name".to_string());
-        }
-        if !seen.insert(name) {
-            return Err(format!("There are two mirrors called {name}"));
-        }
-        mirror
-            .location()
-            .map_err(|problem| format!("Mirror {name}: {problem}"))?;
-    }
-    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -468,7 +497,10 @@ fn read_config_from_disk() -> Config {
     }
     match fs::read_to_string(&path) {
         Ok(contents) => match toml::from_str::<Config>(&contents) {
-            Ok(cfg) => cfg,
+            Ok(mut cfg) => {
+                attach_saved_tokens(&mut cfg);
+                cfg
+            }
             Err(e) => {
                 eprintln!("Warning: Invalid TOML syntax in {}: {e}", path.display());
                 eprintln!("Warning: Using default configuration.");
@@ -480,6 +512,18 @@ fn read_config_from_disk() -> Config {
             eprintln!("Warning: Using default configuration.");
             Config::default()
         }
+    }
+}
+
+/// Give each mirror the token saved for it on this machine. Only read if there is a
+/// mirror, so that a config with none touches nothing outside the data dir.
+fn attach_saved_tokens(config: &mut Config) {
+    if config.mirrors.is_empty() {
+        return;
+    }
+    let tokens = crate::mirror_tokens::TokenFile::from_config().read();
+    for mirror in &mut config.mirrors {
+        mirror.saved_token = tokens.get(&mirror.name).cloned().map(SavedToken);
     }
 }
 
@@ -1378,6 +1422,40 @@ path = "/mnt/nas/doom-mirror"
     }
 
     #[test]
+    fn test_a_saved_token_never_reaches_the_config_file() {
+        let cfg = Config {
+            mirrors: vec![MirrorConfig {
+                saved_token: Some(SavedToken("sekrit".to_string())),
+                ..mirror(Some("https://example.lan/doom"), None)
+            }],
+            ..Default::default()
+        };
+
+        let rendered = minimal_toml(&cfg).unwrap();
+
+        assert!(rendered.contains("[[mirrors]]"), "{rendered}");
+        assert!(!rendered.contains("sekrit"), "{rendered}");
+        assert!(!format!("{cfg:?}").contains("sekrit"));
+    }
+
+    #[test]
+    fn test_mirror_tokens_stay_out_of_the_data_dir() {
+        assert!(!mirror_token_file().starts_with(default_data_dir()));
+        assert!(!mirror_token_file().starts_with(cache_home()));
+    }
+
+    #[test]
+    fn test_a_mirrors_login_is_a_username_if_it_has_one() {
+        let login = |username: Option<&str>| MirrorConfig {
+            username: username.map(str::to_string),
+            ..Default::default()
+        };
+        assert_eq!(login(Some(" doom ")).login(), Some("doom"));
+        assert_eq!(login(Some("  ")).login(), None);
+        assert_eq!(login(None).login(), None);
+    }
+
+    #[test]
     fn test_a_mirrors_token_comes_from_its_environment_variable() {
         const VAR: &str = "CACO_TEST_MIRROR_TOKEN_READ";
         let configured = MirrorConfig {
@@ -1389,8 +1467,14 @@ path = "/mnt/nas/doom-mirror"
         // SAFETY: test-only env mutation, on a variable only this test reads.
         unsafe { std::env::set_var(VAR, "sekrit") };
         assert_eq!(configured.token().as_deref(), Some("sekrit"));
+        let both = MirrorConfig {
+            saved_token: Some(SavedToken("saved".to_string())),
+            ..configured.clone()
+        };
+        assert_eq!(both.token().as_deref(), Some("sekrit"), "the variable wins");
         unsafe { std::env::set_var(VAR, "") };
         assert_eq!(configured.token(), None, "an empty token is no token");
+        assert_eq!(both.token().as_deref(), Some("saved"));
         unsafe { std::env::remove_var(VAR) };
 
         let blank = MirrorConfig {
@@ -1399,29 +1483,6 @@ path = "/mnt/nas/doom-mirror"
         };
         assert_eq!(blank.token_env_name(), None);
         assert_eq!(MirrorConfig::default().token_env_name(), None);
-    }
-
-    #[test]
-    fn test_check_mirrors_finds_what_would_not_work() {
-        let good = mirror(Some("https://example.lan"), None);
-        assert_eq!(check_mirrors(&[]), Ok(()));
-        assert_eq!(check_mirrors(std::slice::from_ref(&good)), Ok(()));
-
-        let unnamed = MirrorConfig {
-            name: " ".to_string(),
-            ..good.clone()
-        };
-        assert!(
-            check_mirrors(&[unnamed])
-                .unwrap_err()
-                .contains("needs a name")
-        );
-
-        let twice = check_mirrors(&[good.clone(), good.clone()]).unwrap_err();
-        assert!(twice.contains("two mirrors called home"), "{twice}");
-
-        let nowhere = check_mirrors(&[mirror(None, None)]).unwrap_err();
-        assert!(nowhere.starts_with("Mirror home:"), "{nowhere}");
     }
 
     #[test]

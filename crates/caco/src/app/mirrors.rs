@@ -1,9 +1,12 @@
 //! Talking to the user's mirrors off the UI thread, and what that tells the user.
 
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use caco_core::config;
-use caco_sources::mirror::{self, SyncReport, Uploaded};
+use caco_core::config::{self, MirrorConfig};
+use caco_core::db::mirrors;
+use caco_sources::mirror::{self, SyncReport, UploadProgress, UploadReport, Uploaded};
 
 use crate::message::{AppMessage, Notification};
 use crate::workers::BackgroundSender;
@@ -50,6 +53,88 @@ pub(super) fn spawn_upload(
         })();
         sender.send(AppMessage::MirrorUploaded { title, outcome });
     });
+}
+
+/// Try a mirror for the setup wizard, on a worker thread, since it is a few requests and
+/// however long a server that has gone takes to fail.
+pub(super) fn spawn_probe(sender: BackgroundSender, config: MirrorConfig) {
+    std::thread::spawn(move || {
+        sender.send(AppMessage::MirrorProbed(mirror::probe_mirror(&config)));
+    });
+}
+
+/// Make a mirror ready for the setup wizard, on a worker thread for the same reason.
+pub(super) fn spawn_set_up(sender: BackgroundSender, config: MirrorConfig) {
+    std::thread::spawn(move || {
+        let outcome = mirror::set_up_mirror(&config).map_err(|e| e.to_string());
+        sender.send(AppMessage::MirrorSetUp {
+            config: Box::new(config),
+            outcome,
+        });
+    });
+}
+
+/// Upload everything worth uploading to a mirror, on a worker thread. Which WADs is
+/// worked out afresh here, so what goes is what is true now, and not what the dialog
+/// listed when it opened. Stops between WADs when `cancel` is set.
+pub(super) fn spawn_upload_all(
+    sender: BackgroundSender,
+    db_path: PathBuf,
+    mirror_name: String,
+    cancel: Arc<AtomicBool>,
+) {
+    std::thread::spawn(move || {
+        let outcome = (|| -> Result<UploadReport, String> {
+            let conn = caco_core::db::open_connection(&db_path)
+                .map_err(|e| format!("DB open failed: {e}"))?;
+            let config = config::load_config();
+            let target = config
+                .mirrors
+                .iter()
+                .find(|mirror| mirror.name == mirror_name)
+                .ok_or_else(|| format!("There is no mirror called {mirror_name} any more"))?;
+            let wads = mirrors::wads_to_upload(&conn, &mirror_name).map_err(|e| e.to_string())?;
+            let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+            Ok(mirror::upload_wads(
+                &conn,
+                &wads,
+                target,
+                &now,
+                &mut |UploadProgress { done, total, title }| {
+                    sender.send(AppMessage::MirrorBulkProgress {
+                        done,
+                        total,
+                        title: title.to_string(),
+                    });
+                },
+                &|| cancel.load(Ordering::Relaxed),
+            ))
+        })();
+        sender.send(AppMessage::MirrorBulkFinished(outcome));
+    });
+}
+
+/// What a finished bulk upload has to tell the user. In the status bar as well as the
+/// dialog, because the dialog may have been closed by then.
+pub(super) fn bulk_notification(
+    mirror: &str,
+    outcome: &Result<UploadReport, String>,
+) -> Notification {
+    let report = match outcome {
+        Ok(report) => report,
+        Err(why) => return Notification::error(format!("Upload failed. {why}")),
+    };
+    let uploaded = plural(report.uploaded, "WAD", "WADs");
+    match report.failed.len() {
+        0 if report.cancelled => {
+            Notification::info(format!("Stopped after uploading {uploaded} to {mirror}."))
+        }
+        0 => Notification::info(format!("Uploaded {uploaded} to {mirror}.")),
+        failed => Notification::warning(format!(
+            "Uploaded {uploaded} to {mirror}. {} did not make it: see Mirrors.",
+            plural(failed, "WAD", "WADs")
+        )),
+    }
 }
 
 /// What a sync has to tell the user, if anything. The status bar holds one line, and
@@ -168,6 +253,34 @@ mod tests {
             said(skipped(3)).unwrap().1,
             "Left out 3 entries from a mirror's index: the entries could not be read."
         );
+    }
+
+    #[test]
+    fn test_a_bulk_upload_says_how_it_went() {
+        let said = |uploaded, failed: &[&str], cancelled| {
+            let report = UploadReport {
+                uploaded,
+                failed: failed
+                    .iter()
+                    .map(|title| (title.to_string(), "why".to_string()))
+                    .collect(),
+                cancelled,
+            };
+            bulk_notification("home", &Ok(report)).text
+        };
+        assert_eq!(said(1, &[], false), "Uploaded 1 WAD to home.");
+        assert_eq!(said(3, &[], false), "Uploaded 3 WADs to home.");
+        assert_eq!(
+            said(2, &[], true),
+            "Stopped after uploading 2 WADs to home."
+        );
+        assert_eq!(
+            said(2, &["Road"], false),
+            "Uploaded 2 WADs to home. 1 WAD did not make it: see Mirrors."
+        );
+
+        let failed = bulk_notification("home", &Err("no such mirror".to_string()));
+        assert_eq!(failed.severity, Severity::Error);
     }
 
     #[test]
