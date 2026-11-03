@@ -3,7 +3,7 @@
 //! `cargo test --workspace` must not need a server. Point it at a throwaway one:
 //!
 //! ```bash
-//! # A Gitea or Forgejo generic package registry, the store with the most opinions:
+//! # Gitea's generic package registry, the store with the most opinions:
 //! docker run -d --rm --name caco-mirror-test -p 127.0.0.1:38317:3000 \
 //!     -e GITEA__security__INSTALL_LOCK=true docker.gitea.com/gitea:latest
 //! docker exec -u git caco-mirror-test gitea admin user create --admin \

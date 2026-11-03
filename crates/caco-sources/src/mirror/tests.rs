@@ -235,10 +235,10 @@ fn test_a_mirror_that_refuses_to_connect_says_so() {
 
     let report = sync_mirrors(&m.conn, &[config]).unwrap();
 
-    assert_eq!(
-        report.failed,
-        [("home".to_string(), "could not connect".to_string())]
-    );
+    // With the reason, since "could not connect" alone is little use setting one up.
+    let why = &report.failed[0].1;
+    assert!(why.starts_with("could not connect: "), "{why}");
+    assert!(why.to_lowercase().contains("refused"), "{why}");
 }
 
 /// The other way round from a failure to answer, and on purpose: the mirror has
@@ -348,6 +348,22 @@ fn test_two_mirrors_with_one_name_read_only_the_first() {
     assert_eq!(report.failed.len(), 1);
     assert!(report.failed[0].1.contains("same name"), "{report:?}");
     assert_eq!(rows_held(&m.conn, "home"), 1);
+}
+
+#[test]
+fn test_a_mirror_with_no_name_is_reported_rather_than_read() {
+    let m = Machine::new();
+    let root = tempfile::tempdir().unwrap();
+    local_store_with(root.path(), &[entry_for(WAD_BYTES, "a.wad")], WAD_BYTES);
+    let config = MirrorConfig {
+        name: " ".to_string(),
+        ..local_mirror(root.path())
+    };
+
+    let report = sync_mirrors(&m.conn, &[config]).unwrap();
+
+    assert_eq!(report.failed[0].1, "it needs a name");
+    assert!(!report.changed);
 }
 
 #[test]
@@ -785,6 +801,29 @@ fn test_a_file_the_index_lists_but_the_mirror_lost_is_put_back() {
 
     assert!(!uploaded.already_there);
     assert_eq!(fs::read(stored).unwrap(), WAD_BYTES);
+}
+
+/// Put back where the index says, whatever this copy happens to be called, or the
+/// index goes on pointing at nothing.
+#[test]
+fn test_a_lost_file_put_back_from_a_copy_with_another_name_can_be_fetched() {
+    let m = Machine::new();
+    let root = tempfile::tempdir().unwrap();
+    let config = local_mirror(root.path());
+    upload(&m, m.wad_with_file("road.zip", WAD_BYTES), &config).unwrap();
+    fs::remove_dir_all(root.path().join(sha256_of(WAD_BYTES))).unwrap();
+
+    let renamed = m.wad_with_file("renamed.zip", WAD_BYTES);
+    let uploaded = upload(&m, renamed, &config).unwrap();
+
+    assert!(!uploaded.already_there);
+    let elsewhere = Machine::new();
+    sync_mirrors(&elsewhere.conn, std::slice::from_ref(&config)).unwrap();
+    let dest = fetch(&elsewhere, &elsewhere.wad_that_lost(WAD_BYTES), &[config])
+        .unwrap()
+        .unwrap();
+    assert_eq!(dest.file_name().unwrap(), "road.zip");
+    assert_eq!(fs::read(dest).unwrap(), WAD_BYTES);
 }
 
 #[test]

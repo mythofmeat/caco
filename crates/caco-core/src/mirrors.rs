@@ -25,7 +25,7 @@
 //! the sourceport.
 //!
 //! The index sits one directory down so that it has the same shape as every file.
-//! A generic package registry (Gitea, Forgejo) only has paths of the form
+//! Gitea's generic package registry only has paths of the form
 //! `<package>/<version>/<file>`, and it answers anything shallower with a 405. With
 //! `<root>` as the package, each `<sha256>` is a version and `index` is one too, so
 //! the same layout serves a static file server, a NAS mount and a registry, with
@@ -91,12 +91,14 @@ pub struct MirrorEntry {
 }
 
 impl MirrorEntry {
+    /// The file's name on the mirror.
+    pub fn stored_name(&self) -> &str {
+        self.stored_as.as_deref().unwrap_or(&self.filename)
+    }
+
     /// The file's path under the mirror's root.
     pub fn stored_path(&self) -> String {
-        stored_path(
-            &self.sha256,
-            self.stored_as.as_deref().unwrap_or(&self.filename),
-        )
+        stored_path(&self.sha256, self.stored_name())
     }
 
     /// This entry in its normal form, or `None` if it cannot be used.
@@ -129,8 +131,9 @@ impl MirrorEntry {
     /// This entry, for a file the index already has under `existing`.
     ///
     /// The file's own facts stay as they were, since they describe what is on the
-    /// mirror. What is known about it adds up, so a machine that only knows a WAD
-    /// by its forum thread does not take away the idgames id another one recorded.
+    /// mirror, unless it had to go back under a new name. What is known about it adds
+    /// up, so a machine that only knows a WAD by its forum thread does not take away
+    /// the idgames id another one recorded.
     fn merged_over(self, existing: MirrorEntry) -> Self {
         let mut cacowards = existing.cacowards;
         for key in self.cacowards {
@@ -142,7 +145,7 @@ impl MirrorEntry {
             sha256: existing.sha256,
             size: existing.size,
             filename: existing.filename,
-            stored_as: existing.stored_as,
+            stored_as: self.stored_as.or(existing.stored_as),
             added: existing.added.or(self.added),
             content_sha256: self.content_sha256.or(existing.content_sha256),
             title: self.title.or(existing.title),
@@ -548,6 +551,24 @@ mod tests {
         // The name and the date describe the file already on the mirror.
         assert_eq!(merged.filename, "first-name.wad");
         assert_eq!(merged.added.as_deref(), Some("2026-01-01T00:00:00Z"));
+    }
+
+    /// The one way a file's own facts change: it had to go back under a safe name.
+    #[test]
+    fn test_a_new_stored_name_replaces_the_old_one() {
+        let mut index = MirrorIndex::default();
+        index.upsert(entry(HASH_A, "Santa's.wad"));
+        index.upsert(MirrorEntry {
+            stored_as: Some("Santa_s.wad".to_string()),
+            ..entry(HASH_A, "Santa's.wad")
+        });
+        let merged = &index.entries().0[0];
+        assert_eq!(merged.stored_name(), "Santa_s.wad");
+        assert_eq!(merged.filename, "Santa's.wad");
+
+        // And uploading it again knows nothing that changes that.
+        index.upsert(entry(HASH_A, "Santa's.wad"));
+        assert_eq!(index.entries().0[0].stored_name(), "Santa_s.wad");
     }
 
     #[test]

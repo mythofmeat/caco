@@ -28,7 +28,9 @@ use caco_core::config::{MirrorConfig, MirrorLocation};
 use caco_core::db::mirrors::{self, MirrorFile};
 use caco_core::db::{self, WadRecord};
 use caco_core::identity;
-use caco_core::mirrors::{INDEX_PATH, MirrorIndex, entry_for_wad, safe_stored_name, stored_path};
+use caco_core::mirrors::{
+    INDEX_PATH, MirrorEntry, MirrorIndex, entry_for_wad, safe_stored_name, stored_path,
+};
 use caco_core::presence::StorePaths;
 use reqwest::Method;
 use reqwest::StatusCode;
@@ -440,15 +442,7 @@ impl Store {
     }
 
     fn send(&self, request: RequestBuilder) -> StoreResult<Response> {
-        let response = request.send().map_err(|e| {
-            if e.is_connect() {
-                "could not connect".to_string()
-            } else if e.is_timeout() {
-                "timed out".to_string()
-            } else {
-                e.to_string()
-            }
-        })?;
+        let response = request.send().map_err(|e| describe_request_error(&e))?;
         match waf_challenge(&response) {
             Some(kind) => Err(format!("{kind} answered with a challenge")),
             None => Ok(response),
@@ -474,6 +468,24 @@ impl Store {
             (true, None, None) => format!("HTTP {status}: it may need a token (token_env)"),
             _ => format!("HTTP {status}"),
         })
+    }
+}
+
+/// A failed request, for a person setting up a mirror. reqwest's own message stops at
+/// "error sending request for url", and the reason is at the bottom of the chain: a
+/// refused connection, or the self-signed certificate a home server is likely to have.
+fn describe_request_error(error: &reqwest::Error) -> String {
+    if error.is_timeout() {
+        return "timed out".to_string();
+    }
+    let mut root: &dyn std::error::Error = error;
+    while let Some(source) = root.source() {
+        root = source;
+    }
+    if error.is_connect() {
+        format!("could not connect: {root}")
+    } else {
+        root.to_string()
     }
 }
 
@@ -535,6 +547,12 @@ pub fn sync_mirrors(
 
     let mut seen = Vec::new();
     for mirror in configured {
+        // Settings refuses both of these, and a file edited by hand gets here.
+        if mirror.name.trim().is_empty() {
+            let why = "it needs a name".to_string();
+            report.failed.push((mirror.name.clone(), why));
+            continue;
+        }
         if seen.contains(&mirror.name.as_str()) {
             let why = "another mirror has the same name".to_string();
             report.failed.push((mirror.name.clone(), why));
@@ -741,8 +759,13 @@ pub fn upload_wad(
         None => false,
     };
     if !already_there {
+        // A file the index lists and the store has lost goes back where the index says
+        // it is, whatever this copy happens to be called.
+        let name = existing
+            .as_ref()
+            .map_or(filename.as_str(), MirrorEntry::stored_name);
         entry.stored_as = store
-            .store_file(&entry.sha256, &filename, &path, entry.size)
+            .store_file(&entry.sha256, name, &path, entry.size)
             .map_err(fail)?;
     }
     index.upsert(entry);

@@ -53,10 +53,9 @@ fn fetch_missing_file_with(
         // A row left by a mirror that has since been taken out of the config, which
         // the next sync drops. Nothing else makes a WAD read as fetchable.
         Ok(None) => {
-            return Err(SourceError::Import(format!(
-                "no configured mirror has {}",
-                wad.title
-            )));
+            return Err(SourceError::NoMirrorHas {
+                title: wad.title.clone(),
+            });
         }
     };
 
@@ -343,6 +342,6 @@ mod tests {
             .unwrap_err()
             .to_string();
 
-        assert!(failure.contains("Road"), "{failure}");
+        assert_eq!(failure, "No configured mirror has Road");
     }
 }
