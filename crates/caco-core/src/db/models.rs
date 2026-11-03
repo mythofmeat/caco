@@ -5,6 +5,8 @@ use std::sync::LazyLock;
 
 use serde::{Deserialize, Serialize};
 
+use crate::identity::{FileIdentity, Hashes};
+
 // ---------------------------------------------------------------------------
 // Status enum
 // ---------------------------------------------------------------------------
@@ -349,6 +351,13 @@ pub struct WadRecord {
     /// copy of anything derivable — `crate::presence` is its only writer, and
     /// setting `cached_path` through [`crate::db::WadUpdate`] clears it.
     pub last_known_path: Option<String>,
+    /// What the file is, as of the last time caco hashed it. Kept when the
+    /// file goes, since it is what a download is checked against and what
+    /// names the file to get it back. `crate::identity` is its only writer.
+    pub identity: Option<FileIdentity>,
+    /// The file's modification time when `identity` was taken. With the size,
+    /// the stamp that says whether the file has been replaced since.
+    pub file_mtime: Option<i64>,
     pub custom_iwad: Option<String>,
     pub custom_sourceport: Option<String>,
     pub required_sourceport_family: Option<String>,
@@ -420,6 +429,8 @@ impl WadRecord {
             filename: row.get("filename")?,
             cached_path: row.get("cached_path")?,
             last_known_path: row.get("last_known_path")?,
+            identity: identity_from_row(row)?,
+            file_mtime: row.get("file_mtime")?,
             custom_iwad: row.get("custom_iwad")?,
             custom_sourceport: row.get("custom_sourceport")?,
             required_sourceport_family: row.get("required_sourceport_family").ok(),
@@ -438,6 +449,25 @@ impl WadRecord {
             tags: Vec::new(),
         })
     }
+}
+
+/// The identity columns, which `crate::identity` writes together or not at all.
+fn identity_from_row(row: &rusqlite::Row) -> rusqlite::Result<Option<FileIdentity>> {
+    let size: Option<i64> = row.get("file_size")?;
+    let sha256: Option<String> = row.get("file_sha256")?;
+    let sha1: Option<String> = row.get("file_sha1")?;
+    let content_sha256: Option<String> = row.get("content_sha256")?;
+    Ok(match (size, sha256, sha1, content_sha256) {
+        (Some(size), Some(sha256), Some(sha1), Some(content_sha256)) => Some(FileIdentity {
+            file: Hashes {
+                size: u64::try_from(size).unwrap_or_default(),
+                sha256,
+                sha1,
+            },
+            content_sha256,
+        }),
+        _ => None,
+    })
 }
 
 // ---------------------------------------------------------------------------

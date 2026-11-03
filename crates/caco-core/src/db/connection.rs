@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use rusqlite::{Connection, Transaction};
+use rusqlite::{Connection, Transaction, TransactionBehavior};
 
 use crate::Result;
 
@@ -10,13 +10,21 @@ pub const SQLITE_MAX_VARS: usize = 900;
 
 /// Run `f` inside a SQLite transaction. Commits on `Ok`, rolls back on `Err` or panic.
 ///
-/// Uses `unchecked_transaction` so callers can pass a shared `&Connection`; rusqlite
-/// connections are `!Sync` so single-threaded use is already enforced.
+/// Unchecked so callers can pass a shared `&Connection`; rusqlite connections are
+/// `!Sync`, so single-threaded use is already enforced.
+///
+/// `BEGIN IMMEDIATE`, because every caller writes and several read first (whether
+/// the status is changing, what the row recorded before). A transaction that reads
+/// and then writes cannot wait for the lock under WAL: if another connection commits
+/// in between, its snapshot is stale and SQLite fails the write at once rather than
+/// calling the busy handler. Taking the write lock up front means it waits like any
+/// other writer. That used to be a rare race. The startup file checks write from a
+/// worker for as long as hashing a whole library takes, so now it is not.
 pub fn with_transaction<F, T>(conn: &Connection, f: F) -> Result<T>
 where
     F: FnOnce(&Transaction<'_>) -> Result<T>,
 {
-    let tx = conn.unchecked_transaction()?;
+    let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
     let out = f(&tx)?;
     tx.commit()?;
     Ok(out)
@@ -179,5 +187,36 @@ mod tests {
         let conn = open_memory().unwrap();
         let result = fetch_tags_batch(&conn, &[]).unwrap();
         assert!(result.is_empty());
+    }
+
+    /// A writer that arrives while a transaction is between its read and its
+    /// write waits for it, rather than committing first and leaving the
+    /// transaction's write to fail on a stale snapshot.
+    #[test]
+    fn test_with_transaction_takes_the_write_lock_before_it_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("library.db");
+        let a = open_connection(&path).unwrap();
+        let b = open_connection(&path).unwrap();
+        // Fail at once rather than wait: the waiting is what is being tested.
+        b.busy_timeout(std::time::Duration::ZERO).unwrap();
+        a.execute_batch("CREATE TABLE t (n INTEGER); INSERT INTO t VALUES (0);")
+            .unwrap();
+
+        with_transaction(&a, |tx| {
+            let n: i64 = tx.query_row("SELECT n FROM t", [], |row| row.get(0))?;
+            assert!(
+                b.execute("UPDATE t SET n = 99", []).is_err(),
+                "another writer must wait for this transaction"
+            );
+            tx.execute("UPDATE t SET n = ?1", [n + 1])?;
+            Ok(())
+        })
+        .unwrap();
+
+        let n: i64 = a
+            .query_row("SELECT n FROM t", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(n, 1);
     }
 }

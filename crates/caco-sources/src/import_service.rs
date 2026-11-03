@@ -15,7 +15,7 @@ use crate::idgames::{
 };
 
 use caco_core::db::{self, NewWad, SourceType, WadUpdate};
-use caco_core::sourceports;
+use caco_core::{identity, sourceports};
 
 /// Result of an import attempt.
 ///
@@ -391,7 +391,8 @@ impl ImportService {
 
     /// Import a local file.
     ///
-    /// Duplicate detection: source_url (the resolved file path).
+    /// Duplicate detection: source_url (the resolved file path), then the
+    /// file's content, which also catches the same WAD under another path.
     #[allow(clippy::too_many_arguments)]
     pub fn import_local(
         &self,
@@ -415,6 +416,21 @@ impl ImportService {
             && !force
         {
             return ImportResult::duplicate(existing.id, &existing.title);
+        }
+
+        // Read before anything is written: the same WAD imported again from
+        // somewhere else (the zip from idgames, the WAD extracted from it) is
+        // the same content under another path.
+        let found = resolved
+            .is_file()
+            .then(|| identity::identify(&resolved).ok())
+            .flatten();
+        if let Some(found) = &found
+            && let Ok(Some((id, existing_title))) =
+                identity::find_by_content(conn, &found.identity.content_sha256)
+            && !force
+        {
+            return ImportResult::duplicate(id, &existing_title);
         }
 
         let mut wad = NewWad::new(title, SourceType::Local).source_url(&source_url);
@@ -441,6 +457,9 @@ impl ImportService {
         }
 
         insert_wad(conn, &wad, |tx, wad_id| {
+            if let Some(found) = &found {
+                identity::record(tx, wad_id, &resolved, found)?;
+            }
             self.auto_enrich_doomwiki(tx, wad_id, title);
             Ok(())
         })
@@ -1628,6 +1647,94 @@ mod tests {
 
         assert_eq!(linked_wad(&conn, row), result.wad_id);
         assert!(result.wad_id.is_some());
+    }
+
+    /// A zip holding `entries`, as an idgames upload is.
+    fn write_zip(path: &std::path::Path, entries: &[(&str, &[u8])]) {
+        use std::io::Write;
+        let mut writer = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+        for (name, data) in entries {
+            writer
+                .start_file(*name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            writer.write_all(data).unwrap();
+        }
+        writer.finish().unwrap();
+    }
+
+    fn import_local(
+        conn: &Connection,
+        title: &str,
+        path: &std::path::Path,
+        force: bool,
+    ) -> ImportResult {
+        ImportService::new().import_local(conn, title, path, None, None, None, None, force)
+    }
+
+    /// A local import has its file in hand, so it records what it is then.
+    #[test]
+    fn test_import_local_records_what_the_file_is() {
+        let conn = setup();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sigil.zip");
+        write_zip(
+            &path,
+            &[("sigil.wad", b"PWAD sigil"), ("sigil.txt", b"Title: Sigil")],
+        );
+
+        let result = import_local(&conn, "Sigil", &path, false);
+
+        let wad = db::get_wad(&conn, result.wad_id.unwrap(), false)
+            .unwrap()
+            .unwrap();
+        let identity = wad.identity.expect("an imported file is hashed at import");
+        assert!(identity.is_container());
+        let inner = identity::inner_files(&conn, wad.id).unwrap();
+        assert_eq!(inner.len(), 1);
+        assert_eq!(inner[0].path, "sigil.wad");
+        assert_eq!(identity.content_sha256, inner[0].hashes.sha256);
+    }
+
+    /// The same WAD imported twice from two places, zipped once and extracted
+    /// once, is one WAD: reported as a duplicate the way the same path is, and
+    /// imported anyway when forced.
+    #[test]
+    fn test_import_local_recognises_the_same_wad_under_another_path() {
+        let conn = setup();
+        let dir = tempfile::tempdir().unwrap();
+        let zip = dir.path().join("eviternity.zip");
+        write_zip(
+            &zip,
+            &[
+                ("eviternity.wad", b"PWAD eviternity"),
+                ("eviternity.txt", b""),
+            ],
+        );
+        let first = import_local(&conn, "Eviternity", &zip, false)
+            .wad_id
+            .unwrap();
+
+        let extracted = dir.path().join("elsewhere").join("eviternity.wad");
+        std::fs::create_dir_all(extracted.parent().unwrap()).unwrap();
+        std::fs::write(&extracted, b"PWAD eviternity").unwrap();
+
+        let again = import_local(&conn, "Eviternity (extracted)", &extracted, false);
+        assert!(again.is_duplicate);
+        assert_eq!(again.duplicate_id, Some(first));
+        assert_eq!(again.duplicate_title.as_deref(), Some("Eviternity"));
+
+        let forced = import_local(&conn, "Eviternity (extracted)", &extracted, true);
+        assert!(forced.ok());
+        assert_eq!(
+            identity::same_content(&conn, first).unwrap(),
+            vec![(forced.wad_id.unwrap(), "Eviternity (extracted)".to_string())]
+        );
+
+        // A different WAD under the same name is not one.
+        let other = dir.path().join("other").join("eviternity.wad");
+        std::fs::create_dir_all(other.parent().unwrap()).unwrap();
+        std::fs::write(&other, b"PWAD eviternity II").unwrap();
+        assert!(import_local(&conn, "Eviternity II", &other, false).ok());
     }
 
     #[test]

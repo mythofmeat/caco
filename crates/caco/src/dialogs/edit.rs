@@ -5,6 +5,7 @@ use caco_core::db::models::Status;
 use caco_core::db::wads::{self, WadUpdate};
 use rusqlite::Connection;
 
+use crate::dialogs::wad_file::WadFileSection;
 use crate::theme;
 
 // ---------------------------------------------------------------------------
@@ -95,6 +96,7 @@ pub struct EditDialogState {
     source_type_display: String,
     source_url: String,
     idgames_id: String,
+    file: WadFileSection,
 
     // Companions tab
     companions: Vec<CompanionEntry>,
@@ -169,6 +171,7 @@ impl EditDialogState {
             source_type_display: wad.source_type.as_str().to_string(),
             source_url: wad.source_url.as_deref().unwrap_or("").to_string(),
             idgames_id: wad.idgames_id.as_deref().unwrap_or("").to_string(),
+            file: WadFileSection::load(conn, &wad),
 
             companions,
             companions_modified: false,
@@ -738,6 +741,10 @@ impl EditDialogState {
                 .desired_width(f32::INFINITY)
                 .text_color(theme::TEXT_PRIMARY),
         );
+
+        ui.add_space(6.0);
+        form_label(ui, "File");
+        self.file.render(ui);
     }
 
     fn render_companions_tab(&mut self, ui: &mut egui::Ui) -> Option<CompanionAction> {

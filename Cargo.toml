@@ -51,6 +51,10 @@ shlex = "2"
 
 # Hashing / binary
 md-5 = "0.11"
+# A WAD file's identity (#52). SHA-1 too because it is what Wad Archive's
+# index is keyed by; both read the file in the same pass as SHA-256.
+sha1 = "0.11"
+sha2 = "0.11"
 hex = "0.4"
 
 # Image processing

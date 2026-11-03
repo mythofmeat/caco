@@ -11,6 +11,7 @@ use crate::complevel_detect;
 use crate::config;
 use crate::db;
 use crate::demos;
+use crate::identity;
 use crate::iwad_detect;
 use crate::presence;
 use crate::sourceports;
@@ -62,6 +63,15 @@ impl PlayResult {
     }
 }
 
+/// How to launch a WAD with [`play`].
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PlayOptions {
+    /// Launch even though the WAD's file plays differently from the one it was
+    /// last played with. Without it, [`play`] fails with
+    /// [`crate::Error::WadFileChanged`] so the user can be asked first.
+    pub accept_changed_file: bool,
+}
+
 /// What a launch is being built for.
 ///
 /// Playback needs byte-identical launch configuration to the session that
@@ -71,7 +81,7 @@ impl PlayResult {
 /// stats reporters would fabricate map exits the user never made.
 #[derive(Debug, Clone, Copy)]
 enum LaunchMode<'a> {
-    Play,
+    Play(PlayOptions),
     Playback(&'a Path),
 }
 
@@ -81,6 +91,9 @@ struct BuiltLaunch {
     /// Resolved sourceport executable (path or bare name).
     sourceport: String,
     wad_path: PathBuf,
+    /// What the sourceport will load, which the session records. `None` when
+    /// the file could not be read to hash it.
+    content_sha256: Option<String>,
     /// Managed data dir, when `manage_data_dirs` is on.
     data_dir: Option<PathBuf>,
     is_zdoom: bool,
@@ -260,6 +273,13 @@ fn build_launch(
             });
         }
     };
+
+    // What the file is: hashed again first if it has been replaced since caco
+    // last looked, and what the session records it played.
+    let identity = identity::verify(conn, &wad, &wad_path)?.map(identity::Checked::into_identity);
+    if let LaunchMode::Play(opts) = mode {
+        refuse_changed_file(conn, &wad, identity.as_ref(), opts)?;
+    }
 
     // Auto-detect zdoom_required if not already set. This remains metadata only:
     // the visible compatibility family field is the launch constraint, so a
@@ -457,7 +477,7 @@ fn build_launch(
     // Stats collection is deliberately skipped during playback: a demo replays
     // map exits the user did not just make, and absorbing those would inflate
     // progress and could auto-complete the WAD from a recording.
-    if matches!(mode, LaunchMode::Play) {
+    if matches!(mode, LaunchMode::Play(_)) {
         // For zdoom-family sourceports, set up logfile for stats collection
         if is_zdoom
             && config::get_auto_stats()
@@ -489,22 +509,53 @@ fn build_launch(
         cmd,
         sourceport,
         wad_path,
+        content_sha256: identity.map(|identity| identity.content_sha256),
         data_dir: wad_data_dir,
         is_zdoom,
         is_helion,
     })
 }
 
+/// Stop a launch whose file plays differently from the one the WAD was last
+/// played with, unless the user has been told and chose to go ahead.
+///
+/// Saves and demos made with one version of a WAD often do not load in
+/// another, so whether to play the new one is the user's call, not caco's.
+/// Asked before the launch persists a detected setting or creates a directory.
+/// A file caco could not hash has nothing to compare, and launches as it
+/// always did.
+fn refuse_changed_file(
+    conn: &Connection,
+    wad: &db::WadRecord,
+    current: Option<&identity::FileIdentity>,
+    opts: PlayOptions,
+) -> crate::Result<()> {
+    if opts.accept_changed_file {
+        return Ok(());
+    }
+    let Some(current) = current else {
+        return Ok(());
+    };
+    match identity::change_since_last_played(conn, wad.id, current)? {
+        Some(change) => Err(crate::Error::WadFileChanged {
+            title: wad.title.clone(),
+            change,
+        }),
+        None => Ok(()),
+    }
+}
+
 /// Launch a WAD, tracking the session and reconciling stats afterwards.
-pub fn play(conn: &Connection, wad_id: i64) -> crate::Result<PlayResult> {
+pub fn play(conn: &Connection, wad_id: i64, opts: PlayOptions) -> crate::Result<PlayResult> {
     let BuiltLaunch {
         mut cmd,
         sourceport,
         wad_path,
+        content_sha256,
         data_dir: wad_data_dir,
         is_zdoom,
         is_helion,
-    } = build_launch(conn, wad_id, LaunchMode::Play)?;
+    } = build_launch(conn, wad_id, LaunchMode::Play(opts))?;
 
     // Absorb any on-disk stats progress the DB doesn't yet know about
     // (e.g. from an orphaned session where caco exited before the
@@ -534,7 +585,8 @@ pub fn play(conn: &Connection, wad_id: i64) -> crate::Result<PlayResult> {
     // level progress. This prevents an unplayed WAD from being marked
     // in-progress just because the user launched-and-exited.
     let session_id = db::with_transaction(conn, |tx| {
-        let session_id = db::start_session(tx, wad_id, Some(&sourceport))?;
+        let session_id =
+            db::start_session(tx, wad_id, Some(&sourceport), content_sha256.as_deref())?;
         if let Some(pt) = db::get_active_playthrough(tx, wad_id)? {
             tx.execute(
                 "UPDATE sessions SET playthrough_id = ?1 WHERE id = ?2",
@@ -1685,5 +1737,68 @@ mod tests {
 
         let active = db::get_active_playthrough(&conn, wad_id).unwrap().unwrap();
         assert_eq!(active.id, pt_id, "must not create a second playthrough");
+    }
+
+    /// A file that plays `content`.
+    fn file_playing(content: &str) -> identity::FileIdentity {
+        identity::FileIdentity {
+            file: identity::Hashes {
+                size: 4,
+                sha256: format!("file-of-{content}"),
+                sha1: "sha1".to_string(),
+            },
+            content_sha256: content.to_string(),
+        }
+    }
+
+    fn played(conn: &rusqlite::Connection, wad_id: i64, content: &str) {
+        conn.execute(
+            "INSERT INTO sessions (wad_id, started_at, content_sha256) \
+             VALUES (?1, '2026-10-12T19:00:00+00:00', ?2)",
+            rusqlite::params![wad_id, content],
+        )
+        .unwrap();
+    }
+
+    /// The launch stops, with what the dialog needs, for a file that plays
+    /// differently from the one last played. It does not stop for the same
+    /// one, or for a WAD never played.
+    #[test]
+    fn test_a_changed_file_is_refused_until_accepted() {
+        use crate::db;
+        let (conn, wad_id) = fresh_db_with_wad();
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        let ask = PlayOptions::default();
+
+        assert!(refuse_changed_file(&conn, &wad, Some(&file_playing("v2")), ask).is_ok());
+
+        played(&conn, wad_id, "v1");
+        match refuse_changed_file(&conn, &wad, Some(&file_playing("v2")), ask) {
+            Err(crate::Error::WadFileChanged { title, change }) => {
+                assert_eq!(title, "Test WAD");
+                assert_eq!(change.played, "v1");
+                assert_eq!(change.current, "v2");
+                assert_eq!(change.last_played_at, "2026-10-12T19:00:00+00:00");
+            }
+            other => panic!("expected WadFileChanged, got {other:?}"),
+        }
+        assert!(refuse_changed_file(&conn, &wad, Some(&file_playing("v1")), ask).is_ok());
+
+        let accept = PlayOptions {
+            accept_changed_file: true,
+        };
+        assert!(refuse_changed_file(&conn, &wad, Some(&file_playing("v2")), accept).is_ok());
+    }
+
+    /// A file caco could not hash launches as it did before identities: there
+    /// is nothing to say it changed.
+    #[test]
+    fn test_an_unhashed_file_is_not_refused() {
+        use crate::db;
+        let (conn, wad_id) = fresh_db_with_wad();
+        played(&conn, wad_id, "v1");
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+
+        assert!(refuse_changed_file(&conn, &wad, None, PlayOptions::default()).is_ok());
     }
 }

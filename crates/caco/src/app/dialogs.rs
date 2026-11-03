@@ -7,6 +7,7 @@ use crate::dialogs::collections::CollectionsResult;
 use crate::dialogs::delete::DeleteResult;
 use crate::dialogs::edit::EditResult;
 use crate::dialogs::enrich::EnrichResult;
+use crate::dialogs::file_changed::FileChangedResult;
 use crate::dialogs::link::LinkResult;
 use crate::dialogs::profiles::ProfilesResult;
 use crate::dialogs::resources::ResourcesResult;
@@ -181,6 +182,16 @@ pub(super) fn render_active_dialog(
                     close_dialog = true;
                 }
                 LinkResult::Open => {}
+            },
+            ActiveDialog::FileChanged(dialog) => match dialog.render(ctx) {
+                FileChangedResult::PlayAnyway(wad_id) => {
+                    close_dialog = true;
+                    follow_up_action = Some(ActionRequest::PlayAnyway(wad_id));
+                }
+                FileChangedResult::Cancelled => {
+                    close_dialog = true;
+                }
+                FileChangedResult::Open => {}
             },
             ActiveDialog::CacowardLink(dialog) => match dialog.render(ctx) {
                 CacowardLinkResult::Linked(pk, wad_id) => {

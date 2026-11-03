@@ -415,7 +415,7 @@ mod tests {
         let pt_id = start_playthrough(&conn, wad_id).unwrap();
 
         // Start a session — playthrough_id column exists on sessions table
-        let session_id = start_session(&conn, wad_id, None).unwrap();
+        let session_id = start_session(&conn, wad_id, None, None).unwrap();
 
         // We can manually link it
         conn.execute(

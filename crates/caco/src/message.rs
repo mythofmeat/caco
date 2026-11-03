@@ -98,9 +98,21 @@ pub enum AppMessage {
     PlayUnavailable {
         wad_id: i64,
     },
+    /// The WAD's file plays differently from the one it was last played with,
+    /// so the launch stopped to ask. Opens the "File Changed" dialog.
+    PlayFileChanged {
+        wad_id: i64,
+        title: String,
+        change: caco_core::identity::ContentChange,
+    },
     /// The startup check of every recorded WAD file wrote something back.
     /// Only sent when it did, so the library reloads only when it is stale.
     FilesChecked(caco_core::presence::CheckReport),
+    /// The startup hashing of WAD files new to caco or replaced since it last
+    /// looked recorded something. Silent, since a changed file is only worth
+    /// a word when it is about to be played, but the library reloads: a file
+    /// that plays differently has lost its map analysis.
+    FilesIdentified,
     /// An enrichment run moved on to another WAD. `done` counts WADs already
     /// finished, so `done / total` drives a progress bar directly.
     EnrichProgress {

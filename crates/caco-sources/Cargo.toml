@@ -20,3 +20,5 @@ rusqlite.workspace = true
 tempfile.workspace = true
 rusqlite.workspace = true
 http.workspace = true
+# Builds the idgames-shaped zips an import test reads.
+zip.workspace = true

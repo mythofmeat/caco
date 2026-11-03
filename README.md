@@ -12,6 +12,7 @@ A personal Doom WAD library manager inspired by [beets](https://beets.io). Impor
 - **Companion files** — manage DEH patches, music WADs, and other companion files with automatic deduplication.
 - **Per-WAD isolation** — saves, stats, and configs are separated per WAD so nothing gets mixed up.
 - **On-demand downloads** — idgames WADs are cached when you play, with configurable auto-cleanup. WADs that cannot be re-downloaded are kept on the portable side instead, and destructive actions leave them alone by default.
+- **Content identity** — every WAD file is hashed, along with the WADs inside a zip, so caco notices when a file has changed since you last played it and asks before launching it: saves and demos made with one version of a WAD often fail with another.
 - **Cacowards browser** — a magazine-style year-by-year view of Doomworld's awards, doubling as an import queue.
 - **Garbage collection** — reclaim disk space from completed / abandoned WADs, reviewing every file before it goes.
 - **Smart collections** — save queries by name and pin them to the sidebar.
@@ -124,7 +125,10 @@ Storage tabs:
 | Files | Companion file registry: every managed file, the WADs using it, and orphan cleanup |
 
 Per-WAD dialogs come from the context menu or a shortcut: **Edit** (`E`),
-**Sessions** (`S`), **Map Stats** (`M`), **Saves & Demos** (`F`).
+**Sessions** (`S`), **Map Stats** (`M`), **Saves & Demos** (`F`). Edit's
+Sources tab shows the WAD's file: where it is (or was last seen), its size,
+SHA-256 and SHA-1, the WADs inside it, and any other WAD in the library that is
+the same file.
 
 ## Queries
 
@@ -138,9 +142,11 @@ status:in-progress , status:unplayed    OR queries
 tag:caco*                       Glob patterns
 cacoward:2023                   Cacoward entries for a year
 retrievable:manual              WADs caco cannot re-download on its own
+hash:a9993e36                   A WAD by any hash of its file, or the start of one
+dup:yes                         WADs that are in the library twice
 ```
 
-**Fields:** `id`, `title`, `author`, `year`, `filename`, `tag`, `status`, `source`, `iwad`, `complevel`, `config`, `cacoward`, `retrievable`, `avail`
+**Fields:** `id`, `title`, `author`, `year`, `filename`, `tag`, `status`, `source`, `iwad`, `complevel`, `config`, `cacoward`, `retrievable`, `avail`, `hash`, `dup`
 
 **`retrievable:`** splits the library by whether caco can fetch the file
 again unattended. `retrievable:automatic` (`auto`, `a`) matches WADs on
@@ -162,6 +168,15 @@ recorded file when it starts and again before each launch. A file that has gone
 synced from a machine that has it — stops counting as cached, and caco remembers
 where it was last seen: Play says where, and the next check that finds it there
 again (or under the same name in either `wads/` directory) picks it back up.
+
+**`hash:`** matches a WAD by any hash caco recorded for its file, or the start of
+one: the file's SHA-256 or SHA-1, or those of a WAD inside it. Wad Archive's
+index on archive.org is keyed by the SHA-1 of the WAD inside a zip, so a hash
+from there finds the WAD it names.
+
+**`dup:yes`** lists WADs whose files play the same as another WAD's in the
+library: the same WAD imported twice from two places. A zip and the WAD extracted
+from it count as the same, since what plays is the WAD.
 
 **Status values:** `unplayed`, `in-progress`, `completed`, `abandoned`
 
@@ -285,6 +300,16 @@ That is what makes copying the data directory to another machine actually carry
 your library: see `retrievable:` under Queries. A file that did not make the trip
 shows up as not on this machine, with where it was last seen, rather than as
 cached.
+
+`library.db` also records what each WAD file is: its size, SHA-256 and SHA-1, the
+same for every WAD, PK3 or DEH inside a zip, and what each play session loaded.
+That is how caco tells that a file has changed since you last played it, whether
+it was re-downloaded after an author's fix or replaced by a sync, and asks before
+launching it. A zip re-packed around the same WAD does not count as a change.
+caco hashes a file when it first sees it, and again only when the file's size or
+modification time has moved. The first start after upgrading reads every file
+once, in the background. The hashes stay after the file goes, because they are
+what identifies the file when you go looking for it.
 
 Override the cache root with `CACO_CACHE_HOME`, or just the WAD cache with
 `CACO_CACHE_DIR`.

@@ -171,6 +171,7 @@ static MIGRATIONS: &[Migration] = &[
         migrate_backfill_idgames_id_trim_source_url,
     ),
     (40, "add_last_known_path", migrate_add_last_known_path),
+    (41, "add_file_identity", migrate_add_file_identity),
 ];
 
 // ---------------------------------------------------------------------------
@@ -523,6 +524,39 @@ fn migrate_backfill_idgames_id_trim_source_url(conn: &Connection) -> Result<()> 
 /// which blocks for as long as a dead network mount does, inside a migration.
 fn migrate_add_last_known_path(conn: &Connection) -> Result<()> {
     add_column_if_missing(conn, "wads", "last_known_path", "TEXT")
+}
+
+/// Record what each WAD's file is, not only where (#52): see `crate::identity`,
+/// the only writer of every column here.
+///
+/// On `wads`, the file's size, SHA-256 and SHA-1, the modification time it was
+/// hashed at (which, with the size, says whether it has been replaced since),
+/// and the hash of what a sourceport loads from it. `wad_files` lists the
+/// loadable files inside an archive, and each session records what it loaded.
+///
+/// Nothing is backfilled here, for migration 40's reason and then some: the
+/// startup check that runs after `init_db` reads every file through, which
+/// would hold a migration for as long as a library takes to read.
+fn migrate_add_file_identity(conn: &Connection) -> Result<()> {
+    add_column_if_missing(conn, "wads", "file_size", "INTEGER")?;
+    add_column_if_missing(conn, "wads", "file_sha256", "TEXT")?;
+    add_column_if_missing(conn, "wads", "file_sha1", "TEXT")?;
+    add_column_if_missing(conn, "wads", "file_mtime", "INTEGER")?;
+    add_column_if_missing(conn, "wads", "content_sha256", "TEXT")?;
+    add_column_if_missing(conn, "sessions", "content_sha256", "TEXT")?;
+    if !table_exists(conn, "wad_files")? {
+        conn.execute_batch(
+            "CREATE TABLE wad_files (
+                wad_id INTEGER NOT NULL REFERENCES wads(id) ON DELETE CASCADE,
+                inner_path TEXT NOT NULL,
+                size INTEGER NOT NULL,
+                sha256 TEXT NOT NULL,
+                sha1 TEXT NOT NULL,
+                PRIMARY KEY (wad_id, inner_path)
+            );",
+        )?;
+    }
+    Ok(())
 }
 
 fn migrate_drop_custom_complevel(conn: &Connection) -> Result<()> {
@@ -884,6 +918,11 @@ mod tests {
             "filename",
             "cached_path",
             "last_known_path",
+            "file_size",
+            "file_sha256",
+            "file_sha1",
+            "file_mtime",
+            "content_sha256",
             "custom_iwad",
             "custom_sourceport",
             "required_sourceport_family",
@@ -1013,6 +1052,7 @@ mod tests {
             "demo_file",
             "exit_code",
             "playthrough_id",
+            "content_sha256",
         ];
         for col in &expected {
             assert!(
@@ -1067,6 +1107,32 @@ mod tests {
         assert!(has_column(&conn, "wad_companions", "companion_id").unwrap());
         assert!(has_column(&conn, "wad_companions", "enabled").unwrap());
         assert!(has_column(&conn, "wad_companions", "load_order").unwrap());
+    }
+
+    #[test]
+    fn test_wad_files_schema() {
+        let conn = open_memory().unwrap();
+        init_db(&conn).unwrap();
+
+        for column in ["wad_id", "inner_path", "size", "sha256", "sha1"] {
+            assert!(
+                has_column(&conn, "wad_files", column).unwrap(),
+                "missing wad_files column: {column}"
+            );
+        }
+
+        // The rows describe a WAD's file, so they go with the WAD.
+        conn.execute_batch(
+            "INSERT INTO wads (id, title, source_type) VALUES (1, 'W', 'local');
+             INSERT INTO wad_files (wad_id, inner_path, size, sha256, sha1)
+             VALUES (1, 'w.wad', 4, 'a', 'b');
+             DELETE FROM wads WHERE id = 1;",
+        )
+        .unwrap();
+        let left: i64 = conn
+            .query_row("SELECT COUNT(*) FROM wad_files", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(left, 0);
     }
 
     #[test]

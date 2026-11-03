@@ -22,6 +22,25 @@ fn is_glob_pattern(pattern: &str) -> bool {
     pattern.contains('*') || pattern.contains('?')
 }
 
+/// A `hash:` value as the start of a stored hash, which is lowercase hex.
+/// `None` for anything else, which leaves the term out, as `year:` does with a
+/// value that is not a year. Insisting on hex also keeps a `%` or `_` from
+/// turning the prefix into a pattern.
+fn hash_prefix(value: &str) -> Option<String> {
+    let value = value.trim();
+    (!value.is_empty() && value.chars().all(|c| c.is_ascii_hexdigit()))
+        .then(|| value.to_ascii_lowercase())
+}
+
+/// A yes-or-no value, as `dup:yes` or `dup:no` spell it.
+fn parse_flag(value: &str) -> Option<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "yes" | "y" | "true" | "1" => Some(true),
+        "no" | "n" | "false" | "0" => Some(false),
+        _ => None,
+    }
+}
+
 /// Split query by OR_SEPARATOR (" , ") respecting quoted strings.
 fn split_or_groups(query: &str) -> Vec<String> {
     let sep = super::models::OR_SEPARATOR;
@@ -371,6 +390,36 @@ fn build_term_sql(term: &QueryTerm) -> (String, Vec<SqlParam>) {
             "wads.custom_config LIKE ?".into(),
             vec![Box::new(format!("%{}%", term.value))],
         ),
+
+        // A hash, or the start of one, from anywhere: the file's own SHA-256
+        // or SHA-1, what it plays, or a file inside it. Wad Archive keys its
+        // index by the SHA-1 of the WAD inside a zip, so that is matched too.
+        // Bare `?` five times over, not `?1`: a number counts from the start of
+        // the whole query, so after any other term it would bind that term's
+        // value instead.
+        Some("hash") => match hash_prefix(&term.value) {
+            Some(prefix) => {
+                let like = format!("{prefix}%");
+                (
+                    "(wads.file_sha256 LIKE ? OR wads.file_sha1 LIKE ? \
+                     OR wads.content_sha256 LIKE ? OR wads.id IN \
+                     (SELECT wad_id FROM wad_files WHERE sha256 LIKE ? OR sha1 LIKE ?))"
+                        .into(),
+                    (0..5).map(|_| Box::new(like.clone()) as SqlParam).collect(),
+                )
+            }
+            None => return (String::new(), Vec::new()),
+        },
+
+        // The same WAD in the library twice: see `identity::DUPLICATE_SQL`.
+        Some("dup") | Some("duplicate") => match parse_flag(&term.value) {
+            Some(true) => (crate::identity::DUPLICATE_SQL.into(), Vec::new()),
+            Some(false) => (
+                format!("NOT {}", crate::identity::DUPLICATE_SQL),
+                Vec::new(),
+            ),
+            None => return (String::new(), Vec::new()),
+        },
 
         // Cacoward link filter — matches WADs linked to a Cacoward entry.
         //
@@ -1469,5 +1518,46 @@ mod tests {
         // completed but lacks the cacoward tag.
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].title, "Ancient Aliens");
+    }
+
+    /// `hash:` finds a WAD by any hash caco recorded for it, from its start:
+    /// the file's two, what it plays, and a file inside it.
+    #[test]
+    fn test_search_wads_by_hash() {
+        let conn = setup();
+        let zip = add_wad(&conn, &NewWad::new("Zipped", SourceType::Idgames)).unwrap();
+        let bare = add_wad(&conn, &NewWad::new("Bare", SourceType::Local)).unwrap();
+        conn.execute_batch(&format!(
+            "UPDATE wads SET file_size = 4, file_sha256 = 'aaaa11', file_sha1 = 'bbbb22', \
+                 content_sha256 = 'cccc33' WHERE id = {zip};
+             UPDATE wads SET file_size = 4, file_sha256 = 'cccc33', file_sha1 = 'dddd44', \
+                 content_sha256 = 'cccc33' WHERE id = {bare};
+             INSERT INTO wad_files (wad_id, inner_path, size, sha256, sha1)
+                 VALUES ({zip}, 'zipped.wad', 4, 'cccc33', 'eeee55');"
+        ))
+        .unwrap();
+        let titles = |query: &str| -> Vec<String> {
+            let mut titles: Vec<String> = search_wads(&conn, Some(query), None, false, false, 0)
+                .unwrap()
+                .into_iter()
+                .map(|w| w.title)
+                .collect();
+            titles.sort();
+            titles
+        };
+
+        assert_eq!(titles("hash:aaaa"), ["Zipped"]);
+        assert_eq!(titles("hash:BBBB22"), ["Zipped"]);
+        assert_eq!(titles("hash:dddd"), ["Bare"]);
+        // Wad Archive's key: the SHA-1 of the WAD inside the zip.
+        assert_eq!(titles("hash:eeee55"), ["Zipped"]);
+        // What both play.
+        assert_eq!(titles("hash:cccc"), ["Bare", "Zipped"]);
+        assert!(titles("hash:ffff").is_empty());
+        // Ignored, like any other value a field cannot use.
+        assert_eq!(titles("hash:%"), titles(""));
+        // Composes with other terms without binding their values.
+        assert_eq!(titles("title:Bare hash:cccc"), ["Bare"]);
+        assert_eq!(titles("hash:cccc title:Zip"), ["Zipped"]);
     }
 }
