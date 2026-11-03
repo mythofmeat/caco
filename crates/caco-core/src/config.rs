@@ -957,6 +957,8 @@ fn collect_profile_stems(dir: &Path) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn a_library_at_its_default_path_snapshots_into_the_backup_dir() {
         assert_eq!(migration_backup_dir(&default_db_path()), backup_dir());
@@ -969,8 +971,6 @@ mod tests {
             Path::new("/mnt/games/backups")
         );
     }
-
-    use super::*;
 
     #[test]
     fn test_expand_tilde() {
