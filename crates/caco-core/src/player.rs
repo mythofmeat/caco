@@ -12,6 +12,7 @@ use crate::config;
 use crate::db;
 use crate::demos;
 use crate::iwad_detect;
+use crate::presence;
 use crate::sourceports;
 use crate::stats_watcher;
 use crate::wad_stats;
@@ -276,19 +277,17 @@ fn build_launch(
 ) -> crate::Result<BuiltLaunch> {
     let wad = db::get_wad(conn, wad_id, false)?.ok_or(crate::Error::WadNotFound(wad_id))?;
 
-    // Get WAD file path (must already be cached/linked)
-    let wad_path = wad.cached_path.as_deref().and_then(|p| {
-        let path = PathBuf::from(p);
-        if path.exists() { Some(path) } else { None }
-    });
-
-    let wad_path = match wad_path {
-        Some(p) => p,
-        None => {
-            return Err(crate::Error::FileNotFound(format!(
-                "No WAD file linked for '{}'. Download and link with: caco modify id:{} --link /path/to/wad",
-                wad.title, wad_id
-            )));
+    // The file has to be on this machine. Asking `presence` rather than the
+    // path means a file deleted since startup, or on a drive unmounted since,
+    // fails here, says where it was last seen, and is recorded as missing — and
+    // one that has come back is relinked instead of failing at all.
+    let wad_path = match presence::check_wad(conn, &wad, &presence::StorePaths::from_config())? {
+        presence::Presence::Here(path) => path,
+        presence::Presence::Missing { last_seen } => {
+            return Err(crate::Error::WadFileMissing {
+                title: wad.title,
+                last_seen,
+            });
         }
     };
 
@@ -738,86 +737,6 @@ pub fn play_demo(
     }
 
     Ok(demo_path)
-}
-
-/// Play an IWAD directly with no PWAD.
-pub fn play_iwad(
-    conn: &Connection,
-    iwad_name: &str,
-    sourceport: Option<&str>,
-    extra_args: &[String],
-    config_profile: Option<&str>,
-) -> crate::Result<PlayResult> {
-    // Resolve IWAD path
-    let db_resolved = db::resolve_iwad_from_db(conn, iwad_name, None);
-    let resolved = config::resolve_iwad_path(iwad_name, db_resolved.as_deref());
-    if !Path::new(&resolved).exists() {
-        return Err(crate::Error::FileNotFound(format!(
-            "IWAD '{iwad_name}' not found. Register it with: caco import /path/to/iwad.wad"
-        )));
-    }
-
-    // Determine sourceport
-    let sourceport = sourceport
-        .map(|s| s.to_string())
-        .unwrap_or_else(config::get_default_sourceport);
-    if sourceport.is_empty() {
-        return Err(crate::Error::Config(
-            "No sourceport specified and no default configured".to_string(),
-        ));
-    }
-
-    let sourceport = config::resolve_sourceport(&sourceport);
-    let mut cmd = Command::new(&sourceport);
-    cmd.args(["-iwad", &resolved]);
-
-    // Add default sourceport args, then per-sourceport args
-    let mut default_args = config::get_sourceport_args();
-    default_args.extend(config::get_executable_args(&sourceport));
-    if !default_args.is_empty() {
-        cmd.args(&default_args);
-    }
-
-    // Inject config profile
-    let profile_name = config_profile.unwrap_or("default");
-    let profile_path = config::get_profile_path(&sourceport, profile_name);
-    let config_args = sourceports::get_config_args(&sourceport, &profile_path.to_string_lossy());
-    if !config_args.is_empty() {
-        if let Some(parent) = profile_path.parent()
-            && let Err(e) = std::fs::create_dir_all(parent)
-        {
-            tracing::warn!("failed to create sourceport config dir {parent:?}: {e}");
-        }
-        if !profile_path.exists()
-            && let Err(e) = std::fs::File::create(&profile_path)
-        {
-            tracing::warn!("failed to create sourceport config file {profile_path:?}: {e}");
-        }
-        cmd.args(&config_args);
-    }
-
-    if !extra_args.is_empty() {
-        cmd.args(extra_args);
-    }
-
-    // Launch
-    cmd.stdin(std::process::Stdio::null());
-    let mut child = cmd.spawn().map_err(|e| {
-        crate::Error::FileNotFound(format!(
-            "Failed to launch sourceport '{}': {}",
-            sourceport, e
-        ))
-    })?;
-
-    let start = Instant::now();
-    let status = child.wait()?;
-    let duration = start.elapsed().as_secs() as i64;
-
-    Ok(PlayResult {
-        duration: Some(duration),
-        exit_code: status.code(),
-        auto_complete: AutoCompleteResult::Unknown,
-    })
 }
 
 /// Format duration as human-readable string.

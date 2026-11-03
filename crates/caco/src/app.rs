@@ -21,6 +21,7 @@ use crate::thumbnails::{ThumbnailHint, ThumbnailManager};
 use crate::workers::{AnalysisJob, BackgroundChannel, spawn_reanalysis};
 
 mod dialogs;
+mod file_check;
 mod help;
 mod hero;
 mod section_header;
@@ -71,6 +72,7 @@ impl CacoApp {
             bg,
             thumbnails: ThumbnailManager::new(),
         };
+        file_check::spawn(app.bg.sender(), app.state.db_path.clone());
         app.spawn_sourceport_update_check();
         app
     }
@@ -164,14 +166,14 @@ impl CacoApp {
             .wads
             .iter()
             .filter(|w| !self.state.analyses_map.contains_key(&w.id))
+            // No `exists()` here: this runs on the UI thread at every reload,
+            // and a stat on a dead mount would freeze it. `cached_path` is
+            // checked at startup and before each launch, and the worker skips
+            // a file it cannot read.
             .filter_map(|w| {
-                let path = PathBuf::from(w.cached_path.as_deref()?);
-                if !path.exists() {
-                    return None;
-                }
                 Some(AnalysisJob {
                     wad_id: w.id,
-                    wad_path: path,
+                    wad_path: PathBuf::from(w.cached_path.as_deref().filter(|p| !p.is_empty())?),
                 })
             })
             .collect();
@@ -574,9 +576,8 @@ impl CacoApp {
                     // Local error type that distinguishes "WAD not available —
                     // offer the link dialog" from other errors that should
                     // surface as a toast. String errors from `?` default to
-                    // Message; Unavailable is chosen explicitly at the sites
-                    // where no downloadable source exists or the download
-                    // could not complete.
+                    // Message; Unavailable is chosen explicitly where the file
+                    // is not on this machine and caco cannot fetch it.
                     enum PlayError {
                         Message(String),
                         Unavailable,
@@ -591,16 +592,25 @@ impl CacoApp {
                         let conn = caco_core::db::open_connection(&db_path)
                             .map_err(|e| format!("DB open failed: {e}"))?;
 
-                        // Auto-download from idgames if no cached file is available
                         let wad = caco_core::db::get_wad(&conn, wad_id, false)
                             .map_err(|e| format!("DB error: {e}"))?
                             .ok_or_else(|| format!("WAD #{wad_id} not found"))?;
-                        let needs_download = wad
-                            .cached_path
-                            .as_deref()
-                            .map(|p| !std::path::Path::new(p).exists())
-                            .unwrap_or(true);
-                        if needs_download {
+
+                        // The startup check, for this one WAD: a file that has
+                        // gone since is recorded as last seen there, and one
+                        // that has come back is relinked.
+                        let presence = caco_core::presence::check_wad(
+                            &conn,
+                            &wad,
+                            &caco_core::presence::StorePaths::from_config(),
+                        )
+                        .map_err(|e| format!("Checking the WAD file failed: {e}"))?;
+                        if !presence.is_here() {
+                            // Nothing to fetch it from: say so now, rather than
+                            // announce a download that cannot start.
+                            if !wad.retrievability().is_automatic() {
+                                return Err(PlayError::Unavailable);
+                            }
                             sender.send(AppMessage::Notify(Notification::info(format!(
                                 "Downloading {}...",
                                 wad.title
@@ -641,24 +651,23 @@ impl CacoApp {
                                 .map_err(|e| format!("Failed to update WAD record: {e}"))?;
                         }
 
-                        let pr = caco_core::player::play(
+                        caco_core::player::play(
                             &conn,
                             wad_id,
                             &caco_core::player::PlayOptions::default(),
                         )
-                        .map_err(|e| format!("{e}"))?;
-                        Ok(pr)
+                        .map_err(|e| match e {
+                            // Gone between the check above and the launch.
+                            caco_core::Error::WadFileMissing { .. } => PlayError::Unavailable,
+                            e => PlayError::Message(e.to_string()),
+                        })
                     })();
 
                     match outcome {
-                        Ok(pr) => sender.send(AppMessage::PlayFinished {
-                            wad_id,
-                            outcome: Ok(pr),
-                        }),
-                        Err(PlayError::Message(msg)) => sender.send(AppMessage::PlayFinished {
-                            wad_id,
-                            outcome: Err(msg),
-                        }),
+                        Ok(pr) => sender.send(AppMessage::PlayFinished { outcome: Ok(pr) }),
+                        Err(PlayError::Message(msg)) => {
+                            sender.send(AppMessage::PlayFinished { outcome: Err(msg) })
+                        }
                         Err(PlayError::Unavailable) => {
                             sender.send(AppMessage::PlayUnavailable { wad_id })
                         }
@@ -684,7 +693,9 @@ impl eframe::App for CacoApp {
                 }
                 AppMessage::PlayUnavailable { wad_id } => {
                     self.state.play_state = PlayState::Idle;
-                    self.state.needs_reload = true;
+                    // The worker's file check may have just recorded the file
+                    // as missing, and Cacoward cards embed the row too.
+                    self.state.invalidate_wad_views();
                     if let Some(dialog) = LinkDialogState::new(&self.conn, wad_id) {
                         self.state.active_dialog = Some(ActiveDialog::Link(dialog));
                     } else {
@@ -694,26 +705,23 @@ impl eframe::App for CacoApp {
                         ));
                     }
                 }
-                AppMessage::PlayFinished { wad_id, outcome } => {
+                AppMessage::FilesChecked(report) => {
+                    self.state.invalidate_wad_views();
+                    if let Some(notification) = file_check::notification(&report) {
+                        self.state.notification = Some(notification);
+                    }
+                }
+                AppMessage::PlayFinished { outcome } => {
                     self.state.play_state = PlayState::Idle;
                     self.state.invalidate_wad_views();
 
                     match outcome {
+                        // A missing file arrives as PlayUnavailable, so this is
+                        // never one: matching the text used to send a sourceport
+                        // that failed to start to the link dialog too.
                         Err(err) => {
-                            // Post-download "cached file vanished" still opens the
-                            // link dialog. All other string errors surface as a
-                            // toast; explicit unavailability uses PlayUnavailable.
-                            if err.starts_with("file not found:") {
-                                if let Some(dialog) = LinkDialogState::new(&self.conn, wad_id) {
-                                    self.state.active_dialog = Some(ActiveDialog::Link(dialog));
-                                } else {
-                                    self.state.notification =
-                                        Some(Notification::error(format!("Play failed: {err}")));
-                                }
-                            } else {
-                                self.state.notification =
-                                    Some(Notification::error(format!("Play failed: {err}")));
-                            }
+                            self.state.notification =
+                                Some(Notification::error(format!("Play failed: {err}")));
                         }
                         Ok(pr) => {
                             if pr.crashed() {

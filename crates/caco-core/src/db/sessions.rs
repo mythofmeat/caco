@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use chrono::Utc;
 use rusqlite::Connection;
 
-use super::connection::{SQLITE_MAX_VARS, attach_tags, batch_query_i64, batch_query_string};
+use super::connection::{SQLITE_MAX_VARS, attach_tags};
 use super::models::WadRecord;
 use crate::Result;
 
@@ -168,100 +168,9 @@ pub fn get_sessions(conn: &Connection, wad_id: i64) -> Result<Vec<SessionRecord>
         .collect())
 }
 
-/// Get total playtime in seconds for a WAD.
-pub fn get_total_playtime(conn: &Connection, wad_id: i64) -> Result<i64> {
-    let total: i64 = conn.query_row(
-        "SELECT COALESCE(SUM(duration_seconds), 0) FROM sessions \
-         WHERE wad_id = ? AND COALESCE(duration_seconds, 0) >= ?",
-        rusqlite::params![wad_id, MIN_SESSION_SECONDS],
-        |row| row.get(0),
-    )?;
-    Ok(total)
-}
-
 // =============================================================================
 // Batch Stats
 // =============================================================================
-
-/// Get total playtime for multiple WADs efficiently. Returns `{wad_id: seconds}`.
-pub fn get_total_playtime_batch(conn: &Connection, wad_ids: &[i64]) -> Result<HashMap<i64, i64>> {
-    let result = batch_query_i64(
-        conn,
-        wad_ids,
-        &format!(
-            "SELECT wad_id, COALESCE(SUM(duration_seconds), 0) as total \
-             FROM sessions WHERE wad_id IN ({{placeholders}}) \
-             AND COALESCE(duration_seconds, 0) >= {MIN_SESSION_SECONDS} GROUP BY wad_id"
-        ),
-        "total",
-    )?;
-    Ok(wad_ids
-        .iter()
-        .map(|&id| (id, *result.get(&id).unwrap_or(&0)))
-        .collect())
-}
-
-/// Get the last played timestamp for a WAD.
-pub fn get_last_played(conn: &Connection, wad_id: i64) -> Result<Option<String>> {
-    let result: Option<String> = conn
-        .query_row(
-            "SELECT started_at FROM sessions WHERE wad_id = ? \
-             AND COALESCE(duration_seconds, 0) >= ? \
-             ORDER BY started_at DESC LIMIT 1",
-            rusqlite::params![wad_id, MIN_SESSION_SECONDS],
-            |row| row.get(0),
-        )
-        .ok();
-    Ok(result)
-}
-
-/// Get last played timestamp for multiple WADs efficiently.
-pub fn get_last_played_batch(conn: &Connection, wad_ids: &[i64]) -> Result<HashMap<i64, String>> {
-    batch_query_string(
-        conn,
-        wad_ids,
-        &format!(
-            "SELECT wad_id, MAX(started_at) as last_played \
-             FROM sessions WHERE wad_id IN ({{placeholders}}) \
-             AND COALESCE(duration_seconds, 0) >= {MIN_SESSION_SECONDS} GROUP BY wad_id"
-        ),
-        "last_played",
-    )
-}
-
-/// Get the most recently played WAD across the entire library.
-pub fn get_most_recently_played(conn: &Connection) -> Result<Option<WadRecord>> {
-    let mut stmt = conn.prepare(&format!(
-        "SELECT wads.* FROM wads \
-         JOIN sessions ON sessions.wad_id = wads.id \
-         WHERE wads.deleted_at IS NULL \
-         AND COALESCE(sessions.duration_seconds, 0) >= {MIN_SESSION_SECONDS} \
-         ORDER BY sessions.started_at DESC \
-         LIMIT 1"
-    ))?;
-    match stmt.query_row([], WadRecord::from_row) {
-        Ok(mut wad) => {
-            attach_tags(conn, &mut wad)?;
-            Ok(Some(wad))
-        }
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(e.into()),
-    }
-}
-
-/// Get session count for multiple WADs efficiently.
-pub fn get_session_count_batch(conn: &Connection, wad_ids: &[i64]) -> Result<HashMap<i64, i64>> {
-    batch_query_i64(
-        conn,
-        wad_ids,
-        &format!(
-            "SELECT wad_id, COUNT(*) as count \
-             FROM sessions WHERE wad_id IN ({{placeholders}}) \
-             AND COALESCE(duration_seconds, 0) >= {MIN_SESSION_SECONDS} GROUP BY wad_id"
-        ),
-        "count",
-    )
-}
 
 /// Combined stats for a WAD (used in list views).
 #[derive(Debug, Clone, Default)]
@@ -273,8 +182,6 @@ pub struct WadStats {
 }
 
 /// Get all stats for multiple WADs in 2 queries on 1 connection.
-///
-/// Replaces 4 separate batch functions for list view loading.
 pub fn get_wad_stats_batch(conn: &Connection, wad_ids: &[i64]) -> Result<HashMap<i64, WadStats>> {
     if wad_ids.is_empty() {
         return Ok(HashMap::new());
@@ -489,93 +396,6 @@ pub fn delete_wad_completion(conn: &Connection, completion_id: i64) -> Result<bo
     Ok(count > 0)
 }
 
-/// Delete a completion record by exact completed_at match.
-pub fn delete_wad_completion_by_timestamp(
-    conn: &Connection,
-    wad_id: i64,
-    timestamp: &str,
-) -> Result<bool> {
-    let count = conn.execute(
-        "DELETE FROM wad_completions WHERE wad_id = ? AND completed_at = ?",
-        rusqlite::params![wad_id, timestamp],
-    )?;
-    Ok(count > 0)
-}
-
-/// Find a completion by timestamp prefix match.
-pub fn find_completion_by_timestamp(
-    conn: &Connection,
-    wad_id: i64,
-    timestamp: &str,
-) -> Result<Option<CompletionRecord>> {
-    let mut stmt = conn.prepare(
-        "SELECT * FROM wad_completions \
-         WHERE wad_id = ? AND completed_at LIKE ? || '%' \
-         ORDER BY completed_at DESC LIMIT 1",
-    )?;
-    match stmt.query_row(
-        rusqlite::params![wad_id, timestamp],
-        CompletionRecord::from_row,
-    ) {
-        Ok(rec) => Ok(Some(rec)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(e.into()),
-    }
-}
-
-/// Set the completion count for a WAD to a specific number.
-pub fn set_wad_completion_count(conn: &Connection, wad_id: i64, count: i64) -> Result<()> {
-    let current: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM wad_completions WHERE wad_id = ?",
-        [wad_id],
-        |row| row.get(0),
-    )?;
-
-    if count < current {
-        let to_delete = current - count;
-        conn.execute(
-            "DELETE FROM wad_completions WHERE id IN (\
-                 SELECT id FROM wad_completions WHERE wad_id = ? \
-                 ORDER BY completed_at ASC LIMIT ?\
-             )",
-            rusqlite::params![wad_id, to_delete],
-        )?;
-    } else if count > current {
-        let to_add = count - current;
-        let mut stmt = conn.prepare("INSERT INTO wad_completions (wad_id, notes) VALUES (?, ?)")?;
-        for _ in 0..to_add {
-            stmt.execute(rusqlite::params![wad_id, "Manually added"])?;
-        }
-    }
-
-    Ok(())
-}
-
-/// Get count of completions for a WAD.
-pub fn get_times_beaten(conn: &Connection, wad_id: i64) -> Result<i64> {
-    let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM wad_completions WHERE wad_id = ?",
-        [wad_id],
-        |row| row.get(0),
-    )?;
-    Ok(count)
-}
-
-/// Get times beaten for multiple WADs efficiently.
-pub fn get_times_beaten_batch(conn: &Connection, wad_ids: &[i64]) -> Result<HashMap<i64, i64>> {
-    let result = batch_query_i64(
-        conn,
-        wad_ids,
-        "SELECT wad_id, COUNT(*) as times_beaten \
-         FROM wad_completions WHERE wad_id IN ({placeholders}) GROUP BY wad_id",
-        "times_beaten",
-    )?;
-    Ok(wad_ids
-        .iter()
-        .map(|&id| (id, *result.get(&id).unwrap_or(&0)))
-        .collect())
-}
-
 // =============================================================================
 // Cache Management
 // =============================================================================
@@ -598,77 +418,6 @@ pub fn get_cached_wads(conn: &Connection) -> Result<Vec<WadRecord>> {
 pub fn clear_cached_path(conn: &Connection, wad_id: i64) -> Result<bool> {
     let count = conn.execute("UPDATE wads SET cached_path = NULL WHERE id = ?", [wad_id])?;
     Ok(count > 0)
-}
-
-/// Re-point dangling `cached_path` values at files that are still in the cache.
-///
-/// Moving the cache directory — it is editable in Settings — relocates the
-/// files but not the absolute paths recorded against each WAD, which leaves
-/// every row pointing at a location that no longer exists. The files are still
-/// there under the same names, so a row whose path is missing is repaired by
-/// looking for its basename in `cache_dir`.
-///
-/// Conservative by design: only rows whose current path does *not* exist are
-/// touched, and only when a same-named file is actually present. A WAD linked
-/// to a file outside the cache — someone's permanent collection — is left
-/// alone, since its path being absent means the file moved, not that a copy is
-/// waiting in the cache.
-///
-/// Returns the number of rows repaired. Idempotent; a no-op once paths resolve.
-pub fn relink_cached_paths(conn: &Connection, cache_dir: &std::path::Path) -> Result<usize> {
-    let mut stmt =
-        conn.prepare("SELECT id, cached_path FROM wads WHERE cached_path IS NOT NULL")?;
-    let rows: Vec<(i64, String)> = stmt
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
-        .collect::<std::result::Result<Vec<_>, _>>()?;
-
-    let mut repaired = 0;
-    for (id, path) in rows {
-        let current = std::path::Path::new(&path);
-        if current.exists() {
-            continue;
-        }
-        let Some(name) = current.file_name() else {
-            continue;
-        };
-        let candidate = cache_dir.join(name);
-        if !candidate.is_file() {
-            continue;
-        }
-        conn.execute(
-            "UPDATE wads SET cached_path = ?1 WHERE id = ?2",
-            rusqlite::params![candidate.to_string_lossy(), id],
-        )?;
-        repaired += 1;
-    }
-
-    Ok(repaired)
-}
-
-/// Clear cached_path for all WADs. Returns count of WADs updated.
-pub fn clear_all_cached_paths(conn: &Connection) -> Result<usize> {
-    let count = conn.execute(
-        "UPDATE wads SET cached_path = NULL WHERE cached_path IS NOT NULL",
-        [],
-    )?;
-    Ok(count)
-}
-
-/// Find a WAD by the filename portion of its cached_path.
-pub fn get_wad_by_cached_filename(conn: &Connection, filename: &str) -> Result<Option<WadRecord>> {
-    let mut stmt =
-        conn.prepare("SELECT * FROM wads WHERE cached_path LIKE ? AND deleted_at IS NULL")?;
-    match stmt.query_row(
-        rusqlite::params![format!("%/{filename}")],
-        WadRecord::from_row,
-    ) {
-        Ok(mut wad) => {
-            attach_tags(conn, &mut wad)?;
-            Ok(Some(wad))
-        }
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(e.into()),
-    }
 }
 
 // =============================================================================
@@ -917,11 +666,11 @@ mod tests {
     }
 
     #[test]
-    fn test_get_total_playtime() {
+    fn test_get_wad_stats_counts_sessions_and_playtime() {
         let conn = setup();
         let wad_id = add_test_wad(&conn);
 
-        assert_eq!(get_total_playtime(&conn, wad_id).unwrap(), 0);
+        assert_eq!(get_wad_stats(&conn, wad_id).unwrap(), (0, 0));
 
         // Insert a session with known duration
         conn.execute(
@@ -931,7 +680,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(get_total_playtime(&conn, wad_id).unwrap(), 3600);
+        assert_eq!(get_wad_stats(&conn, wad_id).unwrap(), (1, 3600));
     }
 
     #[test]
@@ -1001,26 +750,6 @@ mod tests {
     }
 
     #[test]
-    fn test_batch_playtime() {
-        let conn = setup();
-        let id1 = add_test_wad(&conn);
-        let id2 = add_test_wad(&conn);
-
-        conn.execute(
-            "INSERT INTO sessions (wad_id, started_at, duration_seconds) VALUES (?1, '2024-01-01', 1000)",
-            [id1],
-        ).unwrap();
-        conn.execute(
-            "INSERT INTO sessions (wad_id, started_at, duration_seconds) VALUES (?1, '2024-01-02', 2000)",
-            [id1],
-        ).unwrap();
-
-        let batch = get_total_playtime_batch(&conn, &[id1, id2]).unwrap();
-        assert_eq!(batch[&id1], 3000);
-        assert_eq!(batch[&id2], 0);
-    }
-
-    #[test]
     fn test_wad_completions() {
         let conn = setup();
         let wad_id = add_test_wad(&conn);
@@ -1031,8 +760,6 @@ mod tests {
         let completions = get_wad_completions(&conn, wad_id).unwrap();
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].notes.as_deref(), Some("First clear"));
-
-        assert_eq!(get_times_beaten(&conn, wad_id).unwrap(), 1);
     }
 
     #[test]
@@ -1042,22 +769,7 @@ mod tests {
 
         let comp_id = add_wad_completion(&conn, wad_id, None, None, None).unwrap();
         assert!(delete_wad_completion(&conn, comp_id).unwrap());
-        assert_eq!(get_times_beaten(&conn, wad_id).unwrap(), 0);
-    }
-
-    #[test]
-    fn test_set_completion_count() {
-        let conn = setup();
-        let wad_id = add_test_wad(&conn);
-
-        set_wad_completion_count(&conn, wad_id, 3).unwrap();
-        assert_eq!(get_times_beaten(&conn, wad_id).unwrap(), 3);
-
-        set_wad_completion_count(&conn, wad_id, 1).unwrap();
-        assert_eq!(get_times_beaten(&conn, wad_id).unwrap(), 1);
-
-        set_wad_completion_count(&conn, wad_id, 0).unwrap();
-        assert_eq!(get_times_beaten(&conn, wad_id).unwrap(), 0);
+        assert!(get_wad_completions(&conn, wad_id).unwrap().is_empty());
     }
 
     #[test]
@@ -1095,20 +807,6 @@ mod tests {
             .query_row([session_id], SessionRecord::from_row)
             .unwrap();
         assert_eq!(session.demo_file.as_deref(), Some("/path/to/demo.lmp"));
-    }
-
-    #[test]
-    fn test_times_beaten_batch() {
-        let conn = setup();
-        let id1 = add_test_wad(&conn);
-        let id2 = add_test_wad(&conn);
-
-        add_wad_completion(&conn, id1, None, None, None).unwrap();
-        add_wad_completion(&conn, id1, None, None, None).unwrap();
-
-        let batch = get_times_beaten_batch(&conn, &[id1, id2]).unwrap();
-        assert_eq!(batch[&id1], 2);
-        assert_eq!(batch[&id2], 0);
     }
 
     #[test]
@@ -1151,128 +849,6 @@ mod tests {
         assert!(get_cached_wads(&conn).unwrap().is_empty());
     }
 
-    #[test]
-    fn test_relink_cached_paths_repairs_after_a_cache_move() {
-        use crate::db::models::SourceType;
-        use crate::db::wads::{NewWad, add_wad};
-
-        let conn = setup();
-        let cache = tempfile::tempdir().unwrap();
-        // The file is in the new cache under its original name...
-        std::fs::write(cache.path().join("map01.wad"), b"pwad").unwrap();
-
-        // ...but the row still points at where the cache used to be.
-        let id = add_wad(&conn, &NewWad::new("Moved", SourceType::Idgames)).unwrap();
-        crate::db::update_wad(
-            &conn,
-            id,
-            &crate::db::WadUpdate::new().set_text(
-                "cached_path",
-                Some("/old/share/caco/wads/map01.wad".to_string()),
-            ),
-        )
-        .unwrap();
-
-        assert_eq!(relink_cached_paths(&conn, cache.path()).unwrap(), 1);
-        assert_eq!(
-            crate::db::get_wad(&conn, id, false)
-                .unwrap()
-                .unwrap()
-                .cached_path,
-            Some(
-                cache
-                    .path()
-                    .join("map01.wad")
-                    .to_string_lossy()
-                    .into_owned()
-            )
-        );
-
-        // Idempotent — a second pass has nothing left to do.
-        assert_eq!(relink_cached_paths(&conn, cache.path()).unwrap(), 0);
-    }
-
-    #[test]
-    fn test_relink_cached_paths_leaves_files_outside_the_cache_alone() {
-        use crate::db::models::SourceType;
-        use crate::db::wads::{NewWad, add_wad};
-
-        let conn = setup();
-        let cache = tempfile::tempdir().unwrap();
-
-        // A dangling path with no same-named file in the cache: the file moved,
-        // there is no copy to point at, and inventing one would be a lie.
-        let id = add_wad(&conn, &NewWad::new("Gone", SourceType::Local)).unwrap();
-        crate::db::update_wad(
-            &conn,
-            id,
-            &crate::db::WadUpdate::new()
-                .set_text("cached_path", Some("/mnt/collection/gone.wad".to_string())),
-        )
-        .unwrap();
-
-        assert_eq!(relink_cached_paths(&conn, cache.path()).unwrap(), 0);
-        assert_eq!(
-            crate::db::get_wad(&conn, id, false)
-                .unwrap()
-                .unwrap()
-                .cached_path,
-            Some("/mnt/collection/gone.wad".to_string())
-        );
-    }
-
-    #[test]
-    fn test_relink_cached_paths_does_not_touch_valid_rows() {
-        use crate::db::models::SourceType;
-        use crate::db::wads::{NewWad, add_wad};
-
-        let conn = setup();
-        let elsewhere = tempfile::tempdir().unwrap();
-        let cache = tempfile::tempdir().unwrap();
-
-        // Path resolves, so it is correct regardless of what the cache holds.
-        let real = elsewhere.path().join("keep.wad");
-        std::fs::write(&real, b"pwad").unwrap();
-        std::fs::write(cache.path().join("keep.wad"), b"different").unwrap();
-
-        let id = add_wad(&conn, &NewWad::new("Linked", SourceType::Local)).unwrap();
-        crate::db::update_wad(
-            &conn,
-            id,
-            &crate::db::WadUpdate::new()
-                .set_text("cached_path", Some(real.to_string_lossy().into_owned())),
-        )
-        .unwrap();
-
-        assert_eq!(relink_cached_paths(&conn, cache.path()).unwrap(), 0);
-        assert_eq!(
-            crate::db::get_wad(&conn, id, false)
-                .unwrap()
-                .unwrap()
-                .cached_path,
-            Some(real.to_string_lossy().into_owned())
-        );
-    }
-
-    #[test]
-    fn test_clear_all_cached_paths() {
-        let conn = setup();
-        add_wad(
-            &conn,
-            &NewWad::new("A", SourceType::Local).cached_path("/a"),
-        )
-        .unwrap();
-        add_wad(
-            &conn,
-            &NewWad::new("B", SourceType::Local).cached_path("/b"),
-        )
-        .unwrap();
-
-        let count = clear_all_cached_paths(&conn).unwrap();
-        assert_eq!(count, 2);
-        assert!(get_cached_wads(&conn).unwrap().is_empty());
-    }
-
     /// Evicting from the cache used to leave `availability` reading `cached`,
     /// because `clear_cached_path` nulls the column with raw SQL and the old
     /// stored column was only maintained inside `update_wad`. Deriving it on
@@ -1307,23 +883,6 @@ mod tests {
     }
 
     #[test]
-    fn test_get_wad_by_cached_filename() {
-        let conn = setup();
-        add_wad(
-            &conn,
-            &NewWad::new("Test", SourceType::Local).cached_path("/cache/test.wad"),
-        )
-        .unwrap();
-
-        let found = get_wad_by_cached_filename(&conn, "test.wad").unwrap();
-        assert!(found.is_some());
-        assert_eq!(found.unwrap().title, "Test");
-
-        let not_found = get_wad_by_cached_filename(&conn, "other.wad").unwrap();
-        assert!(not_found.is_none());
-    }
-
-    #[test]
     fn test_library_stats() {
         let conn = setup();
         let id = add_test_wad(&conn);
@@ -1340,41 +899,6 @@ mod tests {
         assert_eq!(snapshot.wads_with_sessions, 1);
         assert_eq!(snapshot.played_wads, 1);
         assert!(!snapshot.activity.is_empty());
-    }
-
-    #[test]
-    fn test_find_completion_by_timestamp() {
-        let conn = setup();
-        let wad_id = add_test_wad(&conn);
-
-        add_wad_completion(&conn, wad_id, None, None, Some("2024-06-15T18:30:00")).unwrap();
-
-        let found = find_completion_by_timestamp(&conn, wad_id, "2024-06-15").unwrap();
-        assert!(found.is_some());
-        assert_eq!(found.unwrap().completed_at, "2024-06-15T18:30:00");
-
-        let not_found = find_completion_by_timestamp(&conn, wad_id, "2024-07-01").unwrap();
-        assert!(not_found.is_none());
-    }
-
-    #[test]
-    fn test_most_recently_played() {
-        let conn = setup();
-        let id1 = add_test_wad(&conn);
-        let id2 = add_wad(&conn, &NewWad::new("Second WAD", SourceType::Local)).unwrap();
-
-        conn.execute(
-            "INSERT INTO sessions (wad_id, started_at, duration_seconds) VALUES (?1, '2024-01-01T00:00:00', 300)",
-            [id1],
-        ).unwrap();
-        conn.execute(
-            "INSERT INTO sessions (wad_id, started_at, duration_seconds) VALUES (?1, '2024-06-01T00:00:00', 600)",
-            [id2],
-        ).unwrap();
-
-        let recent = get_most_recently_played(&conn).unwrap();
-        assert!(recent.is_some());
-        assert_eq!(recent.unwrap().title, "Second WAD");
     }
 
     #[test]

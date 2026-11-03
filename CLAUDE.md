@@ -57,7 +57,8 @@ crates/
 
 **caco-core** top-level modules:
 - `config.rs` — TOML config + path resolution + `ensure_config_keys` autofill
-- `player.rs` — sourceport launcher, playtime tracking, companion injection. `build_launch` is the single command builder behind both `play` and `play_demo`, parameterised by a private `LaunchMode`: playback needs an identical file set, complevel and load order to the recording (any difference desyncs the demo) but must not record a session or collect stats, since a replayed map exit is not progress the user just made.
+- `player.rs` — sourceport launcher, playtime tracking, companion injection. `build_launch` is the single command builder behind both `play` and `play_demo`, parameterised by a private `LaunchMode`: playback needs an identical file set, complevel and load order to the recording (any difference desyncs the demo) but must not record a session or collect stats, since a replayed map exit is not progress the user just made. It gets the WAD's file from `presence::check_wad`, so a file that has gone fails there as the typed `Error::WadFileMissing` (with where it was last seen), never inside the sourceport, and the GUI matches the variant rather than the message text.
+- `presence.rs` — keeps `cached_path` honest against the filesystem, which `Availability` and `is_lost` never consult. `check_library` runs over every row at startup (on a worker, `app/file_check.rs`) and `check_wad` over one before each launch; both apply one rule: the recorded file is there → nothing; a file of the same name is directly under the cache or keep dir → relink to it, the WAD's own store dir first; neither → move the path to `last_known_path`. A row with only a `last_known_path` takes the same lookup, so a file that comes back (drive remounted, sync caught up) is found without a relink by hand. The rule ignores retrievability on purpose: an idgames WAD linked to a file on an unmounted drive is as worth finding again as a manual one. Every stat happens before the one short write transaction, and each write compares against the values it read, so a check stalled on a dead mount neither holds a lock the UI's writes queue behind nor undoes a link made meanwhile. `StorePaths` is explicit for the same reason `GcPaths` is.
 - `companion_service.rs`, `resource_service.rs` — MD5 dedup + managed storage; IWAD/id24 registration
 - `complevel.rs`, `complevel_detect.rs`, `iwad_detect.rs` — detection heuristics (COMPLVL, UMAPINFO, DEHACKED, PNAMES, map lumps)
 - `sourceports/` — everything about sourceports, in one module because the two halves are one subject. **Never call these "ports"** anywhere a user or a reader can see it: outside caco's own history that word means something else entirely, and every Doom engine is a *sourceport*. `registry.rs` (was the top-level `sourceports.rs`) is the family table — which flags each family spells for data dirs, save dirs, complevels and configs — flat-re-exported from `mod.rs`, so every existing `sourceports::identify_family` call site was untouched by the merge. The rest builds sourceports from source into a caco-owned prefix: `recipe.rs` holds the TOML schema and the built-in `recipes.toml` (nyan-doom, uzdoom), merged with any `*.toml` in `config::sourceport_recipe_dir()`; `build.rs` is the clone → patch → configure → compile → install driver; `manifest.rs` records what was built inside the prefix, in a `caco-sourceport.toml` marker `remove_installed` refuses to delete without; `doctor.rs` answers "can this machine build it" against pacman, rpm or brew (`Host`): `Macos` on a Mac, otherwise the recipe's `arch` or `fedora` package list picked from os-release's `ID` then `ID_LIKE`; the report stores the `Host` so the install hint is pure; `update.rs` asks each built sourceport's remote whether its ref has moved, via one `git ls-remote` each (no objects fetched), cached in `<prefix_root>/update-check.toml` and throttled by `config.sourceport_update_check_days` (0 disables). A build invalidates its own cache entry, or the badge would stay lit until the interval expired. `app.rs::spawn_sourceport_update_check` runs it at startup and notifies; it never starts a rebuild on its own. The recipe is the portable artifact and lives in the data dir, while checkouts and install prefixes live in the cache — a built sourceport is regenerable and the trees are large. `config::resolve_sourceport` is the only integration point, and a managed build wins over `PATH`. The registry needed no change when builds were added: nyan-doom was already mapped to dsda and uzdoom to zdoom.
@@ -75,7 +76,7 @@ crates/
 - `cacoward_link.rs` — which library WAD a Cacoward row belongs to. One per-row decision (`owner_of`: idgames id, then a unique normalized title, which never outweighs two idgames ids that disagree) reached from two moments, because either side can arrive first: `link_year` after a scrape and `link_imported_wad` after every import. Per row rather than per WAD so the answer cannot depend on iteration order: a WAD claiming rows as it is visited could take one by title that a later WAD owns by id. There is deliberately no whole-table sweep, because Unlink clears a row and a sweep would quietly undo that.
 - `idgames/`, `doomwiki/`, `doomworld/` — per-source API clients + parsers
 
-**caco**: `app.rs` hosts the `CacoApp` state machine. Panels in `src/panels/`, dialogs in `src/dialogs/`, import flow in `src/import/`. `thumbnails.rs` extracts and caches TITLEPIC; `wiki_scraper.rs` fetches Doom Wiki thumbs; `workers.rs` coordinates background search/import/play via mpsc channels. The Cacowards view (`ViewMode::Cacowards`) is rendered by `panels/cacowards.rs` in a deliberately editorial layout (hero banner + year strip + category card grid) to signal the curated-external-feed origin while sharing the rest of the GUI chrome. Imports kicked off from cacoward cards spawn through `import::workers::spawn_import_cacoward` so they reuse the existing duplicate-detection and auto-link plumbing. `dialogs/settings.rs` is the GUI settings editor: it snapshots the live `Config`, edits a curated field subset (sourceports, behavior, cache, paths), and on Save writes the full struct via `config::save_config` + `config::reload_config` so unexposed sections (list, sourceport_preferences, iwad_priority) survive round-trips and changes apply without restart. `dialogs/profiles.rs` manages sourceport config profiles (list on the left, contents editable on the right); it is the GUI counterpart to `caco profile` and shares `caco_core::profiles` with it. Deleting a profile stages a confirmation that lists the WADs still referencing it rather than warning after the fact. `dialogs/gc.rs` is the cleanup panel (Storage's Clean tab): keep-toggles across the top re-measure the plan on change, every row is a checkbox (so one WAD's saves can be kept while another's go), and Clean stages a confirmation naming the item count and size. `dialogs/enrich.rs` drives `caco_sources::enrich_service` from the GUI: it owns only the request, live progress and the report, while `app.rs::spawn_enrich` runs the work on a thread and streams `AppMessage::EnrichProgress` / `EnrichComplete` back. Cancellation is an `Arc<AtomicBool>` the dialog shares with the worker; a fresh one is minted per run so a previously cancelled flag can't abort the next one instantly. `dialogs/companions.rs` is the library-wide companion registry (Storage's Files tab, `caco companion ls` with no query): every managed file with its size, MD5 and the WADs still linking it, plus per-row and bulk orphan deletion. Per-WAD linking stays in the edit dialog's Companions tab, which stages the orphan question when `plan_unregister` returns `None`. `dialogs/wad_data.rs` is the per-WAD Saves / Backups / Demos dialog (`caco saves` + `caco demos` in one place, since both act on the same data dir); every destructive action stages a confirmation, and demo playback returns `WadDataResult::PlayDemo` so `app.rs` can run the blocking launch on a worker thread while the dialog stays open.
+**caco**: `app.rs` hosts the `CacoApp` state machine. Panels in `src/panels/`, dialogs in `src/dialogs/`, import flow in `src/import/`. `app/file_check.rs` runs `presence::check_library` on a worker when the app is created — it used to run in `main.rs` before the window existed, where a stat on a dead mount held the window back — and turns its report into at most one status-bar line, a warning only for files caco cannot fetch again. `thumbnails.rs` extracts and caches TITLEPIC; `wiki_scraper.rs` fetches Doom Wiki thumbs; `workers.rs` coordinates background search/import/play via mpsc channels. The Cacowards view (`ViewMode::Cacowards`) is rendered by `panels/cacowards.rs` in a deliberately editorial layout (hero banner + year strip + category card grid) to signal the curated-external-feed origin while sharing the rest of the GUI chrome. Imports kicked off from cacoward cards spawn through `import::workers::spawn_import_cacoward` so they reuse the existing duplicate-detection and auto-link plumbing. `dialogs/settings.rs` is the GUI settings editor: it snapshots the live `Config`, edits a curated field subset (sourceports, behavior, cache, paths), and on Save writes the full struct via `config::save_config` + `config::reload_config` so unexposed sections (list, sourceport_preferences, iwad_priority) survive round-trips and changes apply without restart. `dialogs/profiles.rs` manages sourceport config profiles (list on the left, contents editable on the right); it is the GUI counterpart to `caco profile` and shares `caco_core::profiles` with it. Deleting a profile stages a confirmation that lists the WADs still referencing it rather than warning after the fact. `dialogs/gc.rs` is the cleanup panel (Storage's Clean tab): keep-toggles across the top re-measure the plan on change, every row is a checkbox (so one WAD's saves can be kept while another's go), and Clean stages a confirmation naming the item count and size. `dialogs/enrich.rs` drives `caco_sources::enrich_service` from the GUI: it owns only the request, live progress and the report, while `app.rs::spawn_enrich` runs the work on a thread and streams `AppMessage::EnrichProgress` / `EnrichComplete` back. Cancellation is an `Arc<AtomicBool>` the dialog shares with the worker; a fresh one is minted per run so a previously cancelled flag can't abort the next one instantly. `dialogs/companions.rs` is the library-wide companion registry (Storage's Files tab, `caco companion ls` with no query): every managed file with its size, MD5 and the WADs still linking it, plus per-row and bulk orphan deletion. Per-WAD linking stays in the edit dialog's Companions tab, which stages the orphan question when `plan_unregister` returns `None`. `dialogs/wad_data.rs` is the per-WAD Saves / Backups / Demos dialog (`caco saves` + `caco demos` in one place, since both act on the same data dir); every destructive action stages a confirmation, and demo playback returns `WadDataResult::PlayDemo` so `app.rs` can run the blocking launch on a worker thread while the dialog stays open.
 
 ## Dependencies (key crates)
 
@@ -96,8 +97,8 @@ egui = "0.37"
 
 ## Key Patterns
 
-- **Builder pattern for DB writes**: `NewWad::builder()` and `WadUpdate::builder()` produce type-safe WAD creation/updates. Both trim `source_url` through `wads::clean_source_url`, and `find_duplicate` compares through it too, or a URL with a pasted `\r` would miss the row it is a duplicate of. reqwest strips that `\r` while parsing, so the fetch succeeds and nothing else notices it was there.
-- **Batch stats**: `get_total_playtime_batch()`, `get_last_played_batch()`, etc. — avoid N+1 queries when rendering lists.
+- **Builder pattern for DB writes**: `NewWad::builder()` and `WadUpdate::builder()` produce type-safe WAD creation/updates. Both trim `source_url` through `wads::clean_source_url`, and `find_duplicate` compares through it too, or a URL with a pasted `\r` would miss the row it is a duplicate of. reqwest strips that `\r` while parsing, so the fetch succeeds and nothing else notices it was there. `WadUpdate` setting a non-empty `cached_path` also clears `last_known_path`, so the two are never both set and `presence` never restores a row from a location that a newer file superseded; `last_known_path` is deliberately not an allowed update field, because `presence` is its only writer.
+- **Batch stats**: `get_wad_stats_batch()` (playtime, last played, session count and times beaten in two queries), `get_analyses_batch()`, `get_companions_batch()` — avoid N+1 queries when rendering lists.
 - **Query parser**: beets-style syntax — see Behavior below.
 - **Companion system**: `companion_files_registry` + `wad_companions` junction table. `companion_service.rs` handles MD5 dedup + managed storage at `<data>/companions/{md5[:12]}_{filename}`. DEH/BEX auto-detected; `-deh` for non-zdoom, `-file` for zdoom. Because files are deduplicated by MD5, one managed file can serve several WADs, so unlinking is not the same as deleting: `companion_service::plan_unregister` answers "what should happen to the file", returning `None` only when the file would be left with no owner *and* the configured policy is `ask` (the default). Both frontends must go through it — `unregister_companion` takes a resolved `OrphanPolicy`, so neither can swallow an `ask` and orphan a file unprompted. `delete_orphan` refuses while anything still links the file.
 - **WAD file placement**: `config::wad_store_dir(retrievability)` is the only
@@ -106,9 +107,10 @@ egui = "0.37"
   explicitly so tests cannot write into the real library, same reason as
   `GcPaths`. `dialogs/link.rs::link_picked_file` re-reads the WAD from the DB
   rather than trusting its caller, because retrievability is a property of the
-  record. The play-time download path in `app.rs` needs no branch: it refuses
-  anything without an idgames id or `/idgames/` URL, so what it fetches is
-  `Automatic` by construction.
+  record. The play-time download path in `app.rs` writes to the cache dir
+  without asking, because only an `Automatic` WAD reaches it: Play sends a
+  manual one whose file is not here straight to the link dialog, rather than
+  announce a download that cannot start.
 - **Destructive flows respect retrievability**: deleting a re-fetchable file
   costs a download, deleting a manual one costs the WAD, so the two must not
   look alike. `dialogs/gc.rs::is_at_risk` requires *both* manual and an actual
@@ -203,8 +205,10 @@ it, and reading the layout code is how the two bugs above survived.
   make the flake rarer, and this job gates a merge nobody is watching.
 - A control that only exists in some state is unchecked until a run reaches that
   state, which is why `scratch_home` puts an empty `nyan-doom` on `PATH` (Settings'
-  detected controls; CI has no sourceport) and why worker-only states are posted
-  through `background_sender`. Add a shot when you add such a state.
+  detected controls; CI has no sourceport), why worker-only states are posted
+  through `background_sender`, and why the last shot adds a WAD whose file is gone
+  and presses Play on it (the link dialog, with an absolute path long enough to
+  wrap). Add a shot when you add such a state.
 - The library is a copy of the real `library.db` into a temp `CACO_HOME`, so
   shots show real WADs and nothing can write to the real library. CI has no library,
   so it falls back to an empty database: every surface still renders, with less in it.
@@ -244,10 +248,12 @@ Disposable (`config::cache_home`, overridable via `CACO_CACHE_HOME`):
 
 Caco carries **no migrations between layouts**. It is pre-1.0 and single-user;
 a layout change is applied by moving the files by hand, which is why nothing in
-`config.rs` knows about a previous location. `db::relink_cached_paths` still runs
-at startup, but for a live reason rather than a historical one: `cache_dir` is
-editable in Settings, and every `wads.cached_path` records an absolute path into
-wherever the cache used to be.
+`config.rs` knows about a previous location. The startup file check (`presence`)
+still relinks by file name, but for live reasons rather than historical ones:
+`cache_dir` is editable in Settings, the data dir is somewhere different on every
+platform, and every `wads.cached_path` records an absolute path into wherever
+those used to be. It looks in both the cache and the keep dir, because the keep
+dir is the half that travels between machines.
 
 ## Behavior
 
@@ -265,11 +271,19 @@ wherever the cache used to be.
 **Lost WADs** (`WadRecord::is_lost`, `Retrievability::LOST_SQL`, query
 `retrievable:lost`): `Manual` intersected with "no local copy" — the set caco
 can neither play nor fetch. Deliberately not a third enum variant, since a WAD
-enters and leaves it purely by its file coming and going. Surfaced as a `⚠`
-prefix on the title in both the table and grid (`theme::LOST_MARKER` /
-`LOST_HOVER`, shared so the two views cannot disagree) and as a self-hiding chip
-beside the filter bar that applies the query; `db::count_lost` feeds the chip
-from `AppState::refresh_status_counts`.
+enters and leaves it purely by its file coming and going. The library does not
+mark these rows: the title marker and the filter-bar chip that once did were
+dropped when the storage controls were simplified, so the query is how to list
+them.
+
+"No local copy" used to mean only "no `cached_path`", and a file that went away
+without caco deleting it never cleared that: a data dir synced from another
+machine listed six manual WADs as cached, My House among them, on a machine that
+had none of their files (#51). `presence` now checks every recorded path at
+startup and before each launch, and moves a vanished one into `last_known_path`
+(migration 40), which the link dialog shows as where the file was last seen.
+That column is history rather than a copy of derivable state, so it does not
+bring back the drift migration 38 removed.
 
 **Two derived axes on a WAD, neither stored.** Both live in `db/models.rs` as an
 enum with a `derive` constructor, a SQL spelling of the same rule, a `WadRecord`
@@ -288,6 +302,8 @@ the same rows. Treat that quartet as the pattern for anything similar.
   this machine, and if not is there a URL to try — from `cached_path` +
   `source_url`, treating `""` as absent. Query field `avail:`, SQL in
   `Availability::sql()`, one predicate per variant, and they partition the table.
+  Deriving it never touches the disk; it is as true as `cached_path`, which
+  `presence` keeps true.
 
 The two are orthogonal and all combinations occur in a real library.
 `Availability::Downloadable` deliberately overstates for manual WADs — it means
@@ -313,7 +329,7 @@ pins the behaviour.
 
 **Launch args layering**: global `sourceport_args` (every sourceport) → `[executable_args]` table (executable basename → args, case-insensitive fallback, applied only when that executable launches) → per-WAD `custom_args` → per-launch extra args. GUI settings dialog edits args as shell-quoted strings via `shlex`.
 
-**DB migrations**: run on `init_db()`; numbered sequentially; current schema version is 39. `init_db` snapshots the DB into the backup dir whenever migrations are pending.
+**DB migrations**: run on `init_db()`; numbered sequentially; current schema version is 40. `init_db` snapshots the DB into the backup dir whenever migrations are pending.
 
 **Cacowards**: `cacowards` table (year, category, rank, wad_title, idgames_url, doomwiki_url, wad_id, manual_override) tracks Doomworld's annual awards. Core categories: `winner`, `runner-up`, `honorable-mention`, `mordeth`. `caco enrich --cacowards --year YYYY` scrapes the Doom Wiki's `Cacowards_YYYY` page (`caco-sources/src/doomwiki/cacowards.rs`), upserts entries, and auto-links to library WADs in two passes: (1) idgames URL → `wads.idgames_id`, (2) normalized-title fallback that links only when exactly one library WAD shares the normalized title and that WAD does not carry a different idgames id. A wrong link is the worse failure because a link is not revisited: the 2023 runner-up "Corruption" (20790) shares its name with two 2007 WADs, and importing one of those first would otherwise keep the row even after the real one arrived, whereas a missed link stays visibly `absent` and takes one pin. Importing a WAD by any route runs the same decision for it (`caco-sources/src/cacoward_link.rs`), so a row never waits on a re-scrape, and neither moment touches a pinned row or one already linked to a live WAD. Stale non-manual rows for the year are cleared before each re-scrape so the wiki view is canonical; `manual_override = 1` entries survive. `caco stats --cacowards` renders a year × category grid; `--year YYYY` drills into entry-level detail with linked-WAD status.
 

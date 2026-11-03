@@ -154,8 +154,14 @@ URL to try, `avail:unavailable` has neither.
 
 **`retrievable:lost`** is the intersection worth watching: manual-only *and* no
 local copy, meaning caco cannot produce the WAD and neither can you without
-going and finding the file again. Those rows are flagged in the library, and a
-chip beside the filter bar shows the count whenever it is not zero.
+going and finding the file again.
+
+Both rely on caco knowing whether a file is really here, so it checks every
+recorded file when it starts and again before each launch. A file that has gone
+— deleted by hand, on a drive that isn't mounted, or recorded by a data directory
+synced from a machine that has it — stops counting as cached, and caco remembers
+where it was last seen: Play says where, and the next check that finds it there
+again (or under the same name in either `wads/` directory) picks it back up.
 
 **Status values:** `unplayed`, `in-progress`, `completed`, `abandoned`
 
@@ -276,7 +282,9 @@ cache, where it is fair game for cleanup because losing it costs a download.
 Everything else — forum attachments, one-off file hosts, files you linked by
 hand — goes to the portable side and stays until you delete it deliberately.
 That is what makes copying the data directory to another machine actually carry
-your library: see `retrievable:` under Queries.
+your library: see `retrievable:` under Queries. A file that did not make the trip
+shows up as not on this machine, with where it was last seen, rather than as
+cached.
 
 Override the cache root with `CACO_CACHE_HOME`, or just the WAD cache with
 `CACO_CACHE_DIR`.

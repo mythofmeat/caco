@@ -160,6 +160,14 @@ impl WadUpdate {
             "source_url" => value.map(|url| clean_source_url(&url).to_string()),
             _ => value,
         };
+        // A file caco has a path for supersedes wherever one was last seen, and
+        // the two columns must never both be set: `presence` would otherwise
+        // read a stale last-known location back as somewhere to restore from.
+        // Not an allowed field of its own because `presence` is its only writer.
+        if field == "cached_path" && value.as_deref().is_some_and(|p| !p.is_empty()) {
+            self.fields
+                .insert("last_known_path", FieldValue::Text(None));
+        }
         self.fields.insert(field, FieldValue::Text(value));
         self
     }
@@ -398,21 +406,6 @@ pub fn remove_tag(conn: &Connection, wad_id: i64, tag: &str) -> Result<bool> {
     Ok(count > 0)
 }
 
-/// Remove all tags from a WAD. Returns count removed.
-pub fn remove_all_tags(conn: &Connection, wad_id: i64) -> Result<usize> {
-    let count = conn.execute("DELETE FROM tags WHERE wad_id = ?1", [wad_id])?;
-    Ok(count)
-}
-
-/// Get all unique tags.
-pub fn get_all_tags(conn: &Connection) -> Result<Vec<String>> {
-    let mut stmt = conn.prepare("SELECT DISTINCT tag FROM tags ORDER BY tag")?;
-    let tags = stmt
-        .query_map([], |row| row.get::<_, String>(0))?
-        .collect::<std::result::Result<Vec<_>, _>>()?;
-    Ok(tags)
-}
-
 /// Count non-deleted WADs grouped by status.
 ///
 /// Keyed by the raw `status` column string ("unplayed", "in-progress", etc.).
@@ -431,40 +424,6 @@ pub fn get_status_counts(conn: &Connection) -> Result<HashMap<String, i64>> {
         let (status, count) = row?;
         counts.insert(status, count);
     }
-    Ok(counts)
-}
-
-/// How many live WADs are manual-only with no local copy.
-///
-/// The count the library needs to admit it cannot launch everything it lists;
-/// see `WadRecord::is_lost`.
-pub fn count_lost(conn: &Connection) -> Result<usize> {
-    let count: i64 = conn.query_row(
-        &format!(
-            "SELECT COUNT(*) FROM wads WHERE deleted_at IS NULL AND {}",
-            crate::db::Retrievability::LOST_SQL
-        ),
-        [],
-        |row| row.get(0),
-    )?;
-    Ok(count as usize)
-}
-
-/// Get all tags with their WAD counts (excluding deleted WADs).
-pub fn get_tag_counts(conn: &Connection) -> Result<Vec<(String, i64)>> {
-    let mut stmt = conn.prepare(
-        "SELECT t.tag, COUNT(*) as count
-         FROM tags t
-         JOIN wads w ON w.id = t.wad_id
-         WHERE w.deleted_at IS NULL
-         GROUP BY t.tag
-         ORDER BY t.tag",
-    )?;
-    let counts = stmt
-        .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-        })?
-        .collect::<std::result::Result<Vec<_>, _>>()?;
     Ok(counts)
 }
 
@@ -776,64 +735,6 @@ mod tests {
     }
 
     #[test]
-    fn test_remove_all_tags() {
-        let conn = setup();
-        let id = add_test_wad(&conn);
-        add_tag(&conn, id, "a").unwrap();
-        add_tag(&conn, id, "b").unwrap();
-        add_tag(&conn, id, "c").unwrap();
-
-        let removed = remove_all_tags(&conn, id).unwrap();
-        assert_eq!(removed, 3);
-        assert!(fetch_tags(&conn, id).unwrap().is_empty());
-    }
-
-    #[test]
-    fn test_get_all_tags() {
-        let conn = setup();
-        let id1 = add_test_wad(&conn);
-        let id2 = add_test_wad(&conn);
-        add_tag(&conn, id1, "doom").unwrap();
-        add_tag(&conn, id1, "megawad").unwrap();
-        add_tag(&conn, id2, "doom").unwrap();
-        add_tag(&conn, id2, "slaughter").unwrap();
-
-        let tags = get_all_tags(&conn).unwrap();
-        assert_eq!(tags, vec!["doom", "megawad", "slaughter"]);
-    }
-
-    #[test]
-    fn test_get_tag_counts() {
-        let conn = setup();
-        let id1 = add_test_wad(&conn);
-        let id2 = add_test_wad(&conn);
-        add_tag(&conn, id1, "doom").unwrap();
-        add_tag(&conn, id2, "doom").unwrap();
-        add_tag(&conn, id1, "megawad").unwrap();
-
-        let counts = get_tag_counts(&conn).unwrap();
-        assert_eq!(
-            counts,
-            vec![("doom".to_string(), 2), ("megawad".to_string(), 1)]
-        );
-    }
-
-    #[test]
-    fn test_tag_counts_exclude_deleted() {
-        let conn = setup();
-        let id1 = add_test_wad(&conn);
-        let id2 = add_test_wad(&conn);
-        add_tag(&conn, id1, "doom").unwrap();
-        add_tag(&conn, id2, "doom").unwrap();
-
-        // Soft-delete one WAD
-        delete_wad(&conn, id2, false).unwrap();
-
-        let counts = get_tag_counts(&conn).unwrap();
-        assert_eq!(counts, vec![("doom".to_string(), 1)]);
-    }
-
-    #[test]
     fn test_new_wad_defaults_to_unplayed() {
         let conn = setup();
         let id = add_wad(&conn, &NewWad::new("Test", SourceType::Local)).unwrap();
@@ -916,6 +817,34 @@ mod tests {
 
         let wad = get_wad(&conn, id, false).unwrap().unwrap();
         assert_eq!(wad.availability(), Availability::Downloadable);
+    }
+
+    /// `presence` restores a row from `last_known_path`, so a row that has a
+    /// file again must not keep one: evicting the new copy would otherwise
+    /// bring back a link to wherever the old one used to be.
+    #[test]
+    fn test_setting_cached_path_forgets_last_known_path() {
+        let conn = setup();
+        let id = add_wad(&conn, &NewWad::new("Test", SourceType::Doomworld)).unwrap();
+        conn.execute(
+            "UPDATE wads SET last_known_path = '/mnt/nas/test.wad' WHERE id = ?1",
+            [id],
+        )
+        .unwrap();
+        let last_known =
+            |conn: &Connection| get_wad(conn, id, false).unwrap().unwrap().last_known_path;
+
+        // Clearing a path, or writing a blank one, is not finding the file.
+        for blank in [None, Some(String::new())] {
+            update_wad(&conn, id, &WadUpdate::new().set_text("cached_path", blank)).unwrap();
+            assert_eq!(last_known(&conn).as_deref(), Some("/mnt/nas/test.wad"));
+        }
+
+        let found = WadUpdate::new().set_text("cached_path", Some("/keep/test.wad".to_string()));
+        update_wad(&conn, id, &found).unwrap();
+        let wad = get_wad(&conn, id, false).unwrap().unwrap();
+        assert_eq!(wad.cached_path.as_deref(), Some("/keep/test.wad"));
+        assert_eq!(wad.last_known_path, None);
     }
 
     #[test]

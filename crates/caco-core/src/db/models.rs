@@ -91,6 +91,12 @@ impl FromStr for Status {
 /// every cache eviction left a row still claiming to be cached. Deriving it
 /// makes that unrepresentable.
 ///
+/// Neither half looks at the filesystem, so `Cached` is only as true as
+/// `cached_path`. A file can go without caco deleting it — a data dir synced
+/// from a machine that has it, an unmounted drive — and [`crate::presence`] is
+/// what notices: it runs at startup and before every launch, and clears the
+/// path of a file that has gone.
+///
 /// Answers a different question from [`Retrievability`]: this one changes
 /// every time a file lands in or leaves the cache, while retrievability is a
 /// fact about where the WAD came from. Note that `Downloadable` only promises
@@ -334,7 +340,15 @@ pub struct WadRecord {
     pub source_url: Option<String>,
     pub idgames_id: Option<String>,
     pub filename: Option<String>,
+    /// The WAD's file, as of the last time caco looked. Kept honest by
+    /// [`crate::presence`]; see [`Availability`].
     pub cached_path: Option<String>,
+    /// Where the file was the last time caco found it, set only while
+    /// `cached_path` is empty: the answer to "where did it go" for a file that
+    /// is on another machine or a drive that is not mounted. History, not a
+    /// copy of anything derivable — `crate::presence` is its only writer, and
+    /// setting `cached_path` through [`crate::db::WadUpdate`] clears it.
+    pub last_known_path: Option<String>,
     pub custom_iwad: Option<String>,
     pub custom_sourceport: Option<String>,
     pub required_sourceport_family: Option<String>,
@@ -372,7 +386,8 @@ impl WadRecord {
     ///
     /// The intersection of the two axes rather than a state of its own — a
     /// `Manual` WAD becomes lost and unlost purely by its file coming and
-    /// going, which is what `Availability` already tracks.
+    /// going, which is what `Availability` already tracks. When it went, as
+    /// opposed to never having had one, `last_known_path` says where it was.
     pub fn is_lost(&self) -> bool {
         self.retrievability() == Retrievability::Manual
             && self.availability() != Availability::Cached
@@ -404,6 +419,7 @@ impl WadRecord {
             idgames_id: row.get("idgames_id")?,
             filename: row.get("filename")?,
             cached_path: row.get("cached_path")?,
+            last_known_path: row.get("last_known_path")?,
             custom_iwad: row.get("custom_iwad")?,
             custom_sourceport: row.get("custom_sourceport")?,
             required_sourceport_family: row.get("required_sourceport_family").ok(),
@@ -514,31 +530,6 @@ pub static ALLOWED_UPDATE_FIELDS: LazyLock<std::collections::HashSet<&'static st
         .into_iter()
         .collect()
     });
-
-/// Status metadata entry: (display_name, hex_color, rich_color, css_class).
-pub type StatusMeta = (&'static str, &'static str, &'static str, &'static str);
-
-/// Canonical status metadata.
-pub static STATUS_METADATA: LazyLock<HashMap<&'static str, StatusMeta>> = LazyLock::new(|| {
-    HashMap::from([
-        (
-            "unplayed",
-            ("Unplayed", "#3366cc", "dodger_blue1", "status-unplayed"),
-        ),
-        (
-            "in-progress",
-            ("In Progress", "#33cc33", "green1", "status-in-progress"),
-        ),
-        (
-            "completed",
-            ("Completed", "#808080", "grey50", "status-completed"),
-        ),
-        (
-            "abandoned",
-            ("Abandoned", "#cc3333", "red", "status-abandoned"),
-        ),
-    ])
-});
 
 #[cfg(test)]
 mod tests {
