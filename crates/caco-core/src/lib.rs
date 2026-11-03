@@ -13,6 +13,7 @@ pub mod iwad_detect;
 pub mod mapinfo;
 pub mod mirror_tokens;
 pub mod mirrors;
+pub mod placement;
 pub mod player;
 pub mod presence;
 pub mod profiles;

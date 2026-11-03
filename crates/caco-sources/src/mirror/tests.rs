@@ -647,15 +647,6 @@ fn test_the_same_file_already_there_is_used_without_a_download() {
     assert_eq!(server.log(), Vec::<String>::new());
 }
 
-#[test]
-fn test_names_with_a_hash_keep_their_extension() {
-    let hash = "1a2b3c4d5e";
-    assert_eq!(name_with_hash("road.zip", hash), "road-1a2b3c4d.zip");
-    assert_eq!(name_with_hash("road.v2.pk3", hash), "road.v2-1a2b3c4d.pk3");
-    assert_eq!(name_with_hash("road", hash), "road-1a2b3c4d");
-    assert_eq!(name_with_hash(".road", hash), ".road-1a2b3c4d");
-}
-
 // -- Uploading --
 
 fn upload(m: &Machine, wad_id: i64, mirror: &MirrorConfig) -> Result<Uploaded> {

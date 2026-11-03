@@ -327,6 +327,25 @@ impl Default for Config {
     }
 }
 
+/// What becomes of a file caco takes from outside its store directories.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkMode {
+    Move,
+    Copy,
+}
+
+impl LinkMode {
+    /// Read the `link_mode` setting. Only an explicit `move` moves, because a typo in
+    /// a config file should not make files vanish from where the user left them.
+    pub fn parse(value: &str) -> Self {
+        if value == "move" {
+            Self::Move
+        } else {
+            Self::Copy
+        }
+    }
+}
+
 /// One `[[mirrors]]` entry: a store of WAD files the user controls.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -779,6 +798,11 @@ pub fn get_companion_orphan_cleanup() -> String {
         "delete" | "keep" | "ask" => value,
         _ => "ask".to_string(),
     }
+}
+
+/// Get the configured link mode: what Get does with a file that lands in Downloads.
+pub fn get_link_mode() -> LinkMode {
+    LinkMode::parse(&load_config().link_mode)
 }
 
 /// Get the configured default sourceport.
@@ -1661,6 +1685,14 @@ window_width = 1600
         unsafe {
             std::env::remove_var("CACO_CONFIG");
         }
+    }
+
+    #[test]
+    fn test_only_an_explicit_move_moves() {
+        assert_eq!(LinkMode::parse("move"), LinkMode::Move);
+        assert_eq!(LinkMode::parse("copy"), LinkMode::Copy);
+        assert_eq!(LinkMode::parse("mvoe"), LinkMode::Copy);
+        assert_eq!(LinkMode::parse(""), LinkMode::Copy);
     }
 
     #[test]
