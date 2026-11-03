@@ -33,10 +33,11 @@ use std::time::Duration;
 
 use caco::dialogs::storage::StorageTab;
 use caco::import::state::SearchSource;
-use caco::message::AppMessage;
+use caco::message::{AppMessage, EnrichReport};
 use caco::state::{ActionRequest, ViewMode};
 use caco_core::sourceports::RemoteRefs;
 use caco_sources::SourceError;
+use caco_sources::enrich_service::WikiBlocked;
 use caco_sources::http::WafKind;
 use egui_kittest::kittest::Queryable;
 
@@ -201,6 +202,26 @@ impl Shooter {
         overflow
     }
 
+    /// Post the report of a library run the wiki refused, the way the worker
+    /// posts it, and check it reached the open Enrich dialog.
+    fn post_wiki_blocked_report(&mut self, findings: Vec<String>) {
+        let blocked = WikiBlocked {
+            kind: WafKind::Cloudflare,
+            unchecked: 71,
+        };
+        let tx = self.harness.state_mut().background_sender();
+        tx.send(AppMessage::EnrichComplete(Ok(EnrichReport::Wads {
+            examined: 116,
+            findings,
+            wiki_lookups: 1,
+            wiki_blocked: Some(blocked.to_string()),
+            cancelled: false,
+            dry_run: false,
+        })));
+        self.settle(2, WORKER_PAUSE);
+        self.harness.get_by_label_contains("could not be checked");
+    }
+
     /// Largest distance by which any floating window escapes the viewport.
     ///
     /// Read off egui's own area bookkeeping rather than the pixels, because a
@@ -335,6 +356,31 @@ fn shoot_every_surface() {
                 tx.send(AppMessage::SourceportBuildComplete(Err(
                     "compile failed: see log".to_string(),
                 )));
+            },
+        ),
+    );
+
+    // Only a run reaches the report, and this is its tallest state: findings from
+    // the files it could read, under a note about the wiki it could not.
+    record(
+        "enrich-wiki-blocked",
+        s.shot_dialog_after("dlg-enrich-wiki-blocked", ActionRequest::Enrich, |s| {
+            let findings = (1..=30)
+                .map(|i| format!("WAD {i} \u{2192} complevel 9 (Boom)"))
+                .collect();
+            s.post_wiki_blocked_report(findings);
+        }),
+    );
+
+    // With no findings, the report must not claim the wiki found nothing.
+    record(
+        "enrich-wiki-blocked-empty",
+        s.shot_dialog_after(
+            "dlg-enrich-wiki-blocked-empty",
+            ActionRequest::Enrich,
+            |s| {
+                s.post_wiki_blocked_report(Vec::new());
+                assert!(s.harness.query_by_label("Nothing new detected.").is_none());
             },
         ),
     );

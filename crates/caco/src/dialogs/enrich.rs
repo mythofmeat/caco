@@ -11,6 +11,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use crate::message::EnrichReport;
 use crate::theme;
 
+/// Height of everything that stays put around the output: title bar, the two
+/// sections and the Close row.
+const CHROME: f32 = 312.0;
+
 /// Which WADs a run should visit.
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub enum EnrichScope {
@@ -115,7 +119,13 @@ impl EnrichDialogState {
             ui.add_space(8.0);
             ui.separator();
             ui.add_space(6.0);
-            self.render_output(ui);
+            // Only the output scrolls: a long report must not push the controls
+            // or Close out of a small window. It shrinks to fit, unlike
+            // `modal_body`, because "Idle." has no use for a full-height window.
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, true])
+                .max_height(crate::dialogs::modal_body_height(ctx, CHROME))
+                .show(ui, |ui| self.render_output(ui));
 
             ui.add_space(6.0);
             ui.horizontal(|ui| {
@@ -248,6 +258,7 @@ impl EnrichDialogState {
                 examined,
                 findings,
                 wiki_lookups,
+                wiki_blocked,
                 cancelled,
                 dry_run,
             } => {
@@ -260,8 +271,17 @@ impl EnrichDialogState {
                     headline.push_str(&format!(", {wiki_lookups} wiki lookup(s)"));
                 }
                 ui.colored_label(theme::TEXT_SECONDARY, headline);
+                if let Some(blocked) = wiki_blocked {
+                    ui.colored_label(theme::COLOR_WARNING, blocked);
+                }
                 ui.add_space(4.0);
-                scroll_lines(ui, findings, "Nothing new detected.");
+                // "Nothing new" would be false of a wiki that never got asked.
+                let empty = if wiki_blocked.is_some() {
+                    ""
+                } else {
+                    "Nothing new detected."
+                };
+                report_lines(ui, findings, empty);
             }
             EnrichReport::Cacowards {
                 year,
@@ -280,25 +300,21 @@ impl EnrichDialogState {
                     ),
                 );
                 ui.add_space(4.0);
-                scroll_lines(ui, previews, "");
+                report_lines(ui, previews, "");
             }
         }
     }
 }
 
-/// Render a scrollable list of report lines, or `empty` when there are none.
-fn scroll_lines(ui: &mut egui::Ui, lines: &[String], empty: &str) {
+/// Render a list of report lines, or `empty` when there are none.
+fn report_lines(ui: &mut egui::Ui, lines: &[String], empty: &str) {
     if lines.is_empty() {
         if !empty.is_empty() {
             ui.colored_label(theme::TEXT_SECONDARY, empty);
         }
         return;
     }
-    egui::ScrollArea::vertical()
-        .max_height(200.0)
-        .show(ui, |ui| {
-            for line in lines {
-                ui.label(line);
-            }
-        });
+    for line in lines {
+        ui.label(line);
+    }
 }

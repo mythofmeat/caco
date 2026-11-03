@@ -351,6 +351,7 @@ impl CacoApp {
                     examined: summary.examined,
                     findings: summary.changed.iter().map(describe_outcome).collect(),
                     wiki_lookups: summary.wiki_lookups,
+                    wiki_blocked: summary.wiki_blocked.as_ref().map(ToString::to_string),
                     cancelled: summary.cancelled,
                     dry_run,
                 })

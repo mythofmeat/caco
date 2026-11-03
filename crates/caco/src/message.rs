@@ -72,6 +72,8 @@ pub enum EnrichReport {
         examined: usize,
         findings: Vec<String>,
         wiki_lookups: u32,
+        /// Why the wiki was only asked once, when it refused.
+        wiki_blocked: Option<String>,
         cancelled: bool,
         dry_run: bool,
     },
