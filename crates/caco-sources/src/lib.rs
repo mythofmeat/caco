@@ -7,5 +7,7 @@ pub mod error;
 pub mod http;
 pub mod idgames;
 pub mod import_service;
+pub mod mirror;
+pub mod wad_fetch;
 
 pub use error::{Result, SourceError};

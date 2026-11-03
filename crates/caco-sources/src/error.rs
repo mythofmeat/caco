@@ -21,6 +21,11 @@ pub enum SourceError {
     #[error("import error: {0}")]
     Import(String),
 
+    /// A mirror could not do what it was asked. Names the mirror, because a library
+    /// can have several and the words are all the user gets.
+    #[error("Mirror {mirror}: {message}")]
+    Mirror { mirror: String, message: String },
+
     /// A WAF answered with a challenge instead of the site's response, as
     /// recognised by [`crate::http::waf_challenge`].
     ///
