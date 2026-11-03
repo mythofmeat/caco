@@ -78,15 +78,6 @@ pub fn update_session_stats(
     Ok(())
 }
 
-/// Attach a recorded demo file path to a session record.
-pub fn update_session_demo(conn: &Connection, session_id: i64, demo_file: &str) -> Result<()> {
-    conn.execute(
-        "UPDATE sessions SET demo_file = ? WHERE id = ?",
-        rusqlite::params![demo_file, session_id],
-    )?;
-    Ok(())
-}
-
 /// Session record from the database.
 #[derive(Debug, Clone)]
 pub struct SessionRecord {
@@ -98,7 +89,6 @@ pub struct SessionRecord {
     pub sourceport: Option<String>,
     pub notes: Option<String>,
     pub exit_code: Option<i32>,
-    pub demo_file: Option<String>,
     pub stats_before: Option<String>,
     pub stats_after: Option<String>,
 }
@@ -114,7 +104,6 @@ impl SessionRecord {
             sourceport: row.get("sourceport")?,
             notes: row.get("notes")?,
             exit_code: row.get("exit_code")?,
-            demo_file: row.get("demo_file")?,
             stats_before: row.get("stats_before")?,
             stats_after: row.get("stats_after")?,
         })
@@ -792,21 +781,6 @@ mod tests {
             .unwrap();
         assert_eq!(session.stats_before.as_deref(), Some("{\"before\": true}"));
         assert_eq!(session.stats_after.as_deref(), Some("{\"after\": true}"));
-    }
-
-    #[test]
-    fn test_update_session_demo() {
-        let conn = setup();
-        let wad_id = add_test_wad(&conn);
-        let session_id = start_session(&conn, wad_id, None).unwrap();
-
-        update_session_demo(&conn, session_id, "/path/to/demo.lmp").unwrap();
-
-        let mut stmt = conn.prepare("SELECT * FROM sessions WHERE id = ?").unwrap();
-        let session = stmt
-            .query_row([session_id], SessionRecord::from_row)
-            .unwrap();
-        assert_eq!(session.demo_file.as_deref(), Some("/path/to/demo.lmp"));
     }
 
     #[test]

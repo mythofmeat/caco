@@ -327,7 +327,7 @@ pins the behaviour.
 
 **Per-WAD config columns**: `custom_iwad`, `custom_sourceport`, `custom_args` (JSON), `complevel` (INT), `custom_config` (TEXT).
 
-**Launch args layering**: global `sourceport_args` (every sourceport) → `[executable_args]` table (executable basename → args, case-insensitive fallback, applied only when that executable launches) → per-WAD `custom_args` → per-launch extra args. GUI settings dialog edits args as shell-quoted strings via `shlex`.
+**Launch args layering**: global `sourceport_args` (every sourceport) → `[executable_args]` table (executable basename → args, case-insensitive fallback, applied only when that executable launches) → per-WAD `custom_args`. GUI settings dialog edits args as shell-quoted strings via `shlex`.
 
 **DB migrations**: run on `init_db()`; numbered sequentially; current schema version is 40. `init_db` snapshots the DB into the backup dir whenever migrations are pending.
 

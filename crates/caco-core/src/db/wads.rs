@@ -127,8 +127,6 @@ impl NewWad {
 #[derive(Default)]
 pub struct WadUpdate {
     fields: HashMap<&'static str, FieldValue>,
-    /// Whether to record a completion when status is set to finished.
-    pub record_completion: bool,
     /// Field names that were rejected by a setter. Surfaced by
     /// [`validate`](Self::validate).
     errors: Vec<String>,
@@ -143,11 +141,7 @@ pub enum FieldValue {
 
 impl WadUpdate {
     pub fn new() -> Self {
-        Self {
-            fields: HashMap::new(),
-            record_completion: true,
-            errors: Vec::new(),
-        }
+        Self::default()
     }
 
     /// Set a text field.
@@ -185,12 +179,6 @@ impl WadUpdate {
     /// Set the status field (convenience).
     pub fn set_status(self, status: Status) -> Self {
         self.set_text("status", Some(status.as_str().to_string()))
-    }
-
-    /// Disable automatic completion recording when status is set to finished.
-    pub fn no_completion(mut self) -> Self {
-        self.record_completion = false;
-        self
     }
 
     pub fn is_empty(&self) -> bool {
@@ -268,19 +256,17 @@ pub fn get_wad(conn: &Connection, wad_id: i64, include_deleted: bool) -> Result<
 
 /// Update a WAD's fields. Returns `true` if updated.
 ///
-/// If status is set to "finished", automatically records a completion
-/// (unless `record_completion` is false on the `WadUpdate`).
+/// Setting status to completed records a completion, when it was not already.
 pub fn update_wad(conn: &Connection, wad_id: i64, update: &WadUpdate) -> Result<bool> {
     update.validate()?;
     if update.is_empty() {
         return Ok(false);
     }
 
-    // Check if setting status to finished
-    let recording_completion = update.record_completion
-        && update.fields.get("status").is_some_and(
-            |v| matches!(v, FieldValue::Text(Some(s)) if s == Status::Completed.as_str()),
-        );
+    let recording_completion = update
+        .fields
+        .get("status")
+        .is_some_and(|v| matches!(v, FieldValue::Text(Some(s)) if s == Status::Completed.as_str()));
 
     // If we're already inside a transaction (e.g. an import service wrapping
     // add_wad + update_wad atomically), run the body directly against the
@@ -650,26 +636,6 @@ mod tests {
     }
 
     #[test]
-    fn test_update_status_finished_no_completion() {
-        let conn = setup();
-        let id = add_test_wad(&conn);
-
-        let update = WadUpdate::new()
-            .set_status(Status::Completed)
-            .no_completion();
-        update_wad(&conn, id, &update).unwrap();
-
-        let count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM wad_completions WHERE wad_id = ?1",
-                [id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(count, 0);
-    }
-
-    #[test]
     fn test_soft_delete_and_restore() {
         let conn = setup();
         let id = add_test_wad(&conn);
@@ -755,9 +721,7 @@ mod tests {
         assert_eq!(wad.status, Status::InProgress);
 
         // Set to completed
-        let update = WadUpdate::new()
-            .set_status(Status::Completed)
-            .no_completion();
+        let update = WadUpdate::new().set_status(Status::Completed);
         update_wad(&conn, id, &update).unwrap();
         let wad = get_wad(&conn, id, false).unwrap().unwrap();
         assert_eq!(wad.status, Status::Completed);

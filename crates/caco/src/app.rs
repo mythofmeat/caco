@@ -478,7 +478,7 @@ impl CacoApp {
                     let outcome = (|| -> Result<(), String> {
                         let conn = caco_core::db::open_connection(&db_path)
                             .map_err(|e| format!("DB open failed: {e}"))?;
-                        caco_core::player::play_demo(&conn, wad_id, Some(&demo), None)
+                        caco_core::player::play_demo(&conn, wad_id, Some(&demo))
                             .map_err(|e| e.to_string())?;
                         Ok(())
                     })();
@@ -651,12 +651,7 @@ impl CacoApp {
                                 .map_err(|e| format!("Failed to update WAD record: {e}"))?;
                         }
 
-                        caco_core::player::play(
-                            &conn,
-                            wad_id,
-                            &caco_core::player::PlayOptions::default(),
-                        )
-                        .map_err(|e| match e {
+                        caco_core::player::play(&conn, wad_id).map_err(|e| match e {
                             // Gone between the check above and the launch.
                             caco_core::Error::WadFileMissing { .. } => PlayError::Unavailable,
                             e => PlayError::Message(e.to_string()),

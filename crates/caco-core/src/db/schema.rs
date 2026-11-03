@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use crate::Result;
 
 /// Core schema SQL — creates tables and indexes if they don't exist.
-pub const SCHEMA: &str = r#"
+const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS wads (
     id INTEGER PRIMARY KEY,
     title TEXT NOT NULL,

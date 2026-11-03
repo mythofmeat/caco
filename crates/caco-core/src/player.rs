@@ -62,26 +62,6 @@ impl PlayResult {
     }
 }
 
-/// Options for launching a WAD.
-#[derive(Debug, Default)]
-pub struct PlayOptions {
-    pub sourceport: Option<String>,
-    pub extra_args: Vec<String>,
-    pub record: Option<RecordOption>,
-    pub config_profile: Option<String>,
-    /// Start a fresh playthrough (resets stats tracking for completed WADs).
-    pub new_playthrough: bool,
-}
-
-/// Demo recording option.
-#[derive(Debug, Clone)]
-pub enum RecordOption {
-    /// Auto-generate a demo name.
-    Auto,
-    /// Use a specific name (without extension).
-    Named(String),
-}
-
 /// What a launch is being built for.
 ///
 /// Playback needs byte-identical launch configuration to the session that
@@ -103,8 +83,6 @@ struct BuiltLaunch {
     wad_path: PathBuf,
     /// Managed data dir, when `manage_data_dirs` is on.
     data_dir: Option<PathBuf>,
-    /// Demo being recorded, if any (no extension — the sourceport appends `.lmp`).
-    demo_path: Option<String>,
     is_zdoom: bool,
     is_helion: bool,
 }
@@ -165,7 +143,6 @@ fn choose_family_sourceport(
 }
 
 fn select_sourceport(
-    cli_sourceport: Option<&str>,
     custom_sourceport: Option<&str>,
     required_sourceport_family: Option<&str>,
     default_sourceport: &str,
@@ -173,9 +150,6 @@ fn select_sourceport(
     sourceport_preferences: &HashMap<String, String>,
     installed_sourceports: &[(String, String)],
 ) -> String {
-    if let Some(sourceport) = non_empty(cli_sourceport) {
-        return sourceport.to_string();
-    }
     if let Some(sourceport) = non_empty(custom_sourceport) {
         return sourceport.to_string();
     }
@@ -260,9 +234,6 @@ fn archive_stats_files(data_dir: &Path) {
     }
 }
 
-/// Play a WAD with the specified sourceport.
-///
-/// Returns a `PlayResult` with duration and exit code.
 /// Build the sourceport command for a WAD.
 ///
 /// Shared by [`play`] and [`play_demo`] so a demo is played back under exactly
@@ -272,7 +243,6 @@ fn archive_stats_files(data_dir: &Path) {
 fn build_launch(
     conn: &Connection,
     wad_id: i64,
-    opts: &PlayOptions,
     mode: LaunchMode<'_>,
 ) -> crate::Result<BuiltLaunch> {
     let wad = db::get_wad(conn, wad_id, false)?.ok_or(crate::Error::WadNotFound(wad_id))?;
@@ -296,7 +266,7 @@ fn build_launch(
     // blank family means "use the default sourceport".
     detect_and_persist_zdoom_required_if_missing(conn, wad_id, wad.zdoom_required, &wad_path)?;
 
-    // Determine sourceport (CLI > user override > compatibility family > global default).
+    // Determine sourceport (user override > compatibility family > global default).
     let cfg = config::load_config();
     let zdoom_sourceport = config::get_zdoom_sourceport();
     let installed_sourceports: Vec<(String, String)> = sourceports::detect_sourceports()
@@ -304,7 +274,6 @@ fn build_launch(
         .map(|(exe, _path, family)| (exe.to_string(), family.to_string()))
         .collect();
     let sourceport = select_sourceport(
-        opts.sourceport.as_deref(),
         wad.custom_sourceport.as_deref(),
         wad.required_sourceport_family.as_deref(),
         &cfg.sourceport,
@@ -370,7 +339,6 @@ fn build_launch(
     if let Some(cl) = complevel {
         let all_args: Vec<String> = std::iter::once(sourceport.clone())
             .chain(default_args.iter().cloned())
-            .chain(opts.extra_args.iter().cloned())
             .collect();
         if !all_args.iter().any(|a| a == "-complevel") {
             let cl_args = sourceports::get_complevel_args(&sourceport, cl);
@@ -388,11 +356,7 @@ fn build_launch(
     }
 
     // Inject managed config profile
-    let profile_name = opts
-        .config_profile
-        .as_deref()
-        .or(wad.custom_config.as_deref())
-        .unwrap_or("default");
+    let profile_name = wad.custom_config.as_deref().unwrap_or("default");
     let profile_path = config::get_profile_path(&sourceport, profile_name);
     let config_args = sourceports::get_config_args(&sourceport, &profile_path.to_string_lossy());
     if !config_args.is_empty() {
@@ -444,35 +408,6 @@ fn build_launch(
         wad_data_dir = Some(data_dir);
     }
 
-    // Handle demo recording. Never while playing one back — `-record` and
-    // `-playdemo` in the same command line is not a meaningful request.
-    let mut demo_path: Option<String> = None;
-    if let (LaunchMode::Play, Some(record)) = (mode, opts.record.as_ref()) {
-        let data_dir = wad_data_dir.clone().unwrap_or_else(|| {
-            config::find_wad_data_dir(wad_id)
-                .unwrap_or_else(|| config::get_wad_data_dir(wad_id, &wad.title))
-        });
-        let demos_dir = demos::get_demos_dir(&data_dir);
-        if let Err(e) = std::fs::create_dir_all(&demos_dir) {
-            tracing::warn!("failed to create demos dir {demos_dir:?}: {e}");
-        }
-
-        let demo_name = match record {
-            RecordOption::Named(name) => name.clone(),
-            RecordOption::Auto => {
-                let stem = wad_path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or(&wad.title);
-                demos::generate_demo_name(stem)
-            }
-        };
-
-        let path = demos_dir.join(&demo_name).to_string_lossy().into_owned();
-        cmd.args(["-record", &path]);
-        demo_path = Some(path);
-    }
-
     // Build -file list: id24 resources + companion files + stats mod + main WAD
     let mut file_args: Vec<String> = get_id24_resource_args(conn, Some(&wad_path));
     let mut deh_args: Vec<String> = Vec::new();
@@ -519,11 +454,6 @@ fn build_launch(
     cmd.arg("-file");
     cmd.args(&file_args);
 
-    // Add extra args from command line (highest priority)
-    if !opts.extra_args.is_empty() {
-        cmd.args(&opts.extra_args);
-    }
-
     // Stats collection is deliberately skipped during playback: a demo replays
     // map exits the user did not just make, and absorbing those would inflate
     // progress and could auto-complete the WAD from a recording.
@@ -560,28 +490,21 @@ fn build_launch(
         sourceport,
         wad_path,
         data_dir: wad_data_dir,
-        demo_path,
         is_zdoom,
         is_helion,
     })
 }
 
 /// Launch a WAD, tracking the session and reconciling stats afterwards.
-pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result<PlayResult> {
+pub fn play(conn: &Connection, wad_id: i64) -> crate::Result<PlayResult> {
     let BuiltLaunch {
         mut cmd,
         sourceport,
         wad_path,
         data_dir: wad_data_dir,
-        demo_path,
         is_zdoom,
         is_helion,
-    } = build_launch(conn, wad_id, opts, LaunchMode::Play)?;
-
-    // Handle --new-playthrough: start fresh before launching
-    if opts.new_playthrough {
-        start_new_playthrough(conn, wad_id)?;
-    }
+    } = build_launch(conn, wad_id, LaunchMode::Play)?;
 
     // Absorb any on-disk stats progress the DB doesn't yet know about
     // (e.g. from an orphaned session where caco exited before the
@@ -668,18 +591,6 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
         )?;
     }
 
-    // Link recorded demo
-    if let Some(ref path) = demo_path {
-        let lmp_path = if path.ends_with(".lmp") {
-            path.clone()
-        } else {
-            format!("{path}.lmp")
-        };
-        if Path::new(&lmp_path).exists() {
-            db::update_session_demo(conn, session_id, &lmp_path)?;
-        }
-    }
-
     // Auto-completion detection: check if all required maps have been beaten
     let auto_complete = check_auto_completion(conn, wad_id, &wad_path, stats_after.as_deref());
 
@@ -700,22 +611,13 @@ pub fn play(conn: &Connection, wad_id: i64, opts: &PlayOptions) -> crate::Result
 ///
 /// No session is recorded and no stats are collected: watching a demo is not
 /// playtime.
-pub fn play_demo(
-    conn: &Connection,
-    wad_id: i64,
-    demo: Option<&str>,
-    sourceport: Option<&str>,
-) -> crate::Result<PathBuf> {
+pub fn play_demo(conn: &Connection, wad_id: i64, demo: Option<&str>) -> crate::Result<PathBuf> {
     let wad = db::get_wad(conn, wad_id, false)?.ok_or(crate::Error::WadNotFound(wad_id))?;
     let data_dir = config::find_wad_data_dir(wad_id)
         .unwrap_or_else(|| config::get_wad_data_dir(wad_id, &wad.title));
     let demo_path = demos::resolve_demo_path(&data_dir, demo)?;
 
-    let opts = PlayOptions {
-        sourceport: sourceport.map(str::to_string),
-        ..Default::default()
-    };
-    let mut built = build_launch(conn, wad_id, &opts, LaunchMode::Playback(&demo_path))?;
+    let mut built = build_launch(conn, wad_id, LaunchMode::Playback(&demo_path))?;
 
     built.cmd.stdin(std::process::Stdio::null());
     let status = built
@@ -1008,9 +910,8 @@ fn ensure_in_progress(conn: &Connection, wad_id: i64) -> crate::Result<Option<i6
 ///
 /// Called at the start of [`play`] to catch orphaned on-disk state (sessions
 /// where caco exited before the sourceport did, or sourceport launches
-/// outside caco entirely). Safe to call opportunistically from read paths
-/// — it's a no-op when disk and DB already agree.
-pub fn reconcile_stats(conn: &Connection, wad_id: i64) -> AutoCompleteResult {
+/// outside caco entirely). A no-op when disk and DB already agree.
+fn reconcile_stats(conn: &Connection, wad_id: i64) -> AutoCompleteResult {
     let wad = match db::get_wad(conn, wad_id, false) {
         Ok(Some(w)) => w,
         _ => return AutoCompleteResult::Unknown,
@@ -1125,8 +1026,7 @@ mod tests {
     #[test]
     fn test_select_sourceport_default_satisfies_required_family() {
         let prefs = HashMap::new();
-        let sourceport =
-            select_sourceport(None, None, Some("dsda"), "nyan-doom", "gzdoom", &prefs, &[]);
+        let sourceport = select_sourceport(None, Some("dsda"), "nyan-doom", "gzdoom", &prefs, &[]);
         assert_eq!(sourceport, "nyan-doom");
     }
 
@@ -1134,7 +1034,6 @@ mod tests {
     fn test_select_sourceport_custom_beats_required_family() {
         let prefs = HashMap::new();
         let sourceport = select_sourceport(
-            None,
             Some("dsda-doom"),
             Some("zdoom"),
             "nyan-doom",
@@ -1146,56 +1045,30 @@ mod tests {
     }
 
     #[test]
-    fn test_select_sourceport_cli_beats_everything() {
-        let prefs = HashMap::new();
-        let sourceport = select_sourceport(
-            Some("woof"),
-            Some("dsda-doom"),
-            Some("zdoom"),
-            "nyan-doom",
-            "gzdoom",
-            &prefs,
-            &[],
-        );
-        assert_eq!(sourceport, "woof");
-    }
-
-    #[test]
     fn test_select_sourceport_zdoom_family_uses_configured_zdoom_port() {
         let prefs = HashMap::new();
-        let sourceport = select_sourceport(
-            None,
-            None,
-            Some("zdoom"),
-            "nyan-doom",
-            "uzdoom",
-            &prefs,
-            &[],
-        );
+        let sourceport = select_sourceport(None, Some("zdoom"), "nyan-doom", "uzdoom", &prefs, &[]);
         assert_eq!(sourceport, "uzdoom");
     }
 
     #[test]
     fn test_select_sourceport_zdoom_port_beats_same_family_default() {
         let prefs = HashMap::new();
-        let sourceport =
-            select_sourceport(None, None, Some("zdoom"), "gzdoom", "uzdoom", &prefs, &[]);
+        let sourceport = select_sourceport(None, Some("zdoom"), "gzdoom", "uzdoom", &prefs, &[]);
         assert_eq!(sourceport, "uzdoom");
     }
 
     #[test]
     fn test_select_sourceport_uses_family_preference() {
         let prefs = HashMap::from([("dsda".to_string(), "nugget-doom".to_string())]);
-        let sourceport =
-            select_sourceport(None, None, Some("dsda"), "gzdoom", "uzdoom", &prefs, &[]);
+        let sourceport = select_sourceport(None, Some("dsda"), "gzdoom", "uzdoom", &prefs, &[]);
         assert_eq!(sourceport, "nugget-doom");
     }
 
     #[test]
     fn test_select_sourceport_preference_beats_same_family_default() {
         let prefs = HashMap::from([("dsda".to_string(), "nugget-doom".to_string())]);
-        let sourceport =
-            select_sourceport(None, None, Some("dsda"), "nyan-doom", "uzdoom", &prefs, &[]);
+        let sourceport = select_sourceport(None, Some("dsda"), "nyan-doom", "uzdoom", &prefs, &[]);
         assert_eq!(sourceport, "nugget-doom");
     }
 
@@ -1203,15 +1076,8 @@ mod tests {
     fn test_select_sourceport_uses_installed_family_port() {
         let prefs = HashMap::new();
         let installed = vec![("nugget-doom".to_string(), "dsda".to_string())];
-        let sourceport = select_sourceport(
-            None,
-            None,
-            Some("dsda"),
-            "gzdoom",
-            "uzdoom",
-            &prefs,
-            &installed,
-        );
+        let sourceport =
+            select_sourceport(None, Some("dsda"), "gzdoom", "uzdoom", &prefs, &installed);
         assert_eq!(sourceport, "nugget-doom");
     }
 
@@ -1222,15 +1088,7 @@ mod tests {
         let update = db::WadUpdate::new().set_int("zdoom_required", Some(1));
         db::update_wad(&conn, wad_id, &update).unwrap();
 
-        let sourceport = select_sourceport(
-            None,
-            None,
-            None,
-            "nyan-doom",
-            "uzdoom",
-            &HashMap::new(),
-            &[],
-        );
+        let sourceport = select_sourceport(None, None, "nyan-doom", "uzdoom", &HashMap::new(), &[]);
 
         assert_eq!(sourceport, "nyan-doom");
         let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
@@ -1254,15 +1112,7 @@ mod tests {
         .unwrap();
 
         detect_and_persist_zdoom_required_if_missing(&conn, wad_id, None, &wad_path).unwrap();
-        let sourceport = select_sourceport(
-            None,
-            None,
-            None,
-            "nyan-doom",
-            "uzdoom",
-            &HashMap::new(),
-            &[],
-        );
+        let sourceport = select_sourceport(None, None, "nyan-doom", "uzdoom", &HashMap::new(), &[]);
 
         assert_eq!(sourceport, "nyan-doom");
         let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
@@ -1272,15 +1122,8 @@ mod tests {
 
     #[test]
     fn test_explicit_family_wins_over_zdoom_required() {
-        let sourceport = select_sourceport(
-            None,
-            None,
-            Some("dsda"),
-            "gzdoom",
-            "uzdoom",
-            &HashMap::new(),
-            &[],
-        );
+        let sourceport =
+            select_sourceport(None, Some("dsda"), "gzdoom", "uzdoom", &HashMap::new(), &[]);
 
         assert_eq!(sourceport, "dsda-doom");
     }
