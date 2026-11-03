@@ -14,18 +14,15 @@
 //! running this over a whole library needs to show movement and let the user
 //! stop.
 
-use std::collections::HashMap;
 use std::path::Path;
 
 use rusqlite::Connection;
 
 use caco_core::db::{self, WadRecord, WadUpdate};
 
+use crate::cacoward_link;
 use crate::doomwiki::{self, DoomwikiClient};
-use crate::idgames::extract_idgames_id_from_url;
-use crate::import_service::{
-    normalize_title, port_to_complevel, port_to_zdoom_required, titles_match,
-};
+use crate::import_service::{port_to_complevel, port_to_zdoom_required, titles_match};
 use crate::{Result, SourceError};
 
 // =============================================================================
@@ -47,7 +44,7 @@ impl EnrichOutcome {
     ///
     /// `zdoom_required: Some(false)` is a real detection but not news — it
     /// only records that the WAD does *not* need a zdoom-family sourceport.
-    pub fn has_changes(&self) -> bool {
+    fn has_changes(&self) -> bool {
         self.complevel.is_some() || self.iwad.is_some() || self.zdoom_required == Some(true)
     }
 }
@@ -127,7 +124,7 @@ pub fn enrich_wads(
 ///
 /// Only fields that are still unset are detected: enrichment never overwrites
 /// a value the user (or a previous run) already chose.
-pub fn enrich_one(
+fn enrich_one(
     conn: &Connection,
     wad: &WadRecord,
     dry_run: bool,
@@ -277,21 +274,12 @@ pub fn enrich_cacowards(conn: &Connection, year: i64, dry_run: bool) -> Result<C
     ingest_cacoward_entries(conn, year, &entries, dry_run)
 }
 
-/// Upsert scraped Cacoward entries into the DB and auto-link to library WADs.
+/// Upsert scraped Cacoward entries into the DB and auto-link the year's rows to
+/// library WADs; [`cacoward_link`] has the rules.
 ///
-/// Auto-linking runs two passes per entry:
-/// 1. **idgames URL match** — extract the numeric id from `{{ig|id=N}}` and
-///    look up `wads.idgames_id`. High confidence; works for any WAD imported
-///    from the idgames archive.
-/// 2. **Normalized title fallback** — only when (1) misses. The wad with an
-///    *exactly* matching normalized title (case-folded, diacritic-stripped,
-///    punctuation-collapsed) gets linked, but only if it's the *single* such
-///    match in the library. Multi-match titles are skipped so two unrelated
-///    WADs sharing a name (e.g. "Crusader" 1995 vs 2023) don't collide.
-///
-/// Neither pass sets `manual_override`, so a future `caco modify` can pin
-/// the correct link without it being clobbered on the next scrape.
-pub fn ingest_cacoward_entries(
+/// One transaction, because the year's unpinned rows are deleted first and a
+/// failure partway through would lose them and their links.
+fn ingest_cacoward_entries(
     conn: &Connection,
     year: i64,
     entries: &[db::NewCacoward],
@@ -303,103 +291,33 @@ pub fn ingest_cacoward_entries(
         ..Default::default()
     };
 
-    // Reconcile: remove non-pinned rows for this year before upserting the
-    // fresh scrape, so stale entries from an older scrape (e.g. parser bugs,
-    // wiki edits) don't linger. Pinned manual links are preserved.
-    if !dry_run {
-        db::clear_year_unpinned(conn, year)?;
-    }
-
-    // Build the normalized-title -> wad_id index once. Skipped in dry-run so
-    // we don't pay for the full table scan when nothing will be written.
-    let title_index = if dry_run {
-        TitleIndex::empty()
-    } else {
-        TitleIndex::build(conn)?
-    };
-
-    for entry in entries {
-        if dry_run {
-            summary.previews.push(CacowardPreview {
+    if dry_run {
+        summary.previews = entries
+            .iter()
+            .map(|entry| CacowardPreview {
                 category: entry.category.clone(),
                 wad_title: entry.wad_title.clone(),
                 idgames_url: entry.idgames_url.clone(),
-            });
-            continue;
-        }
-
-        let id = db::upsert_cacoward(conn, entry)?;
-        summary.upserted += 1;
-
-        // Pass 1: idgames URL → numeric id → wads.idgames_id.
-        let by_idgames = entry
-            .idgames_url
-            .as_deref()
-            .and_then(extract_idgames_id_from_url)
-            .map(|n| n.to_string())
-            .and_then(|key| db::find_wad_by_idgames_id(conn, &key).ok().flatten());
-
-        if let Some(wad_id) = by_idgames {
-            db::link_wad(conn, id, wad_id, false)?;
-            summary.linked_by_idgames += 1;
-            continue;
-        }
-
-        // Pass 2: strict normalized-title fallback (single-match only).
-        if let Some(wad_id) = title_index.unique_match(&entry.wad_title) {
-            db::link_wad(conn, id, wad_id, false)?;
-            summary.linked_by_title += 1;
-        }
-    }
-
-    Ok(summary)
-}
-
-/// Normalized-title → set of matching WAD ids. Used by the title-fallback
-/// pass of the cacoward auto-linker.
-///
-/// A title's ids vec carries up to N entries; `unique_match` returns `Some`
-/// only when there's exactly one, so two WADs sharing a normalized title
-/// can never silently collide.
-struct TitleIndex {
-    by_title: HashMap<String, Vec<i64>>,
-}
-
-impl TitleIndex {
-    fn empty() -> Self {
-        Self {
-            by_title: HashMap::new(),
-        }
-    }
-
-    fn build(conn: &Connection) -> Result<Self> {
-        // Pull only id+title; the rest of the wads row is dead weight here.
-        let mut stmt = conn
-            .prepare("SELECT id, title FROM wads WHERE deleted_at IS NULL")
-            .map_err(caco_core::Error::from)?;
-        let rows = stmt
-            .query_map([], |row| {
-                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
             })
-            .map_err(caco_core::Error::from)?;
-        let mut by_title: HashMap<String, Vec<i64>> = HashMap::new();
-        for r in rows {
-            let (id, title) = r.map_err(caco_core::Error::from)?;
-            let key = normalize_title(&title);
-            if !key.is_empty() {
-                by_title.entry(key).or_default().push(id);
-            }
-        }
-        Ok(Self { by_title })
+            .collect();
+        return Ok(summary);
     }
 
-    fn unique_match(&self, title: &str) -> Option<i64> {
-        let key = normalize_title(title);
-        match self.by_title.get(&key).map(|v| v.as_slice()) {
-            Some([id]) => Some(*id),
-            _ => None,
+    let links = db::with_transaction(conn, |tx| {
+        // Reconcile: remove non-pinned rows for this year before upserting the
+        // fresh scrape, so stale entries from an older scrape (e.g. parser bugs,
+        // wiki edits) don't linger. Pinned manual links are preserved.
+        db::clear_year_unpinned(tx, year)?;
+        for entry in entries {
+            db::upsert_cacoward(tx, entry)?;
         }
-    }
+        cacoward_link::link_year(tx, year)
+    })?;
+
+    summary.upserted = entries.len();
+    summary.linked_by_idgames = links.by_idgames;
+    summary.linked_by_title = links.by_title;
+    Ok(summary)
 }
 
 #[cfg(test)]
@@ -779,8 +697,9 @@ mod tests {
     #[test]
     fn test_ingest_idgames_match_wins_over_title_match() {
         let conn = setup();
-        // Same normalized title, but only one carries the idgames id.
-        let with_id = add_test_wad(&conn, "Ray Mohawk");
+        // One WAD has the entry's title, another its idgames id.
+        add_test_wad(&conn, "Ray Mohawk");
+        let with_id = add_test_wad(&conn, "A Different Title");
         db::update_wad(
             &conn,
             with_id,
@@ -802,5 +721,108 @@ mod tests {
 
         let linked = db::get_cacowards_by_year(&conn, 2023).unwrap();
         assert_eq!(linked[0].wad_id, Some(with_id));
+    }
+
+    #[test]
+    fn test_idgames_import_then_ingest_links_on_the_idgames_pass() {
+        // The titles differ on purpose: only the id can connect these two.
+        let conn = setup();
+        let entry: crate::idgames::FileEntry = serde_json::from_value(serde_json::json!({
+            "id": 21233,
+            "title": "Liminal Doom 2",
+            "filename": "ld2.zip",
+        }))
+        .unwrap();
+        let wad_id = crate::import_service::ImportService::new()
+            .import_idgames(&conn, &entry, None, false)
+            .wad_id
+            .unwrap();
+
+        let entries = vec![db::NewCacoward {
+            year: 2024,
+            category: db::CATEGORY_WINNER.to_string(),
+            wad_title: "Liminal Doom 2: Crossing the Threshold".to_string(),
+            idgames_url: Some("https://www.doomworld.com/idgames/?id=21233".to_string()),
+            ..Default::default()
+        }];
+
+        let summary = ingest_cacoward_entries(&conn, 2024, &entries, false).unwrap();
+        assert_eq!(summary.linked_by_idgames, 1);
+        assert_eq!(summary.linked_by_title, 0);
+
+        let rows = db::get_cacowards_by_year(&conn, 2024).unwrap();
+        assert_eq!(rows[0].wad_id, Some(wad_id));
+    }
+
+    #[test]
+    fn test_reingest_does_not_overwrite_a_pinned_link() {
+        let conn = setup();
+        let pinned_to = add_test_wad(&conn, "Hand Picked");
+        add_test_wad(&conn, "Eisberg");
+
+        let entries = vec![db::NewCacoward {
+            year: 2025,
+            category: db::CATEGORY_HONORABLE_MENTION.to_string(),
+            wad_title: "Eisberg".to_string(),
+            ..Default::default()
+        }];
+        let row = db::upsert_cacoward(&conn, &entries[0]).unwrap();
+        db::link_wad(&conn, row, pinned_to, true).unwrap();
+
+        let summary = ingest_cacoward_entries(&conn, 2025, &entries, false).unwrap();
+        assert_eq!(summary.linked_total(), 0);
+
+        let record = db::get_cacoward(&conn, row).unwrap().unwrap();
+        assert_eq!(record.wad_id, Some(pinned_to));
+        assert!(record.manual_override);
+    }
+
+    #[test]
+    fn test_ingest_does_not_touch_other_years() {
+        // Unlink has to stick: scraping 2025 is no reason to reconsider a 2024
+        // row the user cleared.
+        let conn = setup();
+        add_test_wad(&conn, "Eisberg");
+        let row_in = |year| db::NewCacoward {
+            year,
+            category: db::CATEGORY_WINNER.to_string(),
+            wad_title: "Eisberg".to_string(),
+            ..Default::default()
+        };
+        let other_year = db::upsert_cacoward(&conn, &row_in(2024)).unwrap();
+
+        let summary = ingest_cacoward_entries(&conn, 2025, &[row_in(2025)], false).unwrap();
+
+        assert_eq!(summary.linked_by_title, 1);
+        let record = db::get_cacoward(&conn, other_year).unwrap().unwrap();
+        assert_eq!(record.wad_id, None);
+    }
+
+    #[test]
+    fn test_failed_ingest_keeps_the_rows_it_started_with() {
+        let conn = setup();
+        let wad = add_test_wad(&conn, "Survivor");
+        let row = |title: &str| db::NewCacoward {
+            year: 2025,
+            category: db::CATEGORY_WINNER.to_string(),
+            wad_title: title.to_string(),
+            ..Default::default()
+        };
+
+        ingest_cacoward_entries(&conn, 2025, &[row("Survivor")], false).unwrap();
+        conn.execute_batch(
+            "CREATE TRIGGER refuse_row BEFORE INSERT ON cacowards
+             WHEN NEW.wad_title = 'Refused'
+             BEGIN SELECT RAISE(ABORT, 'refused'); END;",
+        )
+        .unwrap();
+
+        let entries = [row("New Entry"), row("Refused")];
+        assert!(ingest_cacoward_entries(&conn, 2025, &entries, false).is_err());
+
+        let rows = db::get_cacowards_by_year(&conn, 2025).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].wad_title, "Survivor");
+        assert_eq!(rows[0].wad_id, Some(wad));
     }
 }

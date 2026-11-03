@@ -656,10 +656,11 @@ pub fn find_duplicate(
         }
     }
 
-    // Strategy 4: Match by source_url
+    // Strategy 4: Match by source_url, spelled as it would have been stored.
     if let Some(url) = source_url
         && matches!(source_type, SourceType::Url | SourceType::Local)
     {
+        let url = crate::db::wads::clean_source_url(url);
         let mut stmt =
             conn.prepare("SELECT * FROM wads WHERE source_type = ? AND source_url = ?")?;
         match stmt.query_row(
@@ -1237,6 +1238,27 @@ mod tests {
         )
         .unwrap();
         assert!(dup.is_some());
+    }
+
+    #[test]
+    fn test_find_duplicate_ignores_whitespace_around_source_url() {
+        let conn = setup();
+        let id = add_wad(
+            &conn,
+            &NewWad::new("URL WAD", SourceType::Url).source_url("https://example.com/test.wad\r"),
+        )
+        .unwrap();
+
+        let dup = find_duplicate(
+            &conn,
+            SourceType::Url,
+            None,
+            Some(" https://example.com/test.wad\r\n"),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(dup.map(|wad| wad.id), Some(id));
     }
 
     #[test]

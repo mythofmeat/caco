@@ -159,8 +159,9 @@ pub fn spawn_import_cacoward(sender: BackgroundSender, db_path: PathBuf, cacowar
                 return Err(err.clone());
             }
 
-            // Link the cacoward entry to the resulting wad row (new or
-            // pre-existing duplicate). Auto-link, never sets manual_override.
+            // The import links whatever it can prove. This is for the row the
+            // user actually clicked, which it can miss: a duplicate, or a page
+            // whose title differs from the entry's. Never sets manual_override.
             let target_wad = import_result.wad_id.or(import_result.duplicate_id);
             if let Some(wad_id) = target_wad
                 && record.wad_id != Some(wad_id)

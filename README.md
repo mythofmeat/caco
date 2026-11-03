@@ -98,7 +98,8 @@ the sourceport.
 - Right-click context menu (play, edit, delete, sessions, map stats, saves & demos, new playthrough)
 - Right-hand detail sidebar with metadata, play stats, and quick actions
 - Cacowards view — a year-by-year browse of Doomworld's awards where entries you
-  don't own yet are flagged `absent` with an inline Import button
+  don't own yet are flagged `absent` with an inline Import button. A WAD imported
+  any other way links itself to its entry, by idgames id or an exact title match
 - Stats view — headline totals, a status breakdown, and month-by-month activity
 - Keyboard shortcuts: `j/k`, `g`/`G`, `Home`/`End`, `Enter`, `E`, `D`, `S`, `M`, `F`, `P`, `Esc`
 

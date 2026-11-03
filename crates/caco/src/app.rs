@@ -613,44 +613,29 @@ impl CacoApp {
                                 .map_err(|e| format!("Failed to create cache dir: {e}"))?;
                             let mirror = caco_core::config::load_config().download_mirror as usize;
 
-                            let idgames_id = wad
+                            // Ask the archive where the file is now, but a failed
+                            // lookup is not a missing file: source_url + filename
+                            // still name it on a mirror, and the mirrors do not sit
+                            // behind the API.
+                            let entry = wad
                                 .idgames_id
                                 .as_deref()
-                                .and_then(|id| id.parse::<i64>().ok());
+                                .and_then(|id| id.parse::<i64>().ok())
+                                .and_then(|id| client.get(Some(id), None).ok());
 
-                            let dest = if let Some(ig_id) = idgames_id {
-                                match client.get(Some(ig_id), None) {
-                                    Ok(entry) => client
-                                        .download(&entry, Some(&cache_dir), mirror, None)
-                                        .map_err(|e| format!("Download failed: {e}"))?,
-                                    Err(caco_sources::SourceError::WafBlocked { .. }) => {
-                                        let source_url = wad.source_url.as_deref().unwrap_or("");
-                                        let filename = wad.filename.as_deref().unwrap_or("");
-                                        if filename.is_empty() || !source_url.contains("/idgames/")
-                                        {
-                                            return Err(PlayError::Unavailable);
-                                        }
-                                        client
-                                            .download_direct(
-                                                source_url, filename, &cache_dir, mirror, None,
-                                            )
-                                            .map_err(|_| PlayError::Unavailable)?
-                                    }
-                                    Err(_) => {
-                                        return Err(PlayError::Unavailable);
-                                    }
+                            let dest = match entry {
+                                Some(entry) => {
+                                    client.download(&entry, Some(&cache_dir), mirror, None)
                                 }
-                            } else {
-                                // No numeric ID — try direct mirror via source_url
-                                let source_url = wad.source_url.as_deref().unwrap_or("");
-                                let filename = wad.filename.as_deref().unwrap_or("");
-                                if filename.is_empty() || !source_url.contains("/idgames/") {
-                                    return Err(PlayError::Unavailable);
-                                }
-                                client
-                                    .download_direct(source_url, filename, &cache_dir, mirror, None)
-                                    .map_err(|_| PlayError::Unavailable)?
-                            };
+                                None => client.download_direct(
+                                    wad.source_url.as_deref().unwrap_or(""),
+                                    wad.filename.as_deref().unwrap_or(""),
+                                    &cache_dir,
+                                    mirror,
+                                    None,
+                                ),
+                            }
+                            .map_err(|_| PlayError::Unavailable)?;
 
                             let update = caco_core::db::WadUpdate::new()
                                 .set_text("cached_path", Some(dest.to_string_lossy().to_string()));

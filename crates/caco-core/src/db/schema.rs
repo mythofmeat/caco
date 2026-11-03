@@ -165,6 +165,11 @@ static MIGRATIONS: &[Migration] = &[
         migrate_add_cacoward_supported_flag,
     ),
     (38, "drop_availability", migrate_drop_availability),
+    (
+        39,
+        "backfill_idgames_id_trim_source_url",
+        migrate_backfill_idgames_id_trim_source_url,
+    ),
 ];
 
 // ---------------------------------------------------------------------------
@@ -488,6 +493,23 @@ fn migrate_drop_availability(conn: &Connection) -> Result<()> {
     if has_column(conn, "wads", "availability")? {
         conn.execute("ALTER TABLE wads DROP COLUMN availability", [])?;
     }
+    Ok(())
+}
+
+/// Make `idgames_id` the answer to "is this on idgames" for every row, and strip
+/// the whitespace some `source_url`s came in with, which the builders now refuse.
+///
+/// The idgames importer only ever wrote `source_id`, while every reader of
+/// "this WAD's idgames id" looks at `idgames_id`, so the Cacoward auto-linker
+/// could not match the very WADs it exists for. Trashed rows are included
+/// because they can come back.
+fn migrate_backfill_idgames_id_trim_source_url(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "UPDATE wads SET idgames_id = source_id
+         WHERE source_type = 'idgames' AND COALESCE(idgames_id, '') = '';
+         UPDATE wads SET source_url = TRIM(source_url, char(9, 10, 11, 12, 13, 32))
+         WHERE source_url <> TRIM(source_url, char(9, 10, 11, 12, 13, 32));",
+    )?;
     Ok(())
 }
 
@@ -882,6 +904,9 @@ mod tests {
                 title TEXT NOT NULL,
                 status TEXT DEFAULT 'unplayed',
                 source_type TEXT NOT NULL,
+                source_id TEXT,
+                source_url TEXT,
+                idgames_id TEXT,
                 cached_path TEXT,
                 deleted_at TEXT
             );
@@ -901,6 +926,58 @@ mod tests {
             has_column(&conn, "wads", "required_sourceport_family").unwrap(),
             "migration should add required_sourceport_family"
         );
+    }
+
+    #[test]
+    fn test_migration_backfills_idgames_id_and_trims_source_url() {
+        let conn = open_memory().unwrap();
+        init_db(&conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO wads (id, title, source_type, source_id, idgames_id, source_url, deleted_at) VALUES
+                (1, 'unset', 'idgames', '21511', NULL, 'https://www.doomworld.com/idgames/ne2', NULL),
+                (2, 'empty', 'idgames', '21233', '', NULL, NULL),
+                (3, 'already set', 'idgames', '100', '200', NULL, NULL),
+                (4, 'trashed', 'idgames', '19951', NULL, NULL, '2026-01-01'),
+                (5, 'no id to copy', 'idgames', NULL, NULL, NULL, NULL),
+                (6, 'other source', 'doomworld', '149498', NULL,
+                    'https://www.doomworld.com/vb/thread/149498' || char(13), NULL),
+                (7, 'both ends', 'url', NULL, NULL,
+                    char(32, 9) || 'https://example.com/a b.zip' || char(13, 10), NULL);
+             DELETE FROM schema_migrations WHERE version = 39;",
+        )
+        .unwrap();
+
+        init_db(&conn).unwrap();
+
+        let column = |id: i64, name: &str| -> Option<String> {
+            conn.query_row(
+                &format!("SELECT {name} FROM wads WHERE id = ?1"),
+                [id],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(column(1, "idgames_id").as_deref(), Some("21511"));
+        assert_eq!(column(2, "idgames_id").as_deref(), Some("21233"));
+        assert_eq!(column(3, "idgames_id").as_deref(), Some("200"));
+        assert_eq!(column(4, "idgames_id").as_deref(), Some("19951"));
+        assert_eq!(column(5, "idgames_id"), None);
+        // A Doomworld thread id is not an idgames id.
+        assert_eq!(column(6, "idgames_id"), None);
+
+        assert_eq!(
+            column(1, "source_url").as_deref(),
+            Some("https://www.doomworld.com/idgames/ne2")
+        );
+        assert_eq!(
+            column(6, "source_url").as_deref(),
+            Some("https://www.doomworld.com/vb/thread/149498")
+        );
+        assert_eq!(
+            column(7, "source_url").as_deref(),
+            Some("https://example.com/a b.zip")
+        );
+        assert_eq!(column(2, "source_url"), None);
     }
 
     #[test]
