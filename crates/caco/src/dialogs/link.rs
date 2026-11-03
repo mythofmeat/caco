@@ -7,9 +7,9 @@ use crate::workers::{FileDialogReceiver, FileDialogRequest, spawn_file_dialog};
 
 /// State for the WAD Unavailable / Link dialog.
 pub struct LinkDialogState {
-    pub wad_id: i64,
-    pub wad_title: String,
-    pub source_url: Option<String>,
+    wad_id: i64,
+    wad_title: String,
+    source_url: Option<String>,
     /// Where the file was the last time caco found it, if it ever had one —
     /// what turns "not available" into "on another machine, or a drive that
     /// is not mounted".
