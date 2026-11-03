@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use rusqlite::functions::FunctionFlags;
 use rusqlite::{Connection, Transaction, TransactionBehavior};
 
 use crate::Result;
+use crate::source_url::{doomwiki_page_from_url, extract_topic_id_from_url};
 
 /// Conservative limit for SQLite's SQLITE_MAX_VARIABLE_NUMBER (default 999).
 pub const SQLITE_MAX_VARS: usize = 900;
@@ -45,6 +47,7 @@ pub fn open_connection(path: &Path) -> Result<Connection> {
          PRAGMA cache_size = -20000;
          PRAGMA temp_store = MEMORY;",
     )?;
+    register_functions(&conn)?;
     Ok(conn)
 }
 
@@ -55,7 +58,28 @@ pub fn open_memory() -> Result<Connection> {
         "PRAGMA foreign_keys = ON;
          PRAGMA temp_store = MEMORY;",
     )?;
+    register_functions(&conn)?;
     Ok(conn)
+}
+
+/// Give SQL the rules `crate::source_url` knows, which the mirror match compares
+/// `wads.source_url` by: see [`crate::db::mirrors`].
+///
+/// As functions rather than as SQL, because SQLite's string functions cannot decode
+/// `%27` in a wiki URL, and a second spelling of either rule could drift from the
+/// first. Deterministic, which lets the planner evaluate each one once per row and
+/// probe an index with the answer.
+fn register_functions(conn: &Connection) -> Result<()> {
+    let flags = FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC;
+    conn.create_scalar_function("doomworld_topic", 1, flags, |ctx| {
+        let url = ctx.get_raw(0).as_str_or_null().ok().flatten();
+        Ok(url.and_then(extract_topic_id_from_url))
+    })?;
+    conn.create_scalar_function("doomwiki_page", 1, flags, |ctx| {
+        let url = ctx.get_raw(0).as_str_or_null().ok().flatten();
+        Ok(url.and_then(doomwiki_page_from_url))
+    })?;
+    Ok(())
 }
 
 /// Fetch tags for a single WAD.

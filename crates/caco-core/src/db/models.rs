@@ -5,6 +5,7 @@ use std::sync::LazyLock;
 
 use serde::{Deserialize, Serialize};
 
+use super::mirrors::mirror_file_matches;
 use crate::identity::{FileIdentity, Hashes};
 
 // ---------------------------------------------------------------------------
@@ -85,13 +86,13 @@ impl FromStr for Status {
 // ---------------------------------------------------------------------------
 
 /// Whether a WAD's file is on this machine right now, and if not, whether
-/// there is any URL to try.
+/// there is anywhere to try.
 ///
-/// Derived from `cached_path` + `source_url`, never stored. It used to be a
-/// column maintained on write, which drifted the moment anything nulled
-/// `cached_path` with raw SQL — `clear_cached_path` did exactly that, so
-/// every cache eviction left a row still claiming to be cached. Deriving it
-/// makes that unrepresentable.
+/// Derived from `cached_path`, `source_url` and what the mirrors hold, never
+/// stored. It used to be a column maintained on write, which drifted the moment
+/// anything nulled `cached_path` with raw SQL — `clear_cached_path` did exactly
+/// that, so every cache eviction left a row still claiming to be cached. Deriving
+/// it makes that unrepresentable.
 ///
 /// Neither half looks at the filesystem, so `Cached` is only as true as
 /// `cached_path`. A file can go without caco deleting it — a data dir synced
@@ -102,7 +103,7 @@ impl FromStr for Status {
 /// Answers a different question from [`Retrievability`]: this one changes
 /// every time a file lands in or leaves the cache, while retrievability is a
 /// fact about where the WAD came from. Note that `Downloadable` only promises
-/// a `source_url` exists, not that fetching it will work — see
+/// there is somewhere to try, not that fetching it will work — see
 /// [`Retrievability::Manual`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Availability {
@@ -118,13 +119,13 @@ impl Availability {
         Availability::Unavailable,
     ];
 
-    /// Classify from the two fields that decide it. An empty string counts as
-    /// absent — blank text fields arrive from the GUI as `Some("")`.
-    pub fn derive(cached_path: Option<&str>, source_url: Option<&str>) -> Self {
+    /// Classify from what decides it. An empty string counts as absent — blank
+    /// text fields arrive from the GUI as `Some("")`.
+    pub fn derive(cached_path: Option<&str>, source_url: Option<&str>, mirrored: bool) -> Self {
         let present = |v: Option<&str>| v.is_some_and(|s| !s.is_empty());
         if present(cached_path) {
             Availability::Cached
-        } else if present(source_url) {
+        } else if present(source_url) || mirrored {
             Availability::Downloadable
         } else {
             Availability::Unavailable
@@ -138,12 +139,18 @@ impl Availability {
     pub fn sql(self) -> &'static str {
         match self {
             Availability::Cached => "COALESCE(wads.cached_path, '') <> ''",
-            Availability::Downloadable => {
-                "(COALESCE(wads.cached_path, '') = '' AND COALESCE(wads.source_url, '') <> '')"
-            }
-            Availability::Unavailable => {
-                "(COALESCE(wads.cached_path, '') = '' AND COALESCE(wads.source_url, '') = '')"
-            }
+            Availability::Downloadable => concat!(
+                "(COALESCE(wads.cached_path, '') = '' AND (COALESCE(wads.source_url, '') <> '' ",
+                "OR EXISTS (",
+                mirror_file_matches!(),
+                ")))"
+            ),
+            Availability::Unavailable => concat!(
+                "(COALESCE(wads.cached_path, '') = '' AND COALESCE(wads.source_url, '') = '' ",
+                "AND NOT EXISTS (",
+                mirror_file_matches!(),
+                "))"
+            ),
         }
     }
 
@@ -187,10 +194,22 @@ impl FromStr for Availability {
 // Retrievability enum
 // ---------------------------------------------------------------------------
 
+/// The SQL spelling of [`Retrievability::Automatic`]. A macro so that the
+/// predicates built on it can be composed at compile time.
+macro_rules! automatic_sql {
+    () => {
+        concat!(
+            "(wads.source_type = 'idgames' OR COALESCE(wads.idgames_id, '') <> '' OR EXISTS (",
+            mirror_file_matches!(),
+            "))"
+        )
+    };
+}
+
 /// Whether caco can fetch a WAD's file again on its own.
 ///
-/// Deliberately derived from source metadata rather than stored, and never
-/// from where the file currently sits on disk. Placement is a *consequence*
+/// Deliberately derived from source metadata and what the mirrors hold rather
+/// than stored, and never from where the file currently sits on disk. Placement is a *consequence*
 /// of retrievability — a manual WAD belongs in the portable data dir whether
 /// or not its file has been downloaded yet — so reading it back off the path
 /// would make the two drift apart the moment `cache_dir` or `CACO_HOME`
@@ -201,7 +220,8 @@ impl FromStr for Availability {
 /// not cached (will be re-fetched on demand).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Retrievability {
-    /// Re-downloadable from idgames, which is archival and stable.
+    /// Re-downloadable from idgames, which is archival and stable, or from a
+    /// mirror the user configured, which holds what they chose to keep.
     Automatic,
     /// Only obtainable by hand. `source_url` may still be set — a Doomworld
     /// thread or a one-off file host — but those links rot, sit behind a WAF,
@@ -217,20 +237,24 @@ impl Retrievability {
     ///
     /// Must stay in lockstep with [`Retrievability::derive`];
     /// `test_retrievability_sql_matches_rust` asserts they agree.
-    pub const AUTOMATIC_SQL: &str =
-        "(wads.source_type = 'idgames' OR COALESCE(wads.idgames_id, '') <> '')";
+    pub const AUTOMATIC_SQL: &str = automatic_sql!();
 
     /// SQL predicate matching WADs that are `Manual` *and* have no local copy
     /// — the set `WadRecord::is_lost` describes. Not a third variant: it is an
     /// intersection with [`Availability`], exposed because "what can I no
     /// longer play" is the question worth one click.
-    pub const LOST_SQL: &str = "(NOT (wads.source_type = 'idgames' \
-         OR COALESCE(wads.idgames_id, '') <> '') \
-         AND COALESCE(wads.cached_path, '') = '')";
+    pub const LOST_SQL: &str = concat!(
+        "(NOT ",
+        automatic_sql!(),
+        " AND COALESCE(wads.cached_path, '') = '')"
+    );
 
-    /// Classify from the two fields that decide it.
-    pub fn derive(source_type: SourceType, idgames_id: Option<&str>) -> Self {
-        if source_type == SourceType::Idgames || idgames_id.is_some_and(|id| !id.is_empty()) {
+    /// Classify from what decides it.
+    pub fn derive(source_type: SourceType, idgames_id: Option<&str>, mirrored: bool) -> Self {
+        if source_type == SourceType::Idgames
+            || idgames_id.is_some_and(|id| !id.is_empty())
+            || mirrored
+        {
             Retrievability::Automatic
         } else {
             Retrievability::Manual
@@ -326,6 +350,11 @@ impl FromStr for SourceType {
 // WadRecord
 // ---------------------------------------------------------------------------
 
+/// What every query [`WadRecord::from_row`] reads has to select: the row, and
+/// whether a mirror holds its file. A required column, so that a query forgetting
+/// it fails at once rather than reading every WAD as held by nothing.
+pub const WAD_COLUMNS: &str = concat!("wads.*, EXISTS (", mirror_file_matches!(), ") AS mirrored");
+
 /// A WAD row with attached tags.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WadRecord {
@@ -358,6 +387,10 @@ pub struct WadRecord {
     /// The file's modification time when `identity` was taken. With the size,
     /// the stamp that says whether the file has been replaced since.
     pub file_mtime: Option<i64>,
+    /// Whether a mirror holds this WAD's file, as of the last time each index was
+    /// read. Not a column of `wads`: see [`crate::db::mirrors`].
+    #[serde(default)]
+    pub mirrored: bool,
     pub custom_iwad: Option<String>,
     pub custom_sourceport: Option<String>,
     pub required_sourceport_family: Option<String>,
@@ -381,13 +414,22 @@ pub struct WadRecord {
 impl WadRecord {
     /// Whether caco can fetch this WAD's file again on its own.
     pub fn retrievability(&self) -> Retrievability {
-        Retrievability::derive(self.source_type, self.idgames_id.as_deref())
+        Retrievability::derive(self.source_type, self.idgames_id.as_deref(), self.mirrored)
+    }
+
+    /// Whether idgames can give this WAD's file back, whatever a mirror holds.
+    pub fn on_idgames(&self) -> bool {
+        Retrievability::derive(self.source_type, self.idgames_id.as_deref(), false).is_automatic()
     }
 
     /// Whether this WAD's file is on the machine, and if not whether there is
     /// a URL to try.
     pub fn availability(&self) -> Availability {
-        Availability::derive(self.cached_path.as_deref(), self.source_url.as_deref())
+        Availability::derive(
+            self.cached_path.as_deref(),
+            self.source_url.as_deref(),
+            self.mirrored,
+        )
     }
 
     /// Manual-only with no local copy: caco cannot fetch this WAD, and the
@@ -404,8 +446,8 @@ impl WadRecord {
 
     /// Build a `WadRecord` from a `rusqlite::Row`.
     ///
-    /// Expects all wad columns to be present (SELECT *). Tags must be
-    /// attached separately via `attach_tags`.
+    /// Expects [`WAD_COLUMNS`] to have been selected. Tags must be attached
+    /// separately via `attach_tags`.
     pub fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
         let status_raw: String = row.get("status")?;
         let status = status_raw.parse().unwrap_or(Status::Unplayed);
@@ -431,6 +473,7 @@ impl WadRecord {
             last_known_path: row.get("last_known_path")?,
             identity: identity_from_row(row)?,
             file_mtime: row.get("file_mtime")?,
+            mirrored: row.get("mirrored")?,
             custom_iwad: row.get("custom_iwad")?,
             custom_sourceport: row.get("custom_sourceport")?,
             required_sourceport_family: row.get("required_sourceport_family").ok(),
@@ -709,7 +752,7 @@ mod tests {
     #[test]
     fn test_retrievability_idgames_source_is_automatic() {
         assert_eq!(
-            Retrievability::derive(SourceType::Idgames, None),
+            Retrievability::derive(SourceType::Idgames, None, false),
             Retrievability::Automatic
         );
     }
@@ -725,12 +768,12 @@ mod tests {
             SourceType::Local,
         ] {
             assert_eq!(
-                Retrievability::derive(src, Some("12345")),
+                Retrievability::derive(src, Some("12345"), false),
                 Retrievability::Automatic,
                 "{src} with an idgames id should be automatic"
             );
             assert_eq!(
-                Retrievability::derive(src, None),
+                Retrievability::derive(src, None, false),
                 Retrievability::Manual,
                 "{src} without an idgames id should be manual"
             );
@@ -742,8 +785,48 @@ mod tests {
     #[test]
     fn test_retrievability_empty_idgames_id_is_manual() {
         assert_eq!(
-            Retrievability::derive(SourceType::Doomworld, Some("")),
+            Retrievability::derive(SourceType::Doomworld, Some(""), false),
             Retrievability::Manual
+        );
+    }
+
+    /// A copy on the user's own mirror makes a manual WAD fetchable, whatever it
+    /// was imported from.
+    #[test]
+    fn test_retrievability_a_mirror_promotes_any_source() {
+        for src in [
+            SourceType::Doomwiki,
+            SourceType::Doomworld,
+            SourceType::Url,
+            SourceType::Local,
+        ] {
+            assert_eq!(
+                Retrievability::derive(src, None, true),
+                Retrievability::Automatic,
+                "{src} on a mirror should be automatic"
+            );
+        }
+    }
+
+    /// `Downloadable` means there is somewhere to try, which a mirror is, whether
+    /// or not there is a URL.
+    #[test]
+    fn test_availability_a_mirror_is_somewhere_to_try() {
+        assert_eq!(
+            Availability::derive(None, None, true),
+            Availability::Downloadable
+        );
+        assert_eq!(
+            Availability::derive(Some(""), Some(""), true),
+            Availability::Downloadable
+        );
+        assert_eq!(
+            Availability::derive(None, None, false),
+            Availability::Unavailable
+        );
+        assert_eq!(
+            Availability::derive(Some("/keep/x.wad"), None, true),
+            Availability::Cached
         );
     }
 }

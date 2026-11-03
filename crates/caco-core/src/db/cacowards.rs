@@ -247,6 +247,15 @@ pub fn get_cacoward(conn: &Connection, id: i64) -> Result<Option<CacowardRecord>
     Ok(stmt.query_row([id], CacowardRecord::from_row).optional()?)
 }
 
+/// The Cacowards a WAD won.
+pub fn cacowards_for_wad(conn: &Connection, wad_id: i64) -> Result<Vec<CacowardRecord>> {
+    let mut stmt =
+        conn.prepare("SELECT * FROM cacowards WHERE wad_id = ? ORDER BY year, page_order, id")?;
+    Ok(stmt
+        .query_map([wad_id], CacowardRecord::from_row)?
+        .collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
 /// Rows auto-linking may still claim: not pinned, and with no live WAD behind
 /// them. A link to a trashed WAD counts as no link, the same way
 /// [`search_cacowards`] reports such a row as [`EffectiveStatus::Absent`].

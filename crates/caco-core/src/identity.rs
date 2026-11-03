@@ -157,6 +157,11 @@ pub fn identify(path: &Path) -> io::Result<Identified> {
     })
 }
 
+/// Hash a whole file, and nothing inside it: what a download is checked against.
+pub fn hash_file(path: &Path) -> io::Result<Hashes> {
+    hash_reader(File::open(path)?)
+}
+
 /// Hash everything `reader` yields.
 fn hash_reader(mut reader: impl Read) -> io::Result<Hashes> {
     let mut sha256 = Sha256::new();
@@ -581,7 +586,10 @@ pub fn verify(conn: &Connection, wad: &WadRecord, path: &Path) -> crate::Result<
 /// a check cut short when the app closes keeps what it did.
 pub fn check_library(conn: &Connection) -> crate::Result<usize> {
     let wads: Vec<WadRecord> = {
-        let mut stmt = conn.prepare("SELECT * FROM wads WHERE COALESCE(cached_path, '') <> ''")?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {} FROM wads WHERE COALESCE(cached_path, '') <> ''",
+            db::WAD_COLUMNS
+        ))?;
         stmt.query_map([], WadRecord::from_row)?
             .collect::<std::result::Result<_, _>>()?
     };

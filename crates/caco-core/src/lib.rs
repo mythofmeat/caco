@@ -11,6 +11,7 @@ pub mod gc;
 pub mod identity;
 pub mod iwad_detect;
 pub mod mapinfo;
+pub mod mirrors;
 pub mod player;
 pub mod presence;
 pub mod profiles;

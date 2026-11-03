@@ -257,6 +257,10 @@ pub struct Config {
     #[serde(default)]
     pub executable_args: HashMap<String, Vec<String>>,
 
+    /// Stores of WAD files the user controls, tried before anywhere else in the
+    /// order they are listed. See [`crate::mirrors`].
+    pub mirrors: Vec<MirrorConfig>,
+
     #[serde(default)]
     pub gui: GuiConfig,
     #[serde(default)]
@@ -292,11 +296,103 @@ impl Default for Config {
             zdoom_sourceport: String::new(),
             sourceport_preferences: HashMap::new(),
             executable_args: HashMap::new(),
+            mirrors: Vec::new(),
             gui: GuiConfig::default(),
             list: ListConfig::default(),
             iwad_priority: HashMap::new(),
         }
     }
+}
+
+/// One `[[mirrors]]` entry: a store of WAD files the user controls.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MirrorConfig {
+    /// What the library knows it by. The synced index is keyed on this, so
+    /// renaming a mirror reads its index again under the new name.
+    pub name: String,
+    /// Its root over HTTP. A mirror has this or a `path`.
+    pub url: Option<String>,
+    /// Its root on a filesystem. A mirror has this or a `url`.
+    pub path: Option<String>,
+    /// The environment variable holding a bearer token, so that the token itself
+    /// is not in a file meant to be copied between machines.
+    pub token_env: Option<String>,
+    /// Whether caco may upload to it.
+    pub write: bool,
+}
+
+/// Where a mirror's root is, once [`MirrorConfig::location`] has checked it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MirrorLocation {
+    Url(String),
+    Path(PathBuf),
+}
+
+impl MirrorConfig {
+    /// Where this mirror's root is, or what is wrong with how it says so.
+    pub fn location(&self) -> Result<MirrorLocation, String> {
+        let nonempty = |value: &Option<String>| {
+            value
+                .as_deref()
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+                .map(str::to_string)
+        };
+        match (nonempty(&self.url), nonempty(&self.path)) {
+            (Some(_), Some(_)) => Err("set either a URL or a path, not both".to_string()),
+            (None, None) => Err("set a URL or a path".to_string()),
+            (Some(url), None) if url.starts_with("http://") || url.starts_with("https://") => {
+                Ok(MirrorLocation::Url(url.trim_end_matches('/').to_string()))
+            }
+            (Some(url), None) => Err(format!("{url} is not an http:// or https:// URL")),
+            (None, Some(path)) => {
+                // Absolute because caco can be started from anywhere, and a
+                // relative path would mean a different mirror each time.
+                let path = expand_tilde(&path);
+                if path.is_absolute() {
+                    Ok(MirrorLocation::Path(path))
+                } else {
+                    Err(format!("{} is not an absolute path", path.display()))
+                }
+            }
+        }
+    }
+
+    /// The bearer token to present, if one is configured and set.
+    pub fn token(&self) -> Option<String> {
+        std::env::var(self.token_env_name()?)
+            .ok()
+            .filter(|token| !token.is_empty())
+    }
+
+    /// The name of the variable the token should be in, if it should be in one.
+    pub fn token_env_name(&self) -> Option<&str> {
+        self.token_env
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+    }
+}
+
+/// Whether a list of mirrors can be used as it stands. For the Settings dialog,
+/// which says so before saving. A hand-edited file gets the same answer per mirror,
+/// when the sync reads it.
+pub fn check_mirrors(mirrors: &[MirrorConfig]) -> Result<(), String> {
+    let mut seen = std::collections::HashSet::new();
+    for mirror in mirrors {
+        let name = mirror.name.trim();
+        if name.is_empty() {
+            return Err("Every mirror needs a name".to_string());
+        }
+        if !seen.insert(name) {
+            return Err(format!("There are two mirrors called {name}"));
+        }
+        mirror
+            .location()
+            .map_err(|problem| format!("Mirror {name}: {problem}"))?;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1180,6 +1276,152 @@ helion = ["-loglevel", "info"]
         // Omitted keys come back as their defaults, not as blanks.
         assert_eq!(parsed.link_mode, "move");
         assert_eq!(parsed.db_path, Config::default().db_path);
+    }
+
+    // -- mirrors --
+
+    fn mirror(url: Option<&str>, path: Option<&str>) -> MirrorConfig {
+        MirrorConfig {
+            name: "home".to_string(),
+            url: url.map(str::to_string),
+            path: path.map(str::to_string),
+            ..Default::default()
+        }
+    }
+
+    /// The issue's example, parsed as written.
+    #[test]
+    fn test_config_mirrors_parse_as_the_issue_spells_them() {
+        let toml_str = r#"
+[[mirrors]]
+name      = "home"
+url       = "https://files.example.lan/doom"
+token_env = "CACO_MIRROR_TOKEN"
+write     = true
+
+[[mirrors]]
+name = "nas"
+path = "/mnt/nas/doom-mirror"
+"#;
+        let cfg: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.mirrors.len(), 2);
+        assert_eq!(cfg.mirrors[0].name, "home");
+        assert_eq!(cfg.mirrors[0].token_env_name(), Some("CACO_MIRROR_TOKEN"));
+        assert!(cfg.mirrors[0].write);
+        assert_eq!(
+            cfg.mirrors[0].location(),
+            Ok(MirrorLocation::Url(
+                "https://files.example.lan/doom".to_string()
+            ))
+        );
+        assert!(
+            !cfg.mirrors[1].write,
+            "a mirror is read-only unless it says"
+        );
+        assert_eq!(
+            cfg.mirrors[1].location(),
+            Ok(MirrorLocation::Path(PathBuf::from("/mnt/nas/doom-mirror")))
+        );
+    }
+
+    #[test]
+    fn test_minimal_toml_round_trips_mirrors() {
+        let cfg = Config {
+            mirrors: vec![
+                MirrorConfig {
+                    token_env: Some("TOKEN".to_string()),
+                    write: true,
+                    ..mirror(Some("https://example.lan/doom"), None)
+                },
+                MirrorConfig {
+                    name: "nas".to_string(),
+                    ..mirror(None, Some("/mnt/nas"))
+                },
+            ],
+            ..Default::default()
+        };
+
+        let rendered = minimal_toml(&cfg).unwrap();
+        assert!(rendered.contains("[[mirrors]]"), "{rendered}");
+        let parsed: Config = toml::from_str(&rendered).unwrap();
+        assert_eq!(parsed.mirrors, cfg.mirrors);
+    }
+
+    #[test]
+    fn test_a_mirrors_url_loses_its_trailing_slash() {
+        assert_eq!(
+            mirror(Some(" https://example.lan/doom/ "), None).location(),
+            Ok(MirrorLocation::Url("https://example.lan/doom".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_a_mirrors_path_expands_a_tilde() {
+        assert_eq!(
+            mirror(None, Some("~/doom-mirror")).location(),
+            Ok(MirrorLocation::Path(home_dir().join("doom-mirror")))
+        );
+    }
+
+    #[test]
+    fn test_a_mirror_has_one_location_and_a_usable_one() {
+        for (bad, says) in [
+            (mirror(None, None), "set a URL or a path"),
+            (mirror(Some(" "), Some("")), "set a URL or a path"),
+            (mirror(Some("https://x"), Some("/y")), "not both"),
+            (mirror(Some("ftp://x/doom"), None), "not an http"),
+            (mirror(None, Some("relative/doom")), "not an absolute path"),
+        ] {
+            let problem = bad.location().unwrap_err();
+            assert!(problem.contains(says), "{problem}");
+        }
+    }
+
+    #[test]
+    fn test_a_mirrors_token_comes_from_its_environment_variable() {
+        const VAR: &str = "CACO_TEST_MIRROR_TOKEN_READ";
+        let configured = MirrorConfig {
+            token_env: Some(VAR.to_string()),
+            ..Default::default()
+        };
+        assert_eq!(configured.token(), None);
+
+        // SAFETY: test-only env mutation, on a variable only this test reads.
+        unsafe { std::env::set_var(VAR, "sekrit") };
+        assert_eq!(configured.token().as_deref(), Some("sekrit"));
+        unsafe { std::env::set_var(VAR, "") };
+        assert_eq!(configured.token(), None, "an empty token is no token");
+        unsafe { std::env::remove_var(VAR) };
+
+        let blank = MirrorConfig {
+            token_env: Some("  ".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(blank.token_env_name(), None);
+        assert_eq!(MirrorConfig::default().token_env_name(), None);
+    }
+
+    #[test]
+    fn test_check_mirrors_finds_what_would_not_work() {
+        let good = mirror(Some("https://example.lan"), None);
+        assert_eq!(check_mirrors(&[]), Ok(()));
+        assert_eq!(check_mirrors(std::slice::from_ref(&good)), Ok(()));
+
+        let unnamed = MirrorConfig {
+            name: " ".to_string(),
+            ..good.clone()
+        };
+        assert!(
+            check_mirrors(&[unnamed])
+                .unwrap_err()
+                .contains("needs a name")
+        );
+
+        let twice = check_mirrors(&[good.clone(), good.clone()]).unwrap_err();
+        assert!(twice.contains("two mirrors called home"), "{twice}");
+
+        let nowhere = check_mirrors(&[mirror(None, None)]).unwrap_err();
+        assert!(nowhere.starts_with("Mirror home:"), "{nowhere}");
     }
 
     #[test]
