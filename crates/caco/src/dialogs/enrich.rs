@@ -1,10 +1,9 @@
 //! Re-run metadata detection over the library, and refresh Cacowards years.
 //!
-//! The GUI answer to `caco enrich`. Enrichment is network-bound — one Doom
-//! Wiki lookup per WAD file detection cannot settle — so the run happens on a
-//! worker thread and this dialog only holds the request, the live progress,
-//! and the report. `caco_sources::enrich_service` does the actual work for
-//! both frontends.
+//! Enrichment is network-bound — one Doom Wiki lookup per WAD file detection
+//! cannot settle — so the run happens on a worker thread and this dialog only
+//! holds the request, the live progress, and the report.
+//! `caco_sources::enrich_service` does the actual work.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};

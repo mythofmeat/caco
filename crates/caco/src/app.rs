@@ -333,19 +333,16 @@ impl CacoApp {
                     conn,
                     &wads,
                     dry_run,
-                    &mut |progress| {
-                        if let EnrichProgress::Started {
-                            index,
+                    &mut |EnrichProgress {
+                              index,
+                              total,
+                              title,
+                          }| {
+                        sender.send(AppMessage::EnrichProgress {
+                            done: index,
                             total,
-                            title,
-                        } = progress
-                        {
-                            sender.send(AppMessage::EnrichProgress {
-                                done: index,
-                                total,
-                                title: title.to_string(),
-                            });
-                        }
+                            title: title.to_string(),
+                        });
                     },
                     &|| cancel.load(std::sync::atomic::Ordering::Relaxed),
                 );

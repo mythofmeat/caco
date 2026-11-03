@@ -32,7 +32,6 @@ use crate::{Result, SourceError};
 /// What enrichment found for a single WAD.
 #[derive(Debug, Clone, Default)]
 pub struct EnrichOutcome {
-    pub wad_id: i64,
     pub title: String,
     pub complevel: Option<i32>,
     pub iwad: Option<String>,
@@ -49,18 +48,13 @@ impl EnrichOutcome {
     }
 }
 
-/// Progress signal from [`enrich_wads`].
+/// Progress signal from [`enrich_wads`]: about to work on `index` of `total`
+/// (0-based).
 #[derive(Debug, Clone)]
-pub enum EnrichProgress<'a> {
-    /// About to work on `index` of `total` (0-based).
-    Started {
-        index: usize,
-        total: usize,
-        title: &'a str,
-    },
-    /// Finished a WAD. Reported even when nothing was detected, so a caller
-    /// can drive a progress bar off it.
-    Finished(&'a EnrichOutcome),
+pub struct EnrichProgress<'a> {
+    pub index: usize,
+    pub total: usize,
+    pub title: &'a str,
 }
 
 /// Aggregate result of an enrichment run.
@@ -102,7 +96,7 @@ pub fn enrich_wads(
             break;
         }
 
-        progress(EnrichProgress::Started {
+        progress(EnrichProgress {
             index,
             total,
             title: &wad.title,
@@ -111,7 +105,6 @@ pub fn enrich_wads(
         let outcome = enrich_one(conn, wad, dry_run, &mut summary.wiki_lookups);
         summary.examined += 1;
 
-        progress(EnrichProgress::Finished(&outcome));
         if outcome.has_changes() {
             summary.changed.push(outcome);
         }
@@ -131,7 +124,6 @@ fn enrich_one(
     wiki_lookups: &mut u32,
 ) -> EnrichOutcome {
     let mut outcome = EnrichOutcome {
-        wad_id: wad.id,
         title: wad.title.clone(),
         ..Default::default()
     };
@@ -399,7 +391,6 @@ mod tests {
     #[test]
     fn test_has_changes() {
         let base = EnrichOutcome {
-            wad_id: 1,
             title: "Test".to_string(),
             ..Default::default()
         };
@@ -543,20 +534,15 @@ mod tests {
         assert_eq!(wads.len(), 2);
 
         let mut started = Vec::new();
-        let mut finished = 0;
         let summary = enrich_wads(
             &conn,
             &wads,
             false,
-            &mut |p| match p {
-                EnrichProgress::Started { index, total, .. } => started.push((index, total)),
-                EnrichProgress::Finished(_) => finished += 1,
-            },
+            &mut |p| started.push((p.index, p.total)),
             &never_cancel(),
         );
 
         assert_eq!(started, vec![(0, 2), (1, 2)]);
-        assert_eq!(finished, 2);
         assert_eq!(summary.examined, 2);
         assert_eq!(summary.changed.len(), 2);
         assert!(!summary.cancelled);
@@ -576,12 +562,8 @@ mod tests {
             &conn,
             &wads,
             false,
-            &mut |p| {
-                if matches!(p, EnrichProgress::Finished(_)) {
-                    seen.set(seen.get() + 1);
-                }
-            },
-            // Stop once one WAD is done.
+            &mut |_| seen.set(seen.get() + 1),
+            // Stop once one WAD has been visited.
             &|| seen.get() >= 1,
         );
 
