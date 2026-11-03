@@ -77,11 +77,11 @@ impl CacoApp {
 
     /// The handle background workers answer on.
     ///
-    /// Public for the same reason `render` is: the screenshot harness has to
-    /// reach states only a worker can produce — a build in flight, with a step
-    /// and a log — and posting the messages a worker would post is the honest
-    /// way to get there. Reaching into the dialog's private state instead would
-    /// prove a shot renders and nothing about whether the app can get there.
+    /// Public for `tests/screenshots.rs`, which has to reach states only a
+    /// worker can produce — a build in flight, with a step and a log — and
+    /// posting the messages a worker would post is the honest way to get there.
+    /// Reaching into the dialog's private state instead would prove a shot
+    /// renders and nothing about whether the app can get there.
     pub fn background_sender(&self) -> crate::workers::BackgroundSender {
         self.bg.sender()
     }
@@ -361,7 +361,6 @@ impl CacoApp {
         });
     }
 
-    /// Dispatch an action request (from detail panel buttons or table shortcuts).
     /// Switch the central panel to `mode`, asking that view to refresh.
     ///
     /// Public for `tests/screenshots.rs`, which walks every view the way the
@@ -381,6 +380,8 @@ impl CacoApp {
         self.state.active_dialog = None;
     }
 
+    /// Dispatch an action request (from detail panel buttons or table shortcuts).
+    ///
     /// Public so `tests/screenshots.rs` can open any dialog the same way a
     /// click does, instead of reconstructing dialog state by hand.
     pub fn dispatch_action(&mut self, action: ActionRequest) {
@@ -691,17 +692,6 @@ impl eframe::App for CacoApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        self.render(ui);
-    }
-}
-
-impl CacoApp {
-    /// One frame of UI, independent of eframe.
-    ///
-    /// `ui` is only a thin shim over this because `eframe::Frame` cannot
-    /// be constructed outside a real window, and the screenshot harness in
-    /// `tests/screenshots.rs` needs to drive the whole app off-screen.
-    pub fn render(&mut self, ui: &mut egui::Ui) {
         let ctx = &ui.ctx().clone();
         // 1. Drain background messages
         for msg in self.bg.drain() {
@@ -962,7 +952,7 @@ impl CacoApp {
                     .stroke(egui::Stroke::new(1.0_f32, theme::BORDER)),
             )
             .show(ui, |ui| {
-                render_topbar(ui, &mut self.state, &mut actions);
+                render_topbar(ui, &mut self.state);
             });
 
         // ── Bottom status bar ──

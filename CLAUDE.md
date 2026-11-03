@@ -80,7 +80,7 @@ crates/
 ## Dependencies (key crates)
 
 ```toml
-rusqlite = "0.40"       # SQLite (bundled)
+rusqlite = "0.41"       # SQLite (bundled)
 serde / serde_json
 toml = "1.1"
 chrono = "0.4"
@@ -90,8 +90,8 @@ md-5 = "0.11"           # companion dedup (hex::encode — digest 0.11 dropped L
 zip = "9"
 image = "0.25"          # thumbnails
 reqwest = "0.13"        # HTTP (blocking, rustls; `query` feature is opt-in)
-eframe = "0.36"         # GUI (wgpu renderer by default since 0.36)
-egui = "0.36"
+eframe = "0.37"         # GUI (wgpu renderer by default since 0.36)
+egui = "0.37"
 ```
 
 ## Key Patterns
@@ -147,6 +147,13 @@ egui = "0.36"
   at-risk toggle and button row) can exceed the whole budget at the 800x400
   minimum, and then no cap on its list would save it; the wrapper's scrollbar
   only ever appears in that case.
+- **Inputs are named after their label**: `response.labelled_by(label.id)` ties
+  a field to the label a sighted user reads (`dialogs/settings.rs::form_label`
+  returns its `Response` for this), and `accessible_name` is for a control with
+  nothing visible to point at. The screenshot harness fails on an input with no
+  name at all, but a placeholder or a tooltip is enough to pass it, and the name
+  that leaves is often wrong: "Max size (GB)" was announced as "0 = unlimited".
+  With `labelled_by` the tooltip becomes the description, which is what it is.
 - **Sidebar rows size to `ui.available_width()`**: `ui.horizontal` does not
   wrap, and a row wider than a `SidePanel` is not merely clipped — egui sizes a
   panel from the rect its contents actually occupied, so the overflow displaces
@@ -157,27 +164,47 @@ egui = "0.36"
 ## Screenshots
 
 `crates/caco/tests/screenshots.rs` renders every GUI surface to
-`target/screenshots/*.png` with no display server, through `egui_kittest` +
+`target/screenshots/<WxH>/*.png` with no display server, through `egui_kittest` +
 wgpu. It exists because whether a row fits inside its panel is decided at paint
 time against a real font atlas and a real viewport — there is no unit test for
 it, and reading the layout code is how the two bugs above survived.
 
 - `#[ignore]`d, like `sourceports_build.rs`: `cargo test --workspace` must not need a
-  GPU. Run it explicitly.
+  GPU. Run it explicitly, or read CI's: `verify.yml`'s `screenshots` job runs it at
+  1200x800 and 800x400 on Mesa's software Vulkan driver and uploads the PNGs as an
+  artifact. Being in `verify` is what makes it gate `update-deps`' auto-merge: an
+  egui bump once broke the harness and nothing noticed, because nothing ran it.
 - It also *asserts*, not just captures: after opening each dialog it reads
   egui's own area rects and fails if any window escapes the viewport. Run it at
   `CACO_SHOT_SIZE=800x400` (the `min_inner_size` in `main.rs`) when touching
   dialog layout — that is the size things break at, and a PNG cannot tell a
   window clipped at the screen edge from one that merely ends there.
+- kittest's own checks stay on, because each catches what a PNG hides. A
+  character no installed font can draw panics instead of painting tofu, and an
+  input widget with no accessible name fails the run (see *Inputs are named after
+  their label*). The first is why the theme has to be on the context before the
+  first pass, in the harness as much as in `main.rs`. eframe's system font fallback
+  is not installed here, so a WAD title in a script the bundled fonts lack fails a
+  run against a real library even where the app would find a system font for it.
+- `build_eframe` drives the real `eframe::App`, down the same creation path as
+  `main.rs`: there is no test-only entry point into the app. kittest's `build_ui*`
+  kinds would need one, and also wrap the app in an 8pt margin, so what they
+  shoot is not what a user sees. `dispatch_action`, `close_dialog`, `set_view` and
+  `background_sender` are public for this — the harness opens dialogs the way a
+  click does rather than building dialog state by hand.
+- Frames go through `Shooter::settle`, not `Harness::run`. Workers wake the context
+  being painted, as they do in the app, and `run` panics on a UI still being asked
+  to repaint after `max_steps`, so a burst of worker messages failed it at random.
+  `run_ok` stops at the budget instead, and because it then skips its accessibility
+  check, `shot` makes that check itself. Raising `max_steps` instead would only
+  make the flake rarer, and this job gates a merge nobody is watching.
+- A control that only exists in some state is unchecked until a run reaches that
+  state, which is why `scratch_home` puts an empty `nyan-doom` on `PATH` (Settings'
+  detected controls; CI has no sourceport) and why worker-only states are posted
+  through `background_sender`. Add a shot when you add such a state.
 - The library is a copy of the real `library.db` into a temp `CACO_HOME`, so
-  shots show real WADs and nothing can write to the real library.
-- `CacoApp::render(ui)` exists only so this can drive the app: `eframe::Frame`
-  cannot be constructed outside a window. `dispatch_action` and `close_dialog`
-  are public for the same reason — the harness opens dialogs the way a click
-  does rather than building dialog state by hand. It takes a `&mut Ui` rather
-  than a `&Context` because egui 0.36 turned panels into children of a `Ui`
-  instead of the context, and `eframe::App::update` became `App::ui` to match;
-  the harness follows with `build_ui_state`.
+  shots show real WADs and nothing can write to the real library. CI has no library,
+  so it falls back to an empty database: every surface still renders, with less in it.
 
 ## Data Locations
 
@@ -383,12 +410,14 @@ projects release the same way:
   cask (on a macOS runner, since cask rules only apply there). The
   `homebrew` job runs `brew trust --cask` on the linked-in tap first: since
   Homebrew 7, audit refuses to load a cask from an untrusted tap, and that
-  failure kept the 2026-11-01 weekly update from merging. The jobs are
-  named `rust` and `homebrew` so a ruleset can require them. The `rust` job
-  exports `CFLAGS=-O2`, as makepkg and rpmbuild do: v4.1.6 tagged and then
-  failed its Arch build because `cc` 1.6 stopped `aws-lc-sys` from forcing
-  `-O0` on jitterentropy, and a CFLAGS-free verify could not see it. `cc` is
-  pinned `=1.5.1` in the workspace manifest until that is fixed upstream.
+  failure kept the 2026-11-01 weekly update from merging. A `screenshots` job
+  renders every GUI surface on a software Vulkan driver (see Screenshots). The
+  jobs are named `rust`, `screenshots` and `homebrew` so a ruleset can require
+  them. The `rust` job exports `CFLAGS=-O2`, as makepkg and rpmbuild do: v4.1.6
+  tagged and then failed its Arch build because `cc` 1.6 stopped `aws-lc-sys`
+  from forcing `-O0` on jitterentropy, and a CFLAGS-free verify could not see
+  it. `cc` is pinned `=1.5.1` in the workspace manifest until that is fixed
+  upstream.
 - `update-deps.yml` — every Sunday, `cargo upgrade --incompatible` plus
   `cargo update`, opened as a pull request on `deps/weekly`. It uses the
   `DEPS_PR_TOKEN` secret because a pull request opened with the default
@@ -410,7 +439,9 @@ projects release the same way:
   `package` on the tag and builds `Caco.app` on an arm64 macOS runner in
   parallel, creates the GitHub release with all three and generated notes,
   and finally commits `chore(release): cask vX.Y.Z` to point the cask at the
-  new zip.
+  new zip. The release job downloads those three artifacts by name: `verify`
+  runs inside the same workflow run, so its `screenshots` artifact would
+  otherwise land in the directory whose contents get attached.
 
 Never bump the version by hand; the release workflow is the only writer. The
 version files it moves together are the root `Cargo.toml`, the three
