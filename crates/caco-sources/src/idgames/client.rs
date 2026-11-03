@@ -27,7 +27,7 @@ impl IdgamesClient {
     /// Create a new client with default settings.
     pub fn new() -> Self {
         Self {
-            client: build_client(None, None),
+            client: build_client(),
         }
     }
 

@@ -7,11 +7,10 @@ use reqwest::blocking::Client;
 use serde::Deserialize;
 
 const API_URL: &str = "https://doomwiki.org/w/api.php";
-const USER_AGENT: &str = "Caco/1.0 (Doom WAD library manager)";
 
 fn client() -> Option<Client> {
     Client::builder()
-        .user_agent(USER_AGENT)
+        .user_agent(caco_sources::http::USER_AGENT)
         .timeout(std::time::Duration::from_secs(15))
         .build()
         .ok()

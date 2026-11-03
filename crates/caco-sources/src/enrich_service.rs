@@ -13,7 +13,12 @@
 //! and honours a cancel check rather than just returning a summary — a GUI
 //! running this over a whole library needs to show movement and let the user
 //! stop.
+//!
+//! A WAF block ends the run's use of the wiki, not the run: every later request
+//! would meet the same wall, while file detection needs no network and carries
+//! on. The report says once what the block cost ([`WikiBlocked`]).
 
+use std::fmt;
 use std::path::Path;
 
 use rusqlite::Connection;
@@ -21,7 +26,8 @@ use rusqlite::Connection;
 use caco_core::db::{self, WadRecord, WadUpdate};
 
 use crate::cacoward_link;
-use crate::doomwiki::{self, DoomwikiClient};
+use crate::doomwiki::{self, DoomwikiClient, WikiEntry};
+use crate::http::WafKind;
 use crate::import_service::{port_to_complevel, port_to_zdoom_required, titles_match};
 use crate::{Result, SourceError};
 
@@ -32,7 +38,6 @@ use crate::{Result, SourceError};
 /// What enrichment found for a single WAD.
 #[derive(Debug, Clone, Default)]
 pub struct EnrichOutcome {
-    pub wad_id: i64,
     pub title: String,
     pub complevel: Option<i32>,
     pub iwad: Option<String>,
@@ -49,18 +54,13 @@ impl EnrichOutcome {
     }
 }
 
-/// Progress signal from [`enrich_wads`].
+/// Progress signal from [`enrich_wads`]: about to work on `index` of `total`
+/// (0-based).
 #[derive(Debug, Clone)]
-pub enum EnrichProgress<'a> {
-    /// About to work on `index` of `total` (0-based).
-    Started {
-        index: usize,
-        total: usize,
-        title: &'a str,
-    },
-    /// Finished a WAD. Reported even when nothing was detected, so a caller
-    /// can drive a progress bar off it.
-    Finished(&'a EnrichOutcome),
+pub struct EnrichProgress<'a> {
+    pub index: usize,
+    pub total: usize,
+    pub title: &'a str,
 }
 
 /// Aggregate result of an enrichment run.
@@ -72,8 +72,29 @@ pub struct EnrichSummary {
     pub changed: Vec<EnrichOutcome>,
     /// Doom Wiki requests made — the expensive part, worth surfacing.
     pub wiki_lookups: u32,
+    /// Set once the wiki answers a lookup with a WAF challenge.
+    pub wiki_blocked: Option<WikiBlocked>,
     /// Whether `cancel` cut the run short.
     pub cancelled: bool,
+}
+
+/// The wiki answered a lookup with a WAF challenge, so the run stopped asking it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WikiBlocked {
+    pub kind: WafKind,
+    /// WADs that needed the wiki and did not get it, the refused one included.
+    pub unchecked: usize,
+}
+
+impl fmt::Display for WikiBlocked {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Doom Wiki blocked the request ({} challenge), so {} WAD(s) could not be \
+             checked there. Retrying may not help.",
+            self.kind, self.unchecked
+        )
+    }
 }
 
 /// Enrich a batch of WADs, reporting progress as it goes.
@@ -93,7 +114,23 @@ pub fn enrich_wads(
     progress: &mut dyn FnMut(EnrichProgress<'_>),
     cancel: &dyn Fn() -> bool,
 ) -> EnrichSummary {
+    let client = DoomwikiClient::new();
+    let mut lookup = |title: &str| wiki_lookup_port(&client, title);
+    enrich_wads_with(conn, wads, dry_run, progress, cancel, &mut lookup)
+}
+
+/// [`enrich_wads`] with the wiki lookup passed in, so tests can run it, blocks
+/// and all, without reaching the network.
+fn enrich_wads_with(
+    conn: &Connection,
+    wads: &[WadRecord],
+    dry_run: bool,
+    progress: &mut dyn FnMut(EnrichProgress<'_>),
+    cancel: &dyn Fn() -> bool,
+    lookup: WikiLookup<'_>,
+) -> EnrichSummary {
     let mut summary = EnrichSummary::default();
+    let mut wiki = WikiStage::new(lookup);
     let total = wads.len();
 
     for (index, wad) in wads.iter().enumerate() {
@@ -102,22 +139,65 @@ pub fn enrich_wads(
             break;
         }
 
-        progress(EnrichProgress::Started {
+        progress(EnrichProgress {
             index,
             total,
             title: &wad.title,
         });
 
-        let outcome = enrich_one(conn, wad, dry_run, &mut summary.wiki_lookups);
+        let outcome = enrich_one(conn, wad, dry_run, &mut wiki);
         summary.examined += 1;
 
-        progress(EnrichProgress::Finished(&outcome));
         if outcome.has_changes() {
             summary.changed.push(outcome);
         }
     }
 
+    summary.wiki_lookups = wiki.lookups;
+    summary.wiki_blocked = wiki.blocked;
     summary
+}
+
+/// Fetches a WAD's sourceport text from the wiki, by title.
+type WikiLookup<'a> = &'a mut dyn FnMut(&str) -> Result<Option<String>>;
+
+/// What a run knows about the wiki, carried from WAD to WAD.
+struct WikiStage<'a> {
+    lookup: WikiLookup<'a>,
+    lookups: u32,
+    blocked: Option<WikiBlocked>,
+}
+
+impl<'a> WikiStage<'a> {
+    fn new(lookup: WikiLookup<'a>) -> Self {
+        Self {
+            lookup,
+            lookups: 0,
+            blocked: None,
+        }
+    }
+
+    /// The wiki's sourceport text for `title`, if it has any to give.
+    ///
+    /// A failed lookup is not an error worth propagating: it just means this WAD
+    /// keeps its gaps. A WAF block is different, because it says the same about
+    /// every WAD after this one, so it is the last thing the wiki gets asked.
+    fn port_for(&mut self, title: &str) -> Option<String> {
+        if let Some(blocked) = &mut self.blocked {
+            blocked.unchecked += 1;
+            return None;
+        }
+
+        self.lookups += 1;
+        match (self.lookup)(title) {
+            Ok(port) => port,
+            Err(SourceError::WafBlocked { kind, .. }) => {
+                self.blocked = Some(WikiBlocked { kind, unchecked: 1 });
+                None
+            }
+            Err(_) => None,
+        }
+    }
 }
 
 /// Enrich a single WAD, applying the findings unless `dry_run`.
@@ -128,10 +208,9 @@ fn enrich_one(
     conn: &Connection,
     wad: &WadRecord,
     dry_run: bool,
-    wiki_lookups: &mut u32,
+    wiki: &mut WikiStage<'_>,
 ) -> EnrichOutcome {
     let mut outcome = EnrichOutcome {
-        wad_id: wad.id,
         title: wad.title.clone(),
         ..Default::default()
     };
@@ -188,7 +267,7 @@ fn enrich_one(
         return outcome;
     }
 
-    let Some(port_text) = wiki_lookup_port(&wad.title, wiki_lookups) else {
+    let Some(port_text) = wiki.port_for(&wad.title) else {
         return outcome;
     };
 
@@ -212,15 +291,12 @@ fn enrich_one(
 }
 
 /// Look up a WAD's sourceport requirement on the Doom Wiki.
-///
-/// Returns the port field text of the first search hit whose title matches,
-/// or `None` — a failed lookup is not an error worth propagating, it just
-/// means this WAD keeps its gaps.
-fn wiki_lookup_port(title: &str, wiki_lookups: &mut u32) -> Option<String> {
-    let client = DoomwikiClient::new();
-    *wiki_lookups += 1;
+fn wiki_lookup_port(client: &DoomwikiClient, title: &str) -> Result<Option<String>> {
+    Ok(matching_port(title, &client.search_wads(title, 5)?))
+}
 
-    let results = client.search_wads(title, 5).ok()?;
+/// The port field text of the first search hit whose title matches, if any.
+fn matching_port(title: &str, results: &[WikiEntry]) -> Option<String> {
     let entry = results
         .iter()
         .find(|r| titles_match(title, r.display_name()))?;
@@ -394,12 +470,58 @@ mod tests {
         || false
     }
 
+    /// For a run the wiki must stay out of. A test must never reach the network,
+    /// so this is what stands in for it unless a test is about the wiki.
+    fn no_wiki(title: &str) -> Result<Option<String>> {
+        panic!("unexpected wiki lookup for {title:?}");
+    }
+
+    fn enrich_offline(conn: &Connection, wad: &WadRecord, dry_run: bool) -> EnrichOutcome {
+        enrich_one(conn, wad, dry_run, &mut WikiStage::new(&mut no_wiki))
+    }
+
+    fn load(conn: &Connection, ids: &[i64]) -> Vec<WadRecord> {
+        ids.iter()
+            .map(|&id| db::get_wad(conn, id, false).unwrap().unwrap())
+            .collect()
+    }
+
+    fn run_with_wiki(
+        conn: &Connection,
+        wads: &[WadRecord],
+        dry_run: bool,
+        lookup: WikiLookup<'_>,
+    ) -> EnrichSummary {
+        enrich_wads_with(conn, wads, dry_run, &mut |_| {}, &never_cancel(), lookup)
+    }
+
+    fn blocked(kind: WafKind) -> Result<Option<String>> {
+        Err(SourceError::WafBlocked {
+            site: "Doom Wiki",
+            kind,
+        })
+    }
+
+    fn wiki_entry(title: &str, port: &str) -> WikiEntry {
+        WikiEntry {
+            page_id: 1,
+            title: title.to_string(),
+            name: String::new(),
+            author: String::new(),
+            year: None,
+            iwad: String::new(),
+            port: port.to_string(),
+            link: String::new(),
+            description: String::new(),
+            wiki_url: String::new(),
+        }
+    }
+
     // -- EnrichOutcome tests --
 
     #[test]
     fn test_has_changes() {
         let base = EnrichOutcome {
-            wad_id: 1,
             title: "Test".to_string(),
             ..Default::default()
         };
@@ -444,8 +566,7 @@ mod tests {
         let wad_id = add_wad_with_file(&conn, dir.path(), "Test", &[("MAP01", &[])]);
 
         let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
-        let mut lookups = 0;
-        let outcome = enrich_one(&conn, &wad, false, &mut lookups);
+        let outcome = enrich_offline(&conn, &wad, false);
 
         assert_eq!(outcome.complevel, Some(4));
         assert_eq!(
@@ -464,8 +585,7 @@ mod tests {
         let wad_id = add_wad_with_file(&conn, dir.path(), "Test", &[("E1M1", &[])]);
 
         let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
-        let mut lookups = 0;
-        let outcome = enrich_one(&conn, &wad, true, &mut lookups);
+        let outcome = enrich_offline(&conn, &wad, true);
 
         assert_eq!(outcome.complevel, Some(2));
         assert_eq!(
@@ -492,26 +612,19 @@ mod tests {
         )
         .unwrap();
 
+        // Critically: no network call for a WAD with nothing to fill in, which
+        // `enrich_offline` turns into a panic.
         let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
-        let mut lookups = 0;
-        let outcome = enrich_one(&conn, &wad, false, &mut lookups);
-
-        assert!(!outcome.has_changes());
-        // Critically: no network call for a WAD with nothing to fill in.
-        assert_eq!(lookups, 0);
+        assert!(!enrich_offline(&conn, &wad, false).has_changes());
     }
 
     #[test]
     fn test_enrich_one_no_cached_file_makes_no_lookup_without_title_gaps() {
         let conn = setup();
         let wad_id = add_test_wad(&conn, "");
-        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
-        let mut lookups = 0;
-        let outcome = enrich_one(&conn, &wad, false, &mut lookups);
-
-        assert!(!outcome.has_changes());
         // Empty title — nothing to search the wiki for.
-        assert_eq!(lookups, 0);
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        assert!(!enrich_offline(&conn, &wad, false).has_changes());
     }
 
     #[test]
@@ -526,8 +639,7 @@ mod tests {
         .unwrap();
 
         let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
-        let mut lookups = 0;
-        assert!(!enrich_one(&conn, &wad, false, &mut lookups).has_changes());
+        assert!(!enrich_offline(&conn, &wad, false).has_changes());
     }
 
     // -- enrich_wads tests --
@@ -543,20 +655,16 @@ mod tests {
         assert_eq!(wads.len(), 2);
 
         let mut started = Vec::new();
-        let mut finished = 0;
-        let summary = enrich_wads(
+        let summary = enrich_wads_with(
             &conn,
             &wads,
             false,
-            &mut |p| match p {
-                EnrichProgress::Started { index, total, .. } => started.push((index, total)),
-                EnrichProgress::Finished(_) => finished += 1,
-            },
+            &mut |p| started.push((p.index, p.total)),
             &never_cancel(),
+            &mut no_wiki,
         );
 
         assert_eq!(started, vec![(0, 2), (1, 2)]);
-        assert_eq!(finished, 2);
         assert_eq!(summary.examined, 2);
         assert_eq!(summary.changed.len(), 2);
         assert!(!summary.cancelled);
@@ -572,17 +680,14 @@ mod tests {
 
         let wads = db::search_wads(&conn, None, None, true, false, 0).unwrap();
         let seen = std::cell::Cell::new(0usize);
-        let summary = enrich_wads(
+        let summary = enrich_wads_with(
             &conn,
             &wads,
             false,
-            &mut |p| {
-                if matches!(p, EnrichProgress::Finished(_)) {
-                    seen.set(seen.get() + 1);
-                }
-            },
-            // Stop once one WAD is done.
+            &mut |_| seen.set(seen.get() + 1),
+            // Stop once one WAD has been visited.
             &|| seen.get() >= 1,
+            &mut no_wiki,
         );
 
         assert!(summary.cancelled);
@@ -592,10 +697,200 @@ mod tests {
     #[test]
     fn test_enrich_wads_empty_input() {
         let conn = setup();
-        let summary = enrich_wads(&conn, &[], false, &mut |_| {}, &never_cancel());
+        let summary = run_with_wiki(&conn, &[], false, &mut no_wiki);
         assert_eq!(summary.examined, 0);
         assert!(!summary.cancelled);
         assert!(summary.changed.is_empty());
+    }
+
+    // -- the wiki stage --
+
+    #[test]
+    fn test_wiki_fills_the_gaps_no_file_could() {
+        let conn = setup();
+        let id = add_test_wad(&conn, "Sunder");
+
+        let mut lookup = |_: &str| Ok(Some("MBF21-compatible, requires ZDoom".to_string()));
+        let summary = run_with_wiki(&conn, &load(&conn, &[id]), false, &mut lookup);
+
+        assert_eq!(summary.wiki_lookups, 1);
+        assert_eq!(summary.wiki_blocked, None);
+        assert_eq!(summary.changed[0].complevel, Some(21));
+        assert_eq!(summary.changed[0].zdoom_required, Some(true));
+        let wad = &load(&conn, &[id])[0];
+        assert_eq!(wad.complevel, Some(21));
+        assert_eq!(wad.zdoom_required, Some(1));
+    }
+
+    #[test]
+    fn test_wiki_findings_are_reported_but_not_written_on_a_dry_run() {
+        let conn = setup();
+        let id = add_test_wad(&conn, "Sunder");
+
+        let mut lookup = |_: &str| Ok(Some("MBF21-compatible, requires ZDoom".to_string()));
+        let summary = run_with_wiki(&conn, &load(&conn, &[id]), true, &mut lookup);
+
+        assert_eq!(summary.changed[0].complevel, Some(21));
+        let wad = &load(&conn, &[id])[0];
+        assert_eq!(wad.complevel, None);
+        assert_eq!(wad.zdoom_required, None);
+    }
+
+    #[test]
+    fn test_a_blocked_wiki_is_only_asked_once() {
+        let conn = setup();
+        let ids = ["One", "Two", "Three"].map(|title| add_test_wad(&conn, title));
+
+        let mut asked = Vec::new();
+        let mut lookup = |title: &str| {
+            asked.push(title.to_string());
+            blocked(WafKind::Cloudflare)
+        };
+        let summary = run_with_wiki(&conn, &load(&conn, &ids), false, &mut lookup);
+
+        assert_eq!(asked, ["One"]);
+        assert_eq!(summary.wiki_lookups, 1);
+        assert_eq!(summary.examined, 3, "the run itself must not stop");
+        assert!(!summary.cancelled);
+        assert_eq!(
+            summary.wiki_blocked,
+            Some(WikiBlocked {
+                kind: WafKind::Cloudflare,
+                unchecked: 3,
+            })
+        );
+    }
+
+    #[test]
+    fn test_a_blocked_wiki_does_not_stop_file_detection() {
+        let conn = setup();
+        let dir = tempfile::tempdir().unwrap();
+        let no_file = add_test_wad(&conn, "No File");
+        let with_file = add_wad_with_file(&conn, dir.path(), "With File", &[("MAP01", &[])]);
+
+        let mut lookup = |_: &str| blocked(WafKind::Cloudflare);
+        let summary = run_with_wiki(
+            &conn,
+            &load(&conn, &[no_file, with_file]),
+            false,
+            &mut lookup,
+        );
+
+        assert_eq!(summary.changed.len(), 1);
+        assert_eq!(summary.changed[0].title, "With File");
+        assert_eq!(load(&conn, &[with_file])[0].complevel, Some(4));
+        // The file settled the second WAD, so only the first ever needed the wiki.
+        assert_eq!(summary.wiki_blocked.unwrap().unchecked, 1);
+    }
+
+    #[test]
+    fn test_a_block_counts_a_file_that_leaves_a_gap() {
+        let conn = setup();
+        let dir = tempfile::tempdir().unwrap();
+        let no_file = add_test_wad(&conn, "No File");
+        let no_maps = add_wad_with_file(&conn, dir.path(), "No Maps", &[("README", &[])]);
+
+        let mut asked = 0;
+        let mut lookup = |_: &str| {
+            asked += 1;
+            blocked(WafKind::Cloudflare)
+        };
+        let summary = run_with_wiki(&conn, &load(&conn, &[no_file, no_maps]), false, &mut lookup);
+
+        assert_eq!(asked, 1);
+        assert_eq!(summary.wiki_blocked.unwrap().unchecked, 2);
+    }
+
+    #[test]
+    fn test_a_block_does_not_count_wads_that_need_nothing() {
+        let conn = setup();
+        let needs_wiki = add_test_wad(&conn, "Needs Wiki");
+        let settled = add_test_wad(&conn, "Settled");
+        db::update_wad(
+            &conn,
+            settled,
+            &WadUpdate::new()
+                .set_int("complevel", Some(9))
+                .set_text("custom_iwad", Some("doom2".to_string()))
+                .set_int("zdoom_required", Some(0)),
+        )
+        .unwrap();
+
+        let mut lookup = |_: &str| blocked(WafKind::Cloudflare);
+        let summary = run_with_wiki(
+            &conn,
+            &load(&conn, &[needs_wiki, settled]),
+            false,
+            &mut lookup,
+        );
+
+        assert_eq!(summary.wiki_blocked.unwrap().unchecked, 1);
+    }
+
+    /// What was found before the wiki turned caco away is still good.
+    #[test]
+    fn test_a_block_partway_through_keeps_what_the_wiki_already_gave() {
+        let conn = setup();
+        let ids = ["Found", "Refused", "Unasked"].map(|title| add_test_wad(&conn, title));
+
+        let mut lookup = |title: &str| match title {
+            "Found" => Ok(Some("Boom-compatible".to_string())),
+            "Refused" => blocked(WafKind::AwsWaf),
+            other => panic!("the wiki must not be asked about {other:?}"),
+        };
+        let summary = run_with_wiki(&conn, &load(&conn, &ids), false, &mut lookup);
+
+        assert_eq!(summary.wiki_lookups, 2);
+        assert_eq!(summary.changed.len(), 1);
+        assert_eq!(load(&conn, &ids)[0].complevel, Some(9));
+        assert_eq!(
+            summary.wiki_blocked,
+            Some(WikiBlocked {
+                kind: WafKind::AwsWaf,
+                unchecked: 2,
+            })
+        );
+    }
+
+    /// One bad lookup says nothing about the next, unlike a WAF block.
+    #[test]
+    fn test_an_ordinary_failure_does_not_stop_the_wiki_being_asked() {
+        let conn = setup();
+        let ids = ["One", "Two"].map(|title| add_test_wad(&conn, title));
+
+        let mut lookup = |_: &str| Err(SourceError::Api("Bad Gateway".to_string()));
+        let summary = run_with_wiki(&conn, &load(&conn, &ids), false, &mut lookup);
+
+        assert_eq!(summary.wiki_lookups, 2);
+        assert_eq!(summary.wiki_blocked, None);
+    }
+
+    #[test]
+    fn test_wiki_blocked_says_what_it_cost() {
+        let blocked = WikiBlocked {
+            kind: WafKind::Cloudflare,
+            unchecked: 71,
+        };
+        assert_eq!(
+            blocked.to_string(),
+            "Doom Wiki blocked the request (Cloudflare challenge), so 71 WAD(s) could not be \
+             checked there. Retrying may not help."
+        );
+    }
+
+    #[test]
+    fn test_matching_port_skips_hits_for_other_wads() {
+        let results = [
+            wiki_entry("Doom II", "Vanilla"),
+            wiki_entry("Sunder", "Boom"),
+        ];
+        assert_eq!(matching_port("Sunder", &results).as_deref(), Some("Boom"));
+        assert_eq!(matching_port("Scythe", &results), None);
+    }
+
+    #[test]
+    fn test_matching_port_treats_an_empty_port_as_nothing() {
+        assert_eq!(matching_port("Sunder", &[wiki_entry("Sunder", "")]), None);
     }
 
     // -- cacoward ingest tests --

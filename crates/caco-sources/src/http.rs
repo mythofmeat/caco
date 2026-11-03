@@ -2,16 +2,21 @@ use reqwest::blocking::{Client, Response};
 use std::fmt;
 use std::time::Duration;
 
-const DEFAULT_TIMEOUT_SECS: u64 = 30;
-const DEFAULT_USER_AGENT: &str = "Caco/1.0 (Doom WAD library manager)";
+const TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Who caco says it is to every site it talks to. One spelling, so the version
+/// and the project URL cannot go stale in one client and not in another.
+pub const USER_AGENT: &str = concat!(
+    "Caco/",
+    env!("CARGO_PKG_VERSION"),
+    " (Doom WAD library manager; https://github.com/mythofmeat/caco)"
+);
 
 /// Create a shared `reqwest::blocking::Client` with common defaults.
-pub fn build_client(timeout_secs: Option<u64>, user_agent: Option<&str>) -> Client {
+pub fn build_client() -> Client {
     Client::builder()
-        .timeout(Duration::from_secs(
-            timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS),
-        ))
-        .user_agent(user_agent.unwrap_or(DEFAULT_USER_AGENT))
+        .timeout(TIMEOUT)
+        .user_agent(USER_AGENT)
         .build()
         .expect("failed to build HTTP client")
 }
@@ -159,7 +164,7 @@ mod tests {
     }
 
     /// A real refusal keeps its status. Blaming a challenge that never happened
-    /// would tell the user to retry something that will keep failing.
+    /// would send the user looking for the wrong cause.
     #[test]
     fn waf_challenge_ignores_a_plain_403() {
         let response = canned_response(403, &[("server", "cloudflare")], "Forbidden");

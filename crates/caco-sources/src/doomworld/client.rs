@@ -5,8 +5,6 @@ use super::parser::DoomworldParser;
 use crate::error::{Result, SourceError};
 use crate::http::{build_client, waf_challenge};
 
-const USER_AGENT: &str = "Caco/1.0 (Doom WAD library manager; https://github.com/eshen/caco)";
-
 /// Client for fetching Doomworld forum threads.
 ///
 /// Fetches forum thread pages and parses metadata using the `DoomworldParser`.
@@ -19,7 +17,7 @@ impl DoomworldClient {
     /// Create a new client with default settings.
     pub fn new() -> Self {
         Self {
-            client: build_client(None, Some(USER_AGENT)),
+            client: build_client(),
             parser: DoomworldParser::new(),
         }
     }
