@@ -32,6 +32,33 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
 
+  # Whether a row fits its panel is decided at paint time, so rendering every surface is the only
+  # test of it. Being in verify is what makes it gate update-deps' auto-merge: egui 0.37 broke this
+  # harness and nothing noticed, because nothing ran it.
+  screenshots:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup update stable --no-self-update
+      - uses: Swatinem/rust-cache@v2
+      # The runner has no GPU. lavapipe, Mesa's software Vulkan driver, is what egui_kittest would
+      # pick over one anyway.
+      - run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends mesa-vulkan-drivers
+      - run: cargo test -p caco --test screenshots -- --ignored --nocapture
+      # main.rs's min_inner_size, and the size dialogs actually break at. A failure at the default
+      # size says nothing about this one, so it runs either way.
+      - if: ${{ !cancelled() }}
+        run: cargo test -p caco --test screenshots -- --ignored --nocapture
+        env:
+          CACO_SHOT_SIZE: 800x400
+      # A failed run is when the shots are most wanted.
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: screenshots
+          path: target/screenshots/
+
   homebrew:
     runs-on: macos-latest
     timeout-minutes: 15

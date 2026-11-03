@@ -102,8 +102,11 @@ jobs:
     permissions:
       contents: write
     steps:
+      # By name, because verify runs inside this workflow too: unfiltered, its screenshots would be
+      # handed to gh release create along with the packages, after the tag is already out.
       - uses: actions/download-artifact@v8
         with:
+          pattern: "{arch,fedora,macos}"
           path: assets
           merge-multiple: true
       - run: gh release create "$TAG" assets/* --generate-notes --verify-tag
