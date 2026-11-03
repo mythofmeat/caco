@@ -1,0 +1,166 @@
+# Facts from Doomworld's Cacowards, by way of the Doom Wiki.
+year = 2004
+page = "https://www.doomworld.com/11years/"
+
+# Not entries, being people or tools: Mapper of the Year.
+
+[[entry]]
+key       = "2004-winner-action-doom"
+category  = "winner"
+order     = 1
+title     = "Action Doom"
+author    = "Stephen Browning (Scuba Steve) and company"
+idgames   = 12671
+doomwiki  = "Action_Doom"
+
+[[entry]]
+key       = "2004-winner-decade"
+category  = "winner"
+order     = 2
+title     = "Decade"
+author    = "Russell Pearson"
+idgames   = 12849
+doomwiki  = "Decade"
+
+[[entry]]
+key       = "2004-winner-rtc-3057"
+category  = "winner"
+order     = 3
+title     = "RTC-3057"
+author    = "Team Future"
+idgames   = 12747
+doomwiki  = "RTC-3057"
+
+[[entry]]
+key       = "2004-winner-grove"
+category  = "winner"
+order     = 4
+title     = "Grove"
+author    = "B.P.R.D"
+idgames   = 12430
+doomwiki  = "Grove"
+
+[[entry]]
+key       = "2004-winner-tremor"
+category  = "winner"
+order     = 5
+title     = "Tremor"
+author    = "Ross Mathieson (zarkyb)"
+idgames   = 12782
+doomwiki  = "Tremor"
+
+[[entry]]
+key       = "2004-winner-chosen"
+category  = "winner"
+order     = 6
+title     = "Chosen"
+author    = "LilWhiteMouse"
+idgames   = 12363
+doomwiki  = "Chosen"
+
+[[entry]]
+key       = "2004-winner-phobos-revisited"
+category  = "winner"
+order     = 7
+title     = "Phobos Revisited"
+author    = "Rex Claussen"
+idgames   = 12835
+doomwiki  = "Phobos_Revisited"
+
+[[entry]]
+key       = "2004-winner-hell-revealed-ii"
+category  = "winner"
+order     = 8
+title     = "Hell Revealed II"
+author    = "Various"
+idgames   = 12349
+doomwiki  = "Hell_Revealed_II"
+
+[[entry]]
+key       = "2004-winner-community-chest-2"
+category  = "winner"
+order     = 9
+title     = "Community Chest 2"
+author    = "Various"
+idgames   = 13024
+doomwiki  = "Community_Chest_2"
+
+[[entry]]
+key       = "2004-winner-the-zdoom-community-map-project"
+category  = "winner"
+order     = 10
+title     = "The ZDoom Community Map Project"
+author    = "Various"
+idgames   = 12815
+doomwiki  = "The_ZDoom_Community_Map_Project_\"Take_1\""
+
+[[entry]]
+key       = "2004-runner-up-super-sonic-doom"
+category  = "runner-up"
+order     = 1
+title     = "Super Sonic Doom"
+author    = "Stephen Clark (The Ultimate DooMer)"
+idgames   = 13056
+doomwiki  = "Super_Sonic_Doom"
+
+[[entry]]
+key       = "2004-runner-up-deus-vult"
+category  = "runner-up"
+order     = 2
+title     = "Deus Vult"
+author    = "Huy Pham (Doom Marine)"
+idgames   = 12597
+doomwiki  = "Deus_Vult"
+
+[[entry]]
+key       = "2004-runner-up-massmouthmas"
+category  = "runner-up"
+order     = 3
+title     = "Massmouthmas"
+author    = "Mike Watson (Cyb)"
+idgames   = 13055
+doomwiki  = "Massmouthmas"
+
+[[entry]]
+key       = "2004-honorable-mention-daedalus-alien-defense"
+category  = "honorable-mention"
+order     = 1
+title     = "Daedalus: Alien Defense"
+author    = "TeamTNT"
+idgames   = 12291
+doomwiki  = "Daedalus:_Alien_Defense"
+
+[[entry]]
+key       = "2004-multiplayer-8-bits-deathmatch"
+category  = "multiplayer"
+order     = 1
+title     = "8 Bits Deathmatch"
+author    = "Emmanuel Rousseau (G0dCells)"
+idgames   = 12451
+doomwiki  = "8_Bits_Deathmatch"
+
+[[entry]]
+key       = "2004-worst-wad-doom-rampage-edition"
+category  = "worst-wad"
+order     = 1
+title     = "Doom: Rampage Edition"
+author    = "Doom Rampage"
+doomwiki  = "Doom_-_Rampage_Edition"
+
+[[entry]]
+key       = "2004-mordeth-hellcore"
+category  = "mordeth"
+order     = 1
+title     = "Hellcore"
+author    = "Various"
+idgames   = 12870
+doomwiki  = "Hellcore"
+
+[[entry]]
+key       = "2004-mockaward-doomworld-forums-3"
+category  = "mockaward"
+order     = 1
+title     = "Doomworld Forums 3"
+author    = "Anonymous"
+idgames   = 12371
+doomwiki  = "Doomworld_Forums_3"

@@ -1,0 +1,267 @@
+# Facts from Doomworld's Cacowards, by way of the Doom Wiki.
+year = 2020
+page = "https://www.doomworld.com/cacowards/2020/"
+
+# Not entries, being people or tools: Codeaward, Most promising newcomers, Creator of the Year, Espi award.
+
+[[entry]]
+key       = "2020-winner-antaresian-reliquary"
+category  = "winner"
+order     = 1
+title     = "Antaresian Reliquary"
+author    = "Seongbae Park (antares031)"
+idgames   = 19641
+doomwiki  = "Antaresian_Reliquary"
+
+[[entry]]
+key       = "2020-winner-abandon"
+category  = "winner"
+order     = 2
+title     = "Abandon"
+author    = "bemused, Benjogami, Scotty"
+idgames   = 20701
+doomworld = 108251
+doomwiki  = "Abandon"
+
+[[entry]]
+key       = "2020-winner-rowdy-rudy-ii-powertrip"
+category  = "winner"
+order     = 3
+title     = "Rowdy Rudy II: POWERTRIP"
+author    = "Doomkid et al."
+idgames   = 19737
+doomwiki  = "Rowdy_Rudy_II:_POWERTRIP"
+
+[[entry]]
+key       = "2020-winner-ar-luminae"
+category  = "winner"
+order     = 4
+title     = "Ar Luminae"
+author    = "Aurelius & JustCallMeKaito"
+doomworld = 118037
+doomwiki  = "Ar_Luminae"
+
+[[entry]]
+key       = "2020-winner-running-late-2"
+category  = "winner"
+order     = 5
+title     = "Running Late 2"
+author    = "A2Rob"
+idgames   = 19559
+doomwiki  = "Running_Late_2"
+
+[[entry]]
+key       = "2020-winner-bastion-of-chaos"
+category  = "winner"
+order     = 6
+title     = "Bastion of Chaos"
+author    = "Bridgeburner56"
+doomworld = 116003
+doomwiki  = "Bastion_of_Chaos"
+
+[[entry]]
+key       = "2020-winner-mutabor"
+category  = "winner"
+order     = 7
+title     = "Mutabor"
+author    = "Thomas Seifert (tourniquet)"
+idgames   = 19582
+doomwiki  = "Mutabor"
+
+[[entry]]
+key       = "2020-winner-threes-a-crowd"
+category  = "winner"
+order     = 8
+title     = "Three's a Crowd"
+author    = "Scypek2"
+idgames   = 19711
+doomwiki  = "Three's_a_Crowd"
+
+[[entry]]
+key       = "2020-winner-syringe"
+category  = "winner"
+order     = 9
+title     = "Syringe"
+author    = "Walker Wright (Pavera), Richard Frei (Tarnsman), Michael Fraize (Marcaek), Xaser"
+idgames   = 20020
+doomwiki  = "Syringe"
+
+[[entry]]
+key       = "2020-winner-faithless-trilogy"
+category  = "winner"
+order     = 10
+title     = "Faithless: Trilogy"
+author    = "James Paddock (Jimmy)"
+doomworld = 117375
+doomwiki  = "Faithless:_Trilogy"
+
+[[entry]]
+key       = "2020-runner-up-tartarus"
+category  = "runner-up"
+order     = 1
+title     = "Tartarus"
+author    = "RonnieJamesDiner"
+idgames   = 19544
+doomworld = 110522
+doomwiki  = "Tartarus"
+
+[[entry]]
+key       = "2020-runner-up-the-mapwich-2-the-mapwichening"
+category  = "runner-up"
+order     = 2
+title     = "The Mapwich 2: The Mapwichening"
+author    = "Various"
+doomworld = 117485
+doomwiki  = "The_Mapwich_2:_The_Mapwichening"
+
+[[entry]]
+key       = "2020-runner-up-shrine-ii"
+category  = "runner-up"
+order     = 3
+title     = "Shrine II"
+author    = "scumhead & Mengo923"
+doomwiki  = "Shrine_II"
+
+[[entry]]
+key       = "2020-runner-up-technicolor-antichrist-box"
+category  = "runner-up"
+order     = 4
+title     = "Technicolor Antichrist Box"
+author    = "Shannon O'Neill (Major Arlene)"
+idgames   = 19637
+doomwiki  = "Technicolor_Antichrist_Box"
+
+[[entry]]
+key       = "2020-runner-up-return-to-hadron-e3"
+category  = "runner-up"
+order     = 5
+title     = "Return to Hadron E3"
+author    = "Matt Powell (cannonball)"
+idgames   = 19695
+doomwiki  = "Return_to_Hadron"
+
+[[entry]]
+key       = "2020-runner-up-criticality"
+category  = "runner-up"
+order     = 6
+title     = "Criticality"
+author    = "Scotty"
+idgames   = 19973
+doomworld = 116567
+doomwiki  = "Criticality"
+
+[[entry]]
+key       = "2020-runner-up-freaky-panties-2-boxers-or-briefs"
+category  = "runner-up"
+order     = 7
+title     = "Freaky Panties 2: Boxers or Briefs"
+author    = "Alexa Jones-Gonzales (Remilia Scarlet)"
+doomworld = 114977
+doomwiki  = "Freaky_Panties_2:_Boxers_or_Briefs"
+
+[[entry]]
+key       = "2020-runner-up-doom-ii-25-years-on-earth"
+category  = "runner-up"
+order     = 8
+title     = "Doom II: 25 Years on Earth"
+author    = "James Cresswell (Phobus)"
+idgames   = 19710
+doomwiki  = "Doom_II:_25_Years_on_Earth"
+
+[[entry]]
+key       = "2020-runner-up-180-minutes-pour-vivre"
+category  = "runner-up"
+order     = 9
+title     = "180 Minutes Pour Vivre"
+author    = "French Doom Community"
+idgames   = 19736
+doomwiki  = "180_Minutes_Pour_Vivre"
+
+[[entry]]
+key       = "2020-runner-up-gods-guardians"
+category  = "runner-up"
+order     = 10
+title     = "Gods & Guardians"
+author    = "Eugene Guschin (Wraith777)"
+doomworld = 100195
+doomwiki  = "Gods_&_Guardians"
+
+[[entry]]
+key       = "2020-runner-up-abysm-2-infernal-contract"
+category  = "runner-up"
+order     = 11
+title     = "Abysm 2: Infernal Contract"
+author    = "Donnel Enriquez (Jazzmaster9)"
+doomworld = 116452
+doomwiki  = "Abysm_2:_Infernal_Contract"
+
+[[entry]]
+key       = "2020-runner-up-intergalactic-xenology"
+category  = "runner-up"
+order     = 12
+title     = "Intergalactic Xenology"
+author    = "Dreadopp & Lord_Z"
+idgames   = 19603
+doomwiki  = "Intergalactic_Xenology"
+
+[[entry]]
+key       = "2020-multiplayer-doomware"
+category  = "multiplayer"
+order     = 1
+title     = "DoomWare"
+author    = "Buu342"
+idgames   = 19994
+doomworld = 91785
+doomwiki  = "DoomWare"
+
+[[entry]]
+key       = "2020-multiplayer-progressive-duel-3"
+category  = "multiplayer"
+order     = 2
+title     = "Progressive Duel 3"
+author    = "Ru5tK1ng, Hatred, et al."
+doomworld = 117847
+doomwiki  = "Progressive_Duel_3"
+
+[[entry]]
+key       = "2020-gameplay-mod-nobody-told-me-about-id"
+category  = "gameplay-mod"
+order     = 1
+title     = "Nobody Told Me About id"
+author    = "CantSleep"
+doomwiki  = "Nobody_Told_Me_About_id"
+
+[[entry]]
+key       = "2020-gameplay-mod-treasure-tech"
+category  = "gameplay-mod"
+order     = 2
+title     = "Treasure Tech"
+author    = "HyperUltra64"
+doomwiki  = "Treasure_Tech"
+
+[[entry]]
+key       = "2020-gameplay-mod-codename-demolitionist"
+category  = "gameplay-mod"
+order     = 3
+title     = "Codename: DEMOLITIONIST"
+author    = "Marisa Lago"
+doomwiki  = "Codename:_DEMOLITIONIST"
+
+[[entry]]
+key       = "2020-machaward-arbitrary-code-execution"
+category  = "machaward"
+order     = 1
+title     = "Arbitrary code execution"
+author    = "kgsws"
+doomworld = 117123
+doomwiki  = "ACE_Engine"
+supported = false
+
+[[entry]]
+key       = "2020-odyssey-of-noises-bastion-of-chaos-ost-the-coming-hour"
+category  = "odyssey-of-noises"
+order     = 1
+title     = "Bastion of Chaos OST: \"The Coming Hour\""
+author    = "John Weekley (PRIMEVAL)"
+doomworld = 116003
+doomwiki  = "Bastion_of_Chaos"

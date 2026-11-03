@@ -1,0 +1,256 @@
+# Facts from Doomworld's Cacowards, by way of the Doom Wiki.
+year = 2019
+page = "https://www.doomworld.com/cacowards/2019/"
+
+# Not entries, being people or tools: Codeaward, Most promising newcomers, Creator of the Year, Espi award.
+
+[[entry]]
+key       = "2019-winner-eviternity"
+category  = "winner"
+order     = 1
+title     = "Eviternity"
+author    = "Dragonfly et al."
+idgames   = 19304
+doomwiki  = "Eviternity"
+
+[[entry]]
+key       = "2019-winner-verdant-citadel"
+category  = "winner"
+order     = 2
+title     = "Verdant Citadel"
+author    = "exl"
+idgames   = 19364
+doomwiki  = "Verdant_Citadel"
+
+[[entry]]
+key       = "2019-winner-paradise"
+category  = "winner"
+order     = 3
+title     = "Paradise"
+author    = "Tango"
+doomworld = 106058
+doomwiki  = "Paradise"
+
+[[entry]]
+key       = "2019-winner-hell-forged"
+category  = "winner"
+order     = 4
+title     = "Hell-Forged"
+author    = "Amuscaria"
+idgames   = 19453
+doomwiki  = "Hell-Forged"
+
+[[entry]]
+key       = "2019-winner-finely-crafted-fetish-film"
+category  = "winner"
+order     = 5
+title     = "Finely Crafted Fetish Film"
+author    = "Ribbiks"
+doomworld = 104608
+doomwiki  = "Finely_Crafted_Fetish_Film"
+
+[[entry]]
+key       = "2019-winner-hocus-pocus-doom"
+category  = "winner"
+order     = 6
+title     = "Hocus Pocus Doom"
+author    = "rf`"
+doomwiki  = "Hocus_Pocus_Doom"
+
+[[entry]]
+key       = "2019-winner-shotgun-symphony"
+category  = "winner"
+order     = 7
+title     = "Shotgun Symphony"
+author    = "Steve Duff"
+idgames   = 19278
+doomwiki  = "Shotgun_Symphony"
+
+[[entry]]
+key       = "2019-winner-lost-civilization"
+category  = "winner"
+order     = 8
+title     = "Lost Civilization"
+author    = "Jaska"
+idgames   = 19517
+doomwiki  = "Lost_Civilization"
+
+[[entry]]
+key       = "2019-winner-remnant"
+category  = "winner"
+order     = 9
+title     = "Remnant"
+author    = "Aurelius"
+idgames   = 19459
+doomwiki  = "Remnant"
+
+[[entry]]
+key       = "2019-winner-the-wayfarer"
+category  = "winner"
+order     = 10
+title     = "The Wayfarer"
+author    = "Not Jabba"
+idgames   = 19382
+doomwiki  = "The_Wayfarer"
+
+[[entry]]
+key       = "2019-runner-up-infraworld-the-hatehammer"
+category  = "runner-up"
+order     = 1
+title     = "Infraworld - The Hatehammer"
+author    = "StormCatcher.77"
+idgames   = 19580
+doomworld = 107367
+doomwiki  = "Infraworld_-_The_Hatehammer"
+
+[[entry]]
+key       = "2019-runner-up-lunar-catastrophe"
+category  = "runner-up"
+order     = 2
+title     = "Lunar Catastrophe"
+author    = "Miss Bubbles and Count651"
+idgames   = 19386
+doomworld = 103629
+doomwiki  = "Lunar_Catastrophe"
+
+[[entry]]
+key       = "2019-runner-up-the-slaughter-spectrum"
+category  = "runner-up"
+order     = 3
+title     = "The Slaughter Spectrum"
+author    = "Bridgeburner56"
+doomworld = 106310
+doomwiki  = "The_Slaughter_Spectrum"
+
+[[entry]]
+key       = "2019-runner-up-darkest-room"
+category  = "runner-up"
+order     = 4
+title     = "Darkest Room"
+author    = "Paul977"
+idgames   = 19409
+doomwiki  = "Darkest_Room"
+
+[[entry]]
+key       = "2019-runner-up-dbp16-cybs-freaky-colonoscopy"
+category  = "runner-up"
+order     = 5
+title     = "DBP16: Cyb's Freaky Colonoscopy"
+author    = "Big Ol' Billy et al."
+doomworld = 109554
+doomwiki  = "DBP16:_Cyb's_Freaky_Colonoscopy"
+
+[[entry]]
+key       = "2019-runner-up-alienated"
+category  = "runner-up"
+order     = 6
+title     = "Alienated"
+author    = "Lorenz0"
+idgames   = 19487
+doomwiki  = "Alienated"
+
+[[entry]]
+key       = "2019-runner-up-doom-zero"
+category  = "runner-up"
+order     = 7
+title     = "Doom Zero"
+author    = "Christopher Golden (DASI-I)"
+doomworld = 109216
+doomwiki  = "Doom_Zero"
+
+[[entry]]
+key       = "2019-runner-up-entropy"
+category  = "runner-up"
+order     = 8
+title     = "Entropy"
+author    = "Nirvana"
+idgames   = 19353
+doomwiki  = "Entropy_(WAD)"
+
+[[entry]]
+key       = "2019-runner-up-sigil"
+category  = "runner-up"
+order     = 9
+title     = "SIGIL"
+author    = "John Romero"
+idgames   = 19369
+doomwiki  = "SIGIL"
+
+[[entry]]
+key       = "2019-runner-up-doom-3-phobos"
+category  = "runner-up"
+order     = 10
+title     = "Doom 3: Phobos"
+author    = "Team Future"
+doomwiki  = "Doom_3:_Phobos"
+supported = false
+
+[[entry]]
+key       = "2019-multiplayer-32in24-17"
+category  = "multiplayer"
+order     = 1
+title     = "32in24-17"
+author    = "YEDS"
+idgames   = 19334
+doomwiki  = "32in24-17"
+
+[[entry]]
+key       = "2019-multiplayer-neondm"
+category  = "multiplayer"
+order     = 2
+title     = "NeonDM"
+author    = "Mechanix Union"
+doomworld = 92275
+doomwiki  = "NeonDM"
+
+[[entry]]
+key       = "2019-gameplay-mod-doom-4-vanilla"
+category  = "gameplay-mod"
+order     = 1
+title     = "Doom 4 Vanilla"
+author    = "Noiser et al."
+doomworld = 108725
+doomwiki  = "Doom_4_Vanilla"
+
+[[entry]]
+key       = "2019-gameplay-mod-lt-typhoon"
+category  = "gameplay-mod"
+order     = 2
+title     = "Lt. Typhoon"
+author    = "Skelegant"
+doomwiki  = "Lt._Typhoon"
+
+[[entry]]
+key       = "2019-gameplay-mod-naku-naru"
+category  = "gameplay-mod"
+order     = 3
+title     = "NAKU-NARU"
+author    = "Naku Team"
+doomwiki  = "NAKU-NARU"
+
+[[entry]]
+key       = "2019-mordeth-sonic-robo-blast-2"
+category  = "mordeth"
+order     = 1
+title     = "Sonic Robo Blast 2"
+author    = "Sonic Team Junior"
+doomwiki  = "Sonic_Robo_Blast_2"
+supported = false
+
+[[entry]]
+key       = "2019-machaward-mikoportals"
+category  = "machaward"
+order     = 1
+title     = "Mikoportals"
+author    = "Mikolah"
+doomworld = 103009
+doomwiki  = "Mikoportals"
+
+[[entry]]
+key       = "2019-spaceship-of-theseus-hedon"
+category  = "spaceship-of-theseus"
+order     = 1
+title     = "Hedon"
+author    = "Zan"
+doomwiki  = "Hedon"
+supported = false

@@ -1,0 +1,196 @@
+# Facts from Doomworld's Cacowards, by way of the Doom Wiki.
+year = 2012
+page = "https://www.doomworld.com/19years/"
+
+# Not entries, being people or tools: Mapper of the Year.
+
+[[entry]]
+key       = "2012-winner-doom-the-way-id-did"
+category  = "winner"
+order     = 1
+title     = "Doom the Way id Did"
+author    = "Various"
+idgames   = 16721
+doomwiki  = "Doom_the_Way_id_Did"
+
+[[entry]]
+key       = "2012-winner-strife-absolute-order"
+category  = "winner"
+order     = 2
+title     = "Strife: Absolute Order"
+author    = "Adam Woodmansey (Khorus)"
+idgames   = 17009
+doomwiki  = "Strife:_Absolute_Order"
+
+[[entry]]
+key       = "2012-winner-putrefier"
+category  = "winner"
+order     = 3
+title     = "Putrefier"
+author    = "Edward Cripps (Ed)"
+idgames   = 16965
+doomwiki  = "Putrefier"
+
+[[entry]]
+key       = "2012-winner-5till-l1-complex"
+category  = "winner"
+order     = 4
+title     = "5till L1 Complex"
+author    = "Lainos"
+idgames   = 16861
+doomwiki  = "5till_L1_Complex"
+
+[[entry]]
+key       = "2012-winner-community-chest-4"
+category  = "winner"
+order     = 5
+title     = "Community Chest 4"
+author    = "Various"
+idgames   = 16911
+doomwiki  = "Community_Chest_4"
+
+[[entry]]
+key       = "2012-winner-reelism"
+category  = "winner"
+order     = 6
+title     = "Reelism"
+author    = "Kinsie & 300 Pounds"
+doomwiki  = "Reelism"
+
+[[entry]]
+key       = "2012-winner-the-eye"
+category  = "winner"
+order     = 7
+title     = "The Eye"
+author    = "Cyriak Harris (mouldy)"
+idgames   = 17053
+doomwiki  = "The_Eye"
+
+[[entry]]
+key       = "2012-winner-combat-shock-2"
+category  = "winner"
+order     = 8
+title     = "Combat Shock 2"
+author    = "Daniel Jakobsson (dannebubinga)"
+idgames   = 16966
+doomwiki  = "Combat_Shock_2"
+
+[[entry]]
+key       = "2012-winner-winters-fury"
+category  = "winner"
+order     = 9
+title     = "Winter's Fury"
+author    = "Pyroscourge"
+doomworld = 62496
+doomwiki  = "Winter's_Fury"
+
+[[entry]]
+key       = "2012-winner-base-ganymede-complete"
+category  = "winner"
+order     = 10
+title     = "Base Ganymede: Complete"
+author    = "Adam Woodmansey (Khorus)"
+idgames   = 16694
+doomwiki  = "Base_Ganymede"
+
+[[entry]]
+key       = "2012-runner-up-beyond-reality"
+category  = "runner-up"
+order     = 1
+title     = "Beyond Reality"
+author    = "Darsycho"
+idgames   = 16974
+doomwiki  = "Beyond_Reality"
+
+[[entry]]
+key       = "2012-runner-up-masters-of-chaos"
+category  = "runner-up"
+order     = 2
+title     = "Masters of Chaos"
+author    = "Caleb26 & Doom_Warrior"
+idgames   = 16817
+doomwiki  = "Masters_of_Chaos"
+
+[[entry]]
+key       = "2012-runner-up-frozen-time"
+category  = "runner-up"
+order     = 3
+title     = "Frozen Time"
+author    = "Alexander S. (Eternal)"
+idgames   = 17030
+doomwiki  = "Frozen_Time"
+
+[[entry]]
+key       = "2012-runner-up-planisphere-2"
+category  = "runner-up"
+order     = 4
+title     = "Planisphere 2"
+author    = "Perro Seco"
+idgames   = 18746
+doomwiki  = "Planisphere_2"
+
+[[entry]]
+key       = "2012-runner-up-coffee-break-episode-1"
+category  = "runner-up"
+order     = 5
+title     = "Coffee Break Episode 1"
+author    = "Matt Tropiano (MTrop)"
+idgames   = 16862
+doomwiki  = "Coffee_Break"
+
+[[entry]]
+key       = "2012-newcomer-maps-by-purists-six-year-old-son"
+category  = "newcomer"
+order     = 1
+title     = "Maps by Purist's Six Year Old Son"
+author    = "Dylan"
+idgames   = 17060
+
+[[entry]]
+key       = "2012-multiplayer-who-dun-it"
+category  = "multiplayer"
+order     = 1
+title     = "Who Dun It"
+author    = "Aric Carpenter (Firewolf), Theshooter7, TheMisterCat, Peanut, Zeberpal, et al."
+idgames   = 17028
+doomwiki  = "Who_Dun_It"
+
+[[entry]]
+key       = "2012-gameplay-mod-russian-overkill"
+category  = "gameplay-mod"
+order     = 1
+title     = "Russian Overkill"
+author    = "PillowBlaster"
+doomwiki  = "Russian_Overkill"
+
+[[entry]]
+key       = "2012-gameplay-mod-reinforcements-from-moldova"
+category  = "gameplay-mod"
+order     = 2
+title     = "Reinforcements from Moldova"
+author    = "PillowBlaster"
+doomwiki  = "Reinforcements_from_Moldova"
+
+[[entry]]
+key       = "2012-mordeth-community-chest-4"
+category  = "mordeth"
+order     = 1
+title     = "Community Chest 4"
+author    = "Various"
+idgames   = 16911
+doomwiki  = "Community_Chest_4"
+
+[[entry]]
+key       = "2012-mockaward-call-of-dooty-ii-green-ops"
+category  = "mockaward"
+order     = 1
+title     = "Call of Dooty II: Green Ops"
+author    = "Matthew Christian (Chubzdoomer)"
+doomwiki  = "Call_of_Dooty_II:_Green_Ops"
+
+[[entry]]
+key       = "2012-what-the-pope-grezzo-2"
+category  = "what-the-pope"
+order     = 1
+title     = "Grezzo 2"
+doomwiki  = "Grezzo_2"

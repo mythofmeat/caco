@@ -1,0 +1,255 @@
+# Facts from Doomworld's Cacowards, by way of the Doom Wiki.
+year = 2014
+page = "https://www.doomworld.com/21years/"
+
+# Not entries, being people or tools: Most Promising Newcomers, Mapper of the Year, Espi Award.
+
+[[entry]]
+key       = "2014-winner-going-down"
+category  = "winner"
+order     = 1
+title     = "Going Down"
+author    = "Cyriak Harris (mouldy)"
+idgames   = 17917
+doomwiki  = "Going_Down"
+
+[[entry]]
+key       = "2014-winner-the-adventures-of-square"
+category  = "winner"
+order     = 2
+title     = "The Adventures of Square"
+author    = "Bigbrik Games"
+doomwiki  = "The_Adventures_of_Square"
+
+[[entry]]
+key       = "2014-winner-back-to-saturn-x-episode-2"
+category  = "winner"
+order     = 3
+title     = "Back to Saturn X: Episode 2"
+author    = "Various"
+idgames   = 19681
+doomworld = 69960
+doomwiki  = "Back_to_Saturn_X:_Episode_2"
+
+[[entry]]
+key       = "2014-winner-plasmaplant"
+category  = "winner"
+order     = 4
+title     = "Plasmaplant"
+author    = "Sverre Kvernmo"
+idgames   = 18174
+doomwiki  = "Plasmaplant"
+
+[[entry]]
+key       = "2014-winner-shadows-of-chronos"
+category  = "winner"
+order     = 5
+title     = "Shadows of Chronos"
+author    = "Samuel Villarreal (Kaiser)"
+idgames   = 17717
+doomwiki  = "Shadows_of_Chronos"
+
+[[entry]]
+key       = "2014-winner-monster-hunter-ltd-part-i"
+category  = "winner"
+order     = 6
+title     = "Monster Hunter Ltd. Part I"
+author    = "Didy"
+idgames   = 17601
+doomwiki  = "Monster_Hunter_Ltd._Part_I"
+
+[[entry]]
+key       = "2014-winner-monster-hunter-ltd-part-ii"
+category  = "winner"
+order     = 7
+title     = "Monster Hunter Ltd. Part II"
+author    = "Didy"
+idgames   = 17625
+doomwiki  = "Monster_Hunter_Ltd._Part_II"
+
+[[entry]]
+key       = "2014-winner-resurgence"
+category  = "winner"
+order     = 8
+title     = "Resurgence"
+author    = "Josh Sealy (Joshy) & Darkwave0000"
+idgames   = 17868
+doomwiki  = "Resurgence"
+
+[[entry]]
+key       = "2014-winner-mayan-mishap"
+category  = "winner"
+order     = 9
+title     = "Mayan Mishap"
+author    = "Tango"
+idgames   = 19225
+doomworld = 70845
+doomwiki  = "Mayan_Mishap"
+
+[[entry]]
+key       = "2014-winner-urban-brawl-dead-of-winter"
+category  = "winner"
+order     = 10
+title     = "Urban Brawl: Dead of Winter"
+author    = "Stephen Browning (Scuba Steve)"
+idgames   = 15430
+doomwiki  = "Urban_Brawl:_Dead_of_Winter"
+
+[[entry]]
+key       = "2014-winner-thy-flesh-turned-into-a-draft-excluder"
+category  = "winner"
+order     = 11
+title     = "Thy Flesh turned into a draft-excluder"
+author    = "Matt Powell (cannonball)"
+idgames   = 17915
+doomwiki  = "Thy_Flesh_turned_into_a_draft-excluder"
+
+[[entry]]
+key       = "2014-runner-up-bauhaus"
+category  = "runner-up"
+order     = 1
+title     = "Bauhaus"
+author    = "Didy"
+idgames   = 17954
+doomwiki  = "Bauhaus"
+
+[[entry]]
+key       = "2014-runner-up-bloody-steel"
+category  = "runner-up"
+order     = 2
+title     = "Bloody Steel"
+author    = "BigMemka"
+idgames   = 17849
+doomwiki  = "Bloody_Steel"
+
+[[entry]]
+key       = "2014-runner-up-mayhem-2048"
+category  = "runner-up"
+order     = 3
+title     = "MAYhem 2048"
+author    = "Various"
+idgames   = 17943
+doomwiki  = "MAYhem_2048"
+
+[[entry]]
+key       = "2014-runner-up-whitemare-2"
+category  = "runner-up"
+order     = 4
+title     = "Whitemare 2"
+author    = "Various"
+idgames   = 17531
+doomwiki  = "Whitemare_2"
+
+[[entry]]
+key       = "2014-runner-up-you-dig"
+category  = "runner-up"
+order     = 5
+title     = "You Dig"
+author    = "Tuxlar"
+idgames   = 17768
+doomwiki  = "You_Dig"
+
+[[entry]]
+key       = "2014-runner-up-the-wailing-horde"
+category  = "runner-up"
+order     = 6
+title     = "The Wailing Horde"
+author    = "Christian Hansen"
+idgames   = 17631
+doomwiki  = "The_Wailing_Horde"
+
+[[entry]]
+key       = "2014-runner-up-reconstruction-decomposition"
+category  = "runner-up"
+order     = 7
+title     = "Reconstruction / Decomposition"
+author    = "Da Werecat"
+idgames   = 18079
+doomwiki  = "Reconstruction_/_Decomposition"
+
+[[entry]]
+key       = "2014-multiplayer-32in24-13-a-thanksgiving-without-burgers"
+category  = "multiplayer"
+order     = 1
+title     = "32in24-13: A Thanksgiving Without Burgers"
+author    = "YEDS"
+idgames   = 17412
+doomwiki  = "32in24-13:_A_Thanksgiving_Without_Burgers"
+
+[[entry]]
+key       = "2014-multiplayer-push"
+category  = "multiplayer"
+order     = 2
+title     = "Push"
+author    = "TerminusEst13 et al."
+doomworld = 70877
+doomwiki  = "Push"
+
+[[entry]]
+key       = "2014-multiplayer-rage-ctf"
+category  = "multiplayer"
+order     = 3
+title     = "Rage CTF"
+author    = "Mechanix Union"
+idgames   = 17914
+doomwiki  = "Rage_CTF"
+
+[[entry]]
+key       = "2014-gameplay-mod-demonsteele"
+category  = "gameplay-mod"
+order     = 1
+title     = "DemonSteele"
+author    = "TerminusEst13"
+doomworld = 70749
+doomwiki  = "DemonSteele"
+
+[[entry]]
+key       = "2014-mordeth-doom-2-in-name-only"
+category  = "mordeth"
+order     = 1
+title     = "Doom 2 in Name Only"
+author    = "Various"
+idgames   = 17714
+doomwiki  = "Doom_2_in_Name_Only"
+
+[[entry]]
+key       = "2014-mockaward-brutalist-doom"
+category  = "mockaward"
+order     = 1
+title     = "Brutalist Doom"
+author    = "1337 Doomer"
+idgames   = 17826
+doomwiki  = "Brutalist_Doom"
+
+[[entry]]
+key       = "2014-mockaward-laundry-2-dry-hard"
+category  = "mockaward"
+order     = 2
+title     = "Laundry 2: Dry Hard"
+author    = "Sgt. Shivers"
+doomwiki  = "Laundry_2:_Dry_Hard"
+
+[[entry]]
+key       = "2014-mockaward-wooo-2"
+category  = "mockaward"
+order     = 3
+title     = "WOOO 2"
+author    = "Various"
+idgames   = 17852
+doomwiki  = "WOOO_2"
+
+[[entry]]
+key       = "2014-play-thy-role-kyle873s-doom-rpg-mod"
+category  = "play-thy-role"
+order     = 1
+title     = "Kyle873's Doom RPG Mod"
+author    = "Kyle873"
+doomwiki  = "Kyle873's_Doom_RPG_Mod"
+
+[[entry]]
+key       = "2014-play-thy-role-doomrl-arsenal"
+category  = "play-thy-role"
+order     = 2
+title     = "DoomRL Arsenal"
+author    = "Yholl"
+doomwiki  = "DoomRL_Arsenal"

@@ -114,10 +114,8 @@ pub fn spawn_import_doomwiki(sender: BackgroundSender, db_path: PathBuf, source_
     });
 }
 
-/// Import the WAD referenced by a Cacoward entry (DB pk). Mirrors the CLI
-/// `caco import --cacoward` flow: prefer the entry's idgames URL, fall back
-/// to the doomwiki page, then link the new wad row to the cacoward entry
-/// so the magazine view immediately reflects the new state.
+/// Import the WAD referenced by a Cacoward entry (DB pk), then link it to the
+/// entry so the magazine view immediately reflects the new state.
 pub fn spawn_import_cacoward(sender: BackgroundSender, db_path: PathBuf, cacoward_pk: i64) {
     thread::spawn(move || {
         let result: Result<_, String> = (|| {
@@ -126,31 +124,7 @@ pub fn spawn_import_cacoward(sender: BackgroundSender, db_path: PathBuf, cacowar
                 .map_err(|e| e.to_string())?
                 .ok_or_else(|| format!("no cacoward entry with pk {cacoward_pk}"))?;
 
-            let service = ImportService::new();
-
-            // Pass 1: idgames URL → numeric id → import_idgames.
-            let import_result = if let Some(ref url) = record.idgames_url
-                && let Some(id) = caco_sources::idgames::extract_idgames_id_from_url(url)
-            {
-                let client = caco_sources::idgames::IdgamesClient::new();
-                let entry = client.get(Some(id), None).map_err(|e| e.to_string())?;
-                service.import_idgames(&conn, &entry, None, false)
-            } else if let Some(ref url) = record.doomwiki_url
-                && let Some(title) = caco_sources::doomwiki::extract_doomwiki_title_from_url(url)
-            {
-                // Pass 2: Doom Wiki fallback.
-                let client = caco_sources::doomwiki::DoomwikiClient::new();
-                let entry = client
-                    .get_entry(&title)
-                    .map_err(|e| e.to_string())?
-                    .ok_or_else(|| format!("Doom Wiki page '{title}' not found"))?;
-                service.import_doomwiki(&conn, &entry, None, false)
-            } else {
-                return Err(format!(
-                    "{} has neither an idgames link nor a Doom Wiki URL — import manually",
-                    record.wad_title,
-                ));
-            };
+            let import_result = import_from_any_source(&conn, &record)?;
 
             if let Some(err) = &import_result.error {
                 return Err(err.clone());
@@ -171,6 +145,95 @@ pub fn spawn_import_cacoward(sender: BackgroundSender, db_path: PathBuf, cacowar
         })();
         sender.send(AppMessage::ImportComplete(result));
     });
+}
+
+/// Somewhere a Cacoward entry says its WAD can be found.
+#[derive(Debug, PartialEq, Eq)]
+enum CacowardSource {
+    Idgames(i64),
+    DoomworldTopic(i64),
+    DoomwikiPage(String),
+}
+
+impl CacowardSource {
+    /// The sources an entry names, best first. idgames, because caco can download
+    /// from there unattended. Then the forum thread, which is where a Doomworld-only
+    /// release's download links are. Then the wiki, which knows about the WAD but
+    /// rarely where to get it.
+    fn of(record: &caco_core::db::CacowardRecord) -> Vec<Self> {
+        let idgames = record.idgames_id.map(Self::Idgames);
+        let topic = record.doomworld_id.map(Self::DoomworldTopic);
+        let page = record.doomwiki_page.clone().map(Self::DoomwikiPage);
+        [idgames, topic, page].into_iter().flatten().collect()
+    }
+
+    /// Fetch the WAD from this source and put it in the library. A forum thread's
+    /// title is whatever its first post calls it, so the curated title and author
+    /// win there. The other sources have their own canonical ones.
+    fn import(
+        &self,
+        conn: &rusqlite::Connection,
+        service: &ImportService,
+        record: &caco_core::db::CacowardRecord,
+    ) -> Result<caco_sources::import_service::ImportResult, String> {
+        match self {
+            Self::Idgames(id) => {
+                let entry = caco_sources::idgames::IdgamesClient::new()
+                    .get(Some(*id), None)
+                    .map_err(|e| e.to_string())?;
+                Ok(service.import_idgames(conn, &entry, None, false))
+            }
+            Self::DoomworldTopic(topic) => {
+                let url = format!("https://www.doomworld.com/forum/topic/{topic}/");
+                let thread = caco_sources::doomworld::DoomworldClient::new()
+                    .get_thread(&url)
+                    .map_err(|e| e.to_string())?;
+                Ok(service.import_doomworld(
+                    conn,
+                    &thread,
+                    None,
+                    Some(&record.wad_title),
+                    record.wad_author.as_deref(),
+                    None,
+                    false,
+                ))
+            }
+            Self::DoomwikiPage(page) => {
+                let title = page.replace('_', " ");
+                let entry = caco_sources::doomwiki::DoomwikiClient::new()
+                    .get_entry(&title)
+                    .map_err(|e| e.to_string())?
+                    .ok_or_else(|| format!("Doom Wiki page '{title}' not found"))?;
+                Ok(service.import_doomwiki(conn, &entry, None, false))
+            }
+        }
+    }
+}
+
+/// Fetch the entry from the best source it names, falling through to the next when
+/// one fails, since which site is behind a challenge changes from day to day. If
+/// they all fail, the first failure is the one to report: it is about the source
+/// that would have been the most use.
+fn import_from_any_source(
+    conn: &rusqlite::Connection,
+    record: &caco_core::db::CacowardRecord,
+) -> Result<caco_sources::import_service::ImportResult, String> {
+    let service = ImportService::new();
+    let mut first_failure = None;
+    for source in CacowardSource::of(record) {
+        match source.import(conn, &service, record) {
+            Ok(imported) => return Ok(imported),
+            Err(failure) => {
+                first_failure.get_or_insert(failure);
+            }
+        }
+    }
+    Err(first_failure.unwrap_or_else(|| {
+        format!(
+            "{} has no idgames id, Doomworld topic or Doom Wiki page: import it by hand",
+            record.wad_title
+        )
+    }))
 }
 
 pub fn spawn_import_form(
@@ -261,4 +324,68 @@ pub fn spawn_import_form(
         })();
         sender.send(AppMessage::ImportComplete(result));
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use caco_core::db::{NewCacoward, get_cacoward, init_db, open_memory, upsert_cacoward};
+
+    fn record_with(entry: NewCacoward) -> caco_core::db::CacowardRecord {
+        let conn = open_memory().unwrap();
+        init_db(&conn).unwrap();
+        let id = upsert_cacoward(
+            &conn,
+            &NewCacoward {
+                key: "k".to_string(),
+                year: 2025,
+                category: "winner".to_string(),
+                page_order: 1,
+                wad_title: "Some WAD".to_string(),
+                ..entry
+            },
+        )
+        .unwrap();
+        get_cacoward(&conn, id).unwrap().unwrap()
+    }
+
+    #[test]
+    fn an_entrys_sources_are_tried_best_first() {
+        let record = record_with(NewCacoward {
+            idgames_id: Some(1),
+            doomworld_id: Some(2),
+            doomwiki_page: Some("Some_WAD".to_string()),
+            ..Default::default()
+        });
+        assert_eq!(
+            CacowardSource::of(&record),
+            [
+                CacowardSource::Idgames(1),
+                CacowardSource::DoomworldTopic(2),
+                CacowardSource::DoomwikiPage("Some_WAD".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_entry_only_offers_the_sources_it_names() {
+        let record = record_with(NewCacoward {
+            doomworld_id: Some(2),
+            ..Default::default()
+        });
+        assert_eq!(
+            CacowardSource::of(&record),
+            [CacowardSource::DoomworldTopic(2)]
+        );
+    }
+
+    #[test]
+    fn an_entry_with_no_source_says_to_import_it_by_hand() {
+        let conn = open_memory().unwrap();
+        init_db(&conn).unwrap();
+        let record = record_with(NewCacoward::default());
+        let failure = import_from_any_source(&conn, &record).err().unwrap();
+        assert!(failure.contains("Some WAD"), "{failure}");
+        assert!(failure.contains("import it by hand"), "{failure}");
+    }
 }

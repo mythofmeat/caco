@@ -1,3 +1,4 @@
+pub mod cacowards;
 pub mod companion_service;
 pub mod completion_detect;
 pub mod complevel;

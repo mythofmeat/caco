@@ -1,0 +1,157 @@
+# Facts from Doomworld's Cacowards, by way of the Doom Wiki.
+year = 2008
+page = "https://www.doomworld.com/15years/"
+
+# Not entries, being people or tools: Mapper of the Year.
+
+[[entry]]
+key       = "2008-winner-deus-vult-ii"
+category  = "winner"
+order     = 1
+title     = "Deus Vult II"
+author    = "Huy Pham (Doom Marine)"
+idgames   = 15238
+doomwiki  = "Deus_Vult_II"
+
+[[entry]]
+key       = "2008-winner-gravity"
+category  = "winner"
+order     = 2
+title     = "Gravity"
+author    = "Alexander S. (Eternal)"
+idgames   = 15467
+doomwiki  = "Gravity"
+
+[[entry]]
+key       = "2008-winner-action-doom-2-urban-brawl"
+category  = "winner"
+order     = 3
+title     = "Action Doom 2: Urban Brawl"
+author    = "Action Team"
+idgames   = 15430
+doomwiki  = "Action_Doom_2:_Urban_Brawl"
+
+[[entry]]
+key       = "2008-winner-eternal-doom-iv-return-from-oblivion"
+category  = "winner"
+order     = 4
+title     = "Eternal Doom IV: Return from Oblivion"
+author    = "TeamTNT"
+idgames   = 15193
+doomwiki  = "Eternal_Doom_IV:_Return_from_Oblivion"
+
+[[entry]]
+key       = "2008-winner-thunderpeak"
+category  = "winner"
+order     = 5
+title     = "Thunderpeak"
+author    = "Björn Ostmann (Vader)"
+idgames   = 15409
+doomwiki  = "E1M8:_Thunderpeak_Powerplant_(ZPack)"
+
+[[entry]]
+key       = "2008-winner-back-to-basics"
+category  = "winner"
+order     = 6
+title     = "Back to Basics"
+author    = "Esa Repo (Espi)"
+idgames   = 15174
+doomwiki  = "Back_to_Basics"
+
+[[entry]]
+key       = "2008-winner-bgpa-missions-liberation"
+category  = "winner"
+order     = 7
+title     = "BGPA Missions: Liberation"
+author    = "Nigel Rowand (Enjay)"
+idgames   = 15457
+doomwiki  = "BGPA_Missions:_Liberation"
+
+[[entry]]
+key       = "2008-winner-chex-quest-3"
+category  = "winner"
+order     = 8
+title     = "Chex Quest 3"
+author    = "Charles Jacobi"
+doomwiki  = "Chex_Quest_3"
+
+[[entry]]
+key       = "2008-winner-escape-from-castle-chezcrea"
+category  = "winner"
+order     = 9
+title     = "Escape from Castle Chezcrea"
+author    = "Paul Hiebert (Creaphis)"
+idgames   = 15220
+doomwiki  = "Escape_from_Castle_Chezcrea"
+
+[[entry]]
+key       = "2008-winner-cold-as-hell"
+category  = "winner"
+order     = 10
+title     = "Cold as Hell"
+author    = "Jonaya Riley"
+idgames   = 15496
+doomwiki  = "Cold_as_Hell"
+
+[[entry]]
+key       = "2008-this-is-my-boomstick-diaz-the-last-hours-of-purity-ww-hits-collection"
+category  = "this-is-my-boomstick"
+order     = 1
+title     = "Diaz: The Last Hours of Purity (WW Hits Collection)"
+author    = "Corwin Brence (WildWeasel)"
+idgames   = 15465
+doomwiki  = "Diaz"
+
+[[entry]]
+key       = "2008-runner-up-remain-iii"
+category  = "runner-up"
+order     = 1
+title     = "Remain III"
+author    = "Alexander S. (Eternal)"
+idgames   = 15426
+doomwiki  = "Remain_3"
+
+[[entry]]
+key       = "2008-runner-up-xxxi-cybersky"
+category  = "runner-up"
+order     = 2
+title     = "XXXI CyberSky"
+author    = "Alexander S. (Eternal)"
+idgames   = 15434
+doomwiki  = "XXXI_CyberSky"
+
+[[entry]]
+key       = "2008-multiplayer-32in24-7-return-of-the-night-of-capture-the-flag"
+category  = "multiplayer"
+order     = 1
+title     = "32in24-7: Return of the Night of Capture the Flag"
+author    = "YEDS"
+idgames   = 15397
+doomwiki  = "32in24-7:_Return_of_the_Night_of_Capture_the_Flag"
+
+[[entry]]
+key       = "2008-worst-wad-uac-military-nightmare"
+category  = "worst-wad"
+order     = 1
+title     = "UAC Military Nightmare"
+author    = "Terry"
+idgames   = 17641
+doomwiki  = "UAC_Military_Nightmare"
+
+[[entry]]
+key       = "2008-mordeth-deus-vult-ii"
+category  = "mordeth"
+order     = 1
+title     = "Deus Vult II"
+author    = "Huy Pham (Doom Marine)"
+idgames   = 15238
+doomwiki  = "Deus_Vult_II"
+
+[[entry]]
+key       = "2008-mockaward-community-is-falling-3"
+category  = "mockaward"
+order     = 1
+title     = "Community Is Falling 3"
+author    = "Samuel Villarreal (Kaiser)"
+idgames   = 15252
+doomwiki  = "Community_Is_Falling_3"

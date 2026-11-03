@@ -1,0 +1,209 @@
+# Facts from Doomworld's Cacowards, by way of the Doom Wiki.
+year = 2013
+page = "https://www.doomworld.com/20years/"
+
+# Not entries, being people or tools: Mapper of the Year, Espi Award.
+
+[[entry]]
+key       = "2013-winner-back-to-saturn-x-episode-1"
+category  = "winner"
+order     = 1
+title     = "Back to Saturn X: Episode 1"
+author    = "Various"
+idgames   = 18748
+doomwiki  = "Back_to_Saturn_X"
+
+[[entry]]
+key       = "2013-winner-doom-2-the-way-id-did"
+category  = "winner"
+order     = 2
+title     = "Doom 2 the Way id Did"
+author    = "Various"
+idgames   = 17424
+doomwiki  = "Doom_2_the_Way_id_Did"
+
+[[entry]]
+key       = "2013-winner-unholy-realms"
+category  = "winner"
+order     = 3
+title     = "Unholy Realms"
+author    = "Brian Knox (Snakes)"
+idgames   = 17415
+doomwiki  = "Unholy_Realms"
+
+[[entry]]
+key       = "2013-winner-the-zdoom-community-map-project-take-2"
+category  = "winner"
+order     = 4
+title     = "The ZDoom Community Map Project \"Take 2\""
+author    = "Various"
+idgames   = 17682
+doomwiki  = "The_ZDoom_Community_Map_Project_\"Take_2\""
+
+[[entry]]
+key       = "2013-winner-fuel-devourer"
+category  = "winner"
+order     = 5
+title     = "Fuel Devourer"
+author    = "Arthur O. (Archi) & C4tnt"
+idgames   = 17347
+doomwiki  = "Fuel_Devourer"
+
+[[entry]]
+key       = "2013-winner-kuchitsu"
+category  = "winner"
+order     = 6
+title     = "Kuchitsu"
+author    = "Memfis"
+idgames   = 17055
+doomwiki  = "Kuchitsu"
+
+[[entry]]
+key       = "2013-winner-forsaken-overlook"
+category  = "winner"
+order     = 7
+title     = "Forsaken Overlook"
+author    = "Matt Tropiano (MTrop)"
+idgames   = 17199
+doomwiki  = "Forsaken_Overlook"
+
+[[entry]]
+key       = "2013-winner-stardate-20x6"
+category  = "winner"
+order     = 8
+title     = "Stardate 20X6"
+author    = "Zachary Stephens (Ribbiks)"
+idgames   = 17221
+doomwiki  = "Stardate_20X6"
+
+[[entry]]
+key       = "2013-winner-pirate-doom"
+category  = "winner"
+order     = 9
+title     = "Pirate Doom"
+author    = "Darch"
+idgames   = 17722
+doomwiki  = "Pirate_Doom"
+
+[[entry]]
+key       = "2013-winner-swim-with-the-whales"
+category  = "winner"
+order     = 10
+title     = "Swim With The Whales"
+author    = "Zachary Stephens (Ribbiks)"
+idgames   = 17426
+doomwiki  = "Swim_With_The_Whales"
+
+[[entry]]
+key       = "2013-runner-up-interception"
+category  = "runner-up"
+order     = 1
+title     = "Interception"
+author    = "Various"
+idgames   = 17082
+doomwiki  = "Interception"
+
+[[entry]]
+key       = "2013-runner-up-hadephobia"
+category  = "runner-up"
+order     = 2
+title     = "Hadephobia"
+author    = "Various"
+idgames   = 17105
+doomwiki  = "Hadephobia"
+
+[[entry]]
+key       = "2013-runner-up-hellbound"
+category  = "runner-up"
+order     = 3
+title     = "Hellbound"
+author    = "Zoltán Sófalvi (Z86)"
+idgames   = 17259
+doomwiki  = "Hellbound"
+
+[[entry]]
+key       = "2013-runner-up-high-low-5"
+category  = "runner-up"
+order     = 4
+title     = "High/Low 5"
+author    = "Christian Hansen"
+idgames   = 17281
+doomwiki  = "High/Low_5"
+
+[[entry]]
+key       = "2013-runner-up-soulcrusher"
+category  = "runner-up"
+order     = 5
+title     = "Soulcrusher"
+author    = "Przemek Zimny (alterworldruler)"
+idgames   = 17206
+doomwiki  = "Soulcrusher"
+
+[[entry]]
+key       = "2013-runner-up-stomper"
+category  = "runner-up"
+order     = 6
+title     = "Stomper"
+author    = "Pawel Zarczynski (NMN)"
+doomworld = 67341
+doomwiki  = "Stomper"
+
+[[entry]]
+key       = "2013-multiplayer-eyedea"
+category  = "multiplayer"
+order     = 1
+title     = "Eyedea"
+author    = "Lexi Mayfield (LexiMax)"
+idgames   = 17305
+doomwiki  = "Eyedea"
+
+[[entry]]
+key       = "2013-multiplayer-samsara"
+category  = "multiplayer"
+order     = 2
+title     = "Samsara"
+author    = "TerminusEst13 et al."
+doomwiki  = "Samsara"
+
+[[entry]]
+key       = "2013-multiplayer-eon-deathmatch"
+category  = "multiplayer"
+order     = 3
+title     = "Eon Deathmatch"
+author    = "Ru5tK1ng & Hatred"
+doomwiki  = "Eon_Deathmatch"
+
+[[entry]]
+key       = "2013-gameplay-mod-project-msx"
+category  = "gameplay-mod"
+order     = 1
+title     = "Project MSX"
+author    = "MagSigmaX"
+doomwiki  = "Project_MSX"
+
+[[entry]]
+key       = "2013-mordeth-the-zdoom-community-map-project-take-2"
+category  = "mordeth"
+order     = 1
+title     = "The ZDoom Community Map Project \"Take 2\""
+author    = "Various"
+idgames   = 17682
+doomwiki  = "The_ZDoom_Community_Map_Project_\"Take_2\""
+
+[[entry]]
+key       = "2013-mockaward-extreme-weapon-pack"
+category  = "mockaward"
+order     = 1
+title     = "Extreme Weapon Pack"
+author    = "Doggo120"
+idgames   = 17351
+doomwiki  = "Extreme_Weapon_Pack"
+
+[[entry]]
+key       = "2013-sing-the-praises-of-pants-wooo"
+category  = "sing-the-praises-of-pants"
+order     = 1
+title     = "WOOO"
+author    = "Various"
+idgames   = 17390
+doomwiki  = "WOOO"

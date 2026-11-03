@@ -67,15 +67,43 @@ impl CacoApp {
         let mut bg = BackgroundChannel::new();
         bg.set_ctx(ctx.clone());
 
-        let app = Self {
+        let mut app = Self {
             conn,
             state: AppState::new(db_path),
             bg,
             thumbnails: ThumbnailManager::new(),
         };
+        app.sync_cacowards();
         file_check::spawn(app.bg.sender(), app.state.db_path.clone());
         app.spawn_sourceport_update_check();
         app
+    }
+
+    /// Bring the Cacowards table up to date with the dataset compiled into this
+    /// binary and any user files beside it.
+    ///
+    /// Here rather than on a worker, because the Cacowards view must not open empty
+    /// on a new library, and there is nothing here to wait for: a launch with
+    /// nothing new reads a few files and a table without taking the write lock.
+    ///
+    /// A user file that does not parse holds the update back until it is fixed,
+    /// since applying the rest would remove that file's rows.
+    fn sync_cacowards(&mut self) {
+        let warn = |e: &dyn std::fmt::Display| {
+            Notification::warning(format!("Cacowards not updated: {e}"))
+        };
+        match caco_core::cacowards::load(&caco_core::config::cacoward_data_dir()) {
+            Ok(dataset) => {
+                if let Err(e) = caco_sources::cacoward_sync::sync_cacowards(&self.conn, &dataset) {
+                    self.state.notification = Some(warn(&e));
+                }
+                self.state.cacowards.pages = dataset.pages;
+            }
+            Err(e) => {
+                self.state.notification = Some(warn(&e));
+                self.state.cacowards.pages = caco_core::cacowards::builtin().pages;
+            }
+        }
     }
 
     /// The handle background workers answer on.
@@ -412,68 +440,24 @@ impl CacoApp {
 
         let sender = self.bg.sender();
         let db_path = self.state.db_path.clone();
+        let EnrichRequest {
+            scope,
+            dry_run,
+            cancel,
+        } = request;
 
         std::thread::spawn(move || {
-            let conn = match caco_core::db::open_connection(&db_path) {
-                Ok(c) => c,
-                Err(e) => {
-                    sender.send(AppMessage::EnrichComplete(Err(format!(
-                        "DB open failed: {e}"
-                    ))));
-                    return;
-                }
-            };
-
-            let outcome = match request {
-                EnrichRequest::Wads {
-                    scope,
-                    dry_run,
-                    cancel,
-                } => run_wad_enrich(&conn, &sender, scope, dry_run, &cancel),
-                EnrichRequest::Cacowards { year, dry_run } => {
-                    enrich_service::enrich_cacowards(&conn, year, dry_run)
-                        .map(|s| EnrichReport::Cacowards {
-                            year: s.year,
-                            scraped: s.scraped,
-                            upserted: s.upserted,
-                            linked: s.linked_total(),
-                            previews: s
-                                .previews
-                                .iter()
-                                .map(|p| {
-                                    format!(
-                                        "{} — {} ({})",
-                                        p.category,
-                                        p.wad_title,
-                                        p.idgames_url.as_deref().unwrap_or("no idgames link")
-                                    )
-                                })
-                                .collect(),
-                            dry_run,
-                        })
-                        .map_err(|e| e.to_string())
-                }
-            };
-
-            sender.send(AppMessage::EnrichComplete(outcome));
-
-            // Local so the closure below can borrow `sender` without the
-            // spawn body needing a second clone.
-            fn run_wad_enrich(
-                conn: &Connection,
-                sender: &crate::workers::BackgroundSender,
-                scope: EnrichScope,
-                dry_run: bool,
-                cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
-            ) -> Result<EnrichReport, String> {
-                let mut wads = caco_core::db::search_wads(conn, None, None, true, false, 0)
+            let outcome = (|| -> Result<EnrichReport, String> {
+                let conn = caco_core::db::open_connection(&db_path)
+                    .map_err(|e| format!("DB open failed: {e}"))?;
+                let mut wads = caco_core::db::search_wads(&conn, None, None, true, false, 0)
                     .map_err(|e| format!("Search error: {e}"))?;
                 if scope == EnrichScope::MissingComplevel {
                     wads.retain(|w| w.complevel.is_none());
                 }
 
                 let summary = enrich_service::enrich_wads(
-                    conn,
+                    &conn,
                     &wads,
                     dry_run,
                     &mut |EnrichProgress {
@@ -490,7 +474,7 @@ impl CacoApp {
                     &|| cancel.load(std::sync::atomic::Ordering::Relaxed),
                 );
 
-                Ok(EnrichReport::Wads {
+                Ok(EnrichReport {
                     examined: summary.examined,
                     findings: summary.changed.iter().map(describe_outcome).collect(),
                     wiki_lookups: summary.wiki_lookups,
@@ -498,7 +482,9 @@ impl CacoApp {
                     cancelled: summary.cancelled,
                     dry_run,
                 })
-            }
+            })();
+
+            sender.send(AppMessage::EnrichComplete(outcome));
         });
     }
 
@@ -563,12 +549,7 @@ impl CacoApp {
                 self.state.active_dialog = Some(ActiveDialog::Collections(dialog));
             }
             ActionRequest::Enrich => {
-                let year = chrono::Local::now()
-                    .format("%Y")
-                    .to_string()
-                    .parse()
-                    .unwrap_or(2024);
-                let dialog = crate::dialogs::enrich::EnrichDialogState::new(year);
+                let dialog = crate::dialogs::enrich::EnrichDialogState::new();
                 self.state.active_dialog = Some(ActiveDialog::Enrich(Box::new(dialog)));
             }
             ActionRequest::StartEnrich(request) => {
@@ -1110,15 +1091,19 @@ impl eframe::App for CacoApp {
                     self.thumbnails.request(wad.id, path, &hint, &sender);
                 }
             }
-            // Absent entries have no wad row but always carry a Doom Wiki
-            // URL — feed it into the same scraper path the import-flow
-            // wiki thumbnails use. Negative pk keys avoid colliding with
-            // wad_ids in the manager's hashmap.
+            // Absent entries have no wad row, but most carry a Doom Wiki page:
+            // feed it into the same scraper path the import-flow wiki thumbnails
+            // use. Only for the year on screen, or opening this view would ask the
+            // wiki about every entry in every year. Negative pk keys avoid colliding
+            // with wad_ids in the manager's hashmap.
+            let year = self.state.cacowards.selected_year;
             for (record, status) in &self.state.cacowards.all_entries {
-                if !matches!(status, caco_core::db::cacowards::EffectiveStatus::Absent) {
+                if Some(record.year) != year
+                    || !matches!(status, caco_core::db::cacowards::EffectiveStatus::Absent)
+                {
                     continue;
                 }
-                let Some(url) = record.doomwiki_url.as_deref() else {
+                let Some(url) = record.doomwiki_url() else {
                     continue;
                 };
                 let key = panels::cacowards::thumb_key_for_absent(record.id);
@@ -1127,7 +1112,7 @@ impl eframe::App for CacoApp {
                 }
                 let hint = ThumbnailHint {
                     source_type: "doomwiki".to_string(),
-                    source_url: Some(url.to_string()),
+                    source_url: Some(url),
                     title: record.wad_title.clone(),
                 };
                 self.thumbnails.request(key, None, &hint, &sender);

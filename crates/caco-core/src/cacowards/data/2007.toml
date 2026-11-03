@@ -1,0 +1,140 @@
+# Facts from Doomworld's Cacowards, by way of the Doom Wiki.
+year = 2007
+page = "https://www.doomworld.com/14years/"
+
+# Not entries, being people or tools: Mapper of the Year.
+
+[[entry]]
+key       = "2007-winner-genesis-of-descent"
+category  = "winner"
+order     = 1
+title     = "Genesis of Descent"
+author    = "Nick Laurent (hobomaster22)"
+idgames   = 14866
+doomwiki  = "Genesis_of_Descent"
+
+[[entry]]
+key       = "2007-winner-cheogsh"
+category  = "winner"
+order     = 2
+title     = "Cheogsh"
+author    = "Shadowman"
+idgames   = 15060
+doomwiki  = "Cheogsh"
+
+[[entry]]
+key       = "2007-winner-songs-of-the-damned"
+category  = "winner"
+order     = 3
+title     = "Songs of the Damned"
+author    = "Trevor Primmett (iori)"
+idgames   = 14710
+doomwiki  = "Songs_of_the_Damned"
+
+[[entry]]
+key       = "2007-winner-the-dying-end"
+category  = "winner"
+order     = 4
+title     = "The Dying End"
+author    = "Christopher Lutz"
+idgames   = 15016
+doomwiki  = "The_Dying_End"
+
+[[entry]]
+key       = "2007-winner-sine-die"
+category  = "winner"
+order     = 5
+title     = "Sine Die"
+author    = "didy"
+idgames   = 15135
+doomwiki  = "Sine_Die"
+
+[[entry]]
+key       = "2007-winner-knee-deep-in-zdoom"
+category  = "winner"
+order     = 6
+title     = "Knee-Deep in ZDoom"
+author    = "Various"
+idgames   = 17250
+doomwiki  = "Knee-Deep_in_ZDoom"
+
+[[entry]]
+key       = "2007-winner-community-chest-3"
+category  = "winner"
+order     = 7
+title     = "Community Chest 3"
+author    = "Various"
+idgames   = 15156
+doomwiki  = "Community_Chest_3"
+
+[[entry]]
+key       = "2007-winner-epic"
+category  = "winner"
+order     = 8
+title     = "Epic"
+author    = "Alexander S. (Eternal)"
+idgames   = 15125
+doomwiki  = "Epic"
+
+[[entry]]
+key       = "2007-winner-the-ultimate-torment-and-torture"
+category  = "winner"
+order     = 9
+title     = "The Ultimate Torment and Torture"
+author    = "Daniel Gimmer (Tormentor667)"
+idgames   = 15107
+doomwiki  = "The_Ultimate_Torment_and_Torture"
+
+[[entry]]
+key       = "2007-winner-the-outer-darkness"
+category  = "winner"
+order     = 10
+title     = "The Outer Darkness"
+author    = "Varun Abhirama Krishna"
+idgames   = 15061
+doomwiki  = "The_Outer_Darkness"
+
+[[entry]]
+key       = "2007-runner-up-demons-of-problematique"
+category  = "runner-up"
+order     = 1
+title     = "Demons of Problematique"
+author    = "Dennis Meuwissen (Exl)"
+idgames   = 15048
+doomwiki  = "Demons_of_Problematique"
+
+[[entry]]
+key       = "2007-runner-up-wonderful-doom"
+category  = "runner-up"
+order     = 2
+title     = "Wonderful Doom"
+author    = "Eugene Guschin (Wraith777)"
+idgames   = 16642
+doomwiki  = "Wonderful_Doom"
+
+[[entry]]
+key       = "2007-multiplayer-32in24-5"
+category  = "multiplayer"
+order     = 1
+title     = "32in24-5"
+author    = "YEDS"
+idgames   = 16807
+doomwiki  = "32in24-5"
+
+[[entry]]
+key       = "2007-mordeth-knee-deep-in-zdoom"
+category  = "mordeth"
+order     = 1
+title     = "Knee-Deep in ZDoom"
+author    = "Various"
+idgames   = 17250
+doomwiki  = "Knee-Deep_in_ZDoom"
+
+[[entry]]
+key       = "2007-mockaward-it-only-gets-worse"
+category  = "mockaward"
+order     = 1
+title     = "It Only Gets Worse"
+author    = "Wills"
+idgames   = 15034
+doomwiki  = "It_Only_Gets_Worse"

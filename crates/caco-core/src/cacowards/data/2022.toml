@@ -1,0 +1,474 @@
+# Facts from Doomworld's Cacowards, by way of the Doom Wiki.
+year = 2022
+page = "https://www.doomworld.com/cacowards/2022/"
+
+# Not entries, being people or tools: Codeaward, Most Promising Newcomers, Creator of the Year, Espi award.
+
+[[entry]]
+key       = "2022-winner-the-magenta-spire"
+category  = "winner"
+order     = 1
+title     = "The Magenta Spire"
+author    = "Cole Bryden (thelamp)"
+idgames   = 20518
+doomwiki  = "The_Magenta_Spire"
+
+[[entry]]
+key       = "2022-winner-jumpwad"
+category  = "winner"
+order     = 2
+title     = "Jumpwad"
+author    = "Grain of Salt and Zachary Stephens (Ribbiks)"
+doomworld = 129577
+doomwiki  = "Jumpwad"
+
+[[entry]]
+key       = "2022-winner-ozonia"
+category  = "winner"
+order     = 3
+title     = "Ozonia"
+author    = "Tomás Soares (Deadwing)"
+idgames   = 20495
+doomwiki  = "Ozonia"
+
+[[entry]]
+key       = "2022-winner-elementalism-phase-1"
+category  = "winner"
+order     = 4
+title     = "Elementalism: Phase 1"
+author    = "Various"
+doomworld = 100102
+doomwiki  = "Elementalism"
+
+[[entry]]
+key       = "2022-winner-dust-devil"
+category  = "winner"
+order     = 5
+title     = "Dust Devil"
+author    = "Captain Toenail"
+idgames   = 20211
+doomwiki  = "Dust_Devil"
+
+[[entry]]
+key       = "2022-winner-malevolence-episode-1"
+category  = "winner"
+order     = 6
+title     = "Malevolence Episode 1"
+author    = "Cheesewheel"
+doomworld = 131061
+doomwiki  = "Malevolence"
+
+[[entry]]
+key       = "2022-winner-dont-turn-your-back-on-the-city"
+category  = "winner"
+order     = 7
+title     = "Don't Turn Your Back on the City"
+author    = "Trashbang"
+idgames   = 20114
+doomwiki  = "Don't_Turn_Your_Back_on_the_City"
+
+[[entry]]
+key       = "2022-winner-knee-deep-in-knee-deep-in-zdoom"
+category  = "winner"
+order     = 8
+title     = "Knee-Deep in Knee-Deep in ZDoom"
+author    = "Sarah Mancuso (esselfortium)"
+idgames   = 20675
+doomwiki  = "Knee-Deep_in_Knee-Deep_in_ZDoom"
+
+[[entry]]
+key       = "2022-winner-the-10x10-project"
+category  = "winner"
+order     = 9
+title     = "The 10x10 Project"
+author    = "LunchLunch"
+idgames   = 20322
+doomwiki  = "The_10x10_Project"
+
+[[entry]]
+key       = "2022-winner-overboard"
+category  = "winner"
+order     = 10
+title     = "Overboard"
+author    = "Cyriak Harris (mouldy)"
+idgames   = 20431
+doomwiki  = "Overboard"
+
+[[entry]]
+key       = "2022-runner-up-bellatrix-tales-of-orionis-episode-1"
+category  = "runner-up"
+order     = 1
+title     = "Bellatrix: Tales of Orionis (Episode 1)"
+author    = "Franck Livolant (franckFRAG)"
+idgames   = 20489
+doomworld = 131150
+doomwiki  = "Bellatrix:_Tales_of_Orionis"
+
+[[entry]]
+key       = "2022-runner-up-solar-struggle"
+category  = "runner-up"
+order     = 2
+title     = "Solar Struggle"
+author    = "Various"
+idgames   = 20344
+doomwiki  = "Solar_Struggle"
+
+[[entry]]
+key       = "2022-runner-up-altars-of-madness"
+category  = "runner-up"
+order     = 3
+title     = "Altars of Madness"
+author    = "Alex Decker (myolden)"
+idgames   = 20345
+doomwiki  = "Altars_of_Madness"
+
+[[entry]]
+key       = "2022-runner-up-capybara"
+category  = "runner-up"
+order     = 4
+title     = "Capybara"
+author    = "Various"
+idgames   = 20430
+doomwiki  = "Capybara"
+
+[[entry]]
+key       = "2022-runner-up-pagodia"
+category  = "runner-up"
+order     = 5
+title     = "Pagodia"
+author    = "Various"
+idgames   = 20293
+doomwiki  = "Pagodia"
+
+[[entry]]
+key       = "2022-runner-up-anomaly-report"
+category  = "runner-up"
+order     = 6
+title     = "Anomaly Report"
+author    = "Michael Jan Krizik (valkiriforce)"
+idgames   = 20276
+doomwiki  = "Anomaly_Report"
+
+[[entry]]
+key       = "2022-runner-up-2022-a-doom-odyssey"
+category  = "runner-up"
+order     = 7
+title     = "2022 A Doom Odyssey"
+author    = "Various"
+idgames   = 20486
+doomwiki  = "2022_A_Doom_Odyssey"
+
+[[entry]]
+key       = "2022-runner-up-shallow-world-episode-1"
+category  = "runner-up"
+order     = 8
+title     = "Shallow World Episode 1"
+author    = "Peter Blacha (Shawny)"
+idgames   = 20269
+doomwiki  = "Shallow_World"
+
+[[entry]]
+key       = "2022-runner-up-declared-new-apocalypse"
+category  = "runner-up"
+order     = 9
+title     = "Declared New Apocalypse"
+author    = "Kan3"
+doomworld = 122225
+doomwiki  = "Declared_New_Apocalypse"
+
+[[entry]]
+key       = "2022-runner-up-dance-on-the-water"
+category  = "runner-up"
+order     = 10
+title     = "Dance on the Water"
+author    = "Various"
+idgames   = 20327
+doomwiki  = "Dance_on_the_Water"
+
+[[entry]]
+key       = "2022-honorable-mention-occula"
+category  = "honorable-mention"
+order     = 1
+title     = "Occula"
+author    = "Bemused and Thomas Seifert (tourniquet)"
+idgames   = 21662
+doomworld = 126833
+doomwiki  = "Occula"
+
+[[entry]]
+key       = "2022-honorable-mention-atonement"
+category  = "honorable-mention"
+order     = 2
+title     = "Atonement"
+author    = "Matthew DeCalzadilla (Moustachio)"
+idgames   = 20527
+doomwiki  = "Atonement"
+
+[[entry]]
+key       = "2022-honorable-mention-infection"
+category  = "honorable-mention"
+order     = 3
+title     = "Infection"
+author    = "Dennis Meuwissen (Exl)"
+idgames   = 20244
+doomwiki  = "Infection"
+
+[[entry]]
+key       = "2022-honorable-mention-poogers"
+category  = "honorable-mention"
+order     = 4
+title     = "POOGERS"
+author    = "Various"
+idgames   = 20303
+doomwiki  = "POOGERS"
+
+[[entry]]
+key       = "2022-honorable-mention-pocket-slaughter"
+category  = "honorable-mention"
+order     = 5
+title     = "Pocket Slaughter"
+author    = "Sander Florisson (SCF)"
+idgames   = 20567
+doomworld = 129483
+doomwiki  = "Pocket_Slaughter"
+
+[[entry]]
+key       = "2022-honorable-mention-puss-ix-mapping-at-warpspeed"
+category  = "honorable-mention"
+order     = 6
+title     = "PUSS IX: Mapping at Warpspeed"
+author    = "Various"
+idgames   = 20661
+doomwiki  = "PUSS_IX:_Mapping_at_Warpspeed"
+
+[[entry]]
+key       = "2022-honorable-mention-nostalgia"
+category  = "honorable-mention"
+order     = 7
+title     = "Nostalgia"
+author    = "Alex Decker (myolden)"
+idgames   = 20406
+doomwiki  = "Nostalgia"
+
+[[entry]]
+key       = "2022-honorable-mention-nensha"
+category  = "honorable-mention"
+order     = 8
+title     = "Nensha"
+author    = "RonnieJamesDiner"
+idgames   = 20363
+doomwiki  = "Nensha"
+
+[[entry]]
+key       = "2022-honorable-mention-sign-of-torment"
+category  = "honorable-mention"
+order     = 9
+title     = "Sign of Torment"
+author    = "Kain D."
+idgames   = 20118
+doomwiki  = "Sign_of_Torment"
+
+[[entry]]
+key       = "2022-honorable-mention-wretched-flesh"
+category  = "honorable-mention"
+order     = 10
+title     = "Wretched Flesh"
+author    = "HALFCOOL"
+idgames   = 20353
+doomwiki  = "Wretched_Flesh"
+
+[[entry]]
+key       = "2022-honorable-mention-plutonia-revisited-community-project-2"
+category  = "honorable-mention"
+order     = 11
+title     = "Plutonia Revisited Community Project 2"
+author    = "Various"
+idgames   = 20404
+doomwiki  = "Plutonia_Revisited_Community_Project_2"
+
+[[entry]]
+key       = "2022-honorable-mention-hydrosphere"
+category  = "honorable-mention"
+order     = 12
+title     = "Hydrosphere"
+author    = "Brian Irving (Bri)"
+idgames   = 20281
+doomwiki  = "Hydrosphere"
+
+[[entry]]
+key       = "2022-honorable-mention-ante-mortem-episode-1"
+category  = "honorable-mention"
+order     = 13
+title     = "Ante Mortem Episode 1"
+author    = "Snaxalotl"
+doomworld = 129400
+doomwiki  = "Ante_Mortem"
+
+[[entry]]
+key       = "2022-honorable-mention-caffeine-injection"
+category  = "honorable-mention"
+order     = 14
+title     = "Caffeine Injection"
+author    = "Misty"
+idgames   = 20416
+doomwiki  = "Caffeine_Injection"
+
+[[entry]]
+key       = "2022-honorable-mention-ethereal-breakdown"
+category  = "honorable-mention"
+order     = 15
+title     = "Ethereal Breakdown"
+author    = "Various"
+doomworld = 132113
+doomwiki  = "Ethereal_Breakdown"
+
+[[entry]]
+key       = "2022-honorable-mention-corrupted-cistern"
+category  = "honorable-mention"
+order     = 16
+title     = "Corrupted Cistern"
+author    = "Christopher Lutz"
+idgames   = 20236
+doomwiki  = "Corrupted_Cistern"
+
+[[entry]]
+key       = "2022-honorable-mention-azazels-second-descent"
+category  = "honorable-mention"
+order     = 17
+title     = "Azazel's Second Descent"
+author    = "Bloodbath Giraffe"
+idgames   = 20425
+doomwiki  = "Azazel's_Second_Descent"
+
+[[entry]]
+key       = "2022-honorable-mention-100-line-massacre"
+category  = "honorable-mention"
+order     = 18
+title     = "100 Line Massacre"
+author    = "NinjaDelphox and Arsinikk"
+idgames   = 20253
+doomwiki  = "100_Line_Massacre"
+
+[[entry]]
+key       = "2022-honorable-mention-elysiums-curse-episode-1"
+category  = "honorable-mention"
+order     = 19
+title     = "Elysium's Curse Episode 1"
+author    = "Bri"
+doomworld = 126821
+doomwiki  = "Elysium's_Curse"
+
+[[entry]]
+key       = "2022-honorable-mention-the-box-of-a-thousand-demons"
+category  = "honorable-mention"
+order     = 20
+title     = "The Box of a Thousand Demons"
+author    = "Thelokk"
+idgames   = 20863
+doomwiki  = "The_Box_of_a_Thousand_Demons"
+
+[[entry]]
+key       = "2022-honorable-mention-relyctum"
+category  = "honorable-mention"
+order     = 21
+title     = "Relyctum"
+author    = "BeeWen"
+doomworld = 98476
+doomwiki  = "Relyctum"
+
+[[entry]]
+key       = "2022-honorable-mention-irkalla"
+category  = "honorable-mention"
+order     = 22
+title     = "Irkalla"
+author    = "Various"
+idgames   = 20277
+doomwiki  = "Irkalla"
+
+[[entry]]
+key       = "2022-honorable-mention-jamal-jones-doomkids-20-years-mapping-contest"
+category  = "honorable-mention"
+order     = 23
+title     = "Jamal Jones - Doomkid's 20 Years Mapping Contest"
+author    = "Various"
+doomworld = 129169
+doomwiki  = "Jamal_Jones_Trilogy"
+
+[[entry]]
+key       = "2022-honorable-mention-greenian"
+category  = "honorable-mention"
+order     = 24
+title     = "Greenian"
+author    = "BeeWen"
+doomworld = 132601
+doomwiki  = "Greenian"
+
+[[entry]]
+key       = "2022-honorable-mention-doom-ce"
+category  = "honorable-mention"
+order     = 25
+title     = "Doom CE"
+author    = "molecicco"
+doomworld = 126183
+doomwiki  = "Doom_CE"
+
+[[entry]]
+key       = "2022-multiplayer-hordamex"
+category  = "multiplayer"
+order     = 1
+title     = "Hordamex"
+author    = "Various"
+doomworld = 130154
+doomwiki  = "Hordamex"
+
+[[entry]]
+key       = "2022-multiplayer-frantik-dm-2"
+category  = "multiplayer"
+order     = 2
+title     = "Frantik DM 2"
+author    = "Colton Murchison (Arrowhead)"
+doomworld = 131049
+doomwiki  = "Frantik_DM_2"
+
+[[entry]]
+key       = "2022-gameplay-mod-gun-bonsai"
+category  = "gameplay-mod"
+order     = 1
+title     = "Gun Bonsai"
+author    = "ToxicFrog"
+doomwiki  = "Gun_Bonsai"
+
+[[entry]]
+key       = "2022-gameplay-mod-voxel-doom"
+category  = "gameplay-mod"
+order     = 2
+title     = "Voxel Doom"
+author    = "Cheello"
+doomwiki  = "Voxel_Doom"
+
+[[entry]]
+key       = "2022-mordeth-knee-deep-in-knee-deep-in-zdoom-vanilla-tech"
+category  = "mordeth"
+order     = 1
+title     = "Knee-Deep in Knee-Deep in ZDoom vanilla tech"
+idgames   = 20675
+doomwiki  = "Knee-Deep_in_Knee-Deep_in_ZDoom"
+
+[[entry]]
+key       = "2022-machaward-doom-rpg-port"
+category  = "machaward"
+order     = 1
+title     = "Doom RPG Port"
+author    = "Erick194 and John Corrado (anarkavre)"
+doomworld = 129997
+doomwiki  = "Doom_RPG_Port"
+supported = false
+
+[[entry]]
+key       = "2022-odyssey-of-noises-ozonia-ost"
+category  = "odyssey-of-noises"
+order     = 1
+title     = "Ozonia OST"
+author    = "Tomás Soares (Deadwing)"
+idgames   = 20495
+doomwiki  = "Ozonia"

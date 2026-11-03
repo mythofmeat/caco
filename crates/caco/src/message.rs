@@ -67,24 +67,14 @@ impl Notification {
 /// Findings arrive pre-rendered as display lines: the enrich service's own
 /// types stay in caco-sources, and the dialog only ever shows this list.
 #[derive(Debug, Clone)]
-pub enum EnrichReport {
-    Wads {
-        examined: usize,
-        findings: Vec<String>,
-        wiki_lookups: u32,
-        /// Why the wiki was only asked once, when it refused.
-        wiki_blocked: Option<String>,
-        cancelled: bool,
-        dry_run: bool,
-    },
-    Cacowards {
-        year: i64,
-        scraped: usize,
-        upserted: usize,
-        linked: usize,
-        previews: Vec<String>,
-        dry_run: bool,
-    },
+pub struct EnrichReport {
+    pub examined: usize,
+    pub findings: Vec<String>,
+    pub wiki_lookups: u32,
+    /// Why the wiki was only asked once, when it refused.
+    pub wiki_blocked: Option<String>,
+    pub cancelled: bool,
+    pub dry_run: bool,
 }
 
 pub enum AppMessage {

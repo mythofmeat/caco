@@ -1,0 +1,129 @@
+# Facts from Doomworld's Cacowards, by way of the Doom Wiki.
+year = 2011
+page = "https://www.doomworld.com/18years/"
+
+# Not entries, being people or tools: Consolation Prize, Mapper of the Year.
+
+[[entry]]
+key       = "2011-winner-plutonia-revisited"
+category  = "winner"
+order     = 1
+title     = "Plutonia Revisited"
+author    = "Various"
+idgames   = 16429
+doomwiki  = "Plutonia:_Revisited_Community_Project"
+
+[[entry]]
+key       = "2011-winner-vaporware-demo"
+category  = "winner"
+order     = 2
+title     = "Vaporware Demo"
+author    = "Sarah Mancuso (esselfortium)"
+doomwiki  = "Vaporware_Demo"
+
+[[entry]]
+key       = "2011-winner-lunatic"
+category  = "winner"
+order     = 3
+title     = "Lunatic"
+author    = "Paul DeBruyne (skillsaw)"
+idgames   = 16551
+doomwiki  = "Lunatic"
+
+[[entry]]
+key       = "2011-winner-double-impact"
+category  = "winner"
+order     = 4
+title     = "Double Impact"
+author    = "Matt Cibulas (RottKing) & Ralph Vickers (Ralphis)"
+idgames   = 16419
+doomwiki  = "Double_Impact"
+
+[[entry]]
+key       = "2011-winner-vanguard"
+category  = "winner"
+order     = 5
+title     = "Vanguard"
+author    = "Paul DeBruyne (skillsaw)"
+idgames   = 16463
+doomwiki  = "Vanguard"
+
+[[entry]]
+key       = "2011-winner-reverie"
+category  = "winner"
+order     = 6
+title     = "Reverie"
+author    = "Michael Jan Krizik (valkiriforce)"
+idgames   = 16630
+doomwiki  = "Reverie"
+
+[[entry]]
+key       = "2011-winner-jenesis"
+category  = "winner"
+order     = 7
+title     = "Jenesis"
+author    = "James Paddock (Jimmy)"
+idgames   = 16640
+doomwiki  = "Jenesis"
+
+[[entry]]
+key       = "2011-winner-icebound"
+category  = "winner"
+order     = 8
+title     = "Icebound"
+author    = "Christopher Lutz"
+idgames   = 16357
+doomwiki  = "Icebound"
+
+[[entry]]
+key       = "2011-winner-mandrill-ass-project"
+category  = "winner"
+order     = 9
+title     = "Mandrill Ass Project"
+author    = "Aluqah"
+idgames   = 16462
+doomwiki  = "Mandrill_Ass_Project"
+
+[[entry]]
+key       = "2011-winner-khorus-speedy-shit"
+category  = "winner"
+order     = 10
+title     = "Khorus' Speedy Shit"
+author    = "Adam Woodmansey (Khorus)"
+idgames   = 16639
+doomwiki  = "Khorus'_Speedy_Shit"
+
+[[entry]]
+key       = "2011-newcomer-doom-ii-redux"
+category  = "newcomer"
+order     = 1
+title     = "Doom II Redux"
+author    = "Richard Frei (Tarnsman)"
+idgames   = 18738
+doomwiki  = "Suitcase_of_Gor"
+
+[[entry]]
+key       = "2011-multiplayer-32in24-11-occupy-doomworld"
+category  = "multiplayer"
+order     = 1
+title     = "32in24-11: Occupy Doomworld"
+author    = "The 32in24 Team"
+idgames   = 16620
+doomwiki  = "32in24-11:_Occupy_Doomworld"
+
+[[entry]]
+key       = "2011-gameplay-mod-brutal-doom"
+category  = "gameplay-mod"
+order     = 1
+title     = "Brutal Doom"
+author    = "Marcos Abenante (Sergeant Mark IV)"
+doomwiki  = "Brutal_Doom"
+
+[[entry]]
+key       = "2011-mordeth-1994-tune-up-community-project"
+category  = "mordeth"
+order     = 1
+title     = "1994 Tune-up Community Project"
+author    = "Various"
+idgames   = 16561
+doomwiki  = "1994_Tune-up_Community_Project"

@@ -1,0 +1,233 @@
+# Facts from Doomworld's Cacowards, by way of the Doom Wiki.
+year = 2015
+page = "https://www.doomworld.com/22years/"
+
+# Not entries, being people or tools: Most Promising Newcomers, Mapper of the Year, Espi Award.
+
+[[entry]]
+key       = "2015-winner-sunlust"
+category  = "winner"
+order     = 1
+title     = "Sunlust"
+author    = "Zachary Stephens (Ribbiks) & Daniel Jakobsson (dannebubinga)"
+idgames   = 18168
+doomwiki  = "Sunlust"
+
+[[entry]]
+key       = "2015-winner-erkattanne"
+category  = "winner"
+order     = 2
+title     = "Erkattäññe"
+author    = "Nicolás Monti"
+idgames   = 18192
+doomwiki  = "Erkattäññe"
+
+[[entry]]
+key       = "2015-winner-skulldash"
+category  = "winner"
+order     = 3
+title     = "Skulldash"
+author    = "Joshua O'Sullivan (Dragonfly)"
+idgames   = 18249
+doomwiki  = "Skulldash"
+
+[[entry]]
+key       = "2015-winner-swift-death"
+category  = "winner"
+order     = 4
+title     = "Swift Death"
+author    = "Franck Livolant (franckFRAG)"
+idgames   = 18265
+doomwiki  = "Swift_Death"
+
+[[entry]]
+key       = "2015-winner-breach"
+category  = "winner"
+order     = 5
+title     = "Breach"
+author    = "Alun Bestor (Viggles)"
+idgames   = 18968
+doomwiki  = "Breach"
+
+[[entry]]
+key       = "2015-winner-valiant"
+category  = "winner"
+order     = 6
+title     = "Valiant"
+author    = "Paul DeBruyne (skillsaw)"
+idgames   = 18049
+doomwiki  = "Valiant"
+
+[[entry]]
+key       = "2015-winner-50-shades-of-graytall"
+category  = "winner"
+order     = 7
+title     = "50 Shades of Graytall"
+author    = "Various"
+idgames   = 18205
+doomwiki  = "50_Shades_of_Graytall"
+
+[[entry]]
+key       = "2015-winner-sheer-poison"
+category  = "winner"
+order     = 8
+title     = "Sheer Poison"
+author    = "Zan-zan-zawa-veia"
+idgames   = 18301
+doomwiki  = "Sheer_Poison"
+
+[[entry]]
+key       = "2015-winner-dead-wire"
+category  = "winner"
+order     = 9
+title     = "dead.wire"
+author    = "Xaser Acheron"
+idgames   = 19266
+doomworld = 74767
+doomwiki  = "dead.wire"
+
+[[entry]]
+key       = "2015-winner-return-to-hadron"
+category  = "winner"
+order     = 10
+title     = "Return to Hadron"
+author    = "Matt Powell (cannonball)"
+idgames   = 18117
+doomwiki  = "Return_to_Hadron"
+
+[[entry]]
+key       = "2015-runner-up-doomed-space-wars"
+category  = "runner-up"
+order     = 1
+title     = "Doomed Space Wars"
+author    = "Paul Corfiatis"
+idgames   = 18197
+doomwiki  = "Doomed_Space_Wars"
+
+[[entry]]
+key       = "2015-runner-up-crumpets"
+category  = "runner-up"
+order     = 2
+title     = "Crumpets"
+author    = "Zachary Stephens (Ribbiks)"
+idgames   = 18069
+doomwiki  = "Crumpets"
+
+[[entry]]
+key       = "2015-runner-up-prime-directive"
+category  = "runner-up"
+order     = 3
+title     = "Prime Directive"
+author    = "Ethan Watson (GooberMan)"
+idgames   = 18126
+doomwiki  = "Prime_Directive"
+
+[[entry]]
+key       = "2015-runner-up-pinnacle-of-darkness"
+category  = "runner-up"
+order     = 4
+title     = "Pinnacle of Darkness"
+author    = "Nick Laurent (hobomaster22)"
+idgames   = 18080
+doomwiki  = "Pinnacle_of_Darkness"
+
+[[entry]]
+key       = "2015-runner-up-ol-no-name"
+category  = "runner-up"
+order     = 5
+title     = "Ol' No Name"
+author    = "Octavarium"
+idgames   = 18805
+doomwiki  = "Ol'_No_Name"
+
+[[entry]]
+key       = "2015-runner-up-32in24-14"
+category  = "runner-up"
+order     = 6
+title     = "32in24-14"
+author    = "YEDS"
+idgames   = 17969
+doomwiki  = "32in24-14:_How_the_Hamburglar_Stole_Christmas"
+
+[[entry]]
+key       = "2015-multiplayer-dont-be-a-bitch-remastered"
+category  = "multiplayer"
+order     = 1
+title     = "Don't Be A Bitch Remastered"
+author    = "Mechanix Union"
+idgames   = 18189
+doomwiki  = "Don't_Be_A_Bitch_Remastered"
+
+[[entry]]
+key       = "2015-multiplayer-chaoscore-ctf"
+category  = "multiplayer"
+order     = 2
+title     = "ChaosCore CTF"
+author    = "RoSKing et al."
+doomwiki  = "ChaosCore_CTF"
+
+[[entry]]
+key       = "2015-gameplay-mod-doomrl-arsenal"
+category  = "gameplay-mod"
+order     = 1
+title     = "DoomRL Arsenal"
+author    = "Yholl et al."
+doomwiki  = "DoomRL_Arsenal"
+
+[[entry]]
+key       = "2015-mordeth-chaoscore-ctf"
+category  = "mordeth"
+order     = 1
+title     = "ChaosCore CTF"
+author    = "RoSKing et al."
+doomwiki  = "ChaosCore_CTF"
+
+[[entry]]
+key       = "2015-mockaward-instadoom"
+category  = "mockaward"
+order     = 1
+title     = "InstaDoom"
+author    = "Andrew Stine (Linguica)"
+idgames   = 18292
+doomwiki  = "InstaDoom"
+
+[[entry]]
+key       = "2015-fandoom-contra-doom"
+category  = "fandoom"
+order     = 1
+title     = "Contra Doom"
+author    = "Beed28"
+doomwiki  = "Contra_Doom"
+
+[[entry]]
+key       = "2015-fandoom-hocus-pocus-doom"
+category  = "fandoom"
+order     = 2
+title     = "Hocus Pocus Doom"
+author    = "Fletcher`"
+doomwiki  = "Hocus_Pocus_Doom"
+
+[[entry]]
+key       = "2015-fandoom-sans"
+category  = "fandoom"
+order     = 3
+title     = "sans."
+author    = "Ribo Zurai \\ Captain J"
+doomwiki  = "sans."
+
+[[entry]]
+key       = "2015-fandoom-doom-the-golden-souls"
+category  = "fandoom"
+order     = 4
+title     = "Doom: The Golden Souls"
+author    = "Andrea Gori (Batandy)"
+doomworld = 69813
+doomwiki  = "Doom:_The_Golden_Souls"
+
+[[entry]]
+key       = "2015-fandoom-hotline-666"
+category  = "fandoom"
+order     = 5
+title     = "Hotline 666"
+author    = "The Zombie Killer"
+doomwiki  = "Hotline_666"

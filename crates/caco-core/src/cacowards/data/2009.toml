@@ -1,0 +1,140 @@
+# Facts from Doomworld's Cacowards, by way of the Doom Wiki.
+year = 2009
+page = "https://www.doomworld.com/16years/"
+
+# Not entries, being people or tools: Mapper of the Year.
+
+[[entry]]
+key       = "2009-winner-hell-ground"
+category  = "winner"
+order     = 1
+title     = "Hell Ground"
+author    = "Alexander S. (Eternal)"
+idgames   = 15919
+doomwiki  = "Hell_Ground"
+
+[[entry]]
+key       = "2009-winner-newdoom-community-project-ii"
+category  = "winner"
+order     = 2
+title     = "NewDoom Community Project II"
+author    = "Various"
+idgames   = 15652
+doomwiki  = "NewDoom_Community_Project_II"
+
+[[entry]]
+key       = "2009-winner-harmony"
+category  = "winner"
+order     = 3
+title     = "Harmony"
+author    = "Thomas van der Velden"
+idgames   = 20914
+doomwiki  = "Harmony"
+
+[[entry]]
+key       = "2009-winner-mapgame"
+category  = "winner"
+order     = 4
+title     = "Mapgame"
+author    = "Fletcher`"
+idgames   = 15671
+doomwiki  = "Mapgame"
+
+[[entry]]
+key       = "2009-winner-legacy-of-suffering"
+category  = "winner"
+order     = 5
+title     = "Legacy of Suffering"
+author    = "Logan MTM"
+idgames   = 15942
+doomwiki  = "Legacy_of_Suffering"
+
+[[entry]]
+key       = "2009-winner-tribute-this-is-not-the-best-wad-in-the-world"
+category  = "winner"
+order     = 6
+title     = "Tribute - this is not the best wad in the world"
+author    = "Zalewa"
+idgames   = 15603
+doomwiki  = "Tribute_-_this_is_not_the_best_wad_in_the_world"
+
+[[entry]]
+key       = "2009-winner-ghouls-vs-humans"
+category  = "winner"
+order     = 7
+title     = "Ghouls vs Humans"
+author    = "Mike Hill (Cutmanmike)"
+idgames   = 15553
+doomwiki  = "Ghouls_vs_Humans"
+
+[[entry]]
+key       = "2009-winner-whispers-of-satan"
+category  = "winner"
+order     = 8
+title     = "Whispers of Satan"
+author    = "Paul Corfiatis and Kristian Aro"
+idgames   = 15950
+doomwiki  = "Whispers_of_Satan"
+
+[[entry]]
+key       = "2009-winner-demons-of-problematique-2"
+category  = "winner"
+order     = 9
+title     = "Demons of Problematique 2"
+author    = "Dennis Meuwissen (Exl)"
+idgames   = 15862
+doomwiki  = "Demons_of_Problematique_2"
+
+[[entry]]
+key       = "2009-winner-plutonia-2"
+category  = "winner"
+order     = 10
+title     = "Plutonia 2"
+author    = "Plutonia 2 Team"
+idgames   = 15550
+doomwiki  = "Plutonia_2"
+
+[[entry]]
+key       = "2009-runner-up-happy-time-circus-ii"
+category  = "runner-up"
+order     = 1
+title     = "Happy Time Circus II"
+author    = "Rachel Schmitz (Negatronica)"
+idgames   = 15855
+doomwiki  = "Happy_Time_Circus_II"
+
+[[entry]]
+key       = "2009-runner-up-cheogsh-2"
+category  = "runner-up"
+order     = 2
+title     = "Cheogsh 2"
+author    = "Shadowman"
+idgames   = 15933
+doomwiki  = "Cheogsh_2"
+
+[[entry]]
+key       = "2009-multiplayer-udmx"
+category  = "multiplayer"
+order     = 1
+title     = "UDMX"
+author    = "Unidoom"
+idgames   = 15549
+doomwiki  = "UDMX"
+
+[[entry]]
+key       = "2009-mordeth-plutonia-2"
+category  = "mordeth"
+order     = 1
+title     = "Plutonia 2"
+author    = "Plutonia 2 Team"
+idgames   = 15550
+doomwiki  = "Plutonia_2"
+
+[[entry]]
+key       = "2009-mockaward-killing-adventure"
+category  = "mockaward"
+order     = 1
+title     = "Killing Adventure"
+author    = "Ruba"
+idgames   = 15846
+doomwiki  = "Killing_Adventure"

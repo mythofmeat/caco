@@ -913,9 +913,6 @@ static FIRST_POST_FALLBACK: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
-static THREAD_ID_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"/(?:forum/topic|vb/thread)/(\d+)").unwrap());
-
 // HTML-to-text patterns
 static BR_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)<br\s*/?\s*>").unwrap());
 static P_CLOSE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)</p>").unwrap());
@@ -1095,10 +1092,7 @@ impl DoomworldParser {
 
     /// Extract thread ID from Doomworld forum URL.
     fn extract_thread_id(&self, url: &str) -> i64 {
-        THREAD_ID_PATTERN
-            .captures(url)
-            .and_then(|caps| caps.get(1)?.as_str().parse().ok())
-            .unwrap_or(0)
+        super::extract_topic_id_from_url(url).unwrap_or(0)
     }
 
     /// Extract JSON-LD structured data from HTML.

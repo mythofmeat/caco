@@ -172,6 +172,11 @@ static MIGRATIONS: &[Migration] = &[
     ),
     (40, "add_last_known_path", migrate_add_last_known_path),
     (41, "add_file_identity", migrate_add_file_identity),
+    (
+        42,
+        "key_cacowards_on_dataset",
+        migrate_key_cacowards_on_dataset,
+    ),
 ];
 
 // ---------------------------------------------------------------------------
@@ -224,7 +229,8 @@ pub fn init_db(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// Copy the live DB file to `{backup_dir}/pre-migration-{from_version}.db`.
+/// Copy the live DB file to `pre-migration-{from_version}.db` in
+/// [`crate::config::migration_backup_dir`], beside the database itself.
 /// Best-effort: logs a warning and continues on failure (a missing backup
 /// should not prevent the user from running pending migrations).
 fn backup_before_migration(conn: &Connection, from_version: i64) {
@@ -235,7 +241,7 @@ fn backup_before_migration(conn: &Connection, from_version: i64) {
     if !db_path.exists() {
         return;
     }
-    let backup_dir = crate::config::backup_dir();
+    let backup_dir = crate::config::migration_backup_dir(db_path);
     if let Err(e) = std::fs::create_dir_all(&backup_dir) {
         tracing::warn!("failed to create backup dir {backup_dir:?}: {e}");
         return;
@@ -810,6 +816,99 @@ fn migrate_add_cacoward_supported_flag(conn: &Connection) -> Result<()> {
     add_column_if_missing(conn, "cacowards", "supported", "INTEGER NOT NULL DEFAULT 1")
 }
 
+/// Key the table on the curated dataset's `key` instead of
+/// `UNIQUE(year, category, wad_title)`, under which a corrected title turned a
+/// pinned row into a duplicate (#53).
+///
+/// A rebuild, because SQLite cannot drop a table's UNIQUE constraint. A row gets
+/// the key its year, category and title would have been curated under, which is
+/// how it meets its entry when the dataset is first written: what the user did to
+/// it (the link, its pin, an unsupported flag) comes across, and the dataset
+/// overwrites the rest. `supported = 1` was only ever the default, so it comes
+/// across as no opinion, and a `0` is the user's.
+///
+/// The old identifier columns are deliberately left behind, and `blurb` with them,
+/// which nothing ever wrote. The dataset's identifiers arriving in the now-empty
+/// columns is what makes the first sync consider each row for linking once, which
+/// is the only chance a row has if its WAD was imported before linking ran at import.
+fn migrate_key_cacowards_on_dataset(conn: &Connection) -> Result<()> {
+    if has_column(conn, "cacowards", "key")? {
+        return Ok(());
+    }
+
+    conn.execute_batch(
+        "CREATE TABLE cacowards_keyed (
+            id INTEGER PRIMARY KEY,
+            key TEXT NOT NULL UNIQUE,
+            year INTEGER NOT NULL,
+            category TEXT NOT NULL,
+            page_order INTEGER NOT NULL,
+            wad_title TEXT NOT NULL,
+            wad_author TEXT,
+            idgames_id INTEGER,
+            doomworld_id INTEGER,
+            doomwiki_page TEXT,
+            sha256 TEXT,
+            wad_id INTEGER REFERENCES wads(id) ON DELETE SET NULL,
+            manual_override INTEGER NOT NULL DEFAULT 0,
+            supported_default INTEGER NOT NULL DEFAULT 1,
+            supported_override INTEGER,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );",
+    )?;
+
+    struct Row {
+        id: i64,
+        year: i64,
+        category: String,
+        rank: Option<i64>,
+        title: String,
+    }
+    let rows = {
+        let mut stmt =
+            conn.prepare("SELECT id, year, category, rank, wad_title FROM cacowards ORDER BY id")?;
+        stmt.query_map([], |row| {
+            Ok(Row {
+                id: row.get(0)?,
+                year: row.get(1)?,
+                category: row.get(2)?,
+                rank: row.get(3)?,
+                title: row.get(4)?,
+            })
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?
+    };
+
+    let mut taken = std::collections::HashSet::new();
+    for row in rows {
+        let mut key = crate::cacowards::entry_key(row.year, &row.category, &row.title);
+        // The old constraint let two titles that differ only in punctuation
+        // through, and the key cannot tell those apart. The first keeps the key.
+        if !taken.insert(key.clone()) {
+            key = format!("{key}-{}", row.id);
+            taken.insert(key.clone());
+        }
+        conn.execute(
+            "INSERT INTO cacowards_keyed
+                 (id, key, year, category, page_order, wad_title, wad_author, wad_id,
+                  manual_override, supported_override, created_at, updated_at)
+             SELECT id, ?2, year, category, ?3, wad_title, wad_author, wad_id, manual_override,
+                    CASE supported WHEN 0 THEN 0 END, created_at, updated_at
+             FROM cacowards WHERE id = ?1",
+            rusqlite::params![row.id, key, row.rank.unwrap_or(9999)],
+        )?;
+    }
+
+    conn.execute_batch(
+        "DROP TABLE cacowards;
+         ALTER TABLE cacowards_keyed RENAME TO cacowards;
+         CREATE INDEX idx_cacowards_wad_id ON cacowards(wad_id);
+         CREATE INDEX idx_cacowards_year ON cacowards(year);",
+    )?;
+    Ok(())
+}
+
 fn migrate_consolidate_status(conn: &Connection) -> Result<()> {
     // Step 1: Map old status values to new ones
     conn.execute_batch(
@@ -1032,6 +1131,194 @@ mod tests {
             Some("https://example.com/a b.zip")
         );
         assert_eq!(column(2, "source_url"), None);
+    }
+
+    /// A library at schema 41, whose `cacowards` table a scrape filled.
+    fn library_before_the_dataset() -> Connection {
+        let conn = open_memory().unwrap();
+        init_db(&conn).unwrap();
+        conn.execute_batch(
+            "DROP TABLE cacowards;
+             CREATE TABLE cacowards (
+                id INTEGER PRIMARY KEY,
+                year INTEGER NOT NULL,
+                category TEXT NOT NULL,
+                rank INTEGER,
+                wad_title TEXT NOT NULL,
+                wad_author TEXT,
+                idgames_url TEXT,
+                doomwiki_url TEXT,
+                blurb TEXT,
+                wad_id INTEGER REFERENCES wads(id) ON DELETE SET NULL,
+                manual_override INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                supported INTEGER NOT NULL DEFAULT 1,
+                UNIQUE(year, category, wad_title)
+             );
+             DELETE FROM schema_migrations WHERE version >= 42;
+             INSERT INTO wads (id, title, source_type) VALUES (1, 'Lonesome Road | Chapter 1', 'doomworld');
+             INSERT INTO cacowards
+                 (id, year, category, rank, wad_title, wad_author, idgames_url, doomwiki_url,
+                  wad_id, manual_override, supported) VALUES
+                 (10, 2025, 'winner', 8, 'Lonesome Road', 'tourniquet', NULL,
+                  'https://doomwiki.org/wiki/Lonesome_Road', 1, 1, 1),
+                 (11, 2023, 'mordeth', 1, 'TNT2 MAP26', NULL, NULL, NULL, NULL, 0, 0),
+                 (12, 2023, 'winner', 2, 'Piña Colada', NULL,
+                  'https://www.doomworld.com/idgames/?id=20917', NULL, 1, 0, 1),
+                 (13, 2023, 'winner', NULL, 'Unranked', NULL, NULL, NULL, NULL, 0, 1),
+                 (14, 2023, 'winner', 3, 'Same Name!', NULL, NULL, NULL, NULL, 0, 1),
+                 (15, 2023, 'winner', 4, 'Same Name?', NULL, NULL, NULL, NULL, 1, 1);",
+        )
+        .unwrap();
+        conn
+    }
+
+    fn keyed_row(conn: &Connection, id: i64) -> crate::db::cacowards::CacowardRecord {
+        crate::db::cacowards::get_cacoward(conn, id)
+            .unwrap()
+            .unwrap()
+    }
+
+    #[test]
+    fn test_migration_keys_rows_the_way_the_dataset_does() {
+        let conn = library_before_the_dataset();
+        init_db(&conn).unwrap();
+
+        assert_eq!(keyed_row(&conn, 10).key, "2025-winner-lonesome-road");
+        assert_eq!(keyed_row(&conn, 11).key, "2023-mordeth-tnt2-map26");
+        assert_eq!(keyed_row(&conn, 12).key, "2023-winner-pina-colada");
+    }
+
+    #[test]
+    fn test_migration_keeps_what_the_user_did_to_a_row() {
+        let conn = library_before_the_dataset();
+        init_db(&conn).unwrap();
+
+        let pinned = keyed_row(&conn, 10);
+        assert_eq!(pinned.wad_id, Some(1));
+        assert!(pinned.manual_override);
+        assert_eq!(pinned.wad_title, "Lonesome Road");
+        assert_eq!(pinned.page_order, 8);
+        assert_eq!(pinned.wad_author.as_deref(), Some("tourniquet"));
+
+        // An auto-link is kept, and is still not a pin.
+        let auto_linked = keyed_row(&conn, 12);
+        assert_eq!(auto_linked.wad_id, Some(1));
+        assert!(!auto_linked.manual_override);
+    }
+
+    #[test]
+    fn test_migration_reads_supported_as_the_users_word_only_when_it_was_off() {
+        let conn = library_before_the_dataset();
+        init_db(&conn).unwrap();
+
+        let flagged = keyed_row(&conn, 11);
+        assert_eq!(flagged.supported_override, Some(false));
+        assert!(!flagged.supported);
+
+        // 1 was the column's default, so it says nothing the data may not overrule.
+        let unflagged = keyed_row(&conn, 10);
+        assert_eq!(unflagged.supported_override, None);
+        assert!(unflagged.supported);
+    }
+
+    #[test]
+    fn test_migration_leaves_identifiers_for_the_dataset_to_supply() {
+        // Their arrival is what makes the first sync consider each row for linking.
+        let conn = library_before_the_dataset();
+        init_db(&conn).unwrap();
+
+        let row = keyed_row(&conn, 12);
+        assert_eq!(row.idgames_id, None);
+        assert_eq!(row.doomwiki_page, None);
+        assert!(!has_column(&conn, "cacowards", "blurb").unwrap());
+        assert!(!has_column(&conn, "cacowards", "idgames_url").unwrap());
+    }
+
+    #[test]
+    fn test_migration_survives_titles_the_key_cannot_tell_apart() {
+        let conn = library_before_the_dataset();
+        init_db(&conn).unwrap();
+
+        assert_eq!(keyed_row(&conn, 14).key, "2023-winner-same-name");
+        assert_eq!(keyed_row(&conn, 15).key, "2023-winner-same-name-15");
+        assert!(keyed_row(&conn, 15).manual_override);
+    }
+
+    #[test]
+    fn test_migration_gives_a_row_with_no_rank_a_place_at_the_end() {
+        let conn = library_before_the_dataset();
+        init_db(&conn).unwrap();
+        assert_eq!(keyed_row(&conn, 13).page_order, 9999);
+    }
+
+    #[test]
+    fn test_migration_keeps_the_foreign_key_and_indexes() {
+        let conn = library_before_the_dataset();
+        init_db(&conn).unwrap();
+
+        conn.execute("DELETE FROM wads WHERE id = 1", []).unwrap();
+        assert_eq!(keyed_row(&conn, 10).wad_id, None);
+
+        let indexes: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type = 'index' AND name IN ('idx_cacowards_wad_id', 'idx_cacowards_year')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(indexes, 2);
+    }
+
+    #[test]
+    fn test_a_snapshot_goes_beside_the_database_it_is_of() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = crate::db::open_connection(&dir.path().join("library.db")).unwrap();
+
+        init_db(&conn).unwrap();
+
+        assert!(dir.path().join("backups/pre-migration-0.db").exists());
+    }
+
+    #[test]
+    fn test_each_schema_version_keeps_its_own_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = crate::db::open_connection(&dir.path().join("library.db")).unwrap();
+        init_db(&conn).unwrap();
+
+        let latest = MIGRATIONS.last().unwrap().0;
+        conn.execute(
+            "DELETE FROM schema_migrations WHERE version >= ?1",
+            [latest],
+        )
+        .unwrap();
+        init_db(&conn).unwrap();
+
+        let backups = dir.path().join("backups");
+        assert!(backups.join("pre-migration-0.db").exists());
+        assert!(
+            backups
+                .join(format!("pre-migration-{}.db", latest - 1))
+                .exists()
+        );
+    }
+
+    #[test]
+    fn test_key_is_unique_and_title_no_longer_is() {
+        let conn = open_memory().unwrap();
+        init_db(&conn).unwrap();
+        let insert = |key: &str| {
+            conn.execute(
+                "INSERT INTO cacowards (key, year, category, page_order, wad_title)
+                 VALUES (?1, 2023, 'winner', 1, 'Same Title')",
+                [key],
+            )
+        };
+        insert("a").unwrap();
+        insert("b").unwrap();
+        assert!(insert("a").is_err());
     }
 
     #[test]

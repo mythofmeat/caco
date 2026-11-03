@@ -211,7 +211,7 @@ impl Shooter {
             unchecked: 71,
         };
         let tx = self.harness.state_mut().background_sender();
-        tx.send(AppMessage::EnrichComplete(Ok(EnrichReport::Wads {
+        tx.send(AppMessage::EnrichComplete(Ok(EnrichReport {
             examined: 116,
             findings,
             wiki_lookups: 1,
@@ -337,6 +337,18 @@ fn shoot_every_surface() {
     ] {
         s.shot_view(name, mode);
     }
+
+    // The far end of a strip that has to scroll to reach it, since the newest year
+    // is what opens. An old year also has different sections to lay out: no
+    // honorable mentions, and awards the recent ones don't give.
+    s.shot_view_after("03-cacowards-oldest", ViewMode::Cacowards, |s| {
+        // Through accesskit, because a pointer click lands where the chip is, and
+        // that is off the end of the strip until something scrolls it there.
+        s.harness.get_by_label("2004").click_accesskit();
+        s.settle(3, Duration::ZERO);
+        s.harness.get_by_label("WORST WAD");
+        assert!(s.harness.query_by_label("DOOM MOMA").is_none());
+    });
 
     // A blocked source is the state this view most has to explain, and only a
     // worker can report it. Posted the way the search worker posts it, on the tab

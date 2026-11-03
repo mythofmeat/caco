@@ -1,0 +1,149 @@
+# Facts from Doomworld's Cacowards, by way of the Doom Wiki.
+year = 2005
+page = "https://www.doomworld.com/12years/"
+
+# Not entries, being people or tools: Mapper of the Year.
+
+[[entry]]
+key       = "2005-winner-simplicity"
+category  = "winner"
+order     = 1
+title     = "Simplicity"
+author    = "Melissa McGee (Agent Spork)"
+idgames   = 15043
+doomwiki  = "Simplicity"
+
+[[entry]]
+key       = "2005-winner-scythe-2"
+category  = "winner"
+order     = 2
+title     = "Scythe 2"
+author    = "Erik Alm"
+idgames   = 13600
+doomwiki  = "Scythe_2"
+
+[[entry]]
+key       = "2005-winner-hedrox"
+category  = "winner"
+order     = 3
+title     = "HeDRoX"
+author    = "Rodrigo Acevedo (ElRodo)"
+idgames   = 13458
+doomwiki  = "HeDRoX"
+
+[[entry]]
+key       = "2005-winner-suspended-in-dusk"
+category  = "winner"
+order     = 4
+title     = "Suspended in Dusk"
+author    = "Esa Repo (Espi)"
+idgames   = 13851
+doomwiki  = "Suspended_in_Dusk"
+
+[[entry]]
+key       = "2005-winner-kama-sutra"
+category  = "winner"
+order     = 5
+title     = "Kama Sutra"
+author    = "Adolf Vojta (Gusta) and Jakub Razak (_MethoD_)"
+idgames   = 13290
+doomwiki  = "Kama_Sutra"
+
+[[entry]]
+key       = "2005-winner-congestion-1024"
+category  = "winner"
+order     = 6
+title     = "Congestion 1024"
+author    = "Various"
+idgames   = 13958
+doomwiki  = "Congestion_1024"
+
+[[entry]]
+key       = "2005-winner-hi-tech-hell-2-alien-tech"
+category  = "winner"
+order     = 7
+title     = "Hi-Tech Hell 2 - Alien Tech"
+author    = "Simo Malinen"
+idgames   = 13603
+doomwiki  = "Hi-Tech_Hell_2_-_Alien_Tech"
+
+[[entry]]
+key       = "2005-winner-temple-of-chaos-2-warped-reality"
+category  = "winner"
+order     = 8
+title     = "Temple of Chaos 2 - Warped Reality"
+author    = "Melissa McGee (Agent Spork)"
+idgames   = 13402
+doomwiki  = "Temple_of_Chaos_2_-_Warped_Reality"
+
+[[entry]]
+key       = "2005-winner-crimson-canyon"
+category  = "winner"
+order     = 9
+title     = "Crimson Canyon"
+author    = "Jeffrey Graham (psyren)"
+idgames   = 13317
+doomwiki  = "Crimson_Canyon"
+
+[[entry]]
+key       = "2005-winner-total-control"
+category  = "winner"
+order     = 10
+title     = "Total Control"
+author    = "Ronald Lubbelinkhof (Dutch Devil)"
+idgames   = 13845
+doomwiki  = "Total_Control"
+
+[[entry]]
+key       = "2005-runner-up-for-whom-the-bell-tolls"
+category  = "runner-up"
+order     = 1
+title     = "For Whom the Bell Tolls"
+author    = "didy"
+idgames   = 13934
+doomwiki  = "For_Whom_the_Bell_Tolls"
+
+[[entry]]
+key       = "2005-runner-up-altar-of-evil"
+category  = "runner-up"
+order     = 2
+title     = "Altar of Evil"
+author    = "Ronald Lubbelinkhof (Dutch Devil)"
+idgames   = 13700
+doomwiki  = "Altar_of_Evil"
+
+[[entry]]
+key       = "2005-what-the-hell-happy-time-circus"
+category  = "what-the-hell"
+order     = 1
+title     = "Happy Time Circus"
+author    = "Rachel Schmitz (Negatronica)"
+idgames   = 13488
+doomwiki  = "Happy_Time_Circus"
+
+[[entry]]
+key       = "2005-multiplayer-nimrod-project-doom"
+category  = "multiplayer"
+order     = 1
+title     = "Ni'mRoD - Project Doom"
+author    = "Team Future"
+idgames   = 14015
+doomwiki  = "Ni'mRoD_-_Project_Doom"
+
+[[entry]]
+key       = "2005-mordeth-jagermorder-2-terra-nova"
+category  = "mordeth"
+order     = 1
+title     = "Jägermörder 2: Terra Nova"
+author    = "Derek MacDonald (Afterglow)"
+idgames   = 13722
+doomwiki  = "Jägermörder_2:_Terra_Nova"
+
+[[entry]]
+key       = "2005-mockaward-kama-sutra"
+category  = "mockaward"
+order     = 1
+title     = "Kama Sutra"
+author    = "Adolf Vojta (Gusta) and Jakub Razak (_MethoD_)"
+idgames   = 13290
+doomwiki  = "Kama_Sutra"

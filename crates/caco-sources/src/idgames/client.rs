@@ -53,7 +53,7 @@ impl IdgamesClient {
     /// directory so we don't pick up unrelated same-named files.
     ///
     /// A WAF block short-circuits: the search would only hit the same wall.
-    pub(crate) fn get_by_path(&self, file_path: &str) -> Result<FileEntry> {
+    pub fn get_by_path(&self, file_path: &str) -> Result<FileEntry> {
         let get_err = match self.get(None, Some(file_path)) {
             Ok(entry) => return Ok(entry),
             Err(e @ SourceError::WafBlocked { .. }) => return Err(e),

@@ -1,10 +1,10 @@
 //! Modal picker for linking a Cacoward entry to a library WAD.
 //!
-//! The cacoward auto-linker (idgames id + normalized title) catches most
-//! matches, but anything with a renamed/abbreviated/aliased title needs a
-//! manual link. This dialog shows the user's library with a filter input
-//! and lets them pick a WAD to attach to the entry. Linking sets
-//! `manual_override=true` so re-enrich won't clobber the choice.
+//! The cacoward auto-linker catches what an identifier or a unique title can
+//! prove, but a WAD imported some other way, under another title, needs a manual
+//! link. This dialog shows the user's library with a filter input and lets them
+//! pick a WAD to attach to the entry. Linking sets `manual_override=true` so a data
+//! update won't clobber the choice.
 
 use rusqlite::Connection;
 
