@@ -26,8 +26,12 @@ pub enum SourceError {
     ///
     /// Worded here rather than by each client, so the same event cannot read
     /// differently depending on which client hit it, and the WAF it names is the
-    /// one that answered.
-    #[error("{site} blocked the request ({kind} challenge). Try again later or import manually.")]
+    /// one that answered. It does not promise that waiting helps: a challenge can
+    /// be a site's standing policy for non-browser clients, not a passing limit.
+    #[error(
+        "{site} blocked the request ({kind} challenge). Retrying may not help; \
+         add the WAD with the URL or local form instead."
+    )]
     WafBlocked { site: &'static str, kind: WafKind },
 }
 

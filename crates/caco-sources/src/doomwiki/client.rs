@@ -255,8 +255,8 @@ mod tests {
         ));
         assert_eq!(
             err.to_string(),
-            "Doom Wiki blocked the request (Cloudflare challenge). \
-             Try again later or import manually."
+            "Doom Wiki blocked the request (Cloudflare challenge). Retrying may not help; \
+             add the WAD with the URL or local form instead."
         );
     }
 
@@ -280,8 +280,8 @@ mod tests {
         ));
         assert_eq!(
             err.to_string(),
-            "Doom Wiki blocked the request (AWS WAF challenge). \
-             Try again later or import manually."
+            "Doom Wiki blocked the request (AWS WAF challenge). Retrying may not help; \
+             add the WAD with the URL or local form instead."
         );
     }
 

@@ -174,8 +174,8 @@ Non-Doomwiki imports are auto-enriched with Doom Wiki metadata (author, year,
 description, IWAD). Duplicate detection warns before re-importing.
 
 A site can answer with a WAF challenge instead of the page caco asked for. The
-error then names the site and the WAF: try again later, or add the WAD by hand
-with the URL or local form.
+error then names the site and the WAF. Retrying may not help, but you can still
+add the WAD by hand with the URL or local form.
 
 ## IWADs
 

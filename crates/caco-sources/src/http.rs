@@ -159,7 +159,7 @@ mod tests {
     }
 
     /// A real refusal keeps its status. Blaming a challenge that never happened
-    /// would tell the user to retry something that will keep failing.
+    /// would send the user looking for the wrong cause.
     #[test]
     fn waf_challenge_ignores_a_plain_403() {
         let response = canned_response(403, &[("server", "cloudflare")], "Forbidden");
