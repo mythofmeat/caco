@@ -6,6 +6,7 @@ use rusqlite::Connection;
 use crate::dialogs::collections::CollectionsDialogState;
 use crate::dialogs::delete::DeleteDialogState;
 use crate::dialogs::edit::EditDialogState;
+use crate::dialogs::file_changed::FileChangedDialogState;
 use crate::dialogs::link::LinkDialogState;
 use crate::dialogs::resources::ResourcesDialogState;
 use crate::dialogs::sessions::SessionsDialogState;
@@ -261,6 +262,146 @@ impl CacoApp {
         });
     }
 
+    /// Launch a WAD on a worker thread: check its file is here, download it
+    /// when it is not and caco can, then play it.
+    ///
+    /// The worker answers with what the UI does next. A file caco cannot
+    /// fetch opens the link dialog, one that has changed since the WAD was
+    /// last played asks before launching, and anything else is a toast.
+    fn spawn_play(&mut self, wad_id: i64, opts: caco_core::player::PlayOptions) {
+        if self.state.is_playing() {
+            return;
+        }
+
+        // Get title for status bar display
+        let title = self
+            .state
+            .wads
+            .iter()
+            .find(|w| w.id == wad_id)
+            .map(|w| w.title.clone())
+            .unwrap_or_else(|| format!("WAD #{wad_id}"));
+
+        self.state.play_state = PlayState::Playing {
+            wad_id,
+            wad_title: title,
+        };
+
+        // Spawn play worker in a background thread
+        let sender = self.bg.sender();
+        let db_path = self.state.db_path.clone();
+        std::thread::spawn(move || {
+            // Local error type that distinguishes the outcomes the UI acts on
+            // from errors that only surface as a toast. String errors from `?`
+            // default to Message; Unavailable is chosen explicitly where the
+            // file is not on this machine and caco cannot fetch it, and
+            // Changed is the launch's own refusal to play a changed file
+            // without asking.
+            enum PlayError {
+                Message(String),
+                Unavailable,
+                Changed {
+                    title: String,
+                    change: caco_core::identity::ContentChange,
+                },
+            }
+            impl From<String> for PlayError {
+                fn from(s: String) -> Self {
+                    PlayError::Message(s)
+                }
+            }
+
+            let outcome = (|| -> Result<caco_core::player::PlayResult, PlayError> {
+                let conn = caco_core::db::open_connection(&db_path)
+                    .map_err(|e| format!("DB open failed: {e}"))?;
+
+                let wad = caco_core::db::get_wad(&conn, wad_id, false)
+                    .map_err(|e| format!("DB error: {e}"))?
+                    .ok_or_else(|| format!("WAD #{wad_id} not found"))?;
+
+                // The startup check, for this one WAD: a file that has
+                // gone since is recorded as last seen there, and one
+                // that has come back is relinked.
+                let presence = caco_core::presence::check_wad(
+                    &conn,
+                    &wad,
+                    &caco_core::presence::StorePaths::from_config(),
+                )
+                .map_err(|e| format!("Checking the WAD file failed: {e}"))?;
+                if !presence.is_here() {
+                    // Nothing to fetch it from: say so now, rather than
+                    // announce a download that cannot start.
+                    if !wad.retrievability().is_automatic() {
+                        return Err(PlayError::Unavailable);
+                    }
+                    sender.send(AppMessage::Notify(Notification::info(format!(
+                        "Downloading {}...",
+                        wad.title
+                    ))));
+                    let client = caco_sources::idgames::IdgamesClient::new();
+                    let cache_dir = caco_core::config::get_cache_dir();
+                    std::fs::create_dir_all(&cache_dir)
+                        .map_err(|e| format!("Failed to create cache dir: {e}"))?;
+                    let mirror = caco_core::config::load_config().download_mirror as usize;
+
+                    // Ask the archive where the file is now, but a failed
+                    // lookup is not a missing file: source_url + filename
+                    // still name it on a mirror, and the mirrors do not sit
+                    // behind the API.
+                    let entry = wad
+                        .idgames_id
+                        .as_deref()
+                        .and_then(|id| id.parse::<i64>().ok())
+                        .and_then(|id| client.get(Some(id), None).ok());
+
+                    let dest = match entry {
+                        Some(entry) => client.download(&entry, Some(&cache_dir), mirror, None),
+                        None => client.download_direct(
+                            wad.source_url.as_deref().unwrap_or(""),
+                            wad.filename.as_deref().unwrap_or(""),
+                            &cache_dir,
+                            mirror,
+                            None,
+                        ),
+                    }
+                    .map_err(|_| PlayError::Unavailable)?;
+
+                    // Only the path: the launch below hashes the new file
+                    // before it plays it, and asks if it is not the file the
+                    // WAD was last played with.
+                    let update = caco_core::db::WadUpdate::new()
+                        .set_text("cached_path", Some(dest.to_string_lossy().to_string()));
+                    caco_core::db::update_wad(&conn, wad_id, &update)
+                        .map_err(|e| format!("Failed to update WAD record: {e}"))?;
+                }
+
+                caco_core::player::play(&conn, wad_id, opts).map_err(|e| match e {
+                    // Gone between the check above and the launch.
+                    caco_core::Error::WadFileMissing { .. } => PlayError::Unavailable,
+                    caco_core::Error::WadFileChanged { title, change } => {
+                        PlayError::Changed { title, change }
+                    }
+                    e => PlayError::Message(e.to_string()),
+                })
+            })();
+
+            match outcome {
+                Ok(pr) => sender.send(AppMessage::PlayFinished { outcome: Ok(pr) }),
+                Err(PlayError::Message(msg)) => {
+                    sender.send(AppMessage::PlayFinished { outcome: Err(msg) })
+                }
+                Err(PlayError::Unavailable) => sender.send(AppMessage::PlayUnavailable { wad_id }),
+                Err(PlayError::Changed { title, change }) => {
+                    sender.send(AppMessage::PlayFileChanged {
+                        wad_id,
+                        title,
+                        change,
+                    })
+                }
+            }
+        });
+    }
+
     /// Run an enrichment on a worker thread, streaming progress back to the
     /// dialog. Enrichment does one Doom Wiki lookup per WAD it cannot settle
     /// from the file, so a whole-library run is minutes of network I/O and
@@ -478,7 +619,7 @@ impl CacoApp {
                     let outcome = (|| -> Result<(), String> {
                         let conn = caco_core::db::open_connection(&db_path)
                             .map_err(|e| format!("DB open failed: {e}"))?;
-                        caco_core::player::play_demo(&conn, wad_id, Some(&demo), None)
+                        caco_core::player::play_demo(&conn, wad_id, Some(&demo))
                             .map_err(|e| e.to_string())?;
                         Ok(())
                     })();
@@ -551,128 +692,13 @@ impl CacoApp {
                 }
             }
             ActionRequest::Play(wad_id) => {
-                if self.state.is_playing() {
-                    return;
-                }
-
-                // Get title for status bar display
-                let title = self
-                    .state
-                    .wads
-                    .iter()
-                    .find(|w| w.id == wad_id)
-                    .map(|w| w.title.clone())
-                    .unwrap_or_else(|| format!("WAD #{wad_id}"));
-
-                self.state.play_state = PlayState::Playing {
-                    wad_id,
-                    wad_title: title,
+                self.spawn_play(wad_id, caco_core::player::PlayOptions::default());
+            }
+            ActionRequest::PlayAnyway(wad_id) => {
+                let opts = caco_core::player::PlayOptions {
+                    accept_changed_file: true,
                 };
-
-                // Spawn play worker in a background thread
-                let sender = self.bg.sender();
-                let db_path = self.state.db_path.clone();
-                std::thread::spawn(move || {
-                    // Local error type that distinguishes "WAD not available —
-                    // offer the link dialog" from other errors that should
-                    // surface as a toast. String errors from `?` default to
-                    // Message; Unavailable is chosen explicitly where the file
-                    // is not on this machine and caco cannot fetch it.
-                    enum PlayError {
-                        Message(String),
-                        Unavailable,
-                    }
-                    impl From<String> for PlayError {
-                        fn from(s: String) -> Self {
-                            PlayError::Message(s)
-                        }
-                    }
-
-                    let outcome = (|| -> Result<caco_core::player::PlayResult, PlayError> {
-                        let conn = caco_core::db::open_connection(&db_path)
-                            .map_err(|e| format!("DB open failed: {e}"))?;
-
-                        let wad = caco_core::db::get_wad(&conn, wad_id, false)
-                            .map_err(|e| format!("DB error: {e}"))?
-                            .ok_or_else(|| format!("WAD #{wad_id} not found"))?;
-
-                        // The startup check, for this one WAD: a file that has
-                        // gone since is recorded as last seen there, and one
-                        // that has come back is relinked.
-                        let presence = caco_core::presence::check_wad(
-                            &conn,
-                            &wad,
-                            &caco_core::presence::StorePaths::from_config(),
-                        )
-                        .map_err(|e| format!("Checking the WAD file failed: {e}"))?;
-                        if !presence.is_here() {
-                            // Nothing to fetch it from: say so now, rather than
-                            // announce a download that cannot start.
-                            if !wad.retrievability().is_automatic() {
-                                return Err(PlayError::Unavailable);
-                            }
-                            sender.send(AppMessage::Notify(Notification::info(format!(
-                                "Downloading {}...",
-                                wad.title
-                            ))));
-                            let client = caco_sources::idgames::IdgamesClient::new();
-                            let cache_dir = caco_core::config::get_cache_dir();
-                            std::fs::create_dir_all(&cache_dir)
-                                .map_err(|e| format!("Failed to create cache dir: {e}"))?;
-                            let mirror = caco_core::config::load_config().download_mirror as usize;
-
-                            // Ask the archive where the file is now, but a failed
-                            // lookup is not a missing file: source_url + filename
-                            // still name it on a mirror, and the mirrors do not sit
-                            // behind the API.
-                            let entry = wad
-                                .idgames_id
-                                .as_deref()
-                                .and_then(|id| id.parse::<i64>().ok())
-                                .and_then(|id| client.get(Some(id), None).ok());
-
-                            let dest = match entry {
-                                Some(entry) => {
-                                    client.download(&entry, Some(&cache_dir), mirror, None)
-                                }
-                                None => client.download_direct(
-                                    wad.source_url.as_deref().unwrap_or(""),
-                                    wad.filename.as_deref().unwrap_or(""),
-                                    &cache_dir,
-                                    mirror,
-                                    None,
-                                ),
-                            }
-                            .map_err(|_| PlayError::Unavailable)?;
-
-                            let update = caco_core::db::WadUpdate::new()
-                                .set_text("cached_path", Some(dest.to_string_lossy().to_string()));
-                            caco_core::db::update_wad(&conn, wad_id, &update)
-                                .map_err(|e| format!("Failed to update WAD record: {e}"))?;
-                        }
-
-                        caco_core::player::play(
-                            &conn,
-                            wad_id,
-                            &caco_core::player::PlayOptions::default(),
-                        )
-                        .map_err(|e| match e {
-                            // Gone between the check above and the launch.
-                            caco_core::Error::WadFileMissing { .. } => PlayError::Unavailable,
-                            e => PlayError::Message(e.to_string()),
-                        })
-                    })();
-
-                    match outcome {
-                        Ok(pr) => sender.send(AppMessage::PlayFinished { outcome: Ok(pr) }),
-                        Err(PlayError::Message(msg)) => {
-                            sender.send(AppMessage::PlayFinished { outcome: Err(msg) })
-                        }
-                        Err(PlayError::Unavailable) => {
-                            sender.send(AppMessage::PlayUnavailable { wad_id })
-                        }
-                    }
-                });
+                self.spawn_play(wad_id, opts);
             }
         }
     }
@@ -705,11 +731,28 @@ impl eframe::App for CacoApp {
                         ));
                     }
                 }
+                AppMessage::PlayFileChanged {
+                    wad_id,
+                    title,
+                    change,
+                } => {
+                    self.state.play_state = PlayState::Idle;
+                    // The launch hashed the file to find this out, and a file
+                    // that plays differently drops the analysis made from the
+                    // old one.
+                    self.state.invalidate_wad_views();
+                    self.state.active_dialog = Some(ActiveDialog::FileChanged(
+                        FileChangedDialogState::new(wad_id, title, change),
+                    ));
+                }
                 AppMessage::FilesChecked(report) => {
                     self.state.invalidate_wad_views();
                     if let Some(notification) = file_check::notification(&report) {
                         self.state.notification = Some(notification);
                     }
+                }
+                AppMessage::FilesIdentified => {
+                    self.state.invalidate_wad_views();
                 }
                 AppMessage::PlayFinished { outcome } => {
                     self.state.play_state = PlayState::Idle;

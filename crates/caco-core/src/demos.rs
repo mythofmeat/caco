@@ -1,11 +1,9 @@
-//! Demo file management — find, clean, and name demo recordings.
+//! Demo file management — find and clean demo recordings.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use chrono::Local;
-
-use crate::utils::{sanitize_name, system_time_to_rfc3339};
+use crate::utils::system_time_to_rfc3339;
 
 /// Demo file extension.
 pub const DEMO_EXTENSION: &str = ".lmp";
@@ -126,21 +124,6 @@ pub fn clean_demo_files(data_dir: &Path) -> Vec<PathBuf> {
     deleted
 }
 
-/// Generate a timestamped demo filename (without extension).
-///
-/// Sourceports append .lmp automatically when recording, so this returns
-/// the base name only.
-pub fn generate_demo_name(wad_stem: &str) -> String {
-    let sanitized = sanitize_name(wad_stem, 48);
-    let sanitized = if sanitized.is_empty() {
-        "demo".to_string()
-    } else {
-        sanitized
-    };
-    let timestamp = Local::now().format("%Y%m%d_%H%M%S").to_string();
-    format!("{sanitized}_{timestamp}")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -232,24 +215,5 @@ mod tests {
     fn test_resolve_demo_path_no_demos() {
         let dir = tempfile::tempdir().unwrap();
         assert!(resolve_demo_path(dir.path(), None).is_err());
-    }
-
-    #[test]
-    fn test_generate_demo_name() {
-        let name = generate_demo_name("Scythe 2");
-        assert!(name.starts_with("scythe-2_"));
-        assert!(name.len() > 10); // has timestamp
-    }
-
-    #[test]
-    fn test_generate_demo_name_empty() {
-        let name = generate_demo_name("");
-        assert!(name.starts_with("demo_"));
-    }
-
-    #[test]
-    fn test_generate_demo_name_special_chars() {
-        let name = generate_demo_name("!!!Test WAD!!!");
-        assert!(name.starts_with("test-wad_"));
     }
 }

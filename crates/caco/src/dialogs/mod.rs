@@ -7,6 +7,7 @@ pub mod companions;
 pub mod delete;
 pub mod edit;
 pub mod enrich;
+pub mod file_changed;
 pub mod gc;
 pub mod link;
 pub mod profiles;
@@ -17,6 +18,7 @@ pub mod sourceports;
 pub mod storage;
 pub mod trash;
 pub mod wad_data;
+pub mod wad_file;
 pub mod wad_stats;
 
 /// Margin left between a dialog and the app window edge, per side.

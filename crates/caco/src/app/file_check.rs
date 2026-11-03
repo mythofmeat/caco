@@ -7,24 +7,46 @@ use caco_core::presence::{self, CheckReport, StorePaths};
 use crate::message::{AppMessage, Notification};
 use crate::workers::BackgroundSender;
 
-/// Check every recorded WAD file against this machine, on a worker thread.
+/// Check every recorded WAD file against this machine, on a worker thread:
+/// first that it is there, then that it is the file caco hashed.
 ///
 /// One `stat` per row with a path, which is nothing on a local disk and
-/// unbounded on a network mount that has stopped answering. So the window
-/// opens on the rows as they were, and the library reloads when the answer
-/// arrives. A check that changed nothing says nothing.
+/// unbounded on a network mount that has stopped answering, and then a full
+/// read of every file that is new or has been replaced: the whole library, the
+/// first time. So the window opens on the rows as they were, the presence
+/// answer is sent the moment it exists rather than after the hashing, and the
+/// library reloads when either answer changes it. A check that changed nothing
+/// says nothing.
 pub(super) fn spawn(sender: BackgroundSender, db_path: PathBuf) {
     std::thread::spawn(move || {
-        let outcome = caco_core::db::open_connection(&db_path)
-            .and_then(|conn| presence::check_library(&conn, &StorePaths::from_config()));
-        match outcome {
+        let conn = match caco_core::db::open_connection(&db_path) {
+            Ok(conn) => conn,
+            Err(e) => {
+                sender.send(could_not_check(e));
+                return;
+            }
+        };
+        match presence::check_library(&conn, &StorePaths::from_config()) {
             Ok(report) if report.changed() => sender.send(AppMessage::FilesChecked(report)),
             Ok(_) => {}
-            Err(e) => sender.send(AppMessage::Notify(Notification::error(format!(
-                "Could not check WAD files: {e}"
-            )))),
+            Err(e) => {
+                // Hashing would only trip over the same dangling paths.
+                sender.send(could_not_check(e));
+                return;
+            }
+        }
+        match caco_core::identity::check_library(&conn) {
+            Ok(hashed) if hashed > 0 => sender.send(AppMessage::FilesIdentified),
+            Ok(_) => {}
+            Err(e) => sender.send(could_not_check(e)),
         }
     });
+}
+
+fn could_not_check(e: caco_core::Error) -> AppMessage {
+    AppMessage::Notify(Notification::error(format!(
+        "Could not check WAD files: {e}"
+    )))
 }
 
 /// What a check that changed something has to tell the user, if anything.

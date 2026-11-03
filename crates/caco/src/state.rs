@@ -14,6 +14,7 @@ use crate::dialogs::collections::CollectionsDialogState;
 use crate::dialogs::delete::DeleteDialogState;
 use crate::dialogs::edit::EditDialogState;
 use crate::dialogs::enrich::EnrichDialogState;
+use crate::dialogs::file_changed::FileChangedDialogState;
 use crate::dialogs::link::LinkDialogState;
 use crate::dialogs::profiles::ProfilesDialogState;
 use crate::dialogs::resources::ResourcesDialogState;
@@ -62,6 +63,9 @@ pub enum ViewLayout {
 
 pub enum ActionRequest {
     Play(i64),
+    /// Play a WAD whose file has changed since it was last played, once the
+    /// user has been told and chose to go ahead.
+    PlayAnyway(i64),
     StartNewPlaythrough(i64),
     Edit(i64),
     Delete(i64),
@@ -128,6 +132,9 @@ pub enum ActiveDialog {
     WadStats(WadStatsDialogState),
     WadData(Box<WadDataDialogState>),
     Link(LinkDialogState),
+    /// Asked before launching a WAD whose file has changed since it was last
+    /// played.
+    FileChanged(FileChangedDialogState),
     /// Modal picker for choosing a library WAD to link to a Cacoward entry.
     CacowardLink(CacowardLinkDialogState),
     Settings(SettingsDialogState),

@@ -16,10 +16,20 @@ const MIN_SESSION_SECONDS: i64 = 300;
 // =============================================================================
 
 /// Start a play session. Returns the session ID.
-pub fn start_session(conn: &Connection, wad_id: i64, sourceport: Option<&str>) -> Result<i64> {
+///
+/// `content_sha256` is what the sourceport is about to load (see
+/// `crate::identity`), so that the next launch can tell whether the file has
+/// changed since. `None` when caco could not read the file to hash it.
+pub fn start_session(
+    conn: &Connection,
+    wad_id: i64,
+    sourceport: Option<&str>,
+    content_sha256: Option<&str>,
+) -> Result<i64> {
     conn.execute(
-        "INSERT INTO sessions (wad_id, started_at, sourceport) VALUES (?1, ?2, ?3)",
-        rusqlite::params![wad_id, Utc::now().to_rfc3339(), sourceport],
+        "INSERT INTO sessions (wad_id, started_at, sourceport, content_sha256) \
+         VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![wad_id, Utc::now().to_rfc3339(), sourceport, content_sha256],
     )?;
     let session_id = conn.last_insert_rowid();
     if session_id <= 0 {
@@ -78,15 +88,6 @@ pub fn update_session_stats(
     Ok(())
 }
 
-/// Attach a recorded demo file path to a session record.
-pub fn update_session_demo(conn: &Connection, session_id: i64, demo_file: &str) -> Result<()> {
-    conn.execute(
-        "UPDATE sessions SET demo_file = ? WHERE id = ?",
-        rusqlite::params![demo_file, session_id],
-    )?;
-    Ok(())
-}
-
 /// Session record from the database.
 #[derive(Debug, Clone)]
 pub struct SessionRecord {
@@ -98,9 +99,10 @@ pub struct SessionRecord {
     pub sourceport: Option<String>,
     pub notes: Option<String>,
     pub exit_code: Option<i32>,
-    pub demo_file: Option<String>,
     pub stats_before: Option<String>,
     pub stats_after: Option<String>,
+    /// What the sourceport loaded, by `crate::identity`'s content hash.
+    pub content_sha256: Option<String>,
 }
 
 impl SessionRecord {
@@ -114,9 +116,9 @@ impl SessionRecord {
             sourceport: row.get("sourceport")?,
             notes: row.get("notes")?,
             exit_code: row.get("exit_code")?,
-            demo_file: row.get("demo_file")?,
             stats_before: row.get("stats_before")?,
             stats_after: row.get("stats_after")?,
+            content_sha256: row.get("content_sha256")?,
         })
     }
 }
@@ -650,7 +652,7 @@ mod tests {
         let conn = setup();
         let wad_id = add_test_wad(&conn);
 
-        let session_id = start_session(&conn, wad_id, Some("dsda-doom")).unwrap();
+        let session_id = start_session(&conn, wad_id, Some("dsda-doom"), Some("3f2a9c1e")).unwrap();
         assert!(session_id > 0);
 
         end_session(&conn, session_id, Some("Test notes"), None).unwrap();
@@ -663,6 +665,8 @@ mod tests {
         assert_eq!(session.sourceport.as_deref(), Some("dsda-doom"));
         assert_eq!(session.notes.as_deref(), Some("Test notes"));
         assert!(session.duration_seconds.is_some());
+        // What it played, which the next launch compares against.
+        assert_eq!(session.content_sha256.as_deref(), Some("3f2a9c1e"));
     }
 
     #[test]
@@ -776,7 +780,7 @@ mod tests {
     fn test_update_session_stats() {
         let conn = setup();
         let wad_id = add_test_wad(&conn);
-        let session_id = start_session(&conn, wad_id, None).unwrap();
+        let session_id = start_session(&conn, wad_id, None, None).unwrap();
 
         update_session_stats(
             &conn,
@@ -792,21 +796,6 @@ mod tests {
             .unwrap();
         assert_eq!(session.stats_before.as_deref(), Some("{\"before\": true}"));
         assert_eq!(session.stats_after.as_deref(), Some("{\"after\": true}"));
-    }
-
-    #[test]
-    fn test_update_session_demo() {
-        let conn = setup();
-        let wad_id = add_test_wad(&conn);
-        let session_id = start_session(&conn, wad_id, None).unwrap();
-
-        update_session_demo(&conn, session_id, "/path/to/demo.lmp").unwrap();
-
-        let mut stmt = conn.prepare("SELECT * FROM sessions WHERE id = ?").unwrap();
-        let session = stmt
-            .query_row([session_id], SessionRecord::from_row)
-            .unwrap();
-        assert_eq!(session.demo_file.as_deref(), Some("/path/to/demo.lmp"));
     }
 
     #[test]
@@ -946,7 +935,7 @@ mod tests {
     fn test_session_exit_code() {
         let conn = setup();
         let wad_id = add_test_wad(&conn);
-        let session_id = start_session(&conn, wad_id, None).unwrap();
+        let session_id = start_session(&conn, wad_id, None, None).unwrap();
 
         end_session(&conn, session_id, None, Some(139)).unwrap();
 

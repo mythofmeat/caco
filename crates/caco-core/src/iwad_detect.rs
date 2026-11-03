@@ -134,8 +134,13 @@ fn parse_pnames(wad_data: &[u8], directory: &[(String, u32, u32)]) -> Option<Vec
                 return None;
             }
 
-            let count = i32::from_le_bytes(wad_data[off..off + 4].try_into().ok()?) as usize;
-            if 4 + count * 8 > sz {
+            // A count is the file's claim. A negative one wraps to a size no
+            // multiplication survives, and one the lump has no room for is not
+            // a PNAMES at all.
+            let count =
+                usize::try_from(i32::from_le_bytes(wad_data[off..off + 4].try_into().ok()?))
+                    .ok()?;
+            if count.checked_mul(8)?.checked_add(4)? > sz {
                 return None;
             }
 
@@ -657,6 +662,19 @@ mod tests {
         let directory = parse_wad_directory(&wad);
         let result = parse_pnames(&wad, &directory).unwrap();
         assert!(result.is_empty());
+    }
+
+    /// A count is the file's claim. A negative one used to overflow the size
+    /// check, and one the lump has no room for is not a PNAMES.
+    #[test]
+    fn test_parse_pnames_does_not_trust_the_count() {
+        for count in [-1_i32, i32::MIN, i32::MAX, 3] {
+            let mut lump = count.to_le_bytes().to_vec();
+            lump.extend_from_slice(b"ALTAQUA\0");
+            let wad = build_wad(&[("PNAMES", &lump)]);
+            let directory = parse_wad_directory(&wad);
+            assert_eq!(parse_pnames(&wad, &directory), None, "count {count}");
+        }
     }
 
     #[test]

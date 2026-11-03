@@ -250,6 +250,41 @@ impl Shooter {
         id
     }
 
+    /// A WAD whose file has changed since it was last played: a file on disk,
+    /// hashed, and a session that recorded an older one. Play is what notices,
+    /// so the shot goes through it, and it stops before resolving a
+    /// sourceport, which the scratch home does not configure.
+    fn add_changed_wad(&self) -> i64 {
+        use caco_core::db::{self, NewWad, SourceType};
+        use caco_core::identity;
+
+        let dir = self.home.join("changed");
+        std::fs::create_dir_all(&dir).expect("create scratch WAD dir");
+        // A well-formed PWAD with an empty directory: the re-analysis worker
+        // reads it as soon as the library reloads.
+        let path = dir.join("caco-screenshots-sunder-fixed.wad");
+        let mut wad = b"PWAD".to_vec();
+        wad.extend_from_slice(&0_i32.to_le_bytes());
+        wad.extend_from_slice(&12_i32.to_le_bytes());
+        std::fs::write(&path, wad).expect("write WAD");
+
+        let conn = db::open_connection(&self.home.join("library.db")).expect("open db");
+        let id = db::add_wad(
+            &conn,
+            &NewWad::new("Sunder", SourceType::Idgames).cached_path(path.display().to_string()),
+        )
+        .expect("add changed WAD");
+        let found = identity::identify(&path).expect("hash WAD");
+        identity::record(&conn, id, &path, &found).expect("record its identity");
+        conn.execute(
+            "INSERT INTO sessions (wad_id, started_at, content_sha256) \
+             VALUES (?1, '2026-10-12T19:30:00+00:00', ?2)",
+            rusqlite::params![id, "0123456789abcdef".repeat(4)],
+        )
+        .expect("record a session on the old file");
+        id
+    }
+
     fn purge_wad(&self, id: i64) {
         let conn = caco_core::db::open_connection(&self.home.join("library.db")).expect("open db");
         caco_core::db::delete_wad(&conn, id, true).expect("purge WAD");
@@ -417,6 +452,19 @@ fn shoot_every_surface() {
             },
         ),
     );
+
+    // Only Play reaches the File Changed dialog, and only for a WAD whose file
+    // plays differently from the one its last session recorded.
+    let changed = s.add_changed_wad();
+    record(
+        "file-changed",
+        s.shot_dialog_after("dlg-file-changed", ActionRequest::Play(changed), |s| {
+            s.settle(4, WORKER_PAUSE);
+            s.harness
+                .get_by_label_contains("has changed since you last played it");
+        }),
+    );
+    s.purge_wad(changed);
 
     // Only Play reaches the link dialog, and only for a WAD whose file is not
     // here. Last, because the WAD it adds is in the library from then on.

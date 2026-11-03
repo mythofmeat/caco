@@ -59,6 +59,15 @@ pub enum Error {
         last_seen: Option<PathBuf>,
     },
 
+    /// A WAD's file plays differently from the one it was last played with.
+    /// Its own variant because the GUI asks before launching: saves and demos
+    /// made with one version of a WAD often do not work with another.
+    #[error("'{title}' has changed since it was last played")]
+    WadFileChanged {
+        title: String,
+        change: crate::identity::ContentChange,
+    },
+
     #[error("invalid WAD format: {0}")]
     InvalidWadFormat(String),
 

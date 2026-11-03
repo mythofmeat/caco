@@ -18,7 +18,7 @@ use std::path::Path;
 use regex::Regex;
 use std::sync::LazyLock;
 
-use crate::utils::{load_wad_data, parse_wad_directory, zip_entry_names};
+use crate::utils::{MAX_ZIP_ENTRY_SIZE, load_wad_data, parse_wad_directory, zip_entry_names};
 
 static MAP_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(E[1-9]M[0-9]|MAP[0-9][0-9])$").unwrap());
@@ -88,6 +88,9 @@ fn detect_from_pk3(pk3_path: &Path) -> Option<bool> {
             Ok(e) => e,
             Err(_) => continue,
         };
+        if entry.size() > MAX_ZIP_ENTRY_SIZE {
+            continue;
+        }
         let mut buf = Vec::with_capacity(entry.size() as usize);
         if entry.read_to_end(&mut buf).is_err() {
             continue;
