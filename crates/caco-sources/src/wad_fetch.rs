@@ -18,8 +18,8 @@ use crate::mirror;
 /// for a WAD that is on it, since the two do not go down together. If both fail, the
 /// mirror's failure is the one reported.
 ///
-/// `download_urls` would be tried after this, but nothing can fetch those yet: they
-/// are share pages behind a browser, which is #55.
+/// `download_urls` are not tried: they are share pages behind a browser. Those are for
+/// the user to open, which is what Get does.
 ///
 /// Only the path and the name are written: the launch that follows hashes the new
 /// file before it plays it, and asks if it is not the file the WAD was last played

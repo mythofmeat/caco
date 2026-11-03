@@ -31,6 +31,7 @@ use caco_core::identity;
 use caco_core::mirrors::{
     INDEX_PATH, MirrorEntry, MirrorIndex, entry_for_wad, safe_stored_name, stored_path,
 };
+use caco_core::placement::{self, Destination, partial_beside};
 use caco_core::presence::StorePaths;
 use reqwest::Method;
 use reqwest::StatusCode;
@@ -580,13 +581,6 @@ fn upload_timeout(size: u64) -> Duration {
     Duration::from_secs(60 + size / SLOW_BYTES_PER_SECOND)
 }
 
-/// A name beside `dest` for a file still being written, which nothing looks for. The
-/// presence check goes by exact name, and a mirror's index never names it.
-fn partial_beside(dest: &Path) -> PathBuf {
-    let name = dest.file_name().unwrap_or_default().to_string_lossy();
-    dest.with_file_name(format!("{name}.partial"))
-}
-
 // ---------------------------------------------------------------------------
 // Syncing
 // ---------------------------------------------------------------------------
@@ -790,7 +784,9 @@ pub fn fetch_from_mirrors(
 /// or a launch could pick up.
 fn fetch_one(store: &Store, file: &MirrorFile, dir: &Path) -> StoreResult<PathBuf> {
     fs::create_dir_all(dir).map_err(|e| format!("could not create {}: {e}", dir.display()))?;
-    let dest = match destination(dir, file)? {
+    let dest = match placement::destination(dir, &file.filename, &file.sha256)
+        .map_err(|e| e.to_string())?
+    {
         Destination::AlreadyHere(path) => return Ok(path),
         Destination::Write(path) => path,
     };
@@ -821,47 +817,6 @@ fn check_download(path: &Path, file: &MirrorFile) -> StoreResult<()> {
             "its copy of {} is not the file its index lists",
             file.filename
         ))
-    }
-}
-
-enum Destination {
-    /// The file is already in the store dir under this name.
-    AlreadyHere(PathBuf),
-    /// Nothing is in the way of writing it here.
-    Write(PathBuf),
-}
-
-/// Where a fetched file goes: under its own name, which saves and sourceports may
-/// depend on, unless that belongs to something else. Unrelated WADs share names
-/// (`map01.wad`), and overwriting one would cost that WAD its file, so the second
-/// gets its hash in the name. Directly under the store dir either way, which is where
-/// the presence check looks for a file by name.
-fn destination(dir: &Path, file: &MirrorFile) -> StoreResult<Destination> {
-    let plain = dir.join(&file.filename);
-    let hashed = dir.join(name_with_hash(&file.filename, &file.sha256));
-    for candidate in [plain, hashed.clone()] {
-        match identity::hash_file(&candidate) {
-            Ok(hashes) if hashes.sha256 == file.sha256 => {
-                return Ok(Destination::AlreadyHere(candidate));
-            }
-            Ok(_) => {}
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                return Ok(Destination::Write(candidate));
-            }
-            Err(e) => return Err(format!("could not read {}: {e}", candidate.display())),
-        }
-    }
-    // Something under the hashed name is not what its name says. Nothing relies on
-    // that, so it can go.
-    Ok(Destination::Write(hashed))
-}
-
-/// `road.zip` as `road-1a2b3c4d.zip`.
-fn name_with_hash(filename: &str, sha256: &str) -> String {
-    let short = sha256.get(..8).unwrap_or(sha256);
-    match filename.rsplit_once('.') {
-        Some((stem, extension)) if !stem.is_empty() => format!("{stem}-{short}.{extension}"),
-        _ => format!("{filename}-{short}"),
     }
 }
 

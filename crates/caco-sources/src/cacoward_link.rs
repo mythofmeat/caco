@@ -63,6 +63,19 @@ pub(crate) fn link_rows_with_keys(conn: &Connection, keys: &HashSet<String>) -> 
     link_rows(conn, &rows, |_| true)
 }
 
+/// The live WAD a row's identifiers say it belongs to. Everything [`owner_of`] goes by
+/// but the title, for an import holding a file that has already been found not to be
+/// any WAD's: two WADs sharing a name is then the likelier story.
+pub(crate) fn owner_by_identifier(conn: &Connection, row: &CacowardRecord) -> Result<Option<i64>> {
+    let wads = WadIndex::build(conn)?;
+    Ok(
+        owner_of(row, &wads).and_then(|(wad_id, evidence)| match evidence {
+            Evidence::Title => None,
+            _ => Some(wad_id),
+        }),
+    )
+}
+
 fn link_rows(
     conn: &Connection,
     rows: &[CacowardRecord],

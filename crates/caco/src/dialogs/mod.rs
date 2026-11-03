@@ -9,6 +9,7 @@ pub mod edit;
 pub mod enrich;
 pub mod file_changed;
 pub mod gc;
+pub mod get_prompt;
 pub mod link;
 pub mod mirror_offer;
 pub mod mirror_setup;

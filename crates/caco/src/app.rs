@@ -11,6 +11,7 @@ use crate::dialogs::link::LinkDialogState;
 use crate::dialogs::resources::ResourcesDialogState;
 use crate::dialogs::sessions::SessionsDialogState;
 use crate::dialogs::wad_stats::WadStatsDialogState;
+use crate::get::{GetOutcome, GetTarget, PageOpener};
 use crate::import;
 use crate::import::state::SearchSource;
 use crate::message::{AppMessage, EnrichReport, Notification};
@@ -23,6 +24,7 @@ use crate::workers::{AnalysisJob, BackgroundChannel, spawn_reanalysis};
 
 mod dialogs;
 mod file_check;
+mod get;
 mod help;
 mod hero;
 mod mirrors;
@@ -406,6 +408,58 @@ impl CacoApp {
         });
     }
 
+    /// Open the best page for what a Get is after, and watch for what comes of it.
+    ///
+    /// Reads the row or entry again here, because a card or menu can be showing what it
+    /// read a while ago. With nothing to send the user to there is nothing to wait for.
+    fn start_get(&mut self, target: GetTarget) {
+        use caco_core::downloads::{pages_for_cacoward, pages_for_wad};
+
+        let found = match target {
+            GetTarget::Wad(id) => caco_core::db::get_wad(&self.conn, id, false)
+                .ok()
+                .flatten()
+                .map(|wad| {
+                    let pages = pages_for_wad(&wad);
+                    let known_name = wad
+                        .last_known_path
+                        .as_deref()
+                        .and_then(|path| std::path::Path::new(path).file_name())
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .or(wad.filename);
+                    (wad.title, known_name, pages)
+                }),
+            GetTarget::Cacoward(pk) => caco_core::db::get_cacoward(&self.conn, pk)
+                .ok()
+                .flatten()
+                .map(|record| {
+                    let year_page = self.state.cacowards.pages.get(&record.year);
+                    let pages = pages_for_cacoward(&record, year_page.map(String::as_str));
+                    (record.wad_title, None, pages)
+                }),
+        };
+        let Some((title, known_name, pages)) = found else {
+            return;
+        };
+        let Some(page) = pages.first().cloned() else {
+            self.state.notification = Some(Notification::warning(format!(
+                "caco knows no page for {title}. If you have the file, link it from Play."
+            )));
+            return;
+        };
+
+        self.state.gets.arm(
+            &self.bg.sender(),
+            target,
+            title,
+            known_name,
+            pages,
+            std::time::Instant::now(),
+        );
+        self.state.notification = Some(get::opened_notification(&page));
+        self.state.gets.open_page(page);
+    }
+
     /// Run an enrichment on a worker thread, streaming progress back to the
     /// dialog. Enrichment does one Doom Wiki lookup per WAD it cannot settle
     /// from the file, so a whole-library run is minutes of network I/O and
@@ -477,6 +531,12 @@ impl CacoApp {
         }
     }
 
+    /// Hand pages to this instead of a browser. Public for `tests/screenshots.rs`,
+    /// which presses Get for real, on a machine where nobody asked for a browser to open.
+    pub fn open_pages_with(&mut self, opener: PageOpener) {
+        self.state.gets.open_pages_with(opener);
+    }
+
     /// Dismiss whatever dialog is open. Public for `tests/screenshots.rs`,
     /// which walks every dialog in turn.
     pub fn close_dialog(&mut self) {
@@ -492,6 +552,11 @@ impl CacoApp {
     /// Whether a bulk upload to a mirror is still running. Public for the same reason.
     pub fn bulk_upload_running(&self) -> bool {
         self.state.mirror_bulk.is_some()
+    }
+
+    /// Whether a landed file is being linked right now. Public for the same reason.
+    pub fn get_linking(&self) -> bool {
+        !self.state.gets.linking().is_empty()
     }
 
     /// Dispatch an action request (from detail panel buttons or table shortcuts).
@@ -702,6 +767,7 @@ impl CacoApp {
                     cancel,
                 );
             }
+            ActionRequest::Get(target) => self.start_get(target),
             ActionRequest::UploadToMirror { wad_id, mirror } => {
                 let title = caco_core::db::get_wad(&self.conn, wad_id, false)
                     .ok()
@@ -761,6 +827,36 @@ impl eframe::App for CacoApp {
                     self.state.active_dialog = Some(ActiveDialog::FileChanged(
                         FileChangedDialogState::new(wad_id, title, change),
                     ));
+                }
+                AppMessage::DownloadLanded(arrival) => {
+                    // They are in their browser, so it takes more than a window in a
+                    // corner to bring them back. A taskbar flash, where there is one.
+                    if self.state.gets.landed(&self.conn, arrival) {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(
+                            egui::UserAttentionType::Informational,
+                        ));
+                    }
+                }
+                AppMessage::GetLinked {
+                    target,
+                    title,
+                    filename,
+                    outcome,
+                } => {
+                    self.state
+                        .gets
+                        .link_finished(target, &title, outcome.is_ok());
+                    self.state.notification = Some(get::linked_notification(
+                        &title,
+                        &filename,
+                        outcome.as_ref(),
+                    ));
+                    if outcome.is_ok() {
+                        self.state.invalidate_wad_views();
+                    }
+                    if let Ok(GetOutcome::Linked { wad_id }) = outcome {
+                        self.state.mirror_offers.push_back(wad_id);
+                    }
                 }
                 AppMessage::FilesChecked(report) => {
                     self.state.invalidate_wad_views();
@@ -1015,6 +1111,18 @@ impl eframe::App for CacoApp {
         self.state.open_next_mirror_offer(&self.conn);
         if let Some(action) = render_active_dialog(&mut self.state, &self.conn, ctx) {
             self.dispatch_action(action);
+        }
+
+        // A landed file is asked about whatever else is open, and however it is answered
+        // can open a mirror offer on the next frame.
+        get::render_question(&mut self.state, &self.conn, ctx, &self.bg.sender());
+        let now = std::time::Instant::now();
+        let expired = self.state.gets.expire(now);
+        if let Some(notification) = get::expired_notification(&expired) {
+            self.state.notification = Some(notification);
+        }
+        if let Some(deadline) = self.state.gets.next_deadline() {
+            ctx.request_repaint_after(deadline.saturating_duration_since(now));
         }
 
         // 5. Handle keyboard accelerators

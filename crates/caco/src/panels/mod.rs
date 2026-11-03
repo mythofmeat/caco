@@ -8,17 +8,26 @@ pub mod wad_table;
 
 use caco_core::db::Status;
 
+use crate::get::GetTarget;
 use crate::state::ActionRequest;
 
 /// Show a right-click context menu for a WAD with standard actions.
 /// Returns the chosen action, if any.
+///
+/// `lost` is [`caco_core::db::WadRecord::is_lost`]: the WAD has no file here and caco
+/// cannot fetch one, so getting it through a browser is the next thing to do with it.
 pub fn wad_context_menu(
     response: &egui::Response,
     wad_id: i64,
     status: Status,
+    lost: bool,
 ) -> Option<ActionRequest> {
     let mut action = None;
     response.context_menu(|ui| {
+        if lost && ui.button("Get in Browser").clicked() {
+            action = Some(ActionRequest::Get(GetTarget::Wad(wad_id)));
+            ui.close();
+        }
         if ui.button("Play").clicked() {
             action = Some(ActionRequest::Play(wad_id));
             ui.close();

@@ -48,6 +48,9 @@ pub struct SettingsDialogState {
     iwad_dir: String,
     profile_dir: String,
     db_path: String,
+    downloads_dir: String,
+    /// What an empty `downloads_dir` means on this machine, to say so in the field.
+    default_downloads_dir: String,
 
     error: Option<String>,
 }
@@ -107,6 +110,8 @@ impl SettingsDialogState {
             iwad_dir: cfg.iwad_dir.clone(),
             profile_dir: cfg.profile_dir.clone(),
             db_path: cfg.db_path.clone(),
+            downloads_dir: cfg.downloads_dir.clone(),
+            default_downloads_dir: config::default_downloads_dir().display().to_string(),
             error: None,
         }
     }
@@ -149,6 +154,7 @@ impl SettingsDialogState {
         cfg.iwad_dir = self.iwad_dir.trim().to_string();
         cfg.profile_dir = self.profile_dir.trim().to_string();
         cfg.db_path = self.db_path.trim().to_string();
+        cfg.downloads_dir = self.downloads_dir.trim().to_string();
         Ok(cfg)
     }
 
@@ -481,7 +487,10 @@ impl SettingsDialogState {
                     }
                 })
                 .response
-                .labelled_by(label.id);
+                .labelled_by(label.id)
+                .on_hover_text(
+                    "What happens to a file you link when Get finds it in your Downloads folder.",
+                );
             let label = form_label(&mut cols[1], "Orphaned companions");
             egui::ComboBox::from_id_salt("companion_orphan_cleanup")
                 .selected_text(&self.companion_orphan_cleanup)
@@ -574,6 +583,18 @@ impl SettingsDialogState {
         )
         .labelled_by(label.id)
         .on_hover_text("Takes effect after restarting caco");
+
+        // With a hint saying what empty means, because that is what most people want,
+        // and a browser in a sandbox is the reason to change it.
+        let label = form_label(ui, "Downloads folder");
+        ui.add(
+            egui::TextEdit::singleline(&mut self.downloads_dir)
+                .desired_width(f32::INFINITY)
+                .text_color(theme::TEXT_PRIMARY)
+                .hint_text(&self.default_downloads_dir),
+        )
+        .labelled_by(label.id)
+        .on_hover_text("Where Get looks for what your browser downloads");
     }
 }
 

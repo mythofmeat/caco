@@ -1,5 +1,5 @@
 //! Magazine-style Cacowards view — the GUI surface for browsing yearly
-//! awards, completion stats, and entry-level actions (import / open / play).
+//! awards, completion stats, and entry-level actions (import / get / open / play).
 //!
 //! Layout:
 //! 1. Hero banner with the year, and a link to Doomworld's write-ups for it.
@@ -18,6 +18,7 @@ use caco_core::db::cacowards::{CacowardRecord, EffectiveStatus};
 use caco_core::db::{CORE_CATEGORIES, Status, is_core_category};
 use egui::{Color32, CornerRadius, Rect, StrokeKind, Vec2};
 
+use crate::get::GetTarget;
 use crate::state::{ActionRequest, AppState};
 use crate::theme;
 
@@ -657,8 +658,18 @@ fn render_card(
     // Right-click context menu: manual linking + supported toggle. Used
     // for the long tail of cases the auto-linker can't reach (renamed
     // titles, alternative IWAD families, etc.).
+    let linked = record
+        .wad_id
+        .and_then(|id| state.cacowards.linked_wads.get(&id));
+    let get = get_target(record, status, linked);
     let mut menu_action: Option<ActionRequest> = None;
     response.context_menu(|ui| {
+        if let Some(target) = get
+            && ui.button("Get in Browser").clicked()
+        {
+            menu_action = Some(ActionRequest::Get(target));
+            ui.close();
+        }
         if ui.button("Link to library WAD…").clicked() {
             menu_action = Some(ActionRequest::LinkCacoward(record.id));
             ui.close();
@@ -779,7 +790,8 @@ fn render_card(
             .max_rect(button_rect)
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
     );
-    let button_action = action_button(&mut sub_ui, record, status);
+    let waiting = get.is_some_and(|target| state.gets.is_waiting_for(target));
+    let button_action = action_button(&mut sub_ui, record, status, get, waiting);
 
     // Border painted INSIDE the rect — `StrokeKind::Outside` was
     // effectively halving the visible width because the row's
@@ -927,49 +939,141 @@ fn status_label_and_color(status: EffectiveStatus) -> (&'static str, Color32) {
     }
 }
 
+/// What a card can get through the browser, if anything: an entry with no WAD yet, or
+/// a WAD with no file that caco cannot fetch.
+fn get_target(
+    record: &CacowardRecord,
+    status: EffectiveStatus,
+    linked: Option<&caco_core::db::WadRecord>,
+) -> Option<GetTarget> {
+    match status {
+        EffectiveStatus::Absent => Some(GetTarget::Cacoward(record.id)),
+        EffectiveStatus::Library(_) => record
+            .wad_id
+            .filter(|_| linked.is_some_and(|wad| wad.is_lost()))
+            .map(GetTarget::Wad),
+    }
+}
+
+/// What a card offers on its face. The rest is in its menu.
+#[derive(Debug, PartialEq, Eq)]
+enum CardButtons {
+    Import,
+    /// Get leads and Import sits beside it.
+    GetOrImport(GetTarget),
+    Get(GetTarget),
+    Play(i64),
+    Open(i64),
+    None,
+}
+
+/// The one thing a card's face is for: what would get this entry closer to being played.
+///
+/// Import leads for an entry on idgames, which caco can fetch by itself. For one that is
+/// not, the file is what's missing and only a browser can get it, so Get leads, with
+/// Import beside it for the metadata on a day the forum lets caco in.
+///
+/// A WAD the user has finished with keeps Open, whether or not its file is here. A
+/// missing file only needs doing something about if it is going to be played, and an
+/// accent-coloured button on every card that was cleaned up after would read as a list
+/// of things left to do.
+fn card_buttons(
+    record: &CacowardRecord,
+    status: EffectiveStatus,
+    get: Option<GetTarget>,
+) -> CardButtons {
+    match (status, record.wad_id, get) {
+        (EffectiveStatus::Absent, _, _) if record.idgames_id.is_some() => CardButtons::Import,
+        (EffectiveStatus::Absent, _, Some(target)) => CardButtons::GetOrImport(target),
+        (EffectiveStatus::Absent, _, None) => CardButtons::Import,
+        (EffectiveStatus::Library(_), None, _) => CardButtons::None,
+        (EffectiveStatus::Library(status), Some(wad_id), get) => {
+            let still_playing = matches!(status, Status::InProgress | Status::Unplayed);
+            match get {
+                Some(target) if still_playing => CardButtons::Get(target),
+                _ if still_playing => CardButtons::Play(wad_id),
+                _ => CardButtons::Open(wad_id),
+            }
+        }
+    }
+}
+
 fn action_button(
     ui: &mut egui::Ui,
     record: &CacowardRecord,
     status: EffectiveStatus,
+    get: Option<GetTarget>,
+    waiting: bool,
 ) -> Option<ActionRequest> {
-    match status {
-        EffectiveStatus::Absent => {
-            let btn = egui::Button::new(
-                egui::RichText::new("Import")
-                    .size(11.0)
-                    .strong()
-                    .color(Color32::from_rgb(0x1a, 0x0a, 0x04)),
-            )
-            .fill(theme::TEXT_ACCENT)
-            .corner_radius(4.0)
-            .min_size(Vec2::new(0.0, 22.0));
-            if ui.add(btn).clicked() {
-                return Some(ActionRequest::ImportCacoward(record.id));
+    let get_label = if waiting { "Waiting\u{2026}" } else { "Get" };
+    let mut action = None;
+    match card_buttons(record, status, get) {
+        CardButtons::Import => {
+            if primary_button(ui, "Import").clicked() {
+                action = Some(ActionRequest::ImportCacoward(record.id));
             }
-            None
         }
-        EffectiveStatus::Library(s) => {
-            let wad_id = record.wad_id?;
-            let label = if matches!(s, Status::InProgress | Status::Unplayed) {
-                "Play"
-            } else {
-                "Open"
-            };
-            let btn = egui::Button::new(
-                egui::RichText::new(label)
-                    .size(11.0)
-                    .color(theme::TEXT_PRIMARY),
-            )
-            .fill(theme::BG_LIGHT)
-            .stroke(egui::Stroke::new(1.0_f32, theme::BORDER_MED))
-            .corner_radius(4.0)
-            .min_size(Vec2::new(0.0, 22.0));
-            if ui.add(btn).clicked() {
-                return Some(ActionRequest::Play(wad_id));
+        CardButtons::GetOrImport(target) => {
+            if get_button(ui, get_label).clicked() {
+                action = Some(ActionRequest::Get(target));
             }
-            None
+            if secondary_button(ui, "Import").clicked() {
+                action = Some(ActionRequest::ImportCacoward(record.id));
+            }
         }
+        CardButtons::Get(target) => {
+            if get_button(ui, get_label).clicked() {
+                action = Some(ActionRequest::Get(target));
+            }
+        }
+        CardButtons::Play(wad_id) => {
+            if secondary_button(ui, "Play").clicked() {
+                action = Some(ActionRequest::Play(wad_id));
+            }
+        }
+        CardButtons::Open(wad_id) => {
+            if secondary_button(ui, "Open").clicked() {
+                action = Some(ActionRequest::Play(wad_id));
+            }
+        }
+        CardButtons::None => {}
     }
+    action
+}
+
+/// [`primary_button`], saying what it does, since "Get" alone does not say how.
+fn get_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
+    primary_button(ui, label).on_hover_text(
+        "Opens the page for it in your browser, and watches your Downloads folder for the file.",
+    )
+}
+
+fn primary_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
+    ui.add(
+        egui::Button::new(
+            egui::RichText::new(label)
+                .size(11.0)
+                .strong()
+                .color(Color32::from_rgb(0x1a, 0x0a, 0x04)),
+        )
+        .fill(theme::TEXT_ACCENT)
+        .corner_radius(4.0)
+        .min_size(Vec2::new(0.0, 22.0)),
+    )
+}
+
+fn secondary_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
+    ui.add(
+        egui::Button::new(
+            egui::RichText::new(label)
+                .size(11.0)
+                .color(theme::TEXT_PRIMARY),
+        )
+        .fill(theme::BG_LIGHT)
+        .stroke(egui::Stroke::new(1.0_f32, theme::BORDER_MED))
+        .corner_radius(4.0)
+        .min_size(Vec2::new(0.0, 22.0)),
+    )
 }
 
 fn draw_meter(ui: &mut egui::Ui, done: usize, total: usize, width: f32, swept: bool) {
@@ -1058,6 +1162,97 @@ mod tests {
             supported: true,
         };
         (record, EffectiveStatus::Absent)
+    }
+
+    #[test]
+    fn an_absent_entry_can_be_got_and_so_can_a_wad_with_no_way_back() {
+        let conn = caco_core::db::open_memory().unwrap();
+        caco_core::db::init_db(&conn).unwrap();
+        let (mut record, _) = entry(2025, "winner");
+        record.id = 7;
+        assert_eq!(
+            get_target(&record, EffectiveStatus::Absent, None),
+            Some(GetTarget::Cacoward(7))
+        );
+
+        // A manual WAD with no file: the row exists, and only the browser can fill it.
+        let id = caco_core::db::add_wad(
+            &conn,
+            &caco_core::db::NewWad::new("Road", caco_core::db::SourceType::Doomworld),
+        )
+        .unwrap();
+        record.wad_id = Some(id);
+        let library = EffectiveStatus::Library(Status::Unplayed);
+        let lost = caco_core::db::get_wad(&conn, id, false).unwrap().unwrap();
+        assert_eq!(
+            get_target(&record, library, Some(&lost)),
+            Some(GetTarget::Wad(id))
+        );
+
+        // With a file it is just something to play.
+        let update = caco_core::db::WadUpdate::new()
+            .set_text("cached_path", Some("/keep/road.zip".to_string()));
+        caco_core::db::update_wad(&conn, id, &update).unwrap();
+        let here = caco_core::db::get_wad(&conn, id, false).unwrap().unwrap();
+        assert_eq!(get_target(&record, library, Some(&here)), None);
+
+        // On idgames, it comes by itself when played.
+        let update = caco_core::db::WadUpdate::new()
+            .set_text("cached_path", None)
+            .set_text("idgames_id", Some("42".to_string()));
+        caco_core::db::update_wad(&conn, id, &update).unwrap();
+        let fetchable = caco_core::db::get_wad(&conn, id, false).unwrap().unwrap();
+        assert_eq!(get_target(&record, library, Some(&fetchable)), None);
+    }
+
+    #[test]
+    fn a_card_leads_with_what_gets_it_closer_to_being_played() {
+        let (mut record, _) = entry(2025, "winner");
+        record.id = 7;
+        let cacoward = GetTarget::Cacoward(7);
+        let absent = EffectiveStatus::Absent;
+
+        // Not on idgames: only a browser can get it.
+        assert_eq!(
+            card_buttons(&record, absent, Some(cacoward)),
+            CardButtons::GetOrImport(cacoward)
+        );
+        // On idgames: caco can fetch it by itself, and the menu still has Get for when
+        // idgames is behind a challenge too.
+        record.idgames_id = Some(42);
+        assert_eq!(
+            card_buttons(&record, absent, Some(cacoward)),
+            CardButtons::Import
+        );
+
+        record.wad_id = Some(3);
+        let wad = GetTarget::Wad(3);
+        let library = |status| EffectiveStatus::Library(status);
+
+        // In the library, and being played, with a file or a way to one.
+        for status in [Status::Unplayed, Status::InProgress] {
+            assert_eq!(
+                card_buttons(&record, library(status), None),
+                CardButtons::Play(3)
+            );
+            assert_eq!(
+                card_buttons(&record, library(status), Some(wad)),
+                CardButtons::Get(wad),
+                "no file and no way back is what stands between it and being played"
+            );
+        }
+
+        // Finished with: a missing file is not something left to do.
+        for status in [Status::Completed, Status::Abandoned] {
+            assert_eq!(
+                card_buttons(&record, library(status), None),
+                CardButtons::Open(3)
+            );
+            assert_eq!(
+                card_buttons(&record, library(status), Some(wad)),
+                CardButtons::Open(3)
+            );
+        }
     }
 
     #[test]

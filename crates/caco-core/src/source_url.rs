@@ -24,6 +24,16 @@ pub fn extract_topic_id_from_url(url: &str) -> Option<i64> {
     TOPIC_ID.captures(url)?.get(1)?.as_str().parse().ok()
 }
 
+/// A Doomworld forum topic's page, from its id.
+pub fn doomworld_topic_url(topic: i64) -> String {
+    format!("https://www.doomworld.com/forum/topic/{topic}/")
+}
+
+/// A file's page on idgames, from its id.
+pub fn idgames_id_url(id: i64) -> String {
+    format!("https://www.doomworld.com/idgames/?id={id}")
+}
+
 /// Extract the page title from a Doom Wiki article URL.
 ///
 /// Accepts forms such as:

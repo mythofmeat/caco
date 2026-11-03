@@ -12,6 +12,7 @@ A personal Doom WAD library manager inspired by [beets](https://beets.io). Impor
 - **Companion files** — manage DEH patches, music WADs, and other companion files with automatic deduplication.
 - **Per-WAD isolation** — saves, stats, and configs are separated per WAD so nothing gets mixed up.
 - **On-demand downloads** — idgames WADs are cached when you play, with configurable auto-cleanup. WADs that cannot be re-downloaded are kept on the portable side instead, and destructive actions leave them alone by default.
+- **Get through your browser** — for a WAD behind a site that turns caco away, Get opens its page in your browser and watches your Downloads folder. When the file lands, caco asks if that's the one, then files it, hashes it and offers it to your mirror.
 - **Mirrors** — your own store of WAD files, a directory or an HTTP file server, for what idgames does not have. caco looks there first and offers to upload what it could not otherwise get back, so a mirror fills itself as you play.
 - **Content identity** — every WAD file is hashed, along with the WADs inside a zip, so caco notices when a file has changed since you last played it and asks before launching it: saves and demos made with one version of a WAD often fail with another.
 - **Cacowards browser** — a magazine-style year-by-year view of every WAD Doomworld has awarded since 2004, doubling as an import queue. The list ships with caco, so it works offline and needs no site to be up.
@@ -97,10 +98,11 @@ the sourceport.
 
 - Grid and list views with sortable columns and a live filter bar
 - WAD thumbnails scraped from the Doom Wiki (or extracted from TITLEPIC) with on-disk caching
-- Right-click context menu (play, edit, delete, sessions, map stats, saves & demos, new playthrough)
+- Right-click context menu (play, edit, delete, sessions, map stats, saves & demos, new playthrough, and get in browser for a WAD caco can't fetch)
 - Right-hand detail sidebar with metadata, play stats, and quick actions
 - Cacowards view — a year-by-year browse of Doomworld's awards where entries you
-  don't own yet are flagged `absent` with an inline Import button. A WAD imported
+  don't own yet are flagged `absent`, with an inline Import button, and a Get button
+  for those that aren't on idgames. A WAD imported
   any other way links itself to its entry, by file hash, idgames id, Doomworld
   thread, Doom Wiki page or an exact title match. A year's total counts the winners,
   runners-up, honorable mentions and Mordeth award; its other awards are listed
@@ -202,8 +204,9 @@ Non-Doomwiki imports are auto-enriched with Doom Wiki metadata (author, year,
 description, IWAD). Duplicate detection warns before re-importing.
 
 A site can answer with a WAF challenge instead of the page caco asked for. The
-error then names the site and the WAF. Retrying may not help, but you can still
-add the WAD by hand with the URL or local form.
+error then names the site and the WAF. Retrying may not help, but your browser will
+get through: see [Getting a WAD through your browser](#getting-a-wad-through-your-browser).
+You can also add the WAD by hand with the URL or local form.
 
 ## Cacowards
 
@@ -239,6 +242,38 @@ idgames   = 19951
 ```
 
 Your links and the card menu's "Mark as unsupported" outlive any update to the list.
+
+## Getting a WAD through your browser
+
+Most of what idgames doesn't have lives on forum threads and share links, behind
+challenges that stop caco and not your browser. **Get** leaves the download to your
+browser and everything after it to caco:
+
+1. Press **Get** on a Cacoward entry with no WAD yet, or **Get in Browser** in a WAD's
+   right-click menu or in what Play shows for a file that isn't here. caco opens the
+   best page it knows: a link straight to the file if the WAD's source gave one, then a
+   share link, then the forum thread or wherever else the WAD came from.
+2. Download it the way you normally would. The status bar says what caco is waiting
+   for, and clicking it lists the other pages it knows, in case the first was a dead
+   link. It can also stop waiting from there.
+3. When a `.wad`, `.pk3`, `.pk7`, `.zip` or `.7z` finishes arriving in your Downloads
+   folder, caco asks in the corner of its window: **Link `AftercareSessions.wad` to
+   Aftercare Sessions?** The question doesn't get in the way of anything else you're
+   doing. If several WADs are waiting, it asks about the one whose name looks closest
+   first, and **Not This One** moves on to the next, or leaves the file alone.
+4. **Link** files it the way caco files any WAD, hashes it, and offers it to a writable
+   [mirror](#mirrors). A zip is kept as it is, like one from idgames. A Cacoward entry
+   with no WAD gets one at this point, made from the award's own details, so it works
+   on a day the forum won't talk to caco.
+
+Linking doesn't start the game, since you may have asked for several. caco only looks
+for an hour after you press Get, and only touches a file you said to link.
+
+Two settings matter here. **Downloads folder** is where caco looks, and is worth setting
+if your browser runs in a sandbox such as Flatpak and saves somewhere else. **Import link
+mode** says whether the file is moved out of that folder, which is the default, or
+copied. A file you pick yourself with **Link Local File** is always copied, because it
+can be anywhere, including somewhere it's meant to stay.
 
 ## Mirrors
 
@@ -288,9 +323,9 @@ SHA-256 in the mirror's index, so a corrupt or replaced file never reaches the
 sourceport. If it fails, Play falls back to idgames for a WAD that is on it, and
 otherwise says what went wrong.
 
-**Uploading.** When you link a file or import one for a WAD caco could not otherwise
-get back, it offers to upload it to each writable mirror, after the game closes if
-linking launched one. **Upload** in Edit's Sources tab does the same for any one WAD.
+**Uploading.** When you link a file, by hand or through Get, or import one for a WAD
+caco could not otherwise get back, it offers to upload it to each writable mirror, after
+the game closes if linking launched one. **Upload** in Edit's Sources tab does the same for any one WAD.
 
 **Which WADs a mirror has.** caco reads each mirror's index when it starts and when you
 ask it to. It finds a WAD's file by hash if the WAD has one: the same file, or the
@@ -392,6 +427,8 @@ auto_doomwiki_enrich = true
 cache_max_size_gb = 20.0
 cache_auto_clean = true
 sourceport_update_check_days = 1        # 0 = never check built sourceports for updates
+downloads_dir = "~/Downloads"           # where Get looks; unset means the system's
+link_mode = "copy"                      # leave a file Get links in Downloads; default "move"
 
 # Extra args for specific executables only (appended after sourceport_args)
 [executable_args]
