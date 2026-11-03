@@ -7,26 +7,37 @@
 //! render a frame and look at it.
 //!
 //! `egui_kittest` renders through wgpu with no display server, so this runs
-//! over ssh, in a tty, or in CI with a software adapter. It is `#[ignore]`d
-//! for the same reason `sourceports_build.rs` is: `cargo test --workspace`
-//! must not depend on a GPU. Run it explicitly:
+//! over ssh, in a tty, or in CI with a software adapter, which is where
+//! `verify.yml` runs it. It is `#[ignore]`d for the same reason
+//! `sourceports_build.rs` is: `cargo test --workspace` must not depend on a
+//! GPU. Run it explicitly:
 //!
 //! ```bash
 //! cargo test -p caco --test screenshots -- --ignored --nocapture
 //! ```
 //!
-//! PNGs land in `target/screenshots/`. `CACO_SHOT_SIZE=1200x800` overrides the
-//! viewport; small sizes are the interesting ones, since that is where
+//! PNGs land in `target/screenshots/<WxH>/`. `CACO_SHOT_SIZE=800x400` overrides
+//! the viewport; small sizes are the interesting ones, since that is where
 //! fixed-size dialogs overflow.
+//!
+//! A dialog escaping the window is not the only way to fail. kittest's own
+//! checks stay on, because each catches something a PNG hides: a character no
+//! font can draw panics instead of painting tofu, and so does an input widget
+//! with no accessible name.
 //!
 //! The library is a *copy* of the real database into a temp `CACO_HOME`, so
 //! the shots show real WADs while nothing can write to the real library.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use caco::dialogs::storage::StorageTab;
 use caco::message::AppMessage;
 use caco::state::{ActionRequest, ViewMode};
+use caco_core::sourceports::RemoteRefs;
+
+/// How long to leave worker threads to answer between rounds of frames.
+const WORKER_PAUSE: Duration = Duration::from_millis(80);
 
 /// Viewport used for every shot unless `CACO_SHOT_SIZE` says otherwise.
 /// 1200x800 is `main.rs`'s `with_inner_size`, so this is the window a user
@@ -40,17 +51,15 @@ fn shot_size() -> egui::Vec2 {
     )
 }
 
+/// One directory per viewport, so a run at one size cannot overwrite the shots
+/// from another: CI keeps both, and a layout fix wants them side by side.
 fn out_dir() -> PathBuf {
+    let size = shot_size();
     let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../target/screenshots")
-        .canonicalize()
-        .unwrap_or_else(|_| {
-            let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/screenshots");
-            std::fs::create_dir_all(&p).ok();
-            p
-        });
-    std::fs::create_dir_all(&dir).ok();
-    dir
+        .join(format!("{}x{}", size.x, size.y));
+    std::fs::create_dir_all(&dir).expect("create screenshot dir");
+    dir.canonicalize().expect("resolve screenshot dir")
 }
 
 /// Copy the real library into a scratch `CACO_HOME`.
@@ -69,7 +78,20 @@ fn scratch_home() -> PathBuf {
     }
 
     unsafe { std::env::set_var("CACO_HOME", &home) };
+    put_sourceport_on_path(&home);
     home
+}
+
+/// Settings only draws its "detected" controls with a sourceport on `PATH`, so
+/// without this, what a run checks would depend on what the machine has
+/// installed, and CI has nothing. Detection only asks whether the file exists,
+/// so an empty one does: nothing ever runs it.
+fn put_sourceport_on_path(home: &Path) {
+    let bin = home.join("bin");
+    std::fs::create_dir_all(&bin).expect("create scratch bin");
+    std::fs::write(bin.join("nyan-doom"), "").expect("create scratch sourceport");
+    let path = std::env::var("PATH").unwrap_or_default();
+    unsafe { std::env::set_var("PATH", format!("{}:{path}", bin.display())) };
 }
 
 struct Shooter {
@@ -83,32 +105,43 @@ impl Shooter {
         let conn = caco_core::db::open_connection(&db_path).expect("open db");
         caco_core::db::init_db(&conn).expect("init db");
 
-        // `CacoApp::new` only keeps this context to poke for a repaint when a
-        // worker finishes; the harness drives frames by hand, so a throwaway
-        // one is fine. The theme has to land on the context the harness
-        // actually paints with, which only exists after `build_state`.
-        let seed_ctx = egui::Context::default();
-        let app = caco::app::CacoApp::new(conn, db_path, &seed_ctx);
-
+        // The same creation path as `main.rs`, and the real `eframe::App`: the
+        // theme's fonts are on the context before the harness runs its first
+        // pass, and workers wake the context that is actually painting.
         let harness = egui_kittest::Harness::builder()
             .with_size(shot_size())
-            .build_ui_state(|ui, app: &mut caco::app::CacoApp| app.render(ui), app);
+            .build_eframe(|cc| {
+                caco::theme::apply_doom_theme(&cc.egui_ctx);
+                caco::app::CacoApp::new(conn, db_path, &cc.egui_ctx)
+            });
 
         let mut me = Self { harness };
-        caco::theme::apply_doom_theme(&me.harness.ctx);
-        // Settle: first frame loads the library, later frames pick up
-        // thumbnails as the worker threads answer.
-        for _ in 0..8 {
-            me.harness.run();
-            std::thread::sleep(std::time::Duration::from_millis(80));
-        }
+        // First frame loads the library, later frames pick up thumbnails as
+        // the worker threads answer.
+        me.settle(8, WORKER_PAUSE);
         me
     }
 
-    fn shot(&mut self, name: &str) {
-        for _ in 0..3 {
-            self.harness.run();
+    /// Run `rounds` rounds of frames, `pause` apart, so layout can converge
+    /// and workers can answer.
+    ///
+    /// `run_ok`, not `run`. A worker posting a message asks for a repaint, as
+    /// it should, and `run` panics on a UI still being asked after `max_steps`.
+    /// How many requests land inside one `run` is down to thread timing, so
+    /// `run` passes and fails the same build at random. `run_ok` stops at the
+    /// budget instead, skipping its accessibility check when it does, which is
+    /// why `shot` makes that check itself.
+    fn settle(&mut self, rounds: u32, pause: Duration) {
+        for _ in 0..rounds {
+            self.harness.run_ok();
+            std::thread::sleep(pause);
         }
+    }
+
+    fn shot(&mut self, name: &str) {
+        self.settle(3, Duration::ZERO);
+        // `settle` can end up skipping this: see there.
+        self.harness.check_accessibility();
         let img = self
             .harness
             .render()
@@ -122,13 +155,10 @@ impl Shooter {
     /// Switch to a full-panel view and shoot it.
     fn shot_view(&mut self, name: &str, mode: ViewMode) {
         self.harness.state_mut().set_view(mode);
-        for _ in 0..6 {
-            self.harness.run();
-            std::thread::sleep(std::time::Duration::from_millis(80));
-        }
+        self.settle(6, WORKER_PAUSE);
         self.shot(name);
         self.harness.state_mut().set_view(ViewMode::Library);
-        self.harness.run();
+        self.settle(1, Duration::ZERO);
     }
 
     /// Open a dialog through the same path a click takes, shoot it, close it.
@@ -150,18 +180,13 @@ impl Shooter {
         after_open: impl FnOnce(&mut Self),
     ) -> f32 {
         self.harness.state_mut().dispatch_action(action);
-        for _ in 0..4 {
-            self.harness.run();
-            std::thread::sleep(std::time::Duration::from_millis(60));
-        }
+        self.settle(4, WORKER_PAUSE);
         after_open(self);
-        for _ in 0..4 {
-            self.harness.run();
-        }
+        self.settle(4, Duration::ZERO);
         self.shot(name);
         let overflow = self.worst_overflow();
         self.harness.state_mut().close_dialog();
-        self.harness.run();
+        self.settle(1, Duration::ZERO);
         overflow
     }
 
@@ -214,6 +239,14 @@ fn shoot_every_surface() {
     }
 
     let mut escaped = Vec::new();
+    let mut record = |name: &str, over: f32| {
+        println!("  {name}: overflow {over:.0}pt");
+        // 1pt of slack absorbs rounding; anything more is a real spill.
+        if over > 1.0 {
+            escaped.push(format!("{name} (+{over:.0}pt)"));
+        }
+    };
+
     for (name, action) in [
         // One shot per Storage tab: they share a window but not a body, and
         // the tab that overflows is the one that has to be named.
@@ -228,38 +261,52 @@ fn shoot_every_surface() {
         ("collections", ActionRequest::Collections),
         ("settings", ActionRequest::Settings),
     ] {
-        let over = s.shot_dialog(&format!("dlg-{name}"), action);
-        println!("  {name}: overflow {over:.0}pt");
-        // 1pt of slack absorbs rounding; anything more is a real spill.
-        if over > 1.0 {
-            escaped.push(format!("{name} (+{over:.0}pt)"));
-        }
+        record(name, s.shot_dialog(&format!("dlg-{name}"), action));
     }
+
+    // The version picker only exists once a remote has answered, and that is
+    // asked on demand, so opening the dialog alone never reaches it.
+    record(
+        "sourceports-version-picker",
+        s.shot_dialog_after(
+            "dlg-sourceports-version-picker",
+            ActionRequest::Sourceports,
+            |s| {
+                let tx = s.harness.state_mut().background_sender();
+                tx.send(AppMessage::SourceportVersionsLoaded {
+                    sourceport: "nyan-doom".to_string(),
+                    outcome: Ok(RemoteRefs {
+                        branches: vec!["master".to_string()],
+                        releases: vec!["v1.2.3".to_string(), "v1.2.2".to_string()],
+                    }),
+                });
+            },
+        ),
+    );
 
     // A finished build with output is the state the Sourceports dialog exists
     // for, and its tallest: status row plus log pane on top of the sourceport list.
     // Posted the way the build worker posts it, so the shot proves the app can
     // actually reach this layout and not just that it renders.
-    let over = s.shot_dialog_after(
-        "dlg-sourceports-build-log",
-        ActionRequest::Sourceports,
-        |s| {
-            let tx = s.harness.state_mut().background_sender();
-            tx.send(AppMessage::SourceportBuildStep("Compiling".to_string()));
-            for i in 1..=200 {
-                tx.send(AppMessage::SourceportBuildLine(format!(
-                    "[{i}/1636] Building CXX object src/CMakeFiles/nyan-doom.dir/p_map.c.o"
+    record(
+        "sourceports-build-log",
+        s.shot_dialog_after(
+            "dlg-sourceports-build-log",
+            ActionRequest::Sourceports,
+            |s| {
+                let tx = s.harness.state_mut().background_sender();
+                tx.send(AppMessage::SourceportBuildStep("Compiling".to_string()));
+                for i in 1..=200 {
+                    tx.send(AppMessage::SourceportBuildLine(format!(
+                        "[{i}/1636] Building CXX object src/CMakeFiles/nyan-doom.dir/p_map.c.o"
+                    )));
+                }
+                tx.send(AppMessage::SourceportBuildComplete(Err(
+                    "compile failed: see log".to_string(),
                 )));
-            }
-            tx.send(AppMessage::SourceportBuildComplete(Err(
-                "compile failed: see log".to_string(),
-            )));
-        },
+            },
+        ),
     );
-    println!("  sourceports-build-log: overflow {over:.0}pt");
-    if over > 1.0 {
-        escaped.push(format!("sourceports-build-log (+{over:.0}pt)"));
-    }
 
     assert!(
         escaped.is_empty(),

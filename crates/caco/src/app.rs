@@ -77,11 +77,11 @@ impl CacoApp {
 
     /// The handle background workers answer on.
     ///
-    /// Public for the same reason `render` is: the screenshot harness has to
-    /// reach states only a worker can produce — a build in flight, with a step
-    /// and a log — and posting the messages a worker would post is the honest
-    /// way to get there. Reaching into the dialog's private state instead would
-    /// prove a shot renders and nothing about whether the app can get there.
+    /// Public for `tests/screenshots.rs`, which has to reach states only a
+    /// worker can produce — a build in flight, with a step and a log — and
+    /// posting the messages a worker would post is the honest way to get there.
+    /// Reaching into the dialog's private state instead would prove a shot
+    /// renders and nothing about whether the app can get there.
     pub fn background_sender(&self) -> crate::workers::BackgroundSender {
         self.bg.sender()
     }
@@ -692,17 +692,6 @@ impl eframe::App for CacoApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        self.render(ui);
-    }
-}
-
-impl CacoApp {
-    /// One frame of UI, independent of eframe.
-    ///
-    /// `ui` is only a thin shim over this because `eframe::Frame` cannot
-    /// be constructed outside a real window, and the screenshot harness in
-    /// `tests/screenshots.rs` needs to drive the whole app off-screen.
-    pub fn render(&mut self, ui: &mut egui::Ui) {
         let ctx = &ui.ctx().clone();
         // 1. Drain background messages
         for msg in self.bg.drain() {
