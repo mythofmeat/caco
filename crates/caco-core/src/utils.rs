@@ -15,8 +15,10 @@ static ZIP_MAP_DOOM1_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^E[1-9]
 static ZIP_MAP_DOOM2_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^MAP[0-9][0-9]$").unwrap());
 
-/// Maximum size for a WAD inside a ZIP (1 GiB).
-const MAX_ZIP_ENTRY_SIZE: u64 = 1024 * 1024 * 1024;
+/// Largest WAD inside a zip that is read into memory (1 GiB). An entry's size
+/// is the archive's claim, and a buffer is sized by it before a byte is read,
+/// so every such read checks it first.
+pub(crate) const MAX_ZIP_ENTRY_SIZE: u64 = 1024 * 1024 * 1024;
 
 /// Parse WAD header and directory. Returns `[(name, offset, size), ...]`.
 ///
@@ -31,15 +33,22 @@ pub fn parse_wad_directory(wad_data: &[u8]) -> Vec<(String, u32, u32)> {
         return Vec::new();
     }
 
-    let num_lumps = i32::from_le_bytes(wad_data[4..8].try_into().unwrap()) as usize;
-    let dir_offset = i32::from_le_bytes(wad_data[8..12].try_into().unwrap()) as usize;
+    // Both come from the file, which can be truncated, corrupt or not a WAD at
+    // all past its magic. A negative one is nonsense, and no file holds more
+    // entries than its directory has room for: sizing the list by the header
+    // alone asked for 50 GB on a 39-byte file and aborted the process.
+    let num_lumps = i32::from_le_bytes(wad_data[4..8].try_into().unwrap());
+    let dir_offset = i32::from_le_bytes(wad_data[8..12].try_into().unwrap());
+    let (Ok(num_lumps), Ok(dir_offset)) = (usize::try_from(num_lumps), usize::try_from(dir_offset))
+    else {
+        return Vec::new();
+    };
+    let room = wad_data.len().saturating_sub(dir_offset) / 16;
+    let num_lumps = num_lumps.min(room);
 
     let mut entries = Vec::with_capacity(num_lumps);
     for i in 0..num_lumps {
         let entry_offset = dir_offset + i * 16;
-        if entry_offset + 16 > wad_data.len() {
-            break;
-        }
 
         let lump_offset =
             u32::from_le_bytes(wad_data[entry_offset..entry_offset + 4].try_into().unwrap());
@@ -421,6 +430,31 @@ mod tests {
 
         let entries = parse_wad_directory(&wad);
         assert_eq!(entries.len(), 1); // Gracefully handles truncation
+    }
+
+    /// A header is only a claim. A negative count or offset is nonsense, and
+    /// sizing the list by a count the file has no room for asked for 50 GB on
+    /// a 39-byte file and aborted the process, which took the screenshot
+    /// harness down in CI. -1 used to be a capacity overflow on any machine.
+    #[test]
+    fn test_parse_wad_directory_does_not_trust_the_header() {
+        let header = |num_lumps: i32, dir_offset: i32| {
+            let mut wad = b"PWAD".to_vec();
+            wad.extend_from_slice(&num_lumps.to_le_bytes());
+            wad.extend_from_slice(&dir_offset.to_le_bytes());
+            wad
+        };
+        assert!(parse_wad_directory(&header(-1, 12)).is_empty());
+        assert!(parse_wad_directory(&header(1, -1)).is_empty());
+        assert!(parse_wad_directory(&header(i32::MAX, i32::MAX)).is_empty());
+        // The 39-byte file from the harness: "PWAD" and text.
+        assert!(parse_wad_directory(b"PWAD caco screenshots: the author's fix").is_empty());
+
+        let mut one = header(i32::MAX, 12);
+        one.extend_from_slice(&0_u32.to_le_bytes());
+        one.extend_from_slice(&0_u32.to_le_bytes());
+        one.extend_from_slice(b"MAP01\0\0\0");
+        assert_eq!(parse_wad_directory(&one).len(), 1);
     }
 
     #[test]

@@ -260,8 +260,13 @@ impl Shooter {
 
         let dir = self.home.join("changed");
         std::fs::create_dir_all(&dir).expect("create scratch WAD dir");
+        // A well-formed PWAD with an empty directory: the re-analysis worker
+        // reads it as soon as the library reloads.
         let path = dir.join("caco-screenshots-sunder-fixed.wad");
-        std::fs::write(&path, b"PWAD caco screenshots: the author's fix").expect("write WAD");
+        let mut wad = b"PWAD".to_vec();
+        wad.extend_from_slice(&0_i32.to_le_bytes());
+        wad.extend_from_slice(&12_i32.to_le_bytes());
+        std::fs::write(&path, wad).expect("write WAD");
 
         let conn = db::open_connection(&self.home.join("library.db")).expect("open db");
         let id = db::add_wad(
