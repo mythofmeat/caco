@@ -6,6 +6,9 @@ on:
       bump:
         description: Part of the version to increase
         type: choice
+        # A choice only limits the Actions tab. Through the API, `gh workflow run` with
+        # no -f bump=... runs with an empty one unless this is here to refuse it.
+        required: true
         options: [patch, minor, major]
 
 permissions:
@@ -46,11 +49,20 @@ jobs:
             echo "::error::The version files disagree: $(versions | tr '\n' ' ')"
             exit 1
           fi
+          # Agreeing is not enough, since they can all be empty and still agree.
+          if ! [[ "$current" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::The version files say '$current', which is not a version."
+            exit 1
+          fi
           IFS=. read -r major minor patch <<<"$current"
           case "$BUMP" in
             major) version="$((major + 1)).0.0" ;;
             minor) version="$major.$((minor + 1)).0" ;;
             patch) version="$major.$minor.$((patch + 1))" ;;
+            *)
+              echo "::error::The bump has to be patch, minor or major, not '$BUMP'."
+              exit 1
+              ;;
           esac
           sed -i "/^\[workspace\.package\]$/,/^\[/s/^version = \".*\"$/version = \"$version\"/" Cargo.toml
           sed -i "/^name = \"caco\(-core\|-sources\)\?\"$/{n;s/^version = .*/version = \"$version\"/}" Cargo.lock

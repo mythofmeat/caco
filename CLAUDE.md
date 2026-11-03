@@ -602,7 +602,10 @@ projects release the same way:
 - `release.yml` — started by hand from the Actions tab with `patch`, `minor`
   or `major`, or by `update-deps` with `patch`. It runs `verify`, then bumps every version file, commits
   `chore(release): vX.Y.Z`, tags it and pushes both atomically (refusing if
-  started from anything but `main`, or if the version files disagree), runs
+  started from anything but `main`, if the version files disagree or do not hold a
+  version, or with no bump to apply, since `gh workflow run` can leave out an input that
+  is not `required`, and on 2026-11-03 an empty one wrote `version = ""` to `main`,
+  all of the files agreeing on it), runs
   `package` on the tag and builds `Caco.app` on an arm64 macOS runner in
   parallel, creates the GitHub release with all three and generated notes,
   and finally commits `chore(release): cask vX.Y.Z` to point the cask at the
