@@ -151,8 +151,22 @@ pub fn wad_store_dir_in(
     }
 }
 
+/// What the directory of backups is called, in the data dir and beside a database.
+const BACKUPS_DIR_NAME: &str = "backups";
+
 pub fn backup_dir() -> PathBuf {
-    default_data_dir().join("backups")
+    default_data_dir().join(BACKUPS_DIR_NAME)
+}
+
+/// Where the database at `db_path` is snapshotted before a migration: beside it,
+/// which for a library at its default path is [`backup_dir`].
+///
+/// Worked out from the database rather than read from config, for the reason
+/// `GcPaths` is explicit. Otherwise a test's database in a tempdir snapshots into the
+/// developer's real data dir, and a `CACO_DB_PATH` database overwrites the real
+/// library's snapshot of the same schema version.
+pub fn migration_backup_dir(db_path: &Path) -> PathBuf {
+    db_path.with_file_name(BACKUPS_DIR_NAME)
 }
 
 pub fn companion_dir() -> PathBuf {
@@ -943,6 +957,19 @@ fn collect_profile_stems(dir: &Path) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_library_at_its_default_path_snapshots_into_the_backup_dir() {
+        assert_eq!(migration_backup_dir(&default_db_path()), backup_dir());
+    }
+
+    #[test]
+    fn a_database_anywhere_else_snapshots_beside_itself() {
+        assert_eq!(
+            migration_backup_dir(Path::new("/mnt/games/caco.db")),
+            Path::new("/mnt/games/backups")
+        );
+    }
+
     use super::*;
 
     #[test]

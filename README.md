@@ -357,11 +357,11 @@ Override the cache root with `CACO_CACHE_HOME`, or just the WAD cache with
 ### Recovering from a bad migration
 
 Each time caco starts with pending schema migrations it first copies the live
-library to `backups/pre-migration-<N>.db` in the data directory, where `<N>` is
-the schema version before the migration runs. Migrations themselves are
-transactional, so a crash or SQL error rolls back cleanly; the file-level
-snapshot is for the rarer case where a migration commits successfully but
-leaves user data in a bad state. To recover:
+library to `backups/pre-migration-<N>.db` beside it, which is in the data directory
+unless you have moved `db_path`. `<N>` is the schema version before the migration
+runs. Migrations themselves are transactional, so a crash or SQL error rolls back
+cleanly; the file-level snapshot is for the rarer case where a migration commits
+successfully but leaves user data in a bad state. To recover:
 
 ```bash
 # stop any running caco instances, then:

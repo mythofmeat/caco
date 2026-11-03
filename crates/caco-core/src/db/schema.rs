@@ -229,7 +229,8 @@ pub fn init_db(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// Copy the live DB file to `{backup_dir}/pre-migration-{from_version}.db`.
+/// Copy the live DB file to `pre-migration-{from_version}.db` in
+/// [`crate::config::migration_backup_dir`], beside the database itself.
 /// Best-effort: logs a warning and continues on failure (a missing backup
 /// should not prevent the user from running pending migrations).
 fn backup_before_migration(conn: &Connection, from_version: i64) {
@@ -240,7 +241,7 @@ fn backup_before_migration(conn: &Connection, from_version: i64) {
     if !db_path.exists() {
         return;
     }
-    let backup_dir = crate::config::backup_dir();
+    let backup_dir = crate::config::migration_backup_dir(db_path);
     if let Err(e) = std::fs::create_dir_all(&backup_dir) {
         tracing::warn!("failed to create backup dir {backup_dir:?}: {e}");
         return;
@@ -1269,6 +1270,39 @@ mod tests {
             )
             .unwrap();
         assert_eq!(indexes, 2);
+    }
+
+    #[test]
+    fn test_a_snapshot_goes_beside_the_database_it_is_of() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = crate::db::open_connection(&dir.path().join("library.db")).unwrap();
+
+        init_db(&conn).unwrap();
+
+        assert!(dir.path().join("backups/pre-migration-0.db").exists());
+    }
+
+    #[test]
+    fn test_each_schema_version_keeps_its_own_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = crate::db::open_connection(&dir.path().join("library.db")).unwrap();
+        init_db(&conn).unwrap();
+
+        let latest = MIGRATIONS.last().unwrap().0;
+        conn.execute(
+            "DELETE FROM schema_migrations WHERE version >= ?1",
+            [latest],
+        )
+        .unwrap();
+        init_db(&conn).unwrap();
+
+        let backups = dir.path().join("backups");
+        assert!(backups.join("pre-migration-0.db").exists());
+        assert!(
+            backups
+                .join(format!("pre-migration-{}.db", latest - 1))
+                .exists()
+        );
     }
 
     #[test]
