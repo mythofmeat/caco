@@ -665,12 +665,6 @@ impl AppState {
         }
     }
 
-    /// Get the currently selected WAD record, if any.
-    pub fn selected_wad(&self) -> Option<&WadRecord> {
-        self.selected_wad_id
-            .and_then(|id| self.wads.iter().find(|w| w.id == id))
-    }
-
     /// Move selection left by one position (grid mode).
     pub fn select_left(&mut self, columns: usize) {
         if columns == 0 || self.wads.is_empty() {

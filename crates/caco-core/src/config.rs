@@ -661,11 +661,6 @@ pub fn get_zdoom_sourceport() -> String {
     "gzdoom".to_string()
 }
 
-/// Get configured preferred sourceports by family.
-pub fn get_sourceport_preferences() -> HashMap<String, String> {
-    load_config().sourceport_preferences.clone()
-}
-
 /// Get the configured default IWAD.
 pub fn get_iwad() -> String {
     load_config().iwad.clone()
@@ -720,26 +715,6 @@ pub fn get_auto_detect_iwad() -> bool {
 /// Whether to auto-detect complevel from WAD contents.
 pub fn get_auto_detect_complevel() -> bool {
     load_config().auto_detect_complevel
-}
-
-/// Get max cache size in bytes. 0 = unlimited.
-pub fn get_cache_max_size() -> u64 {
-    let cfg = load_config();
-    if cfg.cache_max_size_gb > 0.0 {
-        (cfg.cache_max_size_gb * 1024.0 * 1024.0 * 1024.0) as u64
-    } else {
-        0
-    }
-}
-
-/// Get max cache age in days. 0 = never expire.
-pub fn get_cache_max_age() -> i64 {
-    load_config().cache_max_age_days
-}
-
-/// Whether to auto-clean cache before play.
-pub fn get_cache_auto_clean() -> bool {
-    load_config().cache_auto_clean
 }
 
 /// Resolve a sourceport name to a full path.
