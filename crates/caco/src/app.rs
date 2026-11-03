@@ -361,7 +361,6 @@ impl CacoApp {
         });
     }
 
-    /// Dispatch an action request (from detail panel buttons or table shortcuts).
     /// Switch the central panel to `mode`, asking that view to refresh.
     ///
     /// Public for `tests/screenshots.rs`, which walks every view the way the
@@ -381,6 +380,8 @@ impl CacoApp {
         self.state.active_dialog = None;
     }
 
+    /// Dispatch an action request (from detail panel buttons or table shortcuts).
+    ///
     /// Public so `tests/screenshots.rs` can open any dialog the same way a
     /// click does, instead of reconstructing dialog state by hand.
     pub fn dispatch_action(&mut self, action: ActionRequest) {
@@ -962,7 +963,7 @@ impl CacoApp {
                     .stroke(egui::Stroke::new(1.0_f32, theme::BORDER)),
             )
             .show(ui, |ui| {
-                render_topbar(ui, &mut self.state, &mut actions);
+                render_topbar(ui, &mut self.state);
             });
 
         // ── Bottom status bar ──

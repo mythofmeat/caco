@@ -1,14 +1,10 @@
 //! Top bar — breadcrumbs (left) + filter bar + sort controls (right).
 
 use crate::panels;
-use crate::state::{ActionRequest, ActiveDialog, AppState, ViewMode};
+use crate::state::{ActiveDialog, AppState, ViewMode};
 use crate::theme;
 
-pub(super) fn render_topbar(
-    ui: &mut egui::Ui,
-    state: &mut AppState,
-    _actions: &mut Vec<ActionRequest>,
-) {
+pub(super) fn render_topbar(ui: &mut egui::Ui, state: &mut AppState) {
     ui.horizontal(|ui| {
         // Breadcrumbs
         render_breadcrumbs(ui, state);
