@@ -6,7 +6,6 @@ use crate::error::{Result, SourceError};
 use crate::http::{build_client, waf_challenge};
 
 const API_URL: &str = "https://doomwiki.org/w/api.php";
-const USER_AGENT: &str = "Caco/1.0 (Doom WAD library manager; https://github.com/eshen/caco)";
 
 /// Client for the Doom Wiki MediaWiki API.
 pub struct DoomwikiClient {
@@ -18,7 +17,7 @@ impl DoomwikiClient {
     /// Create a new client with default settings.
     pub fn new() -> Self {
         Self {
-            client: build_client(None, Some(USER_AGENT)),
+            client: build_client(),
             parser: WikitextParser::new(),
         }
     }

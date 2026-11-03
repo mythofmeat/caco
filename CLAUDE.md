@@ -69,7 +69,7 @@ crates/
 - `db/` — schema, migrations (23+), models, query parser, wads, sessions, iwads, id24, companions
 
 **caco-sources** modules:
-- `http.rs` — shared reqwest blocking client + `waf_challenge`
+- `http.rs` — shared reqwest blocking client + `USER_AGENT` + `waf_challenge`
 - `import_service.rs` — central import entry points for all sources + auto-enrichment
 - `enrich_service.rs` — re-derives metadata for rows already in the library: `enrich_wads` fills `complevel` / `custom_iwad` / `zdoom_required` from the cached file first and the Doom Wiki second, never overwriting an existing value; `enrich_cacowards` scrapes a year and auto-links entries. The batch driver takes a progress callback and a `cancel` closure because it is network-bound (one wiki lookup per WAD the file cannot settle) — the GUI needs both a progress bar and a stop button, and a cancelled run is just a shorter one since each WAD is written independently.
 - `cacoward_link.rs` — which library WAD a Cacoward row belongs to. One per-row decision (`owner_of`: idgames id, then a unique normalized title, which never outweighs two idgames ids that disagree) reached from two moments, because either side can arrive first: `link_year` after a scrape and `link_imported_wad` after every import. Per row rather than per WAD so the answer cannot depend on iteration order: a WAD claiming rows as it is visited could take one by title that a later WAD owns by id. There is deliberately no whole-table sweep, because Unlink clears a row and a sweep would quietly undo that.
