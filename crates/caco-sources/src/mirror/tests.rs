@@ -449,8 +449,35 @@ fn test_a_file_of_the_wrong_size_is_not_placed() {
             .unwrap_err()
             .to_string();
 
-        assert!(failure.contains("expected 19 bytes"), "{failure}");
+        assert!(failure.contains("not the 19 bytes"), "{failure}");
         assert_eq!(fs::read_dir(&m.paths.cache_dir).unwrap().count(), 0);
+    }
+}
+
+/// Said in the user's words, with no hash and no OS error number, since this ends up
+/// in the link dialog.
+#[test]
+fn test_a_file_the_index_lists_and_the_mirror_lost_is_explained() {
+    let m = Machine::new();
+    let root = tempfile::tempdir().unwrap();
+    let server = TestServer::start(Flavor::Static, None);
+    let entry = entry_for(WAD_BYTES, "road.zip");
+    local_store_with(root.path(), std::slice::from_ref(&entry), WAD_BYTES);
+    fs::remove_dir_all(root.path().join(&entry.sha256)).unwrap();
+    server.put(
+        INDEX_PATH,
+        index_listing(std::slice::from_ref(&entry)).as_bytes(),
+    );
+
+    for config in [local_mirror(root.path()), http_mirror(&server)] {
+        sync_mirrors(&m.conn, std::slice::from_ref(&config)).unwrap();
+        let failure = fetch(&m, &m.wad_that_lost(WAD_BYTES), &[config])
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            failure,
+            "Mirror home: its index lists road.zip, but the file is not there"
+        );
     }
 }
 

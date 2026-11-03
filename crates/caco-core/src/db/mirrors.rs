@@ -15,6 +15,8 @@
 //! go missing. They also say something true on a machine that cannot reach the
 //! mirror right now.
 
+use std::collections::HashMap;
+
 use rusqlite::Connection;
 
 use super::connection::with_transaction;
@@ -123,6 +125,15 @@ pub fn files_for_wad(conn: &Connection, wad_id: i64) -> Result<Vec<MirrorFile>> 
         })?
         .collect::<std::result::Result<_, _>>()?;
     Ok(files)
+}
+
+/// How many files each mirror's index listed, the last time it was read.
+pub fn file_counts(conn: &Connection) -> Result<HashMap<String, i64>> {
+    let mut stmt = conn.prepare("SELECT mirror, COUNT(*) FROM mirror_files GROUP BY mirror")?;
+    let counts = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<std::result::Result<_, _>>()?;
+    Ok(counts)
 }
 
 /// One mirror file as the tables hold it, which is how two can be compared.
@@ -336,6 +347,19 @@ mod tests {
 
     fn one(sha256: &str, evidence: i64) -> Vec<(String, String, i64)> {
         vec![(HOME.to_string(), sha256.to_string(), evidence)]
+    }
+
+    #[test]
+    fn test_file_counts_are_per_mirror() {
+        let conn = setup();
+        assert_eq!(file_counts(&conn).unwrap(), HashMap::new());
+
+        holds(&conn, &[file(HASH_A), file(HASH_B)]);
+        sync_files(&conn, "other", &[file(HASH_A)]).unwrap();
+
+        let counts = file_counts(&conn).unwrap();
+        assert_eq!(counts.get(HOME), Some(&2));
+        assert_eq!(counts.get("other"), Some(&1));
     }
 
     #[test]

@@ -35,14 +35,19 @@ use caco::dialogs::storage::StorageTab;
 use caco::import::state::SearchSource;
 use caco::message::{AppMessage, EnrichReport};
 use caco::state::{ActionRequest, ViewMode};
+use caco_core::config::MirrorConfig;
 use caco_core::sourceports::RemoteRefs;
 use caco_sources::SourceError;
 use caco_sources::enrich_service::WikiBlocked;
 use caco_sources::http::WafKind;
+use caco_sources::import_service::ImportResult;
 use egui_kittest::kittest::Queryable;
 
 /// How long to leave worker threads to answer between rounds of frames.
 const WORKER_PAUSE: Duration = Duration::from_millis(80);
+
+/// The mirror `Shooter::configure_mirror` sets up.
+const MIRROR_NAME: &str = "home";
 
 /// Viewport used for every shot unless `CACO_SHOT_SIZE` says otherwise.
 /// 1200x800 is `main.rs`'s `with_inner_size`, so this is the window a user
@@ -192,9 +197,17 @@ impl Shooter {
         action: ActionRequest,
         after_open: impl FnOnce(&mut Self),
     ) -> f32 {
-        self.harness.state_mut().dispatch_action(action);
-        self.settle(4, WORKER_PAUSE);
-        after_open(self);
+        self.shot_opened_by(name, |s| {
+            s.harness.state_mut().dispatch_action(action);
+            s.settle(4, WORKER_PAUSE);
+            after_open(s);
+        })
+    }
+
+    /// Same, for a dialog nothing dispatches: `open` gets it on screen however the
+    /// app does.
+    fn shot_opened_by(&mut self, name: &str, open: impl FnOnce(&mut Self)) -> f32 {
+        open(self);
         self.settle(4, Duration::ZERO);
         self.shot(name);
         let overflow = self.worst_overflow();
@@ -283,6 +296,87 @@ impl Shooter {
         )
         .expect("record a session on the old file");
         id
+    }
+
+    /// Give the scratch home a writable mirror, which is what the rest of the mirror
+    /// surfaces hang off. A directory, so that nothing here needs a server. Saved and
+    /// reloaded the way Settings does it, into the scratch home's own config file.
+    fn configure_mirror(&self) -> PathBuf {
+        let root = self.home.join("mirror");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("create scratch mirror");
+
+        unsafe { std::env::set_var("CACO_CONFIG", self.home.join("config.toml")) };
+        let mut config = (*caco_core::config::load_config()).clone();
+        config.mirrors = vec![MirrorConfig {
+            name: MIRROR_NAME.to_string(),
+            path: Some(root.display().to_string()),
+            token_env: Some("CACO_MIRROR_TOKEN".to_string()),
+            write: true,
+            ..Default::default()
+        }];
+        caco_core::config::save_config(&config).expect("save scratch config");
+        caco_core::config::reload_config();
+        root
+    }
+
+    /// A manual-only WAD with its file here: what a mirror is offered. The file's
+    /// name is long on purpose, since it goes in a sentence in the offer.
+    fn add_manual_wad_with_file(&self) -> i64 {
+        use caco_core::db::{self, NewWad, SourceType};
+
+        let dir = self.home.join("offered");
+        std::fs::create_dir_all(&dir).expect("create scratch WAD dir");
+        let path = dir.join("caco-screenshots-lonesome-road-v1.2-final-with-the-music-fix.pk3");
+        std::fs::write(&path, b"PWAD\0\0\0\0\x0c\0\0\0").expect("write WAD");
+
+        let conn = db::open_connection(&self.home.join("library.db")).expect("open db");
+        db::add_wad(
+            &conn,
+            &NewWad::new("Lonesome Road", SourceType::Doomworld)
+                .source_url("https://www.doomworld.com/forum/topic/151858-lonesome-road/")
+                .cached_path(path.display().to_string()),
+        )
+        .expect("add manual WAD")
+    }
+
+    /// A WAD a mirror lists and cannot produce, because the mirror's copy has gone.
+    /// Play is what finds that out, so the shot goes through it, and it stops at the
+    /// link dialog with nothing launched.
+    fn add_wad_on_a_broken_mirror(&self) -> i64 {
+        use caco_core::db::{self, NewWad, SourceType, mirrors};
+        use caco_core::mirrors::MirrorEntry;
+
+        let conn = db::open_connection(&self.home.join("library.db")).expect("open db");
+        let id = db::add_wad(
+            &conn,
+            &NewWad::new("Purgatory", SourceType::Doomworld)
+                .source_url("https://www.doomworld.com/forum/topic/150000-purgatory/"),
+        )
+        .expect("add WAD");
+        let entry = MirrorEntry {
+            sha256: "ab".repeat(32),
+            size: 4,
+            filename: "caco-screenshots-purgatory-v1.1-final.pk3".to_string(),
+            doomworld: Some(150000),
+            ..Default::default()
+        };
+        mirrors::sync_files(&conn, MIRROR_NAME, &[entry]).expect("list it on the mirror");
+        id
+    }
+
+    /// Open the mirror offer for `wad_id` the way an import does, by posting what the
+    /// import worker posts.
+    fn post_import_of(&mut self, wad_id: i64) {
+        let tx = self.harness.state_mut().background_sender();
+        tx.send(AppMessage::ImportComplete(Ok(ImportResult {
+            wad_id: Some(wad_id),
+            is_duplicate: false,
+            duplicate_id: None,
+            duplicate_title: None,
+            error: None,
+        })));
+        self.settle(2, WORKER_PAUSE);
     }
 
     fn purge_wad(&self, id: i64) {
@@ -477,6 +571,101 @@ fn shoot_every_surface() {
         }),
     );
     s.purge_wad(changed);
+
+    // Everything to do with mirrors exists only once one is configured.
+    let mirror_root = s.configure_mirror();
+
+    // The section is down the page, so it is scrolled to before it is shot. Finding
+    // its contents proves a configured mirror reaches it.
+    record(
+        "settings-mirrors",
+        s.shot_dialog_after("dlg-settings-mirrors", ActionRequest::Settings, |s| {
+            s.harness.get_by_label("Add Mirror").scroll_to_me();
+            s.settle(3, Duration::ZERO);
+            s.harness.get_by_label("caco may upload");
+        }),
+    );
+
+    // Only a WAD arriving with no way back brings up the offer.
+    let manual = s.add_manual_wad_with_file();
+    record(
+        "mirror-offer",
+        s.shot_opened_by("dlg-mirror-offer", |s| {
+            s.post_import_of(manual);
+            s.harness
+                .get_by_label_contains("any machine with this library");
+        }),
+    );
+
+    // Edit's File section offers it too, for a file that was here before the mirror.
+    record(
+        "edit-sources-upload",
+        s.shot_dialog_after(
+            "dlg-edit-sources-upload",
+            ActionRequest::Edit(manual),
+            |s| {
+                s.harness.get_by_label("Sources").click();
+                s.settle(3, Duration::ZERO);
+                s.harness.get_by_label(&format!("Upload to {MIRROR_NAME}"));
+            },
+        ),
+    );
+
+    // Pressing the button has to do what it says. Through the real offer, the real
+    // worker and a real (if local) mirror, and the WAD comes out the other side
+    // reading as something caco can fetch.
+    s.post_import_of(manual);
+    s.harness
+        .get_by_label(&format!("Upload to {MIRROR_NAME}"))
+        .click();
+    for _ in 0..50 {
+        s.settle(1, WORKER_PAUSE);
+        if mirror_root.join(caco_core::mirrors::INDEX_PATH).exists()
+            && s.harness.state_mut().uploads_running() == 0
+        {
+            break;
+        }
+    }
+    {
+        let conn = caco_core::db::open_connection(&s.home.join("library.db")).expect("open db");
+        let wad = caco_core::db::get_wad(&conn, manual, false)
+            .expect("read WAD")
+            .expect("WAD still there");
+        assert!(wad.mirrored, "the upload did not reach the library");
+        assert!(wad.retrievability().is_automatic());
+    }
+
+    // Once it is up, the same section says so and stops offering.
+    record(
+        "edit-sources-on-mirror",
+        s.shot_dialog_after(
+            "dlg-edit-sources-on-mirror",
+            ActionRequest::Edit(manual),
+            |s| {
+                s.harness.get_by_label("Sources").click();
+                s.settle(3, Duration::ZERO);
+                s.harness.get_by_label_contains("On mirror: home");
+                assert!(
+                    s.harness
+                        .query_by_label(&format!("Upload to {MIRROR_NAME}"))
+                        .is_none()
+                );
+            },
+        ),
+    );
+    s.purge_wad(manual);
+
+    // A mirror that lists a file and cannot produce it: the link dialog has to say
+    // what went wrong, or it looks like a WAD no mirror ever had.
+    let broken = s.add_wad_on_a_broken_mirror();
+    record(
+        "link-mirror-failed",
+        s.shot_dialog_after("dlg-link-mirror-failed", ActionRequest::Play(broken), |s| {
+            s.settle(4, WORKER_PAUSE);
+            s.harness.get_by_label_contains("Mirror home:");
+        }),
+    );
+    s.purge_wad(broken);
 
     // Only Play reaches the link dialog, and only for a WAD whose file is not
     // here. Last, because the WAD it adds is in the library from then on.

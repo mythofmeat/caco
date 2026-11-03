@@ -25,6 +25,7 @@ mod dialogs;
 mod file_check;
 mod help;
 mod hero;
+mod mirrors;
 mod section_header;
 mod sidebar;
 mod status_bar;
@@ -75,6 +76,7 @@ impl CacoApp {
         };
         app.sync_cacowards();
         file_check::spawn(app.bg.sender(), app.state.db_path.clone());
+        mirrors::spawn_sync(app.bg.sender(), app.state.db_path.clone());
         app.spawn_sourceport_update_check();
         app
     }
@@ -327,7 +329,8 @@ impl CacoApp {
             // without asking.
             enum PlayError {
                 Message(String),
-                Unavailable,
+                /// Says why when caco tried to fetch it and could not.
+                Unavailable(Option<String>),
                 Changed {
                     title: String,
                     change: caco_core::identity::ContentChange,
@@ -350,62 +353,33 @@ impl CacoApp {
                 // The startup check, for this one WAD: a file that has
                 // gone since is recorded as last seen there, and one
                 // that has come back is relinked.
-                let presence = caco_core::presence::check_wad(
-                    &conn,
-                    &wad,
-                    &caco_core::presence::StorePaths::from_config(),
-                )
-                .map_err(|e| format!("Checking the WAD file failed: {e}"))?;
+                let paths = caco_core::presence::StorePaths::from_config();
+                let presence = caco_core::presence::check_wad(&conn, &wad, &paths)
+                    .map_err(|e| format!("Checking the WAD file failed: {e}"))?;
                 if !presence.is_here() {
                     // Nothing to fetch it from: say so now, rather than
                     // announce a download that cannot start.
                     if !wad.retrievability().is_automatic() {
-                        return Err(PlayError::Unavailable);
+                        return Err(PlayError::Unavailable(None));
                     }
                     sender.send(AppMessage::Notify(Notification::info(format!(
                         "Downloading {}...",
                         wad.title
                     ))));
-                    let client = caco_sources::idgames::IdgamesClient::new();
-                    let cache_dir = caco_core::config::get_cache_dir();
-                    std::fs::create_dir_all(&cache_dir)
-                        .map_err(|e| format!("Failed to create cache dir: {e}"))?;
-                    let mirror = caco_core::config::load_config().download_mirror as usize;
-
-                    // Ask the archive where the file is now, but a failed
-                    // lookup is not a missing file: source_url + filename
-                    // still name it on a mirror, and the mirrors do not sit
-                    // behind the API.
-                    let entry = wad
-                        .idgames_id
-                        .as_deref()
-                        .and_then(|id| id.parse::<i64>().ok())
-                        .and_then(|id| client.get(Some(id), None).ok());
-
-                    let dest = match entry {
-                        Some(entry) => client.download(&entry, Some(&cache_dir), mirror, None),
-                        None => client.download_direct(
-                            wad.source_url.as_deref().unwrap_or(""),
-                            wad.filename.as_deref().unwrap_or(""),
-                            &cache_dir,
-                            mirror,
-                            None,
-                        ),
-                    }
-                    .map_err(|_| PlayError::Unavailable)?;
-
-                    // Only the path: the launch below hashes the new file
-                    // before it plays it, and asks if it is not the file the
-                    // WAD was last played with.
-                    let update = caco_core::db::WadUpdate::new()
-                        .set_text("cached_path", Some(dest.to_string_lossy().to_string()));
-                    caco_core::db::update_wad(&conn, wad_id, &update)
-                        .map_err(|e| format!("Failed to update WAD record: {e}"))?;
+                    let config = caco_core::config::load_config();
+                    caco_sources::wad_fetch::fetch_missing_file(
+                        &conn,
+                        &wad,
+                        &config.mirrors,
+                        &paths,
+                        config.download_mirror as usize,
+                    )
+                    .map_err(|e| PlayError::Unavailable(Some(e.to_string())))?;
                 }
 
                 caco_core::player::play(&conn, wad_id, opts).map_err(|e| match e {
                     // Gone between the check above and the launch.
-                    caco_core::Error::WadFileMissing { .. } => PlayError::Unavailable,
+                    caco_core::Error::WadFileMissing { .. } => PlayError::Unavailable(None),
                     caco_core::Error::WadFileChanged { title, change } => {
                         PlayError::Changed { title, change }
                     }
@@ -418,7 +392,9 @@ impl CacoApp {
                 Err(PlayError::Message(msg)) => {
                     sender.send(AppMessage::PlayFinished { outcome: Err(msg) })
                 }
-                Err(PlayError::Unavailable) => sender.send(AppMessage::PlayUnavailable { wad_id }),
+                Err(PlayError::Unavailable(reason)) => {
+                    sender.send(AppMessage::PlayUnavailable { wad_id, reason })
+                }
                 Err(PlayError::Changed { title, change }) => {
                     sender.send(AppMessage::PlayFileChanged {
                         wad_id,
@@ -507,6 +483,12 @@ impl CacoApp {
         self.state.active_dialog = None;
     }
 
+    /// How many uploads to a mirror are still running. Public for
+    /// `tests/screenshots.rs`, which waits for one it started.
+    pub fn uploads_running(&self) -> usize {
+        self.state.uploads.len()
+    }
+
     /// Dispatch an action request (from detail panel buttons or table shortcuts).
     ///
     /// Public so `tests/screenshots.rs` can open any dialog the same way a
@@ -537,7 +519,7 @@ impl CacoApp {
                 self.state.active_dialog = Some(ActiveDialog::Profiles(Box::new(dialog)));
             }
             ActionRequest::Settings => {
-                let dialog = crate::dialogs::settings::SettingsDialogState::new();
+                let dialog = crate::dialogs::settings::SettingsDialogState::new(&self.conn);
                 self.state.active_dialog = Some(ActiveDialog::Settings(dialog));
             }
             ActionRequest::Resources => {
@@ -681,6 +663,23 @@ impl CacoApp {
                 };
                 self.spawn_play(wad_id, opts);
             }
+            ActionRequest::SyncMirrors => {
+                mirrors::spawn_sync(self.bg.sender(), self.state.db_path.clone());
+            }
+            ActionRequest::UploadToMirror { wad_id, mirror } => {
+                let title = caco_core::db::get_wad(&self.conn, wad_id, false)
+                    .ok()
+                    .flatten()
+                    .map_or_else(|| format!("WAD #{wad_id}"), |wad| wad.title);
+                self.state.uploads.push(title.clone());
+                mirrors::spawn_upload(
+                    self.bg.sender(),
+                    self.state.db_path.clone(),
+                    wad_id,
+                    title,
+                    mirror,
+                );
+            }
         }
     }
 }
@@ -698,13 +697,14 @@ impl eframe::App for CacoApp {
                 AppMessage::Notify(notif) => {
                     self.state.notification = Some(notif);
                 }
-                AppMessage::PlayUnavailable { wad_id } => {
+                AppMessage::PlayUnavailable { wad_id, reason } => {
                     self.state.play_state = PlayState::Idle;
                     // The worker's file check may have just recorded the file
                     // as missing, and Cacoward cards embed the row too.
                     self.state.invalidate_wad_views();
                     if let Some(dialog) = LinkDialogState::new(&self.conn, wad_id) {
-                        self.state.active_dialog = Some(ActiveDialog::Link(dialog));
+                        self.state.active_dialog =
+                            Some(ActiveDialog::Link(dialog.with_failure(reason)));
                     } else {
                         self.state.notification = Some(Notification::error(
                             "WAD is not available and could not be located in the database."
@@ -734,6 +734,23 @@ impl eframe::App for CacoApp {
                 }
                 AppMessage::FilesIdentified => {
                     self.state.invalidate_wad_views();
+                }
+                AppMessage::MirrorsSynced(report) => {
+                    if report.changed {
+                        self.state.invalidate_wad_views();
+                    }
+                    if let Some(notification) = mirrors::sync_notification(&report) {
+                        self.state.notification = Some(notification);
+                    }
+                }
+                AppMessage::MirrorUploaded { title, outcome } => {
+                    if let Some(position) = self.state.uploads.iter().position(|t| *t == title) {
+                        self.state.uploads.remove(position);
+                    }
+                    // A file now on a mirror changes what the WAD reads as, and an
+                    // upload hashes a file that had not been.
+                    self.state.invalidate_wad_views();
+                    self.state.notification = Some(mirrors::upload_notification(outcome.as_ref()));
                 }
                 AppMessage::PlayFinished { outcome } => {
                     self.state.play_state = PlayState::Idle;
@@ -872,6 +889,9 @@ impl eframe::App for CacoApp {
                             // existing WAD to the award row, so every successful
                             // result may have changed a cached projection.
                             self.state.invalidate_wad_views();
+                            if let Some(wad_id) = ir.wad_id {
+                                self.state.mirror_offers.push_back(wad_id);
+                            }
                             if ir.is_duplicate {
                                 let title =
                                     ir.duplicate_title.unwrap_or_else(|| "unknown".to_string());
@@ -917,6 +937,7 @@ impl eframe::App for CacoApp {
         }
 
         // 4. Render active dialog (modal, overlays everything)
+        self.state.open_next_mirror_offer(&self.conn);
         if let Some(action) = render_active_dialog(&mut self.state, &self.conn, ctx) {
             self.dispatch_action(action);
         }
@@ -941,6 +962,8 @@ impl eframe::App for CacoApp {
                 caco_core::config::reload_config();
                 self.state.notification =
                     Some(Notification::info("Config reloaded from disk".to_string()));
+                // The mirrors may be what was edited.
+                mirrors::spawn_sync(self.bg.sender(), self.state.db_path.clone());
             }
         }
         if quit {

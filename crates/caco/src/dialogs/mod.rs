@@ -10,6 +10,7 @@ pub mod enrich;
 pub mod file_changed;
 pub mod gc;
 pub mod link;
+pub mod mirror_offer;
 pub mod profiles;
 pub mod resources;
 pub mod sessions;
@@ -143,7 +144,8 @@ pub fn include_at_risk_toggle(ui: &mut egui::Ui, on: &mut bool, manual_files: us
         .size(11.0),
     )
     .on_hover_text(
-        "These files did not come from idgames, so caco cannot download them again after deletion.",
+        "These files are not on idgames or one of your mirrors, so caco cannot download them \
+         again after deletion.",
     );
     *on
 }

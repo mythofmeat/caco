@@ -9,6 +9,7 @@ use crate::dialogs::edit::EditResult;
 use crate::dialogs::enrich::EnrichResult;
 use crate::dialogs::file_changed::FileChangedResult;
 use crate::dialogs::link::LinkResult;
+use crate::dialogs::mirror_offer::MirrorOfferResult;
 use crate::dialogs::profiles::ProfilesResult;
 use crate::dialogs::resources::ResourcesResult;
 use crate::dialogs::sessions::SessionsResult;
@@ -51,6 +52,11 @@ pub(super) fn render_active_dialog(
                 EditResult::Modified => {
                     close_dialog = true;
                     state.invalidate_wad_views();
+                }
+                EditResult::UploadToMirror { wad_id, mirror } => {
+                    // Stay open: the upload runs on a worker thread, and the user
+                    // came here to edit a WAD.
+                    follow_up_action = Some(ActionRequest::UploadToMirror { wad_id, mirror });
                 }
                 EditResult::Open => {}
             },
@@ -95,6 +101,8 @@ pub(super) fn render_active_dialog(
                     state.notification = Some(Notification::info("Settings saved".to_string()));
                     state.needs_reload = true;
                     close_dialog = true;
+                    // A mirror added or taken away changes what the library can fetch.
+                    follow_up_action = Some(ActionRequest::SyncMirrors);
                 }
                 SettingsResult::Closed => {
                     close_dialog = true;
@@ -176,12 +184,23 @@ pub(super) fn render_active_dialog(
                 LinkResult::Linked(wad_id) => {
                     close_dialog = true;
                     mark_linked(state);
+                    state.mirror_offers.push_back(wad_id);
                     follow_up_action = Some(ActionRequest::Play(wad_id));
                 }
                 LinkResult::Cancelled => {
                     close_dialog = true;
                 }
                 LinkResult::Open => {}
+            },
+            ActiveDialog::MirrorOffer(dialog) => match dialog.render(ctx) {
+                MirrorOfferResult::Upload { wad_id, mirror } => {
+                    close_dialog = true;
+                    follow_up_action = Some(ActionRequest::UploadToMirror { wad_id, mirror });
+                }
+                MirrorOfferResult::Declined => {
+                    close_dialog = true;
+                }
+                MirrorOfferResult::Open => {}
             },
             ActiveDialog::FileChanged(dialog) => match dialog.render(ctx) {
                 FileChangedResult::PlayAnyway(wad_id) => {

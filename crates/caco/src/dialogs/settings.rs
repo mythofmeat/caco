@@ -6,9 +6,12 @@
 //! `db_path`, which is only read at startup). Sections not shown here
 //! (tui/list, sourceport preferences, IWAD priority) are preserved verbatim.
 
-use caco_core::config::{self, Config};
+use std::collections::HashMap;
+
+use caco_core::config::{self, Config, MirrorConfig};
 use caco_core::sourceports;
 use caco_sources::idgames::MIRRORS;
+use rusqlite::Connection;
 
 use crate::theme;
 
@@ -42,6 +45,11 @@ pub struct SettingsDialogState {
     cache_max_age_days: i64,
     sourceport_update_check_days: i64,
 
+    // Mirrors
+    mirrors: Vec<MirrorRow>,
+    /// How many files each mirror's index listed, the last time it was read.
+    mirror_file_counts: HashMap<String, i64>,
+
     // Paths
     cache_dir: String,
     data_dir: String,
@@ -52,6 +60,48 @@ pub struct SettingsDialogState {
     error: Option<String>,
 }
 
+/// One row of the Mirrors section: text until Save makes a [`MirrorConfig`] of it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct MirrorRow {
+    name: String,
+    /// A URL or a path. One field, since which it is shows in how it starts.
+    location: String,
+    token_env: String,
+    write: bool,
+}
+
+impl MirrorRow {
+    fn from_config(mirror: &MirrorConfig) -> Self {
+        Self {
+            name: mirror.name.clone(),
+            location: mirror
+                .url
+                .clone()
+                .or_else(|| mirror.path.clone())
+                .unwrap_or_default(),
+            token_env: mirror.token_env.clone().unwrap_or_default(),
+            write: mirror.write,
+        }
+    }
+
+    fn to_config(&self) -> MirrorConfig {
+        let location = self.location.trim();
+        let filled = |text: &str| (!text.is_empty()).then(|| text.to_string());
+        let (url, path) = if location.contains("://") {
+            (filled(location), None)
+        } else {
+            (None, filled(location))
+        };
+        MirrorConfig {
+            name: self.name.trim().to_string(),
+            url,
+            path,
+            token_env: filled(self.token_env.trim()),
+            write: self.write,
+        }
+    }
+}
+
 /// Result of showing the settings dialog.
 pub enum SettingsResult {
     Open,
@@ -59,15 +109,9 @@ pub enum SettingsResult {
     Saved,
 }
 
-impl Default for SettingsDialogState {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl SettingsDialogState {
     /// Create the dialog from the current config snapshot.
-    pub fn new() -> Self {
+    pub fn new(conn: &Connection) -> Self {
         let cfg = config::load_config();
         let mut detected_sourceports: Vec<String> = sourceports::detect_sourceports()
             .into_iter()
@@ -102,6 +146,8 @@ impl SettingsDialogState {
             cache_max_size_gb: cfg.cache_max_size_gb,
             cache_max_age_days: cfg.cache_max_age_days,
             sourceport_update_check_days: cfg.sourceport_update_check_days,
+            mirrors: cfg.mirrors.iter().map(MirrorRow::from_config).collect(),
+            mirror_file_counts: caco_core::db::mirrors::file_counts(conn).unwrap_or_default(),
             cache_dir: cfg.cache_dir.clone(),
             data_dir: cfg.data_dir.clone(),
             iwad_dir: cfg.iwad_dir.clone(),
@@ -113,7 +159,7 @@ impl SettingsDialogState {
 
     /// Build a full [`Config`] from the edited fields, preserving sections
     /// this dialog doesn't expose. Fails when an args string has unbalanced
-    /// quotes.
+    /// quotes or a mirror could not be used.
     fn to_config(&self) -> Result<Config, String> {
         let mut cfg = (*config::load_config()).clone();
         cfg.sourceport = self.sourceport.trim().to_string();
@@ -144,6 +190,8 @@ impl SettingsDialogState {
         cfg.cache_max_size_gb = self.cache_max_size_gb.max(0.0);
         cfg.cache_max_age_days = self.cache_max_age_days.max(0);
         cfg.sourceport_update_check_days = self.sourceport_update_check_days.max(0);
+        cfg.mirrors = self.mirrors.iter().map(MirrorRow::to_config).collect();
+        config::check_mirrors(&cfg.mirrors)?;
         cfg.cache_dir = self.cache_dir.trim().to_string();
         cfg.data_dir = self.data_dir.trim().to_string();
         cfg.iwad_dir = self.iwad_dir.trim().to_string();
@@ -241,6 +289,7 @@ impl SettingsDialogState {
                                 self.section_sourceports(ui);
                                 self.section_behavior(ui);
                                 self.section_cache(ui);
+                                self.section_mirrors(ui);
                                 self.section_paths(ui);
                             });
                     });
@@ -549,6 +598,93 @@ impl SettingsDialogState {
         });
     }
 
+    fn section_mirrors(&mut self, ui: &mut egui::Ui) {
+        Self::section_header(ui, "Mirrors");
+        ui.colored_label(
+            theme::TEXT_SECONDARY,
+            egui::RichText::new(
+                "Your own store of WAD files: a directory or an HTTP file server. caco looks \
+                 here first for a WAD that is not on this machine, and offers to upload what \
+                 it could not otherwise get back.",
+            )
+            .size(12.0),
+        );
+
+        let mut remove: Option<usize> = None;
+        for (idx, row) in self.mirrors.iter_mut().enumerate() {
+            egui::Frame::new()
+                .fill(theme::BG_MEDIUM)
+                .corner_radius(8)
+                .inner_margin(egui::Margin::symmetric(12, 8))
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 4.0;
+                    let name_w = 120.0;
+                    let spacing = ui.spacing().item_spacing.x;
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.set_width(name_w);
+                            let label = form_label(ui, "Name");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut row.name)
+                                    .desired_width(name_w)
+                                    .text_color(theme::TEXT_PRIMARY),
+                            )
+                            .labelled_by(label.id);
+                        });
+                        ui.vertical(|ui| {
+                            let location_w = (ui.available_width() - spacing).max(120.0);
+                            ui.set_width(location_w);
+                            let label = form_label(ui, "URL or path");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut row.location)
+                                    .desired_width(location_w)
+                                    .text_color(theme::TEXT_PRIMARY)
+                                    .hint_text("https://files.example.lan/doom or /mnt/nas/doom"),
+                            )
+                            .labelled_by(label.id);
+                        });
+                    });
+                    ui.horizontal(|ui| {
+                        let label = form_label(ui, "Token variable");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut row.token_env)
+                                .desired_width(170.0)
+                                .text_color(theme::TEXT_PRIMARY)
+                                .hint_text("optional"),
+                        )
+                        .labelled_by(label.id)
+                        .on_hover_text(
+                            "The environment variable holding a bearer token. The token itself \
+                             stays out of this file, which is meant to travel between machines.",
+                        );
+                        ui.checkbox(&mut row.write, "caco may upload");
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("Remove").clicked() {
+                                remove = Some(idx);
+                            }
+                        });
+                    });
+                    if let Some(count) = self.mirror_file_counts.get(row.name.trim()) {
+                        ui.colored_label(
+                            theme::TEXT_MUTED,
+                            egui::RichText::new(format!(
+                                "{count} file{} as of the last time its index was read",
+                                if *count == 1 { "" } else { "s" }
+                            ))
+                            .size(11.0),
+                        );
+                    }
+                });
+        }
+        if let Some(idx) = remove {
+            self.mirrors.remove(idx);
+        }
+
+        if ui.button("Add Mirror").clicked() {
+            self.mirrors.push(MirrorRow::default());
+        }
+    }
+
     fn section_paths(&mut self, ui: &mut egui::Ui) {
         Self::section_header(ui, "Paths");
         for (text, value) in [
@@ -606,4 +742,58 @@ fn mirror_label(index: i64) -> String {
         .trim_end_matches("/files/idgames/")
         .trim_end_matches("/idgames/")
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_a_mirror_row_round_trips_through_the_config() {
+        for mirror in [
+            MirrorConfig {
+                name: "home".to_string(),
+                url: Some("https://files.example.lan/doom".to_string()),
+                token_env: Some("CACO_MIRROR_TOKEN".to_string()),
+                write: true,
+                ..Default::default()
+            },
+            MirrorConfig {
+                name: "nas".to_string(),
+                path: Some("/mnt/nas/doom".to_string()),
+                ..Default::default()
+            },
+        ] {
+            assert_eq!(MirrorRow::from_config(&mirror).to_config(), mirror);
+        }
+    }
+
+    #[test]
+    fn test_a_mirror_row_works_out_which_kind_of_location_it_has() {
+        let row = |location: &str| MirrorRow {
+            name: " home ".to_string(),
+            location: location.to_string(),
+            token_env: "  ".to_string(),
+            write: false,
+        };
+
+        let url = row(" http://nas.lan/doom ").to_config();
+        assert_eq!(url.name, "home");
+        assert_eq!(url.url.as_deref(), Some("http://nas.lan/doom"));
+        assert_eq!(url.path, None);
+        assert_eq!(url.token_env, None);
+
+        let path = row("~/doom-mirror").to_config();
+        assert_eq!(path.url, None);
+        assert_eq!(path.path.as_deref(), Some("~/doom-mirror"));
+
+        let blank = row("  ").to_config();
+        assert_eq!((blank.url, blank.path), (None, None));
+
+        // Taken for a URL, so that the check can say what is wrong with it.
+        assert_eq!(
+            row("ftp://nas.lan/doom").to_config().url.as_deref(),
+            Some("ftp://nas.lan/doom")
+        );
+    }
 }

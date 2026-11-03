@@ -178,27 +178,36 @@ impl Store {
         }
     }
 
-    /// Copy the file at `path` to `dest`, refusing anything but exactly `size` bytes.
-    fn download(&self, path: &str, size: u64, dest: &Path) -> StoreResult<()> {
+    /// Copy `file` to `dest`, refusing anything but exactly its size in bytes.
+    fn download(&self, file: &MirrorFile, dest: &Path) -> StoreResult<()> {
+        let path = file.stored_path();
+        let name = &file.filename;
+        let missing = || format!("its index lists {name}, but the file is not there");
         let copied = match self {
             Store::Local { root } => {
                 let root = Self::local_root(root)?;
-                let source = File::open(root.join(path))
-                    .map_err(|e| format!("could not read {path}: {e}"))?;
-                copy_at_most(source, size, dest)
+                let source = File::open(root.join(&path)).map_err(|e| match e.kind() {
+                    io::ErrorKind::NotFound => missing(),
+                    _ => format!("could not read {name}: {e}"),
+                })?;
+                copy_at_most(source, file.size, dest)
             }
             Store::Http { .. } => {
-                let response = self.send(self.http_request(Method::GET, path)?)?;
+                let response = self.send(self.http_request(Method::GET, &path)?)?;
+                if response.status() == StatusCode::NOT_FOUND {
+                    return Err(missing());
+                }
                 let response = self.require_success(response)?;
-                copy_at_most(response, size, dest)
+                copy_at_most(response, file.size, dest)
             }
         }
-        .map_err(|e| format!("could not download {path}: {e}"))?;
-        if copied == size {
+        .map_err(|e| format!("could not download {name}: {e}"))?;
+        if copied == file.size {
             Ok(())
         } else {
             Err(format!(
-                "expected {size} bytes of {path}, and got {copied} or more"
+                "its copy of {name} is not the {} bytes its index lists",
+                file.size
             ))
         }
     }
@@ -604,7 +613,7 @@ fn fetch_one(store: &Store, file: &MirrorFile, dir: &Path) -> StoreResult<PathBu
     };
     let partial = partial_beside(&dest);
     let fetched = store
-        .download(&file.stored_path(), file.size, &partial)
+        .download(file, &partial)
         .and_then(|()| check_download(&partial, file))
         .and_then(|()| {
             fs::rename(&partial, &dest)

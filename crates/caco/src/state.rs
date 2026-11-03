@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -16,6 +16,7 @@ use crate::dialogs::edit::EditDialogState;
 use crate::dialogs::enrich::EnrichDialogState;
 use crate::dialogs::file_changed::FileChangedDialogState;
 use crate::dialogs::link::LinkDialogState;
+use crate::dialogs::mirror_offer::MirrorOfferDialogState;
 use crate::dialogs::profiles::ProfilesDialogState;
 use crate::dialogs::resources::ResourcesDialogState;
 use crate::dialogs::sessions::SessionsDialogState;
@@ -112,6 +113,15 @@ pub enum ActionRequest {
     /// entry playable / counted toward completion; `false` parks it as
     /// "not yet supported by caco".
     SetCacowardSupported(i64, bool),
+
+    /// Read every mirror's index again, because the list of mirrors may have changed.
+    SyncMirrors,
+
+    /// Upload a WAD's file to a mirror, on a worker thread.
+    UploadToMirror {
+        wad_id: i64,
+        mirror: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -132,6 +142,8 @@ pub enum ActiveDialog {
     WadStats(WadStatsDialogState),
     WadData(Box<WadDataDialogState>),
     Link(LinkDialogState),
+    /// Asked once a WAD nothing could fetch again has a file here.
+    MirrorOffer(MirrorOfferDialogState),
     /// Asked before launching a WAD whose file has changed since it was last
     /// played.
     FileChanged(FileChangedDialogState),
@@ -228,6 +240,15 @@ pub struct AppState {
 
     /// Library statistics view state.
     pub stats: StatsState,
+
+    /// WADs that just got a file, to be offered to a mirror once the user is free to
+    /// answer. A queue rather than a dialog opened on the spot, because linking a file
+    /// launches the WAD straight after, and the question should wait for the game to
+    /// close, not sit behind it or be replaced by what the launch asks.
+    pub mirror_offers: VecDeque<i64>,
+
+    /// Titles of the WADs being uploaded to a mirror right now, for the status bar.
+    pub uploads: Vec<String>,
 }
 
 /// Backing data for [`ViewMode::Stats`].
@@ -370,6 +391,21 @@ impl AppState {
             active_collection: None,
             cacowards: CacowardsState::default(),
             stats: StatsState::default(),
+            mirror_offers: VecDeque::new(),
+            uploads: Vec::new(),
+        }
+    }
+
+    /// Open the next waiting mirror offer, if the user is free to answer one.
+    pub fn open_next_mirror_offer(&mut self, conn: &Connection) {
+        if self.has_dialog() || self.is_playing() {
+            return;
+        }
+        while let Some(wad_id) = self.mirror_offers.pop_front() {
+            if let Some(dialog) = MirrorOfferDialogState::new(conn, wad_id) {
+                self.active_dialog = Some(ActiveDialog::MirrorOffer(dialog));
+                return;
+            }
         }
     }
 

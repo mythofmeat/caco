@@ -44,6 +44,13 @@ impl LinkDialogState {
         })
     }
 
+    /// Say why caco could not fetch the file, when it tried. Without this a mirror
+    /// that has stopped answering looks the same as a WAD no mirror ever had.
+    pub fn with_failure(mut self, failure: Option<String>) -> Self {
+        self.error_message = failure;
+        self
+    }
+
     fn handle_picked_file(&mut self, conn: &Connection, path: &Path) -> LinkResult {
         match link_picked_file(conn, self.wad_id, path) {
             Ok(()) => LinkResult::Linked(self.wad_id),
@@ -251,6 +258,17 @@ mod tests {
             .unwrap();
             assert_eq!(last_seen(&conn).as_deref(), shown);
         }
+    }
+
+    #[test]
+    fn test_dialog_says_why_a_fetch_failed() {
+        let (conn, wad_id) = setup_conn();
+        let dialog = LinkDialogState::new(&conn, wad_id).unwrap();
+        assert_eq!(dialog.error_message, None);
+
+        let why = "Mirror home: could not connect".to_string();
+        let dialog = dialog.with_failure(Some(why.clone()));
+        assert_eq!(dialog.error_message, Some(why));
     }
 
     #[test]
