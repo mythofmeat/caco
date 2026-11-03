@@ -7,6 +7,16 @@ use super::connection::attach_tags;
 use super::models::{ALLOWED_UPDATE_FIELDS, SourceType, Status, WadRecord};
 use crate::Result;
 
+/// A `source_url` as it should be stored and compared.
+///
+/// Whitespace on a URL is invisible until something compares it. Five Doomworld
+/// thread URLs once came in with a trailing `\r`, by their timestamps from a CRLF
+/// import list: reqwest strips it while parsing, so the fetch worked and the raw
+/// string was what got saved.
+pub(crate) fn clean_source_url(url: &str) -> &str {
+    url.trim()
+}
+
 // ---------------------------------------------------------------------------
 // NewWad builder
 // ---------------------------------------------------------------------------
@@ -20,6 +30,7 @@ pub struct NewWad {
     pub description: Option<String>,
     pub source_id: Option<String>,
     pub source_url: Option<String>,
+    pub idgames_id: Option<String>,
     pub filename: Option<String>,
     pub cached_path: Option<String>,
     pub status: Status,
@@ -37,6 +48,7 @@ impl NewWad {
             description: None,
             source_id: None,
             source_url: None,
+            idgames_id: None,
             filename: None,
             cached_path: None,
             status: Status::Unplayed,
@@ -66,7 +78,12 @@ impl NewWad {
     }
 
     pub fn source_url(mut self, v: impl Into<String>) -> Self {
-        self.source_url = Some(v.into());
+        self.source_url = Some(clean_source_url(&v.into()).to_string());
+        self
+    }
+
+    pub fn idgames_id(mut self, v: impl Into<String>) -> Self {
+        self.idgames_id = Some(v.into());
         self
     }
 
@@ -139,6 +156,10 @@ impl WadUpdate {
             self.errors.push(field.to_string());
             return self;
         }
+        let value = match field {
+            "source_url" => value.map(|url| clean_source_url(&url).to_string()),
+            _ => value,
+        };
         self.fields.insert(field, FieldValue::Text(value));
         self
     }
@@ -185,9 +206,9 @@ impl WadUpdate {
 /// Add a WAD to the library. Returns the new WAD ID.
 pub fn add_wad(conn: &Connection, wad: &NewWad) -> Result<i64> {
     conn.execute(
-        "INSERT INTO wads (title, author, year, description, source_type,
-                          source_id, source_url, filename, cached_path, status, version)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        "INSERT INTO wads (title, author, year, description, source_type, source_id,
+                          source_url, idgames_id, filename, cached_path, status, version)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         rusqlite::params![
             wad.title,
             wad.author,
@@ -196,6 +217,7 @@ pub fn add_wad(conn: &Connection, wad: &NewWad) -> Result<i64> {
             wad.source_type.as_str(),
             wad.source_id,
             wad.source_url,
+            wad.idgames_id,
             wad.filename,
             wad.cached_path,
             wad.status.as_str(),
@@ -493,6 +515,59 @@ mod tests {
         assert_eq!(wad.source_type, SourceType::Idgames);
         assert_eq!(wad.status, Status::Unplayed);
         assert_eq!(wad.tags, vec!["cacoward", "megawad"]);
+    }
+
+    #[test]
+    fn test_new_wad_stores_idgames_id() {
+        let conn = setup();
+        let id = add_wad(
+            &conn,
+            &NewWad::new("Scythe", SourceType::Idgames).idgames_id("18184"),
+        )
+        .unwrap();
+
+        let wad = get_wad(&conn, id, false).unwrap().unwrap();
+        assert_eq!(wad.idgames_id.as_deref(), Some("18184"));
+    }
+
+    #[test]
+    fn test_new_wad_trims_source_url() {
+        let conn = setup();
+        let id = add_wad(
+            &conn,
+            &NewWad::new("Thread", SourceType::Doomworld)
+                .source_url(" https://www.doomworld.com/vb/thread/149498\r\n"),
+        )
+        .unwrap();
+
+        let wad = get_wad(&conn, id, false).unwrap().unwrap();
+        assert_eq!(
+            wad.source_url.as_deref(),
+            Some("https://www.doomworld.com/vb/thread/149498")
+        );
+    }
+
+    #[test]
+    fn test_update_trims_source_url_and_only_source_url() {
+        let conn = setup();
+        let id = add_test_wad(&conn);
+
+        let update = WadUpdate::new()
+            .set_text(
+                "source_url",
+                Some("https://example.com/a.zip\r".to_string()),
+            )
+            .set_text("notes", Some("  kept as typed  ".to_string()));
+        update_wad(&conn, id, &update).unwrap();
+
+        let wad = get_wad(&conn, id, false).unwrap().unwrap();
+        assert_eq!(wad.source_url.as_deref(), Some("https://example.com/a.zip"));
+        assert_eq!(wad.notes.as_deref(), Some("  kept as typed  "));
+
+        // Clearing is still clearing.
+        update_wad(&conn, id, &WadUpdate::new().set_text("source_url", None)).unwrap();
+        let wad = get_wad(&conn, id, false).unwrap().unwrap();
+        assert!(wad.source_url.is_none());
     }
 
     #[test]

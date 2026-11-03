@@ -126,11 +126,13 @@ impl ImportService {
         tags: Option<Vec<String>>,
         force: bool,
     ) -> ImportResult {
+        let idgames_id = entry.id.to_string();
+
         // Check for duplicates
         if let Ok(Some(existing)) = db::find_duplicate(
             conn,
             SourceType::Idgames,
-            Some(&entry.id.to_string()),
+            Some(&idgames_id),
             None,
             Some(&entry.filename),
             Some(&entry.author),
@@ -140,8 +142,9 @@ impl ImportService {
         }
 
         // Build and insert the WAD
-        let mut wad =
-            NewWad::new(&entry.title, SourceType::Idgames).source_id(entry.id.to_string());
+        let mut wad = NewWad::new(&entry.title, SourceType::Idgames)
+            .source_id(&idgames_id)
+            .idgames_id(&idgames_id);
 
         if !entry.author.is_empty() {
             wad = wad.author(&entry.author);
@@ -1029,6 +1032,30 @@ mod tests {
         assert_eq!(wad.year, Some(2015));
         assert_eq!(wad.source_type, SourceType::Idgames);
         assert_eq!(wad.source_id.as_deref(), Some("19312"));
+        assert_eq!(wad.idgames_id.as_deref(), Some("19312"));
+    }
+
+    #[test]
+    fn test_import_url_duplicate_ignores_whitespace_around_url() {
+        // The stored URL is trimmed, so the duplicate check has to compare the
+        // trimmed form or a pasted `\r` would slip a second copy past it.
+        let conn = setup();
+        let svc = ImportService::new();
+        let import = |url: &str| svc.import_url(&conn, "Test", url, None, None, None, None, false);
+
+        let first = import("https://example.com/test.zip\r\n");
+        assert!(first.ok());
+        let wad = db::get_wad(&conn, first.wad_id.unwrap(), false)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            wad.source_url.as_deref(),
+            Some("https://example.com/test.zip")
+        );
+
+        let second = import("https://example.com/test.zip\r\n");
+        assert!(second.is_duplicate);
+        assert_eq!(second.duplicate_id, first.wad_id);
     }
 
     #[test]
