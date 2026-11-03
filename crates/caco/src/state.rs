@@ -82,7 +82,7 @@ pub enum ActionRequest {
     Resources,
     Profiles,
     Collections,
-    /// Open the metadata / Cacowards enrichment dialog.
+    /// Open the metadata enrichment dialog.
     Enrich,
     /// Open the sourceport build manager.
     Sourceports,
@@ -104,8 +104,8 @@ pub enum ActionRequest {
     /// this cacoward entry (cacoward pk).
     LinkCacoward(i64),
 
-    /// Clear the wad_id on a cacoward entry, restoring it to the
-    /// auto-linker's reach on the next enrich.
+    /// Clear the wad_id on a cacoward entry. It stays clear until a WAD it
+    /// matches is imported or a data update gives it new evidence.
     UnlinkCacoward(i64),
 
     /// Flip the `supported` flag on a cacoward entry. `true` makes the
@@ -248,13 +248,13 @@ pub struct StatsState {
 /// Backs the magazine-style `ViewMode::Cacowards` central panel.
 ///
 /// Strategy: load every cacoward row + its effective status into memory up
-/// front (the table is tiny — low thousands of rows across 30+ years of
+/// front (the table is tiny — under a thousand rows across all the years of
 /// awards). Year navigation and category sectioning are then pure filters
 /// over [`all_entries`], so flicking between years stays render-only with
 /// no DB hits.
 pub struct CacowardsState {
     /// All Cacoward entries joined with their linked-WAD effective status.
-    /// Sorted year DESC, then canonical category order, then rank.
+    /// Sorted year DESC, then canonical category order, then page order.
     pub all_entries: Vec<(CacowardRecord, EffectiveStatus)>,
 
     /// Library WAD records for every entry with a linked `wad_id`. Loaded
@@ -262,8 +262,12 @@ pub struct CacowardsState {
     /// (source type / URL / cached path) without per-frame DB lookups.
     pub linked_wads: HashMap<i64, WadRecord>,
 
-    /// Currently focused year. `None` only when the table is empty (i.e.
-    /// the user hasn't run `caco enrich --cacowards` yet).
+    /// Doomworld's page for each year, where the write-ups are. From the dataset
+    /// rather than the table, which holds entries.
+    pub pages: std::collections::BTreeMap<i64, String>,
+
+    /// Currently focused year. `None` only when the table is empty, which takes
+    /// a dataset that could not be loaded on a library that has never had one.
     pub selected_year: Option<i64>,
 
     /// Currently selected cacoward entry (by DB pk), used to draw the
@@ -272,7 +276,7 @@ pub struct CacowardsState {
     pub selected_entry_pk: Option<i64>,
 
     /// Set true when the underlying table may have changed (initial load,
-    /// after import, after enrich). The app's update loop drains this flag
+    /// after import). The app's update loop drains this flag
     /// and re-runs `db::search_cacowards`.
     pub needs_reload: bool,
 }
@@ -282,6 +286,7 @@ impl Default for CacowardsState {
         Self {
             all_entries: Vec::new(),
             linked_wads: HashMap::new(),
+            pages: std::collections::BTreeMap::new(),
             selected_year: None,
             selected_entry_pk: None,
             // Eager-load on first view-mode entry so the magazine has
@@ -303,12 +308,16 @@ impl CacowardsState {
     /// in the year strip. "Completed" means any linked-WAD status of
     /// `completed`; absent and in-progress don't count. Unsupported
     /// entries are excluded from both numerator and denominator so the
-    /// year reads "x of N playable entries completed".
+    /// year reads "x of N playable entries completed", and so is anything
+    /// outside the core categories: see [`caco_core::db::CORE_CATEGORIES`].
     pub fn year_summary(&self, year: i64) -> (usize, usize) {
         let mut total = 0;
         let mut done = 0;
         for (record, status) in &self.all_entries {
-            if record.year != year || !record.supported {
+            if record.year != year
+                || !record.supported
+                || !caco_core::db::is_core_category(&record.category)
+            {
                 continue;
             }
             total += 1;
@@ -540,16 +549,15 @@ impl AppState {
         self.needs_reload = false;
     }
 
-    /// Reload the magazine-style Cacowards view's data. Pulls every entry
-    /// plus its effective status in one query, then picks the newest year
-    /// as the focused tab if the previous focus is gone (e.g. after a
-    /// re-enrich removed entries for that year).
     /// Pull the library-wide stats snapshot for [`ViewMode::Stats`].
     pub fn reload_stats(&mut self, conn: &Connection) {
         self.stats.snapshot = caco_core::db::sessions::get_stats_snapshot(conn, "month").ok();
         self.stats.needs_reload = false;
     }
 
+    /// Reload the magazine-style Cacowards view's data. Pulls every entry
+    /// plus its effective status in one query, then picks the newest year
+    /// as the focused tab if the previous focus is gone.
     pub fn reload_cacowards(&mut self, conn: &Connection) {
         match caco_core::db::cacowards::search_cacowards(conn) {
             Ok(entries) => {
@@ -753,6 +761,45 @@ mod tests {
         assert!(state.needs_reload);
         assert!(state.cacowards.needs_reload);
         assert!(state.stats.needs_reload);
+    }
+
+    #[test]
+    fn a_years_total_counts_the_core_categories_that_can_be_played() {
+        let (conn, mut state) = setup();
+        let wad = caco_core::db::wads::add_wad(
+            &conn,
+            &caco_core::db::wads::NewWad::new("Done", caco_core::db::models::SourceType::Local),
+        )
+        .unwrap();
+        conn.execute("UPDATE wads SET status = 'completed' WHERE id = ?1", [wad])
+            .unwrap();
+        let add = |title: &str, category: &str, supported: bool, linked: bool| {
+            let id = caco_core::db::upsert_cacoward(
+                &conn,
+                &caco_core::db::NewCacoward {
+                    key: format!("2025-{category}-{title}"),
+                    year: 2025,
+                    category: category.to_string(),
+                    page_order: 1,
+                    wad_title: title.to_string(),
+                    supported,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            if linked {
+                caco_core::db::link_wad(&conn, id, wad, false).unwrap();
+            }
+        };
+        add("beaten", "winner", true, true);
+        add("not yet", "runner-up", true, false);
+        add("cannot run", "mordeth", false, false);
+        add("beaten extra", "multiplayer", true, true);
+        add("unbeaten extra", "doom-moma", true, false);
+
+        state.reload_cacowards(&conn);
+
+        assert_eq!(state.cacowards.year_summary(2025), (2, 1));
     }
 
     #[test]

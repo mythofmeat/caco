@@ -20,6 +20,7 @@ hex.workspace = true
 image.workspace = true
 zip.workspace = true
 tracing.workspace = true
+unicode-normalization.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

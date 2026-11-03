@@ -211,7 +211,7 @@ impl Shooter {
             unchecked: 71,
         };
         let tx = self.harness.state_mut().background_sender();
-        tx.send(AppMessage::EnrichComplete(Ok(EnrichReport::Wads {
+        tx.send(AppMessage::EnrichComplete(Ok(EnrichReport {
             examined: 116,
             findings,
             wiki_lookups: 1,

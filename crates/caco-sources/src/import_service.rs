@@ -1481,16 +1481,17 @@ mod tests {
 
     // -- Cacoward linking at import time --
 
-    /// A Cacoward row already in the table, as the scrape would leave it.
+    /// A Cacoward row already in the table, as a sync would leave it.
     fn add_cacoward(conn: &Connection, title: &str, idgames_id: Option<i64>) -> i64 {
         db::upsert_cacoward(
             conn,
             &db::NewCacoward {
+                key: caco_core::cacowards::entry_key(2025, db::CATEGORY_WINNER, title),
                 year: 2025,
                 category: db::CATEGORY_WINNER.to_string(),
+                page_order: 1,
                 wad_title: title.to_string(),
-                idgames_url: idgames_id
-                    .map(|id| format!("https://www.doomworld.com/idgames/?id={id}")),
+                idgames_id,
                 ..Default::default()
             },
         )
@@ -1604,6 +1605,63 @@ mod tests {
 
         assert_eq!(linked_wad(&conn, row), result.wad_id);
         assert!(result.wad_id.is_some());
+    }
+
+    #[test]
+    fn test_import_doomworld_links_cacoward_by_topic_when_titles_differ() {
+        // A forum release's title is whatever the first post calls it.
+        let conn = setup();
+        let row = db::upsert_cacoward(
+            &conn,
+            &db::NewCacoward {
+                key: "2025-winner-lonesome-road".to_string(),
+                year: 2025,
+                category: db::CATEGORY_WINNER.to_string(),
+                page_order: 8,
+                wad_title: "Lonesome Road".to_string(),
+                doomworld_id: Some(151858),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let result = ImportService::new().import_doomworld(
+            &conn,
+            &doomworld_thread(151858, "Lonesome Road | Chapter 1"),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+
+        assert!(result.wad_id.is_some());
+        assert_eq!(linked_wad(&conn, row), result.wad_id);
+    }
+
+    #[test]
+    fn test_import_doomwiki_links_cacoward_by_page_when_titles_differ() {
+        let conn = setup();
+        let row = db::upsert_cacoward(
+            &conn,
+            &db::NewCacoward {
+                key: "2011-newcomer-doom-ii-redux".to_string(),
+                year: 2011,
+                category: "newcomer".to_string(),
+                page_order: 1,
+                wad_title: "Doom II Redux".to_string(),
+                doomwiki_page: Some("Suitcase_of_Gor".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let mut entry = wiki_entry(7, "Suitcase of Gor", "");
+        entry.wiki_url = "https://doomwiki.org/wiki/Suitcase_of_Gor".to_string();
+
+        let result = ImportService::new().import_doomwiki(&conn, &entry, None, false);
+
+        assert!(result.wad_id.is_some());
+        assert_eq!(linked_wad(&conn, row), result.wad_id);
     }
 
     #[test]

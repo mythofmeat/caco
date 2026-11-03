@@ -178,6 +178,15 @@ pub fn sourceport_recipe_dir() -> PathBuf {
     default_data_dir().join("sourceports")
 }
 
+/// Where user Cacowards files live, merged over the dataset compiled into the
+/// binary: see [`crate::cacowards`].
+///
+/// On the portable side, because a correction or a private addition cannot be
+/// re-derived from anything.
+pub fn cacoward_data_dir() -> PathBuf {
+    default_data_dir().join("cacowards")
+}
+
 /// Root of the managed sourceport install prefixes.
 ///
 /// Cache side: a built sourceport is regenerable from its recipe, and the

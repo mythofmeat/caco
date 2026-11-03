@@ -2,10 +2,12 @@
 //! awards, completion stats, and entry-level actions (import / open / play).
 //!
 //! Layout:
-//! 1. Hero banner with year and Doomworld attribution.
+//! 1. Hero banner with the year, and a link to Doomworld's write-ups for it.
 //! 2. Year strip with per-year completion ratios.
 //! 3. Category sections (winner / runner-up / honorable-mention / mordeth)
 //!    rendered as poster cards, each tagged with the linked WAD's status.
+//! 4. Every other award the year gave, the same way, under a heading saying that
+//!    they don't count towards its completion.
 //!
 //! Cards are drawn with manual `allocate_exact_size` + direct painter calls
 //! (the same pattern as `wad_grid.rs`) rather than `egui::Grid`. Using Grid
@@ -13,7 +15,7 @@
 //! full content area and overlap.
 
 use caco_core::db::cacowards::{CacowardRecord, EffectiveStatus};
-use caco_core::db::{CORE_CATEGORIES, Status};
+use caco_core::db::{CORE_CATEGORIES, Status, is_core_category};
 use egui::{Color32, CornerRadius, Rect, StrokeKind, Vec2};
 
 use crate::state::{ActionRequest, AppState};
@@ -26,6 +28,7 @@ const SECTION_PAD_Y: f32 = 24.0;
 
 const YEAR_CHIP_WIDTH: f32 = 78.0;
 const YEAR_CHIP_HEIGHT: f32 = 40.0;
+const YEAR_CHIP_GAP: f32 = 6.0;
 const YEAR_STRIP_VPAD: f32 = 14.0;
 
 const CARD_MIN_WIDTH: f32 = 240.0;
@@ -76,7 +79,12 @@ pub fn render(
         state.cacowards.selected_entry_pk = None;
     }
 
-    for &category in CORE_CATEGORIES {
+    let others = other_categories(&year_entries);
+    let core = CORE_CATEGORIES.iter().copied();
+    for (index, category) in core.chain(others.iter().copied()).enumerate() {
+        if index == CORE_CATEGORIES.len() && !others.is_empty() {
+            render_other_awards_heading(ui);
+        }
         let in_section: Vec<&(CacowardRecord, EffectiveStatus)> = year_entries
             .iter()
             .filter(|(r, _)| r.category == category)
@@ -112,8 +120,7 @@ fn render_empty(ui: &mut egui::Ui) -> Option<ActionRequest> {
         ui.add_space(8.0);
         ui.colored_label(
             theme::TEXT_SECONDARY,
-            "Run `caco enrich --cacowards --year YYYY` to populate this view \
-             from the Doom Wiki.",
+            "The Cacowards list could not be loaded when caco started.",
         );
     });
     None
@@ -164,45 +171,16 @@ fn render_hero(ui: &mut egui::Ui, state: &AppState, year: i64) {
         egui::Stroke::new(1.0_f32, theme::BORDER_MED),
     );
 
-    // Source pill — top-right.
-    let source_text = "FROM DOOMWORLD · VIA DOOM WIKI";
-    let source_font = egui::FontId::proportional(10.0);
-    let galley = painter.layout_no_wrap(
-        source_text.to_string(),
-        source_font.clone(),
-        theme::TEXT_MUTED,
-    );
-    let pill_pad = Vec2::new(10.0, 4.0);
-    let pill_size = galley.size() + pill_pad * 2.0;
-    let pill_rect = Rect::from_min_size(
-        egui::pos2(rect.max.x - HERO_PAD_X - pill_size.x, rect.min.y + 18.0),
-        pill_size,
-    );
-    painter.rect(
-        pill_rect,
-        CornerRadius::same(11),
-        Color32::from_black_alpha(80),
-        egui::Stroke::new(1.0_f32, theme::BORDER_MED),
-        StrokeKind::Inside,
-    );
-    painter.text(
-        pill_rect.min + pill_pad,
-        egui::Align2::LEFT_TOP,
-        source_text,
-        source_font,
-        theme::TEXT_MUTED,
+    render_page_pill(
+        ui,
+        rect,
+        state.cacowards.pages.get(&year).map(String::as_str),
     );
 
     let mut cursor_y = rect.min.y + 24.0;
 
     // Kicker
-    let by_cat = category_counts(&state.cacowards.all_entries, year);
-    let kicker = format!(
-        "ANNUAL CACOWARDS · {w} winners · {r} runners-up · {hm} honorable mentions",
-        w = by_cat.get("winner").copied().unwrap_or(0),
-        r = by_cat.get("runner-up").copied().unwrap_or(0),
-        hm = by_cat.get("honorable-mention").copied().unwrap_or(0),
-    );
+    let kicker = hero_kicker(&state.cacowards.all_entries, year);
     painter.text(
         egui::pos2(rect.min.x + HERO_PAD_X, cursor_y),
         egui::Align2::LEFT_TOP,
@@ -275,6 +253,84 @@ fn render_hero(ui: &mut egui::Ui, state: &AppState, year: i64) {
     }
 }
 
+/// The year's Doomworld page, top-right of the hero. The write-ups are Doomworld's
+/// own text, which is why caco links to them rather than carrying them.
+fn render_page_pill(ui: &mut egui::Ui, hero: Rect, page: Option<&str>) {
+    let painter = ui.painter_at(hero);
+    let text = if page.is_some() {
+        "WRITE-UPS ON DOOMWORLD \u{2197}"
+    } else {
+        "FROM DOOMWORLD"
+    };
+    let font = egui::FontId::proportional(10.0);
+    let galley = painter.layout_no_wrap(text.to_string(), font.clone(), theme::TEXT_MUTED);
+    let pad = Vec2::new(10.0, 4.0);
+    let size = galley.size() + pad * 2.0;
+    // On the title's row, whose right end is free at any window size. The kicker
+    // above it reaches the pill's edge at the minimum width.
+    let pill = Rect::from_min_size(
+        egui::pos2(hero.max.x - HERO_PAD_X - size.x, hero.min.y + 62.0),
+        size,
+    );
+
+    let mut color = theme::TEXT_MUTED;
+    if let Some(page) = page {
+        let response = ui
+            .interact(
+                pill,
+                ui.scope_id().with("cacoward-page"),
+                egui::Sense::click(),
+            )
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text(page);
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::Role::Link, true, "Write-ups on Doomworld")
+        });
+        if response.hovered() {
+            color = theme::TEXT_ACCENT;
+        }
+        if response.clicked() {
+            // Nothing to do about a machine with no browser to hand this to.
+            let _ = open::that(page);
+        }
+    }
+
+    painter.rect(
+        pill,
+        CornerRadius::same(11),
+        Color32::from_black_alpha(80),
+        egui::Stroke::new(1.0_f32, theme::BORDER_MED),
+        StrokeKind::Inside,
+    );
+    painter.text(pill.min + pad, egui::Align2::LEFT_TOP, text, font, color);
+}
+
+/// "ANNUAL CACOWARDS · 12 winners · 2 runners-up", naming only what the year gave:
+/// most of them had no honorable mentions at all.
+fn hero_kicker(entries: &[(CacowardRecord, EffectiveStatus)], year: i64) -> String {
+    let mut parts = vec!["ANNUAL CACOWARDS".to_string()];
+    for (category, one, many) in [
+        ("winner", "winner", "winners"),
+        ("runner-up", "runner-up", "runners-up"),
+        (
+            "honorable-mention",
+            "honorable mention",
+            "honorable mentions",
+        ),
+    ] {
+        let count = entries
+            .iter()
+            .filter(|(r, _)| r.year == year && r.category == category)
+            .count();
+        match count {
+            0 => {}
+            1 => parts.push(format!("1 {one}")),
+            n => parts.push(format!("{n} {many}")),
+        }
+    }
+    parts.join(" · ")
+}
+
 // ---------------------------------------------------------------------------
 // Year strip
 // ---------------------------------------------------------------------------
@@ -284,8 +340,7 @@ fn render_year_strip(ui: &mut egui::Ui, state: &AppState) -> Option<i64> {
     let selected = state.cacowards.selected_year;
     let strip_height = YEAR_CHIP_HEIGHT + YEAR_STRIP_VPAD * 2.0;
 
-    // Background strip the full width of the panel, with horizontal scroll
-    // for the chip row.
+    // Background strip the full width of the panel.
     let (strip_rect, _) = ui.allocate_exact_size(
         Vec2::new(ui.available_width(), strip_height),
         egui::Sense::hover(),
@@ -299,39 +354,47 @@ fn render_year_strip(ui: &mut egui::Ui, state: &AppState) -> Option<i64> {
         egui::Stroke::new(1.0_f32, theme::BORDER),
     );
 
-    // Layout chips manually inside the strip.
-    let mut x = strip_rect.min.x + HERO_PAD_X;
-    let y = strip_rect.min.y + YEAR_STRIP_VPAD;
+    // The years scroll, because no window is wide enough to be sure of them all:
+    // twenty-odd chips is 1800pt, against 620pt or so at the minimum window size.
+    let mut strip_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(strip_rect.shrink2(Vec2::new(HERO_PAD_X, 0.0)))
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    // Solid rather than the floating bar that only shows on hover: the strip can
+    // end exactly on a chip's edge, which looks like the end of the years.
+    strip_ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
     let mut clicked: Option<i64> = None;
-    for year in years {
-        let chip_rect = Rect::from_min_size(
-            egui::pos2(x, y),
-            Vec2::new(YEAR_CHIP_WIDTH, YEAR_CHIP_HEIGHT),
-        );
-        // Bail out if we run out of room (scroll arrives in a follow-up;
-        // 30+ years of awards at 78px each fits in a 2400px+ window
-        // already and breaks gracefully when it doesn't).
-        if chip_rect.max.x > strip_rect.max.x - HERO_PAD_X {
-            break;
-        }
-        let response = ui.interact(
-            chip_rect,
-            ui.scope_id().with(("cacoward-year", year)),
-            egui::Sense::click(),
-        );
-        draw_year_chip(
-            ui,
-            chip_rect,
-            year,
-            state,
-            selected == Some(year),
-            response.hovered(),
-        );
-        if response.clicked() {
-            clicked = Some(year);
-        }
-        x += YEAR_CHIP_WIDTH + 6.0;
-    }
+    egui::ScrollArea::horizontal()
+        .id_salt("cacoward-years")
+        .auto_shrink([false, false])
+        .show(&mut strip_ui, |ui| {
+            ui.spacing_mut().item_spacing.x = YEAR_CHIP_GAP;
+            ui.horizontal_centered(|ui| {
+                for year in years {
+                    let (chip_rect, response) = ui.allocate_exact_size(
+                        Vec2::new(YEAR_CHIP_WIDTH, YEAR_CHIP_HEIGHT),
+                        egui::Sense::click(),
+                    );
+                    response.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::Role::Button, true, year.to_string())
+                    });
+                    draw_year_chip(
+                        ui,
+                        chip_rect,
+                        year,
+                        state,
+                        selected == Some(year),
+                        response.hovered(),
+                    );
+                    if response.clicked() {
+                        clicked = Some(year);
+                        // A chip half out of view comes the rest of the way.
+                        response.scroll_to_me(None);
+                    }
+                }
+            });
+        });
     clicked
 }
 
@@ -384,6 +447,36 @@ fn draw_year_chip(
 // ---------------------------------------------------------------------------
 // Category sections
 // ---------------------------------------------------------------------------
+
+/// The year's categories outside the core four, in the order the query gave them.
+fn other_categories(entries: &[(CacowardRecord, EffectiveStatus)]) -> Vec<&str> {
+    let mut others: Vec<&str> = Vec::new();
+    for (record, _) in entries {
+        let category = record.category.as_str();
+        if !is_core_category(category) && !others.contains(&category) {
+            others.push(category);
+        }
+    }
+    others
+}
+
+/// What separates the awards a year is finished by from the rest of what it gave.
+fn render_other_awards_heading(ui: &mut egui::Ui) {
+    ui.add_space(SECTION_PAD_Y);
+    egui::Frame::new()
+        .inner_margin(egui::Margin::symmetric(SECTION_PAD_X as i8, 0))
+        .show(ui, |ui| {
+            ui.label(
+                egui::RichText::new("Other awards")
+                    .size(18.0)
+                    .color(theme::TEXT_PRIMARY),
+            );
+            ui.colored_label(
+                theme::TEXT_SECONDARY,
+                "These don't count towards the year's total.",
+            );
+        });
+}
 
 fn render_category_section(
     ui: &mut egui::Ui,
@@ -456,7 +549,7 @@ fn render_category_section(
 
     // Reorder so undone supported entries render first, completed entries
     // pile up next, and unsupported entries trail at the very end. Stable
-    // sort preserves rank ordering within each group.
+    // sort preserves page order within each group.
     let mut ordered: Vec<&(CacowardRecord, EffectiveStatus)> = entries.to_vec();
     ordered.sort_by_key(|(r, s)| {
         if !r.supported {
@@ -617,21 +710,12 @@ fn render_card(
         painter.rect_filled(thumb_rect, thumb_rounding, Color32::from_black_alpha(140));
     }
 
-    // Top overlay strip + rank / status pill.
+    // Top overlay strip + status pill.
     let strip = Rect::from_min_max(
         thumb_rect.min,
         egui::pos2(thumb_rect.max.x, thumb_rect.min.y + 32.0),
     );
     painter.rect_filled(strip, thumb_rounding, Color32::from_black_alpha(110));
-    if let Some(rank) = record.rank {
-        painter.text(
-            thumb_rect.min + Vec2::new(10.0, 8.0),
-            egui::Align2::LEFT_TOP,
-            format!("#{rank}"),
-            egui::FontId::proportional(12.0),
-            Color32::from_rgb(0xe8, 0xd8, 0xc8),
-        );
-    }
     paint_status_pill(
         &painter,
         thumb_rect.shrink2(Vec2::new(8.0, 8.0)),
@@ -814,25 +898,21 @@ fn paint_status_pill(
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn category_label(category: &str) -> &'static str {
+/// A section's heading. Categories are free text, so one this has never heard of
+/// still gets a heading, spelled from its name.
+fn category_label(category: &str) -> String {
     match category {
-        "winner" => "WINNERS",
-        "runner-up" => "RUNNERS-UP",
-        "honorable-mention" => "HONORABLE MENTIONS",
-        "mordeth" => "MORDETH AWARD",
-        _ => "OTHER",
+        "winner" => "WINNERS".to_string(),
+        "runner-up" => "RUNNERS-UP".to_string(),
+        "honorable-mention" => "HONORABLE MENTIONS".to_string(),
+        "mordeth" => "MORDETH AWARD".to_string(),
+        "special-feature" => "SPECIAL FEATURES".to_string(),
+        "multiplayer" => "MULTIPLAYER AWARDS".to_string(),
+        "gameplay-mod" => "GAMEPLAY MOD AWARDS".to_string(),
+        "newcomer" => "HONORING A NEWCOMER".to_string(),
+        "adrians-pen" => "ADRIAN'S PEN".to_string(),
+        other => other.replace('-', " ").to_uppercase(),
     }
-}
-
-fn category_counts(
-    entries: &[(CacowardRecord, EffectiveStatus)],
-    year: i64,
-) -> std::collections::HashMap<String, usize> {
-    let mut m: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    for (r, _) in entries.iter().filter(|(r, _)| r.year == year) {
-        *m.entry(r.category.clone()).or_insert(0) += 1;
-    }
-    m
 }
 
 fn status_label_and_color(status: EffectiveStatus) -> (&'static str, Color32) {
@@ -952,4 +1032,97 @@ fn truncate(s: &str, max_chars: usize) -> String {
     let mut out: String = s.chars().take(max_chars - 1).collect();
     out.push('…');
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(year: i64, category: &str) -> (CacowardRecord, EffectiveStatus) {
+        let record = CacowardRecord {
+            id: 1,
+            key: String::new(),
+            year,
+            category: category.to_string(),
+            page_order: 1,
+            wad_title: String::new(),
+            wad_author: None,
+            idgames_id: None,
+            doomworld_id: None,
+            doomwiki_page: None,
+            sha256: None,
+            wad_id: None,
+            manual_override: false,
+            supported_default: true,
+            supported_override: None,
+            supported: true,
+        };
+        (record, EffectiveStatus::Absent)
+    }
+
+    #[test]
+    fn the_kicker_names_only_what_the_year_gave() {
+        let entries = [
+            entry(2011, "winner"),
+            entry(2011, "winner"),
+            entry(2011, "mordeth"),
+            entry(2023, "winner"),
+            entry(2023, "runner-up"),
+            entry(2023, "honorable-mention"),
+        ];
+        assert_eq!(hero_kicker(&entries, 2011), "ANNUAL CACOWARDS · 2 winners");
+        assert_eq!(
+            hero_kicker(&entries, 2023),
+            "ANNUAL CACOWARDS · 1 winner · 1 runner-up · 1 honorable mention"
+        );
+    }
+
+    #[test]
+    fn other_categories_keep_the_querys_order_and_leave_out_the_core_four() {
+        let entries = [
+            entry(2025, "winner"),
+            entry(2025, "mordeth"),
+            entry(2025, "doom-moma"),
+            entry(2025, "doom-moma"),
+            entry(2025, "multiplayer"),
+        ];
+        assert_eq!(other_categories(&entries), ["doom-moma", "multiplayer"]);
+    }
+
+    /// The screenshot harness would catch a missing glyph too, by panicking, but only
+    /// for the one year it opens. The app itself would draw tofu.
+    #[test]
+    fn the_bundled_fonts_can_draw_every_entry() {
+        let ctx = egui::Context::default();
+        theme::apply_doom_theme(&ctx);
+        let font = egui::FontId::proportional(14.0);
+
+        let mut missing = Vec::new();
+        let mut frame = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.ctx().fonts_mut(|fonts| {
+                for entry in caco_core::cacowards::builtin().entries {
+                    let author = entry.wad_author.unwrap_or_default();
+                    for text in [entry.wad_title, author] {
+                        if !fonts.has_glyphs(&font, &text) {
+                            missing.push(text);
+                        }
+                    }
+                }
+                assert!(fonts.has_glyphs(&font, "\u{2197}"), "the page pill's arrow");
+            });
+        });
+        // Nothing is going to upload the atlas, and it refuses to be dropped unseen.
+        frame.textures_delta.clear();
+        assert_eq!(missing, Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_category_nobody_told_the_gui_about_still_gets_a_heading() {
+        assert_eq!(category_label("winner"), "WINNERS");
+        assert_eq!(category_label("adrians-pen"), "ADRIAN'S PEN");
+        assert_eq!(
+            category_label("spaceship-of-theseus"),
+            "SPACESHIP OF THESEUS"
+        );
+    }
 }

@@ -1,9 +1,7 @@
-pub mod cacowards;
 pub mod client;
 pub mod models;
 pub mod parser;
 
-pub use cacowards::{fetch_cacowards, parse_cacowards_page};
 pub use client::DoomwikiClient;
 pub use models::WikiEntry;
 pub use parser::WikitextParser;
@@ -35,9 +33,40 @@ pub fn extract_doomwiki_title_from_url(url: &str) -> Option<String> {
     }
 }
 
+/// A Doom Wiki page title in one spelling, so two can be compared.
+///
+/// MediaWiki treats underscores as spaces and ignores the case of a title's first
+/// letter, and which one you get depends on where the title came from: a URL, a
+/// `[[link]]`, or a curated `doomwiki =` value.
+pub fn canonical_page(page: &str) -> String {
+    let spaced = page.replace('_', " ");
+    let mut chars = spaced.trim().chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn page_titles_compare_however_they_were_spelled() {
+        for (a, b) in [
+            ("TNT:_Overcharged", "TNT: Overcharged"),
+            ("lilith", "Lilith"),
+            (" Gossip ", "Gossip"),
+            (
+                "Realm_of_Chaos_2:_The_Revenge_of_'96!",
+                "Realm of Chaos 2: The Revenge of '96!",
+            ),
+        ] {
+            assert_eq!(canonical_page(a), canonical_page(b));
+        }
+        // Only the first letter is folded: MediaWiki keeps the rest.
+        assert_ne!(canonical_page("iD Software"), canonical_page("id Software"));
+    }
 
     #[test]
     fn extracts_simple_title() {

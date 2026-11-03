@@ -16,6 +16,15 @@ unicode-normalization.workspace = true
 urlencoding.workspace = true
 rusqlite.workspace = true
 
+# The maintainer's tool for the year's Cacowards data, not something the app
+# ships: an example so `cargo build` skips it and `cargo test` keeps it compiling,
+# without a crate of its own for every release to build. `test = true` because
+# examples do not run their tests otherwise, and it has a parser to pin.
+[[example]]
+name = "cacowards_draft"
+path = "examples/cacowards_draft/main.rs"
+test = true
+
 [dev-dependencies]
 tempfile.workspace = true
 rusqlite.workspace = true

@@ -1,4 +1,4 @@
-//! Re-run metadata detection over the library, and refresh Cacowards years.
+//! Re-run metadata detection over the library.
 //!
 //! Enrichment is network-bound — one Doom Wiki lookup per WAD file detection
 //! cannot settle — so the run happens on a worker thread and this dialog only
@@ -11,9 +11,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use crate::message::EnrichReport;
 use crate::theme;
 
-/// Height of everything that stays put around the output: title bar, the two
-/// sections and the Close row.
-const CHROME: f32 = 312.0;
+/// Height of everything that stays put around the output: title bar, the
+/// controls and the Close row.
+const CHROME: f32 = 212.0;
 
 /// Which WADs a run should visit.
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -26,16 +26,10 @@ pub enum EnrichScope {
 }
 
 /// A run the dialog is asking the app to start.
-pub enum EnrichRequest {
-    Wads {
-        scope: EnrichScope,
-        dry_run: bool,
-        cancel: Arc<AtomicBool>,
-    },
-    Cacowards {
-        year: i64,
-        dry_run: bool,
-    },
+pub struct EnrichRequest {
+    pub scope: EnrichScope,
+    pub dry_run: bool,
+    pub cancel: Arc<AtomicBool>,
 }
 
 pub enum EnrichResult {
@@ -47,7 +41,6 @@ pub enum EnrichResult {
 pub struct EnrichDialogState {
     scope: EnrichScope,
     dry_run: bool,
-    year_input: String,
     /// Set while a run is in flight; cleared when the report arrives.
     running: bool,
     /// Shared with the worker so Cancel can stop it between WADs.
@@ -57,12 +50,17 @@ pub struct EnrichDialogState {
     error: Option<String>,
 }
 
+impl Default for EnrichDialogState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EnrichDialogState {
-    pub fn new(default_year: i64) -> Self {
+    pub fn new() -> Self {
         Self {
             scope: EnrichScope::MissingComplevel,
             dry_run: false,
-            year_input: default_year.to_string(),
             running: false,
             cancel: Arc::new(AtomicBool::new(false)),
             progress: None,
@@ -92,14 +90,14 @@ impl EnrichDialogState {
         }
     }
 
-    fn start_wads(&mut self) -> EnrichRequest {
+    fn start(&mut self) -> EnrichRequest {
         // A fresh flag per run: reusing a cancelled one would abort instantly.
         self.cancel = Arc::new(AtomicBool::new(false));
         self.running = true;
         self.report = None;
         self.error = None;
         self.progress = Some((0, 0, String::new()));
-        EnrichRequest::Wads {
+        EnrichRequest {
             scope: self.scope,
             dry_run: self.dry_run,
             cancel: Arc::clone(&self.cancel),
@@ -110,11 +108,7 @@ impl EnrichDialogState {
         let mut result = EnrichResult::Open;
 
         crate::dialogs::modal_window(ctx, "Enrich", [640.0, 460.0]).show(ctx, |ui| {
-            self.render_library_section(ui, &mut result);
-            ui.add_space(8.0);
-            ui.separator();
-            ui.add_space(8.0);
-            self.render_cacowards_section(ui, &mut result);
+            self.render_controls(ui, &mut result);
 
             ui.add_space(8.0);
             ui.separator();
@@ -147,7 +141,7 @@ impl EnrichDialogState {
         result
     }
 
-    fn render_library_section(&mut self, ui: &mut egui::Ui, result: &mut EnrichResult) {
+    fn render_controls(&mut self, ui: &mut egui::Ui, result: &mut EnrichResult) {
         ui.strong("Library metadata");
         ui.colored_label(
             theme::TEXT_SECONDARY,
@@ -175,7 +169,7 @@ impl EnrichDialogState {
                 .add_enabled(!self.running, egui::Button::new("Enrich Library"))
                 .clicked()
             {
-                *result = EnrichResult::Start(self.start_wads());
+                *result = EnrichResult::Start(self.start());
             }
             if ui
                 .add_enabled(self.running, egui::Button::new("Cancel"))
@@ -183,44 +177,6 @@ impl EnrichDialogState {
                 .clicked()
             {
                 self.cancel.store(true, Ordering::Relaxed);
-            }
-        });
-    }
-
-    fn render_cacowards_section(&mut self, ui: &mut egui::Ui, result: &mut EnrichResult) {
-        ui.strong("Cacowards");
-        ui.colored_label(
-            theme::TEXT_SECONDARY,
-            "Re-scrapes a year's Doom Wiki page and auto-links entries to \
-             library WADs. Manually pinned links survive.",
-        );
-        ui.add_space(4.0);
-
-        ui.horizontal(|ui| {
-            ui.add_enabled(
-                !self.running,
-                egui::TextEdit::singleline(&mut self.year_input)
-                    .desired_width(70.0)
-                    .hint_text("YYYY"),
-            );
-
-            let year = self.year_input.trim().parse::<i64>().ok();
-            if ui
-                .add_enabled(
-                    !self.running && year.is_some(),
-                    egui::Button::new("Fetch Year"),
-                )
-                .clicked()
-                && let Some(year) = year
-            {
-                self.running = true;
-                self.report = None;
-                self.error = None;
-                self.progress = None;
-                *result = EnrichResult::Start(EnrichRequest::Cacowards {
-                    year,
-                    dry_run: self.dry_run,
-                });
             }
         });
     }
@@ -253,56 +209,34 @@ impl EnrichDialogState {
             return;
         };
 
-        match report {
-            EnrichReport::Wads {
-                examined,
-                findings,
-                wiki_lookups,
-                wiki_blocked,
-                cancelled,
-                dry_run,
-            } => {
-                let verb = if *dry_run { "would change" } else { "changed" };
-                let mut headline = format!("{} of {examined} WAD(s) {verb}", findings.len());
-                if *cancelled {
-                    headline.push_str(" (cancelled)");
-                }
-                if *wiki_lookups > 0 {
-                    headline.push_str(&format!(", {wiki_lookups} wiki lookup(s)"));
-                }
-                ui.colored_label(theme::TEXT_SECONDARY, headline);
-                if let Some(blocked) = wiki_blocked {
-                    ui.colored_label(theme::COLOR_WARNING, blocked);
-                }
-                ui.add_space(4.0);
-                // "Nothing new" would be false of a wiki that never got asked.
-                let empty = if wiki_blocked.is_some() {
-                    ""
-                } else {
-                    "Nothing new detected."
-                };
-                report_lines(ui, findings, empty);
-            }
-            EnrichReport::Cacowards {
-                year,
-                scraped,
-                upserted,
-                linked,
-                previews,
-                dry_run,
-            } => {
-                let suffix = if *dry_run { " (dry run)" } else { "" };
-                ui.colored_label(
-                    theme::TEXT_SECONDARY,
-                    format!(
-                        "Cacowards {year}: scraped {scraped}, upserted {upserted}, \
-                         auto-linked {linked}{suffix}"
-                    ),
-                );
-                ui.add_space(4.0);
-                report_lines(ui, previews, "");
-            }
+        let EnrichReport {
+            examined,
+            findings,
+            wiki_lookups,
+            wiki_blocked,
+            cancelled,
+            dry_run,
+        } = report;
+        let verb = if *dry_run { "would change" } else { "changed" };
+        let mut headline = format!("{} of {examined} WAD(s) {verb}", findings.len());
+        if *cancelled {
+            headline.push_str(" (cancelled)");
         }
+        if *wiki_lookups > 0 {
+            headline.push_str(&format!(", {wiki_lookups} wiki lookup(s)"));
+        }
+        ui.colored_label(theme::TEXT_SECONDARY, headline);
+        if let Some(blocked) = wiki_blocked {
+            ui.colored_label(theme::COLOR_WARNING, blocked);
+        }
+        ui.add_space(4.0);
+        // "Nothing new" would be false of a wiki that never got asked.
+        let empty = if wiki_blocked.is_some() {
+            ""
+        } else {
+            "Nothing new detected."
+        };
+        report_lines(ui, findings, empty);
     }
 }
 

@@ -48,7 +48,7 @@ pub(super) fn render_sidebar(
         }
         state.view_mode = ViewMode::Cacowards;
         // Re-pull on each entry; cheap relative to user-perceived latency
-        // and keeps the year strip honest after an enrich or import.
+        // and keeps the year strip honest after an import.
         state.cacowards.needs_reload = true;
     }
     if theme::sidebar_nav_item(ui, "Stats", state.view_mode == ViewMode::Stats) {
@@ -222,7 +222,7 @@ const TOOLS: &[Tool] = &[
     Tool {
         label: "Enrich",
         action: || ActionRequest::Enrich,
-        hint: "Re-run metadata detection / refresh Cacowards",
+        hint: "Re-run metadata detection",
     },
     Tool {
         label: "IWADs",
