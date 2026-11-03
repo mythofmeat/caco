@@ -1,4 +1,5 @@
-use reqwest::blocking::Client;
+use reqwest::blocking::{Client, Response};
+use std::fmt;
 use std::time::Duration;
 
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
@@ -56,28 +57,58 @@ where
     }
 }
 
-/// Check if an HTTP response has a Cloudflare WAF challenge.
-///
-/// Returns `true` when status is 403 and the `cf-mitigated` header is `"challenge"`.
-pub fn is_cloudflare_challenged(response: &reqwest::blocking::Response) -> bool {
-    response.status() == reqwest::StatusCode::FORBIDDEN
-        && response
-            .headers()
-            .get("cf-mitigated")
-            .and_then(|v| v.to_str().ok())
-            == Some("challenge")
+/// The WAF behind a [`waf_challenge`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WafKind {
+    Cloudflare,
+    AwsWaf,
 }
 
-/// Check if an HTTP response has an AWS WAF challenge.
+impl fmt::Display for WafKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Cloudflare => "Cloudflare",
+            Self::AwsWaf => "AWS WAF",
+        })
+    }
+}
+
+/// Recognise a response that is a WAF's challenge rather than the site's answer.
 ///
-/// Returns `true` when status is 403 and the `x-amzn-waf-action` header is `"challenge"`.
-pub fn is_aws_waf_challenged(response: &reqwest::blocking::Response) -> bool {
-    response.status() == reqwest::StatusCode::FORBIDDEN
-        && response
-            .headers()
-            .get("x-amzn-waf-action")
-            .and_then(|v| v.to_str().ok())
-            == Some("challenge")
+/// Knows every WAF, not just the one a site is behind today: a site can change
+/// provider without notice, and a client checking for the old one then reports
+/// the challenge as a bare HTTP error.
+///
+/// The headers are the whole signal, and the status is deliberately not part of
+/// it. Cloudflare documents `cf-mitigated` without naming a status. AWS WAF
+/// answers a challenge with 202 and a CAPTCHA with 405. A 202 passes
+/// `error_for_status`, so callers must ask this first or the interstitial
+/// reaches their parser.
+pub fn waf_challenge(response: &Response) -> Option<WafKind> {
+    let header = |name| response.headers().get(name)?.to_str().ok();
+
+    if header("cf-mitigated") == Some("challenge") {
+        Some(WafKind::Cloudflare)
+    } else if matches!(header("x-amzn-waf-action"), Some("challenge" | "captcha")) {
+        Some(WafKind::AwsWaf)
+    } else {
+        None
+    }
+}
+
+/// Build a real [`Response`] without a network, for testing what a client does
+/// with one.
+#[cfg(test)]
+pub(crate) fn canned_response(
+    status: u16,
+    headers: &[(&str, &str)],
+    body: &'static str,
+) -> Response {
+    let mut response = ::http::Response::builder().status(status);
+    for &(name, value) in headers {
+        response = response.header(name, value);
+    }
+    response.body(body).expect("valid canned response").into()
 }
 
 #[cfg(test)]
@@ -85,6 +116,63 @@ mod tests {
     use serde::Deserialize;
 
     use super::*;
+
+    /// A real challenge, as caco's own client received it on 2026-10-31.
+    #[test]
+    fn waf_challenge_recognises_cloudflare() {
+        let response = canned_response(
+            403,
+            &[("server", "cloudflare"), ("cf-mitigated", "challenge")],
+            "<html>Just a moment...</html>",
+        );
+        assert_eq!(waf_challenge(&response), Some(WafKind::Cloudflare));
+    }
+
+    /// Cloudflare documents the header and no status, so a different status must
+    /// not hide a challenge.
+    #[test]
+    fn waf_challenge_recognises_cloudflare_at_any_status() {
+        let response = canned_response(503, &[("cf-mitigated", "challenge")], "");
+        assert_eq!(waf_challenge(&response), Some(WafKind::Cloudflare));
+    }
+
+    /// AWS documents 202 for a challenge. The old 403 gate could never match it.
+    #[test]
+    fn waf_challenge_recognises_an_aws_challenge() {
+        let response = canned_response(202, &[("x-amzn-waf-action", "challenge")], "");
+        assert_eq!(waf_challenge(&response), Some(WafKind::AwsWaf));
+    }
+
+    /// AWS documents 405 for a CAPTCHA, which caco can solve no better.
+    #[test]
+    fn waf_challenge_recognises_an_aws_captcha() {
+        let response = canned_response(405, &[("x-amzn-waf-action", "captcha")], "");
+        assert_eq!(waf_challenge(&response), Some(WafKind::AwsWaf));
+    }
+
+    /// Being behind a WAF is not being challenged by it: a site that answers
+    /// normally can still send `server: cloudflare`.
+    #[test]
+    fn waf_challenge_ignores_a_normal_answer_from_behind_a_waf() {
+        let response = canned_response(200, &[("server", "cloudflare")], "{}");
+        assert_eq!(waf_challenge(&response), None);
+    }
+
+    /// A real refusal keeps its status. Blaming a challenge that never happened
+    /// would tell the user to retry something that will keep failing.
+    #[test]
+    fn waf_challenge_ignores_a_plain_403() {
+        let response = canned_response(403, &[("server", "cloudflare")], "Forbidden");
+        assert_eq!(waf_challenge(&response), None);
+    }
+
+    #[test]
+    fn waf_challenge_ignores_values_it_does_not_know() {
+        for header in [("cf-mitigated", "block"), ("x-amzn-waf-action", "allow")] {
+            let response = canned_response(403, &[header], "");
+            assert_eq!(waf_challenge(&response), None, "{header:?}");
+        }
+    }
 
     #[derive(Deserialize)]
     struct TestStr {

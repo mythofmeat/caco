@@ -1,11 +1,11 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use reqwest::blocking::Client;
+use reqwest::blocking::{Client, Response};
 
 use super::models::{FileEntry, Review};
 use crate::error::{Result, SourceError};
-use crate::http::build_client;
+use crate::http::{build_client, waf_challenge};
 
 /// Download mirrors for the idgames archive.
 pub const MIRRORS: &[&str] = &[
@@ -38,31 +38,7 @@ impl IdgamesClient {
         query.push(("out", "json"));
 
         let response = self.client.get(BASE_URL).query(&query).send()?;
-
-        // Detect Cloudflare WAF challenge
-        if crate::http::is_cloudflare_challenged(&response) {
-            return Err(SourceError::WafBlocked {
-                api_name: "idgames".to_string(),
-                message: "idgames API blocked by Cloudflare challenge. This is usually temporary — try again later.".to_string(),
-            });
-        }
-
-        response.error_for_status_ref()?;
-
-        let data: serde_json::Value = response.json()?;
-
-        if let Some(error) = data.get("error") {
-            let msg = error
-                .get("message")
-                .and_then(|m| m.as_str())
-                .unwrap_or("Unknown error");
-            return Err(SourceError::Api(msg.to_string()));
-        }
-
-        Ok(data
-            .get("content")
-            .cloned()
-            .unwrap_or(serde_json::Value::Null))
+        read_api_response(response)
     }
 
     /// Look up an entry by archive path, with a filename-search fallback.
@@ -76,8 +52,7 @@ impl IdgamesClient {
     /// error, falls back to a filename search filtered to the same archive
     /// directory so we don't pick up unrelated same-named files.
     ///
-    /// WAF/network errors short-circuit — no point retrying through the
-    /// same cloudflare.
+    /// A WAF block short-circuits: the search would only hit the same wall.
     pub(crate) fn get_by_path(&self, file_path: &str) -> Result<FileEntry> {
         let get_err = match self.get(None, Some(file_path)) {
             Ok(entry) => return Ok(entry),
@@ -232,7 +207,7 @@ impl IdgamesClient {
 
     /// Download directly from a mirror, bypassing the API.
     ///
-    /// Used as a fallback when the idgames API is blocked (e.g. Cloudflare).
+    /// Used as a fallback when the idgames API is blocked.
     /// Constructs the mirror URL from a WAD's stored `source_url` and `filename`.
     ///
     /// `source_url` format: `https://www.doomworld.com/idgames/levels/doom2/Ports/megawads/sunlust`
@@ -276,6 +251,33 @@ impl Default for IdgamesClient {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Turn an idgames API response into its `content`, or the error it amounts to.
+fn read_api_response(response: Response) -> Result<serde_json::Value> {
+    if let Some(kind) = waf_challenge(&response) {
+        return Err(SourceError::WafBlocked {
+            site: "idgames",
+            kind,
+        });
+    }
+
+    response.error_for_status_ref()?;
+
+    let data: serde_json::Value = response.json()?;
+
+    if let Some(error) = data.get("error") {
+        let msg = error
+            .get("message")
+            .and_then(|m| m.as_str())
+            .unwrap_or("Unknown error");
+        return Err(SourceError::Api(msg.to_string()));
+    }
+
+    Ok(data
+        .get("content")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null))
 }
 
 /// Resolve the destination file path for a download.
@@ -342,6 +344,79 @@ fn parse_file_list(content: &serde_json::Value) -> Result<Vec<FileEntry>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::http::{WafKind, canned_response};
+
+    #[test]
+    fn test_read_api_response_reports_a_cloudflare_challenge_as_blocked() {
+        let err = read_api_response(canned_response(
+            403,
+            &[("server", "cloudflare"), ("cf-mitigated", "challenge")],
+            "<html>Just a moment...</html>",
+        ))
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            SourceError::WafBlocked {
+                site: "idgames",
+                kind: WafKind::Cloudflare,
+            }
+        ));
+    }
+
+    /// This client used to check for Cloudflare only.
+    #[test]
+    fn test_read_api_response_reports_an_aws_challenge_as_blocked() {
+        let err = read_api_response(canned_response(
+            202,
+            &[("x-amzn-waf-action", "challenge")],
+            "<html>challenge script</html>",
+        ))
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            SourceError::WafBlocked {
+                kind: WafKind::AwsWaf,
+                ..
+            }
+        ));
+    }
+
+    /// This API is behind a WAF and answers normally, which must stay an answer.
+    #[test]
+    fn test_read_api_response_returns_the_content() {
+        let content = read_api_response(canned_response(
+            200,
+            &[("server", "cloudflare")],
+            r#"{"content": {"status": "true"}}"#,
+        ))
+        .unwrap();
+
+        assert_eq!(content["status"], "true");
+    }
+
+    #[test]
+    fn test_read_api_response_keeps_the_status_of_a_plain_403() {
+        let err = read_api_response(canned_response(403, &[], "Forbidden")).unwrap_err();
+
+        let SourceError::Http(http) = err else {
+            panic!("expected an HTTP error, got {err:?}");
+        };
+        assert_eq!(http.status(), Some(reqwest::StatusCode::FORBIDDEN));
+    }
+
+    #[test]
+    fn test_read_api_response_reports_an_api_error() {
+        let err = read_api_response(canned_response(
+            200,
+            &[],
+            r#"{"error": {"message": "Bad File"}}"#,
+        ))
+        .unwrap_err();
+
+        assert!(matches!(err, SourceError::Api(msg) if msg == "Bad File"));
+    }
 
     #[test]
     fn test_normalize_list_array() {

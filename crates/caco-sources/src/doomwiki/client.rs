@@ -1,9 +1,9 @@
-use reqwest::blocking::Client;
+use reqwest::blocking::{Client, Response};
 
 use super::models::{SearchResult, WikiEntry};
 use super::parser::WikitextParser;
 use crate::error::{Result, SourceError};
-use crate::http::build_client;
+use crate::http::{build_client, waf_challenge};
 
 const API_URL: &str = "https://doomwiki.org/w/api.php";
 const USER_AGENT: &str = "Caco/1.0 (Doom WAD library manager; https://github.com/eshen/caco)";
@@ -29,28 +29,7 @@ impl DoomwikiClient {
         query.push(("format", "json"));
 
         let response = self.client.get(API_URL).query(&query).send()?;
-
-        // Detect AWS WAF challenge (Doom Wiki uses AWS)
-        if crate::http::is_aws_waf_challenged(&response) {
-            return Err(SourceError::WafBlocked {
-                api_name: "doomwiki".to_string(),
-                message: "Doom Wiki blocked the request (WAF challenge). Try again later or import manually.".to_string(),
-            });
-        }
-
-        response.error_for_status_ref()?;
-
-        let data: serde_json::Value = response.json()?;
-
-        if let Some(error) = data.get("error") {
-            let msg = error
-                .get("info")
-                .and_then(|m| m.as_str())
-                .unwrap_or("Unknown error");
-            return Err(SourceError::Api(msg.to_string()));
-        }
-
-        Ok(data)
+        read_api_response(response)
     }
 
     /// Search the wiki for pages matching the query.
@@ -203,6 +182,30 @@ impl Default for DoomwikiClient {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
+/// Turn a MediaWiki API response into its JSON, or the error it amounts to.
+fn read_api_response(response: Response) -> Result<serde_json::Value> {
+    if let Some(kind) = waf_challenge(&response) {
+        return Err(SourceError::WafBlocked {
+            site: "Doom Wiki",
+            kind,
+        });
+    }
+
+    response.error_for_status_ref()?;
+
+    let data: serde_json::Value = response.json()?;
+
+    if let Some(error) = data.get("error") {
+        let msg = error
+            .get("info")
+            .and_then(|m| m.as_str())
+            .unwrap_or("Unknown error");
+        return Err(SourceError::Api(msg.to_string()));
+    }
+
+    Ok(data)
+}
+
 /// Extract (page_id, wikitext) from a MediaWiki query response.
 fn extract_page_content(data: &serde_json::Value) -> Option<(i64, String)> {
     let pages = data.get("query")?.get("pages")?.as_object()?;
@@ -231,6 +234,90 @@ fn extract_revision_content(page_data: &serde_json::Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::http::{WafKind, canned_response};
+
+    /// The bug this client had: a Cloudflare challenge read as a bare HTTP 403.
+    #[test]
+    fn test_read_api_response_reports_a_cloudflare_challenge_as_blocked() {
+        let err = read_api_response(canned_response(
+            403,
+            &[("server", "cloudflare"), ("cf-mitigated", "challenge")],
+            "<html>Just a moment...</html>",
+        ))
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            SourceError::WafBlocked {
+                site: "Doom Wiki",
+                kind: WafKind::Cloudflare,
+            }
+        ));
+        assert_eq!(
+            err.to_string(),
+            "Doom Wiki blocked the request (Cloudflare challenge). \
+             Try again later or import manually."
+        );
+    }
+
+    /// A 202 passes `error_for_status`, so this would otherwise surface as a
+    /// JSON decode failure on the interstitial.
+    #[test]
+    fn test_read_api_response_reports_an_aws_challenge_as_blocked() {
+        let err = read_api_response(canned_response(
+            202,
+            &[("x-amzn-waf-action", "challenge")],
+            "<html>challenge script</html>",
+        ))
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            SourceError::WafBlocked {
+                kind: WafKind::AwsWaf,
+                ..
+            }
+        ));
+        assert_eq!(
+            err.to_string(),
+            "Doom Wiki blocked the request (AWS WAF challenge). \
+             Try again later or import manually."
+        );
+    }
+
+    #[test]
+    fn test_read_api_response_keeps_the_status_of_a_plain_403() {
+        let err = read_api_response(canned_response(403, &[], "Forbidden")).unwrap_err();
+
+        let SourceError::Http(http) = err else {
+            panic!("expected an HTTP error, got {err:?}");
+        };
+        assert_eq!(http.status(), Some(reqwest::StatusCode::FORBIDDEN));
+    }
+
+    #[test]
+    fn test_read_api_response_returns_the_json() {
+        let data = read_api_response(canned_response(
+            200,
+            &[("server", "cloudflare")],
+            r#"{"query": {"search": []}}"#,
+        ))
+        .unwrap();
+
+        assert!(data.get("query").is_some());
+    }
+
+    #[test]
+    fn test_read_api_response_reports_a_mediawiki_error() {
+        let err = read_api_response(canned_response(
+            200,
+            &[],
+            r#"{"error": {"code": "badvalue", "info": "Unrecognized value"}}"#,
+        ))
+        .unwrap_err();
+
+        assert!(matches!(err, SourceError::Api(msg) if msg == "Unrecognized value"));
+    }
 
     #[test]
     fn test_extract_page_content() {

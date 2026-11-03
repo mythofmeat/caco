@@ -1,3 +1,5 @@
+use crate::http::WafKind;
+
 /// Error type for source adapters (idgames, doomwiki, etc.).
 #[derive(Debug, thiserror::Error)]
 pub enum SourceError {
@@ -19,12 +21,14 @@ pub enum SourceError {
     #[error("import error: {0}")]
     Import(String),
 
-    /// API blocked by WAF challenge (Cloudflare, AWS WAF, etc.).
+    /// A WAF answered with a challenge instead of the site's response, as
+    /// recognised by [`crate::http::waf_challenge`].
     ///
-    /// `api_name` identifies the API ("idgames" or "doomwiki")
-    /// and `message` has user-facing details.
-    #[error("{message}")]
-    WafBlocked { api_name: String, message: String },
+    /// Worded here rather than by each client, so the same event cannot read
+    /// differently depending on which client hit it, and the WAF it names is the
+    /// one that answered.
+    #[error("{site} blocked the request ({kind} challenge). Try again later or import manually.")]
+    WafBlocked { site: &'static str, kind: WafKind },
 }
 
 /// Convenience alias used throughout caco-sources.
