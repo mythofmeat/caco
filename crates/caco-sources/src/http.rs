@@ -2,7 +2,7 @@ use reqwest::blocking::{Client, Response};
 use std::fmt;
 use std::time::Duration;
 
-const TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Who caco says it is to every site it talks to. One spelling, so the version
 /// and the project URL cannot go stale in one client and not in another.

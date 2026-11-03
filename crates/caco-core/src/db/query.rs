@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use super::connection::{attach_tags, fetch_tags_batch};
 use super::models::{
     AndGroup, Availability, OR_SEPARATOR, ParsedQuery, QueryTerm, Retrievability, STATUS_SHORTCUTS,
-    SourceType, WadRecord,
+    SourceType, WAD_COLUMNS, WadRecord,
 };
 use crate::Result;
 use crate::complevel::parse_complevel;
@@ -629,7 +629,7 @@ pub fn search_wads(
 
     let sql = if use_group_by {
         format!(
-            "SELECT wads.* FROM wads \
+            "SELECT {WAD_COLUMNS} FROM wads \
              LEFT JOIN sessions ON sessions.wad_id = wads.id \
              WHERE {where_clause} \
              GROUP BY wads.id \
@@ -637,7 +637,7 @@ pub fn search_wads(
         )
     } else {
         format!(
-            "SELECT wads.* FROM wads \
+            "SELECT {WAD_COLUMNS} FROM wads \
              WHERE {where_clause} \
              ORDER BY {order_by}{limit_clause}"
         )
@@ -685,8 +685,9 @@ pub fn find_duplicate(
             SourceType::Idgames | SourceType::Doomwiki | SourceType::Doomworld
         )
     {
-        let mut stmt =
-            conn.prepare("SELECT * FROM wads WHERE source_type = ? AND source_id = ?")?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {WAD_COLUMNS} FROM wads WHERE source_type = ? AND source_id = ?"
+        ))?;
         match stmt.query_row(
             rusqlite::params![source_type.as_str(), sid],
             WadRecord::from_row,
@@ -705,8 +706,9 @@ pub fn find_duplicate(
         && matches!(source_type, SourceType::Url | SourceType::Local)
     {
         let url = crate::db::wads::clean_source_url(url);
-        let mut stmt =
-            conn.prepare("SELECT * FROM wads WHERE source_type = ? AND source_url = ?")?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {WAD_COLUMNS} FROM wads WHERE source_type = ? AND source_url = ?"
+        ))?;
         match stmt.query_row(
             rusqlite::params![source_type.as_str(), url],
             WadRecord::from_row,
@@ -731,9 +733,9 @@ pub fn find_duplicate(
         }
 
         let row_result = if let Some(auth) = author {
-            let mut stmt = conn.prepare(
-                "SELECT * FROM wads WHERE LOWER(filename) LIKE ? AND LOWER(author) LIKE ?",
-            )?;
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {WAD_COLUMNS} FROM wads WHERE LOWER(filename) LIKE ? AND LOWER(author) LIKE ?"
+            ))?;
             stmt.query_row(
                 rusqlite::params![
                     format!("%{normalized}%"),
@@ -742,7 +744,9 @@ pub fn find_duplicate(
                 WadRecord::from_row,
             )
         } else {
-            let mut stmt = conn.prepare("SELECT * FROM wads WHERE LOWER(filename) LIKE ?")?;
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {WAD_COLUMNS} FROM wads WHERE LOWER(filename) LIKE ?"
+            ))?;
             stmt.query_row(
                 rusqlite::params![format!("%{normalized}%")],
                 WadRecord::from_row,
@@ -833,12 +837,109 @@ mod tests {
         }
     }
 
+    /// WADs a mirror holds, one per kind of evidence, and WADs it looks like it
+    /// might hold and does not. Manual-only unless a mirror changes that, so they
+    /// are what the mirror clause of each predicate decides.
+    fn add_mirror_fixtures(conn: &Connection) {
+        use crate::db::mirrors::sync_files;
+        use crate::mirrors::MirrorEntry;
+
+        const A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        const B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        const C: &str = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+        const D: &str = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+
+        sync_files(
+            conn,
+            "home",
+            &[
+                MirrorEntry {
+                    sha256: A.to_string(),
+                    size: 4,
+                    filename: "a.wad".to_string(),
+                    content_sha256: Some(B.to_string()),
+                    ..Default::default()
+                },
+                MirrorEntry {
+                    sha256: C.to_string(),
+                    size: 4,
+                    filename: "c.wad".to_string(),
+                    idgames: Some(100),
+                    doomworld: Some(151858),
+                    doomwiki: Some("Lonesome_Road".to_string()),
+                    cacowards: vec!["2025-winner-road".to_string()],
+                    ..Default::default()
+                },
+            ],
+        )
+        .unwrap();
+
+        let hashed = |title: &str, file: &str, content: &str| {
+            let id = add_wad(conn, &NewWad::new(title, SourceType::Doomworld)).unwrap();
+            conn.execute(
+                "UPDATE wads SET file_size = 4, file_sha256 = ?1, file_sha1 = 'x', \
+                 content_sha256 = ?2 WHERE id = ?3",
+                rusqlite::params![file, content, id],
+            )
+            .unwrap();
+            id
+        };
+        hashed("mirror-by-file-hash", A, D);
+        hashed("mirror-by-content-hash", D, B);
+        hashed("mirror-other-hash", D, D);
+
+        let at_url = |title: &str, url: &str| {
+            add_wad(
+                conn,
+                &NewWad::new(title, SourceType::Doomworld).source_url(url),
+            )
+            .unwrap()
+        };
+        at_url(
+            "mirror-by-topic",
+            "https://www.doomworld.com/forum/topic/151858-road/",
+        );
+        at_url(
+            "mirror-other-topic",
+            "https://www.doomworld.com/vb/thread/1",
+        );
+        at_url(
+            "mirror-by-page",
+            "https://doomwiki.org/wiki/Lonesome_Road#Reception",
+        );
+        at_url("mirror-other-page", "https://doomwiki.org/wiki/Elsewhere");
+
+        let linked = add_wad(conn, &NewWad::new("mirror-by-award", SourceType::Local)).unwrap();
+        let row = crate::db::upsert_cacoward(
+            conn,
+            &crate::db::NewCacoward {
+                key: "2025-winner-road".to_string(),
+                year: 2025,
+                category: "winner".to_string(),
+                page_order: 1,
+                wad_title: "Road".to_string(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        crate::db::link_wad(conn, row, linked, true).unwrap();
+
+        // A cached file changes which predicate a WAD lands in, and never the
+        // mirror clause.
+        add_wad(
+            conn,
+            &NewWad::new("mirror-other-kept", SourceType::Url).cached_path("/keep/k.wad"),
+        )
+        .unwrap();
+    }
+
     /// `Retrievability::AUTOMATIC_SQL` and `Retrievability::derive` are two
     /// spellings of one rule, so they can drift. This is what catches it.
     #[test]
     fn test_retrievability_sql_matches_rust() {
         let conn = setup();
         add_retrievability_fixtures(&conn);
+        add_mirror_fixtures(&conn);
 
         let sql_automatic: Vec<i64> = conn
             .prepare(&format!(
@@ -863,6 +964,99 @@ mod tests {
             "fixtures produced no automatic rows"
         );
         assert_eq!(sql_automatic, rust_automatic);
+
+        // The fixtures themselves, in case both spellings went wrong together.
+        let all = search_wads(&conn, None, None, true, false, 0).unwrap();
+        for wad in all.iter().filter(|w| w.title.starts_with("mirror-")) {
+            assert_eq!(
+                wad.retrievability().is_automatic(),
+                wad.title.starts_with("mirror-by-"),
+                "{}",
+                wad.title
+            );
+        }
+    }
+
+    /// What Play fetches from and what the library says it can fetch are one rule,
+    /// so a WAD can never read as fetchable with nothing behind it, or the reverse.
+    #[test]
+    fn test_what_a_mirror_holds_agrees_with_what_the_row_says() {
+        let conn = setup();
+        add_retrievability_fixtures(&conn);
+        add_mirror_fixtures(&conn);
+
+        for wad in search_wads(&conn, None, None, true, false, 0).unwrap() {
+            let files = crate::db::mirrors::files_for_wad(&conn, wad.id).unwrap();
+            assert_eq!(wad.mirrored, !files.is_empty(), "{}", wad.title);
+        }
+    }
+
+    /// Every reader of a WAD row sees the mirror column, whichever query it took.
+    #[test]
+    fn test_every_way_of_reading_a_wad_knows_about_mirrors() {
+        let conn = setup();
+        add_mirror_fixtures(&conn);
+        let by_title = |title: &str| {
+            search_wads(&conn, Some(&format!("title:{title}")), None, true, false, 0)
+                .unwrap()
+                .remove(0)
+        };
+        let wad = by_title("mirror-by-topic");
+        assert!(wad.mirrored);
+
+        // Sorting by playtime or last played takes a different query.
+        let sorted = search_wads(
+            &conn,
+            Some("title:mirror-by-topic"),
+            Some("playtime"),
+            true,
+            false,
+            0,
+        )
+        .unwrap();
+        assert!(sorted[0].mirrored);
+
+        assert!(
+            crate::db::get_wad(&conn, wad.id, false)
+                .unwrap()
+                .unwrap()
+                .mirrored
+        );
+
+        let file_row = by_title("mirror-by-file-hash");
+        conn.execute(
+            "UPDATE wads SET cached_path = '/keep/a.wad', filename = 'a.wad', source_url = 'u' \
+             WHERE id = ?1",
+            [file_row.id],
+        )
+        .unwrap();
+        let cached = crate::db::get_cached_wads(&conn).unwrap();
+        assert!(
+            cached
+                .iter()
+                .find(|w| w.id == file_row.id)
+                .unwrap()
+                .mirrored
+        );
+    }
+
+    /// Whatever a query filters on, the columns the mirror match adds must not take
+    /// up its bare `?` placeholders.
+    #[test]
+    fn test_mirror_columns_do_not_disturb_query_parameters() {
+        let conn = setup();
+        add_mirror_fixtures(&conn);
+        let hits = search_wads(
+            &conn,
+            Some("retrievable:auto hash:aaaaaaaa title:mirror"),
+            None,
+            true,
+            false,
+            0,
+        )
+        .unwrap();
+        let titles: Vec<&str> = hits.iter().map(|w| w.title.as_str()).collect();
+        assert_eq!(titles, ["mirror-by-file-hash"]);
     }
 
     #[test]
@@ -892,6 +1086,7 @@ mod tests {
     fn test_lost_sql_matches_rust() {
         let conn = setup();
         add_retrievability_fixtures(&conn);
+        add_mirror_fixtures(&conn);
         // A manual WAD that still has its file is not lost.
         let kept = add_wad(
             &conn,
@@ -963,8 +1158,15 @@ mod tests {
             }
             add_wad(&conn, &nw).unwrap();
         }
+        // Rows only a mirror makes downloadable, and rows it leaves as they were.
+        add_mirror_fixtures(&conn);
 
         let all = search_wads(&conn, None, None, true, false, 0).unwrap();
+        assert!(
+            all.iter()
+                .any(|w| w.mirrored && w.source_url.is_none() && w.cached_path.is_none()),
+            "fixtures have no WAD that only a mirror makes downloadable"
+        );
         let mut covered = 0;
 
         for &avail in Availability::ALL {

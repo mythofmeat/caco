@@ -59,6 +59,11 @@ impl StorePaths {
         }
     }
 
+    /// The directory a WAD's file belongs in: see [`config::wad_store_dir_in`].
+    pub fn store_dir(&self, retrievability: Retrievability) -> PathBuf {
+        config::wad_store_dir_in(retrievability, &self.cache_dir, &self.keep_dir)
+    }
+
     /// Directories to look in for a file by name, the WAD's own store dir
     /// first, as [`config::wad_store_dir_in`] places it.
     ///
@@ -184,10 +189,11 @@ pub fn check_wad(
 /// Every row with a file to look for. Trashed rows too, because they can be
 /// restored, and a restored row should not come back claiming a file.
 fn recorded_wads(conn: &Connection) -> crate::Result<Vec<WadRecord>> {
-    let mut stmt = conn.prepare(
-        "SELECT * FROM wads \
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {} FROM wads \
          WHERE COALESCE(cached_path, '') <> '' OR COALESCE(last_known_path, '') <> ''",
-    )?;
+        db::WAD_COLUMNS
+    ))?;
     let wads = stmt
         .query_map([], WadRecord::from_row)?
         .collect::<std::result::Result<Vec<_>, _>>()?;

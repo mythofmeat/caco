@@ -21,6 +21,7 @@ image.workspace = true
 zip.workspace = true
 tracing.workspace = true
 unicode-normalization.workspace = true
+urlencoding.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

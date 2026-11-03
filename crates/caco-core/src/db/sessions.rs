@@ -4,7 +4,7 @@ use chrono::Utc;
 use rusqlite::Connection;
 
 use super::connection::{SQLITE_MAX_VARS, attach_tags};
-use super::models::WadRecord;
+use super::models::{WAD_COLUMNS, WadRecord};
 use crate::Result;
 
 /// Minimum duration in seconds for a session to count as a real play session.
@@ -404,9 +404,10 @@ pub fn delete_wad_completion(conn: &Connection, completion_id: i64) -> Result<bo
 
 /// Get all WADs with cached files (non-null cached_path, not deleted).
 pub fn get_cached_wads(conn: &Connection) -> Result<Vec<WadRecord>> {
-    let mut stmt = conn.prepare(
-        "SELECT * FROM wads WHERE cached_path IS NOT NULL AND deleted_at IS NULL ORDER BY title",
-    )?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {WAD_COLUMNS} FROM wads \
+         WHERE cached_path IS NOT NULL AND deleted_at IS NULL ORDER BY title"
+    ))?;
     let mut results: Vec<WadRecord> = stmt
         .query_map([], WadRecord::from_row)?
         .collect::<std::result::Result<Vec<_>, _>>()?;

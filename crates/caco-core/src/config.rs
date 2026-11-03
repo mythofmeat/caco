@@ -201,6 +201,29 @@ pub fn cacoward_data_dir() -> PathBuf {
     default_data_dir().join("cacowards")
 }
 
+/// Where tokens pasted into caco for its mirrors are saved: see
+/// [`crate::mirror_tokens`], which says why this is on neither side of the data split.
+///
+/// `CACO_TOKEN_FILE` overrides it. So does `CACO_HOME`, which is a complete isolation
+/// switch, though beside that directory rather than in it: a `CACO_HOME` can be a real
+/// library in a git repository as easily as a scratch one.
+pub fn mirror_token_file() -> PathBuf {
+    if let Ok(p) = std::env::var("CACO_TOKEN_FILE") {
+        return PathBuf::from(p);
+    }
+    if let Ok(home) = std::env::var("CACO_HOME") {
+        let home = PathBuf::from(home);
+        if let Some(name) = home.file_name() {
+            let beside = format!("{}.mirror-tokens.toml", name.to_string_lossy());
+            return home.with_file_name(beside);
+        }
+    }
+    dirs::preference_dir()
+        .unwrap_or_else(|| home_dir().join(".config"))
+        .join("caco")
+        .join("mirror-tokens.toml")
+}
+
 /// Root of the managed sourceport install prefixes.
 ///
 /// Cache side: a built sourceport is regenerable from its recipe, and the
@@ -257,6 +280,10 @@ pub struct Config {
     #[serde(default)]
     pub executable_args: HashMap<String, Vec<String>>,
 
+    /// Stores of WAD files the user controls, tried before anywhere else in the
+    /// order they are listed. See [`crate::mirrors`].
+    pub mirrors: Vec<MirrorConfig>,
+
     #[serde(default)]
     pub gui: GuiConfig,
     #[serde(default)]
@@ -292,10 +319,108 @@ impl Default for Config {
             zdoom_sourceport: String::new(),
             sourceport_preferences: HashMap::new(),
             executable_args: HashMap::new(),
+            mirrors: Vec::new(),
             gui: GuiConfig::default(),
             list: ListConfig::default(),
             iwad_priority: HashMap::new(),
         }
+    }
+}
+
+/// One `[[mirrors]]` entry: a store of WAD files the user controls.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MirrorConfig {
+    /// What the library knows it by. The synced index is keyed on this, so
+    /// renaming a mirror reads its index again under the new name.
+    pub name: String,
+    /// Its root over HTTP. A mirror has this or a `path`.
+    pub url: Option<String>,
+    /// Its root on a filesystem. A mirror has this or a `url`.
+    pub path: Option<String>,
+    /// The login, for a store that wants a username and password, as WebDAV servers
+    /// do. The token is the password then. Without this it goes as a bearer token.
+    pub username: Option<String>,
+    /// The environment variable holding the token, for those who would rather it was
+    /// not saved anywhere. Wins over a saved one.
+    pub token_env: Option<String>,
+    /// Whether caco may upload to it.
+    pub write: bool,
+    /// The token saved on this machine, read from [`mirror_token_file`] along with
+    /// the config. Never written to the config, which is meant to travel.
+    #[serde(skip)]
+    pub saved_token: Option<SavedToken>,
+}
+
+/// A token, kept out of anything that prints a config.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct SavedToken(pub String);
+
+impl std::fmt::Debug for SavedToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SavedToken(..)")
+    }
+}
+
+/// Where a mirror's root is, once [`MirrorConfig::location`] has checked it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MirrorLocation {
+    Url(String),
+    Path(PathBuf),
+}
+
+impl MirrorConfig {
+    /// Where this mirror's root is, or what is wrong with how it says so.
+    pub fn location(&self) -> Result<MirrorLocation, String> {
+        let nonempty = |value: &Option<String>| {
+            value
+                .as_deref()
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+                .map(str::to_string)
+        };
+        match (nonempty(&self.url), nonempty(&self.path)) {
+            (Some(_), Some(_)) => Err("set either a URL or a path, not both".to_string()),
+            (None, None) => Err("set a URL or a path".to_string()),
+            (Some(url), None) if url.starts_with("http://") || url.starts_with("https://") => {
+                Ok(MirrorLocation::Url(url.trim_end_matches('/').to_string()))
+            }
+            (Some(url), None) => Err(format!("{url} is not an http:// or https:// URL")),
+            (None, Some(path)) => {
+                // Absolute because caco can be started from anywhere, and a
+                // relative path would mean a different mirror each time.
+                let path = expand_tilde(&path);
+                if path.is_absolute() {
+                    Ok(MirrorLocation::Path(path))
+                } else {
+                    Err(format!("{} is not an absolute path", path.display()))
+                }
+            }
+        }
+    }
+
+    /// The token or password to present, if there is one on this machine.
+    pub fn token(&self) -> Option<String> {
+        self.token_env_name()
+            .and_then(|name| std::env::var(name).ok())
+            .filter(|token| !token.is_empty())
+            .or_else(|| self.saved_token.as_ref().map(|token| token.0.clone()))
+    }
+
+    /// The username to log in with, if the store wants one.
+    pub fn login(&self) -> Option<&str> {
+        self.username
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+    }
+
+    /// The name of the variable the token should be in, if it should be in one.
+    pub fn token_env_name(&self) -> Option<&str> {
+        self.token_env
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
     }
 }
 
@@ -372,7 +497,10 @@ fn read_config_from_disk() -> Config {
     }
     match fs::read_to_string(&path) {
         Ok(contents) => match toml::from_str::<Config>(&contents) {
-            Ok(cfg) => cfg,
+            Ok(mut cfg) => {
+                attach_saved_tokens(&mut cfg);
+                cfg
+            }
             Err(e) => {
                 eprintln!("Warning: Invalid TOML syntax in {}: {e}", path.display());
                 eprintln!("Warning: Using default configuration.");
@@ -384,6 +512,18 @@ fn read_config_from_disk() -> Config {
             eprintln!("Warning: Using default configuration.");
             Config::default()
         }
+    }
+}
+
+/// Give each mirror the token saved for it on this machine. Only read if there is a
+/// mirror, so that a config with none touches nothing outside the data dir.
+fn attach_saved_tokens(config: &mut Config) {
+    if config.mirrors.is_empty() {
+        return;
+    }
+    let tokens = crate::mirror_tokens::TokenFile::from_config().read();
+    for mirror in &mut config.mirrors {
+        mirror.saved_token = tokens.get(&mirror.name).cloned().map(SavedToken);
     }
 }
 
@@ -661,11 +801,6 @@ pub fn get_zdoom_sourceport() -> String {
     "gzdoom".to_string()
 }
 
-/// Get configured preferred sourceports by family.
-pub fn get_sourceport_preferences() -> HashMap<String, String> {
-    load_config().sourceport_preferences.clone()
-}
-
 /// Get the configured default IWAD.
 pub fn get_iwad() -> String {
     load_config().iwad.clone()
@@ -720,26 +855,6 @@ pub fn get_auto_detect_iwad() -> bool {
 /// Whether to auto-detect complevel from WAD contents.
 pub fn get_auto_detect_complevel() -> bool {
     load_config().auto_detect_complevel
-}
-
-/// Get max cache size in bytes. 0 = unlimited.
-pub fn get_cache_max_size() -> u64 {
-    let cfg = load_config();
-    if cfg.cache_max_size_gb > 0.0 {
-        (cfg.cache_max_size_gb * 1024.0 * 1024.0 * 1024.0) as u64
-    } else {
-        0
-    }
-}
-
-/// Get max cache age in days. 0 = never expire.
-pub fn get_cache_max_age() -> i64 {
-    load_config().cache_max_age_days
-}
-
-/// Whether to auto-clean cache before play.
-pub fn get_cache_auto_clean() -> bool {
-    load_config().cache_auto_clean
 }
 
 /// Resolve a sourceport name to a full path.
@@ -1205,6 +1320,169 @@ helion = ["-loglevel", "info"]
         // Omitted keys come back as their defaults, not as blanks.
         assert_eq!(parsed.link_mode, "move");
         assert_eq!(parsed.db_path, Config::default().db_path);
+    }
+
+    // -- mirrors --
+
+    fn mirror(url: Option<&str>, path: Option<&str>) -> MirrorConfig {
+        MirrorConfig {
+            name: "home".to_string(),
+            url: url.map(str::to_string),
+            path: path.map(str::to_string),
+            ..Default::default()
+        }
+    }
+
+    /// The issue's example, parsed as written.
+    #[test]
+    fn test_config_mirrors_parse_as_the_issue_spells_them() {
+        let toml_str = r#"
+[[mirrors]]
+name      = "home"
+url       = "https://files.example.lan/doom"
+token_env = "CACO_MIRROR_TOKEN"
+write     = true
+
+[[mirrors]]
+name = "nas"
+path = "/mnt/nas/doom-mirror"
+"#;
+        let cfg: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.mirrors.len(), 2);
+        assert_eq!(cfg.mirrors[0].name, "home");
+        assert_eq!(cfg.mirrors[0].token_env_name(), Some("CACO_MIRROR_TOKEN"));
+        assert!(cfg.mirrors[0].write);
+        assert_eq!(
+            cfg.mirrors[0].location(),
+            Ok(MirrorLocation::Url(
+                "https://files.example.lan/doom".to_string()
+            ))
+        );
+        assert!(
+            !cfg.mirrors[1].write,
+            "a mirror is read-only unless it says"
+        );
+        assert_eq!(
+            cfg.mirrors[1].location(),
+            Ok(MirrorLocation::Path(PathBuf::from("/mnt/nas/doom-mirror")))
+        );
+    }
+
+    #[test]
+    fn test_minimal_toml_round_trips_mirrors() {
+        let cfg = Config {
+            mirrors: vec![
+                MirrorConfig {
+                    token_env: Some("TOKEN".to_string()),
+                    write: true,
+                    ..mirror(Some("https://example.lan/doom"), None)
+                },
+                MirrorConfig {
+                    name: "nas".to_string(),
+                    ..mirror(None, Some("/mnt/nas"))
+                },
+            ],
+            ..Default::default()
+        };
+
+        let rendered = minimal_toml(&cfg).unwrap();
+        assert!(rendered.contains("[[mirrors]]"), "{rendered}");
+        let parsed: Config = toml::from_str(&rendered).unwrap();
+        assert_eq!(parsed.mirrors, cfg.mirrors);
+    }
+
+    #[test]
+    fn test_a_mirrors_url_loses_its_trailing_slash() {
+        assert_eq!(
+            mirror(Some(" https://example.lan/doom/ "), None).location(),
+            Ok(MirrorLocation::Url("https://example.lan/doom".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_a_mirrors_path_expands_a_tilde() {
+        assert_eq!(
+            mirror(None, Some("~/doom-mirror")).location(),
+            Ok(MirrorLocation::Path(home_dir().join("doom-mirror")))
+        );
+    }
+
+    #[test]
+    fn test_a_mirror_has_one_location_and_a_usable_one() {
+        for (bad, says) in [
+            (mirror(None, None), "set a URL or a path"),
+            (mirror(Some(" "), Some("")), "set a URL or a path"),
+            (mirror(Some("https://x"), Some("/y")), "not both"),
+            (mirror(Some("ftp://x/doom"), None), "not an http"),
+            (mirror(None, Some("relative/doom")), "not an absolute path"),
+        ] {
+            let problem = bad.location().unwrap_err();
+            assert!(problem.contains(says), "{problem}");
+        }
+    }
+
+    #[test]
+    fn test_a_saved_token_never_reaches_the_config_file() {
+        let cfg = Config {
+            mirrors: vec![MirrorConfig {
+                saved_token: Some(SavedToken("sekrit".to_string())),
+                ..mirror(Some("https://example.lan/doom"), None)
+            }],
+            ..Default::default()
+        };
+
+        let rendered = minimal_toml(&cfg).unwrap();
+
+        assert!(rendered.contains("[[mirrors]]"), "{rendered}");
+        assert!(!rendered.contains("sekrit"), "{rendered}");
+        assert!(!format!("{cfg:?}").contains("sekrit"));
+    }
+
+    #[test]
+    fn test_mirror_tokens_stay_out_of_the_data_dir() {
+        assert!(!mirror_token_file().starts_with(default_data_dir()));
+        assert!(!mirror_token_file().starts_with(cache_home()));
+    }
+
+    #[test]
+    fn test_a_mirrors_login_is_a_username_if_it_has_one() {
+        let login = |username: Option<&str>| MirrorConfig {
+            username: username.map(str::to_string),
+            ..Default::default()
+        };
+        assert_eq!(login(Some(" doom ")).login(), Some("doom"));
+        assert_eq!(login(Some("  ")).login(), None);
+        assert_eq!(login(None).login(), None);
+    }
+
+    #[test]
+    fn test_a_mirrors_token_comes_from_its_environment_variable() {
+        const VAR: &str = "CACO_TEST_MIRROR_TOKEN_READ";
+        let configured = MirrorConfig {
+            token_env: Some(VAR.to_string()),
+            ..Default::default()
+        };
+        assert_eq!(configured.token(), None);
+
+        // SAFETY: test-only env mutation, on a variable only this test reads.
+        unsafe { std::env::set_var(VAR, "sekrit") };
+        assert_eq!(configured.token().as_deref(), Some("sekrit"));
+        let both = MirrorConfig {
+            saved_token: Some(SavedToken("saved".to_string())),
+            ..configured.clone()
+        };
+        assert_eq!(both.token().as_deref(), Some("sekrit"), "the variable wins");
+        unsafe { std::env::set_var(VAR, "") };
+        assert_eq!(configured.token(), None, "an empty token is no token");
+        assert_eq!(both.token().as_deref(), Some("saved"));
+        unsafe { std::env::remove_var(VAR) };
+
+        let blank = MirrorConfig {
+            token_env: Some("  ".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(blank.token_env_name(), None);
+        assert_eq!(MirrorConfig::default().token_env_name(), None);
     }
 
     #[test]

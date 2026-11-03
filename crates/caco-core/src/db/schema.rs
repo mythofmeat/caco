@@ -177,6 +177,7 @@ static MIGRATIONS: &[Migration] = &[
         "key_cacowards_on_dataset",
         migrate_key_cacowards_on_dataset,
     ),
+    (43, "add_mirror_files", migrate_add_mirror_files),
 ];
 
 // ---------------------------------------------------------------------------
@@ -909,6 +910,47 @@ fn migrate_key_cacowards_on_dataset(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Add the tables each mirror's index is synced into: see `crate::db::mirrors`,
+/// which also says why they are not a flag on `wads`.
+///
+/// An index per column the match compares, so that it stays one probe per kind of
+/// evidence on a query that runs for every row of the library. The primary key
+/// leads with the mirror, which the hash lookups do not have.
+fn migrate_add_mirror_files(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS mirror_files (
+            mirror TEXT NOT NULL,
+            sha256 TEXT NOT NULL,
+            size INTEGER NOT NULL,
+            filename TEXT NOT NULL,
+            stored_as TEXT,
+            content_sha256 TEXT NOT NULL,
+            idgames_id TEXT,
+            doomworld_topic INTEGER,
+            doomwiki_page TEXT,
+            added TEXT,
+            PRIMARY KEY (mirror, sha256)
+         ) WITHOUT ROWID;
+         CREATE INDEX IF NOT EXISTS idx_mirror_files_sha256 ON mirror_files(sha256);
+         CREATE INDEX IF NOT EXISTS idx_mirror_files_content ON mirror_files(content_sha256);
+         CREATE INDEX IF NOT EXISTS idx_mirror_files_idgames ON mirror_files(idgames_id);
+         CREATE INDEX IF NOT EXISTS idx_mirror_files_topic ON mirror_files(doomworld_topic);
+         CREATE INDEX IF NOT EXISTS idx_mirror_files_page ON mirror_files(doomwiki_page);
+
+         CREATE TABLE IF NOT EXISTS mirror_file_cacowards (
+            mirror TEXT NOT NULL,
+            sha256 TEXT NOT NULL,
+            cacoward_key TEXT NOT NULL,
+            PRIMARY KEY (mirror, sha256, cacoward_key),
+            FOREIGN KEY (mirror, sha256) REFERENCES mirror_files(mirror, sha256)
+                ON DELETE CASCADE
+         ) WITHOUT ROWID;
+         CREATE INDEX IF NOT EXISTS idx_mirror_file_cacowards_key
+            ON mirror_file_cacowards(cacoward_key);",
+    )?;
+    Ok(())
+}
+
 fn migrate_consolidate_status(conn: &Connection) -> Result<()> {
     // Step 1: Map old status values to new ones
     conn.execute_batch(
@@ -977,6 +1019,8 @@ mod tests {
         assert!(table_exists(&conn, "smart_collections").unwrap());
         assert!(table_exists(&conn, "wad_analysis").unwrap());
         assert!(table_exists(&conn, "cacowards").unwrap());
+        assert!(table_exists(&conn, "mirror_files").unwrap());
+        assert!(table_exists(&conn, "mirror_file_cacowards").unwrap());
     }
 
     #[test]

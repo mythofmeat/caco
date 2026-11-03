@@ -5,6 +5,7 @@ pub mod companions;
 pub mod connection;
 pub mod id24;
 pub mod iwads;
+pub mod mirrors;
 pub mod models;
 pub mod playthroughs;
 pub mod query;
@@ -48,7 +49,7 @@ pub use iwads::{
 };
 pub use models::{
     ALLOWED_UPDATE_FIELDS, AndGroup, Availability, OR_SEPARATOR, ParsedQuery, QueryTerm,
-    Retrievability, STATUS_SHORTCUTS, SourceType, Status, WadRecord,
+    Retrievability, STATUS_SHORTCUTS, SourceType, Status, WAD_COLUMNS, WadRecord,
 };
 pub use playthroughs::{
     PlaythroughRecord, complete_playthrough, delete_playthrough, derive_status, ensure_playthrough,

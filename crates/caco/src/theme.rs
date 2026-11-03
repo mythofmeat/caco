@@ -204,6 +204,7 @@ pub fn section_label(ui: &mut egui::Ui, text: &str) {
 pub fn sidebar_nav_item(ui: &mut egui::Ui, label: &str, is_active: bool) -> bool {
     let desired_size = egui::vec2(ui.available_width(), 36.0);
     let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
+    name_row(&response, label);
 
     let is_hovered = response.hovered();
     let painter = ui.painter();
@@ -241,6 +242,13 @@ pub fn sidebar_nav_item(ui: &mut egui::Ui, label: &str, is_active: bool) -> bool
     response.clicked()
 }
 
+/// Give a row painted by hand the name a button gets from its text. These rows only
+/// exist as pixels otherwise, so a screen reader finds an unnamed target, and nothing
+/// can find "Mirrors".
+fn name_row(response: &egui::Response, label: &str) {
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
+}
+
 /// Render a compact sidebar row for the management tools (Stats, Sourceports, …).
 ///
 /// Same shape as [`sidebar_nav_item`] but shorter and quieter, because these
@@ -250,6 +258,7 @@ pub fn sidebar_nav_item(ui: &mut egui::Ui, label: &str, is_active: bool) -> bool
 pub fn sidebar_tool_item(ui: &mut egui::Ui, label: &str) -> egui::Response {
     let desired_size = egui::vec2(ui.available_width(), 26.0);
     let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
+    name_row(&response, label);
 
     let is_hovered = response.hovered();
     let painter = ui.painter();
@@ -272,6 +281,7 @@ pub fn sidebar_tool_item(ui: &mut egui::Ui, label: &str) -> egui::Response {
 pub fn sidebar_collection_item(ui: &mut egui::Ui, name: &str, is_active: bool) -> egui::Response {
     let desired_size = egui::vec2(ui.available_width(), 28.0);
     let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
+    name_row(&response, name);
 
     let is_hovered = response.hovered();
     let painter = ui.painter();

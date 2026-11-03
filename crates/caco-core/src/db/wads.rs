@@ -4,7 +4,7 @@ use chrono::Utc;
 use rusqlite::Connection;
 
 use super::connection::attach_tags;
-use super::models::{ALLOWED_UPDATE_FIELDS, SourceType, Status, WadRecord};
+use super::models::{ALLOWED_UPDATE_FIELDS, SourceType, Status, WAD_COLUMNS, WadRecord};
 use crate::Result;
 
 /// A `source_url` as it should be stored and compared.
@@ -237,13 +237,15 @@ pub fn add_wad(conn: &Connection, wad: &NewWad) -> Result<i64> {
 ///
 /// If `include_deleted` is false (default), deleted WADs are excluded.
 pub fn get_wad(conn: &Connection, wad_id: i64, include_deleted: bool) -> Result<Option<WadRecord>> {
-    let sql = if include_deleted {
-        "SELECT * FROM wads WHERE id = ?1"
+    let live_only = if include_deleted {
+        ""
     } else {
-        "SELECT * FROM wads WHERE id = ?1 AND deleted_at IS NULL"
+        " AND deleted_at IS NULL"
     };
 
-    let mut stmt = conn.prepare(sql)?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {WAD_COLUMNS} FROM wads WHERE id = ?1{live_only}"
+    ))?;
     let mut wad = match stmt.query_row([wad_id], WadRecord::from_row) {
         Ok(w) => w,
         Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),

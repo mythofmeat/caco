@@ -176,10 +176,30 @@ pub(super) fn render_sidebar(
         // whole remaining rect and then lays out top-down inside it — which is
         // exactly what parked this block under Collections instead of at the
         // panel's bottom edge.
+        //
+        // A drawer: it opens over whatever is above it when there is not the room, as
+        // at the 800x400 minimum, on a background of its own so that it does not paint
+        // its rows through the navigation. Scrolling inside the room that is left would
+        // show barely one tool at that size, and these should all be one click away.
         let open_id = ui.make_persistent_id("sidebar_manage_open");
         let open = ui.data_mut(|data| data.get_persisted::<bool>(open_id).unwrap_or(false));
+        ui.spacing_mut().item_spacing.y = 0.0;
 
         if open {
+            let rows = TOOLS.len() as f32 + 1.0;
+            let bottom = ui.cursor().bottom();
+            let left = ui.max_rect().left();
+            let right = ui.max_rect().right();
+            let drawer = egui::Rect::from_min_max(
+                egui::pos2(left, bottom - rows * TOOL_ROW),
+                egui::pos2(right, bottom),
+            );
+            ui.painter().rect_filled(drawer, 0.0, theme::BG_SIDEBAR);
+            ui.painter().line_segment(
+                [drawer.left_top(), drawer.right_top()],
+                egui::Stroke::new(1.0_f32, theme::BORDER),
+            );
+
             for tool in TOOLS.iter().rev() {
                 let resp = theme::sidebar_tool_item(ui, tool.label);
                 let resp = if tool.hint.is_empty() {
@@ -201,6 +221,9 @@ pub(super) fn render_sidebar(
     });
 }
 
+/// Height of a row in the sidebar's management list: see `theme::sidebar_tool_item`.
+const TOOL_ROW: f32 = 26.0;
+
 /// One entry in the sidebar's management list.
 struct Tool {
     label: &'static str,
@@ -218,6 +241,11 @@ const TOOLS: &[Tool] = &[
         label: "Storage",
         action: || ActionRequest::Storage(StorageTab::Cache),
         hint: "Cached files, cleanup, trash and companion files",
+    },
+    Tool {
+        label: "Mirrors",
+        action: || ActionRequest::Mirrors,
+        hint: "Your own stores of WAD files",
     },
     Tool {
         label: "Enrich",

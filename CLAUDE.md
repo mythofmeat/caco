@@ -26,6 +26,7 @@ Key features:
 - Sourceport config profile management
 - Garbage collection for completed/abandoned WAD data
 - Every Cacoward since 2004 shipped as curated data, linked to the library by identifier
+- Mirrors: stores of WAD files the user controls, read before anything else and offered what caco could not otherwise fetch again
 
 ## Commands
 
@@ -48,6 +49,10 @@ CACO_SHOT_SIZE=800x400 cargo test -p caco --test screenshots -- --ignored --noca
 
 # Draft a year's Cacowards data file from saved wikitext (see Cacowards dataset below)
 cargo run -p caco-sources --example cacowards_draft -- 2026 2026.wikitext
+
+# Run the mirror client against a real store (the test's docs start a throwaway Gitea)
+CACO_TEST_MIRROR_URL=http://127.0.0.1:38317/api/packages/tester/generic/doom-mirror \
+    cargo test -p caco-sources --test mirror_live -- --ignored --nocapture
 ```
 
 ## Architecture
@@ -73,7 +78,10 @@ crates/
 - `saves.rs`, `demos.rs` — save/backup/restore and demo discovery. `demos::resolve_demo_path` picks by mtime rather than filename order, so a restored or hand-copied demo still resolves as "most recent".
 - `titlepic.rs`, `utils.rs`
 - `cacowards/` — the curated dataset: one TOML file per year in `data/`, compiled in with `include_str!` and merged by `key` with any `*.toml` in `config::cacoward_data_dir()`, the same arrangement as sourceport recipes. `entry_key` derives a key from a year, category and title at the two moments one comes into being (the draft tool, and migration 42 keying rows scraped before there was a dataset), and nothing recomputes it afterwards: a key is stable forever, whatever happens to the title. See Cacowards dataset below.
-- `db/` — schema, migrations (23+), models, query parser, wads, sessions, iwads, id24, companions, cacowards
+- `mirrors.rs` — a mirror's format, with no network in it: the index (held as JSON rather than a list of entries, so that writing it back keeps what this build does not understand), `offer_targets` (which mirrors a WAD should be offered to) and `entry_for_wad`. An index comes from somewhere else and names paths on this machine, so `MirrorEntry::validated` is what stops `"filename": "../../.bashrc"`, and one bad entry is skipped rather than sinking the index. See Mirrors below.
+- `mirror_tokens.rs` — tokens pasted into caco for its mirrors, in a file of their own: see Data Locations. `config::read_config_from_disk` attaches them to `MirrorConfig::saved_token`, whose type has no `Serialize`, so a token cannot reach `config.toml` by accident.
+- `source_url.rs` — the identifiers a `source_url` carries, a Doomworld topic and a Doom Wiki page. In core rather than with the clients, which re-export them, because `db::connection` registers them as SQL functions.
+- `db/` — schema, migrations (23+), models, query parser, wads, sessions, iwads, id24, companions, cacowards, mirrors
 
 **caco-sources** modules:
 - `http.rs` — shared reqwest blocking client + `USER_AGENT` + `waf_challenge`
@@ -81,15 +89,17 @@ crates/
 - `enrich_service.rs` — re-derives metadata for rows already in the library: `enrich_wads` fills `complevel` / `custom_iwad` / `zdoom_required` from the cached file first and the Doom Wiki second, never overwriting an existing value. The batch driver takes a progress callback and a `cancel` closure because it is network-bound (one wiki lookup per WAD the file cannot settle) — the GUI needs both a progress bar and a stop button, and a cancelled run is just a shorter one since each WAD is written independently. A WAF block ends the run's use of the wiki, not the run, because file detection needs no network: `WikiBlocked` says once how many WADs could not be checked, in place of "Nothing new detected". `enrich_wads_with` takes the lookup as a closure so tests can drive a block offline, and the `no_wiki` stand-in panics if a test that should stay offline reaches for the wiki.
 - `cacoward_link.rs` — which library WAD a Cacoward row belongs to. One per-row decision (`owner_of`, strongest evidence first: file hash, idgames id, Doomworld topic, Doom Wiki page, unique normalized title) reached from two moments, because either side can arrive first: `link_rows_with_keys` after a sync and `link_imported_wad` after every import. Weaker evidence refuses a WAD whose stronger identifiers differ from the row's, so a title never outweighs two ids that disagree. Per row rather than per WAD so the answer cannot depend on iteration order: a WAD claiming rows as it is visited could take one by title that a later WAD owns by id. There is deliberately no whole-table sweep, because Unlink clears a row and a sweep would quietly undo that.
 - `cacoward_sync.rs` — writes the dataset to the `cacowards` table, at every launch. An unchanged dataset reads and returns without taking the write lock, which is the ordinary case and what makes running it before the window opens cheap. A change updates rows in place by key, considers only new rows and rows with new evidence for linking, and removes rows the dataset dropped unless they hold a pin or the user's word on `supported`.
+- `mirror.rs` — talks to a mirror: `sync_mirrors`, `fetch_from_mirrors`, `upload_wad`, `upload_wads`, and for the wizard `probe_mirror` and `set_up_mirror`. `Store` is the only thing that knows whether a mirror is a directory or HTTP.
+- `wad_fetch.rs` — `fetch_missing_file`, what the Play worker calls for a file that is not here: mirrors, then idgames. Takes the idgames download as a closure in `fetch_missing_file_with`, so tests stay offline.
 - `idgames/`, `doomwiki/`, `doomworld/` — per-source API clients + parsers
 - `examples/cacowards_draft/` — the maintainer's tool for the year's data, and the only code that still parses a `Cacowards_YYYY` wiki page. An example rather than an `xtask`, because `cargo build --workspace --release` would compile a new crate into every package, while `cargo test` builds examples anyway and `test = true` on its `[[example]]` runs its parser's tests.
 
-**caco**: `app.rs` hosts the `CacoApp` state machine. Panels in `src/panels/`, dialogs in `src/dialogs/`, import flow in `src/import/`. `app/file_check.rs` runs `presence::check_library` on a worker when the app is created — it used to run in `main.rs` before the window existed, where a stat on a dead mount held the window back — and turns its report into at most one status-bar line, a warning only for files caco cannot fetch again. It sends that answer before running `identity::check_library`, whose first run reads the whole library, and that pass is silent: a changed file is only worth a word when it is about to be played, so it just reloads the views (a changed file has lost its analysis). `thumbnails.rs` extracts and caches TITLEPIC; `wiki_scraper.rs` fetches Doom Wiki thumbs; `workers.rs` coordinates background search/import/play via mpsc channels. The Cacowards view (`ViewMode::Cacowards`) is rendered by `panels/cacowards.rs` in a deliberately editorial layout (hero banner + year strip + category card grid) to signal the curated-external-feed origin while sharing the rest of the GUI chrome. Imports kicked off from cacoward cards spawn through `import::workers::spawn_import_cacoward` so they reuse the existing duplicate-detection and auto-link plumbing, trying each source the entry names in turn (idgames, then the Doomworld thread, then the Doom Wiki), since which site is behind a challenge changes from day to day. `app.rs::sync_cacowards` writes the dataset to the table as the app is created, before the window opens, so the view can never open empty on a new library. `dialogs/settings.rs` is the GUI settings editor: it snapshots the live `Config`, edits a curated field subset (sourceports, behavior, cache, paths), and on Save writes the full struct via `config::save_config` + `config::reload_config` so unexposed sections (list, sourceport_preferences, iwad_priority) survive round-trips and changes apply without restart. `dialogs/profiles.rs` manages sourceport config profiles (list on the left, contents editable on the right); it is the GUI counterpart to `caco profile` and shares `caco_core::profiles` with it. Deleting a profile stages a confirmation that lists the WADs still referencing it rather than warning after the fact. `dialogs/gc.rs` is the cleanup panel (Storage's Clean tab): keep-toggles across the top re-measure the plan on change, every row is a checkbox (so one WAD's saves can be kept while another's go), and Clean stages a confirmation naming the item count and size. `dialogs/enrich.rs` drives `caco_sources::enrich_service::enrich_wads` from the GUI: it owns only the request, live progress and the report, while `app.rs::spawn_enrich` runs the work on a thread and streams `AppMessage::EnrichProgress` / `EnrichComplete` back. Cancellation is an `Arc<AtomicBool>` the dialog shares with the worker; a fresh one is minted per run so a previously cancelled flag can't abort the next one instantly. `dialogs/companions.rs` is the library-wide companion registry (Storage's Files tab, `caco companion ls` with no query): every managed file with its size, MD5 and the WADs still linking it, plus per-row and bulk orphan deletion. Per-WAD linking stays in the edit dialog's Companions tab, which stages the orphan question when `plan_unregister` returns `None`. `dialogs/wad_data.rs` is the per-WAD Saves / Backups / Demos dialog (`caco saves` + `caco demos` in one place, since both act on the same data dir); every destructive action stages a confirmation, and demo playback returns `WadDataResult::PlayDemo` so `app.rs` can run the blocking launch on a worker thread while the dialog stays open. `dialogs/file_changed.rs` is the question the Play worker's `AppMessage::PlayFileChanged` opens: Play Anyway dispatches `ActionRequest::PlayAnyway`, which goes through the same `app.rs::spawn_play` worker with `accept_changed_file` set. `dialogs/wad_file.rs` is the read-only File section at the foot of the edit dialog's Sources tab: where the file is (or was last seen), its size and hashes, the files inside it, and any other WAD with the same content. It is shown when the file is gone too, since then the hash is the one thing that can still name it.
+**caco**: `app.rs` hosts the `CacoApp` state machine. Panels in `src/panels/`, dialogs in `src/dialogs/`, import flow in `src/import/`. `app/file_check.rs` runs `presence::check_library` on a worker when the app is created — it used to run in `main.rs` before the window existed, where a stat on a dead mount held the window back — and turns its report into at most one status-bar line, a warning only for files caco cannot fetch again. It sends that answer before running `identity::check_library`, whose first run reads the whole library, and that pass is silent: a changed file is only worth a word when it is about to be played, so it just reloads the views (a changed file has lost its analysis). `thumbnails.rs` extracts and caches TITLEPIC; `wiki_scraper.rs` fetches Doom Wiki thumbs; `workers.rs` coordinates background search/import/play via mpsc channels. The Cacowards view (`ViewMode::Cacowards`) is rendered by `panels/cacowards.rs` in a deliberately editorial layout (hero banner + year strip + category card grid) to signal the curated-external-feed origin while sharing the rest of the GUI chrome. Imports kicked off from cacoward cards spawn through `import::workers::spawn_import_cacoward` so they reuse the existing duplicate-detection and auto-link plumbing, trying each source the entry names in turn (idgames, then the Doomworld thread, then the Doom Wiki), since which site is behind a challenge changes from day to day. `app.rs::sync_cacowards` writes the dataset to the table as the app is created, before the window opens, so the view can never open empty on a new library. `dialogs/settings.rs` is the GUI settings editor: it snapshots the live `Config`, edits a curated field subset (sourceports, behavior, cache, paths), and on Save writes the full struct via `config::save_config` + `config::reload_config` so unexposed sections (list, sourceport_preferences, iwad_priority) survive round-trips and changes apply without restart. `dialogs/profiles.rs` manages sourceport config profiles (list on the left, contents editable on the right); it is the GUI counterpart to `caco profile` and shares `caco_core::profiles` with it. Deleting a profile stages a confirmation that lists the WADs still referencing it rather than warning after the fact. `dialogs/gc.rs` is the cleanup panel (Storage's Clean tab): keep-toggles across the top re-measure the plan on change, every row is a checkbox (so one WAD's saves can be kept while another's go), and Clean stages a confirmation naming the item count and size. `dialogs/enrich.rs` drives `caco_sources::enrich_service::enrich_wads` from the GUI: it owns only the request, live progress and the report, while `app.rs::spawn_enrich` runs the work on a thread and streams `AppMessage::EnrichProgress` / `EnrichComplete` back. Cancellation is an `Arc<AtomicBool>` the dialog shares with the worker; a fresh one is minted per run so a previously cancelled flag can't abort the next one instantly. `dialogs/companions.rs` is the library-wide companion registry (Storage's Files tab, `caco companion ls` with no query): every managed file with its size, MD5 and the WADs still linking it, plus per-row and bulk orphan deletion. Per-WAD linking stays in the edit dialog's Companions tab, which stages the orphan question when `plan_unregister` returns `None`. `dialogs/wad_data.rs` is the per-WAD Saves / Backups / Demos dialog (`caco saves` + `caco demos` in one place, since both act on the same data dir); every destructive action stages a confirmation, and demo playback returns `WadDataResult::PlayDemo` so `app.rs` can run the blocking launch on a worker thread while the dialog stays open. `app/mirrors.rs` reads every mirror's index on a worker when the app is created, when a mirror is added, changed or removed, and on Ctrl+R, and runs the probes, set-ups and uploads. `dialogs/mirrors.rs` is the Mirrors tool: one window over three pages, the list, the wizard (`dialogs/mirror_setup.rs`) and filling a mirror, which opens straight on the wizard when there are none. The wizard's form makes a `MirrorConfig`, and a test's result stands only for the config it was run on, so changing a field clears it and Finish cannot act on a stale pass. How a test went sits in the footer rather than under the fields, because at 800x400 it would be below the fold, and Test It would seem to do nothing. A bulk upload's state is in `AppState::mirror_bulk` rather than the dialog, because it outlives the dialog being closed. `dialogs/mirror_offer.rs` is the offer to upload: WADs wait in `AppState::mirror_offers` until no dialog is open and nothing is playing, because linking a file launches the WAD straight after, and the question should wait for the game to close rather than sit behind it or be replaced by what the launch asks. Whether to ask is decided when it opens, not when the WAD was queued. `dialogs/file_changed.rs` is the question the Play worker's `AppMessage::PlayFileChanged` opens: Play Anyway dispatches `ActionRequest::PlayAnyway`, which goes through the same `app.rs::spawn_play` worker with `accept_changed_file` set. `dialogs/wad_file.rs` is the File section at the foot of the edit dialog's Sources tab: where the file is (or was last seen), which mirrors have it, its size and hashes, the files inside it, and any other WAD with the same content. It is shown when the file is gone too, since then the hash is the one thing that can still name it. It edits nothing, and its one action is uploading to a mirror without the file, for a file that was here before the mirror was, which nothing else would ever offer.
 
 ## Dependencies (key crates)
 
 ```toml
-rusqlite = "0.41"       # SQLite (bundled)
+rusqlite = "0.41"       # SQLite (bundled, plus `functions`: see Mirrors)
 serde / serde_json
 toml = "1.1"
 chrono = "0.4"
@@ -106,6 +116,7 @@ egui = "0.37"
 ## Key Patterns
 
 - **Builder pattern for DB writes**: `NewWad::builder()` and `WadUpdate::builder()` produce type-safe WAD creation/updates. Both trim `source_url` through `wads::clean_source_url`, and `find_duplicate` compares through it too, or a URL with a pasted `\r` would miss the row it is a duplicate of. reqwest strips that `\r` while parsing, so the fetch succeeds and nothing else notices it was there. `WadUpdate` setting a non-empty `cached_path` also clears `last_known_path`, so the two are never both set and `presence` never restores a row from a location that a newer file superseded; `last_known_path` is deliberately not an allowed update field, because `presence` is its only writer.
+- **`WAD_COLUMNS`**: every query behind `WadRecord::from_row` selects it rather than `*`, because `mirrored` is not a column of `wads`. `from_row` requires it, so a query that forgets fails at once instead of reading every WAD as held by nothing.
 - **Batch stats**: `get_wad_stats_batch()` (playtime, last played, session count and times beaten in two queries), `get_analyses_batch()`, `get_companions_batch()` — avoid N+1 queries when rendering lists.
 - **Query parser**: beets-style syntax — see Behavior below.
 - **Companion system**: `companion_files_registry` + `wad_companions` junction table. `companion_service.rs` handles MD5 dedup + managed storage at `<data>/companions/{md5[:12]}_{filename}`. DEH/BEX auto-detected; `-deh` for non-zdoom, `-file` for zdoom. Because files are deduplicated by MD5, one managed file can serve several WADs, so unlinking is not the same as deleting: `companion_service::plan_unregister` answers "what should happen to the file", returning `None` only when the file would be left with no owner *and* the configured policy is `ask` (the default). Both frontends must go through it — `unregister_companion` takes a resolved `OrphanPolicy`, so neither can swallow an `ask` and orphan a file unprompted. `delete_orphan` refuses while anything still links the file.
@@ -219,9 +230,17 @@ it, and reading the layout code is how the two bugs above survived.
   and its oldest, reached by clicking the chip (the strip has to scroll that far, and
   an old year has different sections to lay out), why one shot adds a hashed WAD whose last session played
   other content and presses Play on it (the File Changed dialog, reached through
-  `presence`, `identity::verify` and the refusal), and why the last shot adds a WAD whose file is gone
+  `presence`, `identity::verify` and the refusal), why the mirror shots start from a config with no mirrors
+  (the tool opens on the choice of kind then, and each kind's page has its own instructions to fit), and why the last shot adds a WAD whose file is gone
   and presses Play on it (the link dialog, with an absolute path long enough to
-  wrap). Add a shot when you add such a state.
+  wrap). Add a shot when you add such a state. The Edit dialog was never shot until the
+  mirrors work, and the first run found every input in it unnamed and its buttons 4pt
+  off an 800x400 window. The mirror shots go further than rendering. They use the wizard the
+  way a person does, by typing into its fields and pressing its buttons, through the real
+  workers: a folder that is not there is tested, created and filled, and the results checked
+  on disk, and a password is added and removed, and checked to be in the token file with
+  mode 0600 and never in `config.toml`. A worker's result that does not come trips
+  `wait_for`, which leaves `timed-out.png` behind.
 - The library is a copy of the real `library.db` into a temp `CACO_HOME`, so
   shots show real WADs and nothing can write to the real library. CI has no library,
   so it falls back to an empty database: every surface still renders, with less in it.
@@ -254,6 +273,17 @@ Portable (`config::default_data_dir`, overridable via `CACO_HOME`):
 - Sourceport build recipes + patches: `<data>/sourceports/*.toml`
 - Cacowards corrections and additions: `<data>/cacowards/*.toml`
 - Backups: `<data>/backups/` (save backups + pre-migration DB snapshots)
+
+Machine-local (`config::mirror_token_file`, overridable via `CACO_TOKEN_FILE`), which is
+neither side and travels with neither:
+- Tokens and passwords pasted in for mirrors: `~/.config/caco/mirror-tokens.toml`, mode 0600.
+  An environment variable cannot be set from inside caco, so a token has to be savable, and
+  it fits neither side: the data dir travels and may be in a git repository, so a token there
+  gets committed, and the cache side is for what caco can regenerate. A file rather than the OS
+  keychain, as `cargo login` does it, because that would mean a D-Bus service a Linux desktop
+  may not run, and a dependency in every package build. With `CACO_HOME` set it is beside that
+  directory rather than in it, which keeps `CACO_HOME` a complete isolation switch without
+  putting a token in a real library that happens to use it.
 
 Disposable (`config::cache_home`, overridable via `CACO_CACHE_HOME`):
 - WAD cache: `<cache>/wads/` (`CACO_CACHE_DIR` overrides just this)
@@ -309,16 +339,16 @@ accessor, and a test in `query.rs` asserting the Rust and SQL spellings select
 the same rows. Treat that quartet as the pattern for anything similar.
 
 - **`Retrievability`** (`Automatic` / `Manual`): can caco fetch the file again
-  unattended — `source_type = idgames` or a non-empty `idgames_id`. Never
-  inferred from where the file currently sits: placement is a *consequence* of
+  unattended — `source_type = idgames`, a non-empty `idgames_id`, or a mirror holds
+  it. Never inferred from where the file currently sits: placement is a *consequence* of
   retrievability, so reading it back off the path would let the two drift the
   moment `cache_dir` or `CACO_HOME` moves. Query field `retrievable:`, SQL in
   `AUTOMATIC_SQL`. `gc.rs`'s `redownloadable` flag calls it rather than keeping
   its own inline copy of the rule. `config::wad_store_dir` is the single
   placement decision it drives — see Placement below.
 - **`Availability`** (`Cached` / `Downloadable` / `Unavailable`): is the file on
-  this machine, and if not is there a URL to try — from `cached_path` +
-  `source_url`, treating `""` as absent. Query field `avail:`, SQL in
+  this machine, and if not is there anywhere to try — from `cached_path`,
+  `source_url` and `mirrored`, treating `""` as absent. Query field `avail:`, SQL in
   `Availability::sql()`, one predicate per variant, and they partition the table.
   Deriving it never touches the disk; it is as true as `cached_path`, which
   `presence` keeps true.
@@ -327,6 +357,79 @@ The two are orthogonal and all combinations occur in a real library.
 `Availability::Downloadable` deliberately overstates for manual WADs — it means
 "has some `source_url`", including Doomworld threads and one-off hosts that rot,
 which is exactly what `Retrievability` is for.
+
+**Mirrors**: stores of WAD files the user configures, in the Mirrors tool or `[[mirrors]]`
+(name, `url` or `path`, `username`, `token_env`, `write`). Setting one up has to be doable
+from inside caco, including what the other end needs: the wizard's instructions for each
+kind of store were checked against the real thing, a real Gitea's token page and a real
+`rclone serve webdav`, and what caco can do itself it does on Finish. caco ships no mirror:
+a private archive of files you downloaded is the user's business, where a default URL in
+caco would be caco's. The layout is
+`<root>/index/index.json` and `<root>/<sha256>/<filename>`. The index is one directory
+down, rather than at `<root>/index.json`, because Gitea's generic registry only has
+`<package>/<version>/<file>` paths and answers anything shallower with a 405. This way
+every store has one layout and nothing has to be configured.
+
+A mirror hit makes a manual WAD effectively automatic, and that stays derived, or it
+would be the drift migration 38 removed. Each index is synced into `mirror_files` and
+`mirror_file_cacowards`, and `db/mirrors.rs::mirror_file_matches!` joins them to `wads`.
+That macro is the only spelling of the rule: `AUTOMATIC_SQL`, `LOST_SQL`,
+`Availability::sql`, `WAD_COLUMNS` and `files_for_wad` compose it, so a WAD reading as
+fetchable and there being something to fetch cannot disagree, and
+`test_what_a_mirror_holds_agrees_with_what_the_row_says` pins that. It is one `SELECT`
+per kind of evidence rather than one `OR`, because a single term the planner cannot index
+turns the whole `OR` into a scan of the mirror for every row of a query the UI thread
+runs on every reload. `test_every_kind_of_evidence_probes_an_index` reads the query plan.
+On a 5,000-WAD library the query takes the same 65ms with a 10,000-file mirror as with none.
+
+Comparing `source_url` to a topic or page needs `doomworld_topic()` and `doomwiki_page()`,
+which `db::connection` registers on every connection from `source_url.rs` rather than
+spelling in SQL: nothing in SQLite decodes `%27`, and a topic compared with `LIKE` would
+find 151858 under 15185. So a `Connection` not from `open_connection` or `open_memory`
+cannot read a `WadRecord`. No index or view depends on the functions, so `library.db` still
+opens in a plain `sqlite3`.
+
+Matching goes by hash if the row has one, and nothing else then counts: a row with a hash
+names one file, and fetching another release because it shares a forum thread would be a
+silent upgrade. The content hash counts as the same file. A row with no hash goes by
+idgames id, Cacoward key, Doomworld topic, then Doom Wiki page, and weaker evidence refuses
+a file whose idgames id differs, as in `cacoward_link`, since a series can share one wiki
+page across releases and the wrong file is worse than none.
+
+A mirror that does not answer keeps its rows, because that says nothing about what is on
+it, and a laptop away from home should not see half its library go manual. One that answers
+with no index loses them, because the safe mistake is to understate: a WAD wrongly reading
+as manual costs a warning, and one wrongly reading as automatic can have its only copy
+cleaned up. A local mirror whose root is missing is the first case, a drive that is not
+mounted, and a write refuses to create one in its place. The rows live in `library.db`
+despite being regenerable, like `wad_analysis`, because retrievability joins them on every
+connection, where an attached cache database would be one more thing to go missing.
+
+The index is the only listing a mirror has, since no store here can be asked what it holds,
+so a lost one cannot be rebuilt. Nothing writes back an index it could not read, and
+`Store::replace_file` gives a store that will not overwrite (Gitea) a whole spare copy at
+`index/index.json.new` before deleting the real one, which `read_index` falls back to. A
+`409` means the file exists on a registry and its parent directory is missing on WebDAV, so
+it is asked about rather than assumed. Gitea refuses `'`, `,` and non-ASCII in a file name,
+whatever its documentation says about spaces, so `store_file` retries under
+`safe_stored_name` and the entry's `stored_as` records it. A `PUT` says
+`application/octet-stream`, because Gitea takes a form's Content-Type for a multipart upload
+and fails with a 500, and takes a per-request timeout, because a blocking client's covers
+sending the whole body. A username makes the token a password: Gitea takes a bearer token, and
+the WebDAV servers in common use answer one with a 401, so a mirror on one with a login could
+not be used without it. All of this was checked against a real Gitea 28.3 and `rclone serve
+webdav`, and `tests/mirror_live.rs` repeats it. `mirror/test_server.rs` behaves as they were
+seen to, so that `cargo test` needs neither. `tests/mirror_play.rs` is the whole story through
+the real `player::play` with a script for a sourceport, in a binary of its own because that
+reads global config.
+
+Fetched files go through `config::wad_store_dir` like any other, so a mirrored WAD's goes
+to the cache. They download to a temporary name and are checked against the index's size
+and hash before being renamed, so nothing unverified can land where a launch would pick it
+up. A file of the same name belonging to another WAD is never overwritten: the new one gets
+its hash in its name, directly under the store dir, where `presence` looks. A layout for a
+full idgames mirror (`layout = "idgames"`) is left for #56, and would be a new way for
+`fetch_from_mirrors` to name a path.
 
 `Availability` **was** a stored column (dropped in migration 38). Nothing kept
 the copy honest: `sessions::clear_cached_path` nulls `cached_path` with raw SQL
@@ -347,7 +450,7 @@ pins the behaviour.
 
 **Launch args layering**: global `sourceport_args` (every sourceport) → `[executable_args]` table (executable basename → args, case-insensitive fallback, applied only when that executable launches) → per-WAD `custom_args`. GUI settings dialog edits args as shell-quoted strings via `shlex`.
 
-**DB migrations**: run on `init_db()`; numbered sequentially; current schema version is 42. `init_db` snapshots the DB into a `backups/` directory beside it whenever migrations are pending (`config::migration_backup_dir`), which is `<data>/backups/` for a library at its default path. Beside it rather than in `config::backup_dir()` for the reason `GcPaths` is explicit: reading the global path meant a test's tempdir database wrote into the developer's real data dir on every `cargo test`, and a `CACO_DB_PATH` database overwrote the real library's snapshot of the same version.
+**DB migrations**: run on `init_db()`; numbered sequentially; current schema version is 43. `init_db` snapshots the DB into a `backups/` directory beside it whenever migrations are pending (`config::migration_backup_dir`), which is `<data>/backups/` for a library at its default path. Beside it rather than in `config::backup_dir()` for the reason `GcPaths` is explicit: reading the global path meant a test's tempdir database wrote into the developer's real data dir on every `cargo test`, and a `CACO_DB_PATH` database overwrote the real library's snapshot of the same version.
 
 **Cacowards**: `cacowards` table, one row per entry in the dataset, keyed on `key`. The facts (year, category, page_order, wad_title, wad_author, idgames_id, doomworld_id, doomwiki_page, sha256, supported_default) are rewritten from the dataset; what belongs to the user (wad_id, manual_override, supported_override) survives every update. Rows used to be `UNIQUE(year, category, wad_title)`, under which a corrected title turned a pinned row into a duplicate; migration 42 keys each one the way the dataset would have, which is how a row pinned before the migration meets its curated entry.
 
@@ -409,6 +512,7 @@ Tools (`app/sidebar.rs` → `ActionRequest` → `app.rs::dispatch_action`):
 | Storage | `dialogs/storage.rs` | four tabs, below |
 | Profiles | `dialogs/profiles.rs` | `caco_core::profiles` |
 | IWADs | `dialogs/resources.rs` | `resource_service` |
+| Mirrors | `dialogs/mirrors.rs`, `dialogs/mirror_setup.rs` | `caco_sources::mirror` (worker threads) |
 | Sourceports | `dialogs/sourceports.rs` | `caco_core::sourceports` (worker thread) |
 | Enrich | `dialogs/enrich.rs` | `caco_sources::enrich_service` (worker thread) |
 | Settings | `dialogs/settings.rs` | `config::save_config` + `reload_config` |

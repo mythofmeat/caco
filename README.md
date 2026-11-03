@@ -12,6 +12,7 @@ A personal Doom WAD library manager inspired by [beets](https://beets.io). Impor
 - **Companion files** — manage DEH patches, music WADs, and other companion files with automatic deduplication.
 - **Per-WAD isolation** — saves, stats, and configs are separated per WAD so nothing gets mixed up.
 - **On-demand downloads** — idgames WADs are cached when you play, with configurable auto-cleanup. WADs that cannot be re-downloaded are kept on the portable side instead, and destructive actions leave them alone by default.
+- **Mirrors** — your own store of WAD files, a directory or an HTTP file server, for what idgames does not have. caco looks there first and offers to upload what it could not otherwise get back, so a mirror fills itself as you play.
 - **Content identity** — every WAD file is hashed, along with the WADs inside a zip, so caco notices when a file has changed since you last played it and asks before launching it: saves and demos made with one version of a WAD often fail with another.
 - **Cacowards browser** — a magazine-style year-by-year view of every WAD Doomworld has awarded since 2004, doubling as an import queue. The list ships with caco, so it works offline and needs no site to be up.
 - **Garbage collection** — reclaim disk space from completed / abandoned WADs, reviewing every file before it goes.
@@ -116,6 +117,7 @@ the sourceport.
 | IWADs | Registered IWADs and id24 resources |
 | Sourceports | Build sourceports from source into caco's own prefix |
 | Enrich | Re-run complevel / IWAD / sourceport detection across the library |
+| Mirrors | Your own stores of WAD files: set one up, fill it, change it — see [Mirrors](#mirrors) |
 | Settings | Sourceports, launch args, behavior toggles, cache limits, paths |
 
 Storage tabs:
@@ -129,9 +131,10 @@ Storage tabs:
 
 Per-WAD dialogs come from the context menu or a shortcut: **Edit** (`E`),
 **Sessions** (`S`), **Map Stats** (`M`), **Saves & Demos** (`F`). Edit's
-Sources tab shows the WAD's file: where it is (or was last seen), its size,
-SHA-256 and SHA-1, the WADs inside it, and any other WAD in the library that is
-the same file.
+Sources tab shows the WAD's file: where it is (or was last seen), which of your
+mirrors have it, its size, SHA-256 and SHA-1, the WADs inside it, and any other
+WAD in the library that is the same file. It can also upload the file to a mirror
+that does not have it.
 
 ## Queries
 
@@ -154,13 +157,13 @@ dup:yes                         WADs that are in the library twice
 
 **`retrievable:`** splits the library by whether caco can fetch the file
 again unattended. `retrievable:automatic` (`auto`, `a`) matches WADs on
-idgames; `retrievable:manual` (`m`) matches everything else — a Doomworld
-thread link or a one-off file host is not something caco can promise to
-re-download, so those copies are worth keeping.
+idgames or on one of your [mirrors](#mirrors); `retrievable:manual` (`m`) matches
+everything else — a Doomworld thread link or a one-off file host is not something
+caco can promise to re-download, so those copies are worth keeping.
 
 **`avail:`** is the other half of the picture — whether the file is on this
 machine right now. `avail:cached` has a local copy, `avail:downloadable` has a
-URL to try, `avail:unavailable` has neither.
+URL or a mirror to try, `avail:unavailable` has neither.
 
 **`retrievable:lost`** is the intersection worth watching: manual-only *and* no
 local copy, meaning caco cannot produce the WAD and neither can you without
@@ -236,6 +239,120 @@ idgames   = 19951
 ```
 
 Your links and the card menu's "Mark as unsupported" outlive any update to the list.
+
+## Mirrors
+
+A large share of recent Cacoward entries never reach idgames, and the share links on
+their forum threads rot. Keeping a file in the data directory only protects it for as
+long as that directory has it. A mirror is your own store of WAD files, which any
+machine with your library can get them back from.
+
+caco ships no mirror and never will. Many WAD text files restrict redistribution, and
+while a private archive of files you downloaded is your business, a default URL in
+caco would be caco's.
+
+### Setting one up
+
+Everything happens in **Manage → Mirrors**, with nothing to edit by hand. The first time
+it opens on a wizard, which asks where you want to keep it and says what to do for that
+kind of store:
+
+| Kind of store | What it needs | caco does the rest |
+|---|---|---|
+| **A folder**, such as a NAS mount, an external drive or a synced folder | A path | Creates the folder if it isn't there |
+| **Gitea**'s package registry | The server, an owner, and a token with `package` set to Read and Write | Opens Gitea's token page for you, and the package appears by itself |
+| **WebDAV**: Nextcloud, a Synology or QNAP NAS, Apache, nginx, or anything else that speaks it | The address of a folder, and a username and password if it has a login | Creates the folder on the server. There is a one-line `rclone` command to copy if you have no server |
+| **A web server**, read only | The address of a folder something else fills | Nothing to do: it only reads |
+
+**Test It** tries the mirror before anything is saved: it reads the index and, if caco may
+upload, writes a small file and removes it again. If that fails it says why and what to
+check. A mirror that is down right now can be added anyway. **Finish** makes it ready, then
+offers to upload what you already have: the WADs with a file on this machine that nothing
+else could give you back, listed before anything goes anywhere.
+
+From then on the Mirrors list shows what each one holds, says when one can't be read, and
+can add more, edit, reorder, remove or fill them. Removing a mirror deletes nothing on it.
+
+Tokens and passwords you paste in are saved in `~/.config/caco/mirror-tokens.toml` on
+Linux and `~/Library/Preferences/caco/mirror-tokens.toml` on a Mac, readable only by you.
+They are never written to the data directory, which you may copy or keep in git, so a
+second machine asks for its own. If you would rather not save one at all, the wizard can
+read it from an environment variable instead, which has to be set wherever caco starts: a
+desktop launcher often does not see what a shell's rc file exports.
+
+### What a mirror does
+
+**Fetching.** Play looks on your mirrors before anywhere else for a WAD that is not on
+this machine, in the order they are listed. A download is checked against the size and
+SHA-256 in the mirror's index, so a corrupt or replaced file never reaches the
+sourceport. If it fails, Play falls back to idgames for a WAD that is on it, and
+otherwise says what went wrong.
+
+**Uploading.** When you link a file or import one for a WAD caco could not otherwise
+get back, it offers to upload it to each writable mirror, after the game closes if
+linking launched one. **Upload** in Edit's Sources tab does the same for any one WAD.
+
+**Which WADs a mirror has.** caco reads each mirror's index when it starts and when you
+ask it to. It finds a WAD's file by hash if the WAD has one: the same file, or the
+same WAD in a different zip. A WAD with a hash goes by nothing else, so a mirror holding
+a newer release is not a silent upgrade. A WAD that has never had a file goes by idgames
+id, Cacoward, Doomworld thread or Doom Wiki page, and the newest upload wins.
+
+A WAD a mirror holds counts as one caco can fetch, like one on idgames: it stops being
+lost, a new copy goes in the cache, and Clean and Cache treat its file as re-downloadable.
+A mirror that does not answer at startup keeps counting for what it held the last time,
+with a warning in the status bar, so that a laptop away from home does not see half its
+library go manual. So if a mirror is gone for good, remove it.
+
+### In `config.toml`
+
+The wizard writes this, and it can be edited by hand like anything else there:
+
+```toml
+[[mirrors]]
+name      = "home"
+url       = "https://files.example.lan/doom"   # or: path = "/mnt/nas/doom-mirror"
+username  = "doom"                             # for a store that wants a login
+token_env = "CACO_MIRROR_TOKEN"                # read the token or password from here
+write     = true                               # caco may upload
+```
+
+A Gitea mirror's `url` is `https://gitea.example.com/api/packages/<owner>/generic/<name>`.
+
+### Layout
+
+```text
+<root>/index/index.json
+<root>/<sha256>/<filename>
+```
+
+The index is an ordinary JSON file, so a mirror can be filled by hand or by a script.
+Only the first three fields of an entry are required, and caco leaves anything it does
+not understand in place when it rewrites the file:
+
+```json
+{
+  "version": 1,
+  "files": [
+    {
+      "sha256": "9a3f…",
+      "size": 48211034,
+      "filename": "lonesome-road.zip",
+      "content_sha256": "c10b…",
+      "title": "Lonesome Road",
+      "author": "Thomas Seifert (tourniquet)",
+      "doomworld": 151858,
+      "doomwiki": "Lonesome Road",
+      "cacowards": ["2025-winner-lonesome-road"],
+      "added": "2026-11-03T18:02:11Z"
+    }
+  ]
+}
+```
+
+An entry can also say `idgames`, for a file with an idgames id. `stored_as` appears when
+a store refused the file's own name, which Gitea does for an apostrophe, a comma or
+anything outside ASCII. The file then keeps its real name everywhere but on the mirror.
 
 ## IWADs
 
@@ -322,6 +439,12 @@ machine:
 | `cacowards/` | Your corrections and additions to the Cacowards list |
 | `backups/` | Save backups + pre-migration DB snapshots |
 
+**On this machine only** — neither copied between machines nor regenerable:
+
+| | Linux | macOS |
+|---|---|---|
+| Tokens and passwords for your [mirrors](#mirrors) | `~/.config/caco/mirror-tokens.toml` | `~/Library/Preferences/caco/mirror-tokens.toml` |
+
 **Disposable** — safe to delete at any time:
 
 | Path | Contents |
@@ -332,8 +455,8 @@ machine:
 | `sourceports-src/` | Sourceport checkouts and build trees |
 
 Which of the two `wads/` directories a file lands in is decided by whether caco
-can fetch it again on its own, and nothing else. Anything on idgames goes to the
-cache, where it is fair game for cleanup because losing it costs a download.
+can fetch it again on its own, and nothing else. Anything on idgames or a mirror goes
+to the cache, where it is fair game for cleanup because losing it costs a download.
 Everything else — forum attachments, one-off file hosts, files you linked by
 hand — goes to the portable side and stays until you delete it deliberately.
 That is what makes copying the data directory to another machine actually carry

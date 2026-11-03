@@ -640,6 +640,7 @@ dependencies = [
  "toml",
  "tracing",
  "unicode-normalization",
+ "urlencoding",
  "zip",
 ]
 

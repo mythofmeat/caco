@@ -64,6 +64,10 @@ struct PendingOrphan {
 // Constants
 // ---------------------------------------------------------------------------
 
+/// Height of everything this dialog draws outside its scrolling tab: the header,
+/// the tab bar, the error banner when there is one, and the button row.
+const CHROME: f32 = 180.0;
+
 // ---------------------------------------------------------------------------
 // EditDialogState
 // ---------------------------------------------------------------------------
@@ -97,6 +101,8 @@ pub struct EditDialogState {
     source_url: String,
     idgames_id: String,
     file: WadFileSection,
+    /// A mirror the File section just asked to upload to, for `render` to pass on.
+    upload_requested: Option<String>,
 
     // Companions tab
     companions: Vec<CompanionEntry>,
@@ -119,6 +125,11 @@ pub enum EditResult {
     Cancelled,
     /// Companions were modified but form was cancelled — triggers reload without notification.
     Modified,
+    /// Upload the WAD's file to this mirror. The dialog stays open.
+    UploadToMirror {
+        wad_id: i64,
+        mirror: String,
+    },
     Open,
 }
 
@@ -172,6 +183,7 @@ impl EditDialogState {
             source_url: wad.source_url.as_deref().unwrap_or("").to_string(),
             idgames_id: wad.idgames_id.as_deref().unwrap_or("").to_string(),
             file: WadFileSection::load(conn, &wad),
+            upload_requested: None,
 
             companions,
             companions_modified: false,
@@ -345,8 +357,13 @@ impl EditDialogState {
                 }
 
                 // ── Tab content ──
+                // Height comes from what is left after the header, tab bar, error
+                // banner and button row. Comfortable in a large window, and able to
+                // shrink in the 800x400 minimum, where a fixed height would push the
+                // buttons off the bottom.
+                let body_height = crate::dialogs::modal_body_height(ctx, CHROME).min(380.0);
                 egui::ScrollArea::vertical()
-                    .max_height(380.0)
+                    .max_height(body_height)
                     .show(ui, |ui| {
                         egui::Frame::new()
                             .inner_margin(egui::Margin::symmetric(20, 16))
@@ -446,6 +463,16 @@ impl EditDialogState {
             self.process_companion_action(action, conn, ctx);
         }
 
+        // Dialog state rather than an assignment in the tab, which renders inside the
+        // window's closure. The save and cancel buttons win if they were pressed in the
+        // same frame, which only a test could manage.
+        if let (EditResult::Open, Some(mirror)) = (&result, self.upload_requested.take()) {
+            return EditResult::UploadToMirror {
+                wad_id: self.wad_id,
+                mirror,
+            };
+        }
+
         result
     }
 
@@ -454,26 +481,31 @@ impl EditDialogState {
     // -----------------------------------------------------------------------
 
     fn render_metadata_tab(&mut self, ui: &mut egui::Ui) {
-        form_label(ui, "Title");
+        let label = form_label(ui, "Title");
         ui.add(
             egui::TextEdit::singleline(&mut self.title_field)
                 .desired_width(f32::INFINITY)
                 .text_color(theme::TEXT_PRIMARY),
-        );
+        )
+        .labelled_by(label.id);
 
         ui.columns(2, |cols| {
-            form_label(&mut cols[0], "Author");
-            cols[0].add(
-                egui::TextEdit::singleline(&mut self.author)
-                    .desired_width(f32::INFINITY)
-                    .text_color(theme::TEXT_PRIMARY),
-            );
-            form_label(&mut cols[1], "Year");
-            cols[1].add(
-                egui::TextEdit::singleline(&mut self.year)
-                    .desired_width(f32::INFINITY)
-                    .text_color(theme::TEXT_PRIMARY),
-            );
+            let label = form_label(&mut cols[0], "Author");
+            cols[0]
+                .add(
+                    egui::TextEdit::singleline(&mut self.author)
+                        .desired_width(f32::INFINITY)
+                        .text_color(theme::TEXT_PRIMARY),
+                )
+                .labelled_by(label.id);
+            let label = form_label(&mut cols[1], "Year");
+            cols[1]
+                .add(
+                    egui::TextEdit::singleline(&mut self.year)
+                        .desired_width(f32::INFINITY)
+                        .text_color(theme::TEXT_PRIMARY),
+                )
+                .labelled_by(label.id);
         });
 
         // Status picker (clickable pills — mutually exclusive)
@@ -602,12 +634,14 @@ impl EditDialogState {
 
             // Add tag button / inline input
             if self.adding_tag {
-                let response = ui.add(
-                    egui::TextEdit::singleline(&mut self.new_tag_text)
-                        .desired_width(80.0)
-                        .hint_text("tag name")
-                        .text_color(theme::TEXT_PRIMARY),
-                );
+                let response = ui
+                    .add(
+                        egui::TextEdit::singleline(&mut self.new_tag_text)
+                            .desired_width(80.0)
+                            .hint_text("tag name")
+                            .text_color(theme::TEXT_PRIMARY),
+                    )
+                    .accessible_name("New tag");
                 if response.lost_focus() {
                     if ui.input(|i| i.key_pressed(egui::Key::Enter))
                         && !self.new_tag_text.trim().is_empty()
@@ -644,107 +678,125 @@ impl EditDialogState {
             }
         });
 
-        form_label(ui, "Notes");
+        let label = form_label(ui, "Notes");
         ui.add(
             egui::TextEdit::singleline(&mut self.notes)
                 .desired_width(f32::INFINITY)
                 .hint_text("Personal notes...")
                 .text_color(theme::TEXT_PRIMARY),
-        );
+        )
+        .labelled_by(label.id);
 
-        form_label(ui, "Description");
+        let label = form_label(ui, "Description");
         ui.add(
             egui::TextEdit::multiline(&mut self.description)
                 .desired_width(f32::INFINITY)
                 .desired_rows(3)
                 .text_color(theme::TEXT_PRIMARY),
-        );
+        )
+        .labelled_by(label.id);
     }
 
     fn render_sourceport_tab(&mut self, ui: &mut egui::Ui) {
         ui.columns(2, |cols| {
-            form_label(&mut cols[0], "Sourceport Override");
-            cols[0].add(
-                egui::TextEdit::singleline(&mut self.sourceport)
-                    .desired_width(f32::INFINITY)
-                    .hint_text("default")
-                    .text_color(theme::TEXT_PRIMARY),
-            );
-            form_label(&mut cols[1], "Compatibility Family");
-            cols[1].add(
-                egui::TextEdit::singleline(&mut self.sourceport_family)
-                    .desired_width(f32::INFINITY)
-                    .hint_text("default")
-                    .text_color(theme::TEXT_PRIMARY),
-            );
+            let label = form_label(&mut cols[0], "Sourceport Override");
+            cols[0]
+                .add(
+                    egui::TextEdit::singleline(&mut self.sourceport)
+                        .desired_width(f32::INFINITY)
+                        .hint_text("default")
+                        .text_color(theme::TEXT_PRIMARY),
+                )
+                .labelled_by(label.id);
+            let label = form_label(&mut cols[1], "Compatibility Family");
+            cols[1]
+                .add(
+                    egui::TextEdit::singleline(&mut self.sourceport_family)
+                        .desired_width(f32::INFINITY)
+                        .hint_text("default")
+                        .text_color(theme::TEXT_PRIMARY),
+                )
+                .labelled_by(label.id);
         });
 
         ui.columns(2, |cols| {
-            form_label(&mut cols[0], "IWAD");
-            cols[0].add(
-                egui::TextEdit::singleline(&mut self.iwad)
-                    .desired_width(f32::INFINITY)
-                    .hint_text("auto-detect")
-                    .text_color(theme::TEXT_PRIMARY),
-            );
+            let label = form_label(&mut cols[0], "IWAD");
+            cols[0]
+                .add(
+                    egui::TextEdit::singleline(&mut self.iwad)
+                        .desired_width(f32::INFINITY)
+                        .hint_text("auto-detect")
+                        .text_color(theme::TEXT_PRIMARY),
+                )
+                .labelled_by(label.id);
             cols[1].add_space(0.0);
         });
 
         ui.columns(3, |cols| {
-            form_label(&mut cols[0], "Complevel");
-            cols[0].add(
-                egui::TextEdit::singleline(&mut self.complevel)
-                    .desired_width(f32::INFINITY)
-                    .text_color(theme::TEXT_PRIMARY),
-            );
-            form_label(&mut cols[1], "Config Profile");
-            cols[1].add(
-                egui::TextEdit::singleline(&mut self.config)
-                    .desired_width(f32::INFINITY)
-                    .hint_text("default")
-                    .text_color(theme::TEXT_PRIMARY),
-            );
-            form_label(&mut cols[2], "Version");
-            cols[2].add(
-                egui::TextEdit::singleline(&mut self.version)
-                    .desired_width(f32::INFINITY)
-                    .text_color(theme::TEXT_PRIMARY),
-            );
+            let label = form_label(&mut cols[0], "Complevel");
+            cols[0]
+                .add(
+                    egui::TextEdit::singleline(&mut self.complevel)
+                        .desired_width(f32::INFINITY)
+                        .text_color(theme::TEXT_PRIMARY),
+                )
+                .labelled_by(label.id);
+            let label = form_label(&mut cols[1], "Config Profile");
+            cols[1]
+                .add(
+                    egui::TextEdit::singleline(&mut self.config)
+                        .desired_width(f32::INFINITY)
+                        .hint_text("default")
+                        .text_color(theme::TEXT_PRIMARY),
+                )
+                .labelled_by(label.id);
+            let label = form_label(&mut cols[2], "Version");
+            cols[2]
+                .add(
+                    egui::TextEdit::singleline(&mut self.version)
+                        .desired_width(f32::INFINITY)
+                        .text_color(theme::TEXT_PRIMARY),
+                )
+                .labelled_by(label.id);
         });
 
-        form_label(ui, "Custom Args (JSON)");
+        let label = form_label(ui, "Custom Args (JSON)");
         ui.add(
             egui::TextEdit::singleline(&mut self.args)
                 .desired_width(f32::INFINITY)
                 .hint_text("[\"--arg1\", \"value\"]")
                 .text_color(theme::TEXT_PRIMARY),
-        );
+        )
+        .labelled_by(label.id);
     }
 
     fn render_sources_tab(&mut self, ui: &mut egui::Ui) {
-        form_label(ui, "Source Type");
+        let label = form_label(ui, "Source Type");
         ui.add_enabled(
             false,
             egui::TextEdit::singleline(&mut self.source_type_display).desired_width(f32::INFINITY),
-        );
+        )
+        .labelled_by(label.id);
 
-        form_label(ui, "Source URL");
+        let label = form_label(ui, "Source URL");
         ui.add(
             egui::TextEdit::singleline(&mut self.source_url)
                 .desired_width(f32::INFINITY)
                 .text_color(theme::TEXT_PRIMARY),
-        );
+        )
+        .labelled_by(label.id);
 
-        form_label(ui, "idgames ID");
+        let label = form_label(ui, "idgames ID");
         ui.add(
             egui::TextEdit::singleline(&mut self.idgames_id)
                 .desired_width(f32::INFINITY)
                 .text_color(theme::TEXT_PRIMARY),
-        );
+        )
+        .labelled_by(label.id);
 
         ui.add_space(6.0);
         form_label(ui, "File");
-        self.file.render(ui);
+        self.upload_requested = self.file.render(ui);
     }
 
     fn render_companions_tab(&mut self, ui: &mut egui::Ui) -> Option<CompanionAction> {
@@ -1034,11 +1086,11 @@ impl EditDialogState {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn form_label(ui: &mut egui::Ui, label: &str) {
+fn form_label(ui: &mut egui::Ui, label: &str) -> egui::Response {
     ui.colored_label(
         theme::TEXT_SECONDARY,
         egui::RichText::new(label).size(12.0).strong(),
-    );
+    )
 }
 
 fn render_edit_tab(ui: &mut egui::Ui, label: &str, tab: EditTab, active: &mut EditTab) {

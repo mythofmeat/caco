@@ -84,9 +84,10 @@ pub enum AppMessage {
     },
     /// The WAD's file is not on this machine and caco could not fetch it.
     /// Triggers the "WAD Unavailable" link dialog, which says where the file
-    /// was last seen.
+    /// was last seen, and what went wrong if caco tried to fetch it.
     PlayUnavailable {
         wad_id: i64,
+        reason: Option<String>,
     },
     /// The WAD's file plays differently from the one it was last played with,
     /// so the launch stopped to ask. Opens the "File Changed" dialog.
@@ -103,6 +104,29 @@ pub enum AppMessage {
     /// a word when it is about to be played, but the library reloads: a file
     /// that plays differently has lost its map analysis.
     FilesIdentified,
+    /// Every mirror's index has been read, or tried.
+    MirrorsSynced(caco_sources::mirror::SyncReport),
+    /// A test of the mirror in the setup wizard finished.
+    MirrorProbed(Result<caco_sources::mirror::MirrorProbe, String>),
+    /// Setting up the mirror in the wizard finished, for this config.
+    MirrorSetUp {
+        config: Box<caco_core::config::MirrorConfig>,
+        outcome: Result<(), String>,
+    },
+    /// A bulk upload moved on to another WAD. `done` counts WADs already finished.
+    MirrorBulkProgress {
+        done: usize,
+        total: usize,
+        title: String,
+    },
+    /// A bulk upload finished, or could not start.
+    MirrorBulkFinished(Result<caco_sources::mirror::UploadReport, String>),
+    /// An upload to a mirror finished. Which WAD by title, since the status bar
+    /// lists what is in flight by title.
+    MirrorUploaded {
+        title: String,
+        outcome: Result<caco_sources::mirror::Uploaded, String>,
+    },
     /// An enrichment run moved on to another WAD. `done` counts WADs already
     /// finished, so `done / total` drives a progress bar directly.
     EnrichProgress {

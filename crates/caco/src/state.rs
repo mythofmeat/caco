@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -16,6 +16,8 @@ use crate::dialogs::edit::EditDialogState;
 use crate::dialogs::enrich::EnrichDialogState;
 use crate::dialogs::file_changed::FileChangedDialogState;
 use crate::dialogs::link::LinkDialogState;
+use crate::dialogs::mirror_offer::MirrorOfferDialogState;
+use crate::dialogs::mirrors::MirrorsDialogState;
 use crate::dialogs::profiles::ProfilesDialogState;
 use crate::dialogs::resources::ResourcesDialogState;
 use crate::dialogs::sessions::SessionsDialogState;
@@ -112,6 +114,27 @@ pub enum ActionRequest {
     /// entry playable / counted toward completion; `false` parks it as
     /// "not yet supported by caco".
     SetCacowardSupported(i64, bool),
+
+    /// Open the mirrors tool, which starts on the setup wizard if there are none.
+    Mirrors,
+
+    /// Read every mirror's index again, because the list of mirrors may have changed.
+    SyncMirrors,
+
+    /// Try a mirror the wizard is setting up, on a worker thread.
+    ProbeMirror(Box<caco_core::config::MirrorConfig>),
+
+    /// Make a mirror the wizard is setting up ready to use, on a worker thread.
+    SetUpMirror(Box<caco_core::config::MirrorConfig>),
+
+    /// Upload a WAD's file to a mirror, on a worker thread.
+    UploadToMirror {
+        wad_id: i64,
+        mirror: String,
+    },
+
+    /// Upload everything worth uploading to a mirror, on a worker thread.
+    UploadAllToMirror(String),
 }
 
 // ---------------------------------------------------------------------------
@@ -132,6 +155,10 @@ pub enum ActiveDialog {
     WadStats(WadStatsDialogState),
     WadData(Box<WadDataDialogState>),
     Link(LinkDialogState),
+    /// Asked once a WAD nothing could fetch again has a file here.
+    MirrorOffer(MirrorOfferDialogState),
+    /// The mirrors tool, with its setup wizard.
+    Mirrors(Box<MirrorsDialogState>),
     /// Asked before launching a WAD whose file has changed since it was last
     /// played.
     FileChanged(FileChangedDialogState),
@@ -228,6 +255,41 @@ pub struct AppState {
 
     /// Library statistics view state.
     pub stats: StatsState,
+
+    /// WADs that just got a file, to be offered to a mirror once the user is free to
+    /// answer. A queue rather than a dialog opened on the spot, because linking a file
+    /// launches the WAD straight after, and the question should wait for the game to
+    /// close, not sit behind it or be replaced by what the launch asks.
+    pub mirror_offers: VecDeque<i64>,
+
+    /// Titles of the WADs being uploaded to a mirror right now, for the status bar.
+    pub uploads: Vec<String>,
+
+    /// A bulk upload in progress. Here rather than in the mirrors dialog, because it
+    /// outlives the dialog being closed.
+    pub mirror_bulk: Option<MirrorBulk>,
+
+    /// What the last read of every mirror's index found, for the mirrors dialog to say.
+    /// `None` until the first one, at startup, has finished.
+    pub mirror_report: Option<caco_sources::mirror::SyncReport>,
+}
+
+/// Where a bulk upload to a mirror has got to.
+pub struct MirrorBulk {
+    pub mirror: String,
+    pub done: usize,
+    pub total: usize,
+    /// The WAD going up now.
+    pub title: String,
+    /// Shared with the worker, which stops between WADs when this is set.
+    pub cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl MirrorBulk {
+    pub fn stop(&self) {
+        self.cancel
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
 }
 
 /// Backing data for [`ViewMode::Stats`].
@@ -370,6 +432,23 @@ impl AppState {
             active_collection: None,
             cacowards: CacowardsState::default(),
             stats: StatsState::default(),
+            mirror_offers: VecDeque::new(),
+            uploads: Vec::new(),
+            mirror_bulk: None,
+            mirror_report: None,
+        }
+    }
+
+    /// Open the next waiting mirror offer, if the user is free to answer one.
+    pub fn open_next_mirror_offer(&mut self, conn: &Connection) {
+        if self.has_dialog() || self.is_playing() {
+            return;
+        }
+        while let Some(wad_id) = self.mirror_offers.pop_front() {
+            if let Some(dialog) = MirrorOfferDialogState::new(conn, wad_id) {
+                self.active_dialog = Some(ActiveDialog::MirrorOffer(dialog));
+                return;
+            }
         }
     }
 
@@ -663,12 +742,6 @@ impl AppState {
             self.last_g_press = Some(Instant::now());
             false
         }
-    }
-
-    /// Get the currently selected WAD record, if any.
-    pub fn selected_wad(&self) -> Option<&WadRecord> {
-        self.selected_wad_id
-            .and_then(|id| self.wads.iter().find(|w| w.id == id))
     }
 
     /// Move selection left by one position (grid mode).

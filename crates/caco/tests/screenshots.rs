@@ -28,6 +28,7 @@
 //! The library is a *copy* of the real database into a temp `CACO_HOME`, so
 //! the shots show real WADs while nothing can write to the real library.
 
+use std::ops::Not;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -39,10 +40,14 @@ use caco_core::sourceports::RemoteRefs;
 use caco_sources::SourceError;
 use caco_sources::enrich_service::WikiBlocked;
 use caco_sources::http::WafKind;
+use caco_sources::import_service::ImportResult;
 use egui_kittest::kittest::Queryable;
 
 /// How long to leave worker threads to answer between rounds of frames.
 const WORKER_PAUSE: Duration = Duration::from_millis(80);
+
+/// What the wizard calls a folder mirror, unless told otherwise.
+const MIRROR_NAME: &str = "folder";
 
 /// Viewport used for every shot unless `CACO_SHOT_SIZE` says otherwise.
 /// 1200x800 is `main.rs`'s `with_inner_size`, so this is the window a user
@@ -192,9 +197,17 @@ impl Shooter {
         action: ActionRequest,
         after_open: impl FnOnce(&mut Self),
     ) -> f32 {
-        self.harness.state_mut().dispatch_action(action);
-        self.settle(4, WORKER_PAUSE);
-        after_open(self);
+        self.shot_opened_by(name, |s| {
+            s.harness.state_mut().dispatch_action(action);
+            s.settle(4, WORKER_PAUSE);
+            after_open(s);
+        })
+    }
+
+    /// Same, for a dialog nothing dispatches: `open` gets it on screen however the
+    /// app does.
+    fn shot_opened_by(&mut self, name: &str, open: impl FnOnce(&mut Self)) -> f32 {
+        open(self);
         self.settle(4, Duration::ZERO);
         self.shot(name);
         let overflow = self.worst_overflow();
@@ -283,6 +296,120 @@ impl Shooter {
         )
         .expect("record a session on the old file");
         id
+    }
+
+    /// Start the mirror shots from the same place whatever machine this is: no mirrors,
+    /// which decides the page the mirrors tool opens on, in the scratch home's own config
+    /// file, which the wizard goes on writing to. And no WAD files, in the scratch copy
+    /// of the library only, so that what gets offered and filled is what these shots add,
+    /// and a run against a real library does not copy its files into a temp dir.
+    fn start_mirror_shots(&self) {
+        let conn = caco_core::db::open_connection(&self.home.join("library.db")).expect("open db");
+        conn.execute("UPDATE wads SET cached_path = NULL", [])
+            .expect("forget the real library's files");
+
+        unsafe { std::env::set_var("CACO_CONFIG", self.home.join("config.toml")) };
+        let mut config = (*caco_core::config::load_config()).clone();
+        config.mirrors.clear();
+        caco_core::config::save_config(&config).expect("save scratch config");
+        caco_core::config::reload_config();
+    }
+
+    /// Keep rendering until `done` says so, for what a real worker is off doing.
+    fn wait_for(&mut self, what: &str, mut done: impl FnMut(&mut Self) -> bool) {
+        for _ in 0..100 {
+            self.settle(1, WORKER_PAUSE);
+            if done(self) {
+                return;
+            }
+        }
+        // What was on screen when it gave up is most of what there is to know.
+        self.shot("timed-out");
+        panic!("timed out waiting for {what}: see timed-out.png");
+    }
+
+    /// Type into the field with this label, the way a person has to: focus it first.
+    fn type_into(&mut self, label: &str, text: &str) {
+        self.harness.get_by_label(label).focus();
+        self.settle(1, Duration::ZERO);
+        self.harness.get_by_label(label).type_text(text);
+        self.settle(2, Duration::ZERO);
+    }
+
+    /// Open the mirrors tool on a kind's page, through the buttons a person would use.
+    fn open_wizard_on(&mut self, kind: &str) {
+        self.harness
+            .state_mut()
+            .dispatch_action(ActionRequest::Mirrors);
+        self.settle(2, Duration::ZERO);
+        self.harness.get_by_label(kind).click_accesskit();
+        self.settle(3, Duration::ZERO);
+    }
+
+    /// A manual-only WAD with its file here: what a mirror is offered. Its own bytes and
+    /// its own forum thread, or the mirror would rightly recognise it as one it holds.
+    /// The file's name is long on purpose, since it goes in a sentence in the offer.
+    fn add_manual_wad_with_file(&self, title: &str, topic: i64) -> i64 {
+        use caco_core::db::{self, NewWad, SourceType};
+
+        let conn = db::open_connection(&self.home.join("library.db")).expect("open db");
+        let dir = self.home.join("offered");
+        std::fs::create_dir_all(&dir).expect("create scratch WAD dir");
+        let path = dir.join(format!(
+            "caco-screenshots-{topic}-v1.2-final-with-the-music-fix.pk3"
+        ));
+        let mut wad = b"PWAD\0\0\0\0\x0c\0\0\0".to_vec();
+        wad.extend_from_slice(topic.to_string().as_bytes());
+        std::fs::write(&path, wad).expect("write WAD");
+
+        db::add_wad(
+            &conn,
+            &NewWad::new(title, SourceType::Doomworld)
+                .source_url(format!(
+                    "https://www.doomworld.com/forum/topic/{topic}-a-wad/"
+                ))
+                .cached_path(path.display().to_string()),
+        )
+        .expect("add manual WAD")
+    }
+
+    /// A WAD a mirror lists and cannot produce, because the mirror's copy has gone.
+    /// Play is what finds that out, so the shot goes through it, and it stops at the
+    /// link dialog with nothing launched.
+    fn add_wad_on_a_broken_mirror(&self) -> i64 {
+        use caco_core::db::{self, NewWad, SourceType, mirrors};
+        use caco_core::mirrors::MirrorEntry;
+
+        let conn = db::open_connection(&self.home.join("library.db")).expect("open db");
+        let id = db::add_wad(
+            &conn,
+            &NewWad::new("Purgatory", SourceType::Doomworld)
+                .source_url("https://www.doomworld.com/forum/topic/150000-purgatory/"),
+        )
+        .expect("add WAD");
+        let entry = MirrorEntry {
+            sha256: "ab".repeat(32),
+            size: 4,
+            filename: "caco-screenshots-purgatory-v1.1-final.pk3".to_string(),
+            doomworld: Some(150000),
+            ..Default::default()
+        };
+        mirrors::sync_files(&conn, MIRROR_NAME, &[entry]).expect("list it on the mirror");
+        id
+    }
+
+    /// Open the mirror offer for `wad_id` the way an import does, by posting what the
+    /// import worker posts.
+    fn post_import_of(&mut self, wad_id: i64) {
+        let tx = self.harness.state_mut().background_sender();
+        tx.send(AppMessage::ImportComplete(Ok(ImportResult {
+            wad_id: Some(wad_id),
+            is_duplicate: false,
+            duplicate_id: None,
+            duplicate_title: None,
+            error: None,
+        })));
+        self.settle(2, WORKER_PAUSE);
     }
 
     fn purge_wad(&self, id: i64) {
@@ -477,6 +604,312 @@ fn shoot_every_surface() {
         }),
     );
     s.purge_wad(changed);
+
+    // Setting up a mirror, the way a person does. It opens on the choice of kind only
+    // when there are none, and each kind has instructions of its own to fit.
+    s.start_mirror_shots();
+    record(
+        "mirrors-kinds",
+        s.shot_dialog_after("dlg-mirrors-kinds", ActionRequest::Mirrors, |s| {
+            s.harness.get_by_label("A Folder");
+            s.harness.get_by_label("A Web Server");
+        }),
+    );
+    for (name, kind, instruction) in [
+        (
+            "mirrors-folder",
+            "A Folder",
+            "If it isn't there, caco will create it",
+        ),
+        ("mirrors-gitea", "Gitea", "set package to Read and Write"),
+        ("mirrors-webdav", "WebDAV", "rclone serve webdav"),
+        (
+            "mirrors-web-server",
+            "A Web Server",
+            "python3 -m http.server",
+        ),
+    ] {
+        record(
+            name,
+            s.shot_opened_by(&format!("dlg-{name}"), |s| {
+                s.open_wizard_on(kind);
+                s.harness.get_by_label_contains(instruction);
+            }),
+        );
+    }
+
+    // A test that fails has to say so and say what to try, through the real worker.
+    record(
+        "mirrors-test-failed",
+        s.shot_opened_by("dlg-mirrors-test-failed", |s| {
+            s.open_wizard_on("WebDAV");
+            // A port nothing listens on, so the failure is quick and always the same.
+            s.type_into("Address", "http://127.0.0.1:9/doom");
+            s.harness.get_by_label("Test It").click_accesskit();
+            s.wait_for("the test to fail", |s| {
+                s.harness
+                    .query_by_label_contains("Could not use it")
+                    .is_some()
+            });
+            s.harness
+                .get_by_label_contains("reachable from this machine");
+            s.harness.get_by_label("Add Anyway");
+        }),
+    );
+
+    // A password goes through the real wizard, and its handling is the point of this
+    // step: in a file only this user can read, and nowhere near the config, which is
+    // meant to travel between machines. A mirror that cannot be reached can be added
+    // anyway, which is how this gets there with no server. Removing it takes the
+    // password with it.
+    s.open_wizard_on("WebDAV");
+    s.type_into("Address", "http://127.0.0.1:9/doom");
+    s.type_into("Username", "doom");
+    s.type_into("Password", "a-password-for-the-test");
+    s.harness.get_by_label("Test It").click_accesskit();
+    s.wait_for("the test to fail", |s| {
+        s.harness.query_by_label("Add Anyway").is_some()
+    });
+    s.harness.get_by_label("Add Anyway").click_accesskit();
+    s.settle(3, WORKER_PAUSE);
+    {
+        let config = caco_core::config::load_config();
+        let saved = &config.mirrors[0];
+        assert_eq!(saved.login(), Some("doom"));
+        assert_eq!(saved.token().as_deref(), Some("a-password-for-the-test"));
+        let on_disk = std::fs::read_to_string(caco_core::config::config_file()).unwrap();
+        assert!(on_disk.contains("doom"), "{on_disk}");
+        assert!(!on_disk.contains("a-password-for-the-test"), "{on_disk}");
+
+        let tokens = caco_core::mirror_tokens::TokenFile::from_config();
+        assert!(!tokens.path().starts_with(&s.home), "{:?}", tokens.path());
+        assert_eq!(
+            tokens.read().get("webdav").map(String::as_str),
+            Some("a-password-for-the-test")
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(tokens.path())
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+    }
+    s.harness.get_by_label("Done").click_accesskit();
+    s.settle(3, WORKER_PAUSE);
+    s.harness.get_by_label("Remove").click_accesskit();
+    s.settle(3, Duration::ZERO);
+    s.harness.get_by_label("Stop Using It").click_accesskit();
+    s.settle(3, WORKER_PAUSE);
+    assert!(caco_core::config::load_config().mirrors.is_empty());
+    assert!(
+        caco_core::mirror_tokens::TokenFile::from_config()
+            .read()
+            .is_empty()
+    );
+    s.harness.get_by_label_contains("No mirrors yet");
+    s.harness.state_mut().close_dialog();
+    s.settle(1, Duration::ZERO);
+
+    // And the whole of it, for real: a folder that isn't there yet, tested, created and
+    // filled, from nothing but what's on screen.
+    let filled = s.add_manual_wad_with_file("Lonesome Road", 151858);
+    let mirror_root = s.home.join("mirrors/one-that-is/not-there-yet");
+    let _ = std::fs::remove_dir_all(s.home.join("mirrors"));
+    let mirror_path = mirror_root.display().to_string();
+    record(
+        "mirrors-test-passed",
+        s.shot_opened_by("dlg-mirrors-test-passed", |s| {
+            s.open_wizard_on("A Folder");
+            s.type_into("Folder", &mirror_path);
+            s.harness.get_by_label("Test It").click_accesskit();
+            s.wait_for("the test to pass", |s| {
+                s.harness
+                    .query_by_label_contains("isn't there yet")
+                    .is_some()
+            });
+            assert!(!mirror_root.exists(), "testing it must not create it");
+            s.harness.get_by_label("Finish");
+        }),
+    );
+
+    s.open_wizard_on("A Folder");
+    s.type_into("Folder", &mirror_path);
+    s.harness.get_by_label("Test It").click_accesskit();
+    s.wait_for("the test to pass", |s| {
+        s.harness.query_by_label("Finish").is_some()
+    });
+    s.harness.get_by_label("Finish").click_accesskit();
+    let upload_label = format!("Upload 1 to {MIRROR_NAME}");
+    s.wait_for("the mirror to be set up", |s| {
+        s.harness.query_by_label(&upload_label).is_some()
+    });
+    assert!(
+        mirror_root.join(caco_core::mirrors::INDEX_PATH).is_file(),
+        "finishing should create the folder and an empty index"
+    );
+    assert_eq!(caco_core::config::load_config().mirrors.len(), 1);
+    record(
+        "mirrors-fill",
+        s.shot_opened_by("dlg-mirrors-fill", |s| {
+            s.harness.get_by_label_contains("Lonesome Road");
+        }),
+    );
+
+    s.harness
+        .state_mut()
+        .dispatch_action(ActionRequest::Mirrors);
+    s.settle(2, Duration::ZERO);
+    s.harness.get_by_label("Upload 1 WAD").click_accesskit();
+    s.settle(2, Duration::ZERO);
+    s.harness.get_by_label(&upload_label).click_accesskit();
+    s.wait_for("the upload to finish", |s| {
+        s.harness.state_mut().bulk_upload_running().not()
+            && s.harness.query_by_label("Uploaded 1 WAD.").is_some()
+    });
+    record(
+        "mirrors-fill-done",
+        s.shot_opened_by("dlg-mirrors-fill-done", |s| {
+            s.harness.get_by_label_contains("Nothing to upload");
+        }),
+    );
+    {
+        let conn = caco_core::db::open_connection(&s.home.join("library.db")).expect("open db");
+        let wad = caco_core::db::get_wad(&conn, filled, false)
+            .expect("read WAD")
+            .expect("WAD still there");
+        assert!(wad.mirrored, "the upload did not reach the library");
+        assert!(wad.retrievability().is_automatic());
+    }
+
+    // The list, with a mirror in it that has been read.
+    record(
+        "mirrors-list",
+        s.shot_dialog_after("dlg-mirrors-list", ActionRequest::Mirrors, |s| {
+            s.harness.get_by_label("Read Them Again").click_accesskit();
+            s.wait_for("the mirror to be read", |s| {
+                s.harness.query_by_label_contains("1 file").is_some()
+            });
+            s.harness.get_by_label("Add a Mirror");
+            s.harness.get_by_label("Edit");
+        }),
+    );
+
+    // Editing reads it back, and removing asks first and says what it costs.
+    record(
+        "mirrors-edit",
+        s.shot_dialog_after("dlg-mirrors-edit", ActionRequest::Mirrors, |s| {
+            s.harness.get_by_label("Edit").click_accesskit();
+            s.settle(3, Duration::ZERO);
+            assert_eq!(
+                s.harness.get_by_label("Folder").value().as_deref(),
+                Some(mirror_path.as_str())
+            );
+        }),
+    );
+    record(
+        "mirrors-remove",
+        s.shot_dialog_after("dlg-mirrors-remove", ActionRequest::Mirrors, |s| {
+            s.harness.get_by_label("Remove").click_accesskit();
+            s.settle(3, Duration::ZERO);
+            s.harness
+                .get_by_label_contains("Nothing on the mirror is deleted");
+            s.harness.get_by_label("Keep It");
+        }),
+    );
+    s.purge_wad(filled);
+
+    // The tool has to be reachable, and the list of tools fit, at the smallest window.
+    s.shot_view_after("05-manage-open", ViewMode::Library, |s| {
+        s.harness.get_by_label_contains("Manage").click();
+        s.settle(3, Duration::ZERO);
+        s.harness.get_by_label("Mirrors");
+    });
+    s.harness.get_by_label_contains("Manage").click();
+    s.settle(2, Duration::ZERO);
+
+    // Only a WAD arriving with no way back brings up the offer.
+    let manual = s.add_manual_wad_with_file("The Evil Reborn", 152000);
+    record(
+        "mirror-offer",
+        s.shot_opened_by("dlg-mirror-offer", |s| {
+            s.post_import_of(manual);
+            s.harness
+                .get_by_label_contains("any machine with this library");
+        }),
+    );
+
+    // Edit's File section offers it too, for a file that was here before the mirror.
+    record(
+        "edit-sources-upload",
+        s.shot_dialog_after(
+            "dlg-edit-sources-upload",
+            ActionRequest::Edit(manual),
+            |s| {
+                s.harness.get_by_label("Sources").click();
+                s.settle(3, Duration::ZERO);
+                s.harness.get_by_label(&format!("Upload to {MIRROR_NAME}"));
+            },
+        ),
+    );
+
+    // Pressing the button has to do what it says. Through the real offer, the real
+    // worker and a real (if local) mirror, and the WAD comes out the other side
+    // reading as something caco can fetch.
+    s.post_import_of(manual);
+    s.harness
+        .get_by_label(&format!("Upload to {MIRROR_NAME}"))
+        .click();
+    for _ in 0..50 {
+        s.settle(1, WORKER_PAUSE);
+        if s.harness.state_mut().uploads_running() == 0 {
+            break;
+        }
+    }
+    {
+        let conn = caco_core::db::open_connection(&s.home.join("library.db")).expect("open db");
+        let wad = caco_core::db::get_wad(&conn, manual, false)
+            .expect("read WAD")
+            .expect("WAD still there");
+        assert!(wad.mirrored, "the upload did not reach the library");
+        assert!(wad.retrievability().is_automatic());
+    }
+
+    // Once it is up, the same section says so and stops offering.
+    record(
+        "edit-sources-on-mirror",
+        s.shot_dialog_after(
+            "dlg-edit-sources-on-mirror",
+            ActionRequest::Edit(manual),
+            |s| {
+                s.harness.get_by_label("Sources").click();
+                s.settle(3, Duration::ZERO);
+                s.harness
+                    .get_by_label_contains(&format!("On mirror: {MIRROR_NAME}"));
+                assert!(
+                    s.harness
+                        .query_by_label(&format!("Upload to {MIRROR_NAME}"))
+                        .is_none()
+                );
+            },
+        ),
+    );
+    s.purge_wad(manual);
+
+    // A mirror that lists a file and cannot produce it: the link dialog has to say
+    // what went wrong, or it looks like a WAD no mirror ever had.
+    let broken = s.add_wad_on_a_broken_mirror();
+    record(
+        "link-mirror-failed",
+        s.shot_dialog_after("dlg-link-mirror-failed", ActionRequest::Play(broken), |s| {
+            s.settle(4, WORKER_PAUSE);
+            s.harness
+                .get_by_label_contains(&format!("Mirror {MIRROR_NAME}:"));
+        }),
+    );
+    s.purge_wad(broken);
 
     // Only Play reaches the link dialog, and only for a WAD whose file is not
     // here. Last, because the WAD it adds is in the library from then on.
