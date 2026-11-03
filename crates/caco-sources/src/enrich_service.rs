@@ -47,7 +47,7 @@ impl EnrichOutcome {
     ///
     /// `zdoom_required: Some(false)` is a real detection but not news — it
     /// only records that the WAD does *not* need a zdoom-family sourceport.
-    pub fn has_changes(&self) -> bool {
+    fn has_changes(&self) -> bool {
         self.complevel.is_some() || self.iwad.is_some() || self.zdoom_required == Some(true)
     }
 }
@@ -127,7 +127,7 @@ pub fn enrich_wads(
 ///
 /// Only fields that are still unset are detected: enrichment never overwrites
 /// a value the user (or a previous run) already chose.
-pub fn enrich_one(
+fn enrich_one(
     conn: &Connection,
     wad: &WadRecord,
     dry_run: bool,
@@ -291,7 +291,7 @@ pub fn enrich_cacowards(conn: &Connection, year: i64, dry_run: bool) -> Result<C
 ///
 /// Neither pass sets `manual_override`, so a future `caco modify` can pin
 /// the correct link without it being clobbered on the next scrape.
-pub fn ingest_cacoward_entries(
+fn ingest_cacoward_entries(
     conn: &Connection,
     year: i64,
     entries: &[db::NewCacoward],

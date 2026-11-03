@@ -30,7 +30,8 @@ pub struct ImportResult {
 }
 
 impl ImportResult {
-    pub fn ok(&self) -> bool {
+    #[cfg(test)]
+    fn ok(&self) -> bool {
         self.wad_id.is_some() && self.error.is_none()
     }
 
@@ -71,7 +72,7 @@ pub use caco_core::utils::normalize_tags;
 ///
 /// Lowercase, strip accents/diacritics (NFD decomposition), remove
 /// punctuation, collapse whitespace.
-pub fn normalize_title(title: &str) -> String {
+pub(crate) fn normalize_title(title: &str) -> String {
     let lower = title.to_lowercase();
     // Decompose unicode and strip combining marks (accents)
     let stripped: String = lower
@@ -555,7 +556,7 @@ impl ImportService {
 }
 
 /// Map detected sourceport text to a known sourceport family.
-pub fn port_to_sourceport_family(port_text: &str) -> Option<&'static str> {
+fn port_to_sourceport_family(port_text: &str) -> Option<&'static str> {
     let text = port_text.trim();
     if text.is_empty() {
         return None;
@@ -607,7 +608,7 @@ fn truncate_description(text: &str, max_len: usize) -> String {
 ///
 /// Uses substring matching against known port requirement keywords.
 /// Returns `None` if the port text doesn't match any known pattern.
-pub fn port_to_complevel(port_text: &str) -> Option<i32> {
+pub(crate) fn port_to_complevel(port_text: &str) -> Option<i32> {
     // When a wiki infobox lists multiple ports (e.g. Ancient Aliens'
     // `port=Boom-compatible, port2=MBF21-compatible`), prefer the highest
     // compat level — running MBF21 content at Boom complevel loses features.
@@ -634,7 +635,7 @@ pub fn port_to_complevel(port_text: &str) -> Option<i32> {
 ///
 /// Returns `Some(true)` if the port text indicates a ZDoom-family sourceport,
 /// `None` if inconclusive.
-pub fn port_to_zdoom_required(port_text: &str) -> Option<bool> {
+pub(crate) fn port_to_zdoom_required(port_text: &str) -> Option<bool> {
     let text = port_text.to_lowercase();
     let zdoom_keywords = [
         "zdoom",
