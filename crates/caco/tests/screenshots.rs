@@ -30,9 +30,11 @@
 
 use std::ops::Not;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use caco::dialogs::storage::StorageTab;
+use caco::get::GetTarget;
 use caco::import::state::SearchSource;
 use caco::message::{AppMessage, EnrichReport};
 use caco::state::{ActionRequest, ViewMode};
@@ -87,7 +89,12 @@ fn scratch_home() -> PathBuf {
         std::fs::copy(&real_db, &scratch_db).expect("copy library");
     }
 
-    unsafe { std::env::set_var("CACO_HOME", &home) };
+    unsafe {
+        std::env::set_var("CACO_HOME", &home);
+        // Not just the library: linking a file for a WAD caco can fetch again writes to
+        // the WAD cache, which is not under `CACO_HOME`.
+        std::env::set_var("CACO_CACHE_DIR", home.join("cache-wads"));
+    }
     put_sourceport_on_path(&home);
     home
 }
@@ -315,6 +322,72 @@ impl Shooter {
         caco_core::config::reload_config();
     }
 
+    /// Start the Get shots from a Downloads folder of their own, and with pages going
+    /// to a list rather than a browser: this presses Get for real, on a machine where
+    /// nobody asked for a browser to open. Returns the folder and the list.
+    ///
+    /// Doom Wiki enrichment goes off too, since an import has nothing to learn from a
+    /// wiki that is not part of what these shots are about.
+    fn start_get_shots(&mut self) -> (PathBuf, Arc<Mutex<Vec<String>>>) {
+        let downloads = self.home.join("Downloads");
+        let _ = std::fs::remove_dir_all(&downloads);
+        std::fs::create_dir_all(&downloads).expect("create scratch Downloads");
+
+        let mut config = (*caco_core::config::load_config()).clone();
+        config.downloads_dir = downloads.display().to_string();
+        config.auto_doomwiki_enrich = false;
+        caco_core::config::save_config(&config).expect("save scratch config");
+        caco_core::config::reload_config();
+
+        let opened: Arc<Mutex<Vec<String>>> = Arc::default();
+        let recording = Arc::clone(&opened);
+        self.harness
+            .state_mut()
+            .open_pages_with(Arc::new(move |url| {
+                recording.lock().unwrap().push(url.to_string());
+                Ok(())
+            }));
+        (downloads, opened)
+    }
+
+    /// Wait for a page to go to the browser, and return it.
+    fn wait_for_page(&mut self, opened: &Arc<Mutex<Vec<String>>>) -> String {
+        self.wait_for("a page to open", |_| !opened.lock().unwrap().is_empty());
+        opened.lock().unwrap().remove(0)
+    }
+
+    /// A browser finishing a download: Firefox's way, which is the hardest to read, since
+    /// the final name is there and empty for as long as the temporary one grows.
+    fn download(&mut self, downloads: &Path, name: &str, bytes: &[u8]) -> PathBuf {
+        let done = downloads.join(name);
+        let part = downloads.join(format!("{name}.part"));
+        std::fs::write(&done, b"").expect("write placeholder");
+        std::fs::write(&part, bytes).expect("write temporary");
+        // Long enough for the worker to have looked at both, which must prompt nothing.
+        self.settle(5, WORKER_PAUSE * 2);
+        assert!(
+            self.harness.query_by_label("Not This One").is_none(),
+            "asked about a download that had not finished"
+        );
+        std::fs::rename(&part, &done).expect("finish download");
+        done
+    }
+
+    /// The row a Cacoward entry has, unlinked in the scratch library if the real one has
+    /// it linked, since the shots are about an entry with no WAD.
+    fn absent_cacoward(&self, key: &str) -> i64 {
+        let conn = caco_core::db::open_connection(&self.home.join("library.db")).expect("open db");
+        conn.execute(
+            "UPDATE cacowards SET wad_id = NULL, manual_override = 0 WHERE key = ?1",
+            [key],
+        )
+        .expect("unlink entry");
+        conn.query_row("SELECT id FROM cacowards WHERE key = ?1", [key], |row| {
+            row.get(0)
+        })
+        .expect("the dataset has this entry")
+    }
+
     /// Keep rendering until `done` says so, for what a real worker is off doing.
     fn wait_for(&mut self, what: &str, mut done: impl FnMut(&mut Self) -> bool) {
         for _ in 0..100 {
@@ -421,7 +494,8 @@ impl Shooter {
     ///
     /// Read off egui's own area bookkeeping rather than the pixels, because a
     /// window clipped at the screen edge and a window that merely happens to
-    /// end there look identical in a PNG.
+    /// end there look identical in a PNG. Modals are in the middle layer, and what is
+    /// asked over them in the foreground one.
     fn worst_overflow(&self) -> f32 {
         let ctx = &self.harness.ctx;
         let screen = ctx.content_rect();
@@ -429,7 +503,7 @@ impl Shooter {
             m.areas()
                 .visible_layer_ids()
                 .into_iter()
-                .filter(|l| l.order == egui::Order::Middle)
+                .filter(|l| matches!(l.order, egui::Order::Middle | egui::Order::Foreground))
                 .collect()
         });
         layers
@@ -897,6 +971,179 @@ fn shoot_every_surface() {
         ),
     );
     s.purge_wad(manual);
+
+    // Getting a file through the browser, the whole way and the way a person does: press
+    // the button, the page opens, a download lands, and the file ends up in the library.
+    // Real folder, real worker, real link. Only the browser is played by a list.
+    let (downloads, opened) = s.start_get_shots();
+    let gotten = s.add_lost_wad();
+    let page = "https://www.doomworld.com/forum/topic/150000-purgatory/";
+    record(
+        "link-get",
+        s.shot_dialog_after("dlg-link-get", ActionRequest::Play(gotten), |s| {
+            s.settle(4, WORKER_PAUSE);
+            s.harness.get_by_label_contains("Get in Browser opens");
+            s.harness.get_by_label("Link Local File");
+        }),
+    );
+    s.harness
+        .state_mut()
+        .dispatch_action(ActionRequest::Play(gotten));
+    s.wait_for("the link dialog", |s| {
+        s.harness.query_by_label("Get in Browser").is_some()
+    });
+    s.harness.get_by_label("Get in Browser").click_accesskit();
+    assert_eq!(s.wait_for_page(&opened), page);
+    s.settle(2, Duration::ZERO);
+    let waiting = "Waiting for download: Purgatory...";
+    s.harness.get_by_label(waiting);
+    s.shot("06-get-waiting");
+
+    // The menu behind that line, for when the page that opened is a dead share link.
+    s.harness.get_by_label(waiting).click();
+    s.settle(3, Duration::ZERO);
+    s.harness.get_by_label("Open doomworld.com");
+    s.harness.get_by_label("Stop Waiting");
+    s.shot("06-get-waiting-menu");
+    s.harness.get_by_label("Open doomworld.com").click();
+    assert_eq!(s.wait_for_page(&opened), page);
+    s.settle(3, Duration::ZERO);
+
+    // Something else lands first. A person gets to say so, and then the file stays put.
+    let unrelated = s.download(
+        &downloads,
+        "invoice-for-something-else.zip",
+        b"PK-not-a-wad",
+    );
+    s.wait_for("the question about a download", |s| {
+        s.harness.query_by_label("Not This One").is_some()
+    });
+    s.harness.get_by_label_contains("to Purgatory?");
+    s.shot("06-get-question");
+    s.harness.get_by_label("Not This One").click();
+    s.settle(3, Duration::ZERO);
+    assert!(s.harness.query_by_label("Not This One").is_none());
+    assert!(unrelated.exists(), "declining must leave the file alone");
+    s.harness.get_by_label(waiting);
+
+    // The real one, whose name is as long as they come, asked over a modal dialog, and
+    // the app is still usable underneath. The click is a pointer click on purpose, since
+    // whether it reaches the button past a dialog is what's being checked.
+    let long_name = "caco-screenshots-purgatory-v1.1-final-with-the-music-fix-and-more.pk3";
+    let wad_bytes = b"PWAD\0\0\0\0\x0c\0\0\0 a file for purgatory";
+    record(
+        "get-question-over-dialog",
+        s.shot_opened_by("dlg-get-question-over-dialog", |s| {
+            s.harness
+                .state_mut()
+                .dispatch_action(ActionRequest::Settings);
+            s.settle(2, Duration::ZERO);
+            s.download(&downloads, long_name, wad_bytes);
+            s.wait_for("the question about a download", |s| {
+                s.harness.query_by_label("Not This One").is_some()
+            });
+        }),
+    );
+    s.harness.get_by_label("Link").click();
+    s.wait_for("the file to be linked", |s| {
+        s.harness.state_mut().get_linking().not()
+            && s.harness
+                .query_by_label(&format!("Upload to {MIRROR_NAME}"))
+                .is_some()
+    });
+    {
+        let conn = caco_core::db::open_connection(&s.home.join("library.db")).expect("open db");
+        let wad = caco_core::db::get_wad(&conn, gotten, false)
+            .expect("read WAD")
+            .expect("WAD still there");
+        let kept = caco_core::config::keep_dir().join(long_name);
+        assert_eq!(wad.cached_path.as_deref(), kept.to_str());
+        assert_eq!(std::fs::read(&kept).unwrap(), wad_bytes);
+        assert!(
+            !downloads.join(long_name).exists(),
+            "the default link mode moves it"
+        );
+        assert!(wad.identity.is_some(), "linking hashes the file");
+        assert_eq!(wad.last_known_path, None);
+    }
+    assert!(s.harness.query_by_label(waiting).is_none());
+    // The issue's last step, and how a mirror fills itself.
+    s.harness.get_by_label("Not Now").click();
+    s.settle(3, Duration::ZERO);
+    let _ = std::fs::remove_file(caco_core::config::keep_dir().join(long_name));
+    s.purge_wad(gotten);
+
+    // An absent Cacoward entry has no row to link to, and its Get knows which thread to
+    // open: a forum-only release, which is what this exists for. One the mirror these
+    // shots filled does not hold, or it would rightly be something caco could fetch.
+    let entry = s.absent_cacoward("2025-winner-below-the-gaudy-goblin");
+    s.shot_view_after("06-get-cacoward", ViewMode::Cacowards, |s| {
+        s.harness.get_by_label("2025").click_accesskit();
+        s.settle(3, Duration::ZERO);
+        s.harness
+            .state_mut()
+            .dispatch_action(ActionRequest::Get(GetTarget::Cacoward(entry)));
+        assert_eq!(
+            s.wait_for_page(&opened),
+            "https://www.doomworld.com/forum/topic/149566/"
+        );
+        s.settle(2, Duration::ZERO);
+        s.harness.get_by_label("Waiting\u{2026}");
+    });
+    let goblin_name = "GaudyGoblin.pk3";
+    let goblin_bytes = b"PWAD\0\0\0\0\x0c\0\0\0 a file for the goblin";
+    s.download(&downloads, goblin_name, goblin_bytes);
+    s.wait_for("the question about a download", |s| {
+        s.harness.query_by_label("Not This One").is_some()
+    });
+    s.harness
+        .get_by_label_contains("to Below the Gaudy Goblin?");
+    s.harness.get_by_label("Link").click();
+    s.wait_for("the entry to get its row and file", |s| {
+        s.harness.state_mut().get_linking().not()
+            && s.harness
+                .query_by_label(&format!("Upload to {MIRROR_NAME}"))
+                .is_some()
+    });
+    {
+        let conn = caco_core::db::open_connection(&s.home.join("library.db")).expect("open db");
+        let record = caco_core::db::get_cacoward(&conn, entry)
+            .expect("read entry")
+            .expect("entry still there");
+        let wad_id = record.wad_id.expect("the entry should have a WAD now");
+        let wad = caco_core::db::get_wad(&conn, wad_id, false)
+            .expect("read WAD")
+            .expect("WAD still there");
+        let kept = caco_core::config::keep_dir().join(goblin_name);
+        assert_eq!(wad.cached_path.as_deref(), kept.to_str());
+        assert_eq!(std::fs::read(&kept).unwrap(), goblin_bytes);
+        s.harness.get_by_label("Not Now").click();
+        s.settle(3, Duration::ZERO);
+        let _ = std::fs::remove_file(&kept);
+        s.purge_wad(wad_id);
+    }
+
+    // A Get can be called off, and then the folder stops being watched.
+    let stopped = s.absent_cacoward("2025-winner-below-the-gaudy-goblin");
+    s.harness
+        .state_mut()
+        .dispatch_action(ActionRequest::Get(GetTarget::Cacoward(stopped)));
+    s.wait_for_page(&opened);
+    s.settle(2, Duration::ZERO);
+    s.harness
+        .get_by_label("Waiting for download: Below the Gaudy Goblin...")
+        .click();
+    s.settle(3, Duration::ZERO);
+    s.harness.get_by_label("Stop Waiting").click();
+    s.settle(3, Duration::ZERO);
+    assert!(
+        s.harness
+            .query_by_label("Waiting for download: Below the Gaudy Goblin...")
+            .is_none()
+    );
+    std::fs::write(downloads.join("after-stopping.zip"), b"PK").expect("write file");
+    s.settle(5, WORKER_PAUSE * 8);
+    assert!(s.harness.query_by_label("Not This One").is_none());
 
     // A mirror that lists a file and cannot produce it: the link dialog has to say
     // what went wrong, or it looks like a WAD no mirror ever had.
