@@ -6,9 +6,15 @@
 //! - [`link_imported_wad`] runs after every import, when the WAD is new.
 //!
 //! The decision ([`owner_of`]) is made per row rather than per WAD so its answer
-//! cannot depend on order. Walking the library and letting each WAD claim what
-//! it matches would let a title match on one WAD take a row that a later WAD
-//! owns by idgames id.
+//! cannot depend on which WAD is visited first. Walking the library and letting
+//! each WAD claim what it matches would let a title match on one WAD take a row
+//! that a later WAD owns by idgames id.
+//!
+//! A link is not revisited once made, which is why the title pass refuses a WAD
+//! whose idgames id differs from the row's: importing the right WAD later would
+//! not correct it. A WAD with no id has nothing to contradict its title, so it
+//! can still take a row before the row's real owner arrives. Unlink or a pin
+//! corrects that.
 //!
 //! Only rows [`db::get_linkable_cacowards`] returns are touched, so a pinned
 //! link is never overwritten and nothing sets `manual_override`. Nothing here
@@ -81,54 +87,72 @@ enum Evidence {
 /// 2. **Normalized title**: the row's title equals exactly one WAD's, once both
 ///    are case-folded, diacritic-stripped and punctuation-collapsed. Two WADs
 ///    sharing a name (e.g. "Crusader" 1995 and 2023) are left for the user to
-///    pick between.
+///    pick between, and so is a WAD whose idgames id differs from the row's: the
+///    2023 runner-up "Corruption" shares its name with two 2007 WADs.
 fn owner_of(
     conn: &Connection,
     row: &CacowardRecord,
     titles: &TitleIndex,
 ) -> Result<Option<(i64, Evidence)>> {
-    if let Some(id) = row
+    let row_idgames_id = row
         .idgames_url
         .as_deref()
-        .and_then(extract_idgames_id_from_url)
+        .and_then(extract_idgames_id_from_url);
+
+    if let Some(id) = row_idgames_id
         && let Some(wad_id) = db::find_wad_by_idgames_id(conn, &id.to_string())?
     {
         return Ok(Some((wad_id, Evidence::IdgamesId)));
     }
 
+    // No live WAD has the row's id, so any id the title's WAD has is another one.
     Ok(titles
         .unique_match(&row.wad_title)
-        .map(|wad_id| (wad_id, Evidence::Title)))
+        .filter(|wad| row_idgames_id.is_none() || !wad.has_idgames_id)
+        .map(|wad| (wad.wad_id, Evidence::Title)))
 }
 
-/// Normalized title → the live WADs that have it. A vec rather than one id so
+#[derive(Clone, Copy)]
+struct TitledWad {
+    wad_id: i64,
+    has_idgames_id: bool,
+}
+
+/// Normalized title → the live WADs that have it. A vec rather than one WAD so
 /// that [`unique_match`](Self::unique_match) can tell "one" from "several".
 struct TitleIndex {
-    by_title: HashMap<String, Vec<i64>>,
+    by_title: HashMap<String, Vec<TitledWad>>,
 }
 
 impl TitleIndex {
     fn build(conn: &Connection) -> Result<Self> {
-        // Pull only id+title; the rest of the wads row is dead weight here.
-        let mut stmt = conn.prepare("SELECT id, title FROM wads WHERE deleted_at IS NULL")?;
+        // Pull only what the decision reads; the rest of the row is dead weight.
+        let mut stmt = conn.prepare(
+            "SELECT id, title, COALESCE(idgames_id, '') <> ''
+             FROM wads WHERE deleted_at IS NULL",
+        )?;
         let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            let wad = TitledWad {
+                wad_id: row.get(0)?,
+                has_idgames_id: row.get(2)?,
+            };
+            Ok((row.get::<_, String>(1)?, wad))
         })?;
 
-        let mut by_title: HashMap<String, Vec<i64>> = HashMap::new();
+        let mut by_title: HashMap<String, Vec<TitledWad>> = HashMap::new();
         for row in rows {
-            let (id, title) = row?;
+            let (title, wad) = row?;
             let key = normalize_title(&title);
             if !key.is_empty() {
-                by_title.entry(key).or_default().push(id);
+                by_title.entry(key).or_default().push(wad);
             }
         }
         Ok(Self { by_title })
     }
 
-    fn unique_match(&self, title: &str) -> Option<i64> {
+    fn unique_match(&self, title: &str) -> Option<TitledWad> {
         match self.by_title.get(&normalize_title(title))?.as_slice() {
-            [id] => Some(*id),
+            [wad] => Some(*wad),
             _ => None,
         }
     }
@@ -344,12 +368,81 @@ mod tests {
     }
 
     #[test]
-    fn a_title_match_still_links_when_no_wad_has_the_rows_idgames_id() {
-        // An updated upload can carry a new id while the wiki still names the
-        // old one, so a differing id does not prove the title match wrong.
+    fn a_title_does_not_outweigh_two_idgames_ids_that_disagree() {
+        // Real collision: the 2023 runner-up is 20790, the 2007 WAD is 14848.
+        let conn = setup();
+        let row = add_row(&conn, "Corruption", Some(20790));
+        let older = add_idgames_wad(&conn, "Corruption", "14848");
+
+        assert_eq!(
+            link_imported_wad(&conn, older).unwrap(),
+            LinkCounts::default()
+        );
+        assert_eq!(link_year(&conn, YEAR).unwrap(), LinkCounts::default());
+        assert_eq!(linked_wad(&conn, row), None);
+    }
+
+    #[test]
+    fn the_right_wad_gets_the_row_whichever_is_imported_first() {
+        for older_first in [true, false] {
+            let conn = setup();
+            let row = add_row(&conn, "Corruption", Some(20790));
+            let import = |id: &str| {
+                let wad = add_idgames_wad(&conn, "Corruption", id);
+                link_imported_wad(&conn, wad).unwrap();
+                wad
+            };
+
+            let awarded = if older_first {
+                import("14848");
+                import("20790")
+            } else {
+                let awarded = import("20790");
+                import("14848");
+                awarded
+            };
+
+            assert_eq!(
+                linked_wad(&conn, row),
+                Some(awarded),
+                "older_first = {older_first}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_wad_with_no_idgames_id_can_link_by_title_to_a_row_with_one() {
+        // A forum or URL import knows nothing that contradicts the title.
         let conn = setup();
         let row = add_row(&conn, "Eisberg", Some(100));
-        let wad = add_idgames_wad(&conn, "Eisberg", "200");
+        let wad = add_titled_wad(&conn, "Eisberg");
+
+        assert_eq!(link_imported_wad(&conn, wad).unwrap().by_title, 1);
+        assert_eq!(linked_wad(&conn, row), Some(wad));
+    }
+
+    #[test]
+    fn a_wad_with_an_idgames_id_can_link_by_title_to_a_row_with_none() {
+        // The wiki gave no id for The Road to Skull City, which is on idgames.
+        let conn = setup();
+        let row = add_row(&conn, "The Road to Skull City", None);
+        let wad = add_idgames_wad(&conn, "The Road to Skull City", "21867");
+
+        assert_eq!(link_imported_wad(&conn, wad).unwrap().by_title, 1);
+        assert_eq!(linked_wad(&conn, row), Some(wad));
+    }
+
+    #[test]
+    fn an_empty_idgames_id_is_no_idgames_id() {
+        let conn = setup();
+        let row = add_row(&conn, "Eisberg", Some(100));
+        let wad = add_titled_wad(&conn, "Eisberg");
+        db::update_wad(
+            &conn,
+            wad,
+            &WadUpdate::new().set_text("idgames_id", Some(String::new())),
+        )
+        .unwrap();
 
         assert_eq!(link_imported_wad(&conn, wad).unwrap().by_title, 1);
         assert_eq!(linked_wad(&conn, row), Some(wad));
