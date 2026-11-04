@@ -1,14 +1,16 @@
 //! Keeping the local index up to date, in three stages that each ask for less the next
-//! time, and none of which has to work for the one after it to run:
+//! time. The listing is where rows come from, so the others have nothing to do until one
+//! has been read. After that any of them can fail and the next still runs:
 //!
 //! 1. **The listing**, from the first mirror that has one: a conditional `GET` of about
 //!    400 KB, at most once a day. Every upload is searchable by file name and fetchable
 //!    from here on.
 //! 2. **The API**, for ids, which the listing cannot give. Each directory is one call,
-//!    so the first run is about 300 of them, at most one a second, and after that it is
-//!    one call per new upload. The same answer has the title, author and description,
-//!    so it saves about 19,000 requests to someone's volunteer mirror when it works. It
-//!    is behind Cloudflare, and it is allowed to fail.
+//!    so the first run is about 300 of them, at most one a second. After that it is at
+//!    most one call per new upload, and up to five directories a day to keep ratings
+//!    current. The same answer has the title, author and description, so it saves about
+//!    19,000 requests to someone's volunteer mirror when it works. It is behind
+//!    Cloudflare, and it is allowed to fail.
 //! 3. **The text files**, from the mirrors, for whatever the API did not describe, which
 //!    is everything on a day it is blocked. Throttled, since these are volunteers.
 //!

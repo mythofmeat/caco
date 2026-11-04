@@ -1,11 +1,13 @@
 //! The idgames archive.
 //!
-//! Its files have always come from mirrors, which are not behind anything. What is in
-//! them came from `www.doomworld.com`, which is behind Cloudflare, and shares a host with
-//! paths that answer with a challenge. So caco keeps its own index of the archive
-//! ([`index`], kept up to date by [`sync`]), built from what the mirrors publish, and asks
-//! the API only for what it does not know yet: [`archive`] is where that is decided, and
-//! nothing outside this module has to know there are two places to ask.
+//! Its files have always come from mirrors, and there are enough of them that one that is
+//! down or turns caco away is passed over. One of them, `files.xvertigox.com`, is behind
+//! Cloudflare, as of 2026-11-04. What is known about them came from one place,
+//! `www.doomworld.com`, which is behind Cloudflare too, and shares a host with paths that
+//! answer with a challenge. So caco keeps its own index of the archive ([`index`], kept up
+//! to date by [`sync`]), built from what the mirrors publish, and asks the API only for
+//! what it does not know yet: [`archive`] is where that is decided, and nothing outside
+//! this module has to know there are two places to ask.
 
 pub mod archive;
 pub mod client;

@@ -211,11 +211,11 @@ You can also add the WAD by hand with the URL or local form.
 
 ### The idgames index
 
-The files on idgames come from mirrors, which nothing stands in front of. What is known
-*about* them comes from `www.doomworld.com`, which sits behind Cloudflare. So caco keeps
-its own index of the archive, and the idgames tab searches that: title, author, file name
-and description, any part of a word, ignoring case and accents. Opening the tab shows
-what is newest on the archive.
+The files on idgames come from several mirrors, so caco goes on to the next if one is down
+or turns it away. What is known *about* them comes from one place, `www.doomworld.com`,
+which sits behind Cloudflare. So caco keeps its own index of the archive, and the idgames
+tab searches that: title, author, file name and description, any part of a word, ignoring
+case and accents. Opening the tab shows what is newest on the archive.
 
 It builds itself in the background, starting the first time you run this version:
 
@@ -224,8 +224,9 @@ It builds itself in the background, starting the first time you run this version
    has changed. From the moment the first one lands, about 21,000 uploads can be found by
    file name and fetched.
 2. **The API, for ids.** One call per directory the first time, about 300 at one a
-   second, so ten minutes or so. After that, one call per new upload. That same answer
-   has each upload's title, author, description and rating.
+   second, so ten minutes or so. After that, at most one call per new upload, and up to
+   five a day to keep ratings current. That same answer has each upload's title, author,
+   description and rating.
 3. **The text files.** The file beside each upload says what it is, in the archive's own
    template. They are read off a mirror, at most four a second, for whatever the API did
    not cover: the first run reads a little over 2,000 of them, and only what the listing
