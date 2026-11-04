@@ -14,6 +14,7 @@ A personal Doom WAD library manager inspired by [beets](https://beets.io). Impor
 - **On-demand downloads** — idgames WADs are cached when you play, with configurable auto-cleanup. WADs that cannot be re-downloaded are kept on the portable side instead, and destructive actions leave them alone by default.
 - **Get through your browser** — for a WAD behind a site that turns caco away, Get opens its page in your browser and watches your Downloads folder. When the file lands, caco asks if that's the one, then files it, hashes it and offers it to your mirror.
 - **Mirrors** — your own store of WAD files, a directory or an HTTP file server, for what idgames does not have. caco looks there first and offers to upload what it could not otherwise get back, so a mirror fills itself as you play.
+- **A local index of idgames** — every upload on the archive, searchable by title, author, file name and description, with the newest listed first, and none of it behind Doomworld's Cloudflare. Point caco at your own copy of the archive and every WAD on idgames is instant and offline.
 - **Content identity** — every WAD file is hashed, along with the WADs inside a zip, so caco notices when a file has changed since you last played it and asks before launching it: saves and demos made with one version of a WAD often fail with another.
 - **Cacowards browser** — a magazine-style year-by-year view of every WAD Doomworld has awarded since 2004, doubling as an import queue. The list ships with caco, so it works offline and needs no site to be up.
 - **Garbage collection** — reclaim disk space from completed / abandoned WADs, reviewing every file before it goes.
@@ -208,6 +209,41 @@ error then names the site and the WAF. Retrying may not help, but your browser w
 get through: see [Getting a WAD through your browser](#getting-a-wad-through-your-browser).
 You can also add the WAD by hand with the URL or local form.
 
+### The idgames index
+
+The files on idgames come from mirrors, which nothing stands in front of. What is known
+*about* them comes from `www.doomworld.com`, which sits behind Cloudflare. So caco keeps
+its own index of the archive, and the idgames tab searches that: title, author, file name
+and description, any part of a word, ignoring case and accents. Opening the tab shows
+what is newest on the archive.
+
+It builds itself in the background, starting the first time you run this version:
+
+1. **The listing.** Every mirror but one publishes `ls-laR.gz`, a listing of the whole
+   archive. caco asks for it at most once a day, and it costs one empty answer unless it
+   has changed. From the moment the first one lands, about 21,000 uploads can be found by
+   file name and fetched.
+2. **The API, for ids.** One call per directory the first time, about 300 at one a
+   second, so ten minutes or so. After that, one call per new upload. That same answer
+   has each upload's title, author, description and rating.
+3. **The text files.** The file beside each upload says what it is, in the archive's own
+   template. They are read off a mirror, at most four a second, for whatever the API did
+   not cover: the first run reads a little over 2,000 of them, and only what the listing
+   says is new or changed after that.
+
+The API is allowed to fail. On a day Cloudflare has closed that door, all of it comes from
+the text files instead: about 21,000 requests the first time, or a few hours of caco being
+open, and it picks up where it left off if you close it. Until the index has
+caught up, a search asks the API as well, and if it can't, says that this is only what
+the index has so far. An upload with no id yet can still be imported and played, and gets
+its id when the index learns it.
+
+The line above the search box says how far along it is, with **Update** to ask for a new
+listing now and **Stop** while a run is going. Set "Update the idgames index every (days)"
+to 0 in Settings, or `idgames_index_check_days = 0` in `config.toml`, and caco asks nothing
+of anyone at startup. The index lives in `idgames-index.db` on the cache side, as it can
+all be fetched again. Delete it and it is rebuilt.
+
 ## Cacowards
 
 Every WAD Doomworld has awarded since 2004 ships with caco, so the Cacowards view
@@ -354,6 +390,42 @@ write     = true                               # caco may upload
 
 A Gitea mirror's `url` is `https://gitea.example.com/api/packages/<owner>/generic/<name>`.
 
+### A copy of idgames
+
+All of idgames is about 64 GB, which is not much of a disk. Copy it there, tell caco where
+it is, and every WAD on idgames is instant and offline. **Copy of idgames** in the wizard
+says how, and tests that it is the right folder:
+
+```bash
+rsync -rt --exclude incoming --exclude newstuff \
+    rsync://mirror.braindrainlan.nu/pub/idgames/ /mnt/nas/idgames/
+```
+
+Or from any mirror's web pages, with [rclone](https://rclone.org):
+
+```bash
+rclone copy --exclude 'incoming/**' --exclude 'newstuff/**' \
+    --http-url https://youfailit.net/pub/idgames :http: /mnt/nas/idgames
+```
+
+Run it again now and then to catch up. In `config.toml` it is a mirror with one more line,
+and `url` works too, for a server sharing that folder:
+
+```toml
+[[mirrors]]
+name   = "idgames"
+path   = "/mnt/nas/idgames"
+layout = "idgames"
+```
+
+It is not like the mirrors above. caco did not make it and never writes to it, so it has
+no index, and nothing is uploaded to it. A file goes by its path in the archive: Play
+copies it into the cache like any download, which keeps cleaning the cache from ever
+reaching your copy, and it falls back to the public mirrors for anything that isn't there.
+So a copy of part of the archive, such as just `levels/`, is fine. The local index reads
+its listing and text files from here too, so a first run takes seconds rather than
+minutes, if `ls-laR.gz` came along with the rest.
+
 ### Layout
 
 ```text
@@ -427,6 +499,7 @@ auto_doomwiki_enrich = true
 cache_max_size_gb = 20.0
 cache_auto_clean = true
 sourceport_update_check_days = 1        # 0 = never check built sourceports for updates
+idgames_index_check_days = 1            # 0 = never ask a mirror for a new idgames listing
 downloads_dir = "~/Downloads"           # where Get looks; unset means the system's
 link_mode = "copy"                      # leave a file Get links in Downloads; default "move"
 
@@ -490,6 +563,7 @@ machine:
 | `thumbnails/` | Thumbnail cache, re-extracted from TITLEPIC |
 | `sourceports/` | Built sourceport prefixes, rebuilt from the recipe |
 | `sourceports-src/` | Sourceport checkouts and build trees |
+| `idgames-index.db` | The local [index of idgames](#the-idgames-index), rebuilt in the background |
 
 Which of the two `wads/` directories a file lands in is decided by whether caco
 can fetch it again on its own, and nothing else. Anything on idgames or a mirror goes
@@ -511,8 +585,8 @@ modification time has moved. The first start after upgrading reads every file
 once, in the background. The hashes stay after the file goes, because they are
 what identifies the file when you go looking for it.
 
-Override the cache root with `CACO_CACHE_HOME`, or just the WAD cache with
-`CACO_CACHE_DIR`.
+Override the cache root with `CACO_CACHE_HOME`, just the WAD cache with
+`CACO_CACHE_DIR`, or just the idgames index with `CACO_IDGAMES_INDEX`.
 
 ### Recovering from a bad migration
 

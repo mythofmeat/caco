@@ -11,7 +11,8 @@ use crate::cacoward_link;
 use crate::doomwiki::DoomwikiClient;
 use crate::doomworld::ForumThread;
 use crate::idgames::{
-    FileEntry, IdgamesClient, extract_idgames_file_path_from_url, extract_idgames_id_from_url,
+    Archive, FileEntry, Index, archive_path_from_url, extract_idgames_file_path_from_url,
+    extract_idgames_id_from_url,
 };
 
 use caco_core::db::{self, NewWad, SourceType, WadUpdate};
@@ -99,7 +100,7 @@ pub fn titles_match(a: &str, b: &str) -> bool {
 #[derive(Clone)]
 pub struct ImportService {
     doomwiki: Arc<DoomwikiClient>,
-    idgames: Arc<IdgamesClient>,
+    archive: Arc<Archive>,
 }
 
 impl Default for ImportService {
@@ -113,13 +114,20 @@ impl ImportService {
     pub fn new() -> Self {
         Self {
             doomwiki: Arc::new(DoomwikiClient::new()),
-            idgames: Arc::new(IdgamesClient::new()),
+            archive: Arc::new(Archive::open()),
         }
     }
 
     /// Import from idgames archive.
     ///
-    /// Duplicate detection: source_id + filename + author.
+    /// Duplicate detection: source_id, then source_url, then filename + author. An entry
+    /// with no author goes without the last of those, since `map01` by nobody in particular
+    /// is not evidence of anything.
+    ///
+    /// An entry can have no id, when the index knows an upload only by its path and the
+    /// API could not be asked. The row then has none either, until the index learns it:
+    /// see [`backfill_idgames_ids`]. It reads as automatic all the same, and its file
+    /// fetches, because neither of those needs one.
     pub fn import_idgames(
         &self,
         conn: &Connection,
@@ -127,15 +135,17 @@ impl ImportService {
         tags: Option<Vec<String>>,
         force: bool,
     ) -> ImportResult {
-        let idgames_id = entry.id.to_string();
+        let idgames_id = (entry.id > 0).then(|| entry.id.to_string());
+        let page = (!entry.url.is_empty()).then_some(entry.url.as_str());
+        let name_to_match = (!entry.author.is_empty()).then_some(entry.filename.as_str());
 
         // Check for duplicates
         if let Ok(Some(existing)) = db::find_duplicate(
             conn,
             SourceType::Idgames,
-            Some(&idgames_id),
-            None,
-            Some(&entry.filename),
+            idgames_id.as_deref(),
+            page,
+            name_to_match,
             Some(&entry.author),
         ) && !force
         {
@@ -143,9 +153,10 @@ impl ImportService {
         }
 
         // Build and insert the WAD
-        let mut wad = NewWad::new(&entry.title, SourceType::Idgames)
-            .source_id(&idgames_id)
-            .idgames_id(&idgames_id);
+        let mut wad = NewWad::new(&entry.title, SourceType::Idgames);
+        if let Some(id) = &idgames_id {
+            wad = wad.source_id(id).idgames_id(id);
+        }
 
         if !entry.author.is_empty() {
             wad = wad.author(&entry.author);
@@ -852,8 +863,8 @@ impl ImportService {
             // otherwise `{{ig|id=N}}` wiki links leave `filename` null even
             // though the archive knows it. On API error, persist id only.
             let filename = self
-                .idgames
-                .get(Some(id), None)
+                .archive
+                .by_id(id)
                 .ok()
                 .filter(|e| !e.filename.is_empty())
                 .map(|e| e.filename);
@@ -865,7 +876,11 @@ impl ImportService {
             return;
         };
 
-        if let Ok(entry) = self.idgames.get_by_path(&file_path) {
+        // A row with only a path gets nothing here. This is what would make the wiki's WAD
+        // an idgames one, which takes an id, and there is nothing else to go by.
+        if let Ok(entry) = self.archive.by_path(&file_path)
+            && entry.id > 0
+        {
             let filename = if entry.filename.is_empty() {
                 None
             } else {
@@ -874,6 +889,39 @@ impl ImportService {
             apply_idgames_link(conn, wad_id, entry.id, filename);
         }
     }
+}
+
+/// Give WADs imported while the API could not be asked the ids the index has learned
+/// since, and link any Cacoward that was waiting on one. How many it gave one to.
+///
+/// Without this they would stay as they were: nothing else looks at a row again to see
+/// whether it has an id, and a row without one is invisible to anything going by id.
+pub fn backfill_idgames_ids(conn: &Connection, index: &Index) -> caco_core::Result<usize> {
+    let mut filled = 0;
+    for wad in db::idgames_wads_without_id(conn)? {
+        let url = wad.source_url.as_deref().unwrap_or("");
+        let filename = wad.filename.as_deref().unwrap_or("");
+        let Some(path) = archive_path_from_url(url, filename) else {
+            continue;
+        };
+        let Some(id) = index
+            .by_path(&path)?
+            .map(|entry| entry.id)
+            .filter(|id| *id > 0)
+        else {
+            continue;
+        };
+        db::with_transaction(conn, |tx| {
+            // Another row may have got there first, and it is the same WAD twice: that is
+            // not for a background pass to decide about.
+            if db::set_idgames_id(tx, wad.id, id)? {
+                cacoward_link::link_imported_wad(tx, wad.id)?;
+                filled += 1;
+            }
+            Ok(())
+        })?;
+    }
+    Ok(filled)
 }
 
 /// Auto-set custom_iwad on a WAD if the IWAD name is registered.
@@ -1205,6 +1253,183 @@ mod tests {
         assert!(r2.is_duplicate);
     }
 
+    /// An upload as the local index gives it when nothing has connected its path to an
+    /// id yet: the listing and maybe the text file, and no API.
+    fn from_the_index(id: i64, author: &str) -> FileEntry {
+        serde_json::from_value(serde_json::json!({
+            "id": id,
+            "title": "Sunlust",
+            "dir": "levels/doom2/Ports/megawads/",
+            "filename": "sunlust.zip",
+            "date": "2015-08-09",
+            "author": author,
+            "url": "https://www.doomworld.com/idgames/levels/doom2/Ports/megawads/sunlust",
+        }))
+        .unwrap()
+    }
+
+    /// The API behind a challenge, and the WAD goes in anyway: it can be fetched by its
+    /// path, which is all a row needs to read as automatic.
+    #[test]
+    fn test_an_upload_with_no_id_yet_can_still_be_imported() {
+        let conn = setup();
+        let svc = ImportService::new();
+
+        let result = svc.import_idgames(&conn, &from_the_index(0, "Ribbiks"), None, false);
+
+        assert!(result.ok(), "{result:?}");
+        let wad = db::get_wad(&conn, result.wad_id.unwrap(), false)
+            .unwrap()
+            .unwrap();
+        assert_eq!(wad.source_id, None);
+        assert_eq!(wad.idgames_id, None);
+        assert!(wad.retrievability().is_automatic());
+        assert_eq!(wad.filename.as_deref(), Some("sunlust.zip"));
+        assert_eq!(
+            archive_path_from_url(wad.source_url.as_deref().unwrap(), "sunlust.zip").as_deref(),
+            Some("levels/doom2/Ports/megawads/sunlust.zip")
+        );
+    }
+
+    #[test]
+    fn test_the_same_upload_from_either_route_is_one_wad() {
+        let conn = setup();
+        let svc = ImportService::new();
+        let first = svc.import_idgames(&conn, &from_the_index(0, ""), None, false);
+        assert!(first.ok());
+
+        // Again with no id, and with the id it turned out to have.
+        for id in [0, 18168] {
+            let again = svc.import_idgames(&conn, &from_the_index(id, ""), None, false);
+            assert!(again.is_duplicate, "{id}: {again:?}");
+            assert_eq!(again.duplicate_id, first.wad_id);
+        }
+    }
+
+    /// `%castle%` by nobody in particular would find `castle2.zip` by somebody else. Seven
+    /// different files on the archive are called `castle.zip` as it is.
+    #[test]
+    fn test_having_no_author_is_not_a_match_on_author() {
+        let conn = setup();
+        let svc = ImportService::new();
+        let other = db::add_wad(
+            &conn,
+            &NewWad::new("Not Sunlust", SourceType::Idgames)
+                .source_id("1")
+                .author("Someone Else")
+                .filename("sunlust2.zip"),
+        )
+        .unwrap();
+
+        let result = svc.import_idgames(&conn, &from_the_index(0, ""), None, false);
+
+        assert!(result.ok(), "{result:?}");
+        assert_ne!(result.wad_id, Some(other));
+    }
+
+    fn index_listing_sunlust(dir: &tempfile::TempDir, id: i64) -> Index {
+        use crate::idgames::listing::ListedUpload;
+        let index = Index::open(&dir.path().join("index.db")).unwrap();
+        index
+            .apply_listing(
+                &[ListedUpload {
+                    dir: "levels/doom2/Ports/megawads/".to_string(),
+                    filename: "sunlust.zip".to_string(),
+                    size: 10,
+                    date: "2015-08-09".to_string(),
+                    text: None,
+                }],
+                &Default::default(),
+            )
+            .unwrap();
+        if id > 0 {
+            let mut entry = from_the_index(id, "Ribbiks");
+            entry.size = 10;
+            index.record_entry(&entry).unwrap();
+        }
+        index
+    }
+
+    #[test]
+    fn test_a_wad_imported_without_an_id_gets_it_when_the_index_learns_it() {
+        let conn = setup();
+        let svc = ImportService::new();
+        let dir = tempfile::tempdir().unwrap();
+        let wad_id = svc
+            .import_idgames(&conn, &from_the_index(0, "Ribbiks"), None, false)
+            .wad_id
+            .unwrap();
+
+        let index = index_listing_sunlust(&dir, 0);
+        assert_eq!(backfill_idgames_ids(&conn, &index).unwrap(), 0);
+
+        let index = index_listing_sunlust(&dir, 18168);
+        assert_eq!(backfill_idgames_ids(&conn, &index).unwrap(), 1);
+
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        assert_eq!(wad.idgames_id.as_deref(), Some("18168"));
+        assert_eq!(wad.source_id.as_deref(), Some("18168"));
+        // And then it has no more to do.
+        assert_eq!(backfill_idgames_ids(&conn, &index).unwrap(), 0);
+    }
+
+    /// What an id is for: it is what the dataset's Sunlust goes by.
+    #[test]
+    fn test_learning_a_wads_id_links_the_cacoward_waiting_on_it() {
+        let conn = setup();
+        let svc = ImportService::new();
+        let dir = tempfile::tempdir().unwrap();
+        let row = db::upsert_cacoward(
+            &conn,
+            &db::NewCacoward {
+                key: "2015-winner-sunlust-the-other-title".to_string(),
+                year: 2015,
+                category: "winner".to_string(),
+                page_order: 1,
+                wad_title: "A Title It Does Not Share".to_string(),
+                idgames_id: Some(18168),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let wad_id = svc
+            .import_idgames(&conn, &from_the_index(0, "Ribbiks"), None, false)
+            .wad_id
+            .unwrap();
+        assert_eq!(db::get_cacoward(&conn, row).unwrap().unwrap().wad_id, None);
+
+        backfill_idgames_ids(&conn, &index_listing_sunlust(&dir, 18168)).unwrap();
+
+        assert_eq!(
+            db::get_cacoward(&conn, row).unwrap().unwrap().wad_id,
+            Some(wad_id)
+        );
+    }
+
+    #[test]
+    fn test_learning_an_id_another_wad_has_is_left_for_someone_to_decide() {
+        let conn = setup();
+        let svc = ImportService::new();
+        let dir = tempfile::tempdir().unwrap();
+        let wad_id = svc
+            .import_idgames(&conn, &from_the_index(0, "Ribbiks"), None, false)
+            .wad_id
+            .unwrap();
+        db::add_wad(
+            &conn,
+            &NewWad::new("Sunlust", SourceType::Idgames)
+                .source_id("18168")
+                .idgames_id("18168"),
+        )
+        .unwrap();
+
+        let filled = backfill_idgames_ids(&conn, &index_listing_sunlust(&dir, 18168)).unwrap();
+
+        assert_eq!(filled, 0);
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        assert_eq!(wad.idgames_id, None);
+    }
+
     #[test]
     fn test_import_doomwiki() {
         let conn = setup();
@@ -1320,14 +1545,27 @@ mod tests {
         assert_eq!(wad.filename.as_deref(), Some("manual.wad")); // preserved
     }
 
+    /// A service whose index is in `dir` and whose API is nowhere, so that a test can get
+    /// as far as asking about an upload without reaching the real index or the real site.
+    fn offline_service(dir: &tempfile::TempDir) -> ImportService {
+        ImportService {
+            doomwiki: Arc::new(DoomwikiClient::new()),
+            archive: Arc::new(Archive::new(
+                dir.path().join("index.db"),
+                crate::idgames::IdgamesClient::with_api_url("http://127.0.0.1:1/"),
+            )),
+        }
+    }
+
     #[test]
     fn test_auto_link_idgames_from_query_url() {
-        // `?id=N` URLs are resolved without touching the network.
+        // `?id=N` URLs are resolved without the API having to answer.
         let conn = setup();
         let new = NewWad::new("Test", SourceType::Doomwiki);
         let wad_id = db::add_wad(&conn, &new).unwrap();
 
-        let svc = ImportService::new();
+        let dir = tempfile::tempdir().unwrap();
+        let svc = offline_service(&dir);
         svc.auto_link_idgames_from_url(
             &conn,
             wad_id,
@@ -1344,11 +1582,51 @@ mod tests {
         let new = NewWad::new("Test", SourceType::Doomwiki);
         let wad_id = db::add_wad(&conn, &new).unwrap();
 
-        let svc = ImportService::new();
+        let dir = tempfile::tempdir().unwrap();
+        let svc = offline_service(&dir);
         svc.auto_link_idgames_from_url(&conn, wad_id, "https://example.com/downloads/scythe.zip");
 
         let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
         assert!(wad.idgames_id.is_none());
+    }
+
+    /// What it would otherwise write is `0`, which reads as a real id of nothing at all.
+    #[test]
+    fn test_a_wiki_link_to_an_upload_with_no_id_yet_does_not_invent_one() {
+        let conn = setup();
+        let wad_id = db::add_wad(&conn, &NewWad::new("Test", SourceType::Doomwiki)).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        // The index has it by its path, and the API is nowhere.
+        index_listing_sunlust(&dir, 0);
+        let svc = offline_service(&dir);
+
+        svc.auto_link_idgames_from_url(
+            &conn,
+            wad_id,
+            "https://www.doomworld.com/idgames/levels/doom2/Ports/megawads/sunlust",
+        );
+
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        assert_eq!(wad.idgames_id, None);
+    }
+
+    #[test]
+    fn test_a_wiki_link_is_answered_by_the_index_when_it_knows() {
+        let conn = setup();
+        let wad_id = db::add_wad(&conn, &NewWad::new("Test", SourceType::Doomwiki)).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        index_listing_sunlust(&dir, 18168);
+        let svc = offline_service(&dir);
+
+        svc.auto_link_idgames_from_url(
+            &conn,
+            wad_id,
+            "https://www.doomworld.com/idgames/levels/doom2/Ports/megawads/sunlust",
+        );
+
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        assert_eq!(wad.idgames_id.as_deref(), Some("18168"));
+        assert_eq!(wad.filename.as_deref(), Some("sunlust.zip"));
     }
 
     #[test]

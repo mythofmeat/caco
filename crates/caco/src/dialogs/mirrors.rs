@@ -90,7 +90,7 @@ impl MirrorsDialogState {
             .map(|config| Row {
                 files: counts.get(&config.name).copied(),
                 wads: mirrors::wads_held_by(conn, &config.name).unwrap_or_default(),
-                to_upload: if config.write {
+                to_upload: if config.takes_uploads() {
                     mirrors::wads_to_upload(conn, &config.name).map_or(0, |wads| wads.len())
                 } else {
                     0
@@ -170,7 +170,7 @@ impl MirrorsDialogState {
             return false;
         }
 
-        self.page = if config.write && replacing.is_none() {
+        self.page = if config.takes_uploads() && replacing.is_none() {
             Page::Fill(FillPage {
                 titles: titles_to_upload(conn, &config.name),
                 mirror: config.name,
@@ -523,6 +523,12 @@ fn location_text(config: &MirrorConfig) -> String {
 /// it is still being, unless something went wrong.
 fn status_line(row: &Row, report: Option<&SyncReport>) -> (String, bool) {
     let name = &row.config.name;
+    if row.config.is_idgames_copy() {
+        return match report.and_then(|r| r.failed.iter().find(|(n, _)| n == name)) {
+            Some((_, why)) => (format!("Could not read it: {why}."), false),
+            None => ("A copy of idgames · read only".to_string(), true),
+        };
+    }
     let access = if row.config.write {
         "caco may upload"
     } else {

@@ -23,12 +23,14 @@ pub fn render(
 
     // Search bar
     ui.horizontal(|ui| {
-        ui.label("Search:");
-        let response = ui.add(
-            egui::TextEdit::singleline(&mut state.query)
-                .desired_width(300.0)
-                .hint_text("Enter query and press Enter"),
-        );
+        let label = ui.label("Search:");
+        let response = ui
+            .add(
+                egui::TextEdit::singleline(&mut state.query)
+                    .desired_width(300.0)
+                    .hint_text("Enter query and press Enter"),
+            )
+            .labelled_by(label.id);
         if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
             let q = state.query.trim().to_string();
             if !q.is_empty() && !state.is_searching {
@@ -43,6 +45,18 @@ pub fn render(
             ui.colored_label(theme::TEXT_SECONDARY, &state.status_text);
         }
     });
+
+    if let Some(note) = &state.note {
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(note)
+                    .size(12.0)
+                    .color(theme::COLOR_WARNING),
+            )
+            .truncate(),
+        )
+        .on_hover_text(note);
+    }
 
     ui.separator();
 
@@ -100,7 +114,9 @@ fn render_results_table(
     let table = TableBuilder::new(ui)
         .striped(true)
         .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-        .column(Column::remainder().at_least(100.0)) // Title
+        // Clipped, or one long title widens the table and takes the preview off the
+        // window with it. Whole in the preview, and on hover.
+        .column(Column::remainder().at_least(100.0).clip(true)) // Title
         .column(Column::exact(120.0)) // Author
         .column(Column::exact(100.0)); // Extra
 
@@ -125,7 +141,11 @@ fn render_results_table(
 
                 let entry = &state.results[idx];
                 row.col(|ui| {
-                    if ui.selectable_label(is_selected, &entry.title).clicked() {
+                    if ui
+                        .selectable_label(is_selected, &entry.title)
+                        .on_hover_text(&entry.title)
+                        .clicked()
+                    {
                         clicked_row = Some(idx);
                     }
                 });
@@ -173,6 +193,7 @@ fn render_preview(ui: &mut egui::Ui, state: &SearchState, action: &mut Option<Se
             SearchSourceData::Idgames {
                 rating,
                 date,
+                dir,
                 filename,
                 ..
             } => {
@@ -184,6 +205,9 @@ fn render_preview(ui: &mut egui::Ui, state: &SearchState, action: &mut Option<Se
                 }
                 if let Some(f) = filename {
                     preview_row(ui, "File", f);
+                }
+                if let Some(d) = dir {
+                    preview_row(ui, "In", d);
                 }
             }
             SearchSourceData::Doomwiki {

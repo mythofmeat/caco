@@ -13,6 +13,10 @@ use crate::theme;
 
 pub enum ImportAction {
     Search(SearchSource, String),
+    /// Fill the idgames table with the newest uploads.
+    Newest,
+    /// Bring the local index of idgames up to date, now, whatever the setting says.
+    UpdateIndex,
     ImportSearchResult(SearchSource, SearchResultEntry),
     ImportForm(FormKind, Vec<(String, String)>),
 }
@@ -44,6 +48,11 @@ pub fn render(ui: &mut egui::Ui, state: &mut ImportState) -> Option<ImportAction
     // Dispatch to active source panel
     match state.active_source {
         0 => {
+            action = render_index_bar(ui, state);
+            if state.idgames.wants_newest(&state.index) {
+                state.idgames.newest_asked = true;
+                action = Some(ImportAction::Newest);
+            }
             if let Some(a) = search_panel::render(ui, &mut state.idgames, SearchSource::Idgames) {
                 action = Some(map_search_action(SearchSource::Idgames, a));
             }
@@ -91,6 +100,56 @@ pub fn render(ui: &mut egui::Ui, state: &mut ImportState) -> Option<ImportAction
         });
     }
 
+    action
+}
+
+/// One line about the local index of idgames, with what can be done about it. Clipped
+/// rather than wrapped, since it sits above a table that needs the height at 800x400, with
+/// all of it behind a hover.
+fn render_index_bar(ui: &mut egui::Ui, state: &mut ImportState) -> Option<ImportAction> {
+    let mut action = None;
+    let index = &state.index;
+    ui.horizontal(|ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add_space(4.0);
+            if index.is_running() {
+                if ui
+                    .button("Stop")
+                    .on_hover_text("It picks up where it left off the next time caco starts")
+                    .clicked()
+                {
+                    index.stop();
+                }
+                ui.spinner();
+            } else if ui
+                .button("Update")
+                .on_hover_text("Ask a mirror for a new listing now, however recent this one is")
+                .clicked()
+            {
+                action = Some(ImportAction::UpdateIndex);
+            }
+            if ui
+                .button("Newest")
+                .on_hover_text("The most recent uploads to idgames")
+                .clicked()
+            {
+                state.idgames.query.clear();
+                state.idgames.results.clear();
+                state.idgames.showing_newest = true;
+                action = Some(ImportAction::Newest);
+            }
+
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                let (text, color) = match &index.problem {
+                    Some(problem) if !index.is_running() => (problem.clone(), theme::COLOR_WARNING),
+                    _ => (index.summary(), theme::TEXT_SECONDARY),
+                };
+                let label =
+                    egui::Label::new(egui::RichText::new(&text).size(12.0).color(color)).truncate();
+                ui.add(label).on_hover_text(&text);
+            });
+        });
+    });
     action
 }
 

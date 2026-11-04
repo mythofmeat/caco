@@ -366,7 +366,7 @@ pub fn offer_targets(wad: &WadRecord, mirrors: &[MirrorConfig]) -> Vec<String> {
     }
     mirrors
         .iter()
-        .filter(|mirror| mirror.write)
+        .filter(|mirror| mirror.takes_uploads())
         .map(|mirror| mirror.name.clone())
         .collect()
 }

@@ -1,7 +1,25 @@
-pub mod client;
-pub mod models;
+//! The idgames archive.
+//!
+//! Its files have always come from mirrors, which are not behind anything. What is in
+//! them came from `www.doomworld.com`, which is behind Cloudflare, and shares a host with
+//! paths that answer with a challenge. So caco keeps its own index of the archive
+//! ([`index`], kept up to date by [`sync`]), built from what the mirrors publish, and asks
+//! the API only for what it does not know yet: [`archive`] is where that is decided, and
+//! nothing outside this module has to know there are two places to ask.
 
+pub mod archive;
+pub mod client;
+pub mod index;
+pub mod listing;
+pub mod models;
+pub mod sync;
+#[cfg(test)]
+pub(crate) mod test_archive;
+pub mod textfile;
+
+pub use archive::{Archive, ArchiveSearch, IdgamesRef};
 pub use client::{IdgamesClient, MIRRORS};
+pub use index::{Index, IndexStatus};
 pub use models::{FileEntry, Review};
 
 /// Extract a numeric idgames ID from a `doomworld.com/idgames/...?id=N` URL.
@@ -65,9 +83,88 @@ pub fn extract_idgames_file_path_from_url(url: &str) -> Option<String> {
     }
 }
 
+/// The public mirrors as mirrors with idgames' layout, which is all they are, starting
+/// with the one in `first`: `download_mirror` in the config. Named by address, for when
+/// one has to be blamed for something.
+pub fn public_mirrors(first: i64) -> Vec<caco_core::config::MirrorConfig> {
+    let first = first.max(0) as usize % MIRRORS.len();
+    (0..MIRRORS.len())
+        .map(|offset| MIRRORS[(first + offset) % MIRRORS.len()])
+        .map(|url| caco_core::config::MirrorConfig {
+            name: url.to_string(),
+            url: Some(url.to_string()),
+            layout: Some(caco_core::config::MirrorLayout::IDGAMES.to_string()),
+            ..Default::default()
+        })
+        .collect()
+}
+
+/// Where a file is in the archive, from a WAD's `source_url` and `filename`, for a WAD the
+/// index cannot place by its id.
+///
+/// `source_url` looks like `https://www.doomworld.com/idgames/levels/doom2/Ports/megawads/sunlust`:
+/// the last part is a slug for the upload, and what comes before it is the directory.
+pub fn archive_path_from_url(source_url: &str, filename: &str) -> Option<String> {
+    if filename.is_empty() {
+        return None;
+    }
+    let (_, after) = source_url.split_once("/idgames/")?;
+    if after.contains('?') {
+        return None;
+    }
+    let (dir, _slug) = after.trim_end_matches('/').rsplit_once('/')?;
+    Some(format!("{dir}/{filename}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_the_public_mirrors_start_from_the_one_picked() {
+        let names = |first| -> Vec<String> {
+            public_mirrors(first)
+                .into_iter()
+                .map(|mirror| mirror.name)
+                .collect()
+        };
+        assert_eq!(names(0)[0], MIRRORS[0]);
+        assert_eq!(names(1)[0], MIRRORS[1]);
+        assert_eq!(names(1).last().unwrap(), MIRRORS[0]);
+        assert_eq!(names(0).len(), MIRRORS.len());
+        // Out of range wraps round, as a setting from when there were more of them does.
+        assert_eq!(names(MIRRORS.len() as i64)[0], MIRRORS[0]);
+        assert_eq!(names(-1)[0], MIRRORS[0]);
+        assert!(
+            public_mirrors(0)
+                .iter()
+                .all(|mirror| mirror.is_idgames_copy())
+        );
+    }
+
+    #[test]
+    fn test_a_files_place_in_the_archive_comes_from_its_page_and_its_name() {
+        assert_eq!(
+            archive_path_from_url(
+                "https://www.doomworld.com/idgames/levels/doom2/Ports/megawads/sunlust",
+                "sunlust.zip"
+            )
+            .as_deref(),
+            Some("levels/doom2/Ports/megawads/sunlust.zip")
+        );
+    }
+
+    #[test]
+    fn test_a_page_that_does_not_say_where_it_is_places_nothing() {
+        let by_id = "https://www.doomworld.com/idgames/?id=18184";
+        assert_eq!(archive_path_from_url(by_id, "sunlust.zip"), None);
+        let forum = "https://www.doomworld.com/forum/topic/1/";
+        assert_eq!(archive_path_from_url(forum, "sunlust.zip"), None);
+        let at_root = "https://www.doomworld.com/idgames/sunlust";
+        assert_eq!(archive_path_from_url(at_root, "sunlust.zip"), None);
+        let page = "https://www.doomworld.com/idgames/levels/doom2/sunlust";
+        assert_eq!(archive_path_from_url(page, ""), None);
+    }
 
     #[test]
     fn extracts_id_from_basic_url() {

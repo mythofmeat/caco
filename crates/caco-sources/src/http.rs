@@ -21,15 +21,24 @@ pub fn build_client() -> Client {
         .expect("failed to build HTTP client")
 }
 
-/// Custom serde deserializer: accepts JSON `null` or a `String`, returning
-/// an empty `String` for `null`. Mirrors the Python `coerce_str` validator.
+/// Custom serde deserializer: accepts JSON `null`, a `String`, or a number, returning an
+/// empty `String` for `null`.
+///
+/// A number because the idgames API writes anything that looks like one as one: a WAD
+/// called `2014` has `"title": 2014`, and an author called `8130423` the same. Mirrors the
+/// Python `coerce_str` validator otherwise.
 pub fn coerce_str<'de, D>(deserializer: D) -> std::result::Result<String, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
     use serde::Deserialize;
-    let opt = Option::<String>::deserialize(deserializer)?;
-    Ok(opt.unwrap_or_default())
+    let opt = Option::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(match opt {
+        Some(serde_json::Value::String(s)) => s,
+        Some(serde_json::Value::Number(n)) => n.to_string(),
+        Some(serde_json::Value::Bool(b)) => b.to_string(),
+        _ => String::new(),
+    })
 }
 
 /// Custom serde deserializer: accepts JSON `null`, a number, or a numeric
@@ -207,6 +216,13 @@ mod tests {
     fn test_coerce_str_present() {
         let t: TestStr = serde_json::from_str(r#"{"val": "hello"}"#).unwrap();
         assert_eq!(t.val, "hello");
+    }
+
+    /// `vtm_2014.zip` on the real API, and `hexndm.zip`'s author is `8130423`.
+    #[test]
+    fn test_coerce_str_takes_what_the_api_wrote_as_a_number() {
+        let t: TestStr = serde_json::from_str(r#"{"val": 2014}"#).unwrap();
+        assert_eq!(t.val, "2014");
     }
 
     #[test]

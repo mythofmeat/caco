@@ -1496,3 +1496,386 @@ fn test_a_local_mirror_makes_the_same_trip() {
 
     assert_eq!(fs::read(dest).unwrap(), WAD_BYTES);
 }
+
+// ---------------------------------------------------------------------------
+// A copy of idgames
+// ---------------------------------------------------------------------------
+
+/// A directory laid out as a mirror of the archive is.
+fn idgames_tree(root: &Path, files: &[(&str, &[u8])]) -> MirrorConfig {
+    for (path, bytes) in files {
+        let file = root.join(path);
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(file, bytes).unwrap();
+    }
+    MirrorConfig {
+        name: "idgames".to_string(),
+        path: Some(root.to_string_lossy().into_owned()),
+        layout: Some("idgames".to_string()),
+        ..Default::default()
+    }
+}
+
+const SCYTHE: &str = "levels/doom2/megawads/scythe.zip";
+
+fn gzipped_listing() -> Vec<u8> {
+    crate::idgames::test_archive::listing_of(&[
+        (SCYTHE, 10, "Jan  1  2003"),
+        ("levels/doom2/megawads/sunlust.zip", 20, "Aug  9  2015"),
+    ])
+}
+
+#[test]
+fn test_a_file_is_copied_off_a_copy_of_idgames() {
+    let m = Machine::new();
+    let copy = idgames_tree(&m.dir.path().join("copy"), &[(SCYTHE, b"PK scythe")]);
+
+    let dest = fetch_from_idgames_copies(&[copy], SCYTHE, &m.paths.cache_dir)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(dest, m.paths.cache_dir.join("scythe.zip"));
+    assert_eq!(fs::read(&dest).unwrap(), b"PK scythe");
+    assert!(m.dir.path().join("copy").join(SCYTHE).exists());
+}
+
+#[test]
+fn test_a_file_comes_over_http_from_a_copy_of_idgames() {
+    let m = Machine::new();
+    let server = TestServer::start(Flavor::Static, None);
+    server.put(SCYTHE, b"PK scythe");
+    let copy = MirrorConfig {
+        layout: Some("idgames".to_string()),
+        ..http_mirror(&server)
+    };
+
+    let dest = fetch_from_idgames_copies(&[copy], SCYTHE, &m.paths.cache_dir)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(fs::read(dest).unwrap(), b"PK scythe");
+}
+
+#[test]
+fn test_a_copy_without_the_file_is_not_a_failure() {
+    let m = Machine::new();
+    let copy = idgames_tree(&m.dir.path().join("copy"), &[("levels/other.zip", b"PK")]);
+
+    let found = fetch_from_idgames_copies(&[copy], SCYTHE, &m.paths.cache_dir).unwrap();
+
+    assert_eq!(found, None);
+    assert!(!partial_beside(&m.paths.cache_dir.join("scythe.zip")).exists());
+}
+
+#[test]
+fn test_each_copy_is_tried_in_turn() {
+    let m = Machine::new();
+    let first = idgames_tree(&m.dir.path().join("first"), &[]);
+    let mut gone = first.clone();
+    gone.name = "gone".to_string();
+    gone.path = Some(m.dir.path().join("not-mounted").display().to_string());
+    let second = MirrorConfig {
+        name: "second".to_string(),
+        ..idgames_tree(&m.dir.path().join("second"), &[(SCYTHE, b"PK scythe")])
+    };
+
+    let dest = fetch_from_idgames_copies(&[gone, first, second], SCYTHE, &m.paths.cache_dir)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(fs::read(dest).unwrap(), b"PK scythe");
+}
+
+#[test]
+fn test_a_copy_that_is_not_there_gets_the_blame_when_nothing_has_it() {
+    let m = Machine::new();
+    let gone = MirrorConfig {
+        name: "gone".to_string(),
+        path: Some(m.dir.path().join("not-mounted").display().to_string()),
+        layout: Some("idgames".to_string()),
+        ..Default::default()
+    };
+
+    let failure = fetch_from_idgames_copies(&[gone], SCYTHE, &m.paths.cache_dir)
+        .unwrap_err()
+        .to_string();
+
+    assert!(failure.starts_with("Mirror gone:"), "{failure}");
+    assert!(failure.contains("is not there"), "{failure}");
+}
+
+/// Only what says it is one gets asked: the same path on a mirror caco keeps means nothing.
+#[test]
+fn test_a_mirror_caco_keeps_is_not_asked_for_a_path_in_the_archive() {
+    let m = Machine::new();
+    let root = m.dir.path().join("kept");
+    let mut kept = idgames_tree(&root, &[(SCYTHE, b"PK scythe")]);
+    kept.layout = None;
+
+    let found = fetch_from_idgames_copies(&[kept], SCYTHE, &m.paths.cache_dir).unwrap();
+
+    assert_eq!(found, None);
+}
+
+/// It may have come from a row, and a row's URL came from a page somebody wrote.
+#[test]
+fn test_a_path_cannot_climb_out_of_a_copy() {
+    let m = Machine::new();
+    let root = m.dir.path().join("copy");
+    let copy = idgames_tree(&root, &[("levels/a.zip", b"PK")]);
+    fs::write(m.dir.path().join("secret.zip"), b"mine").unwrap();
+
+    for path in [
+        "../secret.zip",
+        "levels/../../secret.zip",
+        "/etc/passwd",
+        "levels//a.zip",
+        "levels\\..\\a.zip",
+        "",
+    ] {
+        let found =
+            fetch_from_idgames_copies(std::slice::from_ref(&copy), path, &m.paths.cache_dir);
+        assert!(matches!(found, Ok(None)), "{path}: {found:?}");
+    }
+    assert!(!m.paths.cache_dir.join("secret.zip").exists());
+}
+
+#[test]
+fn test_a_copy_has_no_index_to_read_and_says_it_is_there() {
+    let m = Machine::new();
+    let copy = idgames_tree(
+        &m.dir.path().join("copy"),
+        &[("ls-laR.gz", &gzipped_listing()), (SCYTHE, b"PK")],
+    );
+
+    let report = sync_mirrors(&m.conn, std::slice::from_ref(&copy)).unwrap();
+
+    assert_eq!(report.failed, []);
+    assert_eq!(report.read, [("idgames".to_string(), 0)]);
+    assert_eq!(rows_held(&m.conn, "idgames"), 0);
+    assert!(!m.dir.path().join("copy/index").exists());
+}
+
+#[test]
+fn test_a_copy_that_is_not_mounted_is_reported_by_a_sync() {
+    let m = Machine::new();
+    let copy = MirrorConfig {
+        name: "idgames".to_string(),
+        path: Some(m.dir.path().join("not-mounted").display().to_string()),
+        layout: Some("idgames".to_string()),
+        ..Default::default()
+    };
+
+    let report = sync_mirrors(&m.conn, &[copy]).unwrap();
+
+    assert_eq!(report.read, []);
+    assert!(report.failed[0].1.contains("is not there"), "{report:?}");
+}
+
+/// A mirror that used to be kept by caco, and is now pointed at a copy of idgames.
+#[test]
+fn test_what_a_mirror_held_goes_when_it_turns_out_to_be_a_copy() {
+    let m = Machine::new();
+    let root = m.dir.path().join("mirror");
+    let entry = entry_for(WAD_BYTES, "a.zip");
+    local_store_with(&root, std::slice::from_ref(&entry), WAD_BYTES);
+    let mirror = local_mirror(&root);
+    sync_mirrors(&m.conn, std::slice::from_ref(&mirror)).unwrap();
+    assert_eq!(rows_held(&m.conn, &mirror.name), 1);
+
+    let as_copy = MirrorConfig {
+        layout: Some("idgames".to_string()),
+        ..mirror.clone()
+    };
+    fs::create_dir_all(root.join("levels")).unwrap();
+    let report = sync_mirrors(&m.conn, std::slice::from_ref(&as_copy)).unwrap();
+
+    assert!(report.changed);
+    assert_eq!(rows_held(&m.conn, &mirror.name), 0);
+}
+
+#[test]
+fn test_a_layout_nobody_has_heard_of_is_reported_rather_than_guessed_at() {
+    let m = Machine::new();
+    let root = m.dir.path().join("mirror");
+    fs::create_dir_all(&root).unwrap();
+    let mirror = MirrorConfig {
+        layout: Some("idgmaes".to_string()),
+        ..local_mirror(&root)
+    };
+
+    let report = sync_mirrors(&m.conn, std::slice::from_ref(&mirror)).unwrap();
+
+    assert_eq!(report.read, []);
+    assert!(report.failed[0].1.contains("idgmaes"), "{report:?}");
+}
+
+#[test]
+fn test_probing_a_copy_counts_what_its_listing_names() {
+    let m = Machine::new();
+    let copy = idgames_tree(
+        &m.dir.path().join("copy"),
+        &[("ls-laR.gz", &gzipped_listing())],
+    );
+    let probe = probe_mirror(&copy).unwrap();
+    assert_eq!(probe.files, Some(2));
+    assert!(!probe.folder_missing);
+    assert_eq!(probe.can_write, None);
+    assert!(probe.is_ok());
+}
+
+/// A copy of `levels/` alone is worth having.
+#[test]
+fn test_probing_a_copy_with_no_listing_goes_by_its_levels_folder() {
+    let m = Machine::new();
+    let copy = idgames_tree(&m.dir.path().join("copy"), &[(SCYTHE, b"PK")]);
+    let probe = probe_mirror(&copy).unwrap();
+    assert_eq!(probe.files, None);
+    assert!(probe.is_ok());
+}
+
+/// The folder above the one that was meant, the likeliest mistake there is.
+#[test]
+fn test_probing_something_that_is_not_a_copy_says_what_it_looked_for() {
+    let m = Machine::new();
+    let copy = idgames_tree(
+        &m.dir.path().join("above"),
+        &[("idgames/levels/doom2/a.zip", b"PK")],
+    );
+    let failure = probe_mirror(&copy).unwrap_err();
+    assert!(failure.contains("ls-laR.gz"), "{failure}");
+    assert!(failure.contains("levels"), "{failure}");
+}
+
+/// caco did not make it and must not start making it. A folder that is not there is a
+/// drive that is not mounted or a copy that has not been made, and not a thing to create.
+#[test]
+fn test_probing_and_setting_up_a_copy_that_is_not_there_creates_nothing() {
+    let m = Machine::new();
+    let missing = m.dir.path().join("not-there");
+    let copy = MirrorConfig {
+        name: "idgames".to_string(),
+        path: Some(missing.display().to_string()),
+        layout: Some("idgames".to_string()),
+        write: true,
+        ..Default::default()
+    };
+
+    assert!(probe_mirror(&copy).is_err());
+    assert!(set_up_mirror(&copy).is_ok());
+    assert!(!missing.exists());
+}
+
+#[test]
+fn test_setting_up_a_copy_leaves_it_as_it_found_it() {
+    let m = Machine::new();
+    let root = m.dir.path().join("copy");
+    let copy = MirrorConfig {
+        write: true,
+        ..idgames_tree(&root, &[(SCYTHE, b"PK")])
+    };
+
+    set_up_mirror(&copy).unwrap();
+
+    assert!(!root.join("index").exists());
+}
+
+#[test]
+fn test_probing_a_copy_over_http_asks_for_its_listing() {
+    let server = TestServer::start(Flavor::Static, None);
+    let copy = MirrorConfig {
+        layout: Some("idgames".to_string()),
+        ..http_mirror(&server)
+    };
+    assert!(probe_mirror(&copy).unwrap_err().contains("ls-laR.gz"));
+
+    server.put("ls-laR.gz", &gzipped_listing());
+    assert_eq!(probe_mirror(&copy).unwrap().files, Some(2));
+}
+
+/// Nothing it could write would survive the next `rsync`, and an index would make it look
+/// like a mirror caco keeps.
+#[test]
+fn test_nothing_is_uploaded_to_a_copy_whatever_its_config_says() {
+    let m = Machine::new();
+    let root = m.dir.path().join("copy");
+    let copy = MirrorConfig {
+        write: true,
+        ..idgames_tree(&root, &[(SCYTHE, b"PK")])
+    };
+    let wad = m.wad_with_file("road.zip", WAD_BYTES);
+
+    assert!(!copy.takes_uploads());
+    let failure = upload_wad(&m.conn, wad, &copy, NOW).unwrap_err();
+
+    assert!(failure.to_string().contains("copy of idgames"), "{failure}");
+    assert!(!root.join("index").exists());
+}
+
+// ---------------------------------------------------------------------------
+// Reading what may not have changed
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_a_local_file_that_has_not_changed_is_noticed_without_being_read() {
+    let m = Machine::new();
+    let root = m.dir.path().join("copy");
+    let copy = idgames_tree(&root, &[("ls-laR.gz", b"a listing")]);
+    let store = Store::open(&copy).unwrap();
+
+    let Conditional::Changed { bytes, validators } =
+        store.read_if_changed("ls-laR.gz", None, 1024).unwrap()
+    else {
+        panic!("should have read it the first time");
+    };
+    assert_eq!(bytes, b"a listing");
+    assert!(validators.last_modified.is_some());
+
+    assert_eq!(
+        store
+            .read_if_changed("ls-laR.gz", Some(&validators), 1024)
+            .unwrap(),
+        Conditional::NotModified
+    );
+
+    fs::write(root.join("ls-laR.gz"), b"a longer listing").unwrap();
+    assert!(matches!(
+        store
+            .read_if_changed("ls-laR.gz", Some(&validators), 1024)
+            .unwrap(),
+        Conditional::Changed { .. }
+    ));
+}
+
+#[test]
+fn test_a_local_file_that_is_not_there_says_so() {
+    let m = Machine::new();
+    let copy = idgames_tree(&m.dir.path().join("copy"), &[("x", b"")]);
+    let store = Store::open(&copy).unwrap();
+    assert_eq!(
+        store.read_if_changed("ls-laR.gz", None, 1024).unwrap(),
+        Conditional::NotThere
+    );
+    assert_eq!(store.read_bytes("ls-laR.gz", 1024).unwrap(), None);
+}
+
+/// The drive is not mounted: that says nothing about what is on it.
+#[test]
+fn test_reading_from_a_local_store_that_is_not_there_is_a_failure() {
+    let m = Machine::new();
+    let copy = MirrorConfig {
+        path: Some(m.dir.path().join("not-mounted").display().to_string()),
+        ..local_mirror(m.dir.path())
+    };
+    let store = Store::open(&copy).unwrap();
+    assert!(store.read_bytes("ls-laR.gz", 1024).is_err());
+    assert!(store.read_if_changed("ls-laR.gz", None, 1024).is_err());
+}
+
+#[test]
+fn test_reading_stops_at_the_limit_it_is_given() {
+    let m = Machine::new();
+    let copy = idgames_tree(&m.dir.path().join("copy"), &[("big", b"0123456789")]);
+    let store = Store::open(&copy).unwrap();
+    assert_eq!(store.read_bytes("big", 4).unwrap().unwrap(), b"0123");
+}
