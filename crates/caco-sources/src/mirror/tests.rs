@@ -1556,6 +1556,77 @@ fn test_a_file_comes_over_http_from_a_copy_of_idgames() {
     assert_eq!(fs::read(dest).unwrap(), b"PK scythe");
 }
 
+/// A file served a little at a time, for `for_secs`, then nothing more until the connection
+/// is dropped if `stall` says so. On a loopback socket, and answering one request.
+fn dribbling_server(for_secs: u64, stall: bool) -> MirrorConfig {
+    use std::io::{BufRead, BufReader, Write};
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        let Ok((stream, _)) = listener.accept() else {
+            return;
+        };
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let mut line = String::new();
+        while reader.read_line(&mut line).is_ok_and(|_| line.trim() != "") {
+            line.clear();
+        }
+        let mut stream = stream;
+        let body_len = for_secs + 1 + u64::from(stall);
+        let head = format!("HTTP/1.1 200 OK\r\nContent-Length: {body_len}\r\n\r\n");
+        stream.write_all(head.as_bytes()).unwrap();
+        for _ in 0..=for_secs {
+            if stream.write_all(b"x").is_err() {
+                return;
+            }
+            stream.flush().unwrap();
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+        if stall {
+            std::thread::sleep(std::time::Duration::from_secs(120));
+        }
+    });
+    MirrorConfig {
+        name: "slow".to_string(),
+        url: Some(url),
+        layout: Some("idgames".to_string()),
+        ..Default::default()
+    }
+}
+
+/// `RequestBuilder::timeout` is a limit on the whole body, where the client's is on each
+/// read. This is what a download relies on being the way round it is, which is easily
+/// taken for the opposite: a file that keeps coming is not cut off however long it takes,
+/// and one that stops does not hold Play up for long. Over a minute of real time, so not on
+/// every run of the tests.
+#[test]
+#[ignore = "takes over a minute of real time"]
+fn test_a_download_can_take_as_long_as_it_keeps_coming_and_no_longer_once_it_stops() {
+    let m = Machine::new();
+
+    let started = std::time::Instant::now();
+    let dest = fetch_from_idgames_copies(
+        &[dribbling_server(40, false)],
+        "levels/slow.zip",
+        &m.paths.cache_dir,
+    )
+    .unwrap()
+    .unwrap();
+    assert!(started.elapsed().as_secs() >= 40, "{:?}", started.elapsed());
+    assert_eq!(fs::read(dest).unwrap().len(), 41);
+
+    let started = std::time::Instant::now();
+    let failure = fetch_from_idgames_copies(
+        &[dribbling_server(2, true)],
+        "levels/stalled.zip",
+        &m.paths.cache_dir,
+    );
+    assert!(failure.is_err(), "{failure:?}");
+    assert!(started.elapsed().as_secs() < 60, "{:?}", started.elapsed());
+    assert!(!partial_beside(&m.paths.cache_dir.join("stalled.zip")).exists());
+}
+
 #[test]
 fn test_a_copy_without_the_file_is_not_a_failure() {
     let m = Machine::new();

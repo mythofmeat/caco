@@ -423,8 +423,8 @@ no index, and nothing is uploaded to it. A file goes by its path in the archive:
 copies it into the cache like any download, which keeps cleaning the cache from ever
 reaching your copy, and it falls back to the public mirrors for anything that isn't there.
 So a copy of part of the archive, such as just `levels/`, is fine. The local index reads
-its listing and text files from here too, so a first run takes seconds rather than
-minutes, if `ls-laR.gz` came along with the rest.
+its listing and text files from here too, if `ls-laR.gz` came along with the rest, so
+building it asks nothing of any mirror.
 
 ### Layout
 

@@ -62,10 +62,6 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// More than this is not an index, whatever a server says.
 const MAX_INDEX_BYTES: u64 = 64 << 20;
 
-/// How long a file gets to come down from a mirror. The largest uploads on idgames are
-/// hundreds of megabytes, and this can be somebody's home server.
-const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(30 * 60);
-
 /// Where a store that refuses to overwrite keeps a whole copy of the index while it
 /// replaces the real one.
 const SPARE_INDEX_PATH: &str = "index/index.json.new";
@@ -339,12 +335,12 @@ impl Store {
                 }
             }
             Store::Http { .. } => {
-                // Instead of the client's, which on a blocking client covers receiving the
-                // whole body, and would fail anything that takes over 30 seconds.
-                let request = self
-                    .http_request(Method::GET, path)?
-                    .timeout(DOWNLOAD_TIMEOUT);
-                let response = self.send(request)?;
+                // The client's timeout, and not one on the request, as an upload has. Here
+                // it is the wait for the answer and then for each read, so a file can take
+                // as long as it takes while it keeps coming, and a server that stops is
+                // dropped in 30 seconds. One on the request would be a limit on the whole
+                // file, and the same long wait on a server that never answers at all.
+                let response = self.send(self.http_request(Method::GET, path)?)?;
                 if response.status() == StatusCode::NOT_FOUND {
                     return Ok(None);
                 }
