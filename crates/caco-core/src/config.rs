@@ -224,6 +224,20 @@ pub fn mirror_token_file() -> PathBuf {
         .join("mirror-tokens.toml")
 }
 
+/// The local index of the idgames archive, as its own SQLite file: see
+/// `caco_sources::idgames::index`.
+///
+/// Cache side and not in `library.db`, because all of it can be fetched again and a
+/// library meant to be copied between machines should not carry tens of megabytes of
+/// someone else's catalogue. `CACO_IDGAMES_INDEX` overrides just this, as `CACO_CACHE_DIR`
+/// does the WAD cache.
+pub fn idgames_index_path() -> PathBuf {
+    if let Ok(p) = std::env::var("CACO_IDGAMES_INDEX") {
+        return PathBuf::from(p);
+    }
+    cache_home().join("idgames-index.db")
+}
+
 /// Root of the managed sourceport install prefixes.
 ///
 /// Cache side: a built sourceport is regenerable from its recipe, and the
@@ -272,6 +286,10 @@ pub struct Config {
     /// How often to ask each built sourceport's remote whether its ref has
     /// moved. `0` disables the check, so caco touches no network at startup.
     pub sourceport_update_check_days: i64,
+    /// How often to ask a mirror for a new listing of the idgames archive. `0` leaves
+    /// the local index as it is, so caco asks nothing of anyone at startup, and search
+    /// goes by what is already in it and then by the API.
+    pub idgames_index_check_days: i64,
     pub data_dir: String,
     pub iwad_dir: String,
     pub profile_dir: String,
@@ -317,6 +335,7 @@ impl Default for Config {
             cache_max_age_days: 0,
             cache_auto_clean: false,
             sourceport_update_check_days: 1,
+            idgames_index_check_days: 1,
             data_dir: default_data_subdir().to_string_lossy().into_owned(),
             iwad_dir: iwad_dir().to_string_lossy().into_owned(),
             profile_dir: String::new(),
@@ -368,8 +387,12 @@ pub struct MirrorConfig {
     /// The environment variable holding the token, for those who would rather it was
     /// not saved anywhere. Wins over a saved one.
     pub token_env: Option<String>,
-    /// Whether caco may upload to it.
+    /// Whether caco may upload to it. Never to a copy of idgames, whatever this says:
+    /// see [`MirrorConfig::takes_uploads`].
     pub write: bool,
+    /// How its files are arranged: `caco` (the default) or `idgames`. See
+    /// [`MirrorLayout`].
+    pub layout: Option<String>,
     /// The token saved on this machine, read from [`mirror_token_file`] along with
     /// the config. Never written to the config, which is meant to travel.
     #[serde(skip)]
@@ -384,6 +407,21 @@ impl std::fmt::Debug for SavedToken {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("SavedToken(..)")
     }
+}
+
+/// How a mirror's files are arranged, which decides how a file on it is named.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MirrorLayout {
+    /// `<sha256>/<filename>` with an index: see [`crate::mirrors`]. What caco makes.
+    Caco,
+    /// `levels/doom2/Ports/megawads/sunlust.zip`: a copy of the idgames archive, made
+    /// by something else, which has its path and its name and nothing else to go by.
+    Idgames,
+}
+
+impl MirrorLayout {
+    /// How `layout` spells this in a config file.
+    pub const IDGAMES: &str = "idgames";
 }
 
 /// Where a mirror's root is, once [`MirrorConfig::location`] has checked it.
@@ -421,6 +459,32 @@ impl MirrorConfig {
                 }
             }
         }
+    }
+
+    /// How this mirror's files are arranged, or what is wrong with how it says so. A
+    /// string in the file rather than an enum, because a typo in an enum would fail the
+    /// whole config, and with it every setting in the file.
+    pub fn layout(&self) -> Result<MirrorLayout, String> {
+        match self.layout.as_deref().map(str::trim) {
+            None | Some("") | Some("caco") => Ok(MirrorLayout::Caco),
+            Some(MirrorLayout::IDGAMES) => Ok(MirrorLayout::Idgames),
+            Some(other) => Err(format!(
+                "its layout is \"{other}\", which is neither \"caco\" nor \"{}\"",
+                MirrorLayout::IDGAMES
+            )),
+        }
+    }
+
+    /// Whether this is a copy of the idgames archive rather than a mirror caco keeps.
+    pub fn is_idgames_copy(&self) -> bool {
+        self.layout() == Ok(MirrorLayout::Idgames)
+    }
+
+    /// Whether caco may put files on this mirror. Not on a copy of idgames, which belongs to
+    /// whatever keeps it up to date, and is meant to hold what the archive holds. An index
+    /// on it would also make it look like a mirror caco keeps.
+    pub fn takes_uploads(&self) -> bool {
+        self.write && self.layout() == Ok(MirrorLayout::Caco)
     }
 
     /// The token or password to present, if there is one on this machine.
@@ -1375,6 +1439,96 @@ helion = ["-loglevel", "info"]
     }
 
     // -- mirrors --
+
+    #[test]
+    fn test_a_mirror_is_caco_s_layout_unless_it_says_otherwise() {
+        let with = |layout: Option<&str>| MirrorConfig {
+            layout: layout.map(str::to_string),
+            ..Default::default()
+        };
+        assert_eq!(with(None).layout(), Ok(MirrorLayout::Caco));
+        assert_eq!(with(Some("")).layout(), Ok(MirrorLayout::Caco));
+        assert_eq!(with(Some("caco")).layout(), Ok(MirrorLayout::Caco));
+        assert_eq!(with(Some("idgames")).layout(), Ok(MirrorLayout::Idgames));
+        assert_eq!(with(Some(" idgames ")).layout(), Ok(MirrorLayout::Idgames));
+        assert!(with(Some("idgames")).is_idgames_copy());
+        assert!(!with(None).is_idgames_copy());
+    }
+
+    #[test]
+    fn test_a_layout_with_a_typo_says_so_and_does_not_sink_the_config() {
+        let config: Config = toml::from_str(
+            r#"
+            sourceport = "dsda-doom"
+
+            [[mirrors]]
+            name = "disk"
+            path = "/mnt/idgames"
+            layout = "idgmaes"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(config.sourceport, "dsda-doom");
+        let problem = config.mirrors[0].layout().unwrap_err();
+        assert!(problem.contains("idgmaes"), "{problem}");
+        assert!(!config.mirrors[0].is_idgames_copy());
+    }
+
+    #[test]
+    fn test_a_copy_of_idgames_takes_no_uploads_whatever_it_says() {
+        let copy = |write| MirrorConfig {
+            layout: Some("idgames".to_string()),
+            write,
+            ..Default::default()
+        };
+        assert!(!copy(true).takes_uploads());
+        assert!(!copy(false).takes_uploads());
+
+        let kept = |write| MirrorConfig {
+            write,
+            ..Default::default()
+        };
+        assert!(kept(true).takes_uploads());
+        assert!(!kept(false).takes_uploads());
+
+        // Whatever it is, it is not known to be something to write to.
+        let typo = MirrorConfig {
+            layout: Some("idgmaes".to_string()),
+            write: true,
+            ..Default::default()
+        };
+        assert!(!typo.takes_uploads());
+    }
+
+    #[test]
+    fn test_a_layout_reaches_the_file_only_when_it_says_something() {
+        let config = Config {
+            mirrors: vec![
+                MirrorConfig {
+                    name: "kept".to_string(),
+                    path: Some("/a".to_string()),
+                    ..Default::default()
+                },
+                MirrorConfig {
+                    name: "disk".to_string(),
+                    path: Some("/b".to_string()),
+                    layout: Some("idgames".to_string()),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        let written = minimal_toml(&config).unwrap();
+        assert_eq!(written.matches("layout").count(), 1, "{written}");
+        let back: Config = toml::from_str(&written).unwrap();
+        assert_eq!(back.mirrors, config.mirrors);
+    }
+
+    #[test]
+    fn test_the_index_of_idgames_is_on_the_cache_side_of_the_split() {
+        assert!(idgames_index_path().starts_with(cache_home()));
+        assert!(!idgames_index_path().starts_with(default_data_dir()));
+    }
 
     fn mirror(url: Option<&str>, path: Option<&str>) -> MirrorConfig {
         MirrorConfig {

@@ -1,6 +1,12 @@
+use std::sync::LazyLock;
+
+use regex::Regex;
 use serde::Deserialize;
 
 use crate::http::{coerce_f64, coerce_i64, coerce_str};
+
+/// A line break as the site writes one, with whatever space was around it.
+static BR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\s*<br\s*/?>\s*").unwrap());
 
 /// A review for a file on the idgames archive.
 #[derive(Debug, Clone, Deserialize)]
@@ -59,6 +65,33 @@ pub struct FileEntry {
     /// (the API returns a nested dict/list structure).
     #[serde(default, skip_deserializing)]
     pub reviews: Vec<Review>,
+}
+
+impl FileEntry {
+    /// Its path under the archive's root.
+    pub fn path(&self) -> String {
+        format!("{}/{}", self.dir.trim_matches('/'), self.filename)
+    }
+
+    /// Take out what the API says the way a web page would: `<br>` for a line break,
+    /// `&amp;` for an ampersand. It came to be there because the site renders these fields
+    /// as they are, and in a WAD's description in the library it is just noise.
+    pub(super) fn clean_text(&mut self) {
+        for text in [
+            &mut self.title,
+            &mut self.author,
+            &mut self.email,
+            &mut self.description,
+            &mut self.credits,
+            &mut self.base,
+            &mut self.buildtime,
+            &mut self.editors,
+            &mut self.bugs,
+        ] {
+            let lines = BR.replace_all(text, "\n");
+            *text = html_escape::decode_html_entities(&lines).trim().to_string();
+        }
+    }
 }
 
 #[cfg(test)]

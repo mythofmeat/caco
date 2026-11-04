@@ -17,6 +17,11 @@
 //! holds, so a lost index cannot be rebuilt from the files behind it, and that shapes
 //! how it is written. A store that will not overwrite a file gets a spare copy first
 //! ([`Store::replace_file`]), and nothing writes back an index it could not read.
+//!
+//! A mirror with `layout = "idgames"` is a copy of the idgames archive, made by something
+//! else: it has no index, it is never written to, and a file on it goes by its path in the
+//! archive. [`crate::idgames::sync`] reads the public mirrors the same way, through
+//! [`Store`], since they are that with a different owner.
 
 use std::fs::{self, File};
 use std::io::{self, Read};
@@ -24,7 +29,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
-use caco_core::config::{MirrorConfig, MirrorLocation};
+use caco_core::config::{MirrorConfig, MirrorLayout, MirrorLocation};
 use caco_core::db::mirrors::{self, MirrorFile};
 use caco_core::db::{self, WadRecord};
 use caco_core::identity;
@@ -36,15 +41,18 @@ use caco_core::presence::StorePaths;
 use reqwest::Method;
 use reqwest::StatusCode;
 use reqwest::blocking::{Body, Client, RequestBuilder, Response};
-use reqwest::header::{CONTENT_LENGTH, CONTENT_TYPE};
+use reqwest::header::{
+    CONTENT_LENGTH, CONTENT_TYPE, ETAG, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED,
+};
 use rusqlite::Connection;
 
 use crate::error::{Result, SourceError};
 use crate::http::{TIMEOUT, USER_AGENT, waf_challenge};
+use crate::idgames::listing::{self, LISTING_PATH};
 
 /// What a failure to talk to a store amounts to before it is known which mirror it
 /// was: the words for the user.
-type StoreResult<T> = std::result::Result<T, String>;
+pub(crate) type StoreResult<T> = std::result::Result<T, String>;
 
 /// How long a mirror gets to accept a connection. Shorter than the timeout on the
 /// rest of the request, because a mirror that has gone is the likeliest failure
@@ -90,7 +98,7 @@ fn mirror_error(mirror: &str, message: impl Into<String>) -> SourceError {
 // Stores
 // ---------------------------------------------------------------------------
 
-enum Store {
+pub(crate) enum Store {
     Local {
         root: PathBuf,
     },
@@ -106,7 +114,7 @@ enum Store {
 /// How to log in to an HTTP store. A bearer token where a store takes one, as Gitea
 /// does, and a username and password where it does not: the WebDAV servers in common
 /// use answer a bearer token with a 401.
-enum Auth {
+pub(crate) enum Auth {
     None,
     Bearer(String),
     Basic {
@@ -138,8 +146,26 @@ enum Put {
     NameRefused,
 }
 
+/// How to ask a store whether a file has changed since it was last read.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Validators {
+    pub(crate) etag: Option<String>,
+    pub(crate) last_modified: Option<String>,
+}
+
+/// What asking for a file that may not have changed found.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Conditional {
+    NotModified,
+    NotThere,
+    Changed {
+        bytes: Vec<u8>,
+        validators: Validators,
+    },
+}
+
 impl Store {
-    fn open(config: &MirrorConfig) -> StoreResult<Self> {
+    pub(crate) fn open(config: &MirrorConfig) -> StoreResult<Self> {
         Ok(match config.location()? {
             MirrorLocation::Path(root) => Store::Local { root },
             MirrorLocation::Url(root) => Store::Http {
@@ -187,14 +213,25 @@ impl Store {
     }
 
     fn read_text(&self, path: &str) -> StoreResult<Option<String>> {
+        let Some(bytes) = self.read_bytes(path, MAX_INDEX_BYTES)? else {
+            return Ok(None);
+        };
+        String::from_utf8(bytes)
+            .map(Some)
+            .map_err(|e| format!("could not read {path}: {e}"))
+    }
+
+    /// Whether reading from this store is free, as opposed to someone's bandwidth.
+    pub(crate) fn is_local(&self) -> bool {
+        matches!(self, Store::Local { .. })
+    }
+
+    /// The file at `path`, up to `max_bytes` of it, or `None` if there is none.
+    pub(crate) fn read_bytes(&self, path: &str, max_bytes: u64) -> StoreResult<Option<Vec<u8>>> {
         match self {
             Store::Local { root } => {
                 let root = Self::local_root(root)?;
-                match fs::read_to_string(root.join(path)) {
-                    Ok(text) => Ok(Some(text)),
-                    Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
-                    Err(e) => Err(format!("could not read {path}: {e}")),
-                }
+                read_at_most(root.join(path), max_bytes, path)
             }
             Store::Http { .. } => {
                 let response = self.send(self.http_request(Method::GET, path)?)?;
@@ -202,48 +239,116 @@ impl Store {
                     return Ok(None);
                 }
                 let response = self.require_success(response)?;
-                let mut text = String::new();
-                response
-                    .take(MAX_INDEX_BYTES)
-                    .read_to_string(&mut text)
-                    .map_err(|e| format!("could not read {path}: {e}"))?;
-                Ok(Some(text))
+                read_response(response, max_bytes, path).map(Some)
+            }
+        }
+    }
+
+    /// The file at `path`, unless it is what `known` says was read last time.
+    ///
+    /// A file on disk goes by its size and modification time, which is what a web server
+    /// makes an `ETag` from anyway.
+    pub(crate) fn read_if_changed(
+        &self,
+        path: &str,
+        known: Option<&Validators>,
+        max_bytes: u64,
+    ) -> StoreResult<Conditional> {
+        match self {
+            Store::Local { root } => {
+                let full = Self::local_root(root)?.join(path);
+                let metadata = match fs::metadata(&full) {
+                    Ok(metadata) => metadata,
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                        return Ok(Conditional::NotThere);
+                    }
+                    Err(e) => return Err(format!("could not read {path}: {e}")),
+                };
+                let validators = local_validators(&metadata);
+                if known == Some(&validators) {
+                    return Ok(Conditional::NotModified);
+                }
+                match read_at_most(full, max_bytes, path)? {
+                    Some(bytes) => Ok(Conditional::Changed { bytes, validators }),
+                    None => Ok(Conditional::NotThere),
+                }
+            }
+            Store::Http { .. } => {
+                let mut request = self.http_request(Method::GET, path)?;
+                if let Some(known) = known {
+                    if let Some(etag) = &known.etag {
+                        request = request.header(IF_NONE_MATCH, etag);
+                    }
+                    if let Some(when) = &known.last_modified {
+                        request = request.header(IF_MODIFIED_SINCE, when);
+                    }
+                }
+                let response = self.send(request)?;
+                match response.status() {
+                    StatusCode::NOT_MODIFIED => return Ok(Conditional::NotModified),
+                    StatusCode::NOT_FOUND => return Ok(Conditional::NotThere),
+                    _ => {}
+                }
+                let response = self.require_success(response)?;
+                let header = |name| {
+                    response
+                        .headers()
+                        .get(name)
+                        .and_then(|value: &reqwest::header::HeaderValue| value.to_str().ok())
+                        .map(str::to_string)
+                };
+                let validators = Validators {
+                    etag: header(ETAG),
+                    last_modified: header(LAST_MODIFIED),
+                };
+                let bytes = read_response(response, max_bytes, path)?;
+                Ok(Conditional::Changed { bytes, validators })
             }
         }
     }
 
     /// Copy `file` to `dest`, refusing anything but exactly its size in bytes.
     fn download(&self, file: &MirrorFile, dest: &Path) -> StoreResult<()> {
-        let path = file.stored_path();
         let name = &file.filename;
-        let missing = || format!("its index lists {name}, but the file is not there");
+        match self.copy_file(&file.stored_path(), file.size, dest) {
+            Ok(Some(copied)) if copied == file.size => Ok(()),
+            Ok(Some(_)) => Err(format!(
+                "its copy of {name} is not the {} bytes its index lists",
+                file.size
+            )),
+            Ok(None) => Err(format!("its index lists {name}, but the file is not there")),
+            Err(why) => Err(format!("could not download {name}: {why}")),
+        }
+    }
+
+    /// Copy the file at `path` to `dest`, stopping one byte past `size` so that a file that
+    /// is too long is noticed without filling the disk first. How many bytes were copied,
+    /// or `None` if there is no such file.
+    fn copy_file(&self, path: &str, size: u64, dest: &Path) -> StoreResult<Option<u64>> {
         let copied = match self {
             Store::Local { root } => {
                 let root = Self::local_root(root)?;
-                let source = File::open(root.join(&path)).map_err(|e| match e.kind() {
-                    io::ErrorKind::NotFound => missing(),
-                    _ => format!("could not read {name}: {e}"),
-                })?;
-                copy_at_most(source, file.size, dest)
+                match File::open(root.join(path)) {
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+                    Err(e) => return Err(e.to_string()),
+                    Ok(source) => copy_at_most(source, size, dest),
+                }
             }
             Store::Http { .. } => {
-                let response = self.send(self.http_request(Method::GET, &path)?)?;
+                // The client's timeout, and not one on the request, as an upload has. Here
+                // it is the wait for the answer and then for each read, so a file can take
+                // as long as it takes while it keeps coming, and a server that stops is
+                // dropped in 30 seconds. One on the request would be a limit on the whole
+                // file, and the same long wait on a server that never answers at all.
+                let response = self.send(self.http_request(Method::GET, path)?)?;
                 if response.status() == StatusCode::NOT_FOUND {
-                    return Err(missing());
+                    return Ok(None);
                 }
                 let response = self.require_success(response)?;
-                copy_at_most(response, file.size, dest)
+                copy_at_most(response, size, dest)
             }
-        }
-        .map_err(|e| format!("could not download {name}: {e}"))?;
-        if copied == file.size {
-            Ok(())
-        } else {
-            Err(format!(
-                "its copy of {name} is not the {} bytes its index lists",
-                file.size
-            ))
-        }
+        };
+        copied.map(Some).map_err(|e| e.to_string())
     }
 
     /// Whether the store has a file at `path` of this size.
@@ -575,6 +680,46 @@ fn copy_at_most(reader: impl Read, size: u64, dest: &Path) -> io::Result<u64> {
     io::copy(&mut reader.take(size.saturating_add(1)), &mut file)
 }
 
+/// A local file, up to `max_bytes` of it. `name` is for the error.
+fn read_at_most(path: PathBuf, max_bytes: u64, name: &str) -> StoreResult<Option<Vec<u8>>> {
+    let file = match File::open(path) {
+        Ok(file) => file,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(format!("could not read {name}: {e}")),
+    };
+    let mut bytes = Vec::new();
+    file.take(max_bytes)
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("could not read {name}: {e}"))?;
+    Ok(Some(bytes))
+}
+
+/// A response's body, up to `max_bytes` of it.
+fn read_response(response: Response, max_bytes: u64, name: &str) -> StoreResult<Vec<u8>> {
+    let mut bytes = Vec::new();
+    response
+        .take(max_bytes)
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("could not read {name}: {e}"))?;
+    Ok(bytes)
+}
+
+/// What stands in for an `ETag` and a `Last-Modified` for a file on disk.
+fn local_validators(metadata: &fs::Metadata) -> Validators {
+    let modified = metadata
+        .modified()
+        .ok()
+        .map(chrono::DateTime::<chrono::Utc>::from);
+    Validators {
+        etag: Some(format!(
+            "{}-{}",
+            metadata.len(),
+            modified.map_or(0, |when| when.timestamp())
+        )),
+        last_modified: modified.map(|when| when.to_rfc2822()),
+    }
+}
+
 /// A generous time for sending `size` bytes: a minute, and a slow uplink's rate.
 fn upload_timeout(size: u64) -> Duration {
     const SLOW_BYTES_PER_SECOND: u64 = 128 << 10;
@@ -636,6 +781,24 @@ pub fn sync_mirrors(
         }
         seen.push(mirror.name.as_str());
 
+        match mirror.layout() {
+            Ok(MirrorLayout::Caco) => {}
+            Ok(MirrorLayout::Idgames) => {
+                // Nothing to read: it has no index, and rows would only mean that it
+                // once had one. It holds what idgames holds.
+                report.changed |= mirrors::sync_files(conn, &mirror.name, &[])?;
+                match Store::open(mirror).and_then(|store| check_idgames_copy(&store)) {
+                    Ok(_) => report.read.push((mirror.name.clone(), 0)),
+                    Err(why) => report.failed.push((mirror.name.clone(), why)),
+                }
+                continue;
+            }
+            Err(why) => {
+                report.failed.push((mirror.name.clone(), why));
+                continue;
+            }
+        }
+
         let _lock = lock_index();
         match Store::open(mirror).and_then(|store| store.read_index()) {
             Ok(index) => {
@@ -682,6 +845,13 @@ impl MirrorProbe {
 /// index depends on, and a bulk upload to another mirror should not make it wait.
 pub fn probe_mirror(config: &MirrorConfig) -> std::result::Result<MirrorProbe, String> {
     let store = Store::open(config)?;
+    if config.layout()? == MirrorLayout::Idgames {
+        return Ok(MirrorProbe {
+            files: check_idgames_copy(&store)?,
+            folder_missing: false,
+            can_write: None,
+        });
+    }
     if let Store::Local { root } = &store
         && !root.exists()
     {
@@ -708,13 +878,17 @@ pub fn probe_mirror(config: &MirrorConfig) -> std::result::Result<MirrorProbe, S
 
 /// Make a mirror ready to use: create its folder if it is a local one that is not
 /// there, and if caco is meant to write to it and it has no index, give it an empty
-/// one. Leaves a mirror that already has an index as it is.
+/// one. Leaves a mirror that already has an index as it is, and a copy of idgames, which
+/// is nothing of caco's, as it found it.
 ///
 /// Only the setup wizard calls this, when someone has said they want a mirror there.
 /// An upload must not create a folder, because to an upload a missing one means a drive
 /// that is not mounted.
 pub fn set_up_mirror(config: &MirrorConfig) -> Result<()> {
     let fail = |message: String| mirror_error(&config.name, message);
+    if config.layout().map_err(fail)? == MirrorLayout::Idgames {
+        return Ok(());
+    }
     let store = Store::open(config).map_err(fail)?;
     store.create_root().map_err(fail)?;
     if config.write {
@@ -805,6 +979,110 @@ fn fetch_one(store: &Store, file: &MirrorFile, dir: &Path) -> StoreResult<PathBu
     Ok(dest)
 }
 
+/// Copy a file off the first copy of idgames that has it, into `dir`. `archive_path` is
+/// where it is in the archive.
+///
+/// `Ok(None)` if none of them has it, which is ordinary: a copy can be of part of the
+/// archive, or behind it. An error if one that should could not give it up: the first
+/// failure, as in [`fetch_from_mirrors`].
+///
+/// There is no hash to check this against, since nothing says what a file in an archive
+/// with one name per path has to be. The launch this comes before hashes it, and asks if
+/// it is not what the WAD was last played with.
+pub fn fetch_from_idgames_copies(
+    configured: &[MirrorConfig],
+    archive_path: &str,
+    dir: &Path,
+) -> Result<Option<PathBuf>> {
+    let Some(filename) = safe_archive_filename(archive_path) else {
+        return Ok(None);
+    };
+    let mut first_failure = None;
+    for mirror in configured.iter().filter(|mirror| mirror.is_idgames_copy()) {
+        match Store::open(mirror)
+            .and_then(|store| fetch_by_path(&store, archive_path, filename, dir))
+        {
+            Ok(Some(path)) => return Ok(Some(path)),
+            Ok(None) => {}
+            Err(why) => {
+                first_failure.get_or_insert_with(|| mirror_error(&mirror.name, why));
+            }
+        }
+    }
+    first_failure.map_or(Ok(None), Err)
+}
+
+/// The last part of a path in the archive, if that path stays inside whatever root it
+/// gets joined to: it may have come from a WAD row, which came from a page on a website.
+fn safe_archive_filename(archive_path: &str) -> Option<&str> {
+    if archive_path
+        .split('/')
+        .any(|part| part.is_empty() || !caco_core::mirrors::is_bare_file_name(part))
+    {
+        return None;
+    }
+    archive_path.rsplit('/').next()
+}
+
+/// Copy one file from a store into `dir` under its own name, through a temporary one.
+/// Its hash only decides what it is called if that name is taken, as in
+/// [`placement::destination`], since `map01.zip` is on the archive more than once.
+fn fetch_by_path(
+    store: &Store,
+    archive_path: &str,
+    filename: &str,
+    dir: &Path,
+) -> StoreResult<Option<PathBuf>> {
+    fs::create_dir_all(dir).map_err(|e| format!("could not create {}: {e}", dir.display()))?;
+    let partial = partial_beside(&dir.join(filename));
+    let fetched = store
+        .copy_file(archive_path, u64::MAX - 1, &partial)
+        .and_then(|found| {
+            if found.is_none() {
+                return Ok(None);
+            }
+            let hashes = identity::hash_file(&partial)
+                .map_err(|e| format!("could not check {filename}: {e}"))?;
+            let destination =
+                placement::destination(dir, filename, &hashes.sha256).map_err(|e| e.to_string())?;
+            let dest = match destination {
+                Destination::AlreadyHere(path) => {
+                    let _ = fs::remove_file(&partial);
+                    return Ok(Some(path));
+                }
+                Destination::Write(path) => path,
+            };
+            fs::rename(&partial, &dest)
+                .map_err(|e| format!("could not write {}: {e}", dest.display()))?;
+            Ok(Some(dest))
+        });
+    if !matches!(fetched, Ok(Some(_))) {
+        let _ = fs::remove_file(&partial);
+    }
+    fetched
+}
+
+/// What a copy of idgames has at its root, to tell one from the folder above it: how many
+/// uploads its listing names, or `None` for a copy with no listing, which has to at least
+/// have the directory the WADs are in. Either way, whether it is there at all.
+fn check_idgames_copy(store: &Store) -> StoreResult<Option<usize>> {
+    let bytes = store.read_bytes(LISTING_PATH, MAX_INDEX_BYTES)?;
+    if let Some(bytes) = bytes {
+        let text =
+            listing::decompress(&bytes).map_err(|e| format!("could not read its listing: {e}"))?;
+        let today = chrono::Utc::now().date_naive();
+        return Ok(Some(listing::parse_listing(&text, today).len()));
+    }
+    match store {
+        Store::Local { root } if root.join("levels").is_dir() => Ok(None),
+        Store::Local { root } => Err(format!(
+            "there is no {LISTING_PATH} or levels folder directly under {}",
+            root.display()
+        )),
+        Store::Http { .. } => Err(format!("there is no {LISTING_PATH} at that address")),
+    }
+}
+
 /// Whether the file at `path` is the one the index promised. The only thing that
 /// makes a file on someone's server safe to play in place of the one a WAD lost.
 fn check_download(path: &Path, file: &MirrorFile) -> StoreResult<()> {
@@ -847,6 +1125,11 @@ pub fn upload_wad(
     added: &str,
 ) -> Result<Uploaded> {
     let fail = |message: String| mirror_error(&mirror.name, message);
+    if mirror.is_idgames_copy() {
+        return Err(fail(
+            "it is a copy of idgames, which caco does not write to".to_string(),
+        ));
+    }
 
     let wad = db::get_wad(conn, wad_id, false)?
         .ok_or_else(|| SourceError::Core(caco_core::Error::WadNotFound(wad_id)))?;

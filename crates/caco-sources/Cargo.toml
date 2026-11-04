@@ -15,6 +15,8 @@ html-escape.workspace = true
 unicode-normalization.workspace = true
 urlencoding.workspace = true
 rusqlite.workspace = true
+chrono.workspace = true
+flate2.workspace = true
 
 # The maintainer's tool for the year's Cacowards data, not something the app
 # ships: an example so `cargo build` skips it and `cargo test` keeps it compiling,
@@ -24,6 +26,12 @@ rusqlite.workspace = true
 name = "cacowards_draft"
 path = "examples/cacowards_draft/main.rs"
 test = true
+
+# Builds the local index of idgames against the real mirrors and API, for looking at what
+# a change does to them. Nothing else exercises the real thing from end to end.
+[[example]]
+name = "idgames_sync"
+path = "examples/idgames_sync/main.rs"
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -66,5 +66,6 @@ pub use sessions::{
 };
 pub use wads::{
     FieldValue, NewWad, WadUpdate, add_tag, add_wad, delete_wad, get_status_counts, get_wad,
-    purge_all_deleted, remove_tag, restore_wad, update_wad,
+    idgames_wads_without_id, purge_all_deleted, remove_tag, restore_wad, set_idgames_id,
+    update_wad,
 };

@@ -35,13 +35,17 @@ use std::time::Duration;
 
 use caco::dialogs::storage::StorageTab;
 use caco::get::GetTarget;
-use caco::import::state::SearchSource;
-use caco::message::{AppMessage, EnrichReport};
+use caco::import::state::{SearchResultEntry, SearchResults, SearchSource, SearchSourceData};
+use caco::message::{AppMessage, EnrichReport, IdgamesIndexRun};
 use caco::state::{ActionRequest, ViewMode};
 use caco_core::sourceports::RemoteRefs;
 use caco_sources::SourceError;
 use caco_sources::enrich_service::WikiBlocked;
 use caco_sources::http::WafKind;
+use caco_sources::idgames::sync::{
+    ListingOutcome, SyncOptions, SyncProgress, SyncReport, sync_index,
+};
+use caco_sources::idgames::{IdgamesClient, Index};
 use caco_sources::import_service::ImportResult;
 use egui_kittest::kittest::Queryable;
 
@@ -50,6 +54,10 @@ const WORKER_PAUSE: Duration = Duration::from_millis(80);
 
 /// What the wizard calls a folder mirror, unless told otherwise.
 const MIRROR_NAME: &str = "folder";
+
+/// A port nothing listens on, for everything that would otherwise ask the real idgames: it
+/// fails at once, every time, the way a blocked API does as far as anything here can tell.
+const NO_API: &str = "http://127.0.0.1:9/api.php";
 
 /// Viewport used for every shot unless `CACO_SHOT_SIZE` says otherwise.
 /// 1200x800 is `main.rs`'s `with_inner_size`, so this is the window a user
@@ -89,14 +97,98 @@ fn scratch_home() -> PathBuf {
         std::fs::copy(&real_db, &scratch_db).expect("copy library");
     }
 
+    let index = home.join("idgames-index.db");
+    for suffix in ["", "-wal", "-shm"] {
+        let mut name = index.as_os_str().to_owned();
+        name.push(suffix);
+        let _ = std::fs::remove_file(name);
+    }
+
     unsafe {
         std::env::set_var("CACO_HOME", &home);
         // Not just the library: linking a file for a WAD caco can fetch again writes to
         // the WAD cache, which is not under `CACO_HOME`.
         std::env::set_var("CACO_CACHE_DIR", home.join("cache-wads"));
+        std::env::set_var("CACO_IDGAMES_INDEX", &index);
+        std::env::set_var("CACO_IDGAMES_API", NO_API);
+        std::env::set_var("CACO_CONFIG", home.join("config.toml"));
     }
+    // The real settings, but for the one that would have the app ask the real mirrors for
+    // a listing as soon as it is created. Nothing here is asked of anyone until a button
+    // says so, and those have the API above and a copy of idgames on disk to go to.
+    let mut config = (*caco_core::config::load_config()).clone();
+    config.idgames_index_check_days = 0;
+    caco_core::config::save_config(&config).expect("save scratch config");
+    caco_core::config::reload_config();
+
     put_sourceport_on_path(&home);
     home
+}
+
+/// What is on the scratch copy of idgames. The names are real ones, and the same in two
+/// places on purpose, as `castle.zip` is. One text file is Latin-1, one is from before there
+/// was a template, and one upload has no text file at all, all as they are on the archive.
+const COPY_OF_IDGAMES: &[(&str, &[u8])] = &[
+    (
+        "levels/doom2/Ports/megawads/sunlust",
+        b"Title                : Sunlust\r\n\
+          Author               : Ribbiks & Dannebubinga\r\n\
+          Description          : Sunlust is a set of 32 boom-compatible maps for Doom II,\r\n\
+          \x20                      designed to be played from pistol start.\r\n",
+    ),
+    (
+        "levels/doom2/Ports/s-u/thepact_1_2",
+        b"Title     : The Pact\nAuthor    : Laoco\xf6n\nDescription : A statue, and his sons.\n",
+    ),
+    (
+        "levels/doom/a-c/asdoom",
+        b"DOOM - the entire ASDOOM series,\nreplacing levels E1M1 to E1M9.\n",
+    ),
+    (
+        "levels/doom/a-c/castle",
+        b"Title : The Castle\nAuthor : Someone\n",
+    ),
+    (
+        "levels/doom2/a-c/castle",
+        b"Title : Castle of a Quite Different Kind, and a Long Enough Title to Need Clipping\n\
+          Author : Someone Else With a Rather Long Name Indeed\n",
+    ),
+];
+
+/// A copy of idgames as `rsync` leaves one, and the name of a folder holding it.
+fn write_copy_of_idgames(home: &Path) -> PathBuf {
+    use std::io::Write;
+
+    let root = home.join("idgames-copy");
+    let _ = std::fs::remove_dir_all(&root);
+    let mut listing = String::new();
+    let mut in_dir: std::collections::BTreeMap<&str, Vec<String>> = Default::default();
+    for (path, text) in COPY_OF_IDGAMES {
+        let (dir, name) = path.rsplit_once('/').unwrap();
+        let file = root.join(path);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(file.with_extension("zip"), b"PK").unwrap();
+        std::fs::write(file.with_extension("txt"), text).unwrap();
+        let lines = in_dir.entry(dir).or_default();
+        lines.push(format!("-rw-rw-r-- 1 a b 2 Mar  9  2019 {name}.zip"));
+        lines.push(format!(
+            "-rw-rw-r-- 1 a b {} Mar  9  2019 {name}.txt",
+            text.len()
+        ));
+    }
+    in_dir
+        .entry("combos")
+        .or_default()
+        .push("-rw-rw-r-- 1 a b 2 Mar  9  2021 extrme1.zip".to_string());
+    std::fs::create_dir_all(root.join("combos")).unwrap();
+    std::fs::write(root.join("combos/extrme1.zip"), b"PK").unwrap();
+    for (dir, lines) in in_dir {
+        listing.push_str(&format!("./{dir}:\ntotal 1\n{}\n\n", lines.join("\n")));
+    }
+    let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    gz.write_all(listing.as_bytes()).unwrap();
+    std::fs::write(root.join("ls-laR.gz"), gz.finish().unwrap()).unwrap();
+    root
 }
 
 /// Settings only draws its "detected" controls with a sourceport on `PATH`, so
@@ -320,6 +412,44 @@ impl Shooter {
         config.mirrors.clear();
         caco_core::config::save_config(&config).expect("save scratch config");
         caco_core::config::reload_config();
+    }
+
+    /// Build the index the way the real one is built, by the real sync, from the copy of
+    /// idgames this writes, with the API refusing and so with no ids. Then tell the app, as
+    /// the worker does.
+    fn build_idgames_index(&mut self) -> PathBuf {
+        let root = write_copy_of_idgames(&self.home);
+        let copy = caco_core::config::MirrorConfig {
+            name: "copy".to_string(),
+            path: Some(root.display().to_string()),
+            layout: Some("idgames".to_string()),
+            ..Default::default()
+        };
+        let index = Index::open_default().expect("open the index");
+        let report = sync_index(
+            &index,
+            &SyncOptions {
+                sources: vec![copy],
+                api: IdgamesClient::with_api_url(NO_API),
+                check_days: 1,
+                force: true,
+                now: chrono::Utc::now(),
+                api_pause: Duration::ZERO,
+                text_pause: Duration::ZERO,
+            },
+            &mut |_| {},
+            &|| false,
+        )
+        .expect("sync the index");
+        assert!(
+            matches!(report.listing, ListingOutcome::Updated(_)),
+            "{report:?}"
+        );
+        assert_eq!(report.text_read, COPY_OF_IDGAMES.len(), "{report:?}");
+        let tx = self.harness.state_mut().background_sender();
+        tx.send(AppMessage::IdgamesIndexStatus(index.status().unwrap()));
+        self.settle(2, WORKER_PAUSE);
+        root
     }
 
     /// Start the Get shots from a Downloads folder of their own, and with pages going
@@ -571,6 +701,118 @@ fn shoot_every_surface() {
         s.harness.get_by_label_contains("blocked the request");
     });
 
+    // The local index of idgames, from nothing, through the real sync and the real workers.
+    // The view comes first on the Import view, so this is what opening it looks like.
+    s.shot_view_after("04-import-idgames-no-index", ViewMode::Import, |s| {
+        s.harness.key_press(egui::Key::Num1);
+        s.settle(1, Duration::ZERO);
+        s.harness.get_by_label_contains("No local index yet");
+    });
+    let copy_root = s.build_idgames_index();
+    s.shot_view_after("04-import-idgames-newest", ViewMode::Import, |s| {
+        s.wait_for("the newest uploads", |s| {
+            s.harness.query_by_label("Newest on idgames").is_some()
+        });
+        s.harness.get_by_label_contains("Searching 6 uploads here");
+        // What the text files said, in whatever they were saved as, and a file name for
+        // what has none.
+        s.harness.get_all_by_label("The Pact").next().unwrap();
+        s.harness.get_all_by_label("extrme1").next().unwrap();
+        s.harness.get_all_by_label("Laocoön").next().unwrap();
+    });
+    s.shot_view_after("04-import-idgames-search", ViewMode::Import, |s| {
+        s.type_into("Search:", "Laocoon");
+        s.harness.key_press(egui::Key::Enter);
+        s.wait_for("the search", |s| {
+            s.harness.query_by_label("1 result").is_some()
+        });
+        s.harness.get_all_by_label("The Pact").next().unwrap();
+        assert!(s.harness.query_by_label("Newest on idgames").is_none());
+    });
+    s.shot_view_after("04-import-idgames-same-name", ViewMode::Import, |s| {
+        s.harness.get_by_label("Search:").focus();
+        s.settle(1, Duration::ZERO);
+        // Replacing what the last shot typed, as a person selecting it would.
+        s.harness
+            .key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        s.harness.get_by_label("Search:").type_text("castle");
+        s.settle(1, Duration::ZERO);
+        s.harness.key_press(egui::Key::Enter);
+        s.wait_for("the search", |s| {
+            s.harness.query_by_label("2 results").is_some()
+        });
+        // Where each one is, since the name will not tell them apart.
+        s.harness.get_by_label_contains("levels/doom/a-c/");
+    });
+    // The notes only a worker reaches: a run in flight, then what a failure leaves behind,
+    // then a search that only got an answer from half an index.
+    s.shot_view_after("04-import-idgames-reading", ViewMode::Import, |s| {
+        let tx = s.harness.state_mut().background_sender();
+        tx.send(AppMessage::IdgamesIndexProgress(
+            SyncProgress::ReadingText {
+                done: 4_200,
+                total: 21_384,
+            },
+        ));
+        s.settle(2, WORKER_PAUSE);
+        s.harness.get_by_label_contains("4200 of 21384");
+        s.harness.get_by_label("Stop");
+        assert!(s.harness.query_by_label("Update").is_none());
+    });
+    s.shot_view_after("04-import-idgames-no-listing", ViewMode::Import, |s| {
+        let tx = s.harness.state_mut().background_sender();
+        tx.send(AppMessage::IdgamesIndexFinished(Ok(IdgamesIndexRun {
+            report: SyncReport {
+                listing: ListingOutcome::Failed(
+                    "https://youfailit.net/pub/idgames/: could not connect: Connection refused"
+                        .to_string(),
+                ),
+                ..Default::default()
+            },
+            status: Index::open_default().unwrap().status().unwrap(),
+            ids_filled_in: 0,
+            asked_for: false,
+        })));
+        s.settle(2, WORKER_PAUSE);
+        s.harness
+            .get_by_label_contains("Could not read a new listing");
+        s.harness.get_by_label("Update");
+    });
+    s.shot_view_after("04-import-idgames-half-built", ViewMode::Import, |s| {
+        let note = SourceError::WafBlocked {
+            site: "idgames",
+            kind: WafKind::Cloudflare,
+        };
+        let tx = s.harness.state_mut().background_sender();
+        tx.send(AppMessage::SearchComplete(
+            SearchSource::Idgames,
+            Ok(SearchResults {
+                entries: vec![SearchResultEntry {
+                    title: "sunlust".to_string(),
+                    author: None,
+                    description: None,
+                    source_data: SearchSourceData::Idgames {
+                        target: caco_sources::idgames::IdgamesRef::Path(
+                            "levels/doom2/Ports/megawads/sunlust.zip".to_string(),
+                        ),
+                        rating: None,
+                        date: Some("2015-08-09".to_string()),
+                        dir: Some("levels/doom2/Ports/megawads/".to_string()),
+                        filename: Some("sunlust.zip".to_string()),
+                    },
+                }],
+                note: Some(format!(
+                    "From the local index, which is still being built, because idgames' own \
+                     search could not be asked. {note}"
+                )),
+            }),
+        ));
+        s.settle(2, WORKER_PAUSE);
+        s.harness.get_by_label_contains("still being built");
+        // The sidebar's, and the one that takes this row as it is, with no id.
+        assert!(s.harness.get_all_by_label("Import").count() >= 2);
+    });
+
     let mut escaped = Vec::new();
     let mut record = |name: &str, over: f32| {
         println!("  {name}: overflow {over:.0}pt");
@@ -702,6 +944,7 @@ fn shoot_every_surface() {
             "A Web Server",
             "python3 -m http.server",
         ),
+        ("mirrors-idgames-copy", "Copy of idgames", "rsync -rt"),
     ] {
         record(
             name,
@@ -894,6 +1137,105 @@ fn shoot_every_surface() {
         }),
     );
     s.purge_wad(filled);
+
+    // A copy of idgames goes through the same wizard, with less to it: the real test, the
+    // folder above it first, which is the likeliest mistake, and then the right one.
+    record(
+        "mirrors-idgames-copy-wrong-folder",
+        s.shot_dialog_after(
+            "dlg-mirrors-idgames-copy-wrong-folder",
+            ActionRequest::Mirrors,
+            |s| {
+                s.harness.get_by_label("Add a Mirror").click_accesskit();
+                s.settle(2, Duration::ZERO);
+                s.harness.get_by_label("Copy of idgames").click_accesskit();
+                s.settle(3, Duration::ZERO);
+                s.type_into("Folder or address", &s.home.display().to_string());
+                s.harness.get_by_label("Test It").click_accesskit();
+                s.wait_for("the test to fail", |s| {
+                    s.harness
+                        .query_by_label_contains("Could not use it")
+                        .is_some()
+                });
+                s.harness.get_by_label_contains("not the one above");
+            },
+        ),
+    );
+    record(
+        "mirrors-idgames-copy-passed",
+        s.shot_dialog_after(
+            "dlg-mirrors-idgames-copy-passed",
+            ActionRequest::Mirrors,
+            |s| {
+                s.harness.get_by_label("Add a Mirror").click_accesskit();
+                s.settle(2, Duration::ZERO);
+                s.harness.get_by_label("Copy of idgames").click_accesskit();
+                s.settle(3, Duration::ZERO);
+                s.type_into("Folder or address", &copy_root.display().to_string());
+                s.harness.get_by_label("Test It").click_accesskit();
+                s.wait_for("the test to pass", |s| {
+                    s.harness
+                        .query_by_label_contains("its listing has 6 uploads")
+                        .is_some()
+                });
+                s.harness.get_by_label("Finish");
+            },
+        ),
+    );
+    // Finishing saves it as what it is, touches nothing in it, and reads the index from it.
+    record(
+        "mirrors-idgames-copy-list",
+        s.shot_dialog_after(
+            "dlg-mirrors-idgames-copy-list",
+            ActionRequest::Mirrors,
+            |s| {
+                s.harness.get_by_label("Add a Mirror").click_accesskit();
+                s.settle(2, Duration::ZERO);
+                s.harness.get_by_label("Copy of idgames").click_accesskit();
+                s.settle(3, Duration::ZERO);
+                s.type_into("Folder or address", &copy_root.display().to_string());
+                s.harness.get_by_label("Test It").click_accesskit();
+                s.wait_for("the test to pass", |s| {
+                    s.harness.query_by_label("Finish").is_some()
+                });
+                s.harness.get_by_label("Finish").click_accesskit();
+                s.wait_for("it to be saved", |s| {
+                    s.harness
+                        .query_by_label_contains("A copy of idgames")
+                        .is_some()
+                });
+                s.wait_for("the index run it starts", |s| {
+                    !s.harness.state_mut().idgames_index_running()
+                });
+                let saved = caco_core::config::load_config();
+                let copy = saved
+                    .mirrors
+                    .iter()
+                    .find(|mirror| mirror.is_idgames_copy())
+                    .expect("saved as a copy of idgames");
+                assert!(!copy.write);
+                assert_eq!(copy.path.as_deref(), copy_root.to_str());
+                let on_disk = std::fs::read_to_string(caco_core::config::config_file()).unwrap();
+                assert!(on_disk.contains("layout = \"idgames\""), "{on_disk}");
+                assert!(!copy_root.join("index").exists());
+            },
+        ),
+    );
+    // With a copy to read from and no API to ask, Update can be pressed for real.
+    s.shot_view_after("04-import-idgames-updated", ViewMode::Import, |s| {
+        s.harness.key_press(egui::Key::Num1);
+        s.settle(1, Duration::ZERO);
+        s.harness.get_by_label("Update").click_accesskit();
+        s.settle(1, WORKER_PAUSE);
+        s.wait_for("the index run", |s| {
+            !s.harness.state_mut().idgames_index_running()
+        });
+        s.harness.get_by_label_contains("idgames has nothing new");
+    });
+    let mut config = (*caco_core::config::load_config()).clone();
+    config.mirrors.retain(|mirror| !mirror.is_idgames_copy());
+    caco_core::config::save_config(&config).expect("save scratch config");
+    caco_core::config::reload_config();
 
     // The tool has to be reachable, and the list of tools fit, at the smallest window.
     s.shot_view_after("05-manage-open", ViewMode::Library, |s| {

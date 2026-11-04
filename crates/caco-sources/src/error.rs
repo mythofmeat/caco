@@ -31,6 +31,10 @@ pub enum SourceError {
     #[error("No configured mirror has {title}")]
     NoMirrorHas { title: String },
 
+    /// Nothing says where a WAD from idgames is in the archive, or no mirror had it there.
+    #[error("Could not find {title} on any idgames mirror")]
+    NotOnIdgames { title: String },
+
     /// A WAF answered with a challenge instead of the site's response, as
     /// recognised by [`crate::http::waf_challenge`].
     ///

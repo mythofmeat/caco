@@ -701,9 +701,13 @@ pub fn find_duplicate(
         }
     }
 
-    // Strategy 4: Match by source_url, spelled as it would have been stored.
+    // Strategy 4: Match by source_url, spelled as it would have been stored. For an idgames
+    // WAD because a row can be there with no source_id yet, known only by where it is.
     if let Some(url) = source_url
-        && matches!(source_type, SourceType::Url | SourceType::Local)
+        && matches!(
+            source_type,
+            SourceType::Url | SourceType::Local | SourceType::Idgames
+        )
     {
         let url = crate::db::wads::clean_source_url(url);
         let mut stmt = conn.prepare(&format!(
@@ -778,6 +782,34 @@ mod tests {
         let conn = open_memory().unwrap();
         init_db(&conn).unwrap();
         conn
+    }
+
+    /// Known by where it is, until something can connect that to an id.
+    #[test]
+    fn test_an_idgames_wad_with_no_id_is_found_by_its_page() {
+        let conn = setup();
+        let url = "https://www.doomworld.com/idgames/levels/doom2/sunlust";
+        let id = add_wad(
+            &conn,
+            &NewWad::new("Sunlust", SourceType::Idgames).source_url(url),
+        )
+        .unwrap();
+
+        let by_url = find_duplicate(&conn, SourceType::Idgames, None, Some(url), None, None);
+        assert_eq!(by_url.unwrap().unwrap().id, id);
+
+        let with_id = find_duplicate(&conn, SourceType::Idgames, Some("7"), Some(url), None, None);
+        assert_eq!(with_id.unwrap().unwrap().id, id);
+
+        let elsewhere = find_duplicate(
+            &conn,
+            SourceType::Idgames,
+            None,
+            Some("https://www.doomworld.com/idgames/levels/doom/sunlust"),
+            None,
+            None,
+        );
+        assert!(elsewhere.unwrap().is_none());
     }
 
     fn add_test_wads(conn: &Connection) {

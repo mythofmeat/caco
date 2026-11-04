@@ -41,6 +41,7 @@ pub struct SettingsDialogState {
     cache_max_size_gb: f64,
     cache_max_age_days: i64,
     sourceport_update_check_days: i64,
+    idgames_index_check_days: i64,
 
     // Paths
     cache_dir: String,
@@ -105,6 +106,7 @@ impl SettingsDialogState {
             cache_max_size_gb: cfg.cache_max_size_gb,
             cache_max_age_days: cfg.cache_max_age_days,
             sourceport_update_check_days: cfg.sourceport_update_check_days,
+            idgames_index_check_days: cfg.idgames_index_check_days,
             cache_dir: cfg.cache_dir.clone(),
             data_dir: cfg.data_dir.clone(),
             iwad_dir: cfg.iwad_dir.clone(),
@@ -149,6 +151,7 @@ impl SettingsDialogState {
         cfg.cache_max_size_gb = self.cache_max_size_gb.max(0.0);
         cfg.cache_max_age_days = self.cache_max_age_days.max(0);
         cfg.sourceport_update_check_days = self.sourceport_update_check_days.max(0);
+        cfg.idgames_index_check_days = self.idgames_index_check_days.max(0);
         cfg.cache_dir = self.cache_dir.trim().to_string();
         cfg.data_dir = self.data_dir.trim().to_string();
         cfg.iwad_dir = self.iwad_dir.trim().to_string();
@@ -531,6 +534,18 @@ impl SettingsDialogState {
             )
             .labelled_by(label.id)
             .on_hover_text("One `git ls-remote` per built sourceport at startup. 0 = never check.");
+        });
+        ui.horizontal(|ui| {
+            let label = form_label(ui, "Update the idgames index every (days)");
+            ui.add(
+                egui::DragValue::new(&mut self.idgames_index_check_days)
+                    .speed(1)
+                    .range(0..=i64::MAX),
+            )
+            .labelled_by(label.id)
+            .on_hover_text(
+                "Asks a mirror for a new listing of the archive at startup, and only downloads                  it if there is one. 0 = never: search goes by what the index already has, then                  by idgames itself.",
+            );
         });
     }
 

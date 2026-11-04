@@ -13,7 +13,7 @@ use crate::dialogs::sessions::SessionsDialogState;
 use crate::dialogs::wad_stats::WadStatsDialogState;
 use crate::get::{GetOutcome, GetTarget, PageOpener};
 use crate::import;
-use crate::import::state::SearchSource;
+use crate::import::state::SearchSourceData;
 use crate::message::{AppMessage, EnrichReport, Notification};
 use crate::panels;
 use crate::persist;
@@ -27,6 +27,7 @@ mod file_check;
 mod get;
 mod help;
 mod hero;
+mod idgames_index;
 mod mirrors;
 mod section_header;
 mod sidebar;
@@ -79,8 +80,24 @@ impl CacoApp {
         app.sync_cacowards();
         file_check::spawn(app.bg.sender(), app.state.db_path.clone());
         mirrors::spawn_sync(app.bg.sender(), app.state.db_path.clone());
+        app.spawn_idgames_index(false);
         app.spawn_sourceport_update_check();
         app
+    }
+
+    /// Bring the local index of idgames up to date, on a worker. One at a time, since two
+    /// would only be asking the same mirror for the same files.
+    fn spawn_idgames_index(&mut self, asked_for: bool) {
+        if self.state.import.index.is_running() {
+            return;
+        }
+        let cancel = self.state.import.index.started();
+        idgames_index::spawn(
+            self.bg.sender(),
+            self.state.db_path.clone(),
+            asked_for,
+            cancel,
+        );
     }
 
     /// Bring the Cacowards table up to date with the dataset compiled into this
@@ -167,17 +184,20 @@ impl CacoApp {
             import::ImportAction::Search(source, query) => {
                 import::workers::spawn_search(sender, source, query);
             }
-            import::ImportAction::ImportSearchResult(source, entry) => {
-                let source_id = entry.source_id();
-                match source {
-                    SearchSource::Idgames => {
-                        import::workers::spawn_import_idgames(sender, db_path, source_id);
-                    }
-                    SearchSource::Doomwiki => {
-                        import::workers::spawn_import_doomwiki(sender, db_path, source_id);
-                    }
-                }
+            import::ImportAction::Newest => {
+                import::workers::spawn_newest(sender);
             }
+            import::ImportAction::UpdateIndex => {
+                self.spawn_idgames_index(true);
+            }
+            import::ImportAction::ImportSearchResult(_, entry) => match entry.source_data {
+                SearchSourceData::Idgames { target, .. } => {
+                    import::workers::spawn_import_idgames(sender, db_path, target);
+                }
+                SearchSourceData::Doomwiki { .. } => {
+                    import::workers::spawn_import_doomwiki(sender, db_path, entry.title);
+                }
+            },
             import::ImportAction::ImportForm(kind, values) => {
                 import::workers::spawn_import_form(sender, db_path, kind, values);
             }
@@ -374,7 +394,7 @@ impl CacoApp {
                         &wad,
                         &config.mirrors,
                         &paths,
-                        config.download_mirror as usize,
+                        config.download_mirror,
                     )
                     .map_err(|e| PlayError::Unavailable(Some(e.to_string())))?;
                 }
@@ -552,6 +572,12 @@ impl CacoApp {
     /// Whether a bulk upload to a mirror is still running. Public for the same reason.
     pub fn bulk_upload_running(&self) -> bool {
         self.state.mirror_bulk.is_some()
+    }
+
+    /// Whether the worker keeping the idgames index up to date is running. Public for the
+    /// same reason.
+    pub fn idgames_index_running(&self) -> bool {
+        self.state.import.index.is_running()
     }
 
     /// Whether a landed file is being linked right now. Public for the same reason.
@@ -885,10 +911,16 @@ impl eframe::App for CacoApp {
                     }
                 }
                 AppMessage::MirrorSetUp { config, outcome } => {
+                    let is_copy = config.is_idgames_copy();
                     if let Some(ActiveDialog::Mirrors(dialog)) = &mut self.state.active_dialog
                         && dialog.set_up_finished(&self.conn, *config, outcome)
                     {
                         mirrors::spawn_sync(self.bg.sender(), self.state.db_path.clone());
+                        // Where the listing and the text files can now come from, at no
+                        // cost to anyone.
+                        if is_copy {
+                            self.spawn_idgames_index(true);
+                        }
                     }
                 }
                 AppMessage::MirrorBulkProgress { done, total, title } => {
@@ -1025,6 +1057,30 @@ impl eframe::App for CacoApp {
                     match outcome {
                         Ok(results) => search.set_results(results),
                         Err(error) => search.set_error(error),
+                    }
+                }
+                AppMessage::NewestUploads(results) => {
+                    self.state.import.idgames.set_newest(results);
+                }
+                AppMessage::IdgamesIndexStatus(status) => {
+                    self.state.import.index.status = Some(status);
+                }
+                AppMessage::IdgamesIndexProgress(progress) => {
+                    self.state.import.index.progress = Some(progress);
+                }
+                AppMessage::IdgamesIndexFinished(outcome) => {
+                    self.state.import.index.finished(&outcome);
+                    if let Ok(run) = &outcome {
+                        if run.ids_filled_in > 0 {
+                            self.state.invalidate_wad_views();
+                        }
+                        // What is on the table may now be out of date.
+                        if run.report.changed() && self.state.import.idgames.showing_newest {
+                            import::workers::spawn_newest(self.bg.sender());
+                        }
+                        if let Some(notification) = idgames_index::notification(run) {
+                            self.state.notification = Some(notification);
+                        }
                     }
                 }
                 AppMessage::ThumbnailReady {

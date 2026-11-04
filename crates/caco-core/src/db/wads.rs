@@ -419,6 +419,43 @@ pub fn get_status_counts(conn: &Connection) -> Result<HashMap<String, i64>> {
 // Tests
 // ---------------------------------------------------------------------------
 
+/// The idgames WADs that have no idgames id, which were imported from the local index of
+/// the archive at a moment nothing could connect their path to an id.
+pub fn idgames_wads_without_id(conn: &Connection) -> Result<Vec<WadRecord>> {
+    let mut statement = conn.prepare(&format!(
+        "SELECT {WAD_COLUMNS} FROM wads
+         WHERE source_type = 'idgames'
+           AND COALESCE(idgames_id, '') = ''
+           AND COALESCE(source_id, '') = ''
+           AND deleted_at IS NULL"
+    ))?;
+    let wads = statement
+        .query_map([], WadRecord::from_row)?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(wads)
+}
+
+/// Give an idgames WAD its id, which on such a row is its `source_id` too. `source_id` is
+/// not something an update can change, since it is what makes a row a duplicate of another.
+/// `false` if another WAD already has this id.
+pub fn set_idgames_id(conn: &Connection, wad_id: i64, idgames_id: i64) -> Result<bool> {
+    let id = idgames_id.to_string();
+    let taken: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM wads
+         WHERE id != ?1 AND source_type = 'idgames' AND (source_id = ?2 OR idgames_id = ?2)",
+        rusqlite::params![wad_id, id],
+        |row| row.get(0),
+    )?;
+    if taken > 0 {
+        return Ok(false);
+    }
+    conn.execute(
+        "UPDATE wads SET idgames_id = ?2, source_id = ?2 WHERE id = ?1",
+        rusqlite::params![wad_id, id],
+    )?;
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -824,5 +861,59 @@ mod tests {
         delete_wad(&conn, id, true).unwrap();
         let tags = fetch_tags(&conn, id).unwrap();
         assert!(tags.is_empty());
+    }
+
+    #[test]
+    fn test_only_idgames_wads_with_no_id_are_waiting_for_one() {
+        let conn = setup();
+        let waiting = add_wad(&conn, &NewWad::new("Waiting", SourceType::Idgames)).unwrap();
+        add_wad(
+            &conn,
+            &NewWad::new("Has one", SourceType::Idgames)
+                .source_id("1")
+                .idgames_id("1"),
+        )
+        .unwrap();
+        add_wad(&conn, &NewWad::new("From the wiki", SourceType::Doomwiki)).unwrap();
+        let trashed = add_wad(&conn, &NewWad::new("Trashed", SourceType::Idgames)).unwrap();
+        delete_wad(&conn, trashed, false).unwrap();
+
+        let found: Vec<i64> = idgames_wads_without_id(&conn)
+            .unwrap()
+            .iter()
+            .map(|wad| wad.id)
+            .collect();
+        assert_eq!(found, [waiting]);
+    }
+
+    #[test]
+    fn test_setting_an_idgames_id_sets_what_duplicates_go_by_too() {
+        let conn = setup();
+        let id = add_wad(&conn, &NewWad::new("Sunlust", SourceType::Idgames)).unwrap();
+
+        assert!(set_idgames_id(&conn, id, 18168).unwrap());
+
+        let wad = get_wad(&conn, id, false).unwrap().unwrap();
+        assert_eq!(wad.idgames_id.as_deref(), Some("18168"));
+        assert_eq!(wad.source_id.as_deref(), Some("18168"));
+        // Its own id is not another WAD's.
+        assert!(set_idgames_id(&conn, id, 18168).unwrap());
+    }
+
+    #[test]
+    fn test_an_id_another_wad_has_is_not_set() {
+        let conn = setup();
+        add_wad(
+            &conn,
+            &NewWad::new("Sunlust", SourceType::Idgames)
+                .source_id("18168")
+                .idgames_id("18168"),
+        )
+        .unwrap();
+        let id = add_wad(&conn, &NewWad::new("The same", SourceType::Idgames)).unwrap();
+
+        assert!(!set_idgames_id(&conn, id, 18168).unwrap());
+
+        assert_eq!(get_wad(&conn, id, false).unwrap().unwrap().idgames_id, None);
     }
 }

@@ -8,15 +8,17 @@ use caco_core::presence::StorePaths;
 use rusqlite::Connection;
 
 use crate::error::{Result, SourceError};
-use crate::idgames::IdgamesClient;
+use crate::idgames::{Archive, public_mirrors};
 use crate::mirror;
 
 /// Fetch a WAD's file and record where it landed.
 ///
 /// Mirrors come first, because a mirror is the user's own copy, and it is the only
-/// place a manual-only WAD can come from. A failure there falls through to idgames
-/// for a WAD that is on it, since the two do not go down together. If both fail, the
-/// mirror's failure is the one reported.
+/// place a manual-only WAD can come from. Then a copy of idgames if there is one and the
+/// file is on it, which is what makes every idgames WAD instant and offline. A failure
+/// in any of those falls through to the public mirrors for a WAD that is on idgames,
+/// since they do not go down together. If everything fails, the first failure is the
+/// one reported.
 ///
 /// `download_urls` are not tried: they are share pages behind a browser. Those are for
 /// the user to open, which is what Get does.
@@ -29,26 +31,48 @@ pub fn fetch_missing_file(
     wad: &WadRecord,
     mirrors: &[MirrorConfig],
     paths: &StorePaths,
-    idgames_mirror: usize,
+    idgames_mirror: i64,
 ) -> Result<PathBuf> {
-    fetch_missing_file_with(conn, wad, mirrors, paths, |cache_dir| {
-        download_from_idgames(wad, cache_dir, idgames_mirror)
-    })
+    let archive_path = if wad.on_idgames() {
+        Archive::open().path_of(wad)
+    } else {
+        None
+    };
+    fetch_missing_file_with(
+        conn,
+        wad,
+        mirrors,
+        paths,
+        archive_path.as_deref(),
+        |cache_dir| download_from_idgames(wad, archive_path.as_deref(), cache_dir, idgames_mirror),
+    )
 }
 
-/// [`fetch_missing_file`], with the idgames download passed in so that tests can run
-/// with no network.
+/// [`fetch_missing_file`], with where the file is in the archive and the download from
+/// the public mirrors passed in, so that tests can run with no network.
 fn fetch_missing_file_with(
     conn: &Connection,
     wad: &WadRecord,
     mirrors: &[MirrorConfig],
     paths: &StorePaths,
-    idgames: impl FnOnce(&Path) -> Result<PathBuf>,
+    archive_path: Option<&str>,
+    public: impl FnOnce(&Path) -> Result<PathBuf>,
 ) -> Result<PathBuf> {
+    let from_idgames = || {
+        let copied = match archive_path {
+            Some(path) => mirror::fetch_from_idgames_copies(mirrors, path, &paths.cache_dir),
+            None => Ok(None),
+        };
+        match copied {
+            Ok(Some(dest)) => Ok(dest),
+            Ok(None) => public(&paths.cache_dir),
+            Err(failure) => public(&paths.cache_dir).map_err(|_| failure),
+        }
+    };
     let dest = match mirror::fetch_from_mirrors(conn, wad, mirrors, paths) {
         Ok(Some(dest)) => dest,
-        Ok(None) if wad.on_idgames() => idgames(&paths.cache_dir)?,
-        Err(failure) if wad.on_idgames() => idgames(&paths.cache_dir).map_err(|_| failure)?,
+        Ok(None) if wad.on_idgames() => from_idgames()?,
+        Err(failure) if wad.on_idgames() => from_idgames().map_err(|_| failure)?,
         Err(failure) => return Err(failure),
         // A row left by a mirror that has since been taken out of the config, which
         // the next sync drops. Nothing else makes a WAD read as fetchable.
@@ -70,30 +94,22 @@ fn fetch_missing_file_with(
     Ok(dest)
 }
 
-/// Download a WAD's file from idgames into `cache_dir`.
-fn download_from_idgames(wad: &WadRecord, cache_dir: &Path, mirror: usize) -> Result<PathBuf> {
-    std::fs::create_dir_all(cache_dir)?;
-    let client = IdgamesClient::new();
-
-    // Ask the archive where the file is now, but a failed lookup is not a missing
-    // file: source_url + filename still name it on idgames' own mirrors, and those do
-    // not sit behind the API.
-    let entry = wad
-        .idgames_id
-        .as_deref()
-        .and_then(|id| id.parse::<i64>().ok())
-        .and_then(|id| client.get(Some(id), None).ok());
-
-    match entry {
-        Some(entry) => client.download(&entry, Some(cache_dir), mirror, None),
-        None => client.download_direct(
-            wad.source_url.as_deref().unwrap_or(""),
-            wad.filename.as_deref().unwrap_or(""),
-            cache_dir,
-            mirror,
-            None,
-        ),
-    }
+/// Download a WAD's file from the public mirrors into `cache_dir`, starting with the one
+/// picked in Settings and carrying on through the others, which hold the same files.
+fn download_from_idgames(
+    wad: &WadRecord,
+    archive_path: Option<&str>,
+    cache_dir: &Path,
+    first_mirror: i64,
+) -> Result<PathBuf> {
+    let path = archive_path.ok_or_else(|| SourceError::NotOnIdgames {
+        title: wad.title.clone(),
+    })?;
+    mirror::fetch_from_idgames_copies(&public_mirrors(first_mirror), path, cache_dir)?.ok_or_else(
+        || SourceError::NotOnIdgames {
+            title: wad.title.clone(),
+        },
+    )
 }
 
 #[cfg(test)]
@@ -198,6 +214,7 @@ mod tests {
             &wad,
             std::slice::from_ref(&config),
             &f.paths,
+            None,
             untouched_idgames,
         )
         .unwrap();
@@ -227,6 +244,7 @@ mod tests {
             &f.row(wad.id),
             &[config],
             &f.paths,
+            None,
             untouched_idgames,
         )
         .unwrap();
@@ -249,7 +267,8 @@ mod tests {
         let wad = f.row(wad.id);
         assert!(wad.on_idgames());
 
-        fetch_missing_file_with(&f.conn, &wad, &[config], &f.paths, untouched_idgames).unwrap();
+        fetch_missing_file_with(&f.conn, &wad, &[config], &f.paths, None, untouched_idgames)
+            .unwrap();
     }
 
     #[test]
@@ -259,7 +278,7 @@ mod tests {
         let expected = f.paths.cache_dir.join("scythe.zip");
         let asked = Cell::new(false);
 
-        let dest = fetch_missing_file_with(&f.conn, &wad, &[], &f.paths, |cache_dir| {
+        let dest = fetch_missing_file_with(&f.conn, &wad, &[], &f.paths, None, |cache_dir| {
             assert_eq!(cache_dir, f.paths.cache_dir);
             asked.set(true);
             Ok(cache_dir.join("scythe.zip"))
@@ -283,7 +302,7 @@ mod tests {
         // The mirror's copy has gone.
         fs::remove_dir_all(f.root.path().join("mirror").join(&sha256)).unwrap();
 
-        let dest = fetch_missing_file_with(&f.conn, &wad, &[config], &f.paths, |dir| {
+        let dest = fetch_missing_file_with(&f.conn, &wad, &[config], &f.paths, None, |dir| {
             Ok(dir.join("from-idgames.zip"))
         })
         .unwrap();
@@ -301,7 +320,7 @@ mod tests {
         fs::remove_dir_all(f.root.path().join("mirror").join(&sha256)).unwrap();
 
         let failure =
-            fetch_missing_file_with(&f.conn, &wad, &[config], &f.paths, untouched_idgames)
+            fetch_missing_file_with(&f.conn, &wad, &[config], &f.paths, None, untouched_idgames)
                 .unwrap_err()
                 .to_string();
 
@@ -320,7 +339,7 @@ mod tests {
         let wad = f.row(wad.id);
         fs::remove_dir_all(f.root.path().join("mirror").join(&sha256)).unwrap();
 
-        let failure = fetch_missing_file_with(&f.conn, &wad, &[config], &f.paths, |_| {
+        let failure = fetch_missing_file_with(&f.conn, &wad, &[config], &f.paths, None, |_| {
             Err(SourceError::Api("idgames is down".to_string()))
         })
         .unwrap_err()
@@ -338,10 +357,153 @@ mod tests {
         let wad = f.wad(manual(1));
         assert!(wad.mirrored);
 
-        let failure = fetch_missing_file_with(&f.conn, &wad, &[], &f.paths, untouched_idgames)
-            .unwrap_err()
-            .to_string();
+        let failure =
+            fetch_missing_file_with(&f.conn, &wad, &[], &f.paths, None, untouched_idgames)
+                .unwrap_err()
+                .to_string();
 
         assert_eq!(failure, "No configured mirror has Road");
+    }
+
+    /// A copy of idgames in the shape `rsync` leaves one.
+    fn idgames_copy(root: &tempfile::TempDir, name: &str, files: &[(&str, &[u8])]) -> MirrorConfig {
+        let dir = root.path().join(name);
+        for (path, bytes) in files {
+            let file = dir.join(path);
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(file, bytes).unwrap();
+        }
+        MirrorConfig {
+            name: name.to_string(),
+            path: Some(dir.to_string_lossy().into_owned()),
+            layout: Some("idgames".to_string()),
+            ..Default::default()
+        }
+    }
+
+    fn on_idgames(f: &Fixture) -> WadRecord {
+        f.wad(NewWad::new("Scythe", SourceType::Idgames).idgames_id("42"))
+    }
+
+    /// The second half of #56: instant and offline, and nothing asked of anyone.
+    #[test]
+    fn test_a_wad_on_idgames_comes_off_a_copy_of_idgames_without_asking_anyone() {
+        let f = Fixture::new();
+        let path = "levels/doom2/megawads/scythe.zip";
+        let copy = idgames_copy(&f.root, "whole", &[(path, b"PK the real thing")]);
+        let wad = on_idgames(&f);
+
+        let dest = fetch_missing_file_with(
+            &f.conn,
+            &wad,
+            &[copy],
+            &f.paths,
+            Some(path),
+            untouched_idgames,
+        )
+        .unwrap();
+
+        assert_eq!(dest, f.paths.cache_dir.join("scythe.zip"));
+        assert_eq!(fs::read(&dest).unwrap(), b"PK the real thing");
+        assert_eq!(f.row(wad.id).cached_path.as_deref(), dest.to_str());
+        // A copy, and not the only one: clearing the cache must never reach the mirror.
+        assert!(f.root.path().join("whole").join(path).exists());
+    }
+
+    /// A copy can be of part of the archive, or be behind it.
+    #[test]
+    fn test_a_copy_without_the_file_falls_through_to_the_public_mirrors() {
+        let f = Fixture::new();
+        let copy = idgames_copy(&f.root, "levels-only", &[("levels/other.zip", b"PK")]);
+        let wad = on_idgames(&f);
+        let expected = f.paths.cache_dir.join("from-public.zip");
+
+        let dest = fetch_missing_file_with(
+            &f.conn,
+            &wad,
+            &[copy],
+            &f.paths,
+            Some("levels/doom2/megawads/scythe.zip"),
+            |dir| Ok(dir.join("from-public.zip")),
+        )
+        .unwrap();
+
+        assert_eq!(dest, expected);
+    }
+
+    #[test]
+    fn test_a_drive_that_is_not_mounted_falls_through_too_and_gets_the_blame_if_nothing_works() {
+        let f = Fixture::new();
+        let mut copy = idgames_copy(&f.root, "gone", &[]);
+        copy.path = Some(f.root.path().join("not-mounted").display().to_string());
+        let wad = on_idgames(&f);
+        let path = Some("levels/doom2/megawads/scythe.zip");
+
+        let dest = fetch_missing_file_with(
+            &f.conn,
+            &wad,
+            std::slice::from_ref(&copy),
+            &f.paths,
+            path,
+            |dir| Ok(dir.join("from-public.zip")),
+        )
+        .unwrap();
+        assert_eq!(dest, f.paths.cache_dir.join("from-public.zip"));
+
+        let failure = fetch_missing_file_with(&f.conn, &wad, &[copy], &f.paths, path, |_| {
+            Err(SourceError::Api("the public mirrors are down".to_string()))
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(failure.starts_with("Mirror gone:"), "{failure}");
+    }
+
+    /// `castle.zip` is on the archive seven times, and they are not the same file.
+    #[test]
+    fn test_a_copy_does_not_overwrite_another_wads_file_of_the_same_name() {
+        let f = Fixture::new();
+        fs::create_dir_all(&f.paths.cache_dir).unwrap();
+        let other = f.paths.cache_dir.join("castle.zip");
+        fs::write(&other, b"PK somebody else's castle").unwrap();
+        let path = "levels/doom2/a-c/castle.zip";
+        let copy = idgames_copy(&f.root, "whole", &[(path, b"PK this castle")]);
+        let wad = on_idgames(&f);
+
+        let dest = fetch_missing_file_with(
+            &f.conn,
+            &wad,
+            &[copy],
+            &f.paths,
+            Some(path),
+            untouched_idgames,
+        )
+        .unwrap();
+
+        assert_ne!(dest, other);
+        assert_eq!(fs::read(&other).unwrap(), b"PK somebody else's castle");
+        assert_eq!(fs::read(&dest).unwrap(), b"PK this castle");
+    }
+
+    /// Being on a copy of idgames says nothing about a WAD that is not on idgames.
+    #[test]
+    fn test_a_copy_is_not_asked_about_a_wad_that_is_not_on_idgames() {
+        let f = Fixture::new();
+        let copy = idgames_copy(&f.root, "whole", &[("levels/road.zip", b"PK")]);
+        let (mirror, sha256) = f.mirror_with_the_file(1);
+        fs::remove_dir_all(f.root.path().join("mirror").join(&sha256)).unwrap();
+        let wad = f.wad(manual(1));
+
+        let failure = fetch_missing_file_with(
+            &f.conn,
+            &wad,
+            &[mirror, copy],
+            &f.paths,
+            Some("levels/road.zip"),
+            untouched_idgames,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(failure.starts_with("Mirror home:"), "{failure}");
     }
 }

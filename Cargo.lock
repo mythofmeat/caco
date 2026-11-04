@@ -607,6 +607,7 @@ dependencies = [
  "egui",
  "egui_extras",
  "egui_kittest",
+ "flate2",
  "image",
  "open",
  "reqwest",
@@ -650,6 +651,8 @@ version = "4.2.5"
 dependencies = [
  "caco-core",
  "cc",
+ "chrono",
+ "flate2",
  "html-escape",
  "http",
  "regex",

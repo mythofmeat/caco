@@ -1,5 +1,4 @@
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use reqwest::blocking::{Client, Response};
 
@@ -16,18 +15,30 @@ pub const MIRRORS: &[&str] = &[
     "https://files.xvertigox.com/idgames/",
 ];
 
-const BASE_URL: &str = "https://www.doomworld.com/idgames/api/api.php";
+const API_URL: &str = "https://www.doomworld.com/idgames/api/api.php";
 
 /// Client for the idgames archive API.
 pub struct IdgamesClient {
     client: Client,
+    api_url: String,
 }
 
 impl IdgamesClient {
-    /// Create a new client with default settings.
+    /// A client for the real API, unless `CACO_IDGAMES_API` says it is somewhere else. Which
+    /// is how a run of the real app with nothing to answer it, in the screenshot harness,
+    /// presses buttons that end up asking it.
     pub fn new() -> Self {
+        match std::env::var("CACO_IDGAMES_API") {
+            Ok(api_url) => Self::with_api_url(api_url),
+            Err(_) => Self::with_api_url(API_URL),
+        }
+    }
+
+    /// A client for an API somewhere else.
+    pub fn with_api_url(api_url: impl Into<String>) -> Self {
         Self {
             client: build_client(),
+            api_url: api_url.into(),
         }
     }
 
@@ -37,7 +48,7 @@ impl IdgamesClient {
         query.push(("action", action));
         query.push(("out", "json"));
 
-        let response = self.client.get(BASE_URL).query(&query).send()?;
+        let response = self.client.get(&self.api_url).query(&query).send()?;
         read_api_response(response)
     }
 
@@ -115,7 +126,16 @@ impl IdgamesClient {
 
         let mut entry: FileEntry = serde_json::from_value(content)?;
         entry.reviews = reviews;
+        entry.clean_text();
         Ok(entry)
+    }
+
+    /// Every file in a directory of the archive, in one call. No more than what a search
+    /// would say about each: the text file itself and the reviews only come from
+    /// [`get`](Self::get).
+    pub fn list_directory(&self, dir: &str) -> Result<Vec<FileEntry>> {
+        let content = self.request("getfiles", &[("name", dir)])?;
+        parse_file_list(&content)
     }
 
     /// Search for files.
@@ -139,111 +159,6 @@ impl IdgamesClient {
 
         let content = self.request("search", &params)?;
         parse_file_list(&content)
-    }
-
-    /// Get the download URL for a file entry.
-    fn get_download_url(&self, entry: &FileEntry, mirror: usize) -> String {
-        let path = format!("{}/{}", entry.dir.trim_matches('/'), entry.filename).replace("//", "/");
-        format!("{}{}", MIRRORS[mirror % MIRRORS.len()], path)
-    }
-
-    /// Atomic download: fetch URL to a `.partial` file, rename on success.
-    /// Cleans up the partial file on failure.
-    fn atomic_download(
-        &self,
-        url: &str,
-        dest_path: &Path,
-        progress: Option<&dyn Fn(u64, u64)>,
-    ) -> Result<PathBuf> {
-        let partial = dest_path.with_extension(format!(
-            "{}.partial",
-            dest_path.extension().and_then(|e| e.to_str()).unwrap_or("")
-        ));
-
-        let result = (|| -> Result<PathBuf> {
-            let mut response = self.client.get(url).send()?;
-            response.error_for_status_ref()?;
-
-            let total = response.content_length().unwrap_or(0);
-
-            if let Some(parent) = partial.parent() {
-                fs::create_dir_all(parent)?;
-            }
-
-            let mut file = fs::File::create(&partial)?;
-            let downloaded = response.copy_to(&mut file)?;
-
-            if let Some(cb) = progress {
-                cb(downloaded, total);
-            }
-
-            drop(file);
-            fs::rename(&partial, dest_path)?;
-            Ok(dest_path.to_path_buf())
-        })();
-
-        if result.is_err() && partial.exists() {
-            let _ = fs::remove_file(&partial);
-        }
-
-        result
-    }
-
-    /// Download a file with optional progress callback.
-    ///
-    /// Uses atomic download: writes to a `.partial` file first, then renames
-    /// on success. Cleans up on failure.
-    pub fn download(
-        &self,
-        entry: &FileEntry,
-        dest: Option<&Path>,
-        mirror: usize,
-        progress: Option<&dyn Fn(u64, u64)>,
-    ) -> Result<PathBuf> {
-        let url = self.get_download_url(entry, mirror);
-        let dest_path = resolve_download_dest(dest, &entry.filename);
-        self.atomic_download(&url, &dest_path, progress)
-    }
-
-    /// Download directly from a mirror, bypassing the API.
-    ///
-    /// Used as a fallback when the idgames API is blocked.
-    /// Constructs the mirror URL from a WAD's stored `source_url` and `filename`.
-    ///
-    /// `source_url` format: `https://www.doomworld.com/idgames/levels/doom2/Ports/megawads/sunlust`
-    /// The last segment is the WAD slug; the parent is the actual mirror directory.
-    pub fn download_direct(
-        &self,
-        source_url: &str,
-        filename: &str,
-        dest_dir: &Path,
-        mirror: usize,
-        progress: Option<&dyn Fn(u64, u64)>,
-    ) -> Result<PathBuf> {
-        if filename.is_empty() || !source_url.contains("/idgames/") {
-            return Err(SourceError::Api(
-                "Cannot construct direct download URL: missing idgames path or filename"
-                    .to_string(),
-            ));
-        }
-
-        // Extract the directory path from source_url
-        let idgames_path = source_url
-            .split("/idgames/")
-            .nth(1)
-            .unwrap_or("")
-            .trim_end_matches('/');
-        let dir_path = match idgames_path.rsplit_once('/') {
-            Some((dir, _slug)) => format!("{dir}/"),
-            None => String::new(),
-        };
-        let download_path = format!("{dir_path}{filename}");
-
-        let mirror_base = MIRRORS[mirror % MIRRORS.len()];
-        let url = format!("{mirror_base}{download_path}");
-
-        let dest_path = dest_dir.join(filename);
-        self.atomic_download(&url, &dest_path, progress)
     }
 }
 
@@ -280,37 +195,21 @@ fn read_api_response(response: Response) -> Result<serde_json::Value> {
         .unwrap_or(serde_json::Value::Null))
 }
 
-/// Resolve the destination file path for a download.
-///
-/// If `dest` is a directory, the filename is joined to it.
-/// If `dest` is a specific file path, it's used as-is.
-/// If `dest` is `None`, the filename alone is returned (relative to CWD).
-fn resolve_download_dest(dest: Option<&Path>, filename: &str) -> PathBuf {
-    match dest {
-        Some(p) if p.is_dir() => p.join(filename),
-        Some(p) => p.to_path_buf(),
-        None => PathBuf::from(filename),
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Normalization helpers
 // ---------------------------------------------------------------------------
 
 /// Normalize a JSON value that may be a single object or an array into a `Vec<T>`.
+///
+/// Each entry on its own, so that one the API has spelled some new way costs that entry
+/// and not all of them. It was one call for the whole array, which threw away every file
+/// in a directory, or every result of a search, for one number where a string should be.
 fn normalize_list<T: serde::de::DeserializeOwned>(val: &serde_json::Value) -> Vec<T> {
-    if val.is_null() {
-        return Vec::new();
-    }
-    if val.is_array() {
-        serde_json::from_value(val.clone()).unwrap_or_default()
-    } else if val.is_object() {
-        match serde_json::from_value::<T>(val.clone()) {
-            Ok(item) => vec![item],
-            Err(_) => Vec::new(),
-        }
-    } else {
-        Vec::new()
+    let parse = |item: &serde_json::Value| serde_json::from_value::<T>(item.clone()).ok();
+    match val {
+        serde_json::Value::Array(items) => items.iter().filter_map(parse).collect(),
+        serde_json::Value::Object(_) => parse(val).into_iter().collect(),
+        _ => Vec::new(),
     }
 }
 
@@ -338,7 +237,9 @@ fn parse_file_list(content: &serde_json::Value) -> Result<Vec<FileEntry>> {
         .get("file")
         .cloned()
         .unwrap_or(serde_json::Value::Null);
-    Ok(normalize_list::<FileEntry>(&files_val))
+    let mut entries = normalize_list::<FileEntry>(&files_val);
+    entries.iter_mut().for_each(FileEntry::clean_text);
+    Ok(entries)
 }
 
 #[cfg(test)]
@@ -437,6 +338,34 @@ mod tests {
         assert_eq!(reviews[0].text, "a");
     }
 
+    /// What used to empty a whole directory: 263 files, for one title of `2014`.
+    #[test]
+    fn test_one_entry_that_cannot_be_read_costs_only_that_entry() {
+        let val = serde_json::json!([
+            {"text": "a", "vote": 1, "username": "x"},
+            {"text": "b", "vote": "not a number", "username": "y"},
+            {"text": "c", "vote": 3, "username": "z"},
+        ]);
+        let reviews: Vec<Review> = normalize_list(&val);
+        let texts: Vec<&str> = reviews.iter().map(|review| review.text.as_str()).collect();
+        assert_eq!(texts, ["a", "c"]);
+    }
+
+    #[test]
+    fn test_a_title_that_looks_like_a_number_is_still_a_title() {
+        let content = serde_json::json!({
+            "file": [
+                {"id": 1, "filename": "vtm_2014.zip", "title": 2014},
+                {"id": 2, "filename": "hexndm.zip", "author": 8130423},
+                {"id": 3, "filename": "plain.zip", "title": "Plain"},
+            ]
+        });
+        let files = parse_file_list(&content).unwrap();
+        assert_eq!(files.len(), 3);
+        assert_eq!(files[0].title, "2014");
+        assert_eq!(files[1].author, "8130423");
+    }
+
     #[test]
     fn test_normalize_list_null() {
         let val = serde_json::Value::Null;
@@ -514,72 +443,6 @@ mod tests {
     }
 
     #[test]
-    fn test_get_download_url() {
-        let client = IdgamesClient::new();
-        let entry = FileEntry {
-            id: 1,
-            title: String::new(),
-            dir: "levels/doom2/Ports/megawads/".to_string(),
-            filename: "sunlust.zip".to_string(),
-            size: 0,
-            age: 0,
-            date: String::new(),
-            author: String::new(),
-            email: String::new(),
-            description: String::new(),
-            credits: String::new(),
-            base: String::new(),
-            buildtime: String::new(),
-            editors: String::new(),
-            bugs: String::new(),
-            textfile: String::new(),
-            rating: 0.0,
-            votes: 0,
-            url: String::new(),
-            idgamesurl: String::new(),
-            reviews: Vec::new(),
-        };
-        let url = client.get_download_url(&entry, 0);
-        assert_eq!(
-            url,
-            "https://youfailit.net/pub/idgames/levels/doom2/Ports/megawads/sunlust.zip"
-        );
-    }
-
-    #[test]
-    fn test_get_download_url_mirror_wrap() {
-        let client = IdgamesClient::new();
-        let entry = FileEntry {
-            id: 1,
-            title: String::new(),
-            dir: "levels/doom2/".to_string(),
-            filename: "test.zip".to_string(),
-            size: 0,
-            age: 0,
-            date: String::new(),
-            author: String::new(),
-            email: String::new(),
-            description: String::new(),
-            credits: String::new(),
-            base: String::new(),
-            buildtime: String::new(),
-            editors: String::new(),
-            bugs: String::new(),
-            textfile: String::new(),
-            rating: 0.0,
-            votes: 0,
-            url: String::new(),
-            idgamesurl: String::new(),
-            reviews: Vec::new(),
-        };
-
-        // Mirror index wraps around
-        let url0 = client.get_download_url(&entry, 0);
-        let url5 = client.get_download_url(&entry, 5);
-        assert_eq!(url0, url5);
-    }
-
-    #[test]
     fn test_full_api_response_parse() {
         // Simulate a complete API response for the `get` action
         let raw = serde_json::json!({
@@ -626,26 +489,18 @@ mod tests {
         assert_eq!(entry.reviews[0].text, "Amazing!");
     }
 
+    /// What the site renders, which is no use anywhere else.
     #[test]
-    fn test_resolve_download_dest_directory() {
-        // When dest is an existing directory, filename should be joined
-        let dir = std::env::temp_dir();
-        let result = resolve_download_dest(Some(dir.as_path()), "sunlust.zip");
-        assert_eq!(result, dir.join("sunlust.zip"));
-    }
-
-    #[test]
-    fn test_resolve_download_dest_file_path() {
-        // When dest is a specific file path (not an existing dir), use as-is
-        let path = PathBuf::from("/tmp/custom_name.zip");
-        let result = resolve_download_dest(Some(path.as_path()), "sunlust.zip");
-        assert_eq!(result, path);
-    }
-
-    #[test]
-    fn test_resolve_download_dest_none() {
-        // When dest is None, return just the filename (relative to CWD)
-        let result = resolve_download_dest(None, "sunlust.zip");
-        assert_eq!(result, PathBuf::from("sunlust.zip"));
+    fn test_the_markup_in_what_the_api_says_is_taken_out() {
+        let content = serde_json::json!({
+            "file": {
+                "id": 1,
+                "title": "Tom &amp; Jerry",
+                "description": "First part.<br><br>\n\nSecond part.<BR />Third.",
+            }
+        });
+        let files = parse_file_list(&content).unwrap();
+        assert_eq!(files[0].title, "Tom & Jerry");
+        assert_eq!(files[0].description, "First part.\n\nSecond part.\nThird.");
     }
 }

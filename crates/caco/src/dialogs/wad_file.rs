@@ -47,7 +47,8 @@ impl WadFileSection {
         let has_file = nonempty(&wad.cached_path).is_some();
         let upload_targets = configured
             .iter()
-            .filter(|mirror| mirror.write && has_file && !on_mirrors.contains(&mirror.name))
+            .filter(|mirror| mirror.takes_uploads())
+            .filter(|mirror| has_file && !on_mirrors.contains(&mirror.name))
             .map(|mirror| mirror.name.clone())
             .collect();
         let location = match (nonempty(&wad.cached_path), nonempty(&wad.last_known_path)) {

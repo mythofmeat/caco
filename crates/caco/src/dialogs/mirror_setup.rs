@@ -13,7 +13,7 @@
 use std::path::PathBuf;
 use std::sync::mpsc::TryRecvError;
 
-use caco_core::config::{MirrorConfig, SavedToken};
+use caco_core::config::{MirrorConfig, MirrorLayout, SavedToken};
 use caco_core::mirror_tokens::TokenFile;
 use caco_sources::mirror::MirrorProbe;
 
@@ -28,14 +28,18 @@ pub enum MirrorKind {
     Gitea,
     Webdav,
     WebServer,
+    /// All of idgames, on a disk or a server of the user's. Not something caco keeps, so
+    /// nothing else about a mirror applies to it but where it is.
+    IdgamesCopy,
 }
 
 impl MirrorKind {
-    pub const ALL: [MirrorKind; 4] = [
+    pub const ALL: [MirrorKind; 5] = [
         MirrorKind::Folder,
         MirrorKind::Gitea,
         MirrorKind::Webdav,
         MirrorKind::WebServer,
+        MirrorKind::IdgamesCopy,
     ];
 
     pub fn title(self) -> &'static str {
@@ -44,6 +48,7 @@ impl MirrorKind {
             MirrorKind::Gitea => "Gitea",
             MirrorKind::Webdav => "WebDAV",
             MirrorKind::WebServer => "A Web Server",
+            MirrorKind::IdgamesCopy => "Copy of idgames",
         }
     }
 
@@ -65,6 +70,10 @@ impl MirrorKind {
                 "Any server that can serve a folder. Read only: caco can download from it but \
                  not upload, so something else has to fill it."
             }
+            MirrorKind::IdgamesCopy => {
+                "All of idgames, about 64 GB, on a disk of your own. Every WAD from there \
+                 becomes instant and offline, for as much of the archive as you copied."
+            }
         }
     }
 
@@ -74,17 +83,21 @@ impl MirrorKind {
             MirrorKind::Gitea => "gitea",
             MirrorKind::Webdav => "webdav",
             MirrorKind::WebServer => "web",
+            MirrorKind::IdgamesCopy => "idgames",
         }
     }
 
     fn can_write(self) -> bool {
-        self != MirrorKind::WebServer
+        !matches!(self, MirrorKind::WebServer | MirrorKind::IdgamesCopy)
     }
 
     /// Which kind a saved mirror is, to ask the right questions when it is edited. A
     /// URL that could be either is WebDAV if it logs in or is written to, since a plain
     /// web server does neither.
     pub fn of(config: &MirrorConfig) -> Self {
+        if config.is_idgames_copy() {
+            return MirrorKind::IdgamesCopy;
+        }
         match config.url.as_deref() {
             None => MirrorKind::Folder,
             Some(url) if parse_gitea_url(url).is_some() => MirrorKind::Gitea,
@@ -250,6 +263,7 @@ impl MirrorSetup {
                     setup.form.package = package;
                 }
             }
+            (MirrorKind::IdgamesCopy, Some(url)) => setup.form.folder = url.to_string(),
             (_, Some(url)) => setup.form.address = url.to_string(),
             (_, None) => setup.form.folder = config.path.clone().unwrap_or_default(),
         }
@@ -268,6 +282,37 @@ impl MirrorSetup {
         self.kind = Some(kind);
         self.form.name = unused_name(kind.default_name(), &self.taken);
         self.form.write = kind.can_write();
+    }
+
+    /// The folder field and its Browse button, which is every kind that can be a folder.
+    fn render_folder_field(
+        &mut self,
+        ctx: &egui::Context,
+        ui: &mut egui::Ui,
+        label: &str,
+        hint: &str,
+    ) {
+        let label = form_label(ui, label);
+        ui.horizontal(|ui| {
+            let browse_w = 80.0;
+            let field_w =
+                (ui.available_width() - browse_w - ui.spacing().item_spacing.x).max(120.0);
+            ui.add(
+                egui::TextEdit::singleline(&mut self.form.folder)
+                    .desired_width(field_w)
+                    .text_color(theme::TEXT_PRIMARY)
+                    .hint_text(hint),
+            )
+            .labelled_by(label.id);
+            if ui
+                .add_enabled(self.picker.is_none(), egui::Button::new("Browse\u{2026}"))
+                .clicked()
+            {
+                let start = dirs::home_dir().unwrap_or_default();
+                let request = FileDialogRequest::folder().set_directory(start);
+                self.picker = Some(spawn_file_dialog(Some(ctx.clone()), request));
+            }
+        });
     }
 
     /// Whether Escape should go back a page rather than out of the wizard.
@@ -306,6 +351,15 @@ impl MirrorSetup {
                 config.username = filled(&form.username);
             }
             MirrorKind::WebServer => config.url = filled(&form.address),
+            MirrorKind::IdgamesCopy => {
+                config.layout = Some(MirrorLayout::IDGAMES.to_string());
+                let place = filled(&form.folder);
+                if place.as_deref().is_some_and(is_http) {
+                    config.url = place;
+                } else {
+                    config.path = place;
+                }
+            }
         }
         config
     }
@@ -322,6 +376,9 @@ impl MirrorSetup {
         match kind {
             MirrorKind::Folder if config.path.is_none() => {
                 return Some("Choose a folder.".to_string());
+            }
+            MirrorKind::IdgamesCopy if config.path.is_none() && config.url.is_none() => {
+                return Some("Choose the folder it is in.".to_string());
             }
             MirrorKind::Gitea if config.url.is_none() => {
                 return Some("Fill in the server, the owner and the package.".to_string());
@@ -494,7 +551,7 @@ impl MirrorSetup {
         for kind in MirrorKind::ALL {
             ui.horizontal_top(|ui| {
                 if ui
-                    .add_sized([110.0, 28.0], egui::Button::new(kind.title()))
+                    .add_sized([124.0, 28.0], egui::Button::new(kind.title()))
                     .clicked()
                 {
                     picked = Some(kind);
@@ -525,17 +582,20 @@ impl MirrorSetup {
             MirrorKind::Gitea => self.render_gitea(ui),
             MirrorKind::Webdav => self.render_webdav(ui),
             MirrorKind::WebServer => self.render_web_server(ui),
+            MirrorKind::IdgamesCopy => self.render_idgames_copy(ctx, ui),
         }
 
         ui.add_space(8.0);
         ui.separator();
         field(ui, "Name", &mut self.form.name, "");
-        note(
-            ui,
-            "What caco calls it, in this list and on its upload buttons.",
-        );
         if kind.can_write() {
+            note(
+                ui,
+                "What caco calls it, in this list and on its upload buttons.",
+            );
             ui.checkbox(&mut self.form.write, "caco may upload to it");
+        } else {
+            note(ui, "What caco calls it, in the list of mirrors.");
         }
     }
 
@@ -545,27 +605,7 @@ impl MirrorSetup {
             "Any folder this machine can reach. Best on another disk, because a mirror on the \
              same disk as your library goes when the disk does.",
         );
-        let label = form_label(ui, "Folder");
-        ui.horizontal(|ui| {
-            let browse_w = 80.0;
-            let field_w =
-                (ui.available_width() - browse_w - ui.spacing().item_spacing.x).max(120.0);
-            ui.add(
-                egui::TextEdit::singleline(&mut self.form.folder)
-                    .desired_width(field_w)
-                    .text_color(theme::TEXT_PRIMARY)
-                    .hint_text("/mnt/nas/doom-mirror"),
-            )
-            .labelled_by(label.id);
-            if ui
-                .add_enabled(self.picker.is_none(), egui::Button::new("Browse\u{2026}"))
-                .clicked()
-            {
-                let start = dirs::home_dir().unwrap_or_default();
-                let request = FileDialogRequest::folder().set_directory(start);
-                self.picker = Some(spawn_file_dialog(Some(ctx.clone()), request));
-            }
-        });
+        self.render_folder_field(ctx, ui, "Folder", "/mnt/nas/doom-mirror");
         note(
             ui,
             "If it isn't there, caco will create it when you finish. If it should be there \
@@ -687,6 +727,46 @@ impl MirrorSetup {
         );
     }
 
+    /// How to make one, and where it is. Both commands were run for this, the first on a
+    /// real mirror's rsync module and the second against a real mirror's web pages.
+    fn render_idgames_copy(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
+        note(
+            ui,
+            "caco doesn't make this one: it only reads what something else keeps up to date. \
+             Each WAD on idgames is then copied from here rather than downloaded.",
+        );
+        step(ui, "1. Copy the archive");
+        note(
+            ui,
+            "About 64 GB. Run it again now and then, and it only fetches what is new. These two \
+             folders are only files on their way somewhere else:",
+        );
+        copyable(
+            ui,
+            "rsync -rt --exclude incoming --exclude newstuff \
+             rsync://mirror.braindrainlan.nu/pub/idgames/ /mnt/nas/idgames/",
+        );
+        note(ui, "Or, with nothing but a web mirror to copy from:");
+        copyable(
+            ui,
+            "rclone copy --exclude 'incoming/**' --exclude 'newstuff/**' \
+             --http-url https://youfailit.net/pub/idgames :http: /mnt/nas/idgames",
+        );
+        note(
+            ui,
+            "A part of it is fine, such as just levels/: anything that isn't there is \
+             downloaded as usual. Keep ls-laR.gz with it, and caco's index can come from here too.",
+        );
+
+        step(ui, "2. Where it is");
+        self.render_folder_field(ctx, ui, "Folder or address", "/mnt/nas/idgames");
+        note(
+            ui,
+            "The folder with levels/ directly inside it, or the address of a web server \
+             serving that folder.",
+        );
+    }
+
     /// The token or password field.
     fn render_token_field(&mut self, ui: &mut egui::Ui, label: &str) {
         let label = form_label(ui, label);
@@ -791,6 +871,20 @@ pub struct TokenChanges {
 }
 
 fn render_probe(ui: &mut egui::Ui, probe: &MirrorProbe, kind: MirrorKind) {
+    if kind == MirrorKind::IdgamesCopy {
+        match probe.files {
+            Some(uploads) => good(
+                ui,
+                &format!("It's there, and its listing has {uploads} uploads in it."),
+            ),
+            None => good(
+                ui,
+                "It's there, with no ls-laR.gz. caco can copy files from it, and will read its \
+                 listing from a public mirror.",
+            ),
+        }
+        return;
+    }
     if probe.folder_missing {
         good(
             ui,
@@ -860,8 +954,16 @@ fn failure_hint(kind: MirrorKind, why: &str) -> Option<&'static str> {
         MirrorKind::Folder if why.contains("denied") => {
             Some("This user can't write there. Check the folder's permissions.")
         }
+        MirrorKind::IdgamesCopy if why.contains("levels") || why.contains("ls-laR") => Some(
+            "It has to be the folder with levels/ and ls-laR.gz directly inside it, and not the \
+             one above.",
+        ),
         _ => None,
     }
+}
+
+fn is_http(place: &str) -> bool {
+    place.starts_with("http://") || place.starts_with("https://")
 }
 
 fn primary(ui: &mut egui::Ui, label: &str, enabled: bool) -> bool {
@@ -956,6 +1058,39 @@ mod tests {
         assert_eq!(config.url, None);
         assert!(config.write);
         assert_eq!(setup.problem(MirrorKind::Folder), None);
+    }
+
+    #[test]
+    fn test_a_copy_of_idgames_is_a_folder_or_an_address_that_is_never_written_to() {
+        let mut setup = at(MirrorKind::IdgamesCopy);
+        assert_eq!(setup.form.name, "idgames");
+        assert_eq!(
+            setup.problem(MirrorKind::IdgamesCopy).as_deref(),
+            Some("Choose the folder it is in.")
+        );
+
+        setup.form.folder = " /mnt/nas/idgames ".to_string();
+        let config = setup.config(MirrorKind::IdgamesCopy);
+        assert_eq!(config.path.as_deref(), Some("/mnt/nas/idgames"));
+        assert_eq!(config.url, None);
+        assert!(config.is_idgames_copy());
+        assert!(!config.write);
+        assert_eq!(setup.problem(MirrorKind::IdgamesCopy), None);
+
+        setup.form.folder = "http://nas:8080/idgames".to_string();
+        let config = setup.config(MirrorKind::IdgamesCopy);
+        assert_eq!(config.url.as_deref(), Some("http://nas:8080/idgames"));
+        assert_eq!(config.path, None);
+        assert_eq!(setup.problem(MirrorKind::IdgamesCopy), None);
+    }
+
+    #[test]
+    fn test_a_copy_of_idgames_in_the_wrong_folder_says_which_to_use() {
+        let hint = failure_hint(
+            MirrorKind::IdgamesCopy,
+            "there is no ls-laR.gz or levels folder directly under /mnt/nas",
+        );
+        assert!(hint.unwrap().contains("directly inside"));
     }
 
     /// The URL the registry wants, built from what a person knows.
@@ -1139,6 +1274,22 @@ mod tests {
                     ..Default::default()
                 }),
                 MirrorKind::WebServer,
+            ),
+            (
+                saved(MirrorConfig {
+                    path: Some("/mnt/nas/idgames".to_string()),
+                    layout: Some("idgames".to_string()),
+                    ..Default::default()
+                }),
+                MirrorKind::IdgamesCopy,
+            ),
+            (
+                saved(MirrorConfig {
+                    url: Some("http://nas:8080/idgames".to_string()),
+                    layout: Some("idgames".to_string()),
+                    ..Default::default()
+                }),
+                MirrorKind::IdgamesCopy,
             ),
         ] {
             assert_eq!(MirrorKind::of(&config), kind, "{config:?}");

@@ -4,7 +4,7 @@ use caco_core::player::PlayResult;
 use caco_core::wad_analysis::WadAnalysis;
 use caco_sources::import_service::ImportResult;
 
-use crate::import::state::{SearchResultEntry, SearchSource};
+use crate::import::state::{SearchResults, SearchSource};
 
 // ---------------------------------------------------------------------------
 // Severity
@@ -75,6 +75,17 @@ pub struct EnrichReport {
     pub wiki_blocked: Option<String>,
     pub cancelled: bool,
     pub dry_run: bool,
+}
+
+/// What a run of the idgames index worker did.
+#[derive(Debug, Clone)]
+pub struct IdgamesIndexRun {
+    pub report: caco_sources::idgames::sync::SyncReport,
+    pub status: caco_sources::idgames::IndexStatus,
+    /// How many WADs in the library got the ids they were missing.
+    pub ids_filled_in: usize,
+    /// Someone asked for this run, and wants to hear how it went.
+    pub asked_for: bool,
 }
 
 pub enum AppMessage {
@@ -161,7 +172,16 @@ pub enum AppMessage {
     /// commit. Only sent when the list is non-empty — a startup check that
     /// finds nothing says nothing.
     SourceportUpdatesAvailable(Vec<String>),
-    SearchComplete(SearchSource, Result<Vec<SearchResultEntry>, String>),
+    SearchComplete(SearchSource, Result<SearchResults, String>),
+    /// The newest uploads on idgames, for the table on the Import view.
+    NewestUploads(SearchResults),
+    /// How far along the local index of idgames is, read every so often by the worker
+    /// keeping it up to date, and once when the app starts whether or not it has work to do.
+    IdgamesIndexStatus(caco_sources::idgames::IndexStatus),
+    /// That worker moved on, or got further through what it was doing.
+    IdgamesIndexProgress(caco_sources::idgames::sync::SyncProgress),
+    /// That worker finished, or could not start.
+    IdgamesIndexFinished(Result<IdgamesIndexRun, String>),
     ImportComplete(Result<ImportResult, String>),
     ThumbnailReady {
         wad_id: i64,

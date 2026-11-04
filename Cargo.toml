@@ -63,6 +63,9 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 
 # Archive
 zip = { version = "9", default-features = false, features = ["deflate"] }
+# The idgames archive's listing is a .gz file, which reqwest does not unwrap: it only
+# does that for a response's Content-Encoding.
+flate2 = "1"
 
 # HTTP
 # `query` became opt-in in 0.13; it was unconditional in 0.12. The idgames and
