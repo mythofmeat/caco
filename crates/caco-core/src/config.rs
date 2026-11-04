@@ -480,9 +480,9 @@ impl MirrorConfig {
         self.layout() == Ok(MirrorLayout::Idgames)
     }
 
-    /// Whether caco may put files on this mirror. A copy of idgames is somebody's
-    /// `rsync`, which would delete anything caco added the next time it ran, and there
-    /// is no index on it to say that it was ever there.
+    /// Whether caco may put files on this mirror. Not on a copy of idgames, which belongs to
+    /// whatever keeps it up to date, and is meant to hold what the archive holds. An index
+    /// on it would also make it look like a mirror caco keeps.
     pub fn takes_uploads(&self) -> bool {
         self.write && self.layout() == Ok(MirrorLayout::Caco)
     }

@@ -1864,8 +1864,8 @@ fn test_probing_a_copy_over_http_asks_for_its_listing() {
     assert_eq!(probe_mirror(&copy).unwrap().files, Some(2));
 }
 
-/// Nothing it could write would survive the next `rsync`, and an index would make it look
-/// like a mirror caco keeps.
+/// It belongs to whatever keeps it up to date, and an index would make it look like a
+/// mirror caco keeps.
 #[test]
 fn test_nothing_is_uploaded_to_a_copy_whatever_its_config_says() {
     let m = Machine::new();
