@@ -40,6 +40,7 @@ struct StatusLine {
 pub struct WadDataDialogState {
     wad_id: i64,
     wad_title: String,
+    data_key: String,
     data_dir: PathBuf,
     tab: Tab,
     saves: Vec<SaveFile>,
@@ -66,12 +67,13 @@ impl WadDataDialogState {
     /// Returns `None` when the WAD row is gone.
     pub fn new(conn: &Connection, wad_id: i64) -> Option<Self> {
         let wad = caco_core::db::get_wad(conn, wad_id, false).ok()??;
-        let data_dir = caco_core::config::find_wad_data_dir(wad_id)
-            .unwrap_or_else(|| caco_core::config::get_wad_data_dir(wad_id, &wad.title));
+        let data_dir = caco_core::config::find_wad_data_dir(&wad.data_key, &wad.title)
+            .unwrap_or_else(|| caco_core::config::get_wad_data_dir(&wad.data_key, &wad.title));
 
         let mut state = Self {
             wad_id,
             wad_title: wad.title,
+            data_key: wad.data_key,
             data_dir,
             tab: Tab::Saves,
             saves: Vec::new(),
@@ -88,7 +90,7 @@ impl WadDataDialogState {
 
     fn reload(&mut self) {
         self.saves = saves::find_save_files(&self.data_dir);
-        self.backups = saves::list_backups(self.wad_id);
+        self.backups = saves::list_backups(&self.data_key);
         self.demos = demos::find_demo_files(&self.data_dir);
         self.pending = None;
         self.selected_backup = (!self.backups.is_empty()).then_some(0);
@@ -114,7 +116,7 @@ impl WadDataDialogState {
             self.set_error(format!("No data directory for '{}'.", self.wad_title));
             return;
         }
-        match saves::create_backup(self.wad_id, &self.wad_title, &self.data_dir) {
+        match saves::create_backup(&self.data_key, &self.wad_title, &self.data_dir) {
             Ok(path) => {
                 let name = path
                     .file_name()

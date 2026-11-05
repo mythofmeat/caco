@@ -358,7 +358,13 @@ pub const WAD_COLUMNS: &str = concat!("wads.*, EXISTS (", mirror_file_matches!()
 /// A WAD row with attached tags.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WadRecord {
+    /// Means this row on this machine, and nothing anywhere else.
     pub id: i64,
+    /// Means this WAD on every machine: see [`crate::sync`].
+    pub uid: String,
+    /// Names its folder in the data dir, which a rowid could not, since the folder travels
+    /// with the data dir. The rowid it had when these came in, or else its uid.
+    pub data_key: String,
     pub title: String,
     pub author: Option<String>,
     pub year: Option<i32>,
@@ -395,7 +401,6 @@ pub struct WadRecord {
     pub custom_sourceport: Option<String>,
     pub required_sourceport_family: Option<String>,
     pub custom_args: Option<String>,
-    pub companion_files: Option<String>,
     pub custom_config: Option<String>,
     pub version: Option<String>,
     pub complevel: Option<i32>,
@@ -455,8 +460,14 @@ impl WadRecord {
         let source_type_raw: String = row.get("source_type")?;
         let source_type = source_type_raw.parse().unwrap_or(SourceType::Local);
 
+        let id: i64 = row.get("id")?;
         Ok(WadRecord {
-            id: row.get("id")?,
+            id,
+            // Never NULL once the row's trigger has run, which is before anyone can read it.
+            uid: row.get::<_, Option<String>>("uid")?.unwrap_or_default(),
+            data_key: row
+                .get::<_, Option<String>>("data_key")?
+                .unwrap_or_else(|| id.to_string()),
             title: row.get("title")?,
             author: row.get("author")?,
             year: row.get("year")?,
@@ -478,7 +489,6 @@ impl WadRecord {
             custom_sourceport: row.get("custom_sourceport")?,
             required_sourceport_family: row.get("required_sourceport_family").ok(),
             custom_args: row.get("custom_args")?,
-            companion_files: row.get("companion_files")?,
             custom_config: row.get("custom_config")?,
             version: row.get("version")?,
             complevel: row.get("complevel")?,
@@ -589,7 +599,6 @@ pub static ALLOWED_UPDATE_FIELDS: LazyLock<std::collections::HashSet<&'static st
             "custom_sourceport",
             "required_sourceport_family",
             "custom_args",
-            "companion_files",
             "custom_config",
             "version",
             "complevel",

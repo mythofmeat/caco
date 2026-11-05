@@ -93,9 +93,24 @@ fn scratch_home() -> PathBuf {
     // Resolve the real DB before pointing CACO_HOME elsewhere.
     let real_db = caco_core::config::get_db_path();
     let scratch_db = home.join("library.db");
-    if real_db.exists() && real_db != scratch_db {
-        std::fs::copy(&real_db, &scratch_db).expect("copy library");
+    if real_db != scratch_db {
+        // Not last run's. With no real library to copy over it, which is CI, that is what the
+        // next run would start from, and CI runs this twice in a row. A `-wal` left beside a
+        // library it did not come from is no better.
+        for suffix in ["", "-wal", "-shm"] {
+            let mut stale = scratch_db.clone().into_os_string();
+            stale.push(suffix);
+            let _ = std::fs::remove_file(stale);
+        }
+        if real_db.exists() {
+            std::fs::copy(&real_db, &scratch_db).expect("copy library");
+        }
     }
+
+    // Last run's logs, or this run's library would merge them straight back in, and its
+    // own settings for this "machine", which the first save below writes again.
+    let _ = std::fs::remove_dir_all(home.join("sync"));
+    let _ = std::fs::remove_file(home.with_file_name("caco-screenshots-home.machine.toml"));
 
     let index = home.join("idgames-index.db");
     for suffix in ["", "-wal", "-shm"] {
@@ -109,6 +124,8 @@ fn scratch_home() -> PathBuf {
         // Not just the library: linking a file for a WAD caco can fetch again writes to
         // the WAD cache, which is not under `CACO_HOME`.
         std::env::set_var("CACO_CACHE_DIR", home.join("cache-wads"));
+        // And nor is the folder of each WAD's saves, which a merge can rename.
+        std::env::set_var("CACO_DATA_DIR", home.join("data"));
         std::env::set_var("CACO_IDGAMES_INDEX", &index);
         std::env::set_var("CACO_IDGAMES_API", NO_API);
         std::env::set_var("CACO_CONFIG", home.join("config.toml"));
@@ -124,6 +141,9 @@ fn scratch_home() -> PathBuf {
     put_sourceport_on_path(&home);
     home
 }
+
+/// The other machine the sync shots hear from.
+const LAPTOP: &str = "laptop-3fa9c1d2";
 
 /// What is on the scratch copy of idgames. The names are real ones, and the same in two
 /// places on purpose, as `castle.zip` is. One text file is Latin-1, one is from before there
@@ -395,6 +415,48 @@ impl Shooter {
         )
         .expect("record a session on the old file");
         id
+    }
+
+    /// Put an event in another machine's log, as if a sync tool had just brought it. Clocks
+    /// from long ago, so that nothing here depends on what else has happened.
+    fn other_machine_says(
+        &self,
+        wall_ms: u64,
+        op: caco_core::sync::event::Op,
+        kind: &str,
+        key: &str,
+        fields: serde_json::Value,
+    ) {
+        use caco_core::sync::clock::Clock;
+        use caco_core::sync::event::{Event, VERSION};
+
+        let dir = self.home.join("sync").join(LAPTOP);
+        std::fs::create_dir_all(&dir).expect("create the other machine's log");
+        let event = Event {
+            v: VERSION,
+            id: format!("{wall_ms}-{kind}-{key}"),
+            machine: LAPTOP.to_string(),
+            clock: Clock::at(wall_ms, LAPTOP),
+            at: "2026-11-03T20:15:00.000Z".to_string(),
+            op,
+            kind: kind.to_string(),
+            key: key.to_string(),
+            fields: fields.as_object().cloned().unwrap_or_default(),
+        };
+        let path = dir.join("2026-11.jsonl");
+        let mut text = std::fs::read_to_string(&path).unwrap_or_default();
+        text.push_str(&event.to_line().expect("write event"));
+        text.push('\n');
+        std::fs::write(path, text).expect("write the other machine's log");
+    }
+
+    /// Press Sync Now in the open Sync tool, and wait for the other machine to show up.
+    fn sync_now_until_the_other_machine_shows(&mut self) {
+        self.harness.get_by_label("Sync Now").click_accesskit();
+        self.settle(1, Duration::ZERO);
+        self.wait_for("the other machine's row", |s| {
+            s.harness.query_all_by_label("laptop").next().is_some()
+        });
     }
 
     /// Start the mirror shots from the same place whatever machine this is: no mirrors,
@@ -920,6 +982,134 @@ fn shoot_every_surface() {
         }),
     );
     s.purge_wad(changed);
+
+    // The Sync tool, on a machine that has only heard from itself, then with another
+    // machine's log arrived the way a sync tool leaves it: a WAD, sessions, a session of a
+    // WAD that has not arrived, and a line from a newer version. Sync Now is pressed for
+    // real, and what it finds is checked in the library.
+    record(
+        "sync",
+        s.shot_dialog_after("dlg-sync", ActionRequest::Sync, |s| {
+            s.harness.get_by_label_contains("Leave library.db out");
+            s.harness.get_by_label("Sync Now");
+            assert!(s.harness.query_by_label("laptop").is_none());
+        }),
+    );
+    {
+        use caco_core::sync::event::Op;
+        use serde_json::json;
+        s.other_machine_says(
+            1_000,
+            Op::Add,
+            "wad",
+            "doomworld-999001",
+            json!({
+                "title": "Came From The Laptop",
+                "source_type": "doomworld",
+                "source_id": "999001",
+            }),
+        );
+        s.other_machine_says(
+            2_000,
+            Op::Add,
+            "session",
+            "00000000000000000000000000000001",
+            json!({ "wad": "doomworld-999001", "started_at": "2026-11-03T20:00:00+00:00" }),
+        );
+        s.other_machine_says(
+            3_000,
+            Op::Add,
+            "session",
+            "00000000000000000000000000000002",
+            json!({ "wad": "doomworld-999002", "started_at": "2026-11-03T20:00:00+00:00" }),
+        );
+    }
+    let newer = s.home.join("sync").join(LAPTOP).join("2026-11.jsonl");
+    let mut text = std::fs::read_to_string(&newer).expect("read the log");
+    text.push_str(&format!(
+        "{{\"v\":99,\"id\":\"from-the-future\",\"clock\":\"0000000004000.000000.{LAPTOP}\"}}\n"
+    ));
+    std::fs::write(&newer, text).expect("add a line from a newer version");
+    record(
+        "sync-machines",
+        s.shot_dialog_after("dlg-sync-machines", ActionRequest::Sync, |s| {
+            s.sync_now_until_the_other_machine_shows();
+            s.harness.get_by_label_contains("1 change is waiting");
+            s.harness
+                .get_by_label_contains("from a newer version of caco");
+        }),
+    );
+    {
+        let conn = caco_core::db::open_connection(&s.home.join("library.db")).expect("open db");
+        let (title, sessions): (String, i64) = conn
+            .query_row(
+                "SELECT title, (SELECT COUNT(*) FROM sessions WHERE wad_id = wads.id) \
+                 FROM wads WHERE uid = 'doomworld-999001'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("the other machine's WAD arrived");
+        assert_eq!(title, "Came From The Laptop");
+        assert_eq!(sessions, 1);
+    }
+
+    // Only Play reaches the Newer Saves dialog, for a WAD with a file here and a save
+    // the other machine says it has. A second save of a name too long for one line.
+    let with_newer_saves = s.add_manual_wad_with_file("Saved On The Laptop", 999_003);
+    {
+        use caco_core::sync::event::Op;
+        let conn = caco_core::db::open_connection(&s.home.join("library.db")).expect("open db");
+        let uid = caco_core::db::get_wad(&conn, with_newer_saves, false)
+            .expect("read WAD")
+            .expect("the WAD is there")
+            .uid;
+        s.other_machine_says(
+            5_000,
+            Op::Set,
+            "saves",
+            &format!("{uid}/{LAPTOP}"),
+            serde_json::json!({
+                "wad": uid,
+                "machine": LAPTOP,
+                "files": serde_json::to_string(&serde_json::json!([
+                    { "path": "nyan_doom_data/doom2/road/nyan-doom-savegame0.dsg",
+                      "size": 4, "sha256": "aa" },
+                    { "path": "nyan_doom_data/doom2/road/a-save-with-rather-a-long-name-indeed-for-a-file.dsg",
+                      "size": 4, "sha256": "bb" },
+                ])).unwrap(),
+                "recorded_at": "2026-11-03T20:15:00+00:00",
+                "present": 1,
+            }),
+        );
+    }
+    s.harness.state_mut().dispatch_action(ActionRequest::Sync);
+    s.settle(2, Duration::ZERO);
+    s.sync_now_until_the_other_machine_shows();
+    s.wait_for("the other machine's saves", |s| {
+        let conn = caco_core::db::open_connection(&s.home.join("library.db")).expect("open db");
+        conn.query_row("SELECT COUNT(*) FROM wad_saves", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .expect("count saves")
+            > 0
+    });
+    s.harness.state_mut().close_dialog();
+    s.settle(1, Duration::ZERO);
+    record(
+        "newer-saves",
+        s.shot_dialog_after(
+            "dlg-newer-saves",
+            ActionRequest::Play(with_newer_saves),
+            |s| {
+                s.wait_for("the question about newer saves", |s| {
+                    s.harness.query_by_label("Play Anyway").is_some()
+                });
+                s.harness.get_by_label_contains("laptop has 2 saves");
+                s.harness.get_by_label("nyan-doom-savegame0.dsg");
+            },
+        ),
+    );
+    s.purge_wad(with_newer_saves);
 
     // Setting up a mirror, the way a person does. It opens on the choice of kind only
     // when there are none, and each kind has instructions of its own to fit.

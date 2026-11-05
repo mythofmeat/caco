@@ -59,7 +59,7 @@ impl GcOptions {
 /// must not be possible to forget to.
 #[derive(Debug, Clone)]
 pub struct GcPaths {
-    /// Root holding the per-WAD `{id}_{slug}` directories.
+    /// Root holding the per-WAD `{key}_{slug}` directories.
     pub data_dir: PathBuf,
     /// Root holding save-backup archives.
     pub backup_dir: PathBuf,
@@ -215,10 +215,13 @@ fn gc_candidates(conn: &Connection) -> crate::Result<Vec<WadRecord>> {
 fn measure_wad(
     conn: &Connection,
     wad: &WadRecord,
-    data_dirs: &HashMap<i64, PathBuf>,
+    data_dirs: &HashMap<String, Vec<PathBuf>>,
     opts: GcOptions,
 ) -> crate::Result<WadPlanEntry> {
-    let (data_dir, data_size) = match (opts.keep_data, data_dirs.get(&wad.id)) {
+    let found = data_dirs
+        .get(&wad.data_key)
+        .and_then(|dirs| config::choose_data_dir(dirs, &wad.title));
+    let (data_dir, data_size) = match (opts.keep_data, found) {
         (false, Some(dir)) => (Some(dir.clone()), reclaimable_data_size(dir, opts)),
         _ => (None, 0),
     };
@@ -362,13 +365,6 @@ fn clean_wad(conn: &Connection, entry: &WadPlanEntry, opts: GcOptions) -> crate:
     Ok(freed)
 }
 
-/// Exclude a WAD from GC, or put it back in scope.
-pub fn set_gc_ignore(conn: &Connection, wad_id: i64, ignore: bool) -> crate::Result<()> {
-    let update = db::WadUpdate::new().set_int("gc_ignore", Some(i64::from(ignore)));
-    db::update_wad(conn, wad_id, &update)?;
-    Ok(())
-}
-
 // =============================================================================
 // Data directory walking
 // =============================================================================
@@ -472,19 +468,20 @@ fn file_size(path: &Path) -> u64 {
 
 fn find_orphaned_data_dirs(
     conn: &Connection,
-    candidates: HashMap<i64, PathBuf>,
+    candidates: HashMap<String, Vec<PathBuf>>,
 ) -> Vec<OrphanEntry> {
     if candidates.is_empty() {
         return Vec::new();
     }
 
-    let ids: Vec<i64> = candidates.keys().copied().collect();
-    let existing = existing_wad_ids(conn, &ids);
+    let keys: Vec<String> = candidates.keys().cloned().collect();
+    let existing = existing_data_keys(conn, &keys);
 
     let mut orphans: Vec<OrphanEntry> = candidates
         .into_iter()
-        .filter(|(id, _)| !existing.contains(id))
-        .map(|(_, path)| OrphanEntry {
+        .filter(|(key, _)| !existing.contains(key) && is_known_to_be_gone(conn, key))
+        .flat_map(|(_, paths)| paths)
+        .map(|path| OrphanEntry {
             size: dir_size(&path),
             path,
             companion_id: None,
@@ -517,15 +514,19 @@ fn find_orphaned_companions(conn: &Connection) -> Vec<OrphanEntry> {
 
 fn find_orphaned_backups(conn: &Connection, backup_dir: &Path) -> Vec<OrphanEntry> {
     let backups = crate::saves::list_backups_in(backup_dir);
-    let ids: Vec<i64> = backups.iter().filter_map(|b| b.wad_id).collect();
-    if ids.is_empty() {
+    let keys: Vec<String> = backups.iter().filter_map(|b| b.data_key.clone()).collect();
+    if keys.is_empty() {
         return Vec::new();
     }
 
-    let existing = existing_wad_ids(conn, &ids);
+    let existing = existing_data_keys(conn, &keys);
     backups
         .into_iter()
-        .filter(|b| b.wad_id.is_some_and(|id| !existing.contains(&id)))
+        .filter(|b| {
+            b.data_key
+                .as_ref()
+                .is_some_and(|key| !existing.contains(key) && is_known_to_be_gone(conn, key))
+        })
         .map(|b| OrphanEntry {
             path: b.path,
             size: b.size,
@@ -534,22 +535,42 @@ fn find_orphaned_backups(conn: &Connection, backup_dir: &Path) -> Vec<OrphanEntr
         .collect()
 }
 
-/// Which of `ids` still have a `wads` row — soft-deleted rows count, since a
+/// Whether a key no row claims means there is nothing left to claim it.
+///
+/// A rowid does: it can only have come from this library, or from one this library came
+/// from, and that was always the rule. A uid does not. The folder is in a synced data dir,
+/// its WAD is in a log, and those can arrive in either order, so a folder with no row may
+/// be another machine's saves for a WAD this one has not heard of yet, and Clean deleting
+/// it would delete it on that machine too. So it takes a tombstone: the log saying the WAD
+/// was deleted for good.
+fn is_known_to_be_gone(conn: &Connection, key: &str) -> bool {
+    if key.bytes().all(|b| b.is_ascii_digit()) {
+        return true;
+    }
+    conn.query_row(
+        "SELECT 1 FROM sync_tombstones WHERE kind = 'wad' AND key = ?1",
+        [key],
+        |_| Ok(()),
+    )
+    .is_ok()
+}
+
+/// Which of `keys` still name a `wads` row — soft-deleted rows count, since a
 /// restore would want its data back.
-fn existing_wad_ids(conn: &Connection, ids: &[i64]) -> HashSet<i64> {
+fn existing_data_keys(conn: &Connection, keys: &[String]) -> HashSet<String> {
     let mut existing = HashSet::new();
 
-    for chunk in ids.chunks(db::SQLITE_MAX_VARS) {
+    for chunk in keys.chunks(db::SQLITE_MAX_VARS) {
         let placeholders: String = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-        let sql = format!("SELECT id FROM wads WHERE id IN ({placeholders})");
+        let sql = format!("SELECT data_key FROM wads WHERE data_key IN ({placeholders})");
         let Ok(mut stmt) = conn.prepare(&sql) else {
             continue;
         };
         let params: Vec<&dyn rusqlite::types::ToSql> = chunk
             .iter()
-            .map(|id| id as &dyn rusqlite::types::ToSql)
+            .map(|key| key as &dyn rusqlite::types::ToSql)
             .collect();
-        if let Ok(rows) = stmt.query_map(params.as_slice(), |row| row.get::<_, i64>(0)) {
+        if let Ok(rows) = stmt.query_map(params.as_slice(), |row| row.get::<_, String>(0)) {
             existing.extend(rows.flatten());
         }
     }
@@ -557,32 +578,27 @@ fn existing_wad_ids(conn: &Connection, ids: &[i64]) -> HashSet<i64> {
     existing
 }
 
-/// Map of `{wad_id: data_dir}` for every `{id}_...` directory on disk.
-fn data_dir_map(data_dir: &Path) -> HashMap<i64, PathBuf> {
+/// Every `{key}_...` directory on disk, by key. Two WADs can share a key, if each machine
+/// gave its own the same rowid before there were uids.
+fn data_dir_map(data_dir: &Path) -> HashMap<String, Vec<PathBuf>> {
     let Ok(entries) = fs::read_dir(data_dir) else {
         return HashMap::new();
     };
 
-    let mut map = HashMap::new();
+    let mut map: HashMap<String, Vec<PathBuf>> = HashMap::new();
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir()
             && let Some(name) = path.file_name().and_then(|n| n.to_str())
-            && let Some(id) = parse_wad_id_prefix(name)
+            && let Some(key) = config::data_key_of(name)
         {
-            map.insert(id, path);
+            map.entry(key.to_string()).or_default().push(path);
         }
     }
-    map
-}
-
-/// Extract the numeric WAD id from a `{id}_...` directory name.
-pub fn parse_wad_id_prefix(name: &str) -> Option<i64> {
-    let (prefix, _) = name.split_once('_')?;
-    if prefix.is_empty() || !prefix.chars().all(|c| c.is_ascii_digit()) {
-        return None;
+    for dirs in map.values_mut() {
+        dirs.sort();
     }
-    prefix.parse().ok()
+    map
 }
 
 #[cfg(test)]
@@ -614,9 +630,9 @@ mod tests {
             Self { _root: root, paths }
         }
 
-        /// Create `data/{id}_{slug}/<rel>` with `bytes` bytes.
-        fn data_file(&self, wad_id: i64, rel: &str, bytes: usize) -> PathBuf {
-            let path = self.paths.data_dir.join(format!("{wad_id}_wad")).join(rel);
+        /// Create `data/{key}_{slug}/<rel>` with `bytes` bytes.
+        fn data_file(&self, key: &str, rel: &str, bytes: usize) -> PathBuf {
+            let path = self.paths.data_dir.join(format!("{key}_wad")).join(rel);
             write(&path, bytes);
             path
         }
@@ -632,6 +648,15 @@ mod tests {
         let conn = open_memory().unwrap();
         init_db(&conn).unwrap();
         conn
+    }
+
+    fn key_of(conn: &Connection, wad_id: i64) -> String {
+        db::get_wad(conn, wad_id, true).unwrap().unwrap().data_key
+    }
+
+    fn set_gc_ignore(conn: &Connection, wad_id: i64, ignore: bool) {
+        let update = db::WadUpdate::new().set_int("gc_ignore", Some(i64::from(ignore)));
+        db::update_wad(conn, wad_id, &update).unwrap();
     }
 
     fn write(path: &Path, bytes: usize) {
@@ -650,17 +675,6 @@ mod tests {
         }
         db::update_wad(conn, wad_id, &update).unwrap();
         wad_id
-    }
-
-    // -- parse_wad_id_prefix --
-
-    #[test]
-    fn test_parse_wad_id_prefix() {
-        assert_eq!(parse_wad_id_prefix("42_scythe-2"), Some(42));
-        assert_eq!(parse_wad_id_prefix("7_a_b_c"), Some(7));
-        assert_eq!(parse_wad_id_prefix("noprefix"), None);
-        assert_eq!(parse_wad_id_prefix("_leading"), None);
-        assert_eq!(parse_wad_id_prefix("12a_mixed"), None);
     }
 
     // -- data dir sizing / protection --
@@ -743,13 +757,13 @@ mod tests {
         let sandbox = Sandbox::new();
         let conn = setup();
         let wad_id = add_status_wad(&conn, "Done", "completed", None);
-        sandbox.data_file(wad_id, "stats.txt", 100);
+        sandbox.data_file(&key_of(&conn, wad_id), "stats.txt", 100);
 
         let measured = plan(&conn, GcOptions::default(), &sandbox.paths).unwrap();
         assert_eq!(measured.wads.len(), 1);
         assert_eq!(measured.wads[0].data_size, 100);
 
-        set_gc_ignore(&conn, wad_id, true).unwrap();
+        set_gc_ignore(&conn, wad_id, true);
         assert!(
             plan(&conn, GcOptions::default(), &sandbox.paths)
                 .unwrap()
@@ -757,7 +771,7 @@ mod tests {
                 .is_empty()
         );
 
-        set_gc_ignore(&conn, wad_id, false).unwrap();
+        set_gc_ignore(&conn, wad_id, false);
         assert_eq!(
             plan(&conn, GcOptions::default(), &sandbox.paths)
                 .unwrap()
@@ -772,7 +786,7 @@ mod tests {
         let sandbox = Sandbox::new();
         let conn = setup();
         let wad_id = add_status_wad(&conn, "Playing", "in-progress", None);
-        sandbox.data_file(wad_id, "stats.txt", 100);
+        sandbox.data_file(&key_of(&conn, wad_id), "stats.txt", 100);
 
         let measured = plan(&conn, GcOptions::default(), &sandbox.paths).unwrap();
         assert!(measured.wads.is_empty());
@@ -785,7 +799,7 @@ mod tests {
         let sandbox = Sandbox::new();
         let conn = setup();
         // No WAD row 999 — its directory is unreachable.
-        sandbox.data_file(999, "stats.txt", 70);
+        sandbox.data_file("999", "stats.txt", 70);
 
         let measured = plan(&conn, GcOptions::default(), &sandbox.paths).unwrap();
         assert_eq!(measured.orphan_data_dirs.len(), 1);
@@ -793,12 +807,79 @@ mod tests {
         assert_eq!(measured.total_size(), 70);
     }
 
+    /// Its WAD is in a log that has not arrived, and those are another machine's saves.
+    #[test]
+    fn test_a_folder_for_a_wad_not_heard_of_yet_is_not_an_orphan() {
+        let sandbox = Sandbox::new();
+        let conn = setup();
+        sandbox.data_file("idgames-18000", "saves/slot1.dsg", 70);
+        sandbox.backup("idgames-18000_sunlust_20250101_000000.zip", 20);
+
+        let measured = plan(&conn, GcOptions::default(), &sandbox.paths).unwrap();
+        assert!(measured.orphan_data_dirs.is_empty());
+        assert!(measured.orphan_backups.is_empty());
+    }
+
+    /// Deleted for good, which is known, and now there is nothing it could be for.
+    #[test]
+    fn test_a_folder_for_a_wad_deleted_for_good_is_an_orphan() {
+        let sandbox = Sandbox::new();
+        let conn = setup();
+        let wad = add_wad(
+            &conn,
+            &NewWad::new("Sunlust", SourceType::Idgames).source_id("18000"),
+        )
+        .unwrap();
+        let key = key_of(&conn, wad);
+        assert_eq!(key, "idgames-18000");
+        sandbox.data_file(&key, "saves/slot1.dsg", 70);
+        sandbox.backup(&format!("{key}_sunlust_20250101_000000.zip"), 20);
+        assert!(
+            plan(&conn, GcOptions::default(), &sandbox.paths)
+                .unwrap()
+                .orphan_data_dirs
+                .is_empty()
+        );
+
+        db::delete_wad(&conn, wad, true).unwrap();
+        let measured = plan(&conn, GcOptions::default(), &sandbox.paths).unwrap();
+        assert_eq!(measured.orphan_data_dirs.len(), 1);
+        assert_eq!(measured.orphan_backups.len(), 1);
+    }
+
+    /// Two WADs with one key, each with its own folder under its own title.
+    #[test]
+    fn test_a_wad_is_measured_by_its_own_folder_when_it_shares_a_key() {
+        let sandbox = Sandbox::new();
+        let conn = setup();
+        for (id, title, status) in [
+            (117, "Ancient Aliens", "in-progress"),
+            (118, "Sunlust", "completed"),
+        ] {
+            conn.execute(
+                "INSERT INTO wads (id, title, source_type, status, data_key) \
+                 VALUES (?1, ?2, 'local', ?3, '117')",
+                rusqlite::params![id, title, status],
+            )
+            .unwrap();
+        }
+        for (dir, bytes) in [("117_ancient-aliens", 50), ("117_sunlust", 7)] {
+            write(&sandbox.paths.data_dir.join(dir).join("a.dsg"), bytes);
+        }
+
+        let measured = plan(&conn, GcOptions::default(), &sandbox.paths).unwrap();
+        assert_eq!(measured.wads.len(), 1);
+        assert_eq!(measured.wads[0].data_size, 7);
+        assert!(measured.orphan_data_dirs.is_empty());
+    }
+
     #[test]
     fn test_plan_finds_orphaned_backups_only() {
         let sandbox = Sandbox::new();
         let conn = setup();
         let live = add_status_wad(&conn, "Live", "unplayed", None);
-        sandbox.backup(&format!("{live}_live_20250101_000000.zip"), 10);
+        let key = key_of(&conn, live);
+        sandbox.backup(&format!("{key}_live_20250101_000000.zip"), 10);
         sandbox.backup("999_gone_20250101_000000.zip", 20);
         // No parseable id — not attributable to any WAD, so never an orphan.
         sandbox.backup("library.pre-repair.zip", 40);
@@ -830,7 +911,7 @@ mod tests {
         let sandbox = Sandbox::new();
         let conn = setup();
         let wad_id = add_status_wad(&conn, "Done", "completed", None);
-        sandbox.data_file(wad_id, "stats.txt", 100);
+        sandbox.data_file(&key_of(&conn, wad_id), "stats.txt", 100);
 
         let opts = GcOptions {
             orphans_only: true,
@@ -897,7 +978,7 @@ mod tests {
         let conn = setup();
         let keep = add_status_wad(&conn, "Keep", "completed", None);
         add_status_wad(&conn, "Sweep", "completed", None);
-        set_gc_ignore(&conn, keep, true).unwrap();
+        set_gc_ignore(&conn, keep, true);
 
         let titles: Vec<String> = gc_candidates(&conn)
             .unwrap()
@@ -916,18 +997,19 @@ mod tests {
     // -- existing_wad_ids --
 
     #[test]
-    fn test_existing_wad_ids() {
+    fn test_existing_data_keys() {
         let conn = setup();
         let a = add_status_wad(&conn, "A", "unplayed", None);
         let b = add_status_wad(&conn, "B", "unplayed", None);
+        let (a, b) = (key_of(&conn, a), key_of(&conn, b));
 
-        let found = existing_wad_ids(&conn, &[a, b, 9999]);
+        let found = existing_data_keys(&conn, &[a.clone(), b.clone(), "9999".to_string()]);
         assert!(found.contains(&a));
         assert!(found.contains(&b));
-        assert!(!found.contains(&9999));
+        assert!(!found.contains("9999"));
 
-        assert!(existing_wad_ids(&conn, &[]).is_empty());
-        assert!(existing_wad_ids(&conn, &[9998, 9999]).is_empty());
+        assert!(existing_data_keys(&conn, &[]).is_empty());
+        assert!(existing_data_keys(&conn, &["9998".to_string(), "9999".to_string()]).is_empty());
     }
 
     // -- orphaned companions --
@@ -1129,7 +1211,7 @@ mod tests {
         let sandbox = Sandbox::new();
         let conn = setup();
         let wad_id = add_status_wad(&conn, "Done", "completed", None);
-        let stats = sandbox.data_file(wad_id, "stats.txt", 60);
+        let stats = sandbox.data_file(&key_of(&conn, wad_id), "stats.txt", 60);
         let data_dir = stats.parent().unwrap().to_path_buf();
 
         let measured = plan(&conn, GcOptions::default(), &sandbox.paths).unwrap();

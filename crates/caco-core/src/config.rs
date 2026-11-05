@@ -20,6 +20,7 @@ use crate::utils::sanitize_dirname;
 // CACO_CACHE_DIR  — override the WAD cache directory
 // CACO_DATA_DIR   — override the per-WAD data directory
 // CACO_CONFIG     — override the config file path
+// CACO_SYNC_DIR   — override the folder of machines' logs
 // ---------------------------------------------------------------------------
 
 fn home_dir() -> PathBuf {
@@ -224,6 +225,64 @@ pub fn mirror_token_file() -> PathBuf {
         .join("mirror-tokens.toml")
 }
 
+/// A file that belongs to this machine and travels with nothing, beside the mirror tokens
+/// for the same reasons. `CACO_HOME` and `CACO_CONFIG` each keep a run away from the real
+/// one, by putting it beside themselves rather than in them, since either of those can be
+/// a real library that gets synced.
+fn machine_local_file(override_var: &str, name: &str) -> PathBuf {
+    if let Ok(p) = std::env::var(override_var) {
+        return PathBuf::from(p);
+    }
+    for var in ["CACO_HOME", "CACO_CONFIG"] {
+        if let Ok(value) = std::env::var(var) {
+            let value = PathBuf::from(value);
+            if let Some(base) = value.file_name() {
+                let beside = format!("{}.{name}", base.to_string_lossy());
+                return value.with_file_name(beside);
+            }
+        }
+    }
+    dirs::preference_dir()
+        .unwrap_or_else(|| home_dir().join(".config"))
+        .join("caco")
+        .join(name)
+}
+
+/// The settings that differ from one machine to the next: see [`MACHINE_KEYS`].
+pub fn machine_config_file() -> PathBuf {
+    machine_local_file("CACO_MACHINE_CONFIG", "machine.toml")
+}
+
+/// Which machine this is: see [`crate::sync::machine`].
+pub fn machine_id_file() -> PathBuf {
+    machine_local_file("CACO_MACHINE_ID", "machine-id")
+}
+
+/// The folder holding each machine's log of what happened on it, for the library at
+/// `db_path`: see [`crate::sync`].
+///
+/// A library anywhere but the configured place has a folder of its own beside it, for the
+/// reason its migration backups do. A database opened with `--db-path` to look at
+/// something must not write into the real logs, or read them into itself.
+pub fn sync_dir_for(db_path: &Path) -> PathBuf {
+    let beside = db_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("sync");
+    if db_path != get_db_path() {
+        return beside;
+    }
+    if let Ok(p) = std::env::var("CACO_SYNC_DIR") {
+        return PathBuf::from(p);
+    }
+    let cfg = load_config();
+    if cfg.sync_dir.is_empty() {
+        beside
+    } else {
+        expand_tilde(&cfg.sync_dir)
+    }
+}
+
 /// The local index of the idgames archive, as its own SQLite file: see
 /// `caco_sources::idgames::index`.
 ///
@@ -275,6 +334,12 @@ pub struct Config {
     pub link_mode: String,
     /// The folder Get watches. Empty means the system's: see [`downloads_dir`].
     pub downloads_dir: String,
+    /// The folder of machines' logs. Empty means beside the database: see [`sync_dir_for`].
+    pub sync_dir: String,
+    /// Whether to ask before launching a WAD another machine has newer saves for. Worth
+    /// turning off for someone who keeps a separate game going on each machine, since
+    /// the question would then come up every time they swapped.
+    pub warn_newer_saves: bool,
     pub manage_data_dirs: bool,
     pub auto_stats: bool,
     pub auto_detect_iwad: bool,
@@ -326,6 +391,8 @@ impl Default for Config {
             download_mirror: 0,
             link_mode: "move".to_string(),
             downloads_dir: String::new(),
+            sync_dir: String::new(),
+            warn_newer_saves: true,
             manage_data_dirs: true,
             auto_stats: true,
             auto_detect_iwad: true,
@@ -579,28 +646,115 @@ static CONFIG: OnceLock<ArcSwap<Config>> = OnceLock::new();
 /// Does NOT touch the in-memory cache — use [`load_config`] or [`reload_config`]
 /// for that.
 fn read_config_from_disk() -> Config {
-    let path = config_file();
-    if !path.exists() {
-        return Config::default();
-    }
-    match fs::read_to_string(&path) {
-        Ok(contents) => match toml::from_str::<Config>(&contents) {
-            Ok(mut cfg) => {
-                attach_saved_tokens(&mut cfg);
-                cfg
-            }
-            Err(e) => {
-                eprintln!("Warning: Invalid TOML syntax in {}: {e}", path.display());
-                eprintln!("Warning: Using default configuration.");
-                Config::default()
-            }
+    let mut cfg = read_config_files(&config_file(), &machine_config_file());
+    attach_saved_tokens(&mut cfg);
+    cfg
+}
+
+/// [`read_config_from_disk`] from explicit files, without the machine's tokens.
+fn read_config_files(path: &Path, machine_path: &Path) -> Config {
+    let mut table = match fs::read_to_string(path) {
+        Ok(contents) => match contents.parse::<toml::Table>() {
+            Ok(table) => table,
+            Err(e) => return invalid_config(path, &e),
         },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => toml::Table::new(),
         Err(e) => {
             eprintln!("Warning: Failed to load config: {e}");
             eprintln!("Warning: Using default configuration.");
-            Config::default()
+            return Config::default();
+        }
+    };
+    overlay_machine_settings(&mut table, read_machine_settings(machine_path));
+
+    match toml::Value::Table(table).try_into::<Config>() {
+        Ok(cfg) => cfg,
+        Err(e) => invalid_config(path, &e),
+    }
+}
+
+fn invalid_config(path: &Path, error: &dyn std::fmt::Display) -> Config {
+    eprintln!(
+        "Warning: Invalid TOML syntax in {}: {error}",
+        path.display()
+    );
+    eprintln!("Warning: Using default configuration.");
+    Config::default()
+}
+
+/// What this machine's own file says, if it has one yet. A file that cannot be read is
+/// left alone and said to be unusable, rather than taken for an empty one, which saving
+/// any setting would then overwrite.
+fn read_machine_settings(path: &Path) -> Option<toml::Table> {
+    let contents = match fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(e) => {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                eprintln!("Warning: Failed to read {}: {e}", path.display());
+            }
+            return None;
+        }
+    };
+    match contents.parse() {
+        Ok(table) => Some(table),
+        Err(e) => {
+            eprintln!("Warning: Invalid TOML syntax in {}: {e}", path.display());
+            None
         }
     }
+}
+
+/// The settings that belong to a machine and not to a library.
+///
+/// Sourceports and IWADs live in different places on Linux and on a Mac, so one
+/// `config.toml` in a synced folder has one machine's paths in it and a conflict every
+/// time they both change it. These go in [`machine_config_file`], and the rest stays in
+/// `config.toml`, which travels with the data dir.
+pub const MACHINE_KEYS: &[&str] = &[
+    "sourceport",
+    "zdoom_sourceport",
+    "sourceport_preferences",
+    "sourceport_args",
+    "executable_args",
+    "iwad",
+    "iwad_dirs",
+    "iwad_dir",
+    "cache_dir",
+    "db_path",
+    "data_dir",
+    "profile_dir",
+    "downloads_dir",
+    "sync_dir",
+];
+
+/// Put this machine's settings over what `config.toml` says.
+///
+/// A machine with no file of its own yet goes by what `config.toml` says, which is what
+/// an existing install's first run after this looks like: the settings stay as they were
+/// until one is saved, which moves them all across. Once there is a file it is the whole
+/// answer, so that a setting cleared here is not brought back by what another machine
+/// left in `config.toml` from before.
+fn overlay_machine_settings(table: &mut toml::Table, machine: Option<toml::Table>) {
+    let Some(machine) = machine else {
+        return;
+    };
+    for key in MACHINE_KEYS {
+        table.remove(*key);
+        if let Some(value) = machine.get(*key) {
+            table.insert((*key).to_string(), value.clone());
+        }
+    }
+}
+
+/// Split non-default settings into what travels and what belongs to this machine.
+fn split_machine_settings(mut table: toml::Table) -> (toml::Table, toml::Table) {
+    let mut machine = toml::Table::new();
+    for key in MACHINE_KEYS {
+        if let Some(value) = table.remove(*key) {
+            machine.insert((*key).to_string(), value);
+        }
+    }
+    (table, machine)
 }
 
 /// Give each mirror the token saved for it on this machine. Only read if there is a
@@ -676,8 +830,8 @@ fn strip_defaults(current: toml::Table, default: &toml::Table) -> toml::Table {
     out
 }
 
-/// Serialize a config down to just its non-default settings.
-fn minimal_toml(config: &Config) -> crate::Result<String> {
+/// A config's non-default settings.
+fn minimal_table(config: &Config) -> crate::Result<toml::Table> {
     let current: toml::Table = toml::Value::try_from(config)?
         .as_table()
         .cloned()
@@ -687,16 +841,37 @@ fn minimal_toml(config: &Config) -> crate::Result<String> {
         .cloned()
         .unwrap_or_default();
 
-    Ok(toml::to_string_pretty(&strip_defaults(current, &default))?)
+    Ok(strip_defaults(current, &default))
 }
 
-/// Save configuration to disk.
+/// Serialize a config down to just its non-default settings.
+#[cfg(test)]
+fn minimal_toml(config: &Config) -> crate::Result<String> {
+    Ok(toml::to_string_pretty(&minimal_table(config)?)?)
+}
+
+/// Save configuration to disk: what travels to `config.toml`, and what belongs to this
+/// machine to its own file.
+///
+/// The machine's file first, so that dying in between leaves a setting in both places,
+/// which reads the same, rather than in neither.
 pub fn save_config(config: &Config) -> crate::Result<()> {
-    let path = config_file();
+    write_config_files(config, &config_file(), &machine_config_file())
+}
+
+/// [`save_config`] to explicit files.
+fn write_config_files(config: &Config, path: &Path, machine_path: &Path) -> crate::Result<()> {
+    let (portable, machine) = split_machine_settings(minimal_table(config)?);
+
+    if let Some(parent) = machine_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(machine_path, toml::to_string_pretty(&machine)?)?;
+
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(path, minimal_toml(config)?)?;
+    fs::write(path, toml::to_string_pretty(&portable)?)?;
     Ok(())
 }
 
@@ -953,6 +1128,11 @@ fn lookup_executable_args(cfg: &Config, executable: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Whether to ask before launching a WAD another machine has newer saves for.
+pub fn get_warn_newer_saves() -> bool {
+    load_config().warn_newer_saves
+}
+
 /// Whether to manage per-WAD data directories.
 pub fn get_manage_data_dirs() -> bool {
     load_config().manage_data_dirs
@@ -994,32 +1174,83 @@ pub fn resolve_sourceport(name: &str) -> String {
     which(name).unwrap_or_else(|| name.to_string())
 }
 
-/// Return the per-WAD data directory path.
+/// Whether `key` could name a WAD's data folder.
 ///
-/// Format: `{data_dir}/{id}_{sanitized_title}/`
-pub fn get_wad_data_dir(wad_id: i64, title: &str) -> PathBuf {
-    get_data_dir().join(format!("{}_{}", wad_id, sanitize_dirname(title)))
+/// A rowid means something different on every machine, so these go by a key that travels
+/// with the row: the rowid a WAD had when this was introduced, or else its uid. Only those
+/// shapes, because what is read from a folder name decides which folders count as a WAD's
+/// at all, and what comes from a log goes into a path. No `_`, which is what ends one.
+pub fn is_data_key(key: &str) -> bool {
+    let digits = |text: &str| !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit());
+    if digits(key) {
+        return true;
+    }
+    if key.len() == 32
+        && key
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        return true;
+    }
+    key.split_once('-').is_some_and(|(source, id)| {
+        matches!(source, "idgames" | "doomwiki" | "doomworld") && digits(id)
+    })
 }
 
-/// Find an existing per-WAD data directory by ID prefix.
+/// The data key at the front of a `{key}_{title}` name, if it has one.
+pub fn data_key_of(name: &str) -> Option<&str> {
+    let (key, _) = name.split_once('_')?;
+    is_data_key(key).then_some(key)
+}
+
+/// Return the per-WAD data directory path.
 ///
-/// Handles title renames — matches `{id}_*` pattern.
-pub fn find_wad_data_dir(wad_id: i64) -> Option<PathBuf> {
-    let base = get_data_dir();
-    if !base.is_dir() {
-        return None;
-    }
-    let prefix = format!("{wad_id}_");
-    for entry in fs::read_dir(&base).ok()?.flatten() {
-        let path = entry.path();
-        if path.is_dir()
-            && let Some(name) = path.file_name().and_then(|n| n.to_str())
-            && name.starts_with(&prefix)
-        {
-            return Some(path);
-        }
-    }
-    None
+/// Format: `{data_dir}/{key}_{sanitized_title}/`
+pub fn get_wad_data_dir(key: &str, title: &str) -> PathBuf {
+    get_data_dir().join(format!("{key}_{}", sanitize_dirname(title)))
+}
+
+/// Find an existing per-WAD data directory by key.
+///
+/// Handles title renames, by matching `{key}_*`. Two WADs can share a key if each machine
+/// gave its own WAD the same rowid before there were uids. Each has its own folder, under
+/// its own title, so that is looked for first.
+pub fn find_wad_data_dir(key: &str, title: &str) -> Option<PathBuf> {
+    find_data_dir_in(&get_data_dir(), key, title)
+}
+
+/// [`find_wad_data_dir`] under an explicit root. Blank `title` for any folder with that key.
+pub fn find_data_dir_in(root: &Path, key: &str, title: &str) -> Option<PathBuf> {
+    let prefix = format!("{key}_");
+    let mut candidates: Vec<PathBuf> = fs::read_dir(root)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.is_dir()
+                && path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with(&prefix))
+        })
+        .collect();
+    // The same answer every time, since `read_dir` comes in no particular order.
+    candidates.sort();
+    choose_data_dir(&candidates, title).cloned()
+}
+
+/// Which of the folders with one key belongs to the WAD with this title: the one named for
+/// it if there is one, or else the first. Sorted, by the caller, so that it stays the first.
+pub fn choose_data_dir<'a>(dirs: &'a [PathBuf], title: &str) -> Option<&'a PathBuf> {
+    let exact = sanitize_dirname(title);
+    dirs.iter()
+        .find(|dir| {
+            dir.file_name()
+                .and_then(|name| name.to_str())
+                .and_then(|name| name.split_once('_'))
+                .is_some_and(|(_, rest)| rest == exact)
+        })
+        .or_else(|| dirs.first())
 }
 
 /// Get the path to a sourceport config profile file.
@@ -1303,9 +1534,248 @@ helion = ["-loglevel", "info"]
 
     #[test]
     fn test_get_wad_data_dir() {
-        let dir = get_wad_data_dir(42, "Scythe 2");
+        let dir = get_wad_data_dir("42", "Scythe 2");
         let name = dir.file_name().unwrap().to_str().unwrap();
         assert_eq!(name, "42_scythe-2");
+    }
+
+    #[test]
+    fn test_what_can_name_a_wads_data_folder() {
+        for good in [
+            "42",
+            "idgames-18000",
+            "doomwiki-7",
+            "doomworld-151858",
+            "0123456789abcdef0123456789abcdef",
+        ] {
+            assert!(is_data_key(good), "{good}");
+        }
+        for bad in [
+            "",
+            "-",
+            "../../etc",
+            "idgames-",
+            "idgames-12a",
+            "other-12",
+            "my",
+            "stuff-1",
+            "0123456789ABCDEF0123456789ABCDEF",
+            "0123456789abcdef",
+            "42_scythe",
+        ] {
+            assert!(!is_data_key(bad), "{bad}");
+        }
+    }
+
+    /// What is not a WAD's folder is not one to clean up.
+    #[test]
+    fn test_only_a_folder_named_for_a_key_has_one() {
+        assert_eq!(data_key_of("42_scythe-2"), Some("42"));
+        assert_eq!(data_key_of("7_a_b_c"), Some("7"));
+        assert_eq!(data_key_of("idgames-5_x"), Some("idgames-5"));
+        assert_eq!(
+            data_key_of("0123456789abcdef0123456789abcdef_x"),
+            Some("0123456789abcdef0123456789abcdef")
+        );
+        for none in ["noprefix", "_leading", "12a_mixed", "my_stuff", "a-1_x"] {
+            assert_eq!(data_key_of(none), None, "{none}");
+        }
+    }
+
+    #[test]
+    fn test_a_data_dir_is_found_through_a_title_change() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("7_old-title")).unwrap();
+        fs::create_dir_all(dir.path().join("77_other")).unwrap();
+
+        let found = find_data_dir_in(dir.path(), "7", "New Title").unwrap();
+        assert_eq!(found.file_name().unwrap(), "7_old-title");
+        assert!(find_data_dir_in(dir.path(), "8", "x").is_none());
+    }
+
+    /// Two machines each gave a different WAD the same rowid, before there were uids.
+    #[test]
+    fn test_two_wads_sharing_a_key_each_get_their_own_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("117_ancient-aliens")).unwrap();
+        fs::create_dir_all(dir.path().join("117_sunlust")).unwrap();
+
+        let find = |title| {
+            find_data_dir_in(dir.path(), "117", title)
+                .unwrap()
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        };
+        assert_eq!(find("Sunlust"), "117_sunlust");
+        assert_eq!(find("Ancient Aliens"), "117_ancient-aliens");
+    }
+
+    #[test]
+    fn test_a_database_opened_elsewhere_has_its_own_logs() {
+        assert_eq!(
+            sync_dir_for(Path::new("/mnt/games/test.db")),
+            Path::new("/mnt/games/sync")
+        );
+    }
+
+    /// What an existing install's first save after this does, on disk: moves them across,
+    /// with nothing changing as far as anything reading the settings can tell.
+    #[test]
+    fn test_saving_moves_a_machines_settings_out_of_the_file_that_travels() {
+        let dir = tempfile::tempdir().unwrap();
+        let (portable, machine) = (
+            dir.path().join("config.toml"),
+            dir.path().join("m/machine.toml"),
+        );
+        fs::write(
+            &portable,
+            "sourceport = \"nyan-doom\"\ncache_dir = \"/fast\"\nlink_mode = \"copy\"\n",
+        )
+        .unwrap();
+
+        let before = read_config_files(&portable, &machine);
+        assert_eq!(before.sourceport, "nyan-doom");
+        assert!(!machine.exists(), "reading settings writes nothing");
+
+        write_config_files(&before, &portable, &machine).unwrap();
+
+        let travels = fs::read_to_string(&portable).unwrap();
+        assert!(travels.contains("link_mode"));
+        assert!(!travels.contains("sourceport"), "{travels}");
+        assert!(!travels.contains("cache_dir"), "{travels}");
+        let stays = fs::read_to_string(&machine).unwrap();
+        assert!(
+            stays.contains("sourceport") && stays.contains("cache_dir"),
+            "{stays}"
+        );
+
+        let after = read_config_files(&portable, &machine);
+        assert_eq!(after.sourceport, "nyan-doom");
+        assert_eq!(after.cache_dir, "/fast");
+        assert_eq!(after.link_mode, "copy");
+    }
+
+    /// The conflict this exists to end: a config another machine wrote, arriving by sync,
+    /// says nothing about what this one has set up.
+    #[test]
+    fn test_another_machines_settings_arriving_change_nothing_here() {
+        let dir = tempfile::tempdir().unwrap();
+        let (portable, machine) = (
+            dir.path().join("config.toml"),
+            dir.path().join("machine.toml"),
+        );
+        let mine = Config {
+            sourceport: "/usr/bin/nyan-doom".to_string(),
+            ..Config::default()
+        };
+        write_config_files(&mine, &portable, &machine).unwrap();
+
+        fs::write(
+            &portable,
+            "sourceport = \"/Applications/Nyan.app\"\nlink_mode = \"copy\"\n",
+        )
+        .unwrap();
+
+        let read = read_config_files(&portable, &machine);
+        assert_eq!(read.sourceport, "/usr/bin/nyan-doom");
+        assert_eq!(read.link_mode, "copy", "and the rest of it still travels");
+    }
+
+    /// Damaged is not empty, or saving a setting would write over what could be fixed by hand.
+    #[test]
+    fn test_a_damaged_machine_file_is_ignored_rather_than_taken_for_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let (portable, machine) = (
+            dir.path().join("config.toml"),
+            dir.path().join("machine.toml"),
+        );
+        fs::write(&portable, "sourceport = \"from-the-config\"\n").unwrap();
+        fs::write(&machine, "this is [not toml").unwrap();
+        assert_eq!(
+            read_config_files(&portable, &machine).sourceport,
+            "from-the-config"
+        );
+    }
+
+    #[test]
+    fn test_settings_split_into_what_travels_and_what_stays() {
+        let cfg = Config {
+            sourceport: "nyan-doom".to_string(),
+            cache_dir: "/fast/cache".to_string(),
+            sync_dir: "~/Sync/caco".to_string(),
+            link_mode: "copy".to_string(),
+            auto_stats: false,
+            ..Config::default()
+        };
+        let (portable, machine) = split_machine_settings(minimal_table(&cfg).unwrap());
+
+        assert_eq!(portable.get("link_mode").unwrap().as_str(), Some("copy"));
+        assert_eq!(portable.get("auto_stats").unwrap().as_bool(), Some(false));
+        assert_eq!(portable.len(), 2);
+
+        assert_eq!(
+            machine.get("sourceport").unwrap().as_str(),
+            Some("nyan-doom")
+        );
+        assert_eq!(
+            machine.get("cache_dir").unwrap().as_str(),
+            Some("/fast/cache")
+        );
+        assert_eq!(
+            machine.get("sync_dir").unwrap().as_str(),
+            Some("~/Sync/caco")
+        );
+        assert_eq!(machine.len(), 3);
+    }
+
+    #[test]
+    fn test_every_machine_key_is_a_real_setting() {
+        let toml::Value::Table(table) = toml::Value::try_from(Config::default()).unwrap() else {
+            panic!("a config is a table");
+        };
+        for key in MACHINE_KEYS {
+            assert!(table.contains_key(*key), "{key}");
+        }
+    }
+
+    fn table(text: &str) -> toml::Table {
+        text.parse().unwrap()
+    }
+
+    /// An existing install's first run: nothing has changed until something is saved.
+    #[test]
+    fn test_a_machine_with_no_file_goes_by_what_the_config_says() {
+        let mut settings = table(r#"sourceport = "dsda-doom""#);
+        overlay_machine_settings(&mut settings, None);
+        assert_eq!(
+            settings.get("sourceport").unwrap().as_str(),
+            Some("dsda-doom")
+        );
+    }
+
+    #[test]
+    fn test_a_machines_own_file_wins_over_what_the_config_says() {
+        let mut settings = table(r#"sourceport = "from-another-machine""#);
+        overlay_machine_settings(&mut settings, Some(table(r#"sourceport = "mine""#)));
+        assert_eq!(settings.get("sourceport").unwrap().as_str(), Some("mine"));
+    }
+
+    /// A setting cleared here stays cleared, whatever is left in the file that travels.
+    #[test]
+    fn test_a_machines_file_is_the_whole_answer_once_it_exists() {
+        let mut settings = table(r#"sourceport = "from-another-machine""#);
+        overlay_machine_settings(&mut settings, Some(toml::Table::new()));
+        assert!(settings.get("sourceport").is_none());
+    }
+
+    /// And nothing that belongs to a library can be shadowed by a stray key in it.
+    #[test]
+    fn test_a_machines_file_only_decides_what_is_a_machines() {
+        let mut settings = table(r#"link_mode = "copy""#);
+        overlay_machine_settings(&mut settings, Some(table(r#"link_mode = "move""#)));
+        assert_eq!(settings.get("link_mode").unwrap().as_str(), Some("copy"));
     }
 
     #[test]
@@ -1815,7 +2285,7 @@ window_width = 1600
 
     #[test]
     fn test_get_wad_data_dir_special_chars() {
-        let dir = get_wad_data_dir(1, "Scythe 2: Electric Boogaloo!");
+        let dir = get_wad_data_dir("1", "Scythe 2: Electric Boogaloo!");
         let name = dir.file_name().unwrap().to_str().unwrap();
         assert_eq!(name, "1_scythe-2-electric-boogaloo");
     }

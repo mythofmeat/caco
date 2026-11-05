@@ -18,12 +18,14 @@ use crate::dialogs::file_changed::FileChangedDialogState;
 use crate::dialogs::link::LinkDialogState;
 use crate::dialogs::mirror_offer::MirrorOfferDialogState;
 use crate::dialogs::mirrors::MirrorsDialogState;
+use crate::dialogs::newer_saves::NewerSavesDialogState;
 use crate::dialogs::profiles::ProfilesDialogState;
 use crate::dialogs::resources::ResourcesDialogState;
 use crate::dialogs::sessions::SessionsDialogState;
 use crate::dialogs::settings::SettingsDialogState;
 use crate::dialogs::sourceports::SourceportsDialogState;
 use crate::dialogs::storage::{StorageDialogState, StorageTab};
+use crate::dialogs::sync::SyncDialogState;
 use crate::dialogs::wad_data::WadDataDialogState;
 use crate::dialogs::wad_stats::WadStatsDialogState;
 use crate::filter_query::{FilterCheck, FilterQuery};
@@ -66,9 +68,9 @@ pub enum ViewLayout {
 
 pub enum ActionRequest {
     Play(i64),
-    /// Play a WAD whose file has changed since it was last played, once the
-    /// user has been told and chose to go ahead.
-    PlayAnyway(i64),
+    /// Play a WAD the launch stopped to ask about, once the user has been told and
+    /// chose to go ahead.
+    PlayWith(i64, caco_core::player::PlayOptions),
     StartNewPlaythrough(i64),
     Edit(i64),
     Delete(i64),
@@ -119,6 +121,12 @@ pub enum ActionRequest {
     /// Open the mirrors tool, which starts on the setup wizard if there are none.
     Mirrors,
 
+    /// Open the Sync tool.
+    Sync,
+
+    /// Write out this machine's log and read everyone else's, now.
+    SyncNow,
+
     /// Read every mirror's index again, because the list of mirrors may have changed.
     SyncMirrors,
 
@@ -167,6 +175,10 @@ pub enum ActiveDialog {
     /// Asked before launching a WAD whose file has changed since it was last
     /// played.
     FileChanged(FileChangedDialogState),
+    /// Asked before launching a WAD another machine has newer saves for.
+    NewerSaves(NewerSavesDialogState),
+    /// Which machines this library has heard from.
+    Sync(Box<SyncDialogState>),
     /// Modal picker for choosing a library WAD to link to a Cacoward entry.
     CacowardLink(CacowardLinkDialogState),
     Settings(SettingsDialogState),
@@ -277,6 +289,8 @@ pub struct AppState {
     /// What the last read of every mirror's index found, for the mirrors dialog to say.
     /// `None` until the first one, at startup, has finished.
     pub mirror_report: Option<caco_sources::mirror::SyncReport>,
+    /// What the last pass of the sync worker that had anything to say found.
+    pub sync_report: Option<caco_core::sync::SyncReport>,
 
     /// Files being fetched by the user in their browser, and what has landed for them.
     pub gets: Gets,
@@ -444,6 +458,7 @@ impl AppState {
             uploads: Vec::new(),
             mirror_bulk: None,
             mirror_report: None,
+            sync_report: None,
             gets: Gets::default(),
         }
     }

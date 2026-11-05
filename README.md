@@ -17,6 +17,7 @@ A personal Doom WAD library manager inspired by [beets](https://beets.io). Impor
 - **A local index of idgames** — every upload on the archive, searchable by title, author, file name and description, with the newest listed first, and none of it behind Doomworld's Cloudflare. Point caco at your own copy of the archive and every WAD on idgames is instant and offline.
 - **Content identity** — every WAD file is hashed, along with the WADs inside a zip, so caco notices when a file has changed since you last played it and asks before launching it: saves and demos made with one version of a WAD often fail with another.
 - **Cacowards browser** — a magazine-style year-by-year view of every WAD Doomworld has awarded since 2004, doubling as an import queue. The list ships with caco, so it works offline and needs no site to be up.
+- **Several machines** — play on a desktop and a laptop between syncs and nothing is lost. Each machine keeps a log of what happens on it, in plain files that can't conflict, so git, Syncthing or a shared drive can carry them, and every machine merges them into the same library. See [Several Machines](#several-machines).
 - **Garbage collection** — reclaim disk space from completed / abandoned WADs, reviewing every file before it goes.
 - **Smart collections** — save queries by name and pin them to the sidebar.
 
@@ -121,6 +122,7 @@ the sourceport.
 | Sourceports | Build sourceports from source into caco's own prefix |
 | Enrich | Re-run complevel / IWAD / sourceport detection across the library |
 | Mirrors | Your own stores of WAD files: set one up, fill it, change it — see [Mirrors](#mirrors) |
+| Sync | Where the logs are, and which machines this library has heard from — see [Several Machines](#several-machines) |
 | Settings | Sourceports, launch args, behavior toggles, cache limits, paths |
 
 Storage tabs:
@@ -483,6 +485,11 @@ absent) config, and defaults resolve at runtime — which is what lets the data
 directory move between machines without dragging one machine's absolute paths
 along.
 
+Sourceports, launch args, IWADs and paths differ from one machine to the next, so they
+are kept in a file of each machine's own instead: see
+[What stays on each machine](#what-stays-on-each-machine). The Settings dialog sorts that
+out, and says so where it applies.
+
 On a first launch with no sourceport configured, caco adopts the best one it
 finds on `PATH` and tells you which.
 
@@ -519,6 +526,8 @@ thumbnail_size = 160
 
 Caco writes only the settings that differ from their defaults, so `config.toml` stays short. Every option and its default is defined on the `Config` struct in `crates/caco-core/src/config.rs`; most are also editable from the Settings dialog.
 
+That example is every setting in one place, for reading. Written by hand, `sourceport`, `iwad`, `iwad_dirs`, `sourceport_args`, `downloads_dir` and `executable_args` belong in `machine.toml`, and once that file exists they are ignored in `config.toml`: see [What stays on each machine](#what-stays-on-each-machine).
+
 ## Data Storage
 
 Caco splits its files by whether they can be regenerated. The **data**
@@ -533,13 +542,14 @@ disposable and rebuilds itself on demand. Both follow platform convention:
 Paths in the two tables below are relative to those roots.
 
 **Keep these** — copy the data directory to move your library to another
-machine:
+machine, or see [Several Machines](#several-machines) to keep it on more than one:
 
 | Path | Contents |
 |------|----------|
 | `config.toml` | Configuration |
 | `gui-state.json` | GUI view/sort/filter state |
 | `library.db` | Library database |
+| `sync/` | What has happened on each machine, which `library.db` can be rebuilt from |
 | `data/` | Per-WAD saves, stats, configs |
 | `wads/` | WAD files caco cannot re-download |
 | `iwads/` | Managed IWADs |
@@ -555,6 +565,8 @@ machine:
 | | Linux | macOS |
 |---|---|---|
 | Tokens and passwords for your [mirrors](#mirrors) | `~/.config/caco/mirror-tokens.toml` | `~/Library/Preferences/caco/mirror-tokens.toml` |
+| [Settings that differ between machines](#what-stays-on-each-machine) | `~/.config/caco/machine.toml` | `~/Library/Preferences/caco/machine.toml` |
+| Which machine this is | `~/.config/caco/machine-id` | `~/Library/Preferences/caco/machine-id` |
 
 **Disposable** — safe to delete at any time:
 
@@ -589,6 +601,11 @@ what identifies the file when you go looking for it.
 Override the cache root with `CACO_CACHE_HOME`, just the WAD cache with
 `CACO_CACHE_DIR`, or just the idgames index with `CACO_IDGAMES_INDEX`.
 
+Each WAD's folder under `data/` is named for a key that travels with the WAD, so that the
+same folder means the same WAD on every machine. That key is the row's old id for anything
+from before this existed, so nothing has to move, and a name like `idgames-18000` or a long
+hex string for anything since.
+
 ### Recovering from a bad migration
 
 Each time caco starts with pending schema migrations it first copies the live
@@ -607,6 +624,107 @@ cp "$data/backups/pre-migration-<N>.db" "$data/library.db"
 
 You will need a caco binary old enough to read schema version `N`. Please also
 file a bug report with the broken DB attached.
+
+## Several Machines
+
+`library.db` is one binary file, so it cannot be merged. Play on two machines between syncs
+and git conflicts on the whole file, and resolving that means keeping one machine's database
+and throwing away the other's sessions.
+
+So each machine also writes down what happens on it, as it happens, in
+`sync/<machine>/<yyyy-mm>.jsonl`. A machine only ever writes to its own folder, so files from
+different machines can't conflict, and anything that moves files can carry them. Every machine
+reads everyone's, at startup and every half a minute after that, and they all end up with the
+same library, whatever order the files turn up in.
+
+### Setting it up
+
+There is nothing to set up inside caco. Sync the data directory the way you do now, and leave
+the database out of it:
+
+| | Sync it? |
+|---|---|
+| `sync/` | Yes. This is what makes it work |
+| `data/`, `companions/`, `profiles/`, `cacowards/`, `config.toml` | Yes, as you do now |
+| `wads/` | If you like, or let a [mirror](#mirrors) hold those files instead |
+| `library.db`, `library.db-wal`, `library.db-shm` | **No.** Each machine builds its own |
+
+Start the new version once on each machine **before** you take `library.db` out of your sync,
+so that what each has done since the last sync gets written to its log. The first start on an
+existing library takes a moment, and writes a log about the size of the database (13 MB for
+one with 1,100 sessions), once. After that a session adds some tens of kilobytes at most.
+Then, with git:
+
+```bash
+git rm --cached library.db
+printf 'library.db*\n' >> .gitignore
+```
+
+A machine that gets its `library.db` deleted by that pull just builds a new one on its next
+start. So does a new machine: install caco, sync the folder, and start it. If your sync tool
+can't take the whole data directory, Settings has a **Sync folder**, and `sync/` can live
+anywhere on its own (`CACO_SYNC_DIR` overrides it).
+
+The **Sync** tool says where the folder is, which machines this library has heard from and
+when, and whether anything is waiting. Sync Now does a pass without waiting for the next one.
+
+### What travels, and who wins
+
+Sessions, playthroughs, completions, status, ratings, notes, tags, a WAD's metadata and
+per-WAD settings, which companions it uses, smart collections, Cacoward links and flags, and
+what each WAD file is.
+
+Edits go by last writer wins, one field at a time: changing the notes on one machine and the
+rating on another keeps both. "Last" goes by a clock that always puts what you did after
+seeing another machine's edit after that edit, however wrong either machine's clock is. An
+import is not an edit. The same WAD imported on two machines is one WAD, and a later import
+somewhere else does not overwrite the rating you gave it.
+
+- **Per-map progress** adds up rather than overwrites. Beat MAP10 on one machine and MAP20 on
+  another and the library knows about both, and finishing the last map anywhere completes the
+  WAD. Starting a new playthrough starts over everywhere.
+- **Deleting a WAD for good** (Empty Trash) is final on every machine. Importing it again
+  makes a new one. Moving it to the Trash, and restoring it, go by last writer like anything else.
+- **Files go by hash.** A machine that does not have a WAD's file knows what the file is, so a
+  [mirror](#mirrors) can be asked for exactly that file, and a copy of the same name already in
+  `wads/` or the cache is linked, without a download, if its hash matches.
+
+So `library.db` is no longer the only copy of anything. Delete it and caco builds it again
+from the logs. Go back to a copy of another machine's, the way resolving a conflict used to go,
+and whatever this machine had done that the copy hasn't seen is applied again.
+
+### Saves
+
+A save is a file a sourceport rewrites, and nothing can merge two of them. So caco detects
+this and leaves it to you. After a session, each machine says what its saves are, and before a
+launch caco compares what is on this disk with what the other machines last said. If another
+machine has said something since this one did, and its saves aren't here, you are asked first:
+that usually means the sync hasn't finished. Once they arrive the hashes agree, and there is
+nothing to ask. If you keep a separate game going on each machine, turn it off in Settings.
+
+Moving saves is the sync tool's job, in `data/`. Stats files are there too, and if two
+machines both change one you can keep either: what they've reported is already in the logs.
+
+### What stays on each machine
+
+These settings live in `machine.toml` rather than `config.toml`, because they are about this
+machine and not your library: `sourceport`, `zdoom_sourceport`, `sourceport_preferences`,
+`sourceport_args`, `executable_args`, `iwad`, `iwad_dirs`, `iwad_dir`, `cache_dir`, `db_path`,
+`data_dir`, `profile_dir`, `downloads_dir` and `sync_dir`. Saving any setting moves them across
+from an older `config.toml`, and until then a machine goes by what `config.toml` says.
+
+These never leave the machine they're true of:
+
+- Where a WAD's file is. The file's hash travels, and each machine finds its own copy.
+- A per-WAD IWAD or sourceport given as a path. `doom2` and `uzdoom` travel, and
+  `/home/me/iwads/doom2.wad` does not.
+- Which IWADs and id24 WADs are registered, since those go by path. Register them in **IWADs**
+  once per machine. A file already in `iwads/` is found without that, but an id24 WAD isn't
+  loaded until it is registered.
+- What can be worked out again: map analysis, what each mirror holds, the Cacowards list.
+
+The log is never compacted, and caco talks to no remote itself. Moving the files is left to
+whatever already moves the rest of the data directory.
 
 ## Supported Sourceports
 

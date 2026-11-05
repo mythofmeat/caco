@@ -70,7 +70,7 @@ impl StorePaths {
     /// Both rather than only that one: a manual WAD's file sat in the cache
     /// before there was a keep dir, and a WAD that learns its idgames id keeps
     /// the file it already had.
-    fn search_order(&self, retrievability: Retrievability) -> [&Path; 2] {
+    pub(crate) fn search_order(&self, retrievability: Retrievability) -> [&Path; 2] {
         match retrievability {
             Retrievability::Automatic => [&self.cache_dir, &self.keep_dir],
             Retrievability::Manual => [&self.keep_dir, &self.cache_dir],

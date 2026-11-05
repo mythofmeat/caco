@@ -8,6 +8,7 @@ use crate::dialogs::delete::DeleteDialogState;
 use crate::dialogs::edit::EditDialogState;
 use crate::dialogs::file_changed::FileChangedDialogState;
 use crate::dialogs::link::LinkDialogState;
+use crate::dialogs::newer_saves::NewerSavesDialogState;
 use crate::dialogs::resources::ResourcesDialogState;
 use crate::dialogs::sessions::SessionsDialogState;
 use crate::dialogs::wad_stats::WadStatsDialogState;
@@ -32,6 +33,7 @@ mod mirrors;
 mod section_header;
 mod sidebar;
 mod status_bar;
+mod sync;
 mod topbar;
 
 use dialogs::render_active_dialog;
@@ -64,20 +66,24 @@ pub struct CacoApp {
     state: AppState,
     bg: BackgroundChannel,
     thumbnails: ThumbnailManager,
+    sync: sync::SyncWorker,
 }
 
 impl CacoApp {
     pub fn new(conn: Connection, db_path: PathBuf, ctx: &egui::Context) -> Self {
         let mut bg = BackgroundChannel::new();
         bg.set_ctx(ctx.clone());
+        let (sync, sync_inbox) = sync::worker();
 
         let mut app = Self {
             conn,
             state: AppState::new(db_path),
             bg,
             thumbnails: ThumbnailManager::new(),
+            sync,
         };
         app.sync_cacowards();
+        sync::spawn(sync_inbox, app.bg.sender(), app.state.db_path.clone());
         file_check::spawn(app.bg.sender(), app.state.db_path.clone());
         mirrors::spawn_sync(app.bg.sender(), app.state.db_path.clone());
         app.spawn_idgames_index(false);
@@ -357,6 +363,10 @@ impl CacoApp {
                     title: String,
                     change: caco_core::identity::ContentChange,
                 },
+                NewerSaves {
+                    title: String,
+                    saves: caco_core::sync::NewerSaves,
+                },
             }
             impl From<String> for PlayError {
                 fn from(s: String) -> Self {
@@ -405,6 +415,9 @@ impl CacoApp {
                     caco_core::Error::WadFileChanged { title, change } => {
                         PlayError::Changed { title, change }
                     }
+                    caco_core::Error::NewerSavesElsewhere { title, saves } => {
+                        PlayError::NewerSaves { title, saves }
+                    }
                     e => PlayError::Message(e.to_string()),
                 })
             })();
@@ -422,6 +435,15 @@ impl CacoApp {
                         wad_id,
                         title,
                         change,
+                        opts,
+                    })
+                }
+                Err(PlayError::NewerSaves { title, saves }) => {
+                    sender.send(AppMessage::PlayNewerSaves {
+                        wad_id,
+                        title,
+                        saves,
+                        opts,
                     })
                 }
             }
@@ -753,12 +775,16 @@ impl CacoApp {
             ActionRequest::Play(wad_id) => {
                 self.spawn_play(wad_id, caco_core::player::PlayOptions::default());
             }
-            ActionRequest::PlayAnyway(wad_id) => {
-                let opts = caco_core::player::PlayOptions {
-                    accept_changed_file: true,
-                };
+            ActionRequest::PlayWith(wad_id, opts) => {
                 self.spawn_play(wad_id, opts);
             }
+            ActionRequest::Sync => {
+                self.sync.nudge();
+                let dialog =
+                    crate::dialogs::sync::SyncDialogState::new(&self.conn, &self.state.db_path);
+                self.state.active_dialog = Some(ActiveDialog::Sync(Box::new(dialog)));
+            }
+            ActionRequest::SyncNow => self.sync.asked(),
             ActionRequest::Mirrors => {
                 let dialog = crate::dialogs::mirrors::MirrorsDialogState::new(&self.conn);
                 self.state.active_dialog = Some(ActiveDialog::Mirrors(Box::new(dialog)));
@@ -815,6 +841,7 @@ impl CacoApp {
 impl eframe::App for CacoApp {
     fn on_exit(&mut self) {
         persist::save(&self.state.to_persisted());
+        self.sync.finish();
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -844,6 +871,7 @@ impl eframe::App for CacoApp {
                     wad_id,
                     title,
                     change,
+                    opts,
                 } => {
                     self.state.play_state = PlayState::Idle;
                     // The launch hashed the file to find this out, and a file
@@ -851,8 +879,33 @@ impl eframe::App for CacoApp {
                     // old one.
                     self.state.invalidate_wad_views();
                     self.state.active_dialog = Some(ActiveDialog::FileChanged(
-                        FileChangedDialogState::new(wad_id, title, change),
+                        FileChangedDialogState::new(wad_id, title, change, opts),
                     ));
+                }
+                AppMessage::PlayNewerSaves {
+                    wad_id,
+                    title,
+                    saves,
+                    opts,
+                } => {
+                    self.state.play_state = PlayState::Idle;
+                    self.state.invalidate_wad_views();
+                    self.state.active_dialog = Some(ActiveDialog::NewerSaves(
+                        NewerSavesDialogState::new(wad_id, title, saves, opts),
+                    ));
+                }
+                AppMessage::SyncFinished(run) => {
+                    if run.report.changed() || run.adopted > 0 {
+                        self.state.invalidate_wad_views();
+                        self.state.refresh_collections(&self.conn);
+                    }
+                    if let Some(notification) = sync::notification(&run) {
+                        self.state.notification = Some(notification);
+                    }
+                    if let Some(ActiveDialog::Sync(dialog)) = &mut self.state.active_dialog {
+                        dialog.reload(&self.conn);
+                    }
+                    self.state.sync_report = Some(run.report);
                 }
                 AppMessage::DownloadLanded(arrival) => {
                     // They are in their browser, so it takes more than a window in a
@@ -958,6 +1011,8 @@ impl eframe::App for CacoApp {
                 AppMessage::PlayFinished { outcome } => {
                     self.state.play_state = PlayState::Idle;
                     self.state.invalidate_wad_views();
+                    // A session is what all of this is for. Worth getting out soon.
+                    self.sync.nudge();
 
                     match outcome {
                         // A missing file arrives as PlayUnavailable, so this is
