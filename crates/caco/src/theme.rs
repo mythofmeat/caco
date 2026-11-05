@@ -36,6 +36,9 @@ pub const TEXT_TAG: Color32 = Color32::from_rgb(0xcc, 0x77, 0x44);
 /// An award: the year's kicker, and a category swept.
 pub const GOLD: Color32 = Color32::from_rgb(0xd4, 0xa1, 0x4a);
 
+/// What a chart's marks are when they stand for an amount rather than a status.
+pub const CHART_BAR: Color32 = Color32::from_rgb(0xc8, 0x76, 0x46);
+
 // ---------------------------------------------------------------------------
 // What went well, and what did not
 // ---------------------------------------------------------------------------
@@ -208,6 +211,11 @@ pub fn paint_truncated(
     );
     job.wrap = egui::text::TextWrapping::truncate_at_width(max_width);
     painter.galley(pos, painter.layout_job(job), color);
+}
+
+/// A colour a little brighter, for a mark being pointed at.
+pub fn lift(color: Color32) -> Color32 {
+    blend(color, Color32::WHITE, 0.25)
 }
 
 /// `amount` of the way from one colour to another.

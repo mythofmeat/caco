@@ -1185,9 +1185,8 @@ impl eframe::App for CacoApp {
                             if ir.is_duplicate {
                                 let title =
                                     ir.duplicate_title.unwrap_or_else(|| "unknown".to_string());
-                                let id = ir.duplicate_id.unwrap_or(0);
                                 self.state.notification = Some(Notification::warning(format!(
-                                    "Already imported as {title} (#{id})"
+                                    "Already in your library, as {title}."
                                 )));
                             } else {
                                 self.state.notification = Some(Notification::info(
@@ -1219,7 +1218,10 @@ impl eframe::App for CacoApp {
             self.state.reload(&self.conn);
             self.kick_reanalysis();
         }
-        if self.state.cacowards.needs_reload && self.state.view_mode == ViewMode::Cacowards {
+        // Stats says how far through each year you are, by the same reckoning.
+        if self.state.cacowards.needs_reload
+            && matches!(self.state.view_mode, ViewMode::Cacowards | ViewMode::Stats)
+        {
             self.state.reload_cacowards(&self.conn);
         }
         if self.state.stats.needs_reload && self.state.view_mode == ViewMode::Stats {
@@ -1265,8 +1267,9 @@ impl eframe::App for CacoApp {
             // new values.
             if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::R)) {
                 caco_core::config::reload_config();
-                self.state.notification =
-                    Some(Notification::info("Config reloaded from disk".to_string()));
+                self.state.notification = Some(Notification::info(
+                    "Settings reloaded from disk.".to_string(),
+                ));
                 // The mirrors may be what was edited.
                 mirrors::spawn_sync(self.bg.sender(), self.state.db_path.clone());
             }
@@ -1358,9 +1361,16 @@ impl eframe::App for CacoApp {
                             });
                     }
                     ViewMode::Import => {
-                        if let Some(import_action) = import::render(ui, &mut self.state.import) {
-                            self.dispatch_import_action(import_action);
-                        }
+                        // The margin every other view has.
+                        egui::Frame::new()
+                            .inner_margin(egui::Margin::symmetric(20, 8))
+                            .show(ui, |ui| {
+                                if let Some(import_action) =
+                                    import::render(ui, &mut self.state.import)
+                                {
+                                    self.dispatch_import_action(import_action);
+                                }
+                            });
                     }
                     ViewMode::Stats => {
                         egui::ScrollArea::vertical()

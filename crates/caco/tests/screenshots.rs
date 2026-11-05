@@ -769,6 +769,18 @@ fn shoot_every_surface() {
         assert!(s.harness.query_by_label("DOOM MOMA").is_none());
     });
 
+    // The forms, each with inputs to name. The `3`, `4` and `5` shortcuts reach them.
+    for (name, key) in [
+        ("04-import-doomworld", egui::Key::Num3),
+        ("04-import-url", egui::Key::Num4),
+        ("04-import-local", egui::Key::Num5),
+    ] {
+        s.shot_view_after(name, ViewMode::Import, |s| {
+            s.harness.key_press(key);
+            s.settle(1, Duration::ZERO);
+        });
+    }
+
     // A blocked source is the state this view most has to explain, and only a
     // worker can report it. Posted the way the search worker posts it, on the tab
     // the `2` shortcut reaches. Finding the text proves it reaches the screen; the

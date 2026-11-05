@@ -10,7 +10,7 @@ use caco_sources::idgames::{IdgamesRef, IndexStatus};
 
 use crate::message::IdgamesIndexRun;
 
-pub const IMPORT_SOURCES: &[&str] = &["idgames", "doomwiki", "doomworld", "URL", "local"];
+pub const IMPORT_SOURCES: &[&str] = &["idgames", "Doom Wiki", "Doomworld", "URL", "Local File"];
 
 // ---------------------------------------------------------------------------
 // Top-level import state

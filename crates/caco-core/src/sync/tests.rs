@@ -2884,13 +2884,13 @@ fn test_a_real_library_comes_through_all_of_it() {
 
     // What the library looks like from every view that reads it.
     let stats = |machine: &Machine| {
-        let snapshot = db::get_stats_snapshot(&machine.conn, "month").unwrap();
+        let snapshot = db::get_stats_snapshot(&machine.conn).unwrap();
         (
             snapshot.total_wads,
             snapshot.total_sessions,
             snapshot.total_playtime,
             snapshot.total_completions,
-            snapshot.completed_wads,
+            snapshot.with_status(Status::Completed),
         )
     };
     assert_eq!(stats(&a), stats(&new));

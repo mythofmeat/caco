@@ -742,7 +742,7 @@ impl AppState {
 
     /// Pull the library-wide stats snapshot for [`ViewMode::Stats`].
     pub fn reload_stats(&mut self, conn: &Connection) {
-        self.stats.snapshot = caco_core::db::sessions::get_stats_snapshot(conn, "month").ok();
+        self.stats.snapshot = caco_core::db::sessions::get_stats_snapshot(conn).ok();
         self.stats.needs_reload = false;
     }
 

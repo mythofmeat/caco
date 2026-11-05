@@ -96,9 +96,7 @@ fn render_results_table(
             ui.colored_label(theme::TEXT_SECONDARY, "Searching...");
         } else if let Some(error) = &state.error {
             ui.colored_label(theme::COLOR_ERROR, error);
-        } else if state.status_text.is_empty() {
-            ui.colored_label(theme::TEXT_SECONDARY, "Enter a search query above");
-        } else {
+        } else if !state.status_text.is_empty() {
             ui.colored_label(theme::TEXT_SECONDARY, "No results");
         }
         return None;
@@ -166,6 +164,10 @@ fn render_results_table(
 }
 
 fn render_preview(ui: &mut egui::Ui, state: &SearchState, action: &mut Option<SearchPanelAction>) {
+    // Nothing to say before there is anything to pick from.
+    if state.results.is_empty() {
+        return;
+    }
     let Some(idx) = state.selected_row else {
         ui.colored_label(theme::TEXT_SECONDARY, "Select a result to preview");
         return;
@@ -240,7 +242,7 @@ fn render_preview(ui: &mut egui::Ui, state: &SearchState, action: &mut Option<Se
         }
 
         // Import button
-        if ui.button("Import").clicked() {
+        if ui.add(theme::primary_button("Import")).clicked() {
             *action = Some(SearchPanelAction::Import(entry.clone()));
         }
     });

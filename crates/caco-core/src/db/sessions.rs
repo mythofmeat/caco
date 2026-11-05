@@ -4,7 +4,7 @@ use chrono::Utc;
 use rusqlite::Connection;
 
 use super::connection::{SQLITE_MAX_VARS, attach_tags};
-use super::models::{WAD_COLUMNS, WadRecord};
+use super::models::{Status, WAD_COLUMNS, WadRecord};
 use crate::Result;
 
 /// Minimum duration in seconds for a session to count as a real play session.
@@ -427,19 +427,43 @@ pub fn clear_cached_path(conn: &Connection, wad_id: i64) -> Result<bool> {
 // Library Statistics
 // =============================================================================
 
-/// Library-wide statistics snapshot.
+/// Library-wide statistics, for the Stats view.
+///
+/// One definition of each thing, and all of it about the library as it stands, so a WAD in
+/// the Trash and its sessions don't count. "Completed" is a WAD's status and nothing else, the
+/// same number the library's filter shows: this used to report a second figure, of completed
+/// WADs that also had a recorded session, and a rate worked out from that, which disagreed
+/// with the first for everything finished before caco was there to see it.
 #[derive(Debug, Clone, Default)]
 pub struct StatsSnapshot {
     pub total_wads: i64,
     pub total_sessions: i64,
     pub total_playtime: i64,
-    pub wads_with_sessions: i64,
     pub wads_by_status: HashMap<String, i64>,
-    pub played_wads: i64,
-    pub completed_wads: i64,
-    pub completion_rate: f64,
+    /// How many times anything has been finished, counting playing it again.
     pub total_completions: i64,
+    /// Newest month first.
     pub activity: Vec<ActivityPeriod>,
+    /// `("2026-03", times finished)`, newest month first.
+    pub completions_by_month: Vec<(String, i64)>,
+    /// By playtime.
+    pub top_authors: Vec<Tally>,
+    /// By playtime, under an executable's name, wherever it was run from.
+    pub sourceports: Vec<Tally>,
+    /// By how many WADs use each.
+    pub iwads: Vec<Tally>,
+    /// By how many WADs use each.
+    pub complevels: Vec<Tally>,
+}
+
+impl StatsSnapshot {
+    /// How many WADs have this status.
+    pub fn with_status(&self, status: Status) -> i64 {
+        self.wads_by_status
+            .get(status.as_str())
+            .copied()
+            .unwrap_or(0)
+    }
 }
 
 /// A single time period of activity.
@@ -451,56 +475,39 @@ pub struct ActivityPeriod {
     pub total_playtime: i64,
 }
 
-/// Get a complete library statistics snapshot.
-pub fn get_stats_snapshot(conn: &Connection, period: &str) -> Result<StatsSnapshot> {
-    let stats = get_library_stats(conn)?;
-    let completion = get_completion_rate(conn)?;
-    let activity = get_wads_played_by_period(conn, period)?;
-
-    Ok(StatsSnapshot {
-        total_wads: stats.0,
-        total_sessions: stats.1,
-        total_playtime: stats.2,
-        wads_with_sessions: stats.3,
-        wads_by_status: stats.4,
-        played_wads: completion.0,
-        completed_wads: completion.1,
-        completion_rate: completion.2,
-        total_completions: completion.3,
-        activity,
-    })
+/// One line of a breakdown: a name, and how much of whatever it is counting.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tally {
+    pub name: String,
+    pub value: i64,
 }
 
-/// Library overview stats tuple.
-type LibraryOverview = (i64, i64, i64, i64, HashMap<String, i64>);
+/// How many lines a breakdown has.
+const TOP: usize = 5;
 
-/// Get library-wide overview statistics.
-///
-/// Returns (total_wads, total_sessions, total_playtime, wads_with_sessions, wads_by_status).
-fn get_library_stats(conn: &Connection) -> Result<LibraryOverview> {
-    let total_wads: i64 = conn.query_row(
+/// What a breakdown calls what has no value for it.
+const NOT_SET: &str = "Not set";
+
+/// Sessions that count, of WADs that count.
+const COUNTED_SESSIONS: &str = "FROM sessions JOIN wads ON wads.id = sessions.wad_id \
+     WHERE wads.deleted_at IS NULL AND COALESCE(sessions.duration_seconds, 0) >= ?1";
+
+/// Get a complete library statistics snapshot.
+pub fn get_stats_snapshot(conn: &Connection) -> Result<StatsSnapshot> {
+    let total_wads = conn.query_row(
         "SELECT COUNT(*) FROM wads WHERE deleted_at IS NULL",
         [],
         |row| row.get(0),
     )?;
-
-    let total_sessions: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM sessions WHERE COALESCE(duration_seconds, 0) >= ?",
+    let (total_sessions, total_playtime) = conn.query_row(
+        &format!("SELECT COUNT(*), COALESCE(SUM(duration_seconds), 0) {COUNTED_SESSIONS}"),
         [MIN_SESSION_SECONDS],
-        |row| row.get(0),
+        |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
-
-    let total_playtime: i64 = conn.query_row(
-        "SELECT COALESCE(SUM(duration_seconds), 0) FROM sessions \
-         WHERE COALESCE(duration_seconds, 0) >= ?",
-        [MIN_SESSION_SECONDS],
-        |row| row.get(0),
-    )?;
-
-    let wads_with_sessions: i64 = conn.query_row(
-        "SELECT COUNT(DISTINCT wad_id) FROM sessions \
-         WHERE COALESCE(duration_seconds, 0) >= ?",
-        [MIN_SESSION_SECONDS],
+    let total_completions = conn.query_row(
+        "SELECT COUNT(*) FROM wad_completions c JOIN wads ON wads.id = c.wad_id \
+         WHERE wads.deleted_at IS NULL",
+        [],
         |row| row.get(0),
     )?;
 
@@ -516,36 +523,35 @@ fn get_library_stats(conn: &Connection) -> Result<LibraryOverview> {
         wads_by_status.insert(status, count);
     }
 
-    Ok((
+    Ok(StatsSnapshot {
         total_wads,
         total_sessions,
         total_playtime,
-        wads_with_sessions,
         wads_by_status,
-    ))
+        total_completions,
+        activity: activity_by_month(conn)?,
+        completions_by_month: completions_by_month(conn)?,
+        top_authors: top_authors(conn)?,
+        sourceports: sourceports(conn)?,
+        iwads: iwads(conn)?,
+        complevels: complevels(conn)?,
+    })
 }
 
-/// Get activity grouped by time period.
-pub fn get_wads_played_by_period(conn: &Connection, period: &str) -> Result<Vec<ActivityPeriod>> {
-    let strftime = match period {
-        "year" => "'%Y'",
-        _ => "'%Y-%m'",
-    };
-
+/// Play by month, newest first. A month with nothing in it has no row.
+fn activity_by_month(conn: &Connection) -> Result<Vec<ActivityPeriod>> {
     let sql = format!(
-        "SELECT strftime({strftime}, started_at) as period, \
+        "SELECT strftime('%Y-%m', started_at) as period, \
              COUNT(DISTINCT wad_id) as wad_count, \
              COUNT(*) as session_count, \
              COALESCE(SUM(duration_seconds), 0) as total_playtime \
-         FROM sessions \
-         WHERE COALESCE(duration_seconds, 0) >= {MIN_SESSION_SECONDS} \
-         GROUP BY strftime({strftime}, started_at) \
+         {COUNTED_SESSIONS} \
+         GROUP BY period \
          ORDER BY period DESC"
     );
-
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt
-        .query_map([], |row| {
+        .query_map([MIN_SESSION_SECONDS], |row| {
             Ok(ActivityPeriod {
                 period: row.get("period")?,
                 wad_count: row.get("wad_count")?,
@@ -557,41 +563,111 @@ pub fn get_wads_played_by_period(conn: &Connection, period: &str) -> Result<Vec<
     Ok(rows)
 }
 
-/// Get completion statistics.
-///
-/// Returns (played_wads, completed_wads, completion_rate, total_completions).
-fn get_completion_rate(conn: &Connection) -> Result<(i64, i64, f64, i64)> {
-    let played_wads: i64 = conn.query_row(
-        "SELECT COUNT(DISTINCT wad_id) FROM sessions \
-         WHERE COALESCE(duration_seconds, 0) >= ?",
-        [MIN_SESSION_SECONDS],
-        |row| row.get(0),
+/// How many times something was finished, by month, newest first.
+fn completions_by_month(conn: &Connection) -> Result<Vec<(String, i64)>> {
+    let mut stmt = conn.prepare(
+        "SELECT strftime('%Y-%m', c.completed_at) as period, COUNT(*) \
+         FROM wad_completions c JOIN wads ON wads.id = c.wad_id \
+         WHERE wads.deleted_at IS NULL AND period IS NOT NULL \
+         GROUP BY period \
+         ORDER BY period DESC",
     )?;
+    let rows = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
 
-    let completed_wads: i64 = conn.query_row(
-        "SELECT COUNT(DISTINCT wads.id) FROM wads \
-         JOIN sessions ON sessions.wad_id = wads.id \
-         WHERE wads.status = 'completed' AND wads.deleted_at IS NULL \
-         AND COALESCE(sessions.duration_seconds, 0) >= ?",
-        [MIN_SESSION_SECONDS],
-        |row| row.get(0),
-    )?;
+/// Add up what shares a name, and keep the largest few. Largest first, and by name after
+/// that, so the same library always reads the same.
+fn top_of(rows: impl IntoIterator<Item = (String, i64)>) -> Vec<Tally> {
+    let mut totals: HashMap<String, i64> = HashMap::new();
+    for (name, value) in rows {
+        *totals.entry(name).or_default() += value;
+    }
+    let mut tallies: Vec<Tally> = totals
+        .into_iter()
+        .map(|(name, value)| Tally { name, value })
+        .collect();
+    tallies.sort_by(|a, b| b.value.cmp(&a.value).then_with(|| a.name.cmp(&b.name)));
+    tallies.truncate(TOP);
+    tallies
+}
 
-    let total_completions: i64 =
-        conn.query_row("SELECT COUNT(*) FROM wad_completions", [], |row| row.get(0))?;
+/// A file's name, wherever it is.
+fn base_name(path: &str) -> &str {
+    path.rsplit(['/', '\\']).next().unwrap_or(path)
+}
 
-    let completion_rate = if played_wads > 0 {
-        completed_wads as f64 / played_wads as f64
-    } else {
-        0.0
-    };
+/// Who has been played the most. "Various" is what a community project says, and not anybody.
+fn top_authors(conn: &Connection) -> Result<Vec<Tally>> {
+    let sql = format!(
+        "SELECT wads.author, SUM(sessions.duration_seconds) {COUNTED_SESSIONS} \
+         AND TRIM(COALESCE(wads.author, '')) != '' AND LOWER(TRIM(wads.author)) != 'various' \
+         GROUP BY wads.author"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt
+        .query_map([MIN_SESSION_SECONDS], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<std::result::Result<Vec<(String, i64)>, _>>()?;
+    Ok(top_of(rows))
+}
 
-    Ok((
-        played_wads,
-        completed_wads,
-        completion_rate,
-        total_completions,
-    ))
+/// What has been played with. A session records the executable it ran, so the same sourceport
+/// is several paths, and a build of it in caco's own folder is another.
+fn sourceports(conn: &Connection) -> Result<Vec<Tally>> {
+    let sql = format!(
+        "SELECT sessions.sourceport, SUM(sessions.duration_seconds) {COUNTED_SESSIONS} \
+         AND TRIM(COALESCE(sessions.sourceport, '')) != '' \
+         GROUP BY sessions.sourceport"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt
+        .query_map([MIN_SESSION_SECONDS], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(top_of(rows.into_iter().map(|(path, seconds)| {
+        (base_name(&path).to_string(), seconds)
+    })))
+}
+
+/// Which IWADs the library's WADs need. The same one can be spelled `doom2` or `DOOM2.WAD`.
+fn iwads(conn: &Connection) -> Result<Vec<Tally>> {
+    let mut stmt =
+        conn.prepare("SELECT custom_iwad, COUNT(*) FROM wads WHERE deleted_at IS NULL GROUP BY 1")?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?))
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(top_of(rows.into_iter().map(|(iwad, count)| {
+        let name = iwad
+            .as_deref()
+            .map(|iwad| base_name(iwad.trim()).to_lowercase())
+            .filter(|iwad| !iwad.is_empty())
+            .map(|iwad| iwad.strip_suffix(".wad").unwrap_or(&iwad).to_string())
+            .unwrap_or_else(|| NOT_SET.to_string());
+        (name, count)
+    })))
+}
+
+/// Which complevels the library's WADs are for, by the name a person knows them by.
+fn complevels(conn: &Connection) -> Result<Vec<Tally>> {
+    let mut stmt =
+        conn.prepare("SELECT complevel, COUNT(*) FROM wads WHERE deleted_at IS NULL GROUP BY 1")?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, Option<i32>>(0)?, row.get::<_, i64>(1)?))
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(top_of(rows.into_iter().map(|(complevel, count)| {
+        let name = match complevel {
+            Some(_) => crate::complevel::complevel_name_string(complevel),
+            None => NOT_SET.to_string(),
+        };
+        (name, count)
+    })))
 }
 
 #[cfg(test)]
@@ -599,6 +675,7 @@ mod tests {
     use super::*;
     use crate::db::connection::open_memory;
     use crate::db::models::SourceType;
+    use crate::db::models::Status;
     use crate::db::schema::init_db;
     use crate::db::wads::{NewWad, add_wad};
 
@@ -882,13 +959,173 @@ mod tests {
             [id],
         ).unwrap();
 
-        let snapshot = get_stats_snapshot(&conn, "month").unwrap();
+        let snapshot = get_stats_snapshot(&conn).unwrap();
         assert_eq!(snapshot.total_wads, 1);
         assert_eq!(snapshot.total_sessions, 1);
         assert_eq!(snapshot.total_playtime, 1000);
-        assert_eq!(snapshot.wads_with_sessions, 1);
-        assert_eq!(snapshot.played_wads, 1);
-        assert!(!snapshot.activity.is_empty());
+        assert_eq!(snapshot.activity.len(), 1);
+        assert_eq!(snapshot.activity[0].period, "2024-01");
+    }
+
+    /// The number the library's filter shows, whether or not caco saw it being played. These
+    /// used to be two numbers, with a rate worked out from the wrong one.
+    #[test]
+    fn test_completed_means_the_status_and_nothing_else() {
+        let conn = setup();
+        let add = |title: &str, status: Status| {
+            add_wad(&conn, &NewWad::new(title, SourceType::Local).status(status)).unwrap()
+        };
+        let played = add("Played and finished", Status::Completed);
+        add("Finished before caco", Status::Completed);
+        add("Not started", Status::Unplayed);
+        conn.execute(
+            "INSERT INTO sessions (wad_id, started_at, duration_seconds) \
+             VALUES (?1, '2024-01-01', 1000)",
+            [played],
+        )
+        .unwrap();
+        add_wad_completion(&conn, played, None, None, Some("2024-01-02T00:00:00+00:00")).unwrap();
+        add_wad_completion(&conn, played, None, None, Some("2024-03-02T00:00:00+00:00")).unwrap();
+
+        let snapshot = get_stats_snapshot(&conn).unwrap();
+
+        assert_eq!(snapshot.with_status(Status::Completed), 2);
+        assert_eq!(snapshot.with_status(Status::Abandoned), 0);
+        assert_eq!(
+            snapshot.total_completions, 2,
+            "playing it again counts here"
+        );
+        assert_eq!(
+            snapshot.completions_by_month,
+            [("2024-03".to_string(), 1), ("2024-01".to_string(), 1)]
+        );
+    }
+
+    #[test]
+    fn test_what_is_in_the_trash_does_not_count() {
+        let conn = setup();
+        let kept = add_wad(&conn, &NewWad::new("Kept", SourceType::Local)).unwrap();
+        let trashed = add_wad(
+            &conn,
+            &NewWad::new("Trashed", SourceType::Local).author("Somebody"),
+        )
+        .unwrap();
+        for id in [kept, trashed] {
+            conn.execute(
+                "INSERT INTO sessions (wad_id, started_at, duration_seconds, sourceport) \
+                 VALUES (?1, '2024-01-01', 1000, 'dsda-doom')",
+                [id],
+            )
+            .unwrap();
+            add_wad_completion(&conn, id, None, None, Some("2024-01-02T00:00:00+00:00")).unwrap();
+        }
+        crate::db::wads::delete_wad(&conn, trashed, false).unwrap();
+
+        let snapshot = get_stats_snapshot(&conn).unwrap();
+
+        assert_eq!(snapshot.total_wads, 1);
+        assert_eq!(snapshot.total_sessions, 1);
+        assert_eq!(snapshot.total_playtime, 1000);
+        assert_eq!(snapshot.total_completions, 1);
+        assert_eq!(snapshot.activity[0].wad_count, 1);
+        assert_eq!(snapshot.completions_by_month[0].1, 1);
+        assert_eq!(snapshot.sourceports[0].value, 1000);
+        assert!(snapshot.top_authors.is_empty());
+    }
+
+    #[test]
+    fn test_the_same_sourceport_is_one_line_wherever_it_was_run_from() {
+        let conn = setup();
+        let id = add_test_wad(&conn);
+        for (path, seconds) in [
+            ("/usr/bin/nyan-doom", 1000),
+            (
+                "/home/me/.cache/caco/sourceports/nyan-doom/v1/bin/nyan-doom",
+                500,
+            ),
+            ("C:\\Doom\\uzdoom", 600),
+        ] {
+            conn.execute(
+                "INSERT INTO sessions (wad_id, started_at, duration_seconds, sourceport) \
+                 VALUES (?1, '2024-01-01', ?2, ?3)",
+                rusqlite::params![id, seconds, path],
+            )
+            .unwrap();
+        }
+
+        let names: Vec<(String, i64)> = get_stats_snapshot(&conn)
+            .unwrap()
+            .sourceports
+            .into_iter()
+            .map(|tally| (tally.name, tally.value))
+            .collect();
+        assert_eq!(
+            names,
+            [("nyan-doom".to_string(), 1500), ("uzdoom".to_string(), 600)]
+        );
+    }
+
+    #[test]
+    fn test_iwads_and_complevels_read_as_one_thing_each() {
+        let conn = setup();
+        for (iwad, complevel) in [
+            (Some("doom2"), Some(9)),
+            (Some("DOOM2.WAD"), Some(9)),
+            (Some("/iwads/doom2.wad"), Some(21)),
+            (Some("tnt"), None),
+            (None, None),
+        ] {
+            let id = add_test_wad(&conn);
+            conn.execute(
+                "UPDATE wads SET custom_iwad = ?1, complevel = ?2 WHERE id = ?3",
+                rusqlite::params![iwad, complevel, id],
+            )
+            .unwrap();
+        }
+
+        let snapshot = get_stats_snapshot(&conn).unwrap();
+        let tally = |name: &str, value| Tally {
+            name: name.to_string(),
+            value,
+        };
+        assert_eq!(
+            snapshot.iwads,
+            [tally("doom2", 3), tally(NOT_SET, 1), tally("tnt", 1)]
+        );
+        assert_eq!(
+            snapshot.complevels,
+            [tally("Boom", 2), tally(NOT_SET, 2), tally("MBF21", 1)]
+        );
+    }
+
+    /// A community project is not an author, and only the top few get a line.
+    #[test]
+    fn test_most_played_authors_are_people_and_only_a_few_of_them() {
+        let conn = setup();
+        for (index, author) in ["A", "B", "C", "D", "E", "F", "Various", "various "]
+            .iter()
+            .enumerate()
+        {
+            let id = add_wad(
+                &conn,
+                &NewWad::new(format!("WAD {index}"), SourceType::Local).author(*author),
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO sessions (wad_id, started_at, duration_seconds) \
+                 VALUES (?1, '2024-01-01', ?2)",
+                rusqlite::params![id, 1000 + index as i64],
+            )
+            .unwrap();
+        }
+
+        let authors: Vec<String> = get_stats_snapshot(&conn)
+            .unwrap()
+            .top_authors
+            .into_iter()
+            .map(|tally| tally.name)
+            .collect();
+        assert_eq!(authors, ["F", "E", "D", "C", "B"]);
     }
 
     #[test]

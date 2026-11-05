@@ -41,13 +41,14 @@ pub fn render(ui: &mut egui::Ui, state: &mut FormState) -> Option<FormPanelActio
                 field.value = p.clone();
             }
             ui.horizontal(|ui| {
-                ui.label(
+                let label = ui.label(
                     egui::RichText::new(&field.display_label)
                         .color(theme::TEXT_SECONDARY)
                         .monospace(),
                 );
                 let text_width = if is_path_field { 330.0 } else { 400.0 };
-                ui.add(egui::TextEdit::singleline(&mut field.value).desired_width(text_width));
+                ui.add(egui::TextEdit::singleline(&mut field.value).desired_width(text_width))
+                    .labelled_by(label.id);
                 if is_path_field {
                     let browse_busy = state.pending_browse.is_some();
                     if ui
@@ -79,7 +80,10 @@ pub fn render(ui: &mut egui::Ui, state: &mut FormState) -> Option<FormPanelActio
         } else {
             "Import"
         };
-        if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+        if ui
+            .add_enabled(enabled, crate::theme::primary_button(label))
+            .clicked()
+        {
             match state.validate() {
                 Ok(()) => {
                     state.status_text.clear();
