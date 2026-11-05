@@ -628,7 +628,7 @@ pub fn adopt_files(conn: &Connection, paths: &crate::presence::StorePaths) -> cr
         let mut stmt = conn.prepare(&format!(
             "SELECT {} FROM wads \
              WHERE COALESCE(cached_path, '') = '' AND file_sha256 IS NOT NULL \
-               AND COALESCE(filename, '') <> ''",
+               AND (COALESCE(filename, '') <> '' OR source_type = 'local')",
             db::WAD_COLUMNS
         ))?;
         stmt.query_map([], WadRecord::from_row)?
@@ -659,46 +659,67 @@ pub fn adopt_files(conn: &Connection, paths: &crate::presence::StorePaths) -> cr
     Ok(adopted)
 }
 
-/// A file in a store dir that is the one `wad` says it has, under its own name or the one
-/// [`crate::placement`] gives a file whose name was taken.
+/// A file here that is the one `wad` says it has.
 fn find_by_identity(
     wad: &WadRecord,
     paths: &crate::presence::StorePaths,
 ) -> Option<(std::path::PathBuf, Identified)> {
     let identity = wad.identity.as_ref()?;
-    let filename = wad.filename.as_deref()?;
-    // A row can say anything here, and a name with a directory in it is not one.
-    if Path::new(filename)
-        .file_name()
-        .and_then(|name| name.to_str())
-        != Some(filename)
-    {
-        return None;
-    }
-    let hashed = crate::placement::name_with_hash(filename, &identity.file.sha256);
-    for dir in paths.search_order(wad.retrievability()) {
-        for name in [filename, hashed.as_str()] {
-            let path = dir.join(name);
-            // Most of what this finds is the file, so the read is rarely wasted, and the
-            // size keeps it that way for a `map01.wad` that is some other WAD's.
+    candidates(wad, identity, paths)
+        .into_iter()
+        .find_map(|path| {
+            // Most of what this finds is the file, so the read is rarely wasted, and the size
+            // keeps it that way for a `map01.wad` that is some other WAD's.
             let same_size = fs::metadata(&path)
                 .is_ok_and(|meta| meta.is_file() && meta.len() == identity.file.size);
             if !same_size {
-                continue;
+                return None;
             }
             match identify(&path) {
                 Ok(found)
                     if found.identity.file.sha256 == identity.file.sha256
                         || found.identity.content_sha256 == identity.content_sha256 =>
                 {
-                    return Some((path, found));
+                    Some((path, found))
                 }
-                Ok(_) => {}
-                Err(e) => tracing::warn!("cannot read {}: {e}", path.display()),
+                Ok(_) => None,
+                Err(e) => {
+                    tracing::warn!("cannot read {}: {e}", path.display());
+                    None
+                }
             }
+        })
+}
+
+/// Where `wad`'s file could be: in a store dir under its own name, or the one
+/// [`crate::placement`] gives a file whose name was taken, and for a local import, where it
+/// was imported from, which is where that stays. That last is only true of the machine it
+/// was imported on, and this is what brings such a WAD's file back when `library.db` goes.
+fn candidates(
+    wad: &WadRecord,
+    identity: &FileIdentity,
+    paths: &crate::presence::StorePaths,
+) -> Vec<std::path::PathBuf> {
+    let mut found = Vec::new();
+    // A row can say anything here, and a name with a directory in it is not one.
+    if let Some(filename) = wad
+        .filename
+        .as_deref()
+        .filter(|name| Path::new(name).file_name().and_then(|n| n.to_str()) == Some(*name))
+    {
+        let hashed = crate::placement::name_with_hash(filename, &identity.file.sha256);
+        for dir in paths.search_order(wad.retrievability()) {
+            found.push(dir.join(filename));
+            found.push(dir.join(&hashed));
         }
     }
-    None
+    if wad.source_type == db::SourceType::Local
+        && let Some(source) = wad.source_url.as_deref().map(Path::new)
+        && source.is_absolute()
+    {
+        found.push(source.to_path_buf());
+    }
+    found
 }
 
 // ---------------------------------------------------------------------------
@@ -982,6 +1003,82 @@ mod adopt_tests {
 
         assert_eq!(f.adopt(), 0);
         assert_eq!(f.cached(id), None);
+    }
+
+    /// A local import stays where it was. With `library.db` gone, the row comes back from
+    /// the log, and that is the only place that file could be.
+    #[test]
+    fn test_a_local_import_is_found_where_it_was_imported_from() {
+        let f = Fixture::new();
+        let elsewhere = f.paths.cache_dir.parent().unwrap().join("my-wads");
+        fs::create_dir_all(&elsewhere).unwrap();
+        let file = elsewhere.join("mine.wad");
+        fs::write(&file, BYTES).unwrap();
+
+        let id = db::add_wad(
+            &f.conn,
+            &NewWad::new("Mine", SourceType::Local).source_url(file.display().to_string()),
+        )
+        .unwrap();
+        let hashes = hash_reader(BYTES).unwrap();
+        f.conn
+            .execute(
+                "UPDATE wads SET file_size = ?1, file_sha256 = ?2, file_sha1 = ?3, \
+                 content_sha256 = ?2 WHERE id = ?4",
+                rusqlite::params![hashes.size as i64, hashes.sha256, hashes.sha1, id],
+            )
+            .unwrap();
+
+        assert_eq!(f.adopt(), 1);
+        assert_eq!(f.cached(id).as_deref(), file.to_str());
+    }
+
+    /// Only a local import's `source_url` is a place on this machine, and even then, a file
+    /// that has since been replaced is not the one the row means.
+    #[test]
+    fn test_where_it_was_imported_from_still_has_to_be_the_file() {
+        let f = Fixture::new();
+        let elsewhere = f.paths.cache_dir.parent().unwrap().join("my-wads");
+        fs::create_dir_all(&elsewhere).unwrap();
+        let file = elsewhere.join("mine.wad");
+        let other: Vec<u8> = BYTES.iter().map(|b| b.wrapping_add(1)).collect();
+        fs::write(&file, &other).unwrap();
+
+        let local = db::add_wad(
+            &f.conn,
+            &NewWad::new("Mine", SourceType::Local).source_url(file.display().to_string()),
+        )
+        .unwrap();
+        let hashes = hash_reader(BYTES).unwrap();
+        f.conn
+            .execute(
+                "UPDATE wads SET file_size = ?1, file_sha256 = ?2, file_sha1 = ?3, \
+                 content_sha256 = ?2",
+                rusqlite::params![hashes.size as i64, hashes.sha256, hashes.sha1],
+            )
+            .unwrap();
+        assert_eq!(f.adopt(), 0);
+        assert_eq!(f.cached(local), None);
+
+        // Nor does a page on the web become a place to look, for any other kind of row.
+        fs::write(&file, BYTES).unwrap();
+        let url = db::add_wad(
+            &f.conn,
+            &NewWad::new("Theirs", SourceType::Url).source_url(file.display().to_string()),
+        )
+        .unwrap();
+        f.conn
+            .execute(
+                "UPDATE wads SET file_size = ?1, file_sha256 = ?2, file_sha1 = ?3, \
+                 content_sha256 = ?2 WHERE id = ?4",
+                rusqlite::params![hashes.size as i64, hashes.sha256, hashes.sha1, url],
+            )
+            .unwrap();
+        f.conn
+            .execute("DELETE FROM wads WHERE id = ?1", [local])
+            .unwrap();
+        assert_eq!(f.adopt(), 0);
+        assert_eq!(f.cached(url), None);
     }
 
     /// `presence` would otherwise go on looking in the old place too.
