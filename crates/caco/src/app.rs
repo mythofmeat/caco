@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 
-use egui::Color32;
 use rusqlite::Connection;
 
 use crate::dialogs::collections::CollectionsDialogState;
@@ -1292,7 +1291,7 @@ impl eframe::App for CacoApp {
         egui::Panel::top("topbar")
             .frame(
                 egui::Frame::new()
-                    .fill(Color32::from_rgb(0x1a, 0x14, 0x10))
+                    .fill(theme::BG_WINDOW)
                     .inner_margin(egui::Margin::symmetric(16, 8))
                     .stroke(egui::Stroke::new(1.0_f32, theme::BORDER)),
             )

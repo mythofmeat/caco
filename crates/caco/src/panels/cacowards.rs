@@ -16,7 +16,7 @@
 
 use caco_core::db::cacowards::{CacowardRecord, EffectiveStatus};
 use caco_core::db::{CORE_CATEGORIES, Status, is_core_category};
-use egui::{Color32, CornerRadius, Rect, StrokeKind, Vec2};
+use egui::{CornerRadius, Rect, StrokeKind, Vec2};
 
 use crate::get::GetTarget;
 use crate::state::{ActionRequest, AppState};
@@ -157,10 +157,11 @@ fn render_hero(ui: &mut egui::Ui, state: &AppState, year: i64) {
         );
         // Lerp BG_MEDIUM → slightly warmer; max contribution stays
         // dim enough that it reads as ambient rather than a panel.
-        let r = lerp_byte(theme::BG_MEDIUM.r(), 0x32, t * 0.45);
-        let g = lerp_byte(theme::BG_MEDIUM.g(), 0x1c, t * 0.45);
-        let b = lerp_byte(theme::BG_MEDIUM.b(), 0x14, t * 0.45);
-        painter.rect_filled(band_rect, 0, Color32::from_rgb(r, g, b));
+        painter.rect_filled(
+            band_rect,
+            0,
+            theme::blend(theme::BG_MEDIUM, theme::GOLD, t * 0.08),
+        );
     }
 
     // Bottom rule
@@ -187,7 +188,7 @@ fn render_hero(ui: &mut egui::Ui, state: &AppState, year: i64) {
         egui::Align2::LEFT_TOP,
         kicker,
         egui::FontId::proportional(11.0),
-        Color32::from_rgb(0xd4, 0xa1, 0x4a), // gold
+        theme::GOLD,
     );
     cursor_y += 20.0;
 
@@ -231,10 +232,9 @@ fn render_hero(ui: &mut egui::Ui, state: &AppState, year: i64) {
         theme::TEXT_SECONDARY,
     );
 
-    // Hero progress bar — wide, thin, just above the bottom rule.
-    // Replaces the byline as the gut-feel "look how far I've come"
-    // signal; the byline becomes the precise label below it. Fills
-    // green at 100% to mirror the per-category meter's swept state.
+    // Hero progress bar — wide, thin, just above the bottom rule. The gut-feel "look how
+    // far I've come", with the byline as the precise label. What fills it is completed
+    // entries, so it is the colour of Completed.
     let bar_h = 4.0;
     let bar_y = rect.max.y - bar_h - 12.0;
     let bar_rect = Rect::from_min_max(
@@ -245,12 +245,11 @@ fn render_hero(ui: &mut egui::Ui, state: &AppState, year: i64) {
     if total > 0 {
         let fill_w = bar_rect.width() * (done as f32 / total as f32);
         let fill_rect = Rect::from_min_size(bar_rect.min, Vec2::new(fill_w, bar_h));
-        let fill_color = if done == total {
-            theme::COLOR_SUCCESS
-        } else {
-            theme::TEXT_ACCENT
-        };
-        painter.rect_filled(fill_rect, CornerRadius::same(2), fill_color);
+        painter.rect_filled(
+            fill_rect,
+            CornerRadius::same(2),
+            theme::status_color(Status::Completed),
+        );
     }
 }
 
@@ -299,7 +298,7 @@ fn render_page_pill(ui: &mut egui::Ui, hero: Rect, page: Option<&str>) {
     painter.rect(
         pill,
         CornerRadius::same(11),
-        Color32::from_black_alpha(80),
+        theme::BG_DARK,
         egui::Stroke::new(1.0_f32, theme::BORDER_MED),
         StrokeKind::Inside,
     );
@@ -533,11 +532,11 @@ fn render_category_section(
             });
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                draw_meter(ui, done, total, 120.0, swept);
+                draw_meter(ui, done, total, 120.0);
                 ui.add_space(10.0);
                 let mut bits = vec![format!("{done} of {total} completed")];
                 if absent > 0 {
-                    bits.push(format!("{absent} absent"));
+                    bits.push(format!("{absent} not in library"));
                 }
                 if unsupported > 0 {
                     bits.push(format!("{unsupported} unsupported"));
@@ -645,7 +644,6 @@ fn render_card(
         ui.allocate_exact_size(Vec2::new(width, height), egui::Sense::click_and_drag());
     let painter = ui.painter_at(rect);
     let rounding = CornerRadius::same(CARD_ROUNDING);
-    let absent = matches!(status, EffectiveStatus::Absent);
 
     // Selection click on the card surface (the action button has its own
     // click handler, but Button is rendered on top so its events take
@@ -712,27 +710,11 @@ fn render_card(
     };
     paint_card_thumbnail(&painter, thumb_rect, thumb_rounding, record, thumbnails);
 
-    // Completed and unsupported cards both get a dark wash over the
-    // thumbnail. Completed = "ticked off"; unsupported = "out of the
-    // game" — they recede for different reasons but the visual cue is
-    // the same so the eye lands on actionable cards first.
-    let dim = matches!(status, EffectiveStatus::Library(Status::Completed)) || !record.supported;
-    if dim {
-        painter.rect_filled(thumb_rect, thumb_rounding, Color32::from_black_alpha(140));
+    // What is out of the game recedes. What has been finished does not: it used to be dimmed
+    // too, which made the work done the hardest thing on the page to read.
+    if !record.supported {
+        painter.rect_filled(thumb_rect, thumb_rounding, theme::SCRIM);
     }
-
-    // Top overlay strip + status pill.
-    let strip = Rect::from_min_max(
-        thumb_rect.min,
-        egui::pos2(thumb_rect.max.x, thumb_rect.min.y + 32.0),
-    );
-    painter.rect_filled(strip, thumb_rounding, Color32::from_black_alpha(110));
-    paint_status_pill(
-        &painter,
-        thumb_rect.shrink2(Vec2::new(8.0, 8.0)),
-        status,
-        record.supported,
-    );
 
     // ── Body ──────────────────────────────────────────────────────────
     // (No status-colored left edge — the pill on the thumbnail conveys
@@ -745,16 +727,10 @@ fn render_card(
         egui::pos2(rect.max.x - pad_x, rect.max.y - 10.0),
     );
 
-    let completed = matches!(status, EffectiveStatus::Library(Status::Completed));
-    let title_color = if completed || absent {
-        theme::TEXT_MUTED
+    let (title_color, author_color) = if record.supported {
+        (theme::TEXT_PRIMARY, theme::TEXT_SECONDARY)
     } else {
-        theme::TEXT_PRIMARY
-    };
-    let author_color = if completed {
-        theme::TEXT_MUTED
-    } else {
-        theme::TEXT_SECONDARY
+        (theme::TEXT_MUTED, theme::TEXT_MUTED)
     };
     let mut title_job = egui::text::LayoutJob::single_section(
         record.wad_title.clone(),
@@ -785,10 +761,17 @@ fn render_card(
         egui::pos2(body.min.x, body.max.y - 22.0),
         egui::pos2(body.max.x, body.max.y),
     );
+    theme::paint_status_pill(
+        &painter,
+        button_rect.min.x,
+        button_rect.center().y,
+        theme::cacoward_style(status, record.supported),
+        "",
+    );
     let mut sub_ui = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(button_rect)
-            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+            .layout(egui::Layout::right_to_left(egui::Align::Center)),
     );
     let waiting = get.is_some_and(|target| state.gets.is_waiting_for(target));
     let button_action = action_button(&mut sub_ui, record, status, get, waiting);
@@ -804,10 +787,7 @@ fn render_card(
             egui::Stroke::new(2.0_f32, theme::TEXT_ACCENT),
             StrokeKind::Inside,
         );
-    } else if response.hovered() || absent {
-        // Hover and absent share the same muted ring — absent acts as
-        // the persistent "this row isn't in your library" affordance,
-        // hover is the transient pointer feedback.
+    } else if response.hovered() {
         painter.rect_stroke(
             rect,
             rounding,
@@ -829,81 +809,13 @@ fn paint_card_thumbnail(
     record: &CacowardRecord,
     thumbnails: Option<&crate::thumbnails::ThumbnailManager>,
 ) {
-    // Try the linked WAD's TITLEPIC first.
-    let thumb_key = record
+    // A linked WAD's own picture, or for an entry not in the library, the one its wiki
+    // page has, which the app asks for under a key of its own.
+    let key = record
         .wad_id
         .unwrap_or_else(|| thumb_key_for_absent(record.id));
-    if let Some(tm) = thumbnails
-        && let Some(tex) = tm.get(thumb_key)
-    {
-        painter.rect_filled(thumb_rect, thumb_rounding, Color32::BLACK);
-        let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-        painter.image(tex.id(), thumb_rect, uv, Color32::WHITE);
-        return;
-    }
-
-    // Gradient placeholder seeded by the cacoward pk so the same entry
-    // always paints the same way across renders.
-    let (c1, c2, ci) = theme::thumb_colors(record.id);
-    painter.rect_filled(thumb_rect, thumb_rounding, c1);
-    let steps = 32;
-    for i in 0..steps {
-        let t0 = i as f32 / steps as f32;
-        let t1 = (i + 1) as f32 / steps as f32;
-        let band_y0 = thumb_rect.min.y + thumb_rect.height() * t0;
-        let band_y1 = thumb_rect.min.y + thumb_rect.height() * t1;
-        let r = lerp_byte(c1.r(), c2.r(), t0);
-        let g = lerp_byte(c1.g(), c2.g(), t0);
-        let b = lerp_byte(c1.b(), c2.b(), t0);
-        let band = Rect::from_min_max(
-            egui::pos2(thumb_rect.min.x, band_y0),
-            egui::pos2(thumb_rect.max.x, band_y1),
-        );
-        painter.rect_filled(band, 0, Color32::from_rgb(r, g, b));
-    }
-    let initials: String = record
-        .wad_title
-        .chars()
-        .filter(|c| c.is_alphanumeric())
-        .take(2)
-        .flat_map(|c| c.to_uppercase())
-        .collect();
-    if !initials.is_empty() {
-        painter.text(
-            thumb_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            &initials,
-            egui::FontId::proportional(32.0),
-            ci,
-        );
-    }
-}
-
-fn paint_status_pill(
-    painter: &egui::Painter,
-    content: Rect,
-    status: EffectiveStatus,
-    supported: bool,
-) {
-    // Unsupported overrides whatever the linked-WAD status would say —
-    // the user has explicitly removed this entry from the completion
-    // game, so it shouldn't read "in progress" or "completed" either.
-    let (text, color) = if supported {
-        status_label_and_color(status)
-    } else {
-        ("unsupported", theme::TEXT_MUTED)
-    };
-    let font = egui::FontId::proportional(10.0);
-    let galley = painter.layout_no_wrap(text.to_string(), font.clone(), color);
-    let pad = Vec2::new(8.0, 2.0);
-    let pill_size = galley.size() + pad * 2.0;
-    let pill_rect = Rect::from_min_size(
-        egui::pos2(content.max.x - pill_size.x, content.min.y - 2.0),
-        pill_size,
-    );
-    let bg = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 32);
-    painter.rect_filled(pill_rect, CornerRadius::same(11), bg);
-    painter.galley(pill_rect.min + pad, galley, color);
+    let picture = thumbnails.and_then(|tm| tm.get(key));
+    theme::paint_thumbnail(painter, thumb_rect, thumb_rounding, picture);
 }
 
 // ---------------------------------------------------------------------------
@@ -924,18 +836,6 @@ fn category_label(category: &str) -> String {
         "newcomer" => "HONORING A NEWCOMER".to_string(),
         "adrians-pen" => "ADRIAN'S PEN".to_string(),
         other => other.replace('-', " ").to_uppercase(),
-    }
-}
-
-fn status_label_and_color(status: EffectiveStatus) -> (&'static str, Color32) {
-    match status {
-        EffectiveStatus::Library(Status::Completed) => ("completed", theme::COLOR_SUCCESS),
-        EffectiveStatus::Library(Status::InProgress) => ("in progress", theme::COLOR_WARNING),
-        EffectiveStatus::Library(Status::Abandoned) => ("dropped", theme::COLOR_ERROR),
-        EffectiveStatus::Library(Status::Unplayed) => {
-            ("unplayed", Color32::from_rgb(0x33, 0x66, 0xcc))
-        }
-        EffectiveStatus::Absent => ("absent", theme::TEXT_SECONDARY),
     }
 }
 
@@ -1050,15 +950,9 @@ fn get_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
 
 fn primary_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
     ui.add(
-        egui::Button::new(
-            egui::RichText::new(label)
-                .size(11.0)
-                .strong()
-                .color(Color32::from_rgb(0x1a, 0x0a, 0x04)),
-        )
-        .fill(theme::TEXT_ACCENT)
-        .corner_radius(4.0)
-        .min_size(Vec2::new(0.0, 22.0)),
+        theme::primary_button(label)
+            .corner_radius(4.0)
+            .min_size(Vec2::new(0.0, 22.0)),
     )
 }
 
@@ -1076,21 +970,18 @@ fn secondary_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
     )
 }
 
-fn draw_meter(ui: &mut egui::Ui, done: usize, total: usize, width: f32, swept: bool) {
+fn draw_meter(ui: &mut egui::Ui, done: usize, total: usize, width: f32) {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 6.0), egui::Sense::hover());
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, CornerRadius::same(3), theme::BG_LIGHT);
     if total > 0 {
         let fill_w = rect.width() * (done as f32 / total as f32);
         let fill_rect = Rect::from_min_size(rect.min, Vec2::new(fill_w, rect.height()));
-        // Fill turns green when the category is swept — the meter and
-        // the chip read the same status, so a glance is enough.
-        let fill_color = if swept {
-            theme::COLOR_SUCCESS
-        } else {
-            theme::TEXT_ACCENT
-        };
-        painter.rect_filled(fill_rect, CornerRadius::same(3), fill_color);
+        painter.rect_filled(
+            fill_rect,
+            CornerRadius::same(3),
+            theme::status_color(Status::Completed),
+        );
     }
 }
 
@@ -1099,16 +990,14 @@ fn draw_meter(ui: &mut egui::Ui, done: usize, total: usize, width: f32, swept: b
 /// surface: a single Mordeth Award sweep is a one-clickaway badge of
 /// honour, a 12/12 Winners sweep is a year-long victory.
 fn paint_swept_chip(ui: &mut egui::Ui) {
-    let gold = Color32::from_rgb(0xd4, 0xa1, 0x4a);
-    let bg = Color32::from_rgba_unmultiplied(gold.r(), gold.g(), gold.b(), 40);
     egui::Frame::new()
-        .fill(bg)
+        .fill(theme::blend(theme::BG_DARK, theme::GOLD, 0.16))
         .corner_radius(11.0)
         .inner_margin(egui::Margin::symmetric(8, 2))
         .show(ui, |ui| {
             ui.label(
                 egui::RichText::new("✓ SWEPT")
-                    .color(gold)
+                    .color(theme::GOLD)
                     .size(10.0)
                     .strong()
                     .extra_letter_spacing(1.0),
@@ -1122,11 +1011,6 @@ fn paint_swept_chip(ui: &mut egui::Ui) {
 /// the existing thumbnail cache + worker pool with.
 pub fn thumb_key_for_absent(cacoward_pk: i64) -> i64 {
     -cacoward_pk
-}
-
-fn lerp_byte(a: u8, b: u8, t: f32) -> u8 {
-    let t = t.clamp(0.0, 1.0);
-    (a as f32 + (b as f32 - a as f32) * t).round() as u8
 }
 
 fn truncate(s: &str, max_chars: usize) -> String {

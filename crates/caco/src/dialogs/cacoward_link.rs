@@ -118,15 +118,8 @@ impl CacowardLinkDialogState {
                     close_with_cancel = true;
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let confirm = ui.add_enabled(
-                        self.selected.is_some(),
-                        egui::Button::new(
-                            egui::RichText::new("Link")
-                                .color(egui::Color32::from_rgb(0x1a, 0x0a, 0x04))
-                                .strong(),
-                        )
-                        .fill(theme::TEXT_ACCENT),
-                    );
+                    let confirm =
+                        ui.add_enabled(self.selected.is_some(), theme::primary_button("Link"));
                     if confirm.clicked()
                         && let Some(wad_id) = self.selected
                     {

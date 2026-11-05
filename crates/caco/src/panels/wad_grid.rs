@@ -1,4 +1,4 @@
-use egui::{Color32, CornerRadius, Rect, StrokeKind, Vec2};
+use egui::{CornerRadius, Rect, StrokeKind, Vec2};
 
 use crate::state::{ActionRequest, AppState};
 use crate::theme;
@@ -147,109 +147,12 @@ pub fn render(
                         se: 0,
                     };
 
-                    // Try to show a real thumbnail, fall back to placeholder
-                    let mut drew_thumbnail = false;
-                    if let Some(tm) = thumbnails
-                        && let Some(tex) = tm.get(wad_id)
-                    {
-                        // Clip the image to rounded top corners
-                        painter.rect_filled(thumb_rect, thumb_rounding, Color32::BLACK);
-                        let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-                        painter.image(tex.id(), thumb_rect, uv, Color32::WHITE);
-                        drew_thumbnail = true;
-                    }
-
-                    if !drew_thumbnail {
-                        // Smooth gradient placeholder from c1 (top) to c2 (bottom)
-                        let (c1, c2, ci) = theme::thumb_colors(wad_id);
-                        let steps = 32;
-                        // Fill background with c1 for the rounded top corners
-                        painter.rect_filled(thumb_rect, thumb_rounding, c1);
-                        for i in 0..steps {
-                            let t0 = i as f32 / steps as f32;
-                            let t1 = (i + 1) as f32 / steps as f32;
-                            let band_y0 = thumb_rect.min.y + thumb_rect.height() * t0;
-                            let band_y1 = thumb_rect.min.y + thumb_rect.height() * t1;
-                            let r = c1.r() as f32 + (c2.r() as f32 - c1.r() as f32) * t0;
-                            let g = c1.g() as f32 + (c2.g() as f32 - c1.g() as f32) * t0;
-                            let b = c1.b() as f32 + (c2.b() as f32 - c1.b() as f32) * t0;
-                            let band = Rect::from_min_max(
-                                egui::pos2(thumb_rect.min.x, band_y0),
-                                egui::pos2(thumb_rect.max.x, band_y1),
-                            );
-                            painter.rect_filled(
-                                band,
-                                0,
-                                Color32::from_rgb(r as u8, g as u8, b as u8),
-                            );
-                        }
-
-                        // Initials
-                        let initials: String = wad
-                            .title
-                            .chars()
-                            .filter(|c| c.is_alphanumeric())
-                            .take(2)
-                            .flat_map(|c| c.to_uppercase())
-                            .collect();
-                        if !initials.is_empty() {
-                            painter.text(
-                                thumb_rect.center(),
-                                egui::Align2::CENTER_CENTER,
-                                &initials,
-                                egui::FontId::proportional(28.0),
-                                ci,
-                            );
-                        }
-                    }
-
-                    // Completion badge (top-right of thumbnail)
-                    let times_completed = stats.map_or(0, |s| s.times_beaten);
-                    if times_completed > 0 {
-                        let badge_size = 26.0;
-                        let badge_center = egui::pos2(
-                            thumb_rect.right() - 8.0 - badge_size / 2.0,
-                            thumb_rect.top() + 8.0 + badge_size / 2.0,
-                        );
-                        // Main circle
-                        painter.circle_filled(
-                            badge_center,
-                            badge_size / 2.0,
-                            Color32::from_black_alpha(178),
-                        );
-                        // Heavy check mark (U+2714) instead of plain check (U+2713).
-                        // Noto Sans Symbols 2 renders plain U+2713 quite thin,
-                        // and its visual centre sits low inside the circle.
-                        // The heavy variant reads better at badge size.
-                        painter.text(
-                            badge_center,
-                            egui::Align2::CENTER_CENTER,
-                            "\u{2714}",
-                            egui::FontId::proportional(16.0),
-                            Color32::from_rgb(0x80, 0x80, 0x80),
-                        );
-
-                        // Count sub-badge for multiple completions
-                        if times_completed > 1 {
-                            let sub_size = 14.0;
-                            let sub_center = egui::pos2(
-                                badge_center.x + badge_size / 2.0 - sub_size / 3.0,
-                                badge_center.y - badge_size / 2.0 + sub_size / 3.0,
-                            );
-                            painter.circle_filled(
-                                sub_center,
-                                sub_size / 2.0,
-                                Color32::from_rgb(0x80, 0x80, 0x80),
-                            );
-                            painter.text(
-                                sub_center,
-                                egui::Align2::CENTER_CENTER,
-                                times_completed.to_string(),
-                                egui::FontId::proportional(9.0),
-                                Color32::from_rgb(0x1a, 0x1a, 0x1a),
-                            );
-                        }
-                    }
+                    theme::paint_thumbnail(
+                        &painter,
+                        thumb_rect,
+                        thumb_rounding,
+                        thumbnails.and_then(|tm| tm.get(wad_id)),
+                    );
 
                     // Card body
                     let body_x = rect.min.x + 14.0;
@@ -279,29 +182,24 @@ pub fn render(
                     // Footer row: status badge + stars + playtime
                     let footer_y = body_top + text_height * 2.0 + 10.0;
 
-                    // Status badge (unified)
-                    let status_label = theme::status_display(wad.status);
-                    let status_color = theme::status_color(wad.status);
-                    let status_bg = theme::status_bg(wad.status);
-
-                    // Measure status text
-                    let status_galley = painter.layout_no_wrap(
-                        status_label.to_string(),
-                        egui::FontId::proportional(11.0),
-                        status_color,
+                    // Status, and how many times over if it has been finished more than
+                    // once. The word is the mark: it used to be said twice, by a check mark
+                    // over the picture too.
+                    let times_beaten = stats.map_or(0, |s| s.times_beaten);
+                    let replays =
+                        if wad.status == caco_core::db::Status::Completed && times_beaten > 1 {
+                            format!(" \u{00d7}{times_beaten}")
+                        } else {
+                            String::new()
+                        };
+                    let badge = theme::paint_status_pill(
+                        &painter,
+                        body_x,
+                        footer_y + 9.0,
+                        theme::status_style(wad.status),
+                        &replays,
                     );
-                    let badge_width = status_galley.size().x + 16.0;
-                    let badge_height = 18.0;
-                    let badge_rect = Rect::from_min_size(
-                        egui::pos2(body_x, footer_y),
-                        Vec2::new(badge_width, badge_height),
-                    );
-                    painter.rect_filled(badge_rect, 6, status_bg);
-                    painter.galley(
-                        egui::pos2(body_x + 8.0, footer_y + 2.0),
-                        status_galley,
-                        Color32::TRANSPARENT,
-                    );
+                    let badge_width = badge.width();
 
                     // Stars (right of status badge)
                     let stars = theme::rating_stars(wad.rating);
@@ -369,7 +267,11 @@ pub fn render(
                         if pct > 0.0 {
                             let fill_rect =
                                 Rect::from_min_size(bar_rect.min, Vec2::new(bar_w * pct, bar_h));
-                            painter.rect_filled(fill_rect, 2.0, theme::TEXT_ACCENT);
+                            painter.rect_filled(
+                                fill_rect,
+                                2.0,
+                                theme::status_color(caco_core::db::Status::InProgress),
+                            );
                         }
                     }
 

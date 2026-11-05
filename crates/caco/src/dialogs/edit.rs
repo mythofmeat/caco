@@ -224,15 +224,10 @@ impl EditDialogState {
             .title_bar(false)
             .frame(
                 egui::Frame::new()
-                    .fill(egui::Color32::from_rgb(0x1a, 0x14, 0x10))
+                    .fill(theme::BG_WINDOW)
                     .corner_radius(16)
                     .stroke(egui::Stroke::new(1.0_f32, theme::BORDER_MED))
-                    .shadow(egui::Shadow {
-                        offset: [0, 8],
-                        blur: 32,
-                        spread: 8,
-                        color: egui::Color32::from_black_alpha(128),
-                    }),
+                    .shadow(ctx.global_style().visuals.window_shadow),
             )
             .show(ctx, |ui| {
                 // ── Header with thumbnail + title ──
@@ -241,28 +236,6 @@ impl EditDialogState {
                     .stroke(egui::Stroke::new(1.0_f32, theme::BORDER))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            // Thumbnail placeholder
-                            let (c1, _c2, ci) = theme::thumb_colors(self.wad_id);
-                            let (thumb_rect, _) = ui
-                                .allocate_exact_size(egui::vec2(56.0, 42.0), egui::Sense::hover());
-                            ui.painter().rect_filled(thumb_rect, 6.0, c1);
-                            let initials: String = self
-                                .title_field
-                                .chars()
-                                .filter(|c| c.is_alphanumeric())
-                                .take(2)
-                                .flat_map(|c| c.to_uppercase())
-                                .collect();
-                            ui.painter().text(
-                                thumb_rect.center(),
-                                egui::Align2::CENTER_CENTER,
-                                &initials,
-                                egui::FontId::proportional(16.0),
-                                ci,
-                            );
-
-                            ui.add_space(12.0);
-
                             ui.vertical(|ui| {
                                 ui.colored_label(
                                     theme::TEXT_PRIMARY,
@@ -314,7 +287,7 @@ impl EditDialogState {
 
                 // ── Tab bar ──
                 egui::Frame::new()
-                    .fill(egui::Color32::from_rgb(0x16, 0x12, 0x0e))
+                    .fill(theme::BG_SIDEBAR)
                     .inner_margin(egui::Margin {
                         left: 20,
                         right: 20,
@@ -349,7 +322,7 @@ impl EditDialogState {
                 // ── Error banner ──
                 if let Some(err) = &self.error_message {
                     egui::Frame::new()
-                        .fill(egui::Color32::from_rgb(0x2a, 0x0d, 0x0d))
+                        .fill(theme::BG_ERROR)
                         .inner_margin(egui::Margin::symmetric(20, 6))
                         .show(ui, |ui| {
                             ui.colored_label(theme::COLOR_ERROR, err);
@@ -394,11 +367,7 @@ impl EditDialogState {
                                     egui::Button::new(
                                         egui::RichText::new("Delete WAD").color(theme::COLOR_ERROR),
                                     )
-                                    .fill(egui::Color32::from_rgb(0x2a, 0x0d, 0x0d))
-                                    .stroke(egui::Stroke::new(
-                                        1.0_f32,
-                                        egui::Color32::from_rgb(0x3a, 0x16, 0x16),
-                                    )),
+                                    .fill(theme::BG_ERROR),
                                 )
                                 .clicked()
                             {
@@ -409,17 +378,7 @@ impl EditDialogState {
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
                                     // Save button
-                                    if ui
-                                        .add(
-                                            egui::Button::new(
-                                                egui::RichText::new("Save Changes")
-                                                    .color(egui::Color32::WHITE)
-                                                    .strong(),
-                                            )
-                                            .fill(theme::TEXT_ACCENT)
-                                            .corner_radius(8),
-                                        )
-                                        .clicked()
+                                    if ui.add(theme::primary_button("Save Changes")).clicked()
                                         && self.save(conn).is_ok()
                                     {
                                         result = EditResult::Saved;
@@ -513,27 +472,24 @@ impl EditDialogState {
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
             for &status in Status::ALL {
-                let color = theme::status_color(status);
-                let bg = theme::status_bg(status);
+                let style = theme::status_style(status);
                 let is_selected = self.status == status.as_str();
 
                 let stroke = if is_selected {
-                    egui::Stroke::new(1.5_f32, color)
+                    egui::Stroke::new(1.5_f32, style.color)
                 } else {
                     egui::Stroke::NONE
                 };
 
                 let response = egui::Frame::new()
-                    .fill(bg)
+                    .fill(style.fill)
                     .corner_radius(8)
                     .inner_margin(egui::Margin::symmetric(12, 4))
                     .stroke(stroke)
                     .show(ui, |ui| {
                         ui.colored_label(
-                            color,
-                            egui::RichText::new(theme::status_display(status))
-                                .size(12.0)
-                                .strong(),
+                            style.color,
+                            egui::RichText::new(style.word).size(12.0).strong(),
                         );
                     })
                     .response;
@@ -600,16 +556,13 @@ impl EditDialogState {
 
             for (i, tag) in tag_list.iter().enumerate() {
                 egui::Frame::new()
-                    .fill(egui::Color32::from_rgb(0x26, 0x1c, 0x14))
+                    .fill(theme::BG_LIGHT)
                     .corner_radius(8)
                     .inner_margin(egui::Margin::symmetric(8, 3))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 4.0;
-                            ui.colored_label(
-                                egui::Color32::from_rgb(0xcc, 0x77, 0x44),
-                                egui::RichText::new(tag).size(12.0),
-                            );
+                            ui.colored_label(theme::TEXT_TAG, egui::RichText::new(tag).size(12.0));
                             if ui
                                 .add(
                                     egui::Button::new(
@@ -665,11 +618,7 @@ impl EditDialogState {
                             .size(12.0)
                             .color(theme::TEXT_MUTED),
                     )
-                    .fill(egui::Color32::TRANSPARENT)
-                    .stroke(egui::Stroke::new(
-                        1.0_f32,
-                        egui::Color32::from_rgba_premultiplied(0x3a, 0x2e, 0x24, 128),
-                    ))
+                    .stroke(egui::Stroke::new(1.0_f32, theme::BORDER_MED))
                     .corner_radius(8),
                 )
                 .clicked()

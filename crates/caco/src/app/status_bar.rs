@@ -1,5 +1,6 @@
 //! Bottom status bar — play-state indicator + notification toast.
 
+use caco_core::db::Status;
 use caco_core::downloads::page_host;
 
 use crate::get::{Gets, PendingGet};
@@ -10,7 +11,10 @@ pub(super) fn render_status_bar(ui: &mut egui::Ui, state: &mut AppState) {
     ui.horizontal(|ui| {
         // Play state indicator
         if let PlayState::Playing { wad_title, .. } = &state.play_state {
-            ui.colored_label(theme::COLOR_SUCCESS, format!("Playing: {wad_title}..."));
+            ui.colored_label(
+                theme::status_color(Status::InProgress),
+                format!("Playing: {wad_title}..."),
+            );
             ui.separator();
         }
 

@@ -1,7 +1,5 @@
 //! "Now Playing" / "Continue Playing" hero banner rendered at the top of the library view.
 
-use egui::Color32;
-
 use crate::panels;
 use crate::state::{ActionRequest, AppState, PlayState};
 use crate::theme;
@@ -45,13 +43,10 @@ pub(super) fn render_now_playing_hero(
 
     // Hero frame
     let hero_frame = egui::Frame::new()
-        .fill(Color32::from_rgb(0x22, 0x18, 0x0c))
+        .fill(theme::BG_HERO)
         .corner_radius(16)
         .inner_margin(egui::Margin::symmetric(24, 20))
-        .stroke(egui::Stroke::new(
-            1.0_f32,
-            Color32::from_rgb(0x3a, 0x2e, 0x1a),
-        ))
+        .stroke(egui::Stroke::new(1.0_f32, theme::BORDER_MED))
         .outer_margin(egui::Margin::symmetric(20, 0));
 
     hero_frame.show(ui, |ui| {
@@ -61,29 +56,12 @@ pub(super) fn render_now_playing_hero(
             let (thumb_rect, thumb_resp) =
                 ui.allocate_exact_size(thumb_size, egui::Sense::click());
 
-            if let Some(tex) = thumbnails.get(wad_id) {
-                let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-                ui.painter()
-                    .rect_filled(thumb_rect, 10.0, Color32::BLACK);
-                ui.painter()
-                    .image(tex.id(), thumb_rect, uv, Color32::WHITE);
-            } else {
-                let (c1, _c2, ci) = theme::thumb_colors(wad_id);
-                ui.painter().rect_filled(thumb_rect, 10.0, c1);
-                let initials: String = wad_title
-                    .chars()
-                    .filter(|c| c.is_alphanumeric())
-                    .take(2)
-                    .flat_map(|c| c.to_uppercase())
-                    .collect();
-                ui.painter().text(
-                    thumb_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    &initials,
-                    egui::FontId::proportional(28.0),
-                    ci,
-                );
-            }
+            theme::paint_thumbnail(
+                ui.painter(),
+                thumb_rect,
+                egui::CornerRadius::same(10),
+                thumbnails.get(wad_id),
+            );
 
             // Hover outline on thumbnail
             if thumb_resp.hovered() {
@@ -122,18 +100,13 @@ pub(super) fn render_now_playing_hero(
                 egui::vec2(info_width, ui.available_height()),
                 egui::Layout::top_down(egui::Align::LEFT),
                 |ui| {
-                    let label_color = if is_active {
-                        theme::COLOR_SUCCESS
-                    } else {
-                        Color32::from_rgb(0x55, 0x88, 0xdd)
-                    };
                     let label_text = if is_active {
                         "NOW PLAYING"
                     } else {
                         "CONTINUE PLAYING"
                     };
                     ui.colored_label(
-                        label_color,
+                        theme::status_color(caco_core::db::Status::InProgress),
                         egui::RichText::new(label_text).size(11.0).strong(),
                     );
                     ui.add_space(2.0);
@@ -233,11 +206,7 @@ pub(super) fn render_now_playing_hero(
                                 egui::vec2(bar_width, bar_height),
                                 egui::Sense::hover(),
                             );
-                            ui.painter().rect_filled(
-                                bar_rect,
-                                3.0,
-                                Color32::from_rgb(0x3a, 0x2e, 0x1a),
-                            );
+                            ui.painter().rect_filled(bar_rect, 3.0, theme::BORDER_MED);
                             if pct > 0.0 {
                                 let fill_rect = egui::Rect::from_min_size(
                                     bar_rect.min,
@@ -249,7 +218,7 @@ pub(super) fn render_now_playing_hero(
                                 ui.painter().rect_filled(
                                     fill_rect,
                                     3.0,
-                                    theme::COLOR_SUCCESS,
+                                    theme::status_color(caco_core::db::Status::InProgress),
                                 );
                             }
 

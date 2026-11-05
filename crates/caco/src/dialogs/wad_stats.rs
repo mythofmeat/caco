@@ -317,7 +317,7 @@ impl WadStatsDialogState {
                         match &entry.kind {
                             EntryKind::Live => {
                                 ui.colored_label(
-                                    theme::COLOR_SUCCESS,
+                                    theme::status_color(caco_core::db::Status::InProgress),
                                     egui::RichText::new(&entry.label).strong(),
                                 );
                             }
@@ -481,7 +481,7 @@ impl WadStatsDialogState {
         ui.horizontal(|ui| match &entry.kind {
             EntryKind::Live => {
                 ui.colored_label(
-                    theme::COLOR_SUCCESS,
+                    theme::status_color(caco_core::db::Status::InProgress),
                     egui::RichText::new(&entry.label).strong(),
                 );
                 if let Some(s) = &entry.stats {
@@ -991,8 +991,8 @@ fn class_label(c: RowClass) -> &'static str {
 fn class_color(c: RowClass) -> egui::Color32 {
     match c {
         RowClass::Required => theme::TEXT_PRIMARY,
-        RowClass::Secret => theme::COLOR_SECRET_FILL,
-        RowClass::Terminal => theme::TEXT_ACCENT,
+        RowClass::Secret => theme::GOLD,
+        RowClass::Terminal => theme::TEXT_SECONDARY,
         RowClass::Played => theme::TEXT_SECONDARY,
     }
 }

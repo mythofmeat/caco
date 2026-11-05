@@ -201,15 +201,10 @@ impl SettingsDialogState {
             .title_bar(false)
             .frame(
                 egui::Frame::new()
-                    .fill(egui::Color32::from_rgb(0x1a, 0x14, 0x10))
+                    .fill(theme::BG_WINDOW)
                     .corner_radius(16)
                     .stroke(egui::Stroke::new(1.0_f32, theme::BORDER_MED))
-                    .shadow(egui::Shadow {
-                        offset: [0, 8],
-                        blur: 32,
-                        spread: 8,
-                        color: egui::Color32::from_black_alpha(128),
-                    }),
+                    .shadow(ctx.global_style().visuals.window_shadow),
             )
             .show(ctx, |ui| {
                 // ── Header ──
@@ -241,7 +236,7 @@ impl SettingsDialogState {
                 // ── Error banner ──
                 if let Some(ref err) = self.error {
                     egui::Frame::new()
-                        .fill(egui::Color32::from_rgb(0x2a, 0x0d, 0x0d))
+                        .fill(theme::BG_ERROR)
                         .inner_margin(egui::Margin::symmetric(20, 6))
                         .show(ui, |ui| {
                             ui.colored_label(theme::COLOR_ERROR, err);
@@ -275,19 +270,7 @@ impl SettingsDialogState {
                     .stroke(egui::Stroke::new(1.0_f32, theme::BORDER))
                     .show(ui, |ui| {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui
-                                .add(
-                                    egui::Button::new(
-                                        egui::RichText::new("Save")
-                                            .color(egui::Color32::WHITE)
-                                            .strong(),
-                                    )
-                                    .fill(theme::TEXT_ACCENT)
-                                    .corner_radius(8),
-                                )
-                                .clicked()
-                                && self.save()
-                            {
+                            if ui.add(theme::primary_button("Save")).clicked() && self.save() {
                                 result = SettingsResult::Saved;
                             }
                             if ui.button("Cancel").clicked() {

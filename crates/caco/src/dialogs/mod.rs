@@ -163,5 +163,5 @@ pub fn dim_backdrop(ctx: &egui::Context) {
         egui::Order::Background,
         egui::Id::unique("modal_backdrop"),
     ))
-    .rect_filled(screen, 0.0, egui::Color32::from_black_alpha(160));
+    .rect_filled(screen, 0.0, crate::theme::SCRIM);
 }
