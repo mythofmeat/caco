@@ -49,9 +49,10 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
         }
     }
 
-    // Escape while focused: clear filter text
+    // Escape while focused: clear filter text. And take the key, or the library, drawn after
+    // this and with the keyboard free again, would go on to act on it too.
     if response.lost_focus()
-        && ui.input(|i| i.key_pressed(egui::Key::Escape))
+        && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
         && !state.filter.input.is_empty()
     {
         state.filter.clear(Instant::now());

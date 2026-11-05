@@ -14,7 +14,7 @@ use crate::dialogs::wad_stats::WadStatsDialogState;
 use crate::get::{GetOutcome, GetTarget, PageOpener};
 use crate::import;
 use crate::import::state::SearchSourceData;
-use crate::message::{AppMessage, EnrichReport, Notification};
+use crate::message::{AppMessage, EnrichReport, NoticeAction, Notification};
 use crate::panels;
 use crate::persist;
 use crate::state::{ActionRequest, ActiveDialog, AppState, PlayState, ViewLayout, ViewMode};
@@ -367,6 +367,7 @@ impl CacoApp {
         self.state.play_state = PlayState::Playing {
             wad_id,
             wad_title: title,
+            downloading: false,
         };
 
         // Spawn play worker in a background thread
@@ -391,6 +392,7 @@ impl CacoApp {
                     title: String,
                     saves: caco_core::sync::NewerSaves,
                 },
+                NoSourceport,
             }
             impl From<String> for PlayError {
                 fn from(s: String) -> Self {
@@ -418,10 +420,7 @@ impl CacoApp {
                     if !wad.retrievability().is_automatic() {
                         return Err(PlayError::Unavailable(None));
                     }
-                    sender.send(AppMessage::Notify(Notification::info(format!(
-                        "Downloading {}...",
-                        wad.title
-                    ))));
+                    sender.send(AppMessage::PlayDownloading(true));
                     let config = caco_core::config::load_config();
                     caco_sources::wad_fetch::fetch_missing_file(
                         &conn,
@@ -431,6 +430,7 @@ impl CacoApp {
                         config.download_mirror,
                     )
                     .map_err(|e| PlayError::Unavailable(Some(e.to_string())))?;
+                    sender.send(AppMessage::PlayDownloading(false));
                 }
 
                 caco_core::player::play(&conn, wad_id, opts).map_err(|e| match e {
@@ -442,6 +442,7 @@ impl CacoApp {
                     caco_core::Error::NewerSavesElsewhere { title, saves } => {
                         PlayError::NewerSaves { title, saves }
                     }
+                    caco_core::Error::NoSourceport => PlayError::NoSourceport,
                     e => PlayError::Message(e.to_string()),
                 })
             })();
@@ -454,6 +455,12 @@ impl CacoApp {
                 Err(PlayError::Unavailable(reason)) => {
                     sender.send(AppMessage::PlayUnavailable { wad_id, reason })
                 }
+                Err(PlayError::NoSourceport) => sender.send(AppMessage::PlayNeedsSetup {
+                    text: "Nothing to play it with: caco couldn't find a sourceport on this \
+                           machine."
+                        .to_string(),
+                    fix: NoticeAction::OpenSettings,
+                }),
                 Err(PlayError::Changed { title, change }) => {
                     sender.send(AppMessage::PlayFileChanged {
                         wad_id,
@@ -710,6 +717,29 @@ impl CacoApp {
                 self.state.show_view(ViewMode::Cacowards);
                 self.state.cacowards.selected_year = Some(year);
             }
+            ActionRequest::UndoDelete(wad_id) => {
+                match caco_core::db::wads::restore_wad(&self.conn, wad_id) {
+                    Ok(_) => {
+                        self.state.invalidate_wad_views();
+                        self.state.select_wad(wad_id);
+                        self.state.reveal_selection = true;
+                    }
+                    Err(e) => {
+                        self.state.notification =
+                            Some(Notification::error(format!("Could not put it back: {e}")));
+                    }
+                }
+            }
+            ActionRequest::ShowWad(wad_id) => self.state.show_wad(wad_id),
+            ActionRequest::SaveFilterAsCollection => {
+                let dialog = CollectionsDialogState::new_adding(
+                    &self.conn,
+                    &self.state.filter.applied,
+                    crate::state::SORT_FIELDS[self.state.sort_field_index].0,
+                    self.state.sort_desc,
+                );
+                self.state.active_dialog = Some(ActiveDialog::Collections(dialog));
+            }
             ActionRequest::Edit(wad_id) => {
                 if let Some(dialog) = EditDialogState::new(&self.conn, wad_id) {
                     self.state.active_dialog = Some(ActiveDialog::Edit(Box::new(dialog)));
@@ -756,6 +786,8 @@ impl CacoApp {
                 self.spawn_enrich(*request);
             }
             ActionRequest::Sourceports => {
+                // It says which of them have an update, so nothing else need.
+                self.state.sourceport_updates.clear();
                 let dialog = crate::dialogs::sourceports::SourceportsDialogState::new();
                 self.state.active_dialog = Some(ActiveDialog::Sourceports(Box::new(dialog)));
             }
@@ -951,6 +983,15 @@ impl eframe::App for CacoApp {
             match msg {
                 AppMessage::Notify(notif) => {
                     self.state.notification = Some(notif);
+                }
+                AppMessage::PlayDownloading(now) => {
+                    if let PlayState::Playing { downloading, .. } = &mut self.state.play_state {
+                        *downloading = now;
+                    }
+                }
+                AppMessage::PlayNeedsSetup { text, fix } => {
+                    self.state.play_state = PlayState::Idle;
+                    self.state.notification = Some(Notification::error(text).with_action(fix));
                 }
                 AppMessage::PlayUnavailable { wad_id, reason } => {
                     self.state.play_state = PlayState::Idle;
@@ -1198,14 +1239,18 @@ impl eframe::App for CacoApp {
                     // Informational only — never interrupts, and never starts
                     // a build the user did not ask for.
                     let text = match names.as_slice() {
-                        [one] => format!("{one} has an update. Rebuild it from Sourceports."),
+                        [one] => format!("{one} has an update."),
                         many => format!(
-                            "{} sourceports have updates ({}). Rebuild from Sourceports.",
+                            "{} sourceports have updates: {}.",
                             many.len(),
                             many.join(", ")
                         ),
                     };
-                    self.state.notification = Some(Notification::info(text));
+                    self.state.notification =
+                        Some(Notification::info(text).with_action(NoticeAction::OpenSourceports));
+                    // A notification goes, and this is still true until something is done
+                    // about it, so the sidebar goes on saying so.
+                    self.state.sourceport_updates = names;
                 }
                 AppMessage::SearchComplete(source, outcome) => {
                     let search = self.state.import.search_state_mut(source);
@@ -1277,13 +1322,26 @@ impl eframe::App for CacoApp {
                             if ir.is_duplicate {
                                 let title =
                                     ir.duplicate_title.unwrap_or_else(|| "unknown".to_string());
-                                self.state.notification = Some(Notification::warning(format!(
+                                // Nothing went wrong: it is there, which is what was wanted.
+                                let notice = Notification::info(format!(
                                     "Already in your library, as {title}."
-                                )));
-                            } else {
-                                self.state.notification = Some(Notification::info(
-                                    "WAD imported successfully".to_string(),
                                 ));
+                                self.state.notification = Some(match ir.duplicate_id {
+                                    Some(id) => notice.with_action(NoticeAction::ShowWad(id)),
+                                    None => notice,
+                                });
+                            } else {
+                                let title = ir
+                                    .wad_id
+                                    .and_then(|id| {
+                                        caco_core::db::get_wad(&self.conn, id, false).ok().flatten()
+                                    })
+                                    .map_or_else(|| "it".to_string(), |wad| wad.title);
+                                let notice = Notification::info(format!("Imported {title}."));
+                                self.state.notification = Some(match ir.wad_id {
+                                    Some(id) => notice.with_action(NoticeAction::ShowWad(id)),
+                                    None => notice,
+                                });
                                 // Reset only the active form on success
                                 match active {
                                     2 => self.state.import.doomworld.reset(),
@@ -1427,7 +1485,7 @@ impl eframe::App for CacoApp {
                     .stroke(egui::Stroke::new(1.0_f32, theme::BORDER)),
             )
             .show(ui, |ui| {
-                render_status_bar(ui, &mut self.state);
+                render_status_bar(ui, &mut self.state, &mut actions);
             });
 
         // ── What is known about the selected WAD, beside the library ──
@@ -1471,14 +1529,25 @@ impl eframe::App for CacoApp {
 
                                 // Section header with view toggle
                                 ui.add_space(4.0);
-                                render_section_header(ui, &mut self.state);
+                                render_section_header(ui, &mut self.state, &mut actions);
                                 ui.add_space(8.0);
 
                                 // WAD grid or table, or why there is neither
                                 if self.state.wads.is_empty() {
-                                    let total = self.state.total_wad_count;
-                                    if panels::render_empty_library(ui, total) {
-                                        self.state.view_mode = ViewMode::Import;
+                                    match panels::render_empty_library(
+                                        ui,
+                                        self.state.total_wad_count,
+                                    ) {
+                                        panels::EmptyLibraryAction::None => {}
+                                        panels::EmptyLibraryAction::Import => {
+                                            self.state.view_mode = ViewMode::Import;
+                                        }
+                                        panels::EmptyLibraryAction::Cacowards => {
+                                            self.state.show_view(ViewMode::Cacowards);
+                                        }
+                                        panels::EmptyLibraryAction::ClearFilter => {
+                                            self.state.clear_filters();
+                                        }
                                     }
                                     return;
                                 }

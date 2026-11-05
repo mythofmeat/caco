@@ -23,11 +23,17 @@ pub(super) fn render_now_playing_hero(
     state: &AppState,
     thumbnails: &ThumbnailManager,
 ) -> Option<ActionRequest> {
-    let (wad_id, title, is_active) = match &state.play_state {
-        PlayState::Playing { wad_id, wad_title } => (*wad_id, wad_title.clone(), true),
+    let (wad_id, title, is_active, downloading) = match &state.play_state {
+        PlayState::Playing {
+            wad_id,
+            wad_title,
+            downloading,
+        } => (*wad_id, wad_title.clone(), true, *downloading),
+        // Searching for something, it would only push the answer down the page.
+        PlayState::Idle if !state.filter.applied.is_empty() => return None,
         PlayState::Idle => {
             let wad = continue_playing(&state.wads, &state.stats_map)?;
-            (wad.id, wad.title.clone(), false)
+            (wad.id, wad.title.clone(), false, false)
         }
     };
     let wad = state.wads.iter().find(|wad| wad.id == wad_id);
@@ -38,10 +44,10 @@ pub(super) fn render_now_playing_hero(
         .filter(|stats| stats.playtime > 0)
         .map(|stats| caco_core::player::format_duration(stats.playtime));
     let progress = wad.and_then(|wad| state.map_progress(wad));
-    let heading = if is_active {
-        "NOW PLAYING"
-    } else {
-        "CONTINUE PLAYING"
+    let heading = match (is_active, downloading) {
+        (true, true) => "DOWNLOADING",
+        (true, false) => "NOW PLAYING",
+        (false, _) => "CONTINUE PLAYING",
     };
 
     let short = theme::is_short_window(ui.ctx());

@@ -9,6 +9,16 @@ const RATING_COLUMN: f32 = 80.0;
 const PLAYTIME_COLUMN: f32 = 70.0;
 const LAST_PLAYED_COLUMN: f32 = 88.0;
 
+/// What heads each column, and what it sorts by if it can.
+const COLUMNS: [(&str, Option<&str>); 6] = [
+    ("Title", Some("title")),
+    ("Author", Some("author")),
+    ("Status", None),
+    ("Rating", Some("rating")),
+    ("Playtime", Some("playtime")),
+    ("Last Played", Some("last_played")),
+];
+
 /// The same as the banner and the cards have.
 const MARGIN: f32 = 20.0;
 
@@ -76,16 +86,14 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState, view_top: f32) -> Option<
 
     table
         .header(row_height + 2.0, |mut header| {
-            for label in [
-                "Title",
-                "Author",
-                "Status",
-                if rating > 0.0 { "Rating" } else { "" },
-                "Playtime",
-                "Last Played",
-            ] {
-                header.col(|ui| {
-                    ui.label(theme::column_header(label));
+            for (label, field) in COLUMNS {
+                header.col(|ui| match field {
+                    // The narrow window gives the rating's column up to the title.
+                    Some("rating") if rating == 0.0 => {}
+                    Some(field) => super::sort_controls::column_header(ui, state, label, field),
+                    None => {
+                        ui.label(theme::column_header(label));
+                    }
                 });
             }
         })

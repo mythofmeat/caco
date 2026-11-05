@@ -370,3 +370,157 @@ fn a_tag_in_the_panel_filters_the_library_by_it() {
     let filter = app.get_by_label("Filter WADs");
     assert_eq!(filter.value().as_deref(), Some("tag:megawad"));
 }
+
+fn wads_in_library(conn: &rusqlite::Connection) -> i64 {
+    conn.query_row(
+        "SELECT count(*) FROM wads WHERE deleted_at IS NULL",
+        [],
+        |row| row.get(0),
+    )
+    .expect("count WADs")
+}
+
+/// Deleting is one key away, so taking it back should be too: the Trash is three clicks off.
+#[test]
+fn a_delete_can_be_undone_from_the_status_bar() {
+    let db_path = library("undo-delete", 3);
+    let conn = db::open_connection(&db_path).expect("open library");
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+    let first = app.state().selected_wad_title().unwrap().to_string();
+
+    press(&mut app, egui::Key::Delete);
+    app.get_by_label("Delete").click_accesskit();
+    settle(&mut app);
+    assert_eq!(wads_in_library(&conn), 2);
+    assert!(
+        app.query_by_label(&format!("Moved {first} to the Trash."))
+            .is_some()
+    );
+    assert_ne!(app.state().selected_wad_title().unwrap(), first);
+
+    app.get_by_label("Undo").click_accesskit();
+    settle(&mut app);
+    assert_eq!(wads_in_library(&conn), 3);
+    assert_eq!(app.state().selected_wad_title().unwrap(), first);
+}
+
+#[test]
+fn a_notification_can_be_dismissed() {
+    let db_path = library("dismiss", 2);
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+    press(&mut app, egui::Key::Delete);
+    app.get_by_label("Delete").click_accesskit();
+    settle(&mut app);
+    assert!(app.query_by_label("Undo").is_some());
+
+    app.get_by_label("\u{00d7}").click_accesskit();
+    settle(&mut app);
+
+    assert!(app.query_by_label("Undo").is_none());
+}
+
+/// What the list is in, top to bottom.
+fn rows_of_list(app: &Harness) -> Vec<String> {
+    let mut rows: Vec<(f32, String)> = app
+        .query_all_by_role(Role::Label)
+        .filter_map(|node| {
+            let text = node.value()?;
+            text.starts_with("WAD ").then(|| (node.rect().min.y, text))
+        })
+        .filter(|(_, text)| text.len() == "WAD 000".len())
+        .collect();
+    rows.sort_by(|a, b| a.0.total_cmp(&b.0));
+    rows.dedup_by(|a, b| a.1 == b.1);
+    rows.into_iter().map(|(_, text)| text).collect()
+}
+
+#[test]
+fn a_column_heading_sorts_the_list_and_turns_it_around() {
+    let db_path = library("column-sort", 5);
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+    press(&mut app, egui::Key::I);
+    app.get_by_label("List").click_accesskit();
+    settle(&mut app);
+
+    app.get_by_label("Title").click_accesskit();
+    settle(&mut app);
+    let ascending = rows_of_list(&app);
+    assert_eq!(ascending.first().map(String::as_str), Some("WAD 000"));
+    assert_eq!(ascending.last().map(String::as_str), Some("WAD 004"));
+
+    app.get_by_label_contains("Title").click_accesskit();
+    settle(&mut app);
+    let descending = rows_of_list(&app);
+    assert_eq!(descending.first().map(String::as_str), Some("WAD 004"));
+}
+
+#[test]
+fn a_filter_that_finds_nothing_says_so_and_offers_the_way_back() {
+    let db_path = library("no-match", 3);
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+
+    type_text(&mut app, "/");
+    type_text(&mut app, "nothing-has-this-name");
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    settle(&mut app);
+    assert!(app.query_by_label("No WADs match.").is_some());
+
+    app.get_by_label("Show All WADs").click_accesskit();
+    settle(&mut app);
+
+    assert!(app.query_by_label("No WADs match.").is_none());
+    assert_eq!(app.get_by_label("Filter WADs").value().as_deref(), Some(""));
+}
+
+#[test]
+fn escape_backs_out_of_a_filter_before_it_touches_the_selection() {
+    let db_path = library("escape-filter", 3);
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+    type_text(&mut app, "/");
+    type_text(&mut app, "WAD");
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    settle(&mut app);
+
+    // The first is the text box's, which lets go of the keyboard.
+    press(&mut app, egui::Key::Escape);
+    if app.get_by_label("Filter WADs").value().as_deref() == Some("WAD") {
+        press(&mut app, egui::Key::Escape);
+    }
+    assert_eq!(app.get_by_label("Filter WADs").value().as_deref(), Some(""));
+    assert!(app.state().selected_wad_title().is_some());
+}
+
+#[test]
+fn a_search_worth_keeping_can_be_saved_as_a_collection() {
+    let db_path = library("save-collection", 3);
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+    type_text(&mut app, "/");
+    type_text(&mut app, "status:unplayed");
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    settle(&mut app);
+
+    app.get_by_label("Save as Collection").click_accesskit();
+    settle(&mut app);
+
+    assert!(
+        app.query_by_role_and_label(Role::Window, "Collections")
+            .is_some()
+    );
+    assert_eq!(
+        app.get_by_label("Query").value().as_deref(),
+        Some("status:unplayed")
+    );
+}
+
+#[test]
+fn a_card_offers_play_once_the_pointer_is_on_it() {
+    let db_path = library("card-play", 3);
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+    let plays_before = app.query_all_by_label("Play").count();
+
+    let card = app.get_by_label("WAD 001, Unplayed").rect().center();
+    app.hover_at(egui::pos2(card.x, card.y));
+    settle(&mut app);
+
+    assert_eq!(app.query_all_by_label("Play").count(), plays_before + 1);
+}

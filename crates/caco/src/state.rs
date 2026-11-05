@@ -80,6 +80,12 @@ pub enum ActionRequest {
     FilterLibrary(String),
     /// Show a year's Cacowards.
     ShowCacowards(i64),
+    /// Put a WAD just deleted back in the library.
+    UndoDelete(i64),
+    /// Go to a WAD in the library, whatever is being filtered for.
+    ShowWad(i64),
+    /// Open Collections on a new one, with what is in the filter.
+    SaveFilterAsCollection,
     /// Play a WAD the launch stopped to ask about, once the user has been told and
     /// chose to go ahead.
     PlayWith(i64, caco_core::player::PlayOptions),
@@ -202,7 +208,12 @@ pub enum ActiveDialog {
 
 pub enum PlayState {
     Idle,
-    Playing { wad_id: i64, wad_title: String },
+    Playing {
+        wad_id: i64,
+        wad_title: String,
+        /// Its file wasn't here, and it is still on its way.
+        downloading: bool,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -326,6 +337,9 @@ pub struct AppState {
 
     /// Files being fetched by the user in their browser, and what has landed for them.
     pub gets: Gets,
+
+    /// Built sourceports with something newer upstream, until Sourceports has been opened.
+    pub sourceport_updates: Vec<String>,
 }
 
 /// What the details of a WAD show that the list of WADs doesn't load, read once per selection.
@@ -550,6 +564,7 @@ impl AppState {
             mirror_report: None,
             sync_report: None,
             gets: Gets::default(),
+            sourceport_updates: Vec::new(),
         }
     }
 
@@ -582,6 +597,11 @@ impl AppState {
             PlayState::Playing { wad_id, .. } => Some(wad_id),
             PlayState::Idle => None,
         }
+    }
+
+    /// Whether anything is narrowing down what the library shows.
+    pub fn is_filtered(&self) -> bool {
+        !self.status_filters.is_empty() || !self.filter.applied.is_empty()
     }
 
     /// Whether the panel about the selected WAD is on the screen.
@@ -979,6 +999,24 @@ impl AppState {
         } else if from / columns < last / columns {
             self.select_index(last);
         }
+    }
+
+    /// Go to a WAD in the library. Whatever is being filtered for is dropped, since it could
+    /// be what is hiding it, and a list with what was asked for missing is worse than a
+    /// filter to type again.
+    pub fn show_wad(&mut self, wad_id: i64) {
+        self.show_view(ViewMode::Library);
+        self.clear_filters();
+        self.select_wad(wad_id);
+        self.reveal_selection = true;
+    }
+
+    /// Show the whole library.
+    pub fn clear_filters(&mut self) {
+        self.active_collection = None;
+        self.status_filters.clear();
+        self.filter.set_both(String::new());
+        self.needs_reload = true;
     }
 
     /// Show the library with `query` in its filter, as if it had been typed.

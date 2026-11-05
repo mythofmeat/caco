@@ -1,9 +1,13 @@
 //! The row above the WAD grid or table: the status filters, and how many are showing.
 
-use crate::state::AppState;
+use crate::state::{ActionRequest, AppState};
 use crate::theme;
 
-pub(super) fn render_section_header(ui: &mut egui::Ui, state: &mut AppState) {
+pub(super) fn render_section_header(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    actions: &mut Vec<ActionRequest>,
+) {
     let margin = egui::Margin::symmetric(20, 0);
     egui::Frame::new().inner_margin(margin).show(ui, |ui| {
         ui.horizontal_wrapped(|ui| {
@@ -37,14 +41,24 @@ pub(super) fn render_section_header(ui: &mut egui::Ui, state: &mut AppState) {
                 }
             }
 
-            // Only worth saying when something is being left out by the words in the filter,
-            // since each pill already says how many it has.
-            if !state.filter.applied.is_empty() {
+            // A search worth keeping is one click from being a collection, where the sidebar
+            // has it. Not for a collection being shown, which already is one.
+            if !state.filter.applied.is_empty() && state.active_collection.is_none() {
                 ui.add_space(6.0);
-                ui.colored_label(
-                    theme::TEXT_SECONDARY,
-                    format!("{} showing", state.wads.len()),
-                );
+                if ui
+                    .add(
+                        egui::Button::new(
+                            egui::RichText::new("Save as Collection")
+                                .size(11.5)
+                                .color(theme::TEXT_SECONDARY),
+                        )
+                        .frame(false),
+                    )
+                    .on_hover_text("Keep this search in the sidebar")
+                    .clicked()
+                {
+                    actions.push(ActionRequest::SaveFilterAsCollection);
+                }
             }
         });
     });

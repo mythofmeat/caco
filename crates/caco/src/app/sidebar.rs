@@ -63,14 +63,14 @@ pub(super) fn render_sidebar(
                 render_collections(ui, state, actions);
                 ui.add_space(12.0);
                 section_heading(ui, "TOOLS");
-                render_tools(ui, TOOLS, actions);
+                render_tools(ui, TOOLS, &state.sourceport_updates, actions);
                 ui.add_space(8.0);
             });
     });
 
     divider(ui);
     ui.add_space(4.0);
-    render_tools(ui, PINNED_TOOLS, actions);
+    render_tools(ui, PINNED_TOOLS, &[], actions);
 }
 
 fn divider(ui: &mut egui::Ui) {
@@ -164,12 +164,23 @@ fn render_collections(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec
     }
 }
 
-fn render_tools(ui: &mut egui::Ui, tools: &[Tool], actions: &mut Vec<ActionRequest>) {
+fn render_tools(
+    ui: &mut egui::Ui,
+    tools: &[Tool],
+    updates: &[String],
+    actions: &mut Vec<ActionRequest>,
+) {
     for tool in tools {
-        if theme::sidebar_tool_item(ui, tool.label)
-            .on_hover_text(tool.hint)
-            .clicked()
-        {
+        let row = theme::sidebar_tool_item(ui, tool.label);
+        // Whether there is something new here is the kind of thing a notification says once,
+        // and only this goes on saying.
+        let row = if tool.label == "Sourceports" && !updates.is_empty() {
+            theme::paint_row_dot(ui, row.rect);
+            row.on_hover_text(format!("{} has an update.", updates.join(", ")))
+        } else {
+            row.on_hover_text(tool.hint)
+        };
+        if row.clicked() {
             actions.push((tool.action)());
         }
     }

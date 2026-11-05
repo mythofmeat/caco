@@ -67,14 +67,26 @@ pub fn layout_toggle(ui: &mut egui::Ui, layout: &mut ViewLayout) {
         });
 }
 
+/// What was asked for by the library's empty state.
+pub enum EmptyLibraryAction {
+    None,
+    Import,
+    Cacowards,
+    ClearFilter,
+}
+
 /// What the library shows when it has nothing to show: where to get a WAD from if it is
-/// empty, and that the filter is why if it isn't. Returns true if asked to go to Import.
-pub fn render_empty_library(ui: &mut egui::Ui, total_wads: usize) -> bool {
-    let mut import = false;
+/// empty, and that the filter is why if it isn't, with the way out of that.
+pub fn render_empty_library(ui: &mut egui::Ui, total_wads: usize) -> EmptyLibraryAction {
+    let mut action = EmptyLibraryAction::None;
     ui.add_space(24.0);
     ui.vertical_centered(|ui| {
         if total_wads > 0 {
             ui.colored_label(theme::TEXT_SECONDARY, "No WADs match.");
+            ui.add_space(4.0);
+            if ui.button("Show All WADs").clicked() {
+                action = EmptyLibraryAction::ClearFilter;
+            }
             return;
         }
         ui.colored_label(
@@ -87,9 +99,15 @@ pub fn render_empty_library(ui: &mut egui::Ui, total_wads: usize) -> bool {
             "Find something on idgames or the Doom Wiki, paste a link, or add a file you have.",
         );
         ui.add_space(8.0);
-        import = ui.add(theme::primary_button("Import a WAD")).clicked();
+        if ui.add(theme::primary_button("Import a WAD")).clicked() {
+            action = EmptyLibraryAction::Import;
+        }
+        ui.add_space(2.0);
+        if ui.button("See the Cacowards").clicked() {
+            action = EmptyLibraryAction::Cacowards;
+        }
     });
-    import
+    action
 }
 
 /// Show a right-click context menu for a WAD with standard actions, what you might do first at
@@ -239,8 +257,13 @@ pub fn library_keys(
     } else if ui.input(|i| !i.modifiers.shift && i.key_pressed(egui::Key::G)) {
         state.handle_g_press();
     }
+    // Back out of whatever is narrowing the list first, and only then of the selection.
     if pressed(egui::Key::Escape) {
-        state.deselect();
+        if state.filter.input.is_empty() {
+            state.deselect();
+        } else {
+            state.filter.clear(std::time::Instant::now());
+        }
     }
 
     handle_action_keys(ui, state.selected_wad_id)

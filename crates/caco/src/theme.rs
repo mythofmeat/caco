@@ -589,6 +589,12 @@ pub fn sidebar_tool_item(ui: &mut egui::Ui, label: &str) -> egui::Response {
     response
 }
 
+/// A dot at the end of a sidebar row, for something new there.
+pub fn paint_row_dot(ui: &egui::Ui, row: egui::Rect) {
+    let center = egui::pos2(row.max.x - 24.0, row.center().y);
+    ui.painter().circle_filled(center, 3.5, TEXT_ACCENT);
+}
+
 /// Render a sidebar collection item (playlist-style). Returns the response.
 pub fn sidebar_collection_item(ui: &mut egui::Ui, name: &str, is_active: bool) -> egui::Response {
     let desired_size = egui::vec2(ui.available_width(), 28.0);

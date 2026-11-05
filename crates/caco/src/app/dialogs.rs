@@ -23,7 +23,7 @@ use crate::dialogs::sync::SyncResult;
 use crate::dialogs::wad_data::WadDataResult;
 use crate::dialogs::wad_stats::WadStatsResult;
 use crate::get::GetTarget;
-use crate::message::Notification;
+use crate::message::{NoticeAction, Notification};
 use crate::panels;
 use crate::state::{ActionRequest, ActiveDialog, AppState};
 use crate::thumbnails::ThumbnailManager;
@@ -84,8 +84,13 @@ pub(super) fn render_active_dialog(
             ActiveDialog::Delete(delete_state) => match delete_state.render(ctx, conn) {
                 DeleteResult::Confirmed => {
                     close_dialog = true;
+                    let notice = Notification::info(format!(
+                        "Moved {} to the Trash.",
+                        delete_state.wad_title
+                    ))
+                    .with_action(NoticeAction::UndoDelete(delete_state.wad_id));
                     state.invalidate_wad_views();
-                    state.notification = Some(Notification::info("WAD deleted".to_string()));
+                    state.notification = Some(notice);
                 }
                 DeleteResult::Error(msg) => {
                     close_dialog = true;

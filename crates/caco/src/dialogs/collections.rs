@@ -54,6 +54,16 @@ impl CollectionsDialogState {
         state
     }
 
+    /// Open the dialog on a new collection, with what the library is showing already filled in.
+    pub fn new_adding(conn: &Connection, query: &str, sort_by: &str, sort_desc: bool) -> Self {
+        let mut state = Self::new(conn);
+        state.edit_mode = EditMode::Add;
+        state.form_query = query.to_string();
+        state.form_sort = sort_by.to_string();
+        state.form_desc = sort_desc;
+        state
+    }
+
     /// Open the dialog with a specific collection pre-selected for editing.
     pub fn new_editing(conn: &Connection, name: &str) -> Self {
         let mut state = Self::new(conn);

@@ -112,9 +112,16 @@ pub fn render(
                         action = Some(a);
                     }
 
+                    // What the card is most for, on the card, once there is a reason to look:
+                    // the pointer on it, or the keyboard, unless the panel beside the library is
+                    // already offering the same.
+                    let details_showing = state.details_showing();
+                    let offer_play = !state.is_playing()
+                        && (response.contains_pointer() || (selected && !details_showing));
+
                     let card = Card {
                         wad,
-                        details_showing: state.details_showing(),
+                        details_showing,
                         stats: state.stats_map.get(&wad_id),
                         progress: if wad.status == Status::InProgress {
                             state.map_progress(wad)
@@ -125,6 +132,10 @@ pub fn render(
                         selected,
                     };
                     card.paint(ui, rect, thumb_height, &response);
+
+                    if offer_play && play_button(ui, rect, thumb_height) {
+                        action = Some(ActionRequest::Play(wad_id));
+                    }
 
                     if response.clicked() || response.secondary_clicked() {
                         state.select_wad(wad_id);
@@ -138,6 +149,17 @@ pub fn render(
     });
 
     action
+}
+
+/// Play, at the corner of a card's picture. True if it was pressed.
+fn play_button(ui: &mut egui::Ui, card: Rect, thumb_height: f32) -> bool {
+    let picture = Rect::from_min_size(card.min, Vec2::new(card.width(), thumb_height));
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(picture.shrink(8.0))
+            .layout(egui::Layout::bottom_up(egui::Align::Max)),
+    );
+    child.add(theme::small_primary_button("Play")).clicked()
 }
 
 /// What one card shows.
