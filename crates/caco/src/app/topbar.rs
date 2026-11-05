@@ -24,18 +24,7 @@ pub(super) fn render_topbar(
                     "What is known about the selected WAD. Or press I."
                 };
                 let open = state.wide_window && state.details_open;
-                let fill = if open {
-                    theme::CONTROL_FILL_HOVER
-                } else {
-                    egui::Color32::TRANSPARENT
-                };
-                let text = egui::RichText::new("Details").size(12.0).color(if open {
-                    theme::TEXT_PRIMARY
-                } else {
-                    theme::TEXT_SECONDARY
-                });
-                if ui
-                    .add(egui::Button::new(text).selected(open).fill(fill))
+                if toggle_button(ui, "Details", open)
                     .on_hover_text(hint)
                     .clicked()
                 {
@@ -54,9 +43,32 @@ pub(super) fn render_topbar(
         } else if state.view_mode == ViewMode::Cacowards {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 panels::layout_toggle(ui, &mut state.cacowards.layout);
+                ui.add_space(4.0);
+                let hiding = state.cacowards.hide_finished;
+                if toggle_button(ui, "Hide Finished", hiding)
+                    .on_hover_text("Show only what is left to play")
+                    .clicked()
+                {
+                    state.cacowards.hide_finished = !hiding;
+                }
             });
         }
     });
+}
+
+/// Something in the bar that stays on, filled in while it is.
+fn toggle_button(ui: &mut egui::Ui, text: &str, on: bool) -> egui::Response {
+    let fill = if on {
+        theme::CONTROL_FILL_HOVER
+    } else {
+        egui::Color32::TRANSPARENT
+    };
+    let text = egui::RichText::new(text).size(12.0).color(if on {
+        theme::TEXT_PRIMARY
+    } else {
+        theme::TEXT_SECONDARY
+    });
+    ui.add(egui::Button::new(text).selected(on).fill(fill))
 }
 
 fn render_breadcrumbs(ui: &mut egui::Ui, state: &AppState) {

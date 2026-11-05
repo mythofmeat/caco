@@ -719,7 +719,9 @@ impl CacoApp {
                     .and_then(|ir| ir.wad_id.or(ir.duplicate_id));
                 import.search_state_mut(source).import_finished(wad);
             }
-            ImportOrigin::Cacoward => {}
+            ImportOrigin::Cacoward(pk) => {
+                self.state.cacowards.importing.remove(&pk);
+            }
         }
 
         let ir = match result {
@@ -948,13 +950,15 @@ impl CacoApp {
                 });
             }
             ActionRequest::ImportCacoward(pk) => {
-                import::workers::spawn_import_cacoward(
-                    self.bg.sender(),
-                    self.state.db_path.clone(),
-                    pk,
-                );
-                self.state.notification =
-                    Some(Notification::info("Importing Cacoward entry…".to_string()));
+                // Its button becomes a spinner, so this can only be asked for again by a key
+                // or a double click, which should not start another.
+                if self.state.cacowards.importing.insert(pk) {
+                    import::workers::spawn_import_cacoward(
+                        self.bg.sender(),
+                        self.state.db_path.clone(),
+                        pk,
+                    );
+                }
             }
             ActionRequest::LinkCacoward(pk) => {
                 if let Some(dialog) =

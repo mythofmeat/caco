@@ -692,7 +692,7 @@ impl Shooter {
     fn post_import_of(&mut self, wad_id: i64) {
         let tx = self.harness.state_mut().background_sender();
         tx.send(AppMessage::ImportComplete(
-            ImportOrigin::Cacoward,
+            ImportOrigin::Cacoward(0),
             Ok(ImportResult {
                 wad_id: Some(wad_id),
                 is_duplicate: false,

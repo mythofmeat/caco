@@ -531,7 +531,8 @@ pub enum SearchSource {
 pub enum ImportOrigin {
     Search(SearchSource),
     Form(FormKind),
-    Cacoward,
+    /// The entry it is for, by pk.
+    Cacoward(i64),
 }
 
 #[cfg(test)]

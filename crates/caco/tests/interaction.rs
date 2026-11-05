@@ -676,3 +676,46 @@ fn enter_in_the_search_box_searches_and_does_not_import_what_is_selected() {
     });
     assert_eq!(wads_in_library(&conn), 1);
 }
+
+#[test]
+fn a_year_can_be_gone_through_with_the_keys() {
+    let db_path = library("cacoward-keys", 1);
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+    app.state_mut().set_view(ViewMode::Cacowards);
+    settle(&mut app);
+    let crumbs = |app: &Harness| {
+        app.query_all_by_role(Role::Label)
+            .filter_map(|node| node.value())
+            .find(|text| {
+                text.parse::<i64>()
+                    .is_ok_and(|year| (2000..2100).contains(&year))
+            })
+    };
+    let newest = crumbs(&app).expect("the year in the top bar");
+
+    press(&mut app, egui::Key::ArrowRight);
+    let older = crumbs(&app).expect("the year in the top bar");
+    assert!(older < newest, "{older} comes after {newest} on the strip");
+
+    press(&mut app, egui::Key::ArrowLeft);
+    assert_eq!(crumbs(&app).expect("the year in the top bar"), newest);
+}
+
+/// Nothing in this library is finished, so hiding what is has nothing to hide.
+#[test]
+fn hiding_what_is_finished_leaves_what_is_not() {
+    let db_path = library("hide-finished", 1);
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+    app.state_mut().set_view(ViewMode::Cacowards);
+    settle(&mut app);
+    let rows = |app: &Harness| app.query_all_by_label_contains("Not in Library").count();
+    let before = rows(&app);
+    assert!(before > 0);
+
+    app.get_by_label("Hide Finished").click_accesskit();
+    settle(&mut app);
+
+    // What can't be played is out of the reckoning and goes, and nothing else does.
+    assert!(rows(&app) <= before);
+    assert!(rows(&app) > 0);
+}

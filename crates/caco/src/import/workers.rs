@@ -220,7 +220,10 @@ pub fn spawn_import_cacoward(sender: BackgroundSender, db_path: PathBuf, cacowar
 
             Ok(import_result)
         })();
-        sender.send(AppMessage::ImportComplete(ImportOrigin::Cacoward, result));
+        sender.send(AppMessage::ImportComplete(
+            ImportOrigin::Cacoward(cacoward_pk),
+            result,
+        ));
     });
 }
 

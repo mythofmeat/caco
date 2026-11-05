@@ -69,7 +69,7 @@ pub fn render(
     render_hero(ui, state, year);
 
     if let Some(y) = render_year_strip(ui, state) {
-        state.cacowards.selected_year = Some(y);
+        state.cacowards.choose_year(y);
     }
 
     // Snapshot for the chosen year so we can iterate without borrowing
@@ -82,16 +82,15 @@ pub fn render(
         .cloned()
         .collect();
 
-    // Esc clears any card selection. Library-mode shortcuts (j/k/etc.)
-    // aren't reused here yet — the cacoward grid is keyboard-navigable in
-    // a follow-up.
-    if !state.has_dialog() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-        state.cacowards.selected_entry_pk = None;
-    }
-
     let others = other_categories(&year_entries);
     let core = CORE_CATEGORIES.iter().copied();
-    for (index, category) in core.chain(others.iter().copied()).enumerate() {
+    let categories: Vec<&str> = core.chain(others.iter().copied()).collect();
+
+    if let Some(a) = entry_keys(ui, state, &year_entries, &categories) {
+        action.get_or_insert(a);
+    }
+
+    for (index, category) in categories.iter().copied().enumerate() {
         if index == CORE_CATEGORIES.len() && !others.is_empty() {
             render_other_awards_heading(ui);
         }
@@ -112,6 +111,67 @@ pub fn render(
     ui.add_space(40.0);
 
     action
+}
+
+// ---------------------------------------------------------------------------
+// Keys
+// ---------------------------------------------------------------------------
+
+/// Going through a year from the keyboard, as the library goes: left and right between years,
+/// up and down between entries, and Enter for whatever the entry's button would do.
+fn entry_keys(
+    ui: &egui::Ui,
+    state: &mut AppState,
+    entries: &[(CacowardRecord, EffectiveStatus)],
+    categories: &[&str],
+) -> Option<ActionRequest> {
+    if state.has_dialog() || ui.ctx().egui_wants_keyboard_input() {
+        return None;
+    }
+    let pressed = |key| ui.input(|i| i.key_pressed(key));
+
+    if pressed(egui::Key::Escape) {
+        state.cacowards.selected_entry_pk = None;
+    }
+    if pressed(egui::Key::ArrowRight) || pressed(egui::Key::L) {
+        state.cacowards.step_year(1);
+    }
+    if pressed(egui::Key::ArrowLeft) || pressed(egui::Key::H) {
+        state.cacowards.step_year(-1);
+    }
+
+    // In the order they are on the screen, leaving out what is being hidden.
+    let hide_finished = state.cacowards.hide_finished;
+    let in_order: Vec<&(CacowardRecord, EffectiveStatus)> = categories
+        .iter()
+        .flat_map(|category| entries.iter().filter(move |(r, _)| r.category == *category))
+        .filter(|(record, status)| !hide_finished || !is_finished(record, *status))
+        .collect();
+    let place = state
+        .cacowards
+        .selected_entry_pk
+        .and_then(|pk| in_order.iter().position(|(r, _)| r.id == pk));
+    let last = in_order.len().saturating_sub(1);
+    let moved = if pressed(egui::Key::ArrowDown) || pressed(egui::Key::J) {
+        Some(place.map_or(0, |at| (at + 1).min(last)))
+    } else if pressed(egui::Key::ArrowUp) || pressed(egui::Key::K) {
+        Some(place.map_or(0, |at| at.saturating_sub(1)))
+    } else {
+        None
+    };
+    if let Some((record, _)) = moved.and_then(|at| in_order.get(at).copied()) {
+        state.cacowards.selected_entry_pk = Some(record.id);
+        state.cacowards.reveal_entry = true;
+    }
+
+    if !pressed(egui::Key::Enter) {
+        return None;
+    }
+    let (record, status) = in_order.get(place?).copied()?;
+    let linked = record
+        .wad_id
+        .and_then(|id| state.cacowards.linked_wads.get(&id));
+    leading_action(record, *status, get_target(record, *status, linked))
 }
 
 // ---------------------------------------------------------------------------
@@ -331,9 +391,11 @@ fn hero_kicker(entries: &[(CacowardRecord, EffectiveStatus)], year: i64) -> Stri
 // Year strip
 // ---------------------------------------------------------------------------
 
-fn render_year_strip(ui: &mut egui::Ui, state: &AppState) -> Option<i64> {
+fn render_year_strip(ui: &mut egui::Ui, state: &mut AppState) -> Option<i64> {
     let years = state.cacowards.years();
     let selected = state.cacowards.selected_year;
+    let reveal = std::mem::take(&mut state.cacowards.reveal_year);
+    let state = &*state;
     let strip_height = YEAR_CHIP_HEIGHT + YEAR_STRIP_VPAD * 2.0;
 
     // Background strip the full width of the panel.
@@ -386,6 +448,9 @@ fn render_year_strip(ui: &mut egui::Ui, state: &AppState) -> Option<i64> {
                     if response.clicked() {
                         clicked = Some(year);
                         // A chip half out of view comes the rest of the way.
+                        response.scroll_to_me(None);
+                    }
+                    if reveal && selected == Some(year) {
                         response.scroll_to_me(None);
                     }
                 }
@@ -540,15 +605,26 @@ fn render_category_section(
     ui.add_space(6.0);
 
     let layout = state.cacowards.layout;
+    let hide_finished = state.cacowards.hide_finished;
+    let showing: Vec<&(CacowardRecord, EffectiveStatus)> = entries
+        .iter()
+        .copied()
+        .filter(|(record, status)| !hide_finished || !is_finished(record, *status))
+        .collect();
     let body = match layout {
-        ViewLayout::List => render_rows(ui, state, entries),
-        ViewLayout::Grid => render_cards(ui, state, entries, thumbnails),
+        ViewLayout::List => render_rows(ui, state, &showing),
+        ViewLayout::Grid => render_cards(ui, state, &showing, thumbnails),
     };
     if let Some(a) = body {
         action.get_or_insert(a);
     }
 
     action
+}
+
+/// Whether an entry is done with, for hiding: played to the end, or out of the reckoning.
+fn is_finished(record: &CacowardRecord, status: EffectiveStatus) -> bool {
+    !record.supported || matches!(status, EffectiveStatus::Library(Status::Completed))
 }
 
 /// Entries as a list, as many columns across as fit.
@@ -606,16 +682,25 @@ fn render_row(
     if response.clicked() {
         state.cacowards.selected_entry_pk = Some(record.id);
     }
+    if selected && std::mem::take(&mut state.cacowards.reveal_entry) {
+        response.scroll_to_me(None);
+    }
     let linked = record
         .wad_id
         .and_then(|id| state.cacowards.linked_wads.get(&id));
     let get = get_target(record, status, linked);
     let menu_action = entry_menu(&response, record, get);
+    let double_click_action = if response.double_clicked() {
+        leading_action(record, status, get)
+    } else {
+        None
+    };
 
     let painter = ui.painter_at(rect);
+    let pointed_at = response.contains_pointer();
     if selected {
         painter.rect_filled(rect, 4, theme::BG_SELECTED);
-    } else if response.hovered() {
+    } else if pointed_at {
         painter.rect_filled(rect, 4, theme::BG_MEDIUM);
     }
 
@@ -626,8 +711,24 @@ fn render_row(
             .layout(egui::Layout::right_to_left(egui::Align::Center)),
     );
     let waiting = get.is_some_and(|target| state.gets.is_waiting_for(target));
-    let button_action = action_button(&mut right, record, status, get, waiting);
-    theme::status_pill(&mut right, style, "");
+    let importing = state.cacowards.importing.contains(&record.id);
+    let button_action = action_button(
+        &mut right,
+        record,
+        status,
+        get,
+        ButtonState {
+            waiting,
+            importing,
+            leading: selected || pointed_at,
+        },
+    );
+    // Only for what is in the library or out of the reckoning: the rest is the button beside it
+    // and the count over the section, and fifty pills saying "Not in Library" was most of what
+    // a year looked like before any of it had been played.
+    if has_status_to_show(status, record.supported) {
+        theme::status_pill(&mut right, style, "");
+    }
 
     let left = rect.min.x + LIST_ROW_PADDING;
     let room = (right.min_rect().min.x - LIST_ROW_PADDING - left).max(0.0);
@@ -664,7 +765,12 @@ fn render_row(
     }
     response.on_hover_text(format!("{}\n{author}", record.wad_title));
 
-    menu_action.or(button_action)
+    menu_action.or(button_action).or(double_click_action)
+}
+
+/// Whether an entry has a status worth a pill.
+fn has_status_to_show(status: EffectiveStatus, supported: bool) -> bool {
+    !supported || !matches!(status, EffectiveStatus::Absent)
 }
 
 const ROW_TEXT_GAP: f32 = 8.0;
@@ -770,12 +876,21 @@ fn render_card(
     if response.clicked() {
         state.cacowards.selected_entry_pk = Some(record.id);
     }
+    if selected && std::mem::take(&mut state.cacowards.reveal_entry) {
+        response.scroll_to_me(None);
+    }
 
     let linked = record
         .wad_id
         .and_then(|id| state.cacowards.linked_wads.get(&id));
     let get = get_target(record, status, linked);
     let menu_action = entry_menu(&response, record, get);
+    let double_click_action = if response.double_clicked() {
+        leading_action(record, status, get)
+    } else {
+        None
+    };
+    let pointed_at = response.contains_pointer();
 
     // Background — slightly lifted when selected.
     let bg = if selected {
@@ -852,20 +967,33 @@ fn render_card(
     );
     // On the picture rather than beside the buttons, since a card can be too narrow for an
     // entry's status and both of the things to do about it.
-    theme::paint_status_pill(
-        &painter,
-        thumb_rect.min.x + 8.0,
-        thumb_rect.min.y + 16.0,
-        style,
-        "",
-    );
+    if has_status_to_show(status, record.supported) {
+        theme::paint_status_pill(
+            &painter,
+            thumb_rect.min.x + 8.0,
+            thumb_rect.min.y + 16.0,
+            style,
+            "",
+        );
+    }
     let mut sub_ui = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(button_rect)
             .layout(egui::Layout::right_to_left(egui::Align::Center)),
     );
     let waiting = get.is_some_and(|target| state.gets.is_waiting_for(target));
-    let button_action = action_button(&mut sub_ui, record, status, get, waiting);
+    let importing = state.cacowards.importing.contains(&record.id);
+    let button_action = action_button(
+        &mut sub_ui,
+        record,
+        status,
+        get,
+        ButtonState {
+            waiting,
+            importing,
+            leading: selected || pointed_at,
+        },
+    );
 
     // Border painted INSIDE the rect — `StrokeKind::Outside` was
     // effectively halving the visible width because the row's
@@ -878,11 +1006,11 @@ fn render_card(
             egui::Stroke::new(2.0_f32, theme::TEXT_ACCENT),
             StrokeKind::Inside,
         );
-    } else if response.hovered() {
+    } else if pointed_at {
         painter.rect_stroke(
             rect,
             rounding,
-            egui::Stroke::new(1.0_f32, theme::BORDER_MED),
+            egui::Stroke::new(1.0_f32, theme::CONTROL_BORDER),
             StrokeKind::Inside,
         );
     }
@@ -890,7 +1018,7 @@ fn render_card(
     // Context-menu picks take precedence — they're the user's
     // most recent gesture and shouldn't get clobbered by a stray
     // button-region click.
-    menu_action.or(button_action)
+    menu_action.or(button_action).or(double_click_action)
 }
 
 fn paint_card_thumbnail(
@@ -926,6 +1054,12 @@ fn entry_menu(
             && ui.button("Get in Browser").clicked()
         {
             action = Some(ActionRequest::Get(target));
+            ui.close();
+        }
+        if let Some(wad_id) = record.wad_id
+            && ui.button("Show in Library").clicked()
+        {
+            action = Some(ActionRequest::ShowWad(wad_id));
             ui.close();
         }
         if ui.button("Link to a WAD in Your Library\u{2026}").clicked() {
@@ -1047,23 +1181,62 @@ fn card_buttons(
     }
 }
 
+/// How an entry's button should look right now.
+#[derive(Clone, Copy)]
+struct ButtonState {
+    /// The browser is out fetching this one.
+    waiting: bool,
+    /// An import of it is under way.
+    importing: bool,
+    /// The pointer or the keyboard is on this entry, so this is the one thing on the page to
+    /// do next. A year nothing has been imported from has fifty of these, and every one of them
+    /// filled in was a wall of orange in which nothing stood out.
+    leading: bool,
+}
+
+/// What a double click or Enter does: what the button most in view says.
+fn leading_action(
+    record: &CacowardRecord,
+    status: EffectiveStatus,
+    get: Option<GetTarget>,
+) -> Option<ActionRequest> {
+    match card_buttons(record, status, get) {
+        CardButtons::Import => Some(ActionRequest::ImportCacoward(record.id)),
+        CardButtons::GetOrImport(target) | CardButtons::Get(target) => {
+            Some(ActionRequest::Get(target))
+        }
+        CardButtons::Play(wad_id) => Some(ActionRequest::Play(wad_id)),
+        CardButtons::None => None,
+    }
+}
+
 fn action_button(
     ui: &mut egui::Ui,
     record: &CacowardRecord,
     status: EffectiveStatus,
     get: Option<GetTarget>,
-    waiting: bool,
+    state: ButtonState,
 ) -> Option<ActionRequest> {
-    let get_label = if waiting { "Waiting\u{2026}" } else { "Get" };
+    if state.importing {
+        ui.add(egui::Spinner::new().size(14.0))
+            .on_hover_text("Importing\u{2026}");
+        return None;
+    }
+    let get_label = if state.waiting {
+        "Waiting\u{2026}"
+    } else {
+        "Get"
+    };
+    let lead = state.leading;
     let mut action = None;
     match card_buttons(record, status, get) {
         CardButtons::Import => {
-            if primary_button(ui, "Import").clicked() {
+            if leading_button(ui, "Import", lead).clicked() {
                 action = Some(ActionRequest::ImportCacoward(record.id));
             }
         }
         CardButtons::GetOrImport(target) => {
-            if get_button(ui, get_label).clicked() {
+            if get_button(ui, get_label, lead).clicked() {
                 action = Some(ActionRequest::Get(target));
             }
             if secondary_button(ui, "Import").clicked() {
@@ -1071,7 +1244,7 @@ fn action_button(
             }
         }
         CardButtons::Get(target) => {
-            if get_button(ui, get_label).clicked() {
+            if get_button(ui, get_label, lead).clicked() {
                 action = Some(ActionRequest::Get(target));
             }
         }
@@ -1085,14 +1258,18 @@ fn action_button(
     action
 }
 
-/// [`primary_button`], saying what it does, since "Get" alone does not say how.
-fn get_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
-    primary_button(ui, label).on_hover_text(
+/// [`leading_button`], saying what it does, since "Get" alone does not say how.
+fn get_button(ui: &mut egui::Ui, label: &str, lead: bool) -> egui::Response {
+    leading_button(ui, label, lead).on_hover_text(
         "Opens the page for it in your browser, and watches your Downloads folder for the file.",
     )
 }
 
-fn primary_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
+/// The button that matters on an entry, filled in only on the one being looked at.
+fn leading_button(ui: &mut egui::Ui, label: &str, lead: bool) -> egui::Response {
+    if !lead {
+        return secondary_button(ui, label);
+    }
     ui.add(
         theme::small_primary_button(label)
             .corner_radius(4.0)
@@ -1107,7 +1284,7 @@ fn secondary_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
                 .size(11.0)
                 .color(theme::TEXT_PRIMARY),
         )
-        .fill(theme::BG_LIGHT)
+        .fill(theme::CONTROL_FILL)
         .stroke(egui::Stroke::new(1.0_f32, theme::BORDER_MED))
         .corner_radius(4.0)
         .min_size(Vec2::new(0.0, 22.0)),
@@ -1272,6 +1449,62 @@ mod tests {
                 CardButtons::Play(3)
             );
         }
+    }
+
+    /// Enter and a double click do what the button most in view says, so nobody has to learn
+    /// anything to use them.
+    #[test]
+    fn the_key_does_what_the_leading_button_says() {
+        let (mut record, _) = entry(2025, "winner");
+        record.id = 7;
+        let absent = EffectiveStatus::Absent;
+        assert!(matches!(
+            leading_action(&record, absent, Some(GetTarget::Cacoward(7))),
+            Some(ActionRequest::Get(GetTarget::Cacoward(7)))
+        ));
+
+        record.idgames_id = Some(42);
+        assert!(matches!(
+            leading_action(&record, absent, None),
+            Some(ActionRequest::ImportCacoward(7))
+        ));
+
+        record.wad_id = Some(3);
+        let completed = EffectiveStatus::Library(Status::Completed);
+        assert!(matches!(
+            leading_action(&record, completed, None),
+            Some(ActionRequest::Play(3))
+        ));
+    }
+
+    /// The button says it, and the count over the section does.
+    #[test]
+    fn only_what_is_in_the_library_or_out_of_the_reckoning_has_a_status_pill() {
+        assert!(!has_status_to_show(EffectiveStatus::Absent, true));
+        assert!(has_status_to_show(EffectiveStatus::Absent, false));
+        assert!(has_status_to_show(
+            EffectiveStatus::Library(Status::Unplayed),
+            true
+        ));
+    }
+
+    #[test]
+    fn what_is_finished_with_is_what_gets_hidden() {
+        let (record, _) = entry(2025, "winner");
+        assert!(!is_finished(&record, EffectiveStatus::Absent));
+        assert!(!is_finished(
+            &record,
+            EffectiveStatus::Library(Status::InProgress)
+        ));
+        assert!(is_finished(
+            &record,
+            EffectiveStatus::Library(Status::Completed)
+        ));
+        let unsupported = CacowardRecord {
+            supported: false,
+            ..record
+        };
+        assert!(is_finished(&unsupported, EffectiveStatus::Absent));
     }
 
     #[test]

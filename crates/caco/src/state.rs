@@ -446,6 +446,18 @@ pub struct CacowardsState {
 
     /// A list to go through, or posters to look at.
     pub layout: ViewLayout,
+
+    /// Leave out what has been finished, or can't be: a year as a list of what is left to do.
+    pub hide_finished: bool,
+
+    /// The selected entry moved with the keyboard, and should be brought into view.
+    pub reveal_entry: bool,
+
+    /// The selected year moved with the keyboard, and its chip should be brought into view.
+    pub reveal_year: bool,
+
+    /// Entries with an import under way, so that they say so and can't be asked for twice.
+    pub importing: HashSet<i64>,
 }
 
 impl Default for CacowardsState {
@@ -460,11 +472,35 @@ impl Default for CacowardsState {
             // something to render the moment the user clicks the nav item.
             needs_reload: true,
             layout: ViewLayout::List,
+            hide_finished: false,
+            reveal_entry: false,
+            reveal_year: false,
+            importing: HashSet::new(),
         }
     }
 }
 
 impl CacowardsState {
+    /// Go to a year, without carrying over which entry was selected in the last one.
+    pub fn choose_year(&mut self, year: i64) {
+        self.selected_year = Some(year);
+        self.selected_entry_pk = None;
+    }
+
+    /// Go `step` years along the strip: newest first, so further along is older.
+    pub fn step_year(&mut self, step: isize) {
+        let years = self.years();
+        let Some(at) = self
+            .selected_year
+            .and_then(|year| years.iter().position(|y| *y == year))
+        else {
+            return;
+        };
+        let to = at.saturating_add_signed(step).min(years.len() - 1);
+        self.choose_year(years[to]);
+        self.reveal_year = true;
+    }
+
     /// Distinct years present in the loaded entries, newest first.
     pub fn years(&self) -> Vec<i64> {
         let mut years: Vec<i64> = self.all_entries.iter().map(|(r, _)| r.year).collect();
@@ -555,6 +591,7 @@ impl AppState {
             active_collection: None,
             cacowards: CacowardsState {
                 layout: cacowards_layout,
+                hide_finished: persisted.cacowards_hide_finished,
                 ..CacowardsState::default()
             },
             stats: StatsState::default(),
@@ -1052,6 +1089,7 @@ impl AppState {
             sort_field_index: None,
             sort_desc: self.sort_desc,
             details_open: self.details_open,
+            cacowards_hide_finished: self.cacowards.hide_finished,
             status_filters: self.status_filters.iter().cloned().collect(),
             status_filter: None,
         }
@@ -1235,6 +1273,42 @@ mod tests {
         assert!(state.needs_reload);
         assert!(state.cacowards.needs_reload);
         assert!(state.stats.needs_reload);
+    }
+
+    #[test]
+    fn going_along_the_years_stops_at_the_ends_and_forgets_the_selected_entry() {
+        let (conn, mut state) = setup();
+        let add = |year: i64| {
+            caco_core::db::upsert_cacoward(
+                &conn,
+                &caco_core::db::NewCacoward {
+                    key: format!("{year}-winner-a"),
+                    year,
+                    category: "winner".to_string(),
+                    page_order: 1,
+                    wad_title: "A".to_string(),
+                    supported: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+        };
+        let first = add(2024);
+        add(2023);
+        state.reload_cacowards(&conn);
+        assert_eq!(state.cacowards.selected_year, Some(2024), "newest first");
+
+        state.cacowards.selected_entry_pk = Some(first);
+        state.cacowards.step_year(1);
+        assert_eq!(state.cacowards.selected_year, Some(2023));
+        assert_eq!(state.cacowards.selected_entry_pk, None);
+        assert!(state.cacowards.reveal_year);
+
+        state.cacowards.step_year(1);
+        assert_eq!(state.cacowards.selected_year, Some(2023), "the oldest");
+        state.cacowards.step_year(-1);
+        state.cacowards.step_year(-1);
+        assert_eq!(state.cacowards.selected_year, Some(2024), "the newest");
     }
 
     #[test]
