@@ -93,8 +93,18 @@ fn scratch_home() -> PathBuf {
     // Resolve the real DB before pointing CACO_HOME elsewhere.
     let real_db = caco_core::config::get_db_path();
     let scratch_db = home.join("library.db");
-    if real_db.exists() && real_db != scratch_db {
-        std::fs::copy(&real_db, &scratch_db).expect("copy library");
+    if real_db != scratch_db {
+        // Not last run's. With no real library to copy over it, which is CI, that is what the
+        // next run would start from, and CI runs this twice in a row. A `-wal` left beside a
+        // library it did not come from is no better.
+        for suffix in ["", "-wal", "-shm"] {
+            let mut stale = scratch_db.clone().into_os_string();
+            stale.push(suffix);
+            let _ = std::fs::remove_file(stale);
+        }
+        if real_db.exists() {
+            std::fs::copy(&real_db, &scratch_db).expect("copy library");
+        }
     }
 
     // Last run's logs, or this run's library would merge them straight back in, and its
