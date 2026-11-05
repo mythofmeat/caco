@@ -236,7 +236,7 @@ pub fn start_new_playthrough(conn: &Connection, wad_id: i64) -> crate::Result<i6
 /// Rename all stats files under `data_dir` so the stats reader no longer
 /// sees them (`stats.txt` → `stats.txt.archived`, numbered on collision).
 /// The sourceport then starts a fresh stats file on the next session.
-fn archive_stats_files(data_dir: &Path) {
+pub(crate) fn archive_stats_files(data_dir: &Path) {
     for path in find_all_stats_files(data_dir) {
         let base = format!("{}.archived", path.to_string_lossy());
         let mut target = PathBuf::from(&base);

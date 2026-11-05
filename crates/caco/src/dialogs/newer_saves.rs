@@ -13,6 +13,9 @@ use crate::theme;
 /// How many saves to name, of however many there are.
 const SHOWN: usize = 4;
 
+/// What sits outside the scrolling part: the title bar, the WAD's title, the button row.
+const CHROME: f32 = 120.0;
+
 pub struct NewerSavesDialogState {
     wad_id: i64,
     wad_title: String,
@@ -48,22 +51,26 @@ impl NewerSavesDialogState {
                 egui::RichText::new(&self.wad_title).heading(),
             );
             ui.add_space(4.0);
-            crate::dialogs::modal_body(ctx, ui, 120.0, |ui| {
-                ui.colored_label(theme::TEXT_SECONDARY, explanation(&self.saves));
-                ui.colored_label(
-                    theme::TEXT_SECONDARY,
-                    "If your sync hasn't finished, wait for it. Playing now carries on from \
-                     what is on this machine, and saving could overwrite the same slot.",
-                );
-                for line in file_lines(&self.saves.files) {
-                    ui.label(
-                        egui::RichText::new(line)
-                            .monospace()
-                            .small()
-                            .color(theme::TEXT_SECONDARY),
+            // Shrinks to what it holds, since this is one question with a few file names.
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, true])
+                .max_height(crate::dialogs::modal_body_height(ctx, CHROME))
+                .show(ui, |ui| {
+                    ui.colored_label(theme::TEXT_SECONDARY, explanation(&self.saves));
+                    ui.colored_label(
+                        theme::TEXT_SECONDARY,
+                        "If your sync hasn't finished, wait for it. Playing now carries on from \
+                         what is on this machine, and saving could overwrite the same slot.",
                     );
-                }
-            });
+                    for line in file_lines(&self.saves.files) {
+                        ui.label(
+                            egui::RichText::new(line)
+                                .monospace()
+                                .small()
+                                .color(theme::TEXT_SECONDARY),
+                        );
+                    }
+                });
 
             ui.add_space(8.0);
             ui.separator();

@@ -59,8 +59,19 @@ impl SyncWorker {
     }
 }
 
-pub(super) fn spawn(sender: BackgroundSender, db_path: PathBuf) -> SyncWorker {
+/// Requests made of a worker that has not started yet.
+pub(super) struct Inbox(mpsc::Receiver<Request>);
+
+/// A worker that can be asked for things, and the other end of that to start it with.
+pub(super) fn worker() -> (SyncWorker, Inbox) {
     let (requests, incoming) = mpsc::channel();
+    (SyncWorker { requests }, Inbox(incoming))
+}
+
+/// Start the passes. After the Cacowards dataset has been written, on a new library, or what
+/// is said about its rows would have nowhere to go until the second one.
+pub(super) fn spawn(inbox: Inbox, sender: BackgroundSender, db_path: PathBuf) {
+    let Inbox(incoming) = inbox;
     std::thread::spawn(move || {
         let conn = match caco_core::db::open_connection(&db_path) {
             Ok(conn) => conn,
@@ -108,7 +119,6 @@ pub(super) fn spawn(sender: BackgroundSender, db_path: PathBuf) -> SyncWorker {
             }
         }
     });
-    SyncWorker { requests }
 }
 
 /// One pass. Asks where everything is each time, so that a change in Settings applies at once.

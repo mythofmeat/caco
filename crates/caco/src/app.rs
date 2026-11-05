@@ -73,7 +73,7 @@ impl CacoApp {
     pub fn new(conn: Connection, db_path: PathBuf, ctx: &egui::Context) -> Self {
         let mut bg = BackgroundChannel::new();
         bg.set_ctx(ctx.clone());
-        let sync = sync::spawn(bg.sender(), db_path.clone());
+        let (sync, sync_inbox) = sync::worker();
 
         let mut app = Self {
             conn,
@@ -83,6 +83,7 @@ impl CacoApp {
             sync,
         };
         app.sync_cacowards();
+        sync::spawn(sync_inbox, app.bg.sender(), app.state.db_path.clone());
         file_check::spawn(app.bg.sender(), app.state.db_path.clone());
         mirrors::spawn_sync(app.bg.sender(), app.state.db_path.clone());
         app.spawn_idgames_index(false);
@@ -1010,6 +1011,8 @@ impl eframe::App for CacoApp {
                 AppMessage::PlayFinished { outcome } => {
                     self.state.play_state = PlayState::Idle;
                     self.state.invalidate_wad_views();
+                    // A session is what all of this is for. Worth getting out soon.
+                    self.sync.nudge();
 
                     match outcome {
                         // A missing file arrives as PlayUnavailable, so this is

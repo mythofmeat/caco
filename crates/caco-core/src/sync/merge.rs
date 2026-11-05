@@ -96,6 +96,8 @@ pub struct MergeReport {
 struct AfterCommit {
     /// A WAD's data key that changed, from what to what.
     renamed_keys: Vec<(String, String)>,
+    /// WADs another machine has started over, by data key and title.
+    restarted: Vec<(String, String)>,
 }
 
 /// Where a merge may put things. `companions` names where a companion's managed file
@@ -129,6 +131,12 @@ pub(super) fn merge(conn: &Connection, paths: &MergePaths<'_>) -> Result<MergeRe
     let mut incoming = parked_events(conn)?;
     collect_new_lines(conn, lines, &mut incoming, &mut report)?;
 
+    // Nothing new is nearly every pass, and working that out has taken no lock so far.
+    if incoming.is_empty() {
+        remember_read(conn, &read)?;
+        return Ok(report);
+    }
+
     let mut pending: Vec<Incoming> = incoming.into_values().collect();
     pending.sort_by(|a, b| a.clock.cmp(&b.clock));
 
@@ -144,6 +152,7 @@ pub(super) fn merge(conn: &Connection, paths: &MergePaths<'_>) -> Result<MergeRe
 
     remember_read(conn, &read)?;
     rename_data_dirs(paths.wad_data_dir, &after.renamed_keys);
+    archive_stats(paths.wad_data_dir, &after.restarted);
     Ok(report)
 }
 
@@ -199,52 +208,49 @@ fn parked_events(conn: &Connection) -> Result<HashMap<String, Incoming>> {
         .collect::<rusqlite::Result<_>>()?;
     let mut incoming = HashMap::with_capacity(lines.len());
     for line in lines {
-        add_line(line, &mut incoming);
+        if let Some(item) = read_line(line) {
+            incoming.entry(item.id.clone()).or_insert(item);
+        }
     }
     Ok(incoming)
 }
 
-/// Sort a line into `incoming`, and say if it could not be read.
-fn add_line(line: String, incoming: &mut HashMap<String, Incoming>) -> bool {
+/// A line of a log as something to apply, or `None` if nobody could have written it.
+fn read_line(line: String) -> Option<Incoming> {
     let (id, clock, event) = match parse_line(&line) {
         Line::Event(event) => (event.id.clone(), event.clock.clone(), Some(*event)),
         Line::TooNew { id, clock } => (id, clock, None),
-        Line::Unreadable => return false,
+        Line::Unreadable => return None,
     };
-    incoming.entry(id.clone()).or_insert(Incoming {
+    Some(Incoming {
         id,
         clock,
         line,
         event,
-    });
-    true
+    })
 }
 
+/// Add what has not been seen before to what is waiting to be applied.
 fn collect_new_lines(
     conn: &Connection,
     lines: Vec<String>,
     incoming: &mut HashMap<String, Incoming>,
     report: &mut MergeReport,
 ) -> Result<()> {
-    let seen: HashSet<String> = if lines.is_empty() {
-        HashSet::new()
-    } else {
-        conn.prepare("SELECT id FROM sync_seen")?
-            .query_map([], |row| row.get(0))?
-            .collect::<rusqlite::Result<_>>()?
-    };
+    if lines.is_empty() {
+        return Ok(());
+    }
+    let seen: HashSet<String> = conn
+        .prepare("SELECT id FROM sync_seen")?
+        .query_map([], |row| row.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
     for line in lines {
-        // Checked by id after parsing, since an unseen line is the unusual one here only
-        // in a folder where nothing has changed, and then this is not reached at all.
-        let mut one = HashMap::with_capacity(1);
-        if !add_line(line, &mut one) {
+        let Some(item) = read_line(line) else {
             report.unreadable += 1;
             continue;
-        }
-        for (id, item) in one {
-            if !seen.contains(&id) {
-                incoming.entry(id).or_insert(item);
-            }
+        };
+        if !seen.contains(&item.id) {
+            incoming.entry(item.id.clone()).or_insert(item);
         }
     }
     Ok(())
@@ -498,7 +504,15 @@ fn decode(field: &Field, value: &Value) -> Option<SqlValue> {
             {
                 return None;
             }
-            if field.role == Role::Name && text.contains(['/', '\\']) {
+            if field.role == Role::Name
+                && (text.contains(['/', '\\']) || text == "." || text == "..")
+            {
+                return None;
+            }
+            // It says what gets run, and a log is a file. A family's own executables are
+            // all there is reason to send, and any other is this machine's business.
+            if field.name == "custom_sourceport" && crate::sourceports::family_name(text).is_none()
+            {
                 return None;
             }
             if field.name == "data_key" && !config::is_data_key(text) {
@@ -585,6 +599,14 @@ fn apply_row(
     }
 
     if event.op == Op::Delete {
+        // Its sessions happened all the same, and the column is not one that cascades.
+        if entity.kind == "playthrough" {
+            tx.execute(
+                "UPDATE sessions SET playthrough_id = NULL WHERE playthrough_id = \
+                 (SELECT id FROM playthroughs WHERE uid = ?1)",
+                [&event.key],
+            )?;
+        }
         tx.execute(
             &format!("DELETE FROM {table} WHERE {key_column} = ?1"),
             [&event.key],
@@ -682,8 +704,15 @@ fn apply_row(
     }
 
     if is_wad {
-        if let Some(value) = stats {
-            apply_stats(tx, id, &entity_id, value.as_deref(), event, this_machine)?;
+        if let Some(value) = stats
+            && apply_stats(tx, id, &entity_id, value.as_deref(), event, this_machine)?
+            && event.machine != this_machine
+        {
+            after.restarted.push(tx.query_row(
+                "SELECT data_key, title FROM wads WHERE id = ?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?);
         }
         tx.execute(
             "UPDATE wads SET updated_at = ?1 WHERE id = ?2",
@@ -771,6 +800,8 @@ fn insert_row(tx: &Connection, table: &str, values: &[(&str, SqlValue)]) -> Resu
 ///
 /// Compared by plain clock, without the op's rank: an `add` holds no clear, since it leaves
 /// out what is empty, and a clear has to be ordered against every snapshot of either kind.
+///
+/// Returns whether this was news of a WAD being started over.
 fn apply_stats(
     tx: &Connection,
     wad_id: i64,
@@ -778,13 +809,13 @@ fn apply_stats(
     value: Option<&str>,
     event: &Event,
     this_machine: &str,
-) -> Result<()> {
+) -> Result<bool> {
     let clock = event.clock.to_string();
     let reset = clock_of(tx, entity_id, STATS_RESET)?;
     match value {
         None => {
             if reset.is_some_and(|reset| clock <= reset) {
-                return Ok(());
+                return Ok(false);
             }
             store_clock(tx, entity_id, STATS_RESET, &clock)?;
             tx.execute(
@@ -794,11 +825,11 @@ fn apply_stats(
         }
         Some(stats) => {
             if reset.is_some_and(|reset| clock <= reset) {
-                return Ok(());
+                return Ok(false);
             }
             if crate::wad_stats::stats_from_json(stats).is_err() {
                 tracing::warn!("ignoring stats for WAD {wad_id} that are not stats");
-                return Ok(());
+                return Ok(false);
             }
             tx.execute(
                 "INSERT INTO wad_stats_by_machine (wad_id, machine, is_this_machine, clock, stats) \
@@ -822,7 +853,7 @@ fn apply_stats(
         "UPDATE wads SET stats_snapshot = ?1 WHERE id = ?2 AND stats_snapshot IS NOT ?1",
         rusqlite::params![known, wad_id],
     )?;
-    Ok(())
+    Ok(value.is_none())
 }
 
 /// What is known about a WAD's maps from every machine, or from every other one. In an
@@ -1045,9 +1076,11 @@ fn apply_annotation(tx: &Connection, entity: &'static Entity, event: &Event) -> 
         return Ok(Outcome::Wait(Waiting::ForParent));
     };
 
+    // Everything it refers to before anything is written down. An event that has to wait
+    // is applied from the start next time, and a clock kept from this attempt would make
+    // the fields it covers look already seen, and lose them.
     let entity_id = entity_id(entity.kind, &event.key);
-    let stamp = stamp_of(event);
-    let mut changes = Vec::new();
+    let mut values = Vec::new();
     for (name, value) in &event.fields {
         let Some(field) = entity.field(name) else {
             continue;
@@ -1062,8 +1095,14 @@ fn apply_annotation(tx: &Connection, entity: &'static Entity, event: &Event) -> 
                 Resolved::NotYet => return Ok(Outcome::Wait(Waiting::ForParent)),
             };
         }
-        if newer(tx, &entity_id, name, &stamp)? {
-            store_clock(tx, &entity_id, name, &stamp)?;
+        values.push((field, decoded));
+    }
+
+    let stamp = stamp_of(event);
+    let mut changes = Vec::new();
+    for (field, decoded) in values {
+        if newer(tx, &entity_id, field.name, &stamp)? {
+            store_clock(tx, &entity_id, field.name, &stamp)?;
             changes.push((field.column, decoded));
         }
     }
@@ -1071,6 +1110,18 @@ fn apply_annotation(tx: &Connection, entity: &'static Entity, event: &Event) -> 
         update_row(tx, table, id, &changes)?;
     }
     Ok(Outcome::Applied)
+}
+
+/// Put this machine's stats files aside for each WAD another machine has started over, as
+/// [`crate::player::start_new_playthrough`] does for its own. They are still the last
+/// attempt's, and every read of stats prefers the disk, so the next launch here would take
+/// them for this one's progress, and could finish a playthrough that has only just begun.
+fn archive_stats(root: &Path, restarted: &[(String, String)]) {
+    for (key, title) in restarted {
+        if let Some(dir) = config::find_data_dir_in(root, key, title) {
+            crate::player::archive_stats_files(&dir);
+        }
+    }
 }
 
 /// Bring a WAD's folder along when the key that names it changes, which happens when two

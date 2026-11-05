@@ -226,10 +226,12 @@ impl SettingsDialogState {
                                 theme::TEXT_SECONDARY,
                                 // Resolved, not spelled: the config lives in
                                 // the data dir (and moves with CACO_HOME or
-                                // CACO_CONFIG), never in ~/.config.
+                                // CACO_CONFIG), and what is this machine's
+                                // somewhere that does not travel with it.
                                 egui::RichText::new(format!(
-                                    "Saved to {}",
-                                    caco_core::config::config_file().display()
+                                    "Saved to {}, and for this machine to {}",
+                                    caco_core::config::config_file().display(),
+                                    caco_core::config::machine_config_file().display()
                                 ))
                                 .size(11.0),
                             );

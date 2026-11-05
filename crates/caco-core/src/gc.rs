@@ -479,7 +479,7 @@ fn find_orphaned_data_dirs(
 
     let mut orphans: Vec<OrphanEntry> = candidates
         .into_iter()
-        .filter(|(key, _)| !existing.contains(key))
+        .filter(|(key, _)| !existing.contains(key) && is_known_to_be_gone(conn, key))
         .flat_map(|(_, paths)| paths)
         .map(|path| OrphanEntry {
             size: dir_size(&path),
@@ -525,7 +525,7 @@ fn find_orphaned_backups(conn: &Connection, backup_dir: &Path) -> Vec<OrphanEntr
         .filter(|b| {
             b.data_key
                 .as_ref()
-                .is_some_and(|key| !existing.contains(key))
+                .is_some_and(|key| !existing.contains(key) && is_known_to_be_gone(conn, key))
         })
         .map(|b| OrphanEntry {
             path: b.path,
@@ -533,6 +533,26 @@ fn find_orphaned_backups(conn: &Connection, backup_dir: &Path) -> Vec<OrphanEntr
             companion_id: None,
         })
         .collect()
+}
+
+/// Whether a key no row claims means there is nothing left to claim it.
+///
+/// A rowid does: it can only have come from this library, or from one this library came
+/// from, and that was always the rule. A uid does not. The folder is in a synced data dir,
+/// its WAD is in a log, and those can arrive in either order, so a folder with no row may
+/// be another machine's saves for a WAD this one has not heard of yet, and Clean deleting
+/// it would delete it on that machine too. So it takes a tombstone: the log saying the WAD
+/// was deleted for good.
+fn is_known_to_be_gone(conn: &Connection, key: &str) -> bool {
+    if key.bytes().all(|b| b.is_ascii_digit()) {
+        return true;
+    }
+    conn.query_row(
+        "SELECT 1 FROM sync_tombstones WHERE kind = 'wad' AND key = ?1",
+        [key],
+        |_| Ok(()),
+    )
+    .is_ok()
 }
 
 /// Which of `keys` still name a `wads` row — soft-deleted rows count, since a
@@ -798,6 +818,72 @@ mod tests {
         assert_eq!(measured.orphan_data_dirs.len(), 1);
         assert_eq!(measured.orphan_data_dirs[0].size, 70);
         assert_eq!(measured.total_size(), 70);
+    }
+
+    /// Its WAD is in a log that has not arrived, and those are another machine's saves.
+    #[test]
+    fn test_a_folder_for_a_wad_not_heard_of_yet_is_not_an_orphan() {
+        let sandbox = Sandbox::new();
+        let conn = setup();
+        sandbox.data_file("idgames-18000", "saves/slot1.dsg", 70);
+        sandbox.backup("idgames-18000_sunlust_20250101_000000.zip", 20);
+
+        let measured = plan(&conn, GcOptions::default(), &sandbox.paths).unwrap();
+        assert!(measured.orphan_data_dirs.is_empty());
+        assert!(measured.orphan_backups.is_empty());
+    }
+
+    /// Deleted for good, which is known, and now there is nothing it could be for.
+    #[test]
+    fn test_a_folder_for_a_wad_deleted_for_good_is_an_orphan() {
+        let sandbox = Sandbox::new();
+        let conn = setup();
+        let wad = add_wad(
+            &conn,
+            &NewWad::new("Sunlust", SourceType::Idgames).source_id("18000"),
+        )
+        .unwrap();
+        let key = key_of(&conn, wad);
+        assert_eq!(key, "idgames-18000");
+        sandbox.data_file(&key, "saves/slot1.dsg", 70);
+        sandbox.backup(&format!("{key}_sunlust_20250101_000000.zip"), 20);
+        assert!(
+            plan(&conn, GcOptions::default(), &sandbox.paths)
+                .unwrap()
+                .orphan_data_dirs
+                .is_empty()
+        );
+
+        db::delete_wad(&conn, wad, true).unwrap();
+        let measured = plan(&conn, GcOptions::default(), &sandbox.paths).unwrap();
+        assert_eq!(measured.orphan_data_dirs.len(), 1);
+        assert_eq!(measured.orphan_backups.len(), 1);
+    }
+
+    /// Two WADs with one key, each with its own folder under its own title.
+    #[test]
+    fn test_a_wad_is_measured_by_its_own_folder_when_it_shares_a_key() {
+        let sandbox = Sandbox::new();
+        let conn = setup();
+        for (id, title, status) in [
+            (117, "Ancient Aliens", "in-progress"),
+            (118, "Sunlust", "completed"),
+        ] {
+            conn.execute(
+                "INSERT INTO wads (id, title, source_type, status, data_key) \
+                 VALUES (?1, ?2, 'local', ?3, '117')",
+                rusqlite::params![id, title, status],
+            )
+            .unwrap();
+        }
+        for (dir, bytes) in [("117_ancient-aliens", 50), ("117_sunlust", 7)] {
+            write(&sandbox.paths.data_dir.join(dir).join("a.dsg"), bytes);
+        }
+
+        let measured = plan(&conn, GcOptions::default(), &sandbox.paths).unwrap();
+        assert_eq!(measured.wads.len(), 1);
+        assert_eq!(measured.wads[0].data_size, 7);
+        assert!(measured.orphan_data_dirs.is_empty());
     }
 
     #[test]

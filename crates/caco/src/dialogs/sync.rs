@@ -59,15 +59,19 @@ impl SyncDialogState {
     pub fn render(&mut self, ctx: &egui::Context, report: Option<&SyncReport>) -> SyncResult {
         let mut result = SyncResult::Open;
 
-        crate::dialogs::modal_window(ctx, "Sync", [600.0, 460.0]).show(ctx, |ui| {
-            crate::dialogs::modal_body(ctx, ui, FOOTER, |ui| {
-                ui.spacing_mut().item_spacing.y = 6.0;
-                self.intro(ui);
-                ui.add_space(8.0);
-                self.machines_table(ui);
-                ui.add_space(8.0);
-                self.status_lines(ui, report);
-            });
+        crate::dialogs::modal_window(ctx, "Sync", [600.0, 280.0]).show(ctx, |ui| {
+            // Shrinks to what it holds, which is not much for someone with two machines.
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, true])
+                .max_height(crate::dialogs::modal_body_height(ctx, FOOTER))
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 6.0;
+                    self.intro(ui);
+                    ui.add_space(8.0);
+                    self.machines_table(ui);
+                    ui.add_space(8.0);
+                    self.status_lines(ui, report);
+                });
 
             ui.add_space(8.0);
             ui.separator();
@@ -182,39 +186,46 @@ impl SyncDialogState {
             );
         }
         if self.waiting_for_parent > 0 {
-            ui.colored_label(
-                theme::TEXT_SECONDARY,
-                format!(
-                    "{} waiting for something they refer to, which hasn't arrived yet.",
-                    changes(self.waiting_for_parent)
-                ),
-            );
+            ui.colored_label(theme::TEXT_SECONDARY, waiting_line(self.waiting_for_parent));
         }
         if self.waiting_for_upgrade > 0 {
-            ui.colored_label(
-                theme::COLOR_WARNING,
-                format!(
-                    "{} from a newer version of caco. Update this machine to apply them.",
-                    changes(self.waiting_for_upgrade)
-                ),
-            );
+            ui.colored_label(theme::COLOR_WARNING, upgrade_line(self.waiting_for_upgrade));
         }
         if let Some(unreadable) = report
             .map(|report| report.merge.unreadable)
             .filter(|n| *n > 0)
         {
-            ui.colored_label(
-                theme::TEXT_SECONDARY,
-                format!("Passed over {unreadable} unreadable lines in the logs."),
-            );
+            ui.colored_label(theme::TEXT_SECONDARY, unreadable_line(unreadable));
         }
     }
 }
 
-fn changes(n: i64) -> String {
+fn waiting_line(n: i64) -> String {
     match n {
-        1 => "1 change".to_string(),
-        n => format!("{n} changes"),
+        1 => {
+            "1 change is waiting for something it refers to, which hasn't arrived yet.".to_string()
+        }
+        n => {
+            format!("{n} changes are waiting for things they refer to, which haven't arrived yet.")
+        }
+    }
+}
+
+fn upgrade_line(n: i64) -> String {
+    match n {
+        1 => {
+            "1 change is from a newer version of caco. Update this machine to apply it.".to_string()
+        }
+        n => format!(
+            "{n} changes are from a newer version of caco. Update this machine to apply them."
+        ),
+    }
+}
+
+fn unreadable_line(n: usize) -> String {
+    match n {
+        1 => "Passed over 1 line in the logs that can't be read.".to_string(),
+        n => format!("Passed over {n} lines in the logs that can't be read."),
     }
 }
 
@@ -235,9 +246,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_the_count_reads_as_a_person_would_say_it() {
-        assert_eq!(changes(1), "1 change");
-        assert_eq!(changes(3), "3 changes");
+    fn test_the_counts_read_as_a_person_would_say_them() {
+        assert_eq!(
+            waiting_line(1),
+            "1 change is waiting for something it refers to, which hasn't arrived yet."
+        );
+        assert_eq!(
+            waiting_line(3),
+            "3 changes are waiting for things they refer to, which haven't arrived yet."
+        );
+        assert!(upgrade_line(1).ends_with("to apply it."));
+        assert!(upgrade_line(2).ends_with("to apply them."));
+        assert!(unreadable_line(1).starts_with("Passed over 1 line "));
+        assert!(unreadable_line(2).starts_with("Passed over 2 lines "));
     }
 
     #[test]

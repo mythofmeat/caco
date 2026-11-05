@@ -747,6 +747,47 @@ fn test_a_wad_imported_again_after_a_purge_is_a_wad_again() {
     assert_same_library(&[&a, &b]);
 }
 
+/// Its sessions happened all the same.
+#[test]
+fn test_deleting_a_playthrough_leaves_its_sessions() {
+    let world = World::new();
+    let a = world.machine("a");
+    let wad = a.add("X");
+    let session = a.play(wad);
+    let playthrough = db::start_playthrough(&a.conn, wad).unwrap();
+    a.conn
+        .execute(
+            "UPDATE sessions SET playthrough_id = ?1 WHERE id = ?2",
+            [playthrough, session],
+        )
+        .unwrap();
+    a.sync();
+    let uid: String = a
+        .conn
+        .query_row("SELECT uid FROM playthroughs", [], |row| row.get(0))
+        .unwrap();
+
+    let b = world.machine("b");
+    b.sync();
+    assert_eq!(b.count("playthroughs"), 1);
+
+    world.write_line(
+        "other",
+        &world.event(
+            "other",
+            u64::MAX / 1_000_000_000,
+            Op::Delete,
+            "playthrough",
+            &uid,
+            json!({}),
+        ),
+    );
+    let report = b.sync();
+    assert_eq!(report.merge.waiting, 0);
+    assert_eq!(b.count("playthroughs"), 0);
+    assert_eq!(b.count("sessions"), 1);
+}
+
 #[test]
 fn test_deleting_a_completion_is_final_everywhere() {
     let world = World::new();
@@ -833,6 +874,21 @@ fn test_reading_a_log_again_changes_nothing() {
     assert_eq!(b.count("sessions"), 1);
 }
 
+/// A pass with nothing to do takes place every half a minute, and must not stand in the
+/// way of anything. It says so by not writing anything, which is what the lock is for.
+#[test]
+fn test_a_pass_with_nothing_to_do_writes_nothing() {
+    let world = World::new();
+    let a = world.machine("a");
+    a.add("X");
+    a.sync();
+    a.sync();
+
+    let before = a.conn.total_changes();
+    a.sync();
+    assert_eq!(a.conn.total_changes(), before);
+}
+
 /// What another machine says being applied here is not this machine's to say again.
 #[test]
 fn test_machines_do_not_echo_each_other() {
@@ -857,6 +913,9 @@ fn test_any_history_in_any_order_ends_the_same_everywhere() {
     for seed in 1u64..=stress_seeds() {
         let world = World::new();
         let machines = [world.machine("a"), world.machine("b"), world.machine("c")];
+        for machine in &machines {
+            add_cacowards(machine);
+        }
         let mut random = Random(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15));
 
         for _ in 0..200 {
@@ -882,8 +941,23 @@ fn test_any_history_in_any_order_ends_the_same_everywhere() {
 
         // And someone starting from nothing, who only has the files.
         let new = world.machine("new");
+        add_cacowards(&new);
         new.sync();
         assert_same_library(&[&machines[0], &new]);
+    }
+}
+
+/// The same few entries in every machine's dataset.
+fn add_cacowards(machine: &Machine) {
+    for n in 0..3 {
+        machine
+            .conn
+            .execute(
+                "INSERT INTO cacowards (key, year, category, page_order, wad_title) \
+                 VALUES (?1, 2025, 'winner', ?2, ?1)",
+                rusqlite::params![format!("2025-winner-{n}"), n],
+            )
+            .unwrap();
     }
 }
 
@@ -894,7 +968,7 @@ fn random_step(random: &mut Random, machine: &Machine, wad: Option<i64>) {
         return;
     };
     let word = ["a", "b", "c"][random.below(3)];
-    match random.below(23) {
+    match random.below(25) {
         0 => {
             machine.add(&format!("WAD {}", random.below(1000)));
         }
@@ -1007,6 +1081,26 @@ fn random_step(random: &mut Random, machine: &Machine, wad: Option<i64>) {
                 rusqlite::params![random.below(9) as i64, word, wad],
             )
             .unwrap();
+        }
+        // A Cacoward linked, pinned, unlinked, or marked as not playable.
+        22 => {
+            let key = format!("2025-winner-{}", random.below(3));
+            let entry: i64 = conn
+                .query_row("SELECT id FROM cacowards WHERE key = ?1", [&key], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            match random.below(3) {
+                0 => {
+                    db::link_wad(conn, entry, wad, random.below(2) == 0).unwrap();
+                }
+                1 => {
+                    db::unlink_wad(conn, entry).unwrap();
+                }
+                _ => {
+                    db::set_supported(conn, entry, random.below(2) == 0).unwrap();
+                }
+            }
         }
         21 => {
             let md5 = format!("{:032x}", random.below(3));
@@ -1283,6 +1377,62 @@ fn test_what_a_log_says_is_checked_before_it_gets_anywhere() {
     assert_eq!(wad.year, None);
     assert_eq!(wad.rating, None);
     assert_eq!(wad.status, Status::Unplayed);
+}
+
+/// What gets run can't be left to a file: any sourceport's name will do, and nothing else.
+#[test]
+fn test_a_log_cannot_choose_what_gets_run() {
+    let world = World::new();
+    world.write_line(
+        "other",
+        &world.event(
+            "other",
+            1_000,
+            Op::Add,
+            "wad",
+            "idgames-1",
+            json!({ "title": "X", "source_type": "idgames", "custom_sourceport": "sh" }),
+        ),
+    );
+    world.write_line(
+        "other",
+        &world.event(
+            "other",
+            1_001,
+            Op::Add,
+            "wad",
+            "idgames-2",
+            json!({ "title": "Y", "source_type": "idgames", "custom_sourceport": "uzdoom" }),
+        ),
+    );
+    let here = world.machine("here");
+    here.sync();
+    assert_eq!(here.wad_named("X").custom_sourceport, None);
+    assert_eq!(
+        here.wad_named("Y").custom_sourceport.as_deref(),
+        Some("uzdoom")
+    );
+}
+
+#[test]
+fn test_names_that_are_not_names_do_not_get_in() {
+    for name in ["..", "."] {
+        let world = World::new();
+        world.write_line(
+            "other",
+            &world.event(
+                "other",
+                1_000,
+                Op::Add,
+                "wad",
+                "idgames-1",
+                json!({ "title": "X", "source_type": "idgames", "filename": name }),
+            ),
+        );
+        let here = world.machine("here");
+        here.sync();
+        assert_eq!(here.wad_named("X").filename, None, "{name}");
+    }
 }
 
 #[test]
@@ -1648,6 +1798,65 @@ fn test_a_clear_and_newer_progress_end_the_same_in_either_order() {
     assert_same_library(&[&here, &fresh]);
 }
 
+/// The other machine's stats files are from the last attempt, and every read of stats
+/// prefers the disk. Left there, the next launch would take them for this one's progress,
+/// and could finish a playthrough on the spot.
+#[test]
+fn test_starting_over_elsewhere_puts_this_machines_stats_files_aside() {
+    let world = World::new();
+    let a = world.machine("a");
+    let b = world.machine("b");
+    let wad = a.add("Sunlust");
+    a.set(wad, "stats_snapshot", &stats(&[("MAP01", 1)]));
+    settle(&[&a, &b]);
+
+    let key = b.wad_named("Sunlust").data_key;
+    let folder = b.paths.wad_data_dir.join(format!("{key}_sunlust"));
+    fs::create_dir_all(&folder).unwrap();
+    fs::write(folder.join("stats.txt"), "last attempt").unwrap();
+    fs::write(folder.join("slot1.dsg"), "a save").unwrap();
+
+    db::update_wad(
+        &a.conn,
+        wad,
+        &WadUpdate::new().set_text("stats_snapshot", None),
+    )
+    .unwrap();
+    settle(&[&a, &b]);
+
+    assert!(!folder.join("stats.txt").exists());
+    assert_eq!(
+        fs::read_to_string(folder.join("stats.txt.archived")).unwrap(),
+        "last attempt"
+    );
+    assert!(folder.join("slot1.dsg").is_file(), "saves are not stats");
+}
+
+/// A library rebuilt from its own log has not been told anything new, and these files are
+/// the attempt that came after it.
+#[test]
+fn test_reading_ones_own_clear_again_leaves_the_stats_files_alone() {
+    let world = World::new();
+    let a = world.machine("a");
+    let wad = a.add("Sunlust");
+    a.set(wad, "stats_snapshot", &stats(&[("MAP01", 1)]));
+    db::update_wad(
+        &a.conn,
+        wad,
+        &WadUpdate::new().set_text("stats_snapshot", None),
+    )
+    .unwrap();
+    a.sync();
+
+    let again = world.machine("a");
+    let key = a.wad_named("Sunlust").data_key;
+    let folder = again.paths.wad_data_dir.join(format!("{key}_sunlust"));
+    fs::create_dir_all(&folder).unwrap();
+    fs::write(folder.join("stats.txt"), "this attempt").unwrap();
+    again.sync();
+    assert!(folder.join("stats.txt").is_file());
+}
+
 /// All written out together, after the clear's trigger has already been and gone.
 #[test]
 fn test_progress_cleared_before_it_was_written_out_is_gone() {
@@ -1795,6 +2004,57 @@ fn test_a_cacoward_link_and_flag_travel_and_the_facts_do_not() {
         .query_row("SELECT wad_id FROM cacowards", [], |row| row.get(0))
         .unwrap();
     assert_eq!(linked, None);
+}
+
+/// As happens with a library's first log: a Cacoward's row changed before its WAD's last
+/// did, so its event comes first, and has to wait for the WAD. Having to wait must not lose
+/// the part of it that could have gone straight in.
+#[test]
+fn test_an_event_that_has_to_wait_is_not_half_remembered() {
+    let world = World::new();
+    world.write_line(
+        "other",
+        &world.event(
+            "other",
+            2_000,
+            Op::Add,
+            "wad",
+            "idgames-1",
+            json!({ "title": "X", "source_type": "idgames" }),
+        ),
+    );
+    world.write_line(
+        "other",
+        &world.event(
+            "other",
+            1_000,
+            Op::Add,
+            "cacoward",
+            "2025-winner-x",
+            json!({ "wad": "idgames-1", "manual_override": 1, "supported_override": 0 }),
+        ),
+    );
+    let here = world.machine("here");
+    here.conn
+        .execute(
+            "INSERT INTO cacowards (key, year, category, page_order, wad_title) \
+             VALUES ('2025-winner-x', 2025, 'winner', 1, 'X')",
+            [],
+        )
+        .unwrap();
+    here.sync();
+
+    let (wad, pinned, supported): (i64, i64, i64) = here
+        .conn
+        .query_row(
+            "SELECT wad_id, manual_override, supported_override FROM cacowards",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(wad, here.wad_named("X").id);
+    assert_eq!(pinned, 1);
+    assert_eq!(supported, 0);
 }
 
 /// An entry this build's dataset does not have yet may be in the next one.
@@ -2349,4 +2609,164 @@ fn stress_seeds() -> u64 {
         .ok()
         .and_then(|seeds| seeds.parse().ok())
         .unwrap_or(8)
+}
+
+/// Everything above, on a real library: upgrade two copies of it, have them meet, and build
+/// a third machine from nothing but the logs. The original is only ever read.
+///
+/// `CACO_TEST_LIBRARY=~/.local/share/caco/library.db cargo test -p caco-core --lib \
+///     -- --ignored --nocapture a_real_library`
+#[test]
+#[ignore = "needs a real library, named by CACO_TEST_LIBRARY"]
+fn test_a_real_library_comes_through_all_of_it() {
+    let original = std::env::var("CACO_TEST_LIBRARY").expect("set CACO_TEST_LIBRARY");
+    let world = World::new();
+
+    let copy = |name: &str| -> Connection {
+        let path = world.dir.path().join(format!("{name}.db"));
+        let source = Connection::open_with_flags(
+            &original,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+        )
+        .unwrap();
+        source
+            .execute("VACUUM INTO ?1", [path.to_string_lossy()])
+            .unwrap();
+        db::open_connection(&path).unwrap()
+    };
+    let timed = |what: &str, step: &mut dyn FnMut()| {
+        let start = std::time::Instant::now();
+        step();
+        eprintln!("{what}: {:?}", start.elapsed());
+    };
+
+    let a_conn = copy("a");
+    let b_conn = copy("b");
+    timed("upgrading a copy", &mut || upgrade(&a_conn));
+    upgrade(&b_conn);
+    let a = world.machine_with("a", a_conn);
+    let b = world.machine_with("b", b_conn);
+
+    for table in ["wads", "sessions", "wad_completions", "playthroughs"] {
+        let missing: i64 = a
+            .conn
+            .query_row(
+                &format!("SELECT COUNT(*) FROM {table} WHERE uid IS NULL"),
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(missing, 0, "{table}");
+        eprintln!("{table}: {}", a.count(table));
+    }
+    let keys_are_rowids: i64 = a
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM wads WHERE data_key <> CAST(id AS TEXT)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(keys_are_rowids, 0, "every folder stays where it is");
+
+    // The first machine writes the log.
+    timed("writing the first log", &mut || {
+        assert_eq!(a.sync().merge.unreadable, 0);
+    });
+    let log_size: u64 = log::list_files(&world.log_dir())
+        .unwrap()
+        .iter()
+        .map(|file| file.size)
+        .sum();
+    eprintln!("log: {log_size} bytes");
+
+    // The second has a copy of the same library, and they meet as one.
+    timed("the second machine meeting it", &mut || {
+        b.sync();
+    });
+    settle(&[&a, &b]);
+    assert_same_library(&[&a, &b]);
+    assert_eq!(a.count("wads"), b.count("wads"));
+
+    // A third has nothing, and ends up with all of it. Nothing but the Cacowards dataset,
+    // that is, which the app writes before the first pass, and every machine has its own of.
+    let new = world.machine("new");
+    {
+        let mut entries = a
+            .conn
+            .prepare("SELECT key, year, category, page_order, wad_title FROM cacowards")
+            .unwrap();
+        let rows = entries
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            })
+            .unwrap();
+        for row in rows {
+            let (key, year, category, order, title) = row.unwrap();
+            new.conn
+                .execute(
+                    "INSERT INTO cacowards (key, year, category, page_order, wad_title) \
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    rusqlite::params![key, year, category, order, title],
+                )
+                .unwrap();
+        }
+    }
+    timed("building a library from the logs", &mut || {
+        let report = new.sync();
+        assert_eq!(report.merge.waiting, 0, "nothing should be left waiting");
+        assert_eq!(report.merge.too_new, 0);
+        assert_eq!(report.merge.unreadable, 0);
+    });
+    assert_same_library(&[&a, &new]);
+    assert_eq!(new.count("sessions"), a.count("sessions"));
+    assert_eq!(new.count("wad_completions"), a.count("wad_completions"));
+
+    // A pass with nothing to do should be nothing.
+    timed("a pass with nothing to do", &mut || {
+        let report = new.sync();
+        assert_eq!(report.written, 0);
+        assert_eq!(report.applied(), 0);
+    });
+
+    // What the library looks like from every view that reads it.
+    let stats = |machine: &Machine| {
+        let snapshot = db::get_stats_snapshot(&machine.conn, "month").unwrap();
+        (
+            snapshot.total_wads,
+            snapshot.total_sessions,
+            snapshot.total_playtime,
+            snapshot.total_completions,
+            snapshot.completed_wads,
+        )
+    };
+    assert_eq!(stats(&a), stats(&new));
+    let everything = |machine: &Machine| {
+        let mut titles: Vec<(String, Status, Vec<String>)> =
+            db::search_wads(&machine.conn, None, None, true, true, 0)
+                .unwrap()
+                .into_iter()
+                .map(|wad| (wad.title, wad.status, wad.tags))
+                .collect();
+        titles.sort_by(|x, y| x.0.cmp(&y.0));
+        titles
+    };
+    assert_eq!(everything(&a), everything(&new));
+    eprintln!("stats on every machine: {:?}", stats(&a));
+
+    // Nothing leaks that is only true of one machine.
+    let text = log::list_files(&world.log_dir())
+        .unwrap()
+        .iter()
+        .map(|file| fs::read_to_string(&file.path).unwrap())
+        .collect::<String>();
+    assert!(!text.contains("\"cached_path\""));
+    assert!(!text.contains("\"last_known_path\""));
+    assert!(!text.contains("\"file_mtime\""));
 }

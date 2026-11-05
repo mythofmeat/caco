@@ -131,13 +131,11 @@ fn group(rows: &[Row]) -> Vec<&[Row]> {
     let mut groups = Vec::new();
     let mut start = 0;
     for i in 1..=rows.len() {
+        // `rows[i - 1]` is the last of a group when the next does not continue it.
         if i == rows.len() || !rows[i].continues(&rows[i - 1]) {
             groups.push(&rows[start..i]);
             start = i;
         }
-    }
-    if rows.is_empty() {
-        groups.clear();
     }
     groups
 }
@@ -220,6 +218,14 @@ fn at_text(wall_ms: u64) -> String {
 /// Write everything waiting in the outbox to this machine's log, and return how many
 /// events that was.
 pub(super) fn write_outbox(conn: &Connection, log_dir: &Path, machine: &str) -> Result<usize> {
+    // Nothing to do on nearly every pass, and working that out takes no lock.
+    let waiting: bool = conn.query_row("SELECT EXISTS (SELECT 1 FROM sync_outbox)", [], |row| {
+        row.get(0)
+    })?;
+    if !waiting {
+        return Ok(0);
+    }
+
     stamp(conn, machine)?;
 
     let rows = read_rows(conn, "clock IS NOT NULL")?;
