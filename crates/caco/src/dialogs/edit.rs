@@ -6,7 +6,7 @@ use caco_core::db::wads::{self, WadUpdate};
 use rusqlite::Connection;
 
 use crate::dialogs::wad_file::WadFileSection;
-use crate::dialogs::{Dialog, Primary, form_label, tab_bar};
+use crate::dialogs::{Dialog, Primary, form_label, scroll_body, tab_bar};
 use crate::theme;
 
 // ---------------------------------------------------------------------------
@@ -239,16 +239,20 @@ impl EditDialogState {
                             ],
                         );
                     })
-                    .scroll(|ui| {
-                        ui.spacing_mut().item_spacing.y = 8.0;
-                        match self.active_tab {
-                            EditTab::Metadata => self.render_metadata_tab(ui),
-                            EditTab::Sourceport => self.render_sourceport_tab(ui),
-                            EditTab::Sources => self.render_sources_tab(ui),
-                            EditTab::Companions => {
-                                companion_action = self.render_companions_tab(ui);
+                    // The whole height whichever tab it is, so that the tabs don't move under
+                    // the pointer when the window would otherwise fit a shorter one.
+                    .fill(|ui, height| {
+                        scroll_body(ui, height, |ui| {
+                            ui.spacing_mut().item_spacing.y = 8.0;
+                            match self.active_tab {
+                                EditTab::Metadata => self.render_metadata_tab(ui),
+                                EditTab::Sourceport => self.render_sourceport_tab(ui),
+                                EditTab::Sources => self.render_sources_tab(ui),
+                                EditTab::Companions => {
+                                    companion_action = self.render_companions_tab(ui);
+                                }
                             }
-                        }
+                        });
                     })
                     .above(|ui| {
                         if let Some(err) = &self.error_message {

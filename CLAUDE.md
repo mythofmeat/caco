@@ -268,7 +268,7 @@ update, which `verify` would otherwise wave through to a release nobody looked a
   by at most 2 levels in 255, far inside kittest's default threshold.
 - **Nothing in a picture may depend on the machine or the day**: the library is made up,
   its dates are years old, it runs in UTC at a fixed path, and nothing it does reaches the
-  network. Which is why the charts end at the last month with anything in it rather than
+  network (`CACO_IDGAMES_API` and `CACO_DOOMWIKI_API` say where the API and the wiki are). Which is why the charts end at the last month with anything in it rather than
   today, and why Last Played gives a date past a year: "6y ago" would change on its own one
   day and fail a dependency update that had nothing to do with it. The version number moved out
   of the sidebar for the same reason, since it changed every surface on every release.
