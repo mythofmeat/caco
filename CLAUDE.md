@@ -264,8 +264,11 @@ update, which `verify` would otherwise wave through to a release nobody looked a
 - **When a change is meant to show**: `UPDATE_SNAPSHOTS=1 cargo test -p caco --test snapshots
   -- --ignored`, and commit the images. When it fails on CI, the `snapshot-changes` artifact has
   what it rendered and what differs.
-- **Any machine can make them.** On CI's lavapipe and a real Radeon, the same content differs
-  by at most 2 levels in 255, far inside kittest's default threshold.
+- **Any machine can make them**, because `THRESHOLD` in `snapshots.rs` is set from measuring
+  two. CI's lavapipe and a real Radeon do not agree: kittest's default failed 16 images of 32
+  on the same content, though nothing scored past 2 on its scale, where one level of grey is
+  0.5 and the two closest text colours are 196 apart. A failure's message counts the pixels at
+  each threshold, so read that before changing it.
 - **Nothing in a picture may depend on the machine or the day**: the library is made up,
   its dates are years old, it runs in UTC at a fixed path, and nothing it does reaches the
   network (`CACO_IDGAMES_API` and `CACO_DOOMWIKI_API` say where the API and the wiki are). Which is why the charts end at the last month with anything in it rather than

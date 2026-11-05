@@ -15,9 +15,9 @@
 //! the point. A failure leaves `*.new.png` and `*.diff.png` beside them, and CI uploads those
 //! as the `snapshot-changes` artifact.
 //!
-//! Images made on a real GPU compare equal to CI's software renderer: measured on this
-//! test's predecessor, identical content differs by at most 2 levels in 255, which is well
-//! inside kittest's default threshold. So they can be made on any machine.
+//! Images can be made on any machine, though not because machines agree: CI's software
+//! renderer and a real GPU disagree by a little on a lot of pixels. [`THRESHOLD`] is set from
+//! measuring by how much.
 //!
 //! Nothing here reads the real library, or anything else that differs between two machines
 //! or two days: the library is made up, its dates are long past and in UTC, the paths are
@@ -42,6 +42,17 @@ const HOME: &str = "/tmp/caco-snapshots";
 const NOWHERE: &str = "http://127.0.0.1:9/api.php";
 
 const SIZES: [[f32; 2]; 2] = [[1200.0, 800.0], [800.0, 400.0]];
+
+/// How far a pixel may be off before it counts, on kittest's scale: squared distance in YIQ,
+/// where one level of grey in 255 is 0.5, three levels are 4.5, the two closest text colours
+/// are 196 apart, and this theme's text on its background is about 20,000.
+///
+/// Between CI's lavapipe and a real Radeon, the same content failed kittest's default of 0.6
+/// on 16 images of 32, with one pixel past 1.5 and none past 2. A failure's message counts the
+/// pixels at each threshold, which is what to read before changing this. The price is that no
+/// threshold above that noise can see `BG_DARK` become `BG_WINDOW` (0.6) or `BG_MEDIUM` become
+/// `BG_HERO` (2.0), which are two to four levels apart on near-black.
+const THRESHOLD: f32 = 3.0;
 
 /// How long to leave worker threads to answer between rounds of frames.
 const WORKER_PAUSE: Duration = Duration::from_millis(60);
@@ -393,6 +404,7 @@ impl Shooter {
         let db_path = db_path.to_path_buf();
         let harness = egui_kittest::Harness::builder()
             .with_size(egui::Vec2::from(size))
+            .with_options(egui_kittest::SnapshotOptions::new().threshold(THRESHOLD))
             .build_eframe(|cc| {
                 caco::theme::apply_doom_theme(&cc.egui_ctx);
                 caco::app::CacoApp::new(conn, db_path, &cc.egui_ctx)
