@@ -100,8 +100,8 @@ struct AfterCommit {
     restarted: Vec<(String, String)>,
 }
 
-/// Where a merge may put things. `companions` names where a companion's managed file
-/// would be, which goes in its row: nothing writes there.
+/// Where a merge may touch things. `companion_dir` only names where a companion's managed
+/// file would be, for its row: nothing writes there.
 pub(super) struct MergePaths<'a> {
     pub log_dir: &'a Path,
     pub machine: &'a str,
@@ -401,6 +401,11 @@ fn note_own_stats(
     if reset.is_some_and(|reset| clock <= reset) {
         return Ok(());
     }
+    // What a row holds and nothing can read is nothing to work the row out from, and working
+    // it out would clear it. The row keeps it, as it would have before any of this.
+    if crate::wad_stats::stats_from_json(stats).is_err() {
+        return Ok(());
+    }
     conn.execute(
         "INSERT INTO wad_stats_by_machine (wad_id, machine, is_this_machine, clock, stats) \
          SELECT id, ?1, 1, ?2, ?3 FROM wads WHERE uid = ?4 \
@@ -677,12 +682,16 @@ fn apply_row(
             if has_file {
                 changes.retain(|(column, _)| !is_identity_column(entity, column));
             }
-            if is_wad {
-                note_data_key_change(tx, id, &changes, after)?;
-            }
+            let renamed = if is_wad {
+                data_key_change(tx, id, &changes)?
+            } else {
+                None
+            };
             if !changes.is_empty() {
                 update_row(tx, table, id, &changes)?;
             }
+            // Only now, since a folder must not move for a key that did not change.
+            after.renamed_keys.extend(renamed);
             id
         }
         None => {
@@ -714,8 +723,10 @@ fn apply_row(
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )?);
         }
+        // MAX, because events do not come in order, and a text comparison, because the
+        // spellings of a time in this column all start with the date.
         tx.execute(
-            "UPDATE wads SET updated_at = ?1 WHERE id = ?2",
+            "UPDATE wads SET updated_at = MAX(COALESCE(updated_at, ''), ?1) WHERE id = ?2",
             rusqlite::params![event.at, id],
         )?;
     }
@@ -738,29 +749,26 @@ fn wad_has_file(tx: &Connection, wad_id: i64) -> Result<bool> {
     )?)
 }
 
-fn note_data_key_change(
+/// The key a WAD's folder goes by, from what to what, if these changes change it.
+fn data_key_change(
     tx: &Connection,
     wad_id: i64,
     changes: &[(&'static str, SqlValue)],
-    after: &mut AfterCommit,
-) -> Result<()> {
+) -> Result<Option<(String, String)>> {
     let new_key = changes.iter().find_map(|(column, value)| match value {
         SqlValue::Text(key) if *column == "data_key" => Some(key.clone()),
         _ => None,
     });
     let Some(new_key) = new_key else {
-        return Ok(());
+        return Ok(None);
     };
     let old_key: Option<String> =
         tx.query_row("SELECT data_key FROM wads WHERE id = ?1", [wad_id], |row| {
             row.get(0)
         })?;
-    if let Some(old_key) = old_key
-        && old_key != new_key
-    {
-        after.renamed_keys.push((old_key, new_key));
-    }
-    Ok(())
+    Ok(old_key
+        .filter(|old_key| *old_key != new_key)
+        .map(|old_key| (old_key, new_key)))
 }
 
 fn update_row(tx: &Connection, table: &str, id: i64, values: &[(&str, SqlValue)]) -> Result<()> {

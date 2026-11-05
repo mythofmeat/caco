@@ -71,25 +71,44 @@ pub(super) fn worker() -> (SyncWorker, Inbox) {
 /// Start the passes. After the Cacowards dataset has been written, on a new library, or what
 /// is said about its rows would have nowhere to go until the second one.
 pub(super) fn spawn(inbox: Inbox, sender: BackgroundSender, db_path: PathBuf) {
-    let Inbox(incoming) = inbox;
     std::thread::spawn(move || {
-        let conn = match caco_core::db::open_connection(&db_path) {
-            Ok(conn) => conn,
-            Err(e) => {
-                sender.send(AppMessage::Notify(Notification::error(format!(
-                    "Could not open the library to sync it: {e}"
-                ))));
-                return;
-            }
-        };
+        run_worker(inbox, sender, &db_path, POLL, &|db_path| {
+            Ok((SyncPaths::from_config(db_path)?, StorePaths::from_config()))
+        });
+    });
+}
 
+/// Where a pass reads and writes. Asked each time, so that a change in Settings applies at
+/// once, and passed in for the reason `SyncPaths` is explicit: a test of the worker must not
+/// be able to reach the real folders.
+type FindPaths<'a> = &'a dyn Fn(&Path) -> caco_core::Result<(SyncPaths, StorePaths)>;
+
+fn run_worker(
+    inbox: Inbox,
+    sender: BackgroundSender,
+    db_path: &Path,
+    poll: Duration,
+    find_paths: FindPaths<'_>,
+) {
+    let Inbox(incoming) = inbox;
+    let conn = match caco_core::db::open_connection(db_path) {
+        Ok(conn) => conn,
+        Err(e) => {
+            sender.send(AppMessage::Notify(Notification::error(format!(
+                "Could not open the library to sync it: {e}"
+            ))));
+            return;
+        }
+    };
+
+    {
         let mut said = None;
         let mut request = None;
         // A library that has just been rebuilt, or whose keep dir has just arrived.
         let mut look_for_files = true;
         loop {
             let asked_for = matches!(request, Some(Request::Asked));
-            let run = pass(&conn, &db_path, asked_for, look_for_files);
+            let run = pass(&conn, db_path, asked_for, look_for_files, find_paths);
             look_for_files = false;
 
             // Only what has changed since it was last said, or someone with an unreachable
@@ -112,23 +131,24 @@ pub(super) fn spawn(inbox: Inbox, sender: BackgroundSender, db_path: PathBuf) {
                 let _ = done.send(());
                 return;
             }
-            match incoming.recv_timeout(POLL) {
+            match incoming.recv_timeout(poll) {
                 Ok(next) => request = Some(next),
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => return,
             }
         }
-    });
+    }
 }
 
-/// One pass. Asks where everything is each time, so that a change in Settings applies at once.
+/// One pass.
 fn pass(
     conn: &rusqlite::Connection,
     db_path: &Path,
     asked_for: bool,
     look_for_files: bool,
+    find_paths: FindPaths<'_>,
 ) -> SyncRun {
-    let paths = match SyncPaths::from_config(db_path) {
+    let (paths, stores) = match find_paths(db_path) {
         Ok(paths) => paths,
         Err(e) => {
             return SyncRun {
@@ -146,7 +166,7 @@ fn pass(
     let report = sync::run(conn, &paths);
     // Worth nothing if it fails, since all that means is a file not found until next time.
     let adopted = if look_for_files || report.changed() {
-        caco_core::identity::adopt_files(conn, &StorePaths::from_config()).unwrap_or(0)
+        caco_core::identity::adopt_files(conn, &stores).unwrap_or(0)
     } else {
         0
     };
@@ -211,7 +231,158 @@ pub(super) fn notification(run: &SyncRun) -> Option<Notification> {
 mod tests {
     use super::*;
     use crate::message::Severity;
+    use crate::workers::BackgroundChannel;
+    use caco_core::db;
     use caco_core::sync::{MergeReport, SyncReport};
+
+    /// A library on disk, for the worker to open, and folders of its own to work in.
+    struct Fixture {
+        dir: tempfile::TempDir,
+        db_path: PathBuf,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let dir = tempfile::tempdir().unwrap();
+            let db_path = dir.path().join("library.db");
+            let conn = db::open_connection(&db_path).unwrap();
+            db::init_db(&conn).unwrap();
+            Self { dir, db_path }
+        }
+
+        fn add_wad(&self, title: &str) {
+            let conn = db::open_connection(&self.db_path).unwrap();
+            db::add_wad(&conn, &db::NewWad::new(title, db::SourceType::Local)).unwrap();
+        }
+
+        /// The worker, on a thread, with a poll too long to do anything by itself.
+        fn start(&self) -> (SyncWorker, BackgroundChannel, std::thread::JoinHandle<()>) {
+            let channel = BackgroundChannel::new();
+            let sender = channel.sender();
+            let (worker, inbox) = worker();
+            let db_path = self.db_path.clone();
+            let root = self.dir.path().to_path_buf();
+            let thread = std::thread::spawn(move || {
+                run_worker(inbox, sender, &db_path, Duration::from_secs(3600), &|_| {
+                    Ok((
+                        SyncPaths {
+                            log_dir: root.join("sync"),
+                            machine: "here-00000000".to_string(),
+                            wad_data_dir: root.join("data"),
+                            companion_dir: root.join("companions"),
+                        },
+                        StorePaths {
+                            cache_dir: root.join("cache"),
+                            keep_dir: root.join("keep"),
+                        },
+                    ))
+                });
+            });
+            (worker, channel, thread)
+        }
+
+        fn log_has(&self, text: &str) -> bool {
+            let folder = self.dir.path().join("sync").join("here-00000000");
+            std::fs::read_dir(folder).is_ok_and(|entries| {
+                entries.flatten().any(|entry| {
+                    std::fs::read_to_string(entry.path())
+                        .unwrap()
+                        .contains(text)
+                })
+            })
+        }
+    }
+
+    /// Wait for a message from the worker, however long a loaded machine takes.
+    fn next_run(channel: &BackgroundChannel) -> SyncRun {
+        for _ in 0..500 {
+            for message in channel.drain() {
+                if let AppMessage::SyncFinished(run) = message {
+                    return run;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("the worker said nothing");
+    }
+
+    /// What closing the app relies on: nothing it has done since the last pass is left
+    /// unwritten once this returns, and the thread is done.
+    #[test]
+    fn test_finishing_gets_the_last_writes_out() {
+        let f = Fixture::new();
+        let (worker, channel, thread) = f.start();
+        next_run(&channel);
+
+        f.add_wad("Added Just Before Closing");
+        worker.finish();
+
+        assert!(f.log_has("Added Just Before Closing"));
+        thread.join().unwrap();
+    }
+
+    #[test]
+    fn test_a_nudge_gets_a_session_out_without_waiting_for_the_poll() {
+        let f = Fixture::new();
+        let (worker, channel, _thread) = f.start();
+        next_run(&channel);
+
+        f.add_wad("Just Played");
+        worker.nudge();
+        let run = next_run(&channel);
+
+        assert_eq!(run.report.written, 1);
+        assert!(!run.asked_for);
+        assert!(f.log_has("Just Played"));
+    }
+
+    /// Pressing the button gets an answer, even if the answer is nothing.
+    #[test]
+    fn test_being_asked_always_gets_an_answer() {
+        let f = Fixture::new();
+        let (worker, channel, _thread) = f.start();
+        next_run(&channel);
+
+        worker.asked();
+        let run = next_run(&channel);
+        assert!(run.asked_for);
+        assert!(!run.report.changed());
+    }
+
+    /// Dropping the worker is how the app ending looks to it, if `finish` never ran.
+    #[test]
+    fn test_the_thread_ends_when_nothing_can_ask_it_anything() {
+        let f = Fixture::new();
+        let (worker, _channel, thread) = f.start();
+        drop(worker);
+        thread.join().unwrap();
+    }
+
+    /// The second pass finds what a machine's first log left, and says nothing about it.
+    #[test]
+    fn test_a_pass_that_finds_nothing_says_nothing() {
+        let f = Fixture::new();
+        let (worker, channel, thread) = f.start();
+        next_run(&channel);
+
+        worker.nudge();
+        worker.nudge();
+        worker.finish();
+        thread.join().unwrap();
+
+        // At most the one a change from the first pass's report makes, and no news in it.
+        let later: Vec<SyncRun> = channel
+            .drain()
+            .into_iter()
+            .filter_map(|message| match message {
+                AppMessage::SyncFinished(run) => Some(run),
+                _ => None,
+            })
+            .collect();
+        assert!(later.len() <= 1, "{later:?}");
+        assert!(later.iter().all(|run| !run.report.changed()));
+        assert!(later.iter().all(|run| notification(run).is_none()));
+    }
 
     fn run(applied: &[(&str, usize)], asked_for: bool) -> SyncRun {
         SyncRun {

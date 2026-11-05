@@ -8,16 +8,15 @@
 //! # Why triggers
 //!
 //! Sessions, completions and status changes are written from all over: `db/`, raw SQL in
-//! `player.rs`, the dialogs. This module's first draft could have gone through them one
-//! at a time, and the next write path would have been the one that forgot. A stored
-//! `availability` column once drifted for months for that reason: `clear_cached_path`
-//! was the one writer that went around whatever kept it honest. A trigger cannot be
-//! gone around, by a new write path, by a test, or by someone in a `sqlite3` prompt, and
-//! it joins the transaction of the write it records, so a write and its record of
-//! having happened are committed or rolled back together.
+//! `player.rs`, the dialogs. Adding a call to each would only last until the next write
+//! path forgot. A stored `availability` column once drifted for months for that reason:
+//! `clear_cached_path` was the one writer that went around whatever kept it honest. A
+//! trigger cannot be gone around, by a new write path, by a test, or by someone in a
+//! `sqlite3` prompt, and it joins the transaction of the write it records, so a write and
+//! its record of having happened are committed or rolled back together.
 //!
-//! Hence no custom SQL functions here, or `library.db` could not be written to by anything
-//! but caco, and nothing in the triggers depends on anything beyond SQLite itself.
+//! They use nothing beyond SQLite's own functions, unlike what reads a mirror's rows, or
+//! `library.db` could not be written to by anything but caco.
 //!
 //! # What does not travel
 //!
@@ -25,8 +24,8 @@
 //! a sourceport or IWAD named by a path, which is what [`Role::Name`] leaves behind.
 //! Anything that can be worked out again from a file or a dataset also stays:
 //! `wad_analysis`, `wad_files`, what the mirrors hold, the facts about a Cacoward.
-//! [`LOCAL_COLUMNS`] and [`LOCAL_TABLES`] list all of it, and a test fails on a column
-//! that is on neither side, so adding one means deciding.
+//! `LOCAL_COLUMNS` and `LOCAL_TABLES` list all of it, and a test fails on a column that is
+//! on neither side, so adding one means deciding.
 
 use rusqlite::Connection;
 
@@ -436,7 +435,11 @@ pub static ENTITIES: &[Entity] = &[
 
 /// Columns of the tables above that are true of one machine, or can be worked out again.
 /// Each table's rowid is here because it is the reason for all of this.
-pub const LOCAL_COLUMNS: &[(&str, &[&str])] = &[
+///
+/// Nothing but a test reads these, or this one. They are what a test holds every column
+/// to, so that adding one means deciding which list it goes on.
+#[cfg(test)]
+const LOCAL_COLUMNS: &[(&str, &[&str])] = &[
     (
         "wads",
         &[
@@ -476,7 +479,8 @@ pub const LOCAL_COLUMNS: &[(&str, &[&str])] = &[
 ];
 
 /// Tables with nothing in them that belongs in a log.
-pub const LOCAL_TABLES: &[&str] = &[
+#[cfg(test)]
+const LOCAL_TABLES: &[&str] = &[
     // The database's own bookkeeping.
     "schema_migrations",
     "sync_outbox",
@@ -1558,19 +1562,19 @@ mod tests {
     #[test]
     fn test_triggers_are_only_rebuilt_when_they_differ() {
         let conn = setup();
-        assert_eq!(installed_triggers(&conn).unwrap().len(), {
-            let mut wanted = triggers();
-            wanted.sort();
-            wanted.len()
-        });
-        let before = conn.total_changes();
-        install(&conn).unwrap();
-        assert_eq!(conn.total_changes(), before);
-
-        conn.execute_batch("DROP TRIGGER sync_tags_insert").unwrap();
-        install(&conn).unwrap();
         let mut wanted = triggers();
         wanted.sort();
+        // What SQLite keeps is exactly what it was given, which is what makes this a read.
+        assert_eq!(installed_triggers(&conn).unwrap(), wanted);
+
+        // A build that has changed one, and a library that has lost one, both get them all.
+        conn.execute_batch("DROP TRIGGER sync_tags_insert").unwrap();
+        conn.execute_batch(
+            "DROP TRIGGER sync_tags_delete;
+             CREATE TRIGGER sync_tags_delete AFTER DELETE ON tags BEGIN SELECT 1; END",
+        )
+        .unwrap();
+        install(&conn).unwrap();
         assert_eq!(installed_triggers(&conn).unwrap(), wanted);
     }
 

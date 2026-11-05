@@ -646,11 +646,17 @@ static CONFIG: OnceLock<ArcSwap<Config>> = OnceLock::new();
 /// Does NOT touch the in-memory cache — use [`load_config`] or [`reload_config`]
 /// for that.
 fn read_config_from_disk() -> Config {
-    let path = config_file();
-    let mut table = match fs::read_to_string(&path) {
+    let mut cfg = read_config_files(&config_file(), &machine_config_file());
+    attach_saved_tokens(&mut cfg);
+    cfg
+}
+
+/// [`read_config_from_disk`] from explicit files, without the machine's tokens.
+fn read_config_files(path: &Path, machine_path: &Path) -> Config {
+    let mut table = match fs::read_to_string(path) {
         Ok(contents) => match contents.parse::<toml::Table>() {
             Ok(table) => table,
-            Err(e) => return invalid_config(&path, &e),
+            Err(e) => return invalid_config(path, &e),
         },
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => toml::Table::new(),
         Err(e) => {
@@ -659,14 +665,11 @@ fn read_config_from_disk() -> Config {
             return Config::default();
         }
     };
-    overlay_machine_settings(&mut table, read_machine_settings());
+    overlay_machine_settings(&mut table, read_machine_settings(machine_path));
 
     match toml::Value::Table(table).try_into::<Config>() {
-        Ok(mut cfg) => {
-            attach_saved_tokens(&mut cfg);
-            cfg
-        }
-        Err(e) => invalid_config(&path, &e),
+        Ok(cfg) => cfg,
+        Err(e) => invalid_config(path, &e),
     }
 }
 
@@ -682,9 +685,8 @@ fn invalid_config(path: &Path, error: &dyn std::fmt::Display) -> Config {
 /// What this machine's own file says, if it has one yet. A file that cannot be read is
 /// left alone and said to be unusable, rather than taken for an empty one, which saving
 /// any setting would then overwrite.
-fn read_machine_settings() -> Option<toml::Table> {
-    let path = machine_config_file();
-    let contents = match fs::read_to_string(&path) {
+fn read_machine_settings(path: &Path) -> Option<toml::Table> {
+    let contents = match fs::read_to_string(path) {
         Ok(contents) => contents,
         Err(e) => {
             if e.kind() != std::io::ErrorKind::NotFound {
@@ -854,15 +856,18 @@ fn minimal_toml(config: &Config) -> crate::Result<String> {
 /// The machine's file first, so that dying in between leaves a setting in both places,
 /// which reads the same, rather than in neither.
 pub fn save_config(config: &Config) -> crate::Result<()> {
+    write_config_files(config, &config_file(), &machine_config_file())
+}
+
+/// [`save_config`] to explicit files.
+fn write_config_files(config: &Config, path: &Path, machine_path: &Path) -> crate::Result<()> {
     let (portable, machine) = split_machine_settings(minimal_table(config)?);
 
-    let machine_path = machine_config_file();
     if let Some(parent) = machine_path.parent() {
         fs::create_dir_all(parent)?;
     }
     fs::write(machine_path, toml::to_string_pretty(&machine)?)?;
 
-    let path = config_file();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -1606,6 +1611,85 @@ helion = ["-loglevel", "info"]
         );
     }
 
+    /// What an existing install's first save after this does, on disk: moves them across,
+    /// with nothing changing as far as anything reading the settings can tell.
+    #[test]
+    fn test_saving_moves_a_machines_settings_out_of_the_file_that_travels() {
+        let dir = tempfile::tempdir().unwrap();
+        let (portable, machine) = (
+            dir.path().join("config.toml"),
+            dir.path().join("m/machine.toml"),
+        );
+        fs::write(
+            &portable,
+            "sourceport = \"nyan-doom\"\ncache_dir = \"/fast\"\nlink_mode = \"copy\"\n",
+        )
+        .unwrap();
+
+        let before = read_config_files(&portable, &machine);
+        assert_eq!(before.sourceport, "nyan-doom");
+        assert!(!machine.exists(), "reading settings writes nothing");
+
+        write_config_files(&before, &portable, &machine).unwrap();
+
+        let travels = fs::read_to_string(&portable).unwrap();
+        assert!(travels.contains("link_mode"));
+        assert!(!travels.contains("sourceport"), "{travels}");
+        assert!(!travels.contains("cache_dir"), "{travels}");
+        let stays = fs::read_to_string(&machine).unwrap();
+        assert!(
+            stays.contains("sourceport") && stays.contains("cache_dir"),
+            "{stays}"
+        );
+
+        let after = read_config_files(&portable, &machine);
+        assert_eq!(after.sourceport, "nyan-doom");
+        assert_eq!(after.cache_dir, "/fast");
+        assert_eq!(after.link_mode, "copy");
+    }
+
+    /// The conflict this exists to end: a config another machine wrote, arriving by sync,
+    /// says nothing about what this one has set up.
+    #[test]
+    fn test_another_machines_settings_arriving_change_nothing_here() {
+        let dir = tempfile::tempdir().unwrap();
+        let (portable, machine) = (
+            dir.path().join("config.toml"),
+            dir.path().join("machine.toml"),
+        );
+        let mine = Config {
+            sourceport: "/usr/bin/nyan-doom".to_string(),
+            ..Config::default()
+        };
+        write_config_files(&mine, &portable, &machine).unwrap();
+
+        fs::write(
+            &portable,
+            "sourceport = \"/Applications/Nyan.app\"\nlink_mode = \"copy\"\n",
+        )
+        .unwrap();
+
+        let read = read_config_files(&portable, &machine);
+        assert_eq!(read.sourceport, "/usr/bin/nyan-doom");
+        assert_eq!(read.link_mode, "copy", "and the rest of it still travels");
+    }
+
+    /// Damaged is not empty, or saving a setting would write over what could be fixed by hand.
+    #[test]
+    fn test_a_damaged_machine_file_is_ignored_rather_than_taken_for_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let (portable, machine) = (
+            dir.path().join("config.toml"),
+            dir.path().join("machine.toml"),
+        );
+        fs::write(&portable, "sourceport = \"from-the-config\"\n").unwrap();
+        fs::write(&machine, "this is [not toml").unwrap();
+        assert_eq!(
+            read_config_files(&portable, &machine).sourceport,
+            "from-the-config"
+        );
+    }
+
     #[test]
     fn test_settings_split_into_what_travels_and_what_stays() {
         let cfg = Config {
@@ -1639,15 +1723,8 @@ helion = ["-loglevel", "info"]
 
     #[test]
     fn test_every_machine_key_is_a_real_setting() {
-        let table = match toml::Value::try_from(Config {
-            // Absent from a default's table only for being empty, which TOML has no way
-            // to say of `Option`-free fields, so nothing here needs setting.
-            ..Config::default()
-        })
-        .unwrap()
-        {
-            toml::Value::Table(table) => table,
-            _ => unreachable!(),
+        let toml::Value::Table(table) = toml::Value::try_from(Config::default()).unwrap() else {
+            panic!("a config is a table");
         };
         for key in MACHINE_KEYS {
             assert!(table.contains_key(*key), "{key}");

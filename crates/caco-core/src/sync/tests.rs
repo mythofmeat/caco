@@ -14,6 +14,8 @@ use serde_json::{Value, json};
 use super::capture::{self, ENTITIES, Shape};
 use super::clock::Clock;
 use super::event::{Event, Op, VERSION};
+use super::log;
+use super::merge;
 use super::saves::{SaveEntry, newer_saves_elsewhere, read_saves, record_saves};
 use super::*;
 use crate::db::{self, NewWad, SourceType, Status, WadUpdate};
@@ -1716,6 +1718,24 @@ fn test_a_machine_on_its_own_follows_its_own_stats() {
     a.set(wad, "stats_snapshot", &disk);
     a.sync();
     assert_eq!(exits(&a, "X").keys().collect::<Vec<_>>(), ["MAP02"]);
+}
+
+/// Logging it must not cost what it holds, whatever that is.
+#[test]
+fn test_stats_nothing_can_read_are_left_where_they_are() {
+    let world = World::new();
+    let a = world.machine("a");
+    let wad = a.add("X");
+    a.set(wad, "stats_snapshot", "not stats");
+    a.sync();
+    assert_eq!(
+        a.wad_named("X").stats_snapshot.as_deref(),
+        Some("not stats")
+    );
+
+    let b = world.machine("b");
+    b.sync();
+    assert_eq!(b.wad_named("X").stats_snapshot, None);
 }
 
 /// A second machine's map counts towards finishing it, here as anywhere.

@@ -266,7 +266,27 @@ pub(super) fn write_outbox(conn: &Connection, log_dir: &Path, machine: &str) -> 
         "DELETE FROM sync_outbox WHERE seq <= ?1 AND clock IS NOT NULL",
         [last_seq],
     )?;
+    give_back_space(conn);
     Ok(events)
+}
+
+/// A library's first log passes through the outbox whole, which leaves a real library
+/// twice the size it was, in a directory that is meant to stay small enough to copy. Only
+/// after something that large: an ordinary write leaves little behind, and it gets reused.
+///
+/// Worth nothing if it fails, which only leaves the file larger than it needs to be.
+fn give_back_space(conn: &Connection) {
+    const WORTH_IT: i64 = 8 * 1024 * 1024;
+    let free = || -> rusqlite::Result<i64> {
+        let pages: i64 = conn.query_row("PRAGMA freelist_count", [], |row| row.get(0))?;
+        let size: i64 = conn.query_row("PRAGMA page_size", [], |row| row.get(0))?;
+        Ok(pages * size)
+    };
+    if free().is_ok_and(|free| free >= WORTH_IT)
+        && let Err(e) = conn.execute_batch("VACUUM; PRAGMA wal_checkpoint(TRUNCATE);")
+    {
+        tracing::warn!("could not compact the library: {e}");
+    }
 }
 
 /// `<log>/<machine>/<yyyy-mm>.jsonl`, which only this machine ever writes to.
@@ -582,6 +602,30 @@ mod tests {
         assert_eq!(notes.clock.to_string(), stamped.1);
         assert!(notes.fields.get("rating").is_none());
         assert!(events.iter().any(|e| e.fields.get("rating").is_some()));
+    }
+
+    /// A first log of any size goes through the outbox, which must not leave the library
+    /// twice the size. A real one came out at 27 MB from 12.
+    #[test]
+    fn test_a_large_first_log_does_not_leave_the_library_larger() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = db::open_connection(&dir.path().join("library.db")).unwrap();
+        db::init_db(&conn).unwrap();
+        let big = "x".repeat(16 * 1024 * 1024);
+        conn.execute(
+            "INSERT INTO sync_outbox (op, kind, key, fields) VALUES ('set', 'wad', 'a', ?1)",
+            [serde_json::json!({ "notes": big }).to_string()],
+        )
+        .unwrap();
+
+        write_outbox(&conn, dir.path(), MACHINE).unwrap();
+
+        let free: i64 = conn
+            .query_row("PRAGMA freelist_count", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(free, 0);
+        let size = fs::metadata(dir.path().join("library.db")).unwrap().len();
+        assert!(size < 4 * 1024 * 1024, "{size} bytes");
     }
 
     /// An unwritable folder stops nothing, and loses nothing: it is all still there for

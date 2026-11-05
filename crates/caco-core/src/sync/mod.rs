@@ -30,12 +30,12 @@
 //! Moving the logs is left to whatever moves the rest of the data dir, so caco talks to
 //! no remote itself.
 
-pub mod capture;
+pub(crate) mod capture;
 pub mod clock;
 pub mod event;
-pub mod log;
+mod log;
 pub mod machine;
-pub mod merge;
+pub(crate) mod merge;
 pub mod saves;
 
 #[cfg(test)]
