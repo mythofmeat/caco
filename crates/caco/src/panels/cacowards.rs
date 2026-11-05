@@ -500,7 +500,7 @@ fn draw_year_chip(
         rect.center() + Vec2::new(0.0, 8.0),
         egui::Align2::CENTER_CENTER,
         format!("{done}/{total}"),
-        egui::FontId::proportional(10.0),
+        egui::FontId::proportional(11.0),
         sub,
     );
 }
@@ -1319,7 +1319,7 @@ fn paint_swept_chip(ui: &mut egui::Ui) {
             ui.label(
                 egui::RichText::new("✓ SWEPT")
                     .color(theme::GOLD)
-                    .size(10.0)
+                    .size(11.0)
                     .strong()
                     .extra_letter_spacing(1.0),
             );

@@ -791,3 +791,22 @@ fn help_says_how_to_write_a_filter() {
     press(&mut app, egui::Key::F1);
     assert!(app.query_by_label("^status:abandoned").is_some());
 }
+
+/// Five in a row, wherever they are. They were in a column in Edit, once, and only looking at
+/// a picture of it showed that.
+#[test]
+fn the_stars_for_a_rating_go_across_in_the_panel_and_in_edit() {
+    let db_path = described_library("stars-across");
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+    let in_a_row = |app: &Harness| {
+        let first = app.get_all_by_label("Rate 1 star").last().unwrap().rect();
+        let last = app.get_all_by_label("Rate 5 stars").last().unwrap().rect();
+        assert_eq!(first.min.y, last.min.y, "{first:?} {last:?}");
+        assert!(first.max.x <= last.min.x, "{first:?} {last:?}");
+    };
+    in_a_row(&app);
+
+    press(&mut app, egui::Key::E);
+    assert!(app.query_by_label("Save Changes").is_some());
+    in_a_row(&app);
+}

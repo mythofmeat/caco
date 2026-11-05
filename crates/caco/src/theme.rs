@@ -309,7 +309,7 @@ pub fn severity_color(severity: crate::message::Severity) -> Color32 {
 pub fn rating_picker(ui: &mut egui::Ui, rating: Option<i32>, size: f32) -> Option<Option<i32>> {
     let current = rating.unwrap_or(0);
     let mut changed = None;
-    ui.scope(|ui| {
+    ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 1.0;
         let stars: Vec<egui::Response> = (1..=5)
             .map(|star| {
@@ -670,6 +670,11 @@ pub fn sidebar_collection_item(ui: &mut egui::Ui, name: &str, is_active: bool) -
 // Theme application
 // ---------------------------------------------------------------------------
 
+/// See `apply_doom_theme`.
+const UI_FONT_SCALE: f32 = 0.92;
+/// The smallest anything is written.
+const SMALL_TEXT: f32 = 11.0;
+
 /// Apply the warm dark theme to the egui context.
 pub fn apply_doom_theme(ctx: &egui::Context) {
     // Bundle Noto Sans Symbols 1 + 2 as fallbacks. The two fonts are designed
@@ -679,6 +684,23 @@ pub fn apply_doom_theme(ctx: &egui::Context) {
     // bundled Ubuntu-Light nor NotoEmoji include plain dingbats like U+2713,
     // so without this any such character renders as tofu.
     let mut fonts = egui::FontDefinitions::default();
+    // Everything is read in Noto Sans rather than the Ubuntu Light that comes with egui, whose
+    // thin strokes in a muted colour on a dark background were hard going at small sizes. A
+    // little smaller than it says, since it runs larger for its size: at Ubuntu's sizes it made
+    // every control a line-height taller, and less fit in a dialog at 800x400.
+    fonts.font_data.insert(
+        "noto-sans".to_owned(),
+        std::sync::Arc::new(
+            egui::FontData::from_static(include_bytes!("../assets/fonts/NotoSans-Regular.ttf"))
+                .tweak(egui::FontTweak {
+                    scale: UI_FONT_SCALE,
+                    ..Default::default()
+                }),
+        ),
+    );
+    if let Some(family) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+        family.insert(0, "noto-sans".to_owned());
+    }
     fonts.font_data.insert(
         "symbols2".to_owned(),
         std::sync::Arc::new(egui::FontData::from_static(include_bytes!(
@@ -776,6 +798,11 @@ pub fn apply_doom_theme(ctx: &egui::Context) {
     ctx.all_styles_mut(|style| {
         style.spacing.item_spacing = egui::vec2(8.0, 4.0);
         style.spacing.button_padding = egui::vec2(10.0, 4.0);
+        // Small text is for what is worth reading, and 9 points is not worth trying to read.
+        style.text_styles.insert(
+            egui::TextStyle::Small,
+            egui::FontId::proportional(SMALL_TEXT),
+        );
     });
 }
 

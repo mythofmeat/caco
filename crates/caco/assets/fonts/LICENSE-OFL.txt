@@ -1,3 +1,6 @@
+Noto Sans
+Copyright 2022 The Noto Project Authors (https://github.com/notofonts/latin-greek-cyrillic)
+
 Noto Sans Symbols
 Copyright 2022 The Noto Project Authors (https://github.com/notofonts/symbols)
 
