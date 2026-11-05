@@ -702,7 +702,9 @@ fn test_a_purge_reaches_every_machine_and_stays() {
     assert_same_library(&[&a, &b, &new]);
 }
 
-/// Played on one machine, which had not heard it was deleted on the other.
+/// Played on one machine, which had not heard it was deleted on the other. What it did is
+/// about something that is not coming back, and must not sit there waiting for it, on the
+/// machine that deleted it or the one still playing it.
 #[test]
 fn test_what_was_on_its_way_about_a_purged_wad_does_not_wait_for_ever() {
     let world = World::new();
@@ -715,16 +717,54 @@ fn test_what_was_on_its_way_about_a_purged_wad_does_not_wait_for_ever() {
     db::delete_wad(&a.conn, wad, true).unwrap();
     a.sync();
 
+    // All before it reads the purge, which only the next pass does.
     let session = db::start_session(&b.conn, there, None, None).unwrap();
-    b.sync();
     db::end_session(&b.conn, session, None, Some(0)).unwrap();
     b.set(there, "notes", "still playing");
+    db::add_tag(&b.conn, there, "x").unwrap();
+    db::add_wad_completion(&b.conn, there, None, None, None).unwrap();
+    assert_eq!(b.count("sync_outbox"), 5);
+
     settle(&[&a, &b]);
 
     assert!(!a.has_wad("X"));
     assert!(!b.has_wad("X"));
-    assert_eq!(a.count("sync_parked"), 0);
-    assert_eq!(b.count("sync_parked"), 0);
+    assert_eq!(a.count("sessions"), 0);
+    assert_eq!(
+        a.count("sync_parked"),
+        0,
+        "nothing on the machine that purged it"
+    );
+    assert_eq!(
+        b.count("sync_parked"),
+        0,
+        "nothing on the one that was playing it"
+    );
+    assert_same_library(&[&a, &b]);
+
+    // Nor for someone reading all of it for the first time.
+    let new = world.machine("new");
+    assert_eq!(new.sync().merge.waiting, 0);
+    assert_same_library(&[&a, &new]);
+}
+
+/// An import on a machine that had not heard is not a reason to bring it back, or a purge
+/// would only hold until the next machine happened to import the same thing.
+#[test]
+fn test_a_purge_beats_an_import_that_had_not_heard_of_it() {
+    let world = World::new();
+    let a = world.machine("a");
+    let b = world.machine("b");
+    let wad = import_sunlust(&a);
+    db::delete_wad(&a.conn, wad, true).unwrap();
+    a.sync();
+
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    import_sunlust(&b);
+    settle(&[&a, &b]);
+
+    assert!(!a.has_wad("Sunlust"));
+    assert!(!b.has_wad("Sunlust"));
     assert_same_library(&[&a, &b]);
 }
 
@@ -2074,6 +2114,69 @@ fn test_an_event_that_has_to_wait_is_not_half_remembered() {
         .unwrap();
     assert_eq!(wad, here.wad_named("X").id);
     assert_eq!(pinned, 1);
+    assert_eq!(supported, 0);
+}
+
+/// Sync tools deliver files whenever they like. The older word arriving later is still older.
+#[test]
+fn test_an_older_cacoward_link_does_not_undo_a_newer_one_that_arrived_first() {
+    let world = World::new();
+    let here = world.machine("here");
+    here.conn
+        .execute(
+            "INSERT INTO cacowards (key, year, category, page_order, wad_title) \
+             VALUES ('2025-winner-x', 2025, 'winner', 1, 'X')",
+            [],
+        )
+        .unwrap();
+    for (id, title) in [("idgames-1", "One"), ("idgames-2", "Two")] {
+        world.write_line(
+            "other",
+            &world.event(
+                "other",
+                1_000,
+                Op::Add,
+                "wad",
+                id,
+                json!({ "title": title, "source_type": "idgames" }),
+            ),
+        );
+    }
+    world.write_line(
+        "later",
+        &world.event(
+            "later",
+            3_000,
+            Op::Set,
+            "cacoward",
+            "2025-winner-x",
+            json!({ "wad": "idgames-2", "supported_override": 0 }),
+        ),
+    );
+    here.sync();
+
+    world.write_line(
+        "earlier",
+        &world.event(
+            "earlier",
+            2_000,
+            Op::Set,
+            "cacoward",
+            "2025-winner-x",
+            json!({ "wad": "idgames-1", "supported_override": 1 }),
+        ),
+    );
+    here.sync();
+
+    let (wad, supported): (i64, i64) = here
+        .conn
+        .query_row(
+            "SELECT wad_id, supported_override FROM cacowards",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(wad, here.wad_named("Two").id);
     assert_eq!(supported, 0);
 }
 
