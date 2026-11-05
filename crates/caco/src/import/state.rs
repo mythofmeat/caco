@@ -434,12 +434,20 @@ impl FormKind {
                 "For anything that is not on idgames or the forums. caco downloads it from this \
                  link when you first play it."
             }
-            Self::Local => {
+            Self::Local if drops_can_arrive(std::env::var_os("WAYLAND_DISPLAY").is_some()) => {
                 "A WAD or an archive you already have. Browse for it, or drop it anywhere on this \
                  window."
             }
+            Self::Local => "A WAD or an archive you already have.",
         }
     }
+}
+
+/// Whether a file dropped on the window will reach it, which winit has no way of doing under
+/// Wayland: it would be an offer that does nothing. Going by the variable it goes by itself in
+/// choosing a backend.
+fn drops_can_arrive(on_wayland: bool) -> bool {
+    !on_wayland
 }
 
 /// A title to start from for a file nobody has named yet: its name without the extension, and
@@ -884,6 +892,12 @@ mod tests {
         s.import_finished(Some(42));
 
         assert_eq!(s.results[0].in_library, None);
+    }
+
+    #[test]
+    fn dropping_a_file_is_only_offered_where_it_can_work() {
+        assert!(drops_can_arrive(false));
+        assert!(!drops_can_arrive(true));
     }
 
     #[test]

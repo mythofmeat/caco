@@ -90,7 +90,8 @@ Launch `caco` (or pick it from your application menu), then:
 2. **IWADs** in the sidebar — register your IWADs. Drop in a directory and caco
    identifies each file by MD5.
 3. **Import** in the sidebar — search idgames or the Doom Wiki, paste a
-   Doomworld thread URL, or point at a local file, or drop one on the window.
+   Doomworld thread URL, or point at a local file, or drop one on the window (not under
+   Wayland, which the windowing library can't take drops from yet).
 4. Select a WAD and press **Enter** to play. On first launch caco detects the
    required IWAD and complevel from the WAD file itself.
 
@@ -215,7 +216,7 @@ Save a query as a collection to pin it to the sidebar.
 
 The Import view has a tab for each way in: searching idgames or the Doom Wiki, a
 Doomworld thread, a link to a file, or a file you have, which can also be dropped
-anywhere on the window. WAD files that turn out to be IWADs are registered as IWADs
+anywhere on the window, except under Wayland. WAD files that turn out to be IWADs are registered as IWADs
 rather than library entries.
 
 Non-Doomwiki imports are auto-enriched with Doom Wiki metadata (author, year,
