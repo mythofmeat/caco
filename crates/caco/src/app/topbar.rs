@@ -1,10 +1,14 @@
 //! Top bar — breadcrumbs (left) + filter bar + sort controls (right).
 
 use crate::panels;
-use crate::state::{AppState, ViewMode};
+use crate::state::{ActionRequest, AppState, ViewMode};
 use crate::theme;
 
-pub(super) fn render_topbar(ui: &mut egui::Ui, state: &mut AppState) {
+pub(super) fn render_topbar(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    actions: &mut Vec<ActionRequest>,
+) {
     ui.horizontal(|ui| {
         // Breadcrumbs
         render_breadcrumbs(ui, state);
@@ -14,6 +18,30 @@ pub(super) fn render_topbar(ui: &mut egui::Ui, state: &mut AppState) {
         // it lays them out.
         if state.view_mode == ViewMode::Library {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let hint = if state.wide_window {
+                    "Show or hide what is known about the selected WAD. Or press I."
+                } else {
+                    "What is known about the selected WAD. Or press I."
+                };
+                let open = state.wide_window && state.details_open;
+                let fill = if open {
+                    theme::CONTROL_FILL_HOVER
+                } else {
+                    egui::Color32::TRANSPARENT
+                };
+                let text = egui::RichText::new("Details").size(12.0).color(if open {
+                    theme::TEXT_PRIMARY
+                } else {
+                    theme::TEXT_SECONDARY
+                });
+                if ui
+                    .add(egui::Button::new(text).selected(open).fill(fill))
+                    .on_hover_text(hint)
+                    .clicked()
+                {
+                    actions.push(ActionRequest::ToggleDetails);
+                }
+                ui.add_space(4.0);
                 panels::layout_toggle(ui, &mut state.view_layout);
                 ui.add_space(4.0);
 

@@ -372,6 +372,30 @@ fn fill_library(conn: &rusqlite::Connection, home: &Path) {
         if wad.status == Status::InProgress {
             record_progress(conn, id);
         }
+        // The one the app opens with selected, with everything the details of a WAD can show.
+        if wad.title == LIBRARY[0].title {
+            let file = home.join("cache/wads/lonesome-road.wad");
+            std::fs::create_dir_all(home.join("cache/wads")).expect("create WAD cache");
+            std::fs::write(&file, "PWAD").expect("write WAD file");
+            let update = WadUpdate::new()
+                .set_text("cached_path", Some(file.display().to_string()))
+                .set_text(
+                    "description",
+                    Some(
+                        "Eight maps along a road out of a dead city, and one long look back at \
+                         it. Plays best from a pistol start."
+                            .to_string(),
+                    ),
+                )
+                .set_text("notes", Some("Save MAP05 for a free evening.".to_string()))
+                .set_text(
+                    "source_url",
+                    Some("https://www.doomworld.com/forum/topic/151858-lonesome-road/".to_string()),
+                );
+            db::update_wad(conn, id, &update).expect("describe WAD");
+            db::add_tag(conn, id, "megawad").expect("tag WAD");
+            db::add_tag(conn, id, "to finish").expect("tag WAD");
+        }
     }
 }
 
@@ -509,6 +533,7 @@ impl Shooter {
             ("storage-trash", ActionRequest::Storage(StorageTab::Trash)),
             ("iwads", ActionRequest::Resources),
             ("profiles", ActionRequest::Profiles),
+            ("details", ActionRequest::ShowDetails(first_wad)),
             ("edit", ActionRequest::Edit(first_wad)),
             ("delete", ActionRequest::Delete(first_wad)),
             ("sessions", ActionRequest::Sessions(first_wad)),

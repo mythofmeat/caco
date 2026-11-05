@@ -304,6 +304,64 @@ pub fn severity_color(severity: crate::message::Severity) -> Color32 {
     }
 }
 
+/// Stars to click on: the third is three stars, and clicking the rating it already has clears
+/// it. Returns the new rating when there is one, and `Some(None)` for cleared.
+pub fn rating_picker(ui: &mut egui::Ui, rating: Option<i32>, size: f32) -> Option<Option<i32>> {
+    let current = rating.unwrap_or(0);
+    let mut changed = None;
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.x = 1.0;
+        let stars: Vec<egui::Response> = (1..=5)
+            .map(|star| {
+                let (_, response) =
+                    ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::click());
+                response.widget_info(|| {
+                    let word = if star == 1 { "star" } else { "stars" };
+                    egui::WidgetInfo::selected(
+                        egui::Role::Button,
+                        true,
+                        star <= current,
+                        format!("Rate {star} {word}"),
+                    )
+                });
+                response
+            })
+            .collect();
+        let hovered = stars.iter().position(egui::Response::hovered);
+        for (index, response) in stars.iter().enumerate() {
+            let star = index as i32 + 1;
+            let lit = hovered.map_or(star <= current, |under| index <= under);
+            let (glyph, color) = match (lit, star <= current) {
+                (true, _) => ("\u{2605}", GOLD),
+                (false, _) => ("\u{2606}", CONTROL_BORDER),
+            };
+            ui.painter().text(
+                response.rect.center(),
+                egui::Align2::CENTER_CENTER,
+                glyph,
+                egui::FontId::proportional(size),
+                color,
+            );
+            if response.clicked() {
+                changed = Some((star != current).then_some(star));
+            }
+        }
+    });
+    changed
+}
+
+/// How far through something, as a bar. In progress is blue, and so is how far along it is.
+pub fn paint_progress(painter: &egui::Painter, bar: egui::Rect, fraction: f32) {
+    painter.rect_filled(bar, 2.0, BORDER_MED);
+    if fraction > 0.0 {
+        let fill = egui::Rect::from_min_size(
+            bar.min,
+            egui::vec2(bar.width() * fraction.min(1.0), bar.height()),
+        );
+        painter.rect_filled(fill, 2.0, status_color(Status::InProgress));
+    }
+}
+
 pub fn rating_stars(rating: Option<i32>) -> String {
     match rating {
         Some(r) if r > 0 => {
@@ -333,11 +391,33 @@ pub fn paint_thumbnail(
         paint_thumb_placeholder(painter, rect, rounding);
         return;
     };
-    let whole = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
     painter.add(
-        egui::epaint::RectShape::filled(rect, rounding, Color32::WHITE)
-            .with_texture(picture.id(), whole),
+        egui::epaint::RectShape::filled(rect, rounding, Color32::WHITE).with_texture(
+            picture.id(),
+            picture_crop(picture.size(), rect.aspect_ratio()),
+        ),
     );
+}
+
+/// How much of a picture to show to fill a box of this shape, taking the same amount off each
+/// side rather than squashing it.
+///
+/// A Doom title screen is the exception that makes this more than a crop: 320x200, drawn on a
+/// 4:3 screen, so its pixels are taller than they are wide, and 4:3 is its real shape. Anything
+/// else from the wiki is what it looks like.
+fn picture_crop([width, height]: [usize; 2], box_aspect: f32) -> egui::Rect {
+    let aspect = width as f32 / height.max(1) as f32;
+    let aspect = if (aspect - 1.6).abs() < 0.01 {
+        4.0 / 3.0
+    } else {
+        aspect
+    };
+    let (x, y) = if aspect > box_aspect {
+        ((1.0 - box_aspect / aspect) / 2.0, 0.0)
+    } else {
+        (0.0, (1.0 - aspect / box_aspect) / 2.0)
+    };
+    egui::Rect::from_min_max(egui::pos2(x, y), egui::pos2(1.0 - x, 1.0 - y))
 }
 
 /// What a WAD with no picture shows: a quiet hatched tile rather than a picture of something.
@@ -779,6 +859,27 @@ mod tests {
         let ctx = egui::Context::default();
         apply_doom_theme(&ctx);
         assert_eq!(ctx.global_style().visuals.strong_text_color(), TEXT_PRIMARY);
+    }
+
+    #[test]
+    fn a_title_screen_fills_a_four_by_three_box_because_that_is_its_real_shape() {
+        let whole = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+        assert_eq!(picture_crop([320, 200], 4.0 / 3.0), whole);
+        assert_eq!(picture_crop([640, 400], 4.0 / 3.0), whole);
+    }
+
+    #[test]
+    fn a_picture_of_another_shape_loses_the_same_from_each_side_and_keeps_its_own() {
+        // A square picture in a 4:3 box keeps its width and loses an eighth top and bottom.
+        let square = picture_crop([100, 100], 4.0 / 3.0);
+        assert_eq!(square.min.x, 0.0);
+        assert!((square.min.y - 0.125).abs() < 0.001, "{square:?}");
+        assert!((square.max.y - 0.875).abs() < 0.001, "{square:?}");
+
+        // A panorama keeps its height and loses from the sides.
+        let wide = picture_crop([400, 100], 4.0 / 3.0);
+        assert_eq!(wide.min.y, 0.0);
+        assert!((wide.min.x - (1.0 - wide.max.x)).abs() < 0.001, "{wide:?}");
     }
 
     #[test]

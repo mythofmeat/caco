@@ -148,11 +148,13 @@ fn moving_through_the_list_keeps_the_selection_on_the_screen() {
     settle(&mut app);
 
     let row_of_selection = |app: &Harness| {
+        // Its row, and not the panel beside it, which says the same.
         let title = app.state().selected_wad_title().unwrap();
-        let rect = app
-            .query_by_label(title)
-            .unwrap_or_else(|| panic!("{title} is not on the screen"))
-            .rect();
+        let in_table = app
+            .query_all_by_label(title)
+            .find(|node| node.rect().min.x < 400.0)
+            .unwrap_or_else(|| panic!("{title} is not on the screen"));
+        let rect = in_table.rect();
         assert!(rect.max.y <= DEFAULT_WINDOW[1], "{title}: {rect:?}");
     };
 
@@ -263,4 +265,108 @@ fn searching_from_import_goes_to_its_own_box() {
     type_text(&mut app, "/");
 
     assert!(app.get_by_label("Search:").is_focused());
+}
+
+/// The library with one WAD selected and something to read about it.
+fn described_library(name: &str) -> PathBuf {
+    let path = library(name, 3);
+    let conn = db::open_connection(&path).expect("open library");
+    let id: i64 = conn
+        .query_row("SELECT id FROM wads WHERE title = 'WAD 000'", [], |row| {
+            row.get(0)
+        })
+        .expect("the library has this WAD");
+    let update = db::WadUpdate::new().set_text(
+        "description",
+        Some("A road out of a dead city.".to_string()),
+    );
+    db::update_wad(&conn, id, &update).expect("describe WAD");
+    db::add_tag(&conn, id, "megawad").expect("tag WAD");
+    path
+}
+
+#[test]
+fn the_panel_says_what_is_known_about_whatever_is_selected() {
+    let db_path = described_library("panel-follows");
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+    assert!(app.query_by_label("A road out of a dead city.").is_some());
+    assert!(app.query_by_label("megawad").is_some());
+
+    press(&mut app, egui::Key::L);
+
+    assert_ne!(app.state().selected_wad_title().unwrap(), "WAD 000");
+    assert!(app.query_by_label("A road out of a dead city.").is_none());
+}
+
+#[test]
+fn details_can_be_put_away_and_come_back_where_there_is_room() {
+    let db_path = described_library("panel-toggle");
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+
+    press(&mut app, egui::Key::I);
+    assert!(app.query_by_label("A road out of a dead city.").is_none());
+
+    app.get_by_label("Details").click_accesskit();
+    settle(&mut app);
+    assert!(app.query_by_label("A road out of a dead city.").is_some());
+}
+
+#[test]
+fn a_window_with_no_room_for_the_panel_opens_details_in_a_dialog() {
+    let db_path = described_library("details-dialog");
+    let mut app = open_app(&db_path, SMALLEST_WINDOW);
+    assert!(
+        app.query_by_label("A road out of a dead city.").is_none(),
+        "there is no room for it beside the library"
+    );
+
+    press(&mut app, egui::Key::I);
+    assert!(
+        app.query_by_role_and_label(Role::Window, "WAD 000")
+            .is_some()
+    );
+    assert!(app.query_by_label("A road out of a dead city.").is_some());
+
+    press(&mut app, egui::Key::Escape);
+    assert!(
+        app.query_by_role_and_label(Role::Window, "WAD 000")
+            .is_none()
+    );
+    // Escape was the dialog's, and said nothing about the selection.
+    assert_eq!(app.state().selected_wad_title(), Some("WAD 000"));
+}
+
+#[test]
+fn a_rating_is_given_by_clicking_on_it_and_taken_away_the_same_way() {
+    let db_path = described_library("rating");
+    let conn = db::open_connection(&db_path).expect("open library");
+    let rating_of_first = || -> Option<i32> {
+        conn.query_row(
+            "SELECT rating FROM wads WHERE title = 'WAD 000'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("the library has this WAD")
+    };
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+
+    app.get_by_label("Rate 4 stars").click_accesskit();
+    settle(&mut app);
+    assert_eq!(rating_of_first(), Some(4));
+
+    app.get_by_label("Rate 4 stars").click_accesskit();
+    settle(&mut app);
+    assert_eq!(rating_of_first(), None);
+}
+
+#[test]
+fn a_tag_in_the_panel_filters_the_library_by_it() {
+    let db_path = described_library("tag-filter");
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+
+    app.get_by_label("megawad").click_accesskit();
+    settle(&mut app);
+
+    let filter = app.get_by_label("Filter WADs");
+    assert_eq!(filter.value().as_deref(), Some("tag:megawad"));
 }

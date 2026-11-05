@@ -68,6 +68,18 @@ pub enum ViewLayout {
 
 pub enum ActionRequest {
     Play(i64),
+    /// Change a WAD's status, in passing.
+    SetStatus(i64, caco_core::db::Status),
+    /// Change a WAD's rating, in passing, or take it away.
+    SetRating(i64, Option<i32>),
+    /// Show everything about a WAD: beside the library if there is room, and in a dialog if not.
+    ShowDetails(i64),
+    /// Show or hide what is known about the selected WAD.
+    ToggleDetails,
+    /// Show the library with this in the filter.
+    FilterLibrary(String),
+    /// Show a year's Cacowards.
+    ShowCacowards(i64),
     /// Play a WAD the launch stopped to ask about, once the user has been told and
     /// chose to go ahead.
     PlayWith(i64, caco_core::player::PlayOptions),
@@ -156,6 +168,8 @@ pub enum ActionRequest {
 // ---------------------------------------------------------------------------
 
 pub enum ActiveDialog {
+    /// Everything about a WAD, for a window with no room for it beside the library.
+    Details(i64),
     Edit(Box<EditDialogState>),
     Delete(DeleteDialogState),
     Sessions(SessionsDialogState),
@@ -252,6 +266,12 @@ pub struct AppState {
     /// The query the list was last loaded with, to tell a selection that went because the
     /// list is now a different list from one that went because it was deleted.
     pub loaded_query: Option<String>,
+    /// Whether the panel about the selected WAD is showing, where a window has room for it.
+    pub details_open: bool,
+    /// What that panel shows that isn't in `wads`.
+    pub details: Option<WadDetails>,
+    /// Whether this window has room for that panel, as of the last frame.
+    pub wide_window: bool,
 
     // UI flags
     pub view_layout: ViewLayout,
@@ -306,6 +326,12 @@ pub struct AppState {
 
     /// Files being fetched by the user in their browser, and what has landed for them.
     pub gets: Gets,
+}
+
+/// What the details of a WAD show that the list of WADs doesn't load, read once per selection.
+pub struct WadDetails {
+    pub wad_id: i64,
+    pub awards: Vec<CacowardRecord>,
 }
 
 /// How far through a WAD's maps a playthrough has got.
@@ -499,6 +525,9 @@ impl AppState {
             selection_dismissed: false,
             reveal_selection: false,
             loaded_query: None,
+            details_open: persisted.details_open,
+            details: None,
+            wide_window: true,
             notification: None,
             needs_reload: true,
             active_dialog: None,
@@ -547,6 +576,41 @@ impl AppState {
         matches!(self.play_state, PlayState::Playing { .. })
     }
 
+    /// The WAD running now, if one is.
+    pub fn playing_wad(&self) -> Option<i64> {
+        match self.play_state {
+            PlayState::Playing { wad_id, .. } => Some(wad_id),
+            PlayState::Idle => None,
+        }
+    }
+
+    /// Whether the panel about the selected WAD is on the screen.
+    pub fn details_showing(&self) -> bool {
+        self.view_mode == ViewMode::Library
+            && self.details_open
+            && self.wide_window
+            && self.total_wad_count > 0
+    }
+
+    /// Which WAD the details on the screen are about, if any are.
+    pub fn details_wanted(&self) -> Option<i64> {
+        match self.active_dialog {
+            Some(ActiveDialog::Details(wad_id)) => Some(wad_id),
+            _ => self.selected_wad_id.filter(|_| self.details_showing()),
+        }
+    }
+
+    /// Read what the details of `wad_id` need, unless that is what is already there.
+    pub fn load_details(&mut self, conn: &Connection, wad_id: i64) {
+        if self.details.as_ref().is_some_and(|d| d.wad_id == wad_id) {
+            return;
+        }
+        self.details = Some(WadDetails {
+            wad_id,
+            awards: caco_core::db::cacowards::cacowards_for_wad(conn, wad_id).unwrap_or_default(),
+        });
+    }
+
     /// Mark every projection derived from WAD rows or play history stale.
     ///
     /// Library, Cacowards and Stats deliberately keep independent snapshots
@@ -554,6 +618,7 @@ impl AppState {
     /// must invalidate all three: linked Cacoward cards embed `WadRecord`s,
     /// while Stats aggregates statuses, sessions and completions.
     pub fn invalidate_wad_views(&mut self) {
+        self.details = None;
         self.needs_reload = true;
         self.cacowards.needs_reload = true;
         self.stats.needs_reload = true;
@@ -916,6 +981,14 @@ impl AppState {
         }
     }
 
+    /// Show the library with `query` in its filter, as if it had been typed.
+    pub fn filter_library(&mut self, query: String) {
+        self.show_view(ViewMode::Library);
+        self.active_collection = None;
+        self.filter.input = query;
+        self.filter.mark_changed(Instant::now());
+    }
+
     /// Go to a view, the way its entry in the sidebar does. Leaving the library leaves a
     /// collection too, and each view asks for what it shows to be read again, because a
     /// figure that predates the session you just finished is worse than a brief wait.
@@ -940,6 +1013,7 @@ impl AppState {
             sort_field: Some(SORT_FIELDS[self.sort_field_index].0.to_string()),
             sort_field_index: None,
             sort_desc: self.sort_desc,
+            details_open: self.details_open,
             status_filters: self.status_filters.iter().cloned().collect(),
             status_filter: None,
         }

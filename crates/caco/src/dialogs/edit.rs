@@ -372,43 +372,10 @@ impl EditDialogState {
 
         // Rating (clickable stars)
         form_label(ui, "Rating");
-        ui.horizontal(|ui| {
-            let current_rating: i32 = self.rating.parse().unwrap_or(0);
-            for i in 1..=5 {
-                let is_filled = i <= current_rating;
-                let star = if is_filled { "\u{2605}" } else { "\u{2606}" };
-                let color = if is_filled {
-                    theme::GOLD
-                } else {
-                    theme::CONTROL_BORDER
-                };
-                let response = ui.add(
-                    egui::Label::new(egui::RichText::new(star).color(color).size(22.0))
-                        .sense(egui::Sense::click()),
-                );
-                if response.clicked() {
-                    self.rating = if i == current_rating {
-                        String::new()
-                    } else {
-                        i.to_string()
-                    };
-                }
-            }
-            if current_rating > 0
-                && ui
-                    .add(
-                        egui::Button::new(
-                            egui::RichText::new("clear")
-                                .size(11.0)
-                                .color(theme::TEXT_MUTED),
-                        )
-                        .frame(false),
-                    )
-                    .clicked()
-            {
-                self.rating.clear();
-            }
-        });
+        let current_rating = self.rating.parse().ok();
+        if let Some(rating) = theme::rating_picker(ui, current_rating, 22.0) {
+            self.rating = rating.map(|r| r.to_string()).unwrap_or_default();
+        }
 
         // Tags (pill editor)
         form_label(ui, "Tags");

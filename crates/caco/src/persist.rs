@@ -17,6 +17,9 @@ pub struct GuiState {
     pub sort_field_index: Option<usize>,
     #[serde(default = "default_true")]
     pub sort_desc: bool,
+    /// Whether the panel about the selected WAD is open, for a window with room for it.
+    #[serde(default = "default_true")]
+    pub details_open: bool,
     /// Multi-select status filters (empty = all).
     #[serde(default)]
     pub status_filters: Vec<String>,
@@ -37,6 +40,7 @@ impl Default for GuiState {
             sort_field: None,
             sort_field_index: None,
             sort_desc: true,
+            details_open: true,
             status_filters: Vec::new(),
             status_filter: None,
         }

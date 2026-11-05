@@ -2,10 +2,11 @@ pub mod cacowards;
 pub mod filter_bar;
 pub mod sort_controls;
 pub mod stats;
+pub mod wad_details;
 pub mod wad_grid;
 pub mod wad_table;
 
-use caco_core::db::Status;
+use caco_core::db::{Status, WadRecord};
 
 use crate::get::GetTarget;
 use crate::state::{ActionRequest, AppState, ViewLayout};
@@ -91,20 +92,16 @@ pub fn render_empty_library(ui: &mut egui::Ui, total_wads: usize) -> bool {
     import
 }
 
-/// Show a right-click context menu for a WAD with standard actions.
-/// Returns the chosen action, if any.
+/// Show a right-click context menu for a WAD with standard actions, what you might do first at
+/// the top and what cannot easily be undone at the bottom. Returns the chosen action, if any.
 ///
-/// `lost` is [`caco_core::db::WadRecord::is_lost`]: the WAD has no file here and caco
-/// cannot fetch one, so getting it through a browser is the next thing to do with it.
-pub fn wad_context_menu(
-    response: &egui::Response,
-    wad_id: i64,
-    status: Status,
-    lost: bool,
-) -> Option<ActionRequest> {
+/// Get in Browser is there for [`WadRecord::is_lost`]: the WAD has no file here and caco cannot
+/// fetch one, so getting it through a browser is the next thing to do with it.
+pub fn wad_context_menu(response: &egui::Response, wad: &WadRecord) -> Option<ActionRequest> {
+    let wad_id = wad.id;
     let mut action = None;
     response.context_menu(|ui| {
-        if lost && ui.button("Get in Browser").clicked() {
+        if wad.is_lost() && ui.button("Get in Browser").clicked() {
             action = Some(ActionRequest::Get(GetTarget::Wad(wad_id)));
             ui.close();
         }
@@ -112,21 +109,46 @@ pub fn wad_context_menu(
             action = Some(ActionRequest::Play(wad_id));
             ui.close();
         }
-        if matches!(status, Status::Completed | Status::Abandoned)
+        if matches!(wad.status, Status::Completed | Status::Abandoned)
             && ui.button("Start New Playthrough").clicked()
         {
             action = Some(ActionRequest::StartNewPlaythrough(wad_id));
             ui.close();
         }
-        if ui.button("Edit").clicked() {
-            action = Some(ActionRequest::Edit(wad_id));
-            ui.close();
-        }
-        if ui.button("Delete").clicked() {
-            action = Some(ActionRequest::Delete(wad_id));
-            ui.close();
-        }
         ui.separator();
+        if ui.button("Details").clicked() {
+            action = Some(ActionRequest::ShowDetails(wad_id));
+            ui.close();
+        }
+        ui.menu_button("Status", |ui| {
+            for &status in Status::ALL {
+                let style = theme::status_style(status);
+                let text = egui::RichText::new(style.word).color(style.color);
+                if ui.selectable_label(wad.status == status, text).clicked() {
+                    if wad.status != status {
+                        action = Some(ActionRequest::SetStatus(wad_id, status));
+                    }
+                    ui.close();
+                }
+            }
+        });
+        ui.menu_button("Rating", |ui| {
+            for stars in (1..=5).rev() {
+                let text = egui::RichText::new(theme::rating_stars(Some(stars))).color(theme::GOLD);
+                if ui
+                    .selectable_label(wad.rating == Some(stars), text)
+                    .on_hover_text(crate::dialogs::count(stars as usize, "star", "stars"))
+                    .clicked()
+                {
+                    action = Some(ActionRequest::SetRating(wad_id, Some(stars)));
+                    ui.close();
+                }
+            }
+            if wad.rating.is_some() && ui.button("No Rating").clicked() {
+                action = Some(ActionRequest::SetRating(wad_id, None));
+                ui.close();
+            }
+        });
         if ui.button("Sessions").clicked() {
             action = Some(ActionRequest::Sessions(wad_id));
             ui.close();
@@ -137,6 +159,15 @@ pub fn wad_context_menu(
         }
         if ui.button("Saves & Demos").clicked() {
             action = Some(ActionRequest::WadData(wad_id));
+            ui.close();
+        }
+        ui.separator();
+        if ui.button("Edit").clicked() {
+            action = Some(ActionRequest::Edit(wad_id));
+            ui.close();
+        }
+        if ui.button("Delete").clicked() {
+            action = Some(ActionRequest::Delete(wad_id));
             ui.close();
         }
     });
@@ -237,6 +268,9 @@ pub fn handle_action_keys(ui: &egui::Ui, selected_wad_id: Option<i64>) -> Option
     }
     if ui.input(|i| i.key_pressed(egui::Key::F)) {
         return Some(ActionRequest::WadData(wad_id));
+    }
+    if ui.input(|i| i.key_pressed(egui::Key::I)) {
+        return Some(ActionRequest::ToggleDetails);
     }
     None
 }

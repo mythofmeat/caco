@@ -108,9 +108,7 @@ pub(super) fn render_now_playing_hero(
     if banner.double_clicked() && !is_active {
         action = Some(ActionRequest::Play(wad_id));
     }
-    let status = wad.map_or(Status::Unplayed, |wad| wad.status);
-    let lost = wad.is_some_and(WadRecord::is_lost);
-    if let Some(picked) = panels::wad_context_menu(&banner, wad_id, status, lost) {
+    if let Some(picked) = wad.and_then(|wad| panels::wad_context_menu(&banner, wad)) {
         action = Some(picked);
     }
 
@@ -171,7 +169,7 @@ fn full_details(
         ui.add_space(2.0);
         ui.horizontal(|ui| {
             let (bar, _) = ui.allocate_exact_size(egui::vec2(160.0, 5.0), egui::Sense::hover());
-            paint_progress_bar(ui.painter(), bar, progress);
+            theme::paint_progress(ui.painter(), bar, progress.fraction());
             ui.colored_label(
                 theme::TEXT_SECONDARY,
                 egui::RichText::new(progress.summary()).size(11.0),
@@ -238,16 +236,6 @@ fn playtime_block(ui: &mut egui::Ui, playtime: &str, short: bool) {
         caption,
         theme::TEXT_MUTED,
     );
-}
-
-fn paint_progress_bar(painter: &egui::Painter, bar: egui::Rect, progress: &MapProgress) {
-    painter.rect_filled(bar, 2.0, theme::BORDER_MED);
-    let fraction = progress.fraction();
-    if fraction > 0.0 {
-        let fill =
-            egui::Rect::from_min_size(bar.min, egui::vec2(bar.width() * fraction, bar.height()));
-        painter.rect_filled(fill, 2.0, theme::status_color(Status::InProgress));
-    }
 }
 
 #[cfg(test)]

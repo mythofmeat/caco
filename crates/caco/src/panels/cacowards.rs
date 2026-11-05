@@ -970,6 +970,26 @@ fn category_label(category: &str) -> String {
     }
 }
 
+/// What one award in a category is called, for saying what a WAD won. Spelled from the name
+/// for a category this has never heard of, as a heading is.
+pub fn award_label(category: &str) -> String {
+    match category {
+        "winner" => "Winner".to_string(),
+        "runner-up" => "Runner-up".to_string(),
+        "honorable-mention" => "Honorable Mention".to_string(),
+        "mordeth" => "Mordeth Award".to_string(),
+        "adrians-pen" => "Adrian's Pen".to_string(),
+        other => {
+            let spaced = other.replace('-', " ");
+            let mut letters = spaced.chars();
+            match letters.next() {
+                Some(first) => first.to_uppercase().chain(letters).collect(),
+                None => String::new(),
+            }
+        }
+    }
+}
+
 /// What a card can get through the browser, if anything: an entry with no WAD yet, or
 /// a WAD with no file that caco cannot fetch.
 fn get_target(
@@ -1331,6 +1351,14 @@ mod tests {
         // Nothing is going to upload the atlas, and it refuses to be dropped unseen.
         frame.textures_delta.clear();
         assert_eq!(missing, Vec::<String>::new());
+    }
+
+    #[test]
+    fn what_a_wad_won_reads_as_a_person_would_say_it() {
+        assert_eq!(award_label("winner"), "Winner");
+        assert_eq!(award_label("honorable-mention"), "Honorable Mention");
+        assert_eq!(award_label("doom-moma"), "Doom moma");
+        assert_eq!(award_label(""), "");
     }
 
     #[test]

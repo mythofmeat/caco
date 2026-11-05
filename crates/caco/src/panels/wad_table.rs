@@ -162,10 +162,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState, view_top: f32) -> Option<
                 if response.double_clicked() {
                     action = Some(ActionRequest::Play(wad_id));
                 }
-                let wad = &state.wads[idx];
-                if let Some(a) =
-                    super::wad_context_menu(&response, wad_id, wad.status, wad.is_lost())
-                {
+                if let Some(a) = super::wad_context_menu(&response, &state.wads[idx]) {
                     action = Some(a);
                 }
             });

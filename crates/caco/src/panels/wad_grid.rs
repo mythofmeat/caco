@@ -5,9 +5,10 @@ use caco_core::db::{Status, WadRecord};
 use crate::state::{ActionRequest, AppState, MapProgress};
 use crate::theme;
 
-/// Card dimensions. The minimum is what fits three across at the 800x400 window and five at the
-/// default one, with the whole of a row in view at either.
-const CARD_MIN_WIDTH: f32 = 176.0;
+/// Card dimensions. The minimum is what fits three across at the 800x400 window, five at the
+/// default one, and four there with the panel about the selected WAD beside them, with the whole
+/// of a row in view at any of them.
+const CARD_MIN_WIDTH: f32 = 160.0;
 const CARD_MAX_WIDTH: f32 = 260.0;
 const CARD_SPACING: f32 = 14.0;
 const CARD_ROUNDING: u8 = 10;
@@ -17,9 +18,7 @@ const CARD_BODY_HEIGHT: f32 = 76.0;
 const CARD_PADDING: f32 = 10.0;
 const PROGRESS_HEIGHT: f32 = 4.0;
 
-/// Five stars at this size take about this much.
-const STARS_WIDTH: f32 = 60.0;
-/// A star and a number do.
+/// A star and a number at this size take about this much.
 const SHORT_RATING_WIDTH: f32 = 26.0;
 
 /// Calculate responsive card width.
@@ -109,14 +108,13 @@ pub fn render(
                     }
 
                     // Context menu on right-click
-                    if let Some(a) =
-                        super::wad_context_menu(&response, wad_id, wad.status, wad.is_lost())
-                    {
+                    if let Some(a) = super::wad_context_menu(&response, wad) {
                         action = Some(a);
                     }
 
                     let card = Card {
                         wad,
+                        details_showing: state.details_showing(),
                         stats: state.stats_map.get(&wad_id),
                         progress: if wad.status == Status::InProgress {
                             state.map_progress(wad)
@@ -145,6 +143,8 @@ pub fn render(
 /// What one card shows.
 struct Card<'a> {
     wad: &'a WadRecord,
+    /// Whether the panel beside the library is already saying what a tooltip would.
+    details_showing: bool,
     stats: Option<&'a caco_core::db::sessions::WadStats>,
     progress: Option<MapProgress>,
     picture: Option<&'a egui::TextureHandle>,
@@ -160,9 +160,11 @@ impl Card<'_> {
         // A painted card is pixels otherwise, and says nothing to a screen reader.
         let name = format!("{}, {word}", self.wad.title);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
-        response.clone().on_hover_ui(|ui| {
-            ui.label(self.hover_text());
-        });
+        if !self.details_showing {
+            response.clone().on_hover_ui(|ui| {
+                ui.label(self.hover_text());
+            });
+        }
 
         painter.rect_filled(rect, rounding, theme::BG_MEDIUM);
 
@@ -270,20 +272,19 @@ impl Card<'_> {
             }
         }
 
-        let stars = match self.wad.rating {
-            Some(rating) if rating > 0 && free >= STARS_WIDTH => theme::rating_stars(Some(rating)),
-            Some(rating) if rating > 0 && free >= SHORT_RATING_WIDTH => {
-                format!("\u{2605} {rating}")
-            }
-            _ => return,
-        };
-        painter.text(
-            egui::pos2(pill.max.x + 6.0, center_y),
-            egui::Align2::LEFT_CENTER,
-            stars,
-            font,
-            theme::GOLD,
-        );
+        // One form, whatever the room: a row of cards with stars on some and a number on others
+        // reads as two different things.
+        if let Some(rating) = self.wad.rating.filter(|rating| *rating > 0)
+            && free >= SHORT_RATING_WIDTH
+        {
+            painter.text(
+                egui::pos2(pill.max.x + 6.0, center_y),
+                egui::Align2::LEFT_CENTER,
+                format!("\u{2605} {rating}"),
+                font,
+                theme::GOLD,
+            );
+        }
     }
 
     /// All of what a card might have had to leave out.
@@ -340,6 +341,7 @@ mod tests {
         };
         assert_eq!(across(800.0), 3);
         assert_eq!(across(1200.0), 5);
+        assert_eq!(across(1200.0 - super::super::wad_details::PANEL_WIDTH), 4);
     }
 
     /// The whole of a row has to be in view at the smallest window, or it is a grid of tops.

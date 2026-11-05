@@ -348,7 +348,10 @@ impl CacoApp {
     /// fetch opens the link dialog, one that has changed since the WAD was
     /// last played asks before launching, and anything else is a toast.
     fn spawn_play(&mut self, wad_id: i64, opts: caco_core::player::PlayOptions) {
-        if self.state.is_playing() {
+        if let PlayState::Playing { wad_title, .. } = &self.state.play_state {
+            self.state.notification = Some(Notification::warning(format!(
+                "{wad_title} is still running. Close it first."
+            )));
             return;
         }
 
@@ -642,6 +645,17 @@ impl CacoApp {
         self.state.notification = None;
     }
 
+    /// Write something about a WAD that was changed in passing, and show it everywhere.
+    fn update_wad(&mut self, wad_id: i64, update: &caco_core::db::WadUpdate) {
+        match caco_core::db::update_wad(&self.conn, wad_id, update) {
+            Ok(_) => self.state.invalidate_wad_views(),
+            Err(e) => {
+                self.state.notification =
+                    Some(Notification::error(format!("Could not save that: {e}")));
+            }
+        }
+    }
+
     /// Put the keyboard in the box that searches what is on the screen. In the library that is
     /// the filter. Import has one of its own per source that searches, and the rest of its
     /// sources and views have nothing to search, so there this goes to the library's.
@@ -665,6 +679,37 @@ impl CacoApp {
     /// click does, instead of reconstructing dialog state by hand.
     pub fn dispatch_action(&mut self, action: ActionRequest) {
         match action {
+            ActionRequest::SetStatus(wad_id, status) => {
+                let update = caco_core::db::WadUpdate::new().set_status(status);
+                self.update_wad(wad_id, &update);
+            }
+            ActionRequest::SetRating(wad_id, rating) => {
+                let update =
+                    caco_core::db::WadUpdate::new().set_int("rating", rating.map(i64::from));
+                self.update_wad(wad_id, &update);
+            }
+            ActionRequest::ShowDetails(wad_id) => {
+                self.state.select_wad(wad_id);
+                if self.state.wide_window {
+                    self.state.details_open = true;
+                } else {
+                    self.state.active_dialog = Some(ActiveDialog::Details(wad_id));
+                }
+            }
+            ActionRequest::ToggleDetails => {
+                if self.state.wide_window {
+                    self.state.details_open = !self.state.details_open;
+                } else if let Some(wad_id) = self.state.selected_wad_id {
+                    self.state.active_dialog = Some(ActiveDialog::Details(wad_id));
+                }
+            }
+            ActionRequest::FilterLibrary(query) => {
+                self.state.filter_library(query);
+            }
+            ActionRequest::ShowCacowards(year) => {
+                self.state.show_view(ViewMode::Cacowards);
+                self.state.cacowards.selected_year = Some(year);
+            }
             ActionRequest::Edit(wad_id) => {
                 if let Some(dialog) = EditDialogState::new(&self.conn, wad_id) {
                     self.state.active_dialog = Some(ActiveDialog::Edit(Box::new(dialog)));
@@ -1260,6 +1305,8 @@ impl eframe::App for CacoApp {
         // 2. Check filter debounce
         self.state.check_filter_debounce(ctx, &self.conn);
 
+        self.state.wide_window = panels::wad_details::fits(ctx);
+
         // 3. Reload data if needed (defer when on Import view)
         if self.state.needs_reload && self.state.view_mode == ViewMode::Library {
             self.state.reload(&self.conn);
@@ -1277,8 +1324,24 @@ impl eframe::App for CacoApp {
 
         // 4. Render active dialog (modal, overlays everything)
         self.state.open_next_mirror_offer(&self.conn);
-        if let Some(action) = render_active_dialog(&mut self.state, &self.conn, ctx) {
+        if let Some(wad_id) = self.state.details_wanted() {
+            self.state.load_details(&self.conn, wad_id);
+        }
+        let dialog_was_open = self.state.has_dialog();
+        if let Some(action) =
+            render_active_dialog(&mut self.state, &self.conn, ctx, &self.thumbnails)
+        {
             self.dispatch_action(action);
+        }
+        // What was pressed was for the dialog, even if that closed it: the panels are drawn
+        // after this, and Escape closing Edit also deselected the WAD behind it, and Enter
+        // in the last field of a dialog that closes on it would play it.
+        if dialog_was_open {
+            ctx.input_mut(|i| {
+                i.events.retain(|event| {
+                    !matches!(event, egui::Event::Key { .. } | egui::Event::Text(_))
+                });
+            });
         }
 
         // A landed file is asked about whatever else is open, and however it is answered
@@ -1352,7 +1415,7 @@ impl eframe::App for CacoApp {
                     .stroke(egui::Stroke::new(1.0_f32, theme::BORDER)),
             )
             .show(ui, |ui| {
-                render_topbar(ui, &mut self.state);
+                render_topbar(ui, &mut self.state, &mut actions);
             });
 
         // ── Bottom status bar ──
@@ -1366,6 +1429,26 @@ impl eframe::App for CacoApp {
             .show(ui, |ui| {
                 render_status_bar(ui, &mut self.state);
             });
+
+        // ── What is known about the selected WAD, beside the library ──
+        if self.state.details_showing() {
+            egui::Panel::right("wad_details")
+                .exact_size(panels::wad_details::PANEL_WIDTH)
+                .resizable(false)
+                .frame(
+                    egui::Frame::new()
+                        .fill(theme::BG_SIDEBAR)
+                        .inner_margin(0.0)
+                        .stroke(egui::Stroke::new(1.0_f32, theme::BORDER)),
+                )
+                .show(ui, |ui| {
+                    if let Some(a) =
+                        panels::wad_details::render_panel(ui, &self.state, &self.thumbnails)
+                    {
+                        actions.push(a);
+                    }
+                });
+        }
 
         // ── Central panel (main content) ──
         egui::CentralPanel::default()
