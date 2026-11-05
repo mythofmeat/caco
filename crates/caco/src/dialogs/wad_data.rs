@@ -3,14 +3,14 @@
 
 use std::path::PathBuf;
 
-use egui_extras::{Column, TableBuilder};
+use egui_extras::Column;
 use rusqlite::Connection;
 
 use caco_core::demos::{self, DemoFile};
 use caco_core::saves::{self, BackupInfo, SaveFile};
 use caco_core::utils::format_size;
 
-use crate::dialogs::{Dialog, Primary, StatusLine, count, tab_bar};
+use crate::dialogs::{Dialog, Primary, StatusLine, count, dialog_table, tab_bar};
 use crate::theme;
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -395,14 +395,11 @@ fn file_table(
     let mut clicked = None;
     let selected = selection.as_ref().and_then(|s| **s);
 
-    TableBuilder::new(ui)
-        .striped(true)
-        .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+    dialog_table(ui, height - row_height)
         .sense(egui::Sense::click())
         .column(Column::remainder().at_least(180.0).clip(true))
         .column(Column::initial(90.0).at_least(60.0))
         .column(Column::initial(160.0).at_least(100.0))
-        .max_scroll_height((height - row_height).max(60.0))
         .header(row_height + 2.0, |mut header| {
             for label in headers {
                 header.col(|ui| {

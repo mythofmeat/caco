@@ -1,9 +1,9 @@
-use egui_extras::{Column, TableBuilder};
+use egui_extras::Column;
 use rusqlite::Connection;
 
 use caco_core::db::collections::{self, CollectionRecord};
 
-use crate::dialogs::{Dialog, Primary, form_label};
+use crate::dialogs::{Dialog, Primary, dialog_table, form_label};
 use crate::state::SORT_FIELDS;
 use crate::theme;
 
@@ -178,11 +178,8 @@ impl CollectionsDialogState {
         let text_height = ui.text_style_height(&egui::TextStyle::Body);
         let row_height = text_height + 6.0;
 
-        let table = TableBuilder::new(ui)
-            .striped(true)
-            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+        let table = dialog_table(ui, height - row_height)
             .sense(egui::Sense::click())
-            .max_scroll_height(height - row_height)
             .column(Column::initial(140.0).at_least(60.0).clip(true)) // Name
             .column(Column::remainder().at_least(160.0).clip(true)) // Query
             .column(Column::initial(120.0).at_least(60.0)); // Sort

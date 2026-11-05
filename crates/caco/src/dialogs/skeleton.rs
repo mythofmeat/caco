@@ -485,6 +485,17 @@ pub fn scroll_body<R>(ui: &mut egui::Ui, height: f32, add: impl FnOnce(&mut egui
         .inner
 }
 
+/// A table inside a body that was told its `height`, which it will stay inside. A table scrolls
+/// at 200 points at the least otherwise, whatever it is asked for, which is most of what a
+/// dialog has in the smallest window, and spills out of the window once it has enough rows.
+pub fn dialog_table(ui: &mut egui::Ui, height: f32) -> egui_extras::TableBuilder<'_> {
+    egui_extras::TableBuilder::new(ui)
+        .striped(true)
+        .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+        .min_scrolled_height(0.0)
+        .max_scroll_height(height.max(MIN_BODY))
+}
+
 /// Plural `word`, spelled out: `3 WADs`, never `3 WAD(s)`.
 pub fn count(n: usize, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })

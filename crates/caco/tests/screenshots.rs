@@ -961,6 +961,39 @@ fn shoot_every_surface() {
         s.shot_dialog("dlg-cacoward-link", ActionRequest::LinkCacoward(an_award)),
     );
 
+    // The form Collections opens, whose fields only exist once it has.
+    record(
+        "collections-form",
+        s.shot_dialog_after("dlg-collections-form", ActionRequest::Collections, |s| {
+            s.harness.get_by_label("Add").click_accesskit();
+            s.settle(3, Duration::ZERO);
+            s.harness.get_by_label("Query");
+            s.harness.get_by_label("Save");
+        }),
+    );
+
+    // Being asked before something goes for good: in the footer, with the way out and the
+    // action where they always are. Through the button, on a WAD of its own in the Trash.
+    let trashed = s.add_manual_wad_with_file("A Wad in the Trash", 999_101);
+    {
+        let conn = caco_core::db::open_connection(&s.home.join("library.db")).expect("open db");
+        caco_core::db::delete_wad(&conn, trashed, false).expect("trash WAD");
+    }
+    record(
+        "storage-trash-asking",
+        s.shot_dialog_after(
+            "dlg-storage-trash-asking",
+            ActionRequest::Storage(StorageTab::Trash),
+            |s| {
+                s.harness.get_by_label("Empty Trash").click_accesskit();
+                s.settle(3, Duration::ZERO);
+                s.harness.get_by_label_contains("Permanently delete");
+                s.harness.get_by_label("Delete Permanently");
+            },
+        ),
+    );
+    s.purge_wad(trashed);
+
     // A dialog is modal: a real click on the sidebar around it goes nowhere. Stats would have
     // something to show if it went anywhere.
     s.harness.state_mut().dispatch_action(ActionRequest::Enrich);

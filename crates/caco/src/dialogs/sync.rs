@@ -126,6 +126,8 @@ impl SyncDialogState {
         }
         TableBuilder::new(ui)
             .striped(true)
+            // The body scrolls, and there are only so many machines.
+            .vscroll(false)
             .auto_shrink([false, true])
             .column(Column::remainder().at_least(160.0))
             .column(Column::exact(150.0))

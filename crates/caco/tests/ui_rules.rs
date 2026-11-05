@@ -55,6 +55,24 @@ fn every_colour_is_a_token_in_the_theme() {
     assert_eq!(hits, Vec::<String>::new(), "name these in theme.rs");
 }
 
+/// A table in a dialog has a minimum height unless told otherwise, and spills out of the
+/// window once it has enough rows.
+#[test]
+fn a_table_in_a_dialog_stays_inside_what_it_was_given() {
+    let hits = lines_containing(
+        &["TableBuilder::new"],
+        &[
+            // Where the helper is.
+            "dialogs/skeleton.rs",
+            // Not in a dialog, or inside a body that scrolls with `vscroll(false)`.
+            "panels/wad_table.rs",
+            "import/search_panel.rs",
+            "dialogs/sync.rs",
+        ],
+    );
+    assert_eq!(hits, Vec::<String>::new(), "use dialogs::dialog_table");
+}
+
 /// A window opened anywhere else has its own idea of where the buttons go.
 #[test]
 fn only_the_dialog_skeleton_opens_a_window() {

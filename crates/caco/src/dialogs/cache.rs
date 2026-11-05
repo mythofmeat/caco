@@ -1,9 +1,9 @@
 use std::fs;
 
-use egui_extras::{Column, TableBuilder};
+use egui_extras::Column;
 use rusqlite::Connection;
 
-use crate::dialogs::{FooterRow, count, include_at_risk_toggle};
+use crate::dialogs::{FooterRow, count, dialog_table, include_at_risk_toggle};
 use crate::theme;
 
 /// A single cache entry for display.
@@ -105,10 +105,7 @@ impl CacheDialogState {
         let text_height = ui.text_style_height(&egui::TextStyle::Body);
         let row_height = text_height + 6.0;
 
-        TableBuilder::new(ui)
-            .max_scroll_height(height - row_height - 24.0)
-            .striped(true)
-            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+        dialog_table(ui, height - row_height - 24.0)
             .sense(egui::Sense::click())
             .column(Column::initial(260.0).at_least(100.0).clip(true)) // Title
             .column(Column::remainder().at_least(150.0).clip(true)) // Path

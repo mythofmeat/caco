@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 
-use egui_extras::{Column, TableBuilder};
+use egui_extras::Column;
 use rusqlite::Connection;
 
 use caco_core::config;
@@ -10,7 +10,7 @@ use caco_core::db::id24::{self, Id24Record};
 use caco_core::db::iwads::{self, IwadRecord};
 use caco_core::resource_service;
 
-use crate::dialogs::{Dialog, form_label, tab_bar};
+use crate::dialogs::{Dialog, dialog_table, form_label, tab_bar};
 use crate::theme;
 
 /// Active sub-tab within the Resources dialog.
@@ -218,11 +218,8 @@ impl ResourcesDialogState {
         let text_height = ui.text_style_height(&egui::TextStyle::Body);
         let row_height = text_height + 6.0;
 
-        TableBuilder::new(ui)
-            .striped(true)
-            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+        dialog_table(ui, height - row_height)
             .sense(egui::Sense::click())
-            .max_scroll_height(height - row_height)
             .column(Column::exact(100.0)) // Family
             .column(Column::exact(140.0)) // Version
             .column(Column::remainder().at_least(150.0).clip(true)) // Title
@@ -280,11 +277,8 @@ impl ResourcesDialogState {
         let text_height = ui.text_style_height(&egui::TextStyle::Body);
         let row_height = text_height + 6.0;
 
-        TableBuilder::new(ui)
-            .striped(true)
-            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+        dialog_table(ui, height - row_height)
             .sense(egui::Sense::click())
-            .max_scroll_height(height - row_height)
             .column(Column::exact(140.0)) // Name
             .column(Column::exact(100.0)) // Version
             .column(Column::remainder().at_least(150.0).clip(true)) // Title

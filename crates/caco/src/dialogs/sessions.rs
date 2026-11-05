@@ -1,7 +1,7 @@
-use egui_extras::{Column, TableBuilder};
+use egui_extras::Column;
 use rusqlite::Connection;
 
-use crate::dialogs::{Dialog, count};
+use crate::dialogs::{Dialog, count, dialog_table};
 use crate::theme;
 
 /// State for the session history dialog.
@@ -127,10 +127,7 @@ impl SessionsDialogState {
         let text_height = ui.text_style_height(&egui::TextStyle::Body);
         let row_height = text_height + 6.0;
 
-        TableBuilder::new(ui)
-            .striped(true)
-            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-            .max_scroll_height(height - 60.0)
+        dialog_table(ui, height - 60.0)
             .column(Column::initial(90.0).at_least(70.0)) // Date
             .column(Column::initial(55.0).at_least(45.0)) // Time
             .column(Column::initial(75.0).at_least(50.0)) // Duration

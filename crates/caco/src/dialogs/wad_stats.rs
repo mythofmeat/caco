@@ -6,10 +6,10 @@
 //! stats snapshot attached to any entry.
 
 use chrono::Utc;
-use egui_extras::{Column, TableBuilder};
+use egui_extras::Column;
 use rusqlite::Connection;
 
-use crate::dialogs::{Dialog, FooterRow, Primary, count, form_label, scroll_body};
+use crate::dialogs::{Dialog, FooterRow, Primary, count, dialog_table, form_label, scroll_body};
 use crate::theme;
 use crate::workers::{FileDialogReceiver, FileDialogRequest, spawn_file_dialog};
 
@@ -524,17 +524,17 @@ impl WadStatsDialogState {
         let text_height = ui.text_style_height(&egui::TextStyle::Body);
         let row_height = text_height + 6.0;
 
-        let table = TableBuilder::new(ui)
-            .striped(true)
-            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-            .max_scroll_height((height - row_height * 2.0 - 40.0).max(60.0))
-            .column(Column::initial(70.0).at_least(50.0))
-            .column(Column::initial(75.0).at_least(60.0))
-            .column(Column::initial(50.0).at_least(40.0))
-            .column(Column::initial(70.0).at_least(50.0))
-            .column(Column::initial(80.0).at_least(60.0))
-            .column(Column::initial(80.0).at_least(60.0))
-            .column(Column::remainder().at_least(60.0));
+        // Less the line above it, the header row, and the summary below.
+        let table = dialog_table(ui, height - row_height * 2.0 - 40.0)
+            // What fits beside the list of playthroughs in the smallest window, with the last
+            // taking whatever a bigger one has.
+            .column(Column::exact(56.0).clip(true))
+            .column(Column::exact(60.0).clip(true))
+            .column(Column::exact(36.0).clip(true))
+            .column(Column::exact(48.0).clip(true))
+            .column(Column::exact(58.0).clip(true))
+            .column(Column::exact(48.0).clip(true))
+            .column(Column::remainder().at_least(40.0).clip(true));
 
         let rows_ref = &rows;
         let stats_format = stats.format.clone();

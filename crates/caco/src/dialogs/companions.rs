@@ -6,14 +6,14 @@
 //! several WADs. That is why every row shows its users: deleting is only safe
 //! once nothing points at it.
 
-use egui_extras::{Column, TableBuilder};
+use egui_extras::Column;
 use rusqlite::Connection;
 
 use caco_core::companion_service;
 use caco_core::db;
 use caco_core::utils::format_size;
 
-use crate::dialogs::{FooterRow, Primary, StatusLine, count};
+use crate::dialogs::{FooterRow, Primary, StatusLine, count, dialog_table};
 use crate::theme;
 
 /// One registry row, with the WADs that link it resolved up front.
@@ -216,14 +216,11 @@ impl CompanionsDialogState {
         let mut clicked = None;
         let selected = self.selected;
 
-        TableBuilder::new(ui)
-            .striped(true)
-            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+        dialog_table(ui, height)
             .sense(egui::Sense::click())
             .column(Column::remainder().at_least(180.0).clip(true)) // Filename
             .column(Column::initial(80.0).at_least(60.0)) // Size
             .column(Column::initial(110.0).at_least(70.0)) // Used by
-            .max_scroll_height(height.max(60.0))
             .header(row_height + 2.0, |mut header| {
                 for label in ["File", "Size", "Used by"] {
                     header.col(|ui| {

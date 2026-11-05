@@ -443,8 +443,33 @@ impl Shooter {
     fn snap_dialog(&mut self, surface: &str, action: ActionRequest) {
         self.harness.state_mut().dispatch_action(action);
         self.snap(surface);
+        self.assert_dialog_fits(surface);
         self.harness.state_mut().close_dialog();
         self.settle();
+    }
+
+    /// `screenshots.rs` checks this too, but on dialogs with nothing much in them, on a
+    /// library that may be empty. These are full, and fit is what data breaks.
+    fn assert_dialog_fits(&self, surface: &str) {
+        let ctx = &self.harness.ctx;
+        let screen = ctx.content_rect();
+        let layers: Vec<egui::LayerId> = ctx.memory(|m| {
+            m.areas()
+                .visible_layer_ids()
+                .into_iter()
+                .filter(|layer| layer.order == egui::Order::Middle)
+                .collect()
+        });
+        for layer in layers {
+            let rect = ctx
+                .memory(|m| m.area_rect(layer.id))
+                .expect("a visible layer has a rect");
+            assert!(
+                screen.expand(1.0).contains_rect(rect),
+                "{surface} at {:?}: {rect:?} is outside {screen:?}",
+                self.size
+            );
+        }
     }
 
     fn view(&mut self, mode: ViewMode) {

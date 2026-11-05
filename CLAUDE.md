@@ -234,6 +234,17 @@ egui = "0.37"
   goes in `dialogs::scroll_body(ui, height, ..)`. A tab's actions are not in its body:
   it gets a `FooterRow`, since whether the way out is Close or Cancel depends on
   whether it is in the middle of asking something.
+- **A table in a dialog is `dialogs::dialog_table`**: `TableBuilder` won't scroll below 200pt
+  of its own accord, which is more than a dialog has at 800x400 once there is a footer, so
+  Map Stats ran off the window as soon as it had anything to list. `ui_rules` fails on a table
+  built any other way, bar Sync's, which does not scroll, inside a body that does. `snapshots.rs`
+  checks every window against the screen too, because its library has something in it, and
+  `screenshots.rs`'s may not.
+- **A dialog blocks the app by being in the way**: `dialogs::modal_backdrop` is a scrim in a
+  layer of its own, in front of the panels and behind the windows, that takes the pointer.
+  A window only stops clicks where it actually is, so without it a WAD behind Settings could
+  be double-clicked and launched. Not `ui.disable()`, which does the same and also fades
+  everything it covers, panels' backgrounds included, so the app behind turned grey.
 - **Inputs are named after their label**: `response.labelled_by(label.id)` ties
   a field to the label a sighted user reads (`dialogs::form_label`
   returns its `Response` for this), and `accessible_name` is for a control with

@@ -30,7 +30,7 @@ pub mod wad_stats;
 
 pub use skeleton::{
     Dialog, DialogBody, DialogDone, DialogFooter, Ended, FooterRow, Primary, StatusLine, count,
-    form_label, scroll_body, tab_bar,
+    dialog_table, form_label, scroll_body, tab_bar,
 };
 
 /// The opt-in that lets a bulk delete touch manually added files.
@@ -66,13 +66,21 @@ pub fn include_at_risk_toggle(ui: &mut egui::Ui, on: &mut bool, manual_files: us
     *on
 }
 
-/// Dim the app behind a modal, so it reads as "the window is blocked" rather
-/// than as a stray floating panel.
-pub fn dim_backdrop(ctx: &egui::Context) {
+/// Put something between the app and a modal: dimmed, so that it reads as "the window is
+/// blocked" rather than as a stray floating panel, and taking the pointer, so that it is.
+///
+/// A window is only in front of the panels where it actually is, so without this a WAD behind
+/// Settings could be double-clicked and launched, and a card's tooltip could turn up on top of
+/// the dialog. In a layer of its own, after the panels' in the same `Order` and so in front of
+/// them, and an `Order` below the windows. Disabling the panels would do it too, but that fades
+/// them, and their backgrounds with them.
+pub fn modal_backdrop(ctx: &egui::Context) {
     let screen = ctx.content_rect();
-    ctx.layer_painter(egui::LayerId::new(
-        egui::Order::Background,
-        egui::Id::unique("modal_backdrop"),
-    ))
-    .rect_filled(screen, 0.0, crate::theme::SCRIM);
+    egui::Area::new(egui::Id::unique("modal_backdrop"))
+        .order(egui::Order::Background)
+        .fixed_pos(screen.min)
+        .show(ctx, |ui| {
+            ui.painter().rect_filled(screen, 0.0, crate::theme::SCRIM);
+            ui.allocate_response(screen.size(), egui::Sense::click_and_drag());
+        });
 }
