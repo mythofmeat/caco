@@ -17,37 +17,20 @@ const NARROW: f32 = 640.0;
 
 /// Render the WAD library table with virtual scrolling.
 /// Returns an action request if a keyboard shortcut was pressed.
-pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<ActionRequest> {
-    let mut action = None;
-
-    // Handle keyboard shortcuts when no dialog is open and no text input is focused
-    if !state.has_dialog() && !ui.ctx().egui_wants_keyboard_input() {
-        if ui.input(|i| i.key_pressed(egui::Key::J) || i.key_pressed(egui::Key::ArrowDown)) {
-            state.select_next();
-        }
-        if ui.input(|i| i.key_pressed(egui::Key::K) || i.key_pressed(egui::Key::ArrowUp)) {
-            state.select_prev();
-        }
-        if ui.input(|i| i.key_pressed(egui::Key::Home)) {
-            state.select_first();
-        }
-        if ui.input(|i| i.key_pressed(egui::Key::End)) {
-            state.select_last();
-        }
-        if ui.input(|i| i.modifiers.shift && i.key_pressed(egui::Key::G)) {
-            state.select_last();
-        } else if ui.input(|i| !i.modifiers.shift && i.key_pressed(egui::Key::G)) {
-            state.handle_g_press();
-        }
-        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-            state.selected_wad_id = None;
-        }
-
-        action = super::handle_action_keys(ui, state.selected_wad_id);
-    }
-
+///
+/// `view_top` is where what scrolls with it starts, above the table.
+pub fn render(ui: &mut egui::Ui, state: &mut AppState, view_top: f32) -> Option<ActionRequest> {
     let text_height = ui.text_style_height(&egui::TextStyle::Body);
     let row_height = text_height + 6.0;
+
+    let mut action = super::library_keys(
+        ui,
+        state,
+        super::LibraryShape {
+            columns: 1,
+            page: (ui.clip_rect().height() / row_height).floor().max(1.0) as usize,
+        },
+    );
 
     let mut table_ui = ui.new_child(
         egui::UiBuilder::new()
@@ -70,6 +53,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<ActionRequest> 
         (0.2 * width, RATING_COLUMN)
     };
 
+    theme::calm_table_selection(ui);
     let table = TableBuilder::new(ui)
         .striped(true)
         .sense(egui::Sense::click())
@@ -83,6 +67,13 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<ActionRequest> 
         .column(Column::exact(PLAYTIME_COLUMN)) // Playtime
         .column(Column::exact(LAST_PLAYED_COLUMN)); // Last Played
 
+    // Worked out rather than asked of the table: a row off the screen is not laid out, and its
+    // `scroll_to_row` goes to its own scrolling, which is off, because the view scrolls.
+    let reveal_row = state
+        .selected_index()
+        .filter(|_| std::mem::take(&mut state.reveal_selection));
+    let mut reveal_rect = None;
+
     table
         .header(row_height + 2.0, |mut header| {
             for label in [
@@ -94,22 +85,29 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<ActionRequest> 
                 "Last Played",
             ] {
                 header.col(|ui| {
-                    ui.colored_label(theme::TEXT_ACCENT, egui::RichText::new(label).strong());
+                    ui.label(theme::column_header(label));
                 });
             }
         })
-        .body(|body| {
+        .body(|mut body| {
+            if let Some(row) = reveal_row {
+                let left_top = body.ui_mut().cursor().left_top();
+                let spacing = body.ui_mut().spacing().item_spacing.y;
+                let top = row as f32 * (row_height + spacing);
+                reveal_rect = Some(egui::Rect::from_min_size(
+                    left_top + egui::vec2(0.0, top),
+                    egui::vec2(1.0, row_height + spacing),
+                ));
+            }
             let wad_count = state.wads.len();
             body.rows(row_height, wad_count, |mut row| {
                 let idx = row.index();
-                let is_selected = state.selected_row == idx;
-
-                // Highlight selected row
-                row.set_selected(is_selected);
-
                 let wad = &state.wads[idx];
                 let wad_id = wad.id;
                 let stats = state.stats_map.get(&wad_id);
+
+                // Highlight selected row
+                row.set_selected(state.selected_wad_id == Some(wad_id));
 
                 // Title
                 row.col(|ui| {
@@ -133,7 +131,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<ActionRequest> 
                 row.col(|ui| {
                     let stars = theme::rating_stars(wad.rating);
                     if rating > 0.0 && !stars.is_empty() {
-                        ui.colored_label(theme::TEXT_ACCENT, stars);
+                        ui.colored_label(theme::GOLD, stars);
                     }
                 });
 
@@ -159,8 +157,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<ActionRequest> 
                 // Row-level click selection + context menu
                 let response = row.response();
                 if response.clicked() || response.secondary_clicked() {
-                    state.selected_row = idx;
-                    state.selected_wad_id = Some(wad_id);
+                    state.select_wad(wad_id);
                 }
                 if response.double_clicked() {
                     action = Some(ActionRequest::Play(wad_id));
@@ -177,6 +174,10 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<ActionRequest> 
     // The table was laid out in a child, which the view scrolling around it has to be told of.
     let used = table_ui.min_rect();
     ui_outer.advance_cursor_after_rect(used);
+
+    if let (Some(rect), Some(row)) = (reveal_rect, reveal_row) {
+        super::reveal(ui_outer, rect, row == 0, view_top);
+    }
 
     action
 }

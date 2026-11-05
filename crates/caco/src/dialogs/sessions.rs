@@ -137,7 +137,7 @@ impl SessionsDialogState {
             .header(row_height + 2.0, |mut header| {
                 for label in ["Date", "Time", "Duration", "Sourceport", "Maps", "Status"] {
                     header.col(|ui| {
-                        ui.strong(label);
+                        ui.label(theme::column_header(label));
                     });
                 }
             })

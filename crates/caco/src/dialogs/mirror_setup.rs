@@ -975,7 +975,7 @@ fn is_http(place: &str) -> bool {
 fn step(ui: &mut egui::Ui, text: &str) {
     ui.add_space(4.0);
     ui.colored_label(
-        theme::TEXT_ACCENT,
+        theme::TEXT_PRIMARY,
         egui::RichText::new(text).size(12.0).strong(),
     );
 }

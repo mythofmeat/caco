@@ -50,10 +50,7 @@ fn render_breadcrumbs(ui: &mut egui::Ui, state: &AppState) {
             && let Some(year) = state.cacowards.selected_year
         {
             ui.colored_label(theme::TEXT_MUTED, "  /  ");
-            ui.colored_label(
-                theme::TEXT_ACCENT,
-                egui::RichText::new(year.to_string()).strong(),
-            );
+            ui.colored_label(theme::TEXT_SECONDARY, year.to_string());
         }
     });
 }

@@ -33,10 +33,13 @@ fn card_width(available_width: f32) -> f32 {
 
 /// Render the WAD library as a grid of cards.
 /// Returns an action request if a keyboard shortcut was pressed.
+///
+/// `view_top` is where what scrolls with it starts, above the grid.
 pub fn render(
     ui: &mut egui::Ui,
     state: &mut AppState,
     thumbnails: Option<&crate::thumbnails::ThumbnailManager>,
+    view_top: f32,
 ) -> Option<ActionRequest> {
     // Add horizontal margin
     let margin = egui::Margin::symmetric(20, 0);
@@ -49,40 +52,21 @@ pub fn render(
             .floor()
             .max(1.0) as usize;
 
-        // Handle keyboard shortcuts
-        if !state.has_dialog() && !ui.ctx().egui_wants_keyboard_input() {
-            if ui.input(|i| i.key_pressed(egui::Key::J) || i.key_pressed(egui::Key::ArrowDown)) {
-                state.select_down_grid(columns);
-            }
-            if ui.input(|i| i.key_pressed(egui::Key::K) || i.key_pressed(egui::Key::ArrowUp)) {
-                state.select_up_grid(columns);
-            }
-            if ui.input(|i| i.key_pressed(egui::Key::H) || i.key_pressed(egui::Key::ArrowLeft)) {
-                state.select_left(columns);
-            }
-            if ui.input(|i| i.key_pressed(egui::Key::L) || i.key_pressed(egui::Key::ArrowRight)) {
-                state.select_right(columns);
-            }
-            if ui.input(|i| i.key_pressed(egui::Key::Home)) {
-                state.select_first();
-            }
-            if ui.input(|i| i.key_pressed(egui::Key::End)) {
-                state.select_last();
-            }
-            if ui.input(|i| i.modifiers.shift && i.key_pressed(egui::Key::G)) {
-                state.select_last();
-            } else if ui.input(|i| !i.modifiers.shift && i.key_pressed(egui::Key::G)) {
-                state.handle_g_press();
-            }
-            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                state.selected_wad_id = None;
-            }
-
-            action = super::handle_action_keys(ui, state.selected_wad_id);
-        }
-
         let thumb_height = (card_w * THUMB_ASPECT).round();
         let card_size = Vec2::new(card_w, thumb_height + CARD_BODY_HEIGHT);
+
+        // Rows on the screen, for how far a page is.
+        let rows_in_view = (ui.clip_rect().height() / (card_size.y + CARD_SPACING))
+            .floor()
+            .max(1.0) as usize;
+        action = super::library_keys(
+            ui,
+            state,
+            super::LibraryShape {
+                columns,
+                page: rows_in_view * columns,
+            },
+        );
 
         let wad_count = state.wads.len();
         let rows = wad_count.div_ceil(columns);
@@ -99,8 +83,17 @@ pub fn render(
                     let wad = &state.wads[idx];
                     let wad_id = wad.id;
 
+                    let selected = state.selected_wad_id == Some(wad_id);
+
                     // Allocate card space
                     let (rect, response) = ui.allocate_exact_size(card_size, egui::Sense::click());
+
+                    // Before the virtualization below, since off the screen is the point.
+                    if selected && state.reveal_selection {
+                        state.reveal_selection = false;
+                        let with_gap = rect.expand2(Vec2::new(0.0, CARD_SPACING));
+                        super::reveal(ui, with_gap, row == 0, view_top);
+                    }
 
                     // Virtualization: skip painting + event handling for cards
                     // entirely outside the scroll viewport. Layout (scrollbar
@@ -111,11 +104,6 @@ pub fn render(
                         continue;
                     }
 
-                    // Handle clicks
-                    if response.clicked() || response.secondary_clicked() {
-                        state.selected_row = idx;
-                        state.selected_wad_id = Some(wad_id);
-                    }
                     if response.double_clicked() {
                         action = Some(ActionRequest::Play(wad_id));
                     }
@@ -136,9 +124,13 @@ pub fn render(
                             None
                         },
                         picture: thumbnails.and_then(|tm| tm.get(wad_id)),
-                        selected: state.selected_row == idx,
+                        selected,
                     };
                     card.paint(ui, rect, thumb_height, &response);
+
+                    if response.clicked() || response.secondary_clicked() {
+                        state.select_wad(wad_id);
+                    }
                 }
             });
 
@@ -290,7 +282,7 @@ impl Card<'_> {
             egui::Align2::LEFT_CENTER,
             stars,
             font,
-            theme::TEXT_ACCENT,
+            theme::GOLD,
         );
     }
 

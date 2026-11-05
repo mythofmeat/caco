@@ -41,6 +41,15 @@ impl Default for ImportState {
 }
 
 impl ImportState {
+    /// The search box on the source showing, if it has one.
+    pub fn active_search(&self) -> Option<&SearchState> {
+        match self.active_source {
+            0 => Some(&self.idgames),
+            1 => Some(&self.doomwiki),
+            _ => None,
+        }
+    }
+
     /// Get a mutable reference to the search state for the given source.
     pub fn search_state_mut(&mut self, source: SearchSource) -> &mut SearchState {
         match source {

@@ -122,7 +122,7 @@ fn render_empty(ui: &mut egui::Ui) -> Option<ActionRequest> {
     ui.vertical_centered(|ui| {
         ui.add_space(80.0);
         ui.colored_label(
-            theme::TEXT_ACCENT,
+            theme::TEXT_PRIMARY,
             egui::RichText::new("No Cacoward data yet")
                 .size(20.0)
                 .strong(),
@@ -359,7 +359,7 @@ fn render_year_strip(ui: &mut egui::Ui, state: &AppState) -> Option<i64> {
     );
     // Solid rather than the floating bar that only shows on hover: the strip can
     // end exactly on a chip's edge, which looks like the end of the years.
-    strip_ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
+    theme::solid_scrollbar(&mut strip_ui);
     let mut clicked: Option<i64> = None;
     egui::ScrollArea::horizontal()
         .id_salt("cacoward-years")
@@ -513,7 +513,7 @@ fn render_category_section(
                     egui::RichText::new(category_label(category))
                         .size(12.0)
                         .strong()
-                        .color(theme::TEXT_ACCENT)
+                        .color(theme::GOLD)
                         .extra_letter_spacing(2.0),
                 );
                 ui.add_space(6.0);

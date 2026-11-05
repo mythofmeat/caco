@@ -60,6 +60,34 @@ fn describe_outcome(outcome: &caco_sources::enrich_service::EnrichOutcome) -> St
     format!("{} → {}", outcome.title, parts.join(", "))
 }
 
+/// Which key goes to which view, with Ctrl or Cmd held, in the order the sidebar has them.
+const VIEW_KEYS: [(egui::Key, ViewMode); 4] = [
+    (egui::Key::Num1, ViewMode::Library),
+    (egui::Key::Num2, ViewMode::Import),
+    (egui::Key::Num3, ViewMode::Cacowards),
+    (egui::Key::Num4, ViewMode::Stats),
+];
+
+/// Whether `text` was typed this frame with nothing there to type it into, and if so take it,
+/// or it would land in the field it is about to put the keyboard in. Goes by what was typed
+/// rather than which key, since `?` and `/` are different keys on different keyboards.
+fn typed_alone(ctx: &egui::Context, text: &str) -> bool {
+    if ctx.egui_wants_keyboard_input() {
+        return false;
+    }
+    ctx.input_mut(|i| {
+        let typed = i
+            .events
+            .iter()
+            .any(|event| matches!(event, egui::Event::Text(t) if t == text));
+        if typed {
+            i.events
+                .retain(|event| !matches!(event, egui::Event::Text(t) if t == text));
+        }
+        typed
+    })
+}
+
 pub struct CacoApp {
     conn: Connection,
     state: AppState,
@@ -558,12 +586,7 @@ impl CacoApp {
     /// Public for `tests/screenshots.rs`, which walks every view the way the
     /// sidebar does rather than poking `view_mode` and getting a stale page.
     pub fn set_view(&mut self, mode: ViewMode) {
-        self.state.view_mode = mode;
-        match mode {
-            ViewMode::Cacowards => self.state.cacowards.needs_reload = true,
-            ViewMode::Stats => self.state.stats.needs_reload = true,
-            ViewMode::Library | ViewMode::Import => {}
-        }
+        self.state.show_view(mode);
     }
 
     /// Hand pages to this instead of a browser. Public for `tests/screenshots.rs`,
@@ -606,10 +629,34 @@ impl CacoApp {
         self.thumbnails.pending_count()
     }
 
+    /// The WAD selected in the library. Public for `tests/interaction.rs`, which presses keys
+    /// and has to see where the selection went.
+    pub fn selected_wad_title(&self) -> Option<&str> {
+        let index = self.state.selected_index()?;
+        Some(&self.state.wads[index].title)
+    }
+
     /// Clear the status bar. Public for `tests/snapshots.rs`: a notification goes away by
     /// the clock, and a picture must not depend on how long a run took to get there.
     pub fn dismiss_notification(&mut self) {
         self.state.notification = None;
+    }
+
+    /// Put the keyboard in the box that searches what is on the screen. In the library that is
+    /// the filter. Import has one of its own per source that searches, and the rest of its
+    /// sources and views have nothing to search, so there this goes to the library's.
+    fn focus_search(&mut self, ctx: &egui::Context) {
+        let field = match self.state.view_mode {
+            ViewMode::Import if self.state.import.active_search().is_some() => {
+                import::search_panel::SEARCH_ID_SOURCE
+            }
+            ViewMode::Library => panels::filter_bar::FILTER_ID_SOURCE,
+            _ => {
+                self.state.show_view(ViewMode::Library);
+                panels::filter_bar::FILTER_ID_SOURCE
+            }
+        };
+        ctx.memory_mut(|m| m.request_focus(egui::Id::unique(field)));
     }
 
     /// Dispatch an action request (from detail panel buttons or table shortcuts).
@@ -1255,12 +1302,18 @@ impl eframe::App for CacoApp {
             if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Q)) {
                 quit = true;
             }
-            if ctx.input(|i| i.key_pressed(egui::Key::F1)) {
+            if ctx.input(|i| i.key_pressed(egui::Key::F1)) || typed_alone(ctx, "?") {
                 self.dispatch_action(ActionRequest::Help);
             }
-            if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::F)) {
-                let id = egui::Id::unique(panels::filter_bar::FILTER_ID_SOURCE);
-                ctx.memory_mut(|m| m.request_focus(id));
+            if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::F))
+                || typed_alone(ctx, "/")
+            {
+                self.focus_search(ctx);
+            }
+            for (key, view) in VIEW_KEYS {
+                if ctx.input(|i| i.modifiers.command && i.key_pressed(key)) {
+                    self.state.show_view(view);
+                }
             }
             // Ctrl+R — reload config from disk. Already-cached state (e.g. window
             // size chosen at startup) does not refresh; subsequent reads pick up
@@ -1324,6 +1377,7 @@ impl eframe::App for CacoApp {
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
                                 ui.set_min_width(ui.available_width());
+                                let view_top = ui.cursor().top();
 
                                 // Now-playing hero
                                 if let Some(a) =
@@ -1347,12 +1401,13 @@ impl eframe::App for CacoApp {
                                 }
                                 let view_action = match self.state.view_layout {
                                     ViewLayout::List => {
-                                        panels::wad_table::render(ui, &mut self.state)
+                                        panels::wad_table::render(ui, &mut self.state, view_top)
                                     }
                                     ViewLayout::Grid => panels::wad_grid::render(
                                         ui,
                                         &mut self.state,
                                         Some(&self.thumbnails),
+                                        view_top,
                                     ),
                                 };
                                 if let Some(a) = view_action {

@@ -1,0 +1,266 @@
+//! How the app behaves when it is used: keys pressed and things clicked, through the real
+//! `eframe::App` and the real workers.
+//!
+//! `screenshots.rs` and `snapshots.rs` say what the app looks like, and both need a GPU, so
+//! neither is part of `cargo test`. Nothing here renders: egui lays everything out and paints
+//! into a list without one, which is all it takes to ask what is on the screen and where.
+//!
+//! Everything points at a temporary directory, set up once for the whole binary, since the
+//! environment is global. Each test has a library of its own in there.
+
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+
+use caco::state::ViewMode;
+use caco_core::db::{self, NewWad, SourceType};
+use egui::accesskit::Role;
+use egui_kittest::kittest::Queryable;
+
+const DEFAULT_WINDOW: [f32; 2] = [1200.0, 800.0];
+const SMALLEST_WINDOW: [f32; 2] = [800.0, 400.0];
+
+/// A port nothing listens on: it fails at once, every time.
+const NOWHERE: &str = "http://127.0.0.1:9/api.php";
+
+fn scratch() -> &'static Path {
+    static SCRATCH: OnceLock<tempfile::TempDir> = OnceLock::new();
+    SCRATCH
+        .get_or_init(|| {
+            let dir = tempfile::tempdir().expect("create scratch dir");
+            let home = dir.path();
+            let set = |key: &str, value: PathBuf| unsafe { std::env::set_var(key, value) };
+            // Before anything that reads the environment, by this being the only way in.
+            set("CACO_HOME", home.join("data"));
+            set("CACO_CONFIG", home.join("data/config.toml"));
+            set("CACO_CACHE_HOME", home.join("cache"));
+            set("CACO_CACHE_DIR", home.join("cache/wads"));
+            set("CACO_DATA_DIR", home.join("data/data"));
+            set("CACO_TOKEN_FILE", home.join("machine/tokens.toml"));
+            set("CACO_MACHINE_CONFIG", home.join("machine/machine.toml"));
+            set("CACO_MACHINE_ID", home.join("machine/machine-id"));
+            set("CACO_IDGAMES_INDEX", home.join("cache/idgames-index.db"));
+            set("CACO_IDGAMES_API", PathBuf::from(NOWHERE));
+            set("CACO_DOOMWIKI_API", PathBuf::from(NOWHERE));
+
+            std::fs::create_dir_all(home.join("data")).expect("create scratch data dir");
+            let mut config = (*caco_core::config::load_config()).clone();
+            config.idgames_index_check_days = 0;
+            config.sourceport_update_check_days = 0;
+            config.auto_doomwiki_enrich = false;
+            caco_core::config::save_config(&config).expect("save scratch config");
+            caco_core::config::reload_config();
+            dir
+        })
+        .path()
+}
+
+/// A library of `count` WADs called `WAD 000` and so on, in a folder of its own. A library
+/// outside the data dir keeps its sync log beside it, and two sharing a folder would read each
+/// other's WADs in as their own.
+fn library(name: &str, count: usize) -> PathBuf {
+    let dir = scratch().join(name);
+    std::fs::create_dir_all(&dir).expect("create library dir");
+    let path = dir.join("library.db");
+    let conn = db::open_connection(&path).expect("open library");
+    db::init_db(&conn).expect("init library");
+    for n in 0..count {
+        let title = format!("WAD {n:03}");
+        db::add_wad(&conn, &NewWad::new(&title, SourceType::Local)).expect("add WAD");
+    }
+    path
+}
+
+type Harness = egui_kittest::Harness<'static, caco::app::CacoApp>;
+
+fn open_app(db_path: &Path, size: [f32; 2]) -> Harness {
+    let conn = db::open_connection(db_path).expect("open library");
+    let db_path = db_path.to_path_buf();
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(egui::Vec2::from(size))
+        .build_eframe(|cc| {
+            caco::theme::apply_doom_theme(&cc.egui_ctx);
+            caco::app::CacoApp::new(conn, db_path, &cc.egui_ctx)
+        });
+    settle(&mut harness);
+    harness
+}
+
+/// `run_ok` rather than `run`: workers wake the context, and `run` fails on a UI that keeps
+/// being asked to repaint. See `screenshots.rs`.
+fn settle(harness: &mut Harness) {
+    for _ in 0..4 {
+        harness.run_ok();
+    }
+}
+
+fn press(harness: &mut Harness, key: egui::Key) {
+    harness.key_press(key);
+    settle(harness);
+}
+
+fn type_text(harness: &mut Harness, text: &str) {
+    harness.event(egui::Event::Text(text.to_string()));
+    settle(harness);
+}
+
+/// The selected card is on the screen, all of it, between the bars at the top and bottom.
+fn assert_selection_is_on_screen(harness: &Harness, size: [f32; 2]) {
+    let title = harness.state().selected_wad_title().expect("a selection");
+    let label = format!("{title}, Unplayed");
+    let card = harness
+        .query_by_label(&label)
+        .unwrap_or_else(|| panic!("{title} is not on the screen"));
+    let rect = card.rect();
+    assert!(
+        rect.min.y >= 0.0 && rect.max.y <= size[1],
+        "{title}: {rect:?}"
+    );
+}
+
+#[test]
+fn moving_with_the_keyboard_keeps_the_selection_on_the_screen() {
+    let db_path = library("keep-on-screen", 60);
+    for size in [DEFAULT_WINDOW, SMALLEST_WINDOW] {
+        let mut app = open_app(&db_path, size);
+        let first = app.state().selected_wad_title().unwrap().to_string();
+
+        for _ in 0..12 {
+            press(&mut app, egui::Key::J);
+            assert_selection_is_on_screen(&app, size);
+        }
+        assert_ne!(app.state().selected_wad_title().unwrap(), first);
+
+        press(&mut app, egui::Key::End);
+        assert_selection_is_on_screen(&app, size);
+        press(&mut app, egui::Key::PageUp);
+        assert_selection_is_on_screen(&app, size);
+        press(&mut app, egui::Key::Home);
+        assert_eq!(app.state().selected_wad_title().unwrap(), first);
+        assert_selection_is_on_screen(&app, size);
+    }
+}
+
+#[test]
+fn moving_through_the_list_keeps_the_selection_on_the_screen() {
+    let db_path = library("list-on-screen", 200);
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+    app.get_by_label("List").click_accesskit();
+    settle(&mut app);
+
+    let row_of_selection = |app: &Harness| {
+        let title = app.state().selected_wad_title().unwrap();
+        let rect = app
+            .query_by_label(title)
+            .unwrap_or_else(|| panic!("{title} is not on the screen"))
+            .rect();
+        assert!(rect.max.y <= DEFAULT_WINDOW[1], "{title}: {rect:?}");
+    };
+
+    press(&mut app, egui::Key::End);
+    row_of_selection(&app);
+    press(&mut app, egui::Key::PageUp);
+    row_of_selection(&app);
+    press(&mut app, egui::Key::Home);
+    row_of_selection(&app);
+    for _ in 0..40 {
+        press(&mut app, egui::Key::ArrowDown);
+    }
+    row_of_selection(&app);
+}
+
+/// With nothing selected nothing should look selected either, and Enter should have nothing to
+/// act on. The first key after that picks up from the start.
+#[test]
+fn escape_deselects_and_the_next_key_starts_over() {
+    let db_path = library("escape", 5);
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+    let first = app.state().selected_wad_title().unwrap().to_string();
+    press(&mut app, egui::Key::J);
+    press(&mut app, egui::Key::Escape);
+    assert_eq!(app.state().selected_wad_title(), None);
+
+    // Nothing to play: this would open a dialog on a missing file.
+    press(&mut app, egui::Key::Enter);
+    assert!(
+        app.query_by_role_and_label(Role::Window, "WAD Unavailable")
+            .is_none()
+    );
+
+    press(&mut app, egui::Key::J);
+    assert_eq!(app.state().selected_wad_title().unwrap(), first);
+}
+
+#[test]
+fn a_slash_goes_to_the_filter_and_is_not_typed_into_it() {
+    let db_path = library("slash", 3);
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+
+    type_text(&mut app, "/");
+
+    let filter = app.get_by_label("Filter WADs");
+    assert!(filter.is_focused());
+    assert_eq!(filter.value().as_deref(), Some(""));
+}
+
+#[test]
+fn typing_in_the_filter_does_not_trigger_the_librarys_keys() {
+    let db_path = library("filter-typing", 3);
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+    let first = app.state().selected_wad_title().unwrap().to_string();
+
+    type_text(&mut app, "/");
+    type_text(&mut app, "j");
+    press(&mut app, egui::Key::J);
+
+    assert_eq!(app.state().selected_wad_title().unwrap(), first);
+    assert!(app.query_by_role_and_label(Role::Window, "Help").is_none());
+}
+
+#[test]
+fn a_question_mark_opens_help() {
+    let db_path = library("help", 1);
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+    type_text(&mut app, "?");
+    assert!(app.query_by_role_and_label(Role::Window, "Help").is_some());
+}
+
+#[test]
+fn the_views_have_keys_in_the_order_the_sidebar_has_them() {
+    let db_path = library("view-keys", 1);
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+
+    app.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Num2);
+    settle(&mut app);
+    assert!(app.query_by_label("Search:").is_some(), "Import");
+
+    app.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Num4);
+    settle(&mut app);
+    assert!(app.query_by_label("Playtime").is_some(), "Stats");
+
+    app.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Num1);
+    settle(&mut app);
+    assert!(app.query_by_label("Filter WADs").is_some(), "Library");
+}
+
+#[test]
+fn deleting_with_the_delete_key_asks_first() {
+    let db_path = library("delete-key", 2);
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+    press(&mut app, egui::Key::Delete);
+    assert!(
+        app.query_by_role_and_label(Role::Window, "Delete WAD")
+            .is_some()
+    );
+}
+
+#[test]
+fn searching_from_import_goes_to_its_own_box() {
+    let db_path = library("import-search", 1);
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+    app.state_mut().set_view(ViewMode::Import);
+    settle(&mut app);
+
+    type_text(&mut app, "/");
+
+    assert!(app.get_by_label("Search:").is_focused());
+}

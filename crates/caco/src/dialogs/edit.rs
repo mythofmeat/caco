@@ -378,9 +378,9 @@ impl EditDialogState {
                 let is_filled = i <= current_rating;
                 let star = if is_filled { "\u{2605}" } else { "\u{2606}" };
                 let color = if is_filled {
-                    theme::TEXT_ACCENT
+                    theme::GOLD
                 } else {
-                    theme::BORDER_MED
+                    theme::CONTROL_BORDER
                 };
                 let response = ui.add(
                     egui::Label::new(egui::RichText::new(star).color(color).size(22.0))

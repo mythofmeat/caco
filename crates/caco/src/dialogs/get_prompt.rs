@@ -57,16 +57,16 @@ pub fn render(ctx: &egui::Context, asking: &Asking<'_>, mode: LinkMode) -> Optio
 fn question(ui: &egui::Ui, asking: &Asking<'_>) -> LayoutJob {
     let plain = TextFormat {
         font_id: egui::TextStyle::Body.resolve(ui.style()),
-        color: theme::TEXT_PRIMARY,
+        color: theme::TEXT_SECONDARY,
         ..Default::default()
     };
     let file = TextFormat {
         font_id: egui::TextStyle::Monospace.resolve(ui.style()),
-        color: theme::TEXT_ACCENT,
+        color: theme::TEXT_PRIMARY,
         ..Default::default()
     };
     let title = TextFormat {
-        color: theme::TEXT_ACCENT,
+        color: theme::TEXT_PRIMARY,
         ..plain.clone()
     };
 

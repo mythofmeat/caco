@@ -33,36 +33,16 @@ pub(super) fn render_sidebar(
     // the highlight instead.
     let library_active = state.view_mode == ViewMode::Library && state.active_collection.is_none();
     if theme::sidebar_nav_item(ui, "Library", library_active) {
-        let cleared = state.clear_active_collection();
-        state.view_mode = ViewMode::Library;
-        if cleared || state.wads.is_empty() {
-            state.needs_reload = true;
-        }
+        state.show_view(ViewMode::Library);
     }
     if theme::sidebar_nav_item(ui, "Import", state.view_mode == ViewMode::Import) {
-        if state.clear_active_collection() {
-            state.needs_reload = true;
-        }
-        state.view_mode = ViewMode::Import;
+        state.show_view(ViewMode::Import);
     }
     if theme::sidebar_nav_item(ui, "Cacowards", state.view_mode == ViewMode::Cacowards) {
-        if state.clear_active_collection() {
-            state.needs_reload = true;
-        }
-        state.view_mode = ViewMode::Cacowards;
-        // Re-pull on each entry; cheap relative to user-perceived latency
-        // and keeps the year strip honest after an import.
-        state.cacowards.needs_reload = true;
+        state.show_view(ViewMode::Cacowards);
     }
     if theme::sidebar_nav_item(ui, "Stats", state.view_mode == ViewMode::Stats) {
-        if state.clear_active_collection() {
-            state.needs_reload = true;
-        }
-        state.view_mode = ViewMode::Stats;
-        // Same reasoning as Cacowards: one aggregate query, and a figure that
-        // silently predates the session you just finished is worse than a
-        // brief wait.
-        state.stats.needs_reload = true;
+        state.show_view(ViewMode::Stats);
     }
 
     ui.add_space(if short { 4.0 } else { 12.0 });
@@ -73,7 +53,7 @@ pub(super) fn render_sidebar(
     // that only shows on hover, or tools below the fold would look as if there were none.
     let scrolling = (ui.available_height() - PINNED).max(0.0);
     ui.scope(|ui| {
-        ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
+        theme::solid_scrollbar(ui);
         egui::ScrollArea::vertical()
             .id_salt("sidebar-tools")
             .auto_shrink([false, false])

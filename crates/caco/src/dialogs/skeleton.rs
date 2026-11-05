@@ -489,6 +489,7 @@ pub fn scroll_body<R>(ui: &mut egui::Ui, height: f32, add: impl FnOnce(&mut egui
 /// at 200 points at the least otherwise, whatever it is asked for, which is most of what a
 /// dialog has in the smallest window, and spills out of the window once it has enough rows.
 pub fn dialog_table(ui: &mut egui::Ui, height: f32) -> egui_extras::TableBuilder<'_> {
+    theme::calm_table_selection(ui);
     egui_extras::TableBuilder::new(ui)
         .striped(true)
         .cell_layout(egui::Layout::left_to_right(egui::Align::Center))

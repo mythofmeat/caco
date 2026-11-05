@@ -5,6 +5,10 @@ use crate::theme;
 // Actions returned to the caller
 // ---------------------------------------------------------------------------
 
+/// ID source for the search box (shared with app.rs for Ctrl+F and `/`). The two searches
+/// share it, since only one is on the screen.
+pub const SEARCH_ID_SOURCE: &str = "import_search_input";
+
 pub enum SearchPanelAction {
     Search(String),
     Import(SearchResultEntry),
@@ -27,6 +31,7 @@ pub fn render(
         let response = ui
             .add(
                 egui::TextEdit::singleline(&mut state.query)
+                    .id(egui::Id::unique(SEARCH_ID_SOURCE))
                     .desired_width(300.0)
                     .hint_text("Enter query and press Enter"),
             )
@@ -109,6 +114,7 @@ fn render_results_table(
 
     let mut clicked_row = None;
 
+    theme::calm_table_selection(ui);
     let table = TableBuilder::new(ui)
         .striped(true)
         .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
@@ -121,13 +127,13 @@ fn render_results_table(
     table
         .header(18.0, |mut header| {
             header.col(|ui| {
-                ui.colored_label(theme::TEXT_ACCENT, "Title");
+                ui.label(theme::column_header("Title"));
             });
             header.col(|ui| {
-                ui.colored_label(theme::TEXT_ACCENT, "Author");
+                ui.label(theme::column_header("Author"));
             });
             header.col(|ui| {
-                ui.colored_label(theme::TEXT_ACCENT, extra_header);
+                ui.label(theme::column_header(extra_header));
             });
         })
         .body(|body| {
@@ -181,7 +187,7 @@ fn render_preview(ui: &mut egui::Ui, state: &SearchState, action: &mut Option<Se
 
         // Title
         ui.colored_label(
-            theme::TEXT_ACCENT,
+            theme::TEXT_PRIMARY,
             egui::RichText::new(&entry.title).heading().strong(),
         );
 

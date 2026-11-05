@@ -240,9 +240,18 @@ pub struct AppState {
     /// completion verdict uses.
     pub analyses_map: HashMap<i64, WadAnalysis>,
 
-    // Selection
+    /// Which WAD is chosen. The only record of it: where that is in the list is worked out
+    /// when it is wanted, since a second copy is how Escape once left a card highlighted with
+    /// nothing selected, and every key that acts on the selection doing nothing.
     pub selected_wad_id: Option<i64>,
-    pub selected_row: usize,
+    /// Nothing is selected because that was asked for, so a reload should not pick something.
+    pub selection_dismissed: bool,
+    /// The selection moved somewhere that may be off the screen, and the next frame should
+    /// bring it into view. Not set by a click, which is already looking at it.
+    pub reveal_selection: bool,
+    /// The query the list was last loaded with, to tell a selection that went because the
+    /// list is now a different list from one that went because it was deleted.
+    pub loaded_query: Option<String>,
 
     // UI flags
     pub view_layout: ViewLayout,
@@ -487,7 +496,9 @@ impl AppState {
             stats_map: HashMap::new(),
             analyses_map: HashMap::new(),
             selected_wad_id: None,
-            selected_row: 0,
+            selection_dismissed: false,
+            reveal_selection: false,
+            loaded_query: None,
             notification: None,
             needs_reload: true,
             active_dialog: None,
@@ -709,23 +720,9 @@ impl AppState {
                 self.analyses_map =
                     caco_core::db::get_analyses_batch(conn, &ids).unwrap_or_default();
 
-                // Preserve selection if still valid
-                if let Some(sel_id) = self.selected_wad_id {
-                    if let Some(pos) = wads.iter().position(|w| w.id == sel_id) {
-                        self.selected_row = pos;
-                    } else {
-                        self.selected_wad_id = None;
-                        self.selected_row = 0;
-                    }
-                } else {
-                    self.selected_row = 0;
-                }
-
-                // Auto-select first if nothing selected
-                if self.selected_wad_id.is_none() {
-                    self.selected_wad_id = wads.first().map(|w| w.id);
-                }
-
+                let same_list = self.loaded_query == query;
+                self.selected_wad_id = self.selection_after_reload(&wads, same_list);
+                self.loaded_query = query;
                 self.wads = wads;
             }
             Err(e) => {
@@ -808,36 +805,75 @@ impl AppState {
         }
     }
 
-    /// Move selection up by one row.
-    pub fn select_prev(&mut self) {
-        if !self.wads.is_empty() && self.selected_row > 0 {
-            self.selected_row -= 1;
-            self.selected_wad_id = Some(self.wads[self.selected_row].id);
+    /// What should be selected once `wads` replaces the list.
+    ///
+    /// What was selected, if it is still there. Then, if the same list lost it, which means it
+    /// was deleted or filtered out by a status it no longer has, whatever is now in its place:
+    /// the next thing to look at, rather than a jump to the top. A different list starts at
+    /// the top, as does a list nothing was selected in, unless that was asked for.
+    fn selection_after_reload(&self, wads: &[WadRecord], same_list: bool) -> Option<i64> {
+        if let Some(id) = self.selected_wad_id
+            && wads.iter().any(|wad| wad.id == id)
+        {
+            return Some(id);
+        }
+        if self.selection_dismissed && self.selected_wad_id.is_none() {
+            return None;
+        }
+        let place = self
+            .selected_index()
+            .filter(|_| same_list)
+            .unwrap_or(0)
+            .min(wads.len().saturating_sub(1));
+        wads.get(place).map(|wad| wad.id)
+    }
+
+    /// Where the selected WAD is in the list.
+    pub fn selected_index(&self) -> Option<usize> {
+        let id = self.selected_wad_id?;
+        self.wads.iter().position(|wad| wad.id == id)
+    }
+
+    /// Select what was clicked on.
+    pub fn select_wad(&mut self, wad_id: i64) {
+        self.selected_wad_id = Some(wad_id);
+        self.selection_dismissed = false;
+    }
+
+    /// Nothing selected, and it stays that way until something is asked for.
+    pub fn deselect(&mut self) {
+        self.selected_wad_id = None;
+        self.selection_dismissed = true;
+    }
+
+    /// Select the WAD at `index` and bring it into view.
+    fn select_index(&mut self, index: usize) {
+        if let Some(wad) = self.wads.get(index) {
+            self.selected_wad_id = Some(wad.id);
+            self.selection_dismissed = false;
+            self.reveal_selection = true;
         }
     }
 
-    /// Move selection down by one row.
-    pub fn select_next(&mut self) {
-        if !self.wads.is_empty() && self.selected_row + 1 < self.wads.len() {
-            self.selected_row += 1;
-            self.selected_wad_id = Some(self.wads[self.selected_row].id);
-        }
+    /// Move the selection by `step` places, stopping at the ends. With nothing selected, any
+    /// move starts from the first.
+    pub fn move_selection(&mut self, step: isize) {
+        let Some(from) = self.selected_index() else {
+            self.select_first();
+            return;
+        };
+        let last = self.wads.len().saturating_sub(1);
+        self.select_index(from.saturating_add_signed(step).min(last));
     }
 
     /// Jump selection to the first WAD.
     pub fn select_first(&mut self) {
-        if !self.wads.is_empty() {
-            self.selected_row = 0;
-            self.selected_wad_id = Some(self.wads[0].id);
-        }
+        self.select_index(0);
     }
 
     /// Jump selection to the last WAD.
     pub fn select_last(&mut self) {
-        if !self.wads.is_empty() {
-            self.selected_row = self.wads.len() - 1;
-            self.selected_wad_id = Some(self.wads[self.selected_row].id);
-        }
+        self.select_index(self.wads.len().saturating_sub(1));
     }
 
     /// Handle a 'g' keypress for vim-style gg (jump to top).
@@ -856,50 +892,43 @@ impl AppState {
         }
     }
 
-    /// Move selection left by one position (grid mode).
-    pub fn select_left(&mut self, columns: usize) {
-        if columns == 0 || self.wads.is_empty() {
-            return;
-        }
-        let col = self.selected_row % columns;
-        if col > 0 {
-            self.selected_row -= 1;
-            self.selected_wad_id = Some(self.wads[self.selected_row].id);
+    /// Move up a row of `columns`, staying put in the top one.
+    pub fn select_up(&mut self, columns: usize) {
+        match self.selected_index() {
+            Some(from) if from >= columns => self.select_index(from - columns),
+            Some(_) => {}
+            None => self.select_first(),
         }
     }
 
-    /// Move selection right by one position (grid mode).
-    pub fn select_right(&mut self, columns: usize) {
-        if columns == 0 || self.wads.is_empty() {
+    /// Move down a row of `columns`. A last row that stops short of this column still counts,
+    /// or the last few WADs could only be reached from the column they happen to be in.
+    pub fn select_down(&mut self, columns: usize) {
+        let Some(from) = self.selected_index() else {
+            self.select_first();
             return;
-        }
-        let col = self.selected_row % columns;
-        if col + 1 < columns && self.selected_row + 1 < self.wads.len() {
-            self.selected_row += 1;
-            self.selected_wad_id = Some(self.wads[self.selected_row].id);
+        };
+        let last = self.wads.len().saturating_sub(1);
+        if from + columns <= last {
+            self.select_index(from + columns);
+        } else if from / columns < last / columns {
+            self.select_index(last);
         }
     }
 
-    /// Move selection up by one row in grid mode.
-    pub fn select_up_grid(&mut self, columns: usize) {
-        if columns == 0 || self.wads.is_empty() {
-            return;
+    /// Go to a view, the way its entry in the sidebar does. Leaving the library leaves a
+    /// collection too, and each view asks for what it shows to be read again, because a
+    /// figure that predates the session you just finished is worse than a brief wait.
+    pub fn show_view(&mut self, mode: ViewMode) {
+        let library = mode == ViewMode::Library;
+        if self.clear_active_collection() || (library && self.wads.is_empty()) {
+            self.needs_reload = true;
         }
-        if self.selected_row >= columns {
-            self.selected_row -= columns;
-            self.selected_wad_id = Some(self.wads[self.selected_row].id);
-        }
-    }
-
-    /// Move selection down by one row in grid mode.
-    pub fn select_down_grid(&mut self, columns: usize) {
-        if columns == 0 || self.wads.is_empty() {
-            return;
-        }
-        let new_row = self.selected_row + columns;
-        if new_row < self.wads.len() {
-            self.selected_row = new_row;
-            self.selected_wad_id = Some(self.wads[self.selected_row].id);
+        self.view_mode = mode;
+        match mode {
+            ViewMode::Cacowards => self.cacowards.needs_reload = true,
+            ViewMode::Stats => self.stats.needs_reload = true,
+            ViewMode::Library | ViewMode::Import => {}
         }
     }
 
@@ -926,6 +955,141 @@ mod tests {
         caco_core::db::init_db(&conn).unwrap();
         let state = AppState::new(PathBuf::from("test-library.db"));
         (conn, state)
+    }
+
+    /// Five WADs, first selected, read back as they would be from the database.
+    fn five_wads() -> (Connection, AppState) {
+        let (conn, mut state) = setup();
+        for title in ["A", "B", "C", "D", "E"] {
+            caco_core::db::wads::add_wad(
+                &conn,
+                &caco_core::db::wads::NewWad::new(title, caco_core::db::models::SourceType::Local),
+            )
+            .unwrap();
+        }
+        // `AppState::new` starts from whatever this machine last had on the screen.
+        state.status_filters.clear();
+        state.sort_desc = true;
+        state.sort_field_index = SORT_FIELDS.iter().position(|(k, _)| *k == "title").unwrap();
+        state.reload(&conn);
+        (conn, state)
+    }
+
+    fn selected_title(state: &AppState) -> Option<&str> {
+        let id = state.selected_wad_id?;
+        state
+            .wads
+            .iter()
+            .find(|wad| wad.id == id)
+            .map(|wad| wad.title.as_str())
+    }
+
+    #[test]
+    fn the_first_load_selects_the_first_wad() {
+        let (_conn, state) = five_wads();
+        assert_eq!(selected_title(&state), Some("A"));
+    }
+
+    /// The bug this replaced: the highlight came from one field and the keys went by another,
+    /// so after Escape a card still looked selected and Enter did nothing.
+    #[test]
+    fn nothing_is_selected_after_it_was_dismissed_until_something_is_asked_for() {
+        let (conn, mut state) = five_wads();
+        state.deselect();
+        assert_eq!(state.selected_index(), None);
+
+        // A sync finishing does this, and it should not put the selection back.
+        state.reload(&conn);
+        assert_eq!(state.selected_wad_id, None);
+
+        // Any move starts again from the first.
+        state.move_selection(1);
+        assert_eq!(selected_title(&state), Some("A"));
+        assert!(!state.selection_dismissed);
+    }
+
+    #[test]
+    fn a_deleted_wad_leaves_the_selection_on_whatever_took_its_place() {
+        let (conn, mut state) = five_wads();
+        state.move_selection(2);
+        assert_eq!(selected_title(&state), Some("C"));
+        let id = state.selected_wad_id.unwrap();
+        caco_core::db::wads::delete_wad(&conn, id, false).unwrap();
+
+        state.reload(&conn);
+
+        assert_eq!(selected_title(&state), Some("D"));
+    }
+
+    #[test]
+    fn deleting_the_last_wad_selects_the_new_last_one() {
+        let (conn, mut state) = five_wads();
+        state.select_last();
+        let id = state.selected_wad_id.unwrap();
+        caco_core::db::wads::delete_wad(&conn, id, false).unwrap();
+
+        state.reload(&conn);
+
+        assert_eq!(selected_title(&state), Some("D"));
+    }
+
+    #[test]
+    fn a_different_list_starts_at_the_top() {
+        let (conn, mut state) = five_wads();
+        state.select_last();
+        state.filter.set_both("title:B , title:C".to_string());
+
+        state.reload(&conn);
+
+        assert_eq!(selected_title(&state), Some("B"));
+    }
+
+    #[test]
+    fn moving_in_a_list_stops_at_the_ends() {
+        let (_conn, mut state) = five_wads();
+        state.move_selection(-1);
+        assert_eq!(selected_title(&state), Some("A"));
+        state.move_selection(3);
+        assert_eq!(selected_title(&state), Some("D"));
+        state.move_selection(100);
+        assert_eq!(selected_title(&state), Some("E"));
+        state.move_selection(-100);
+        assert_eq!(selected_title(&state), Some("A"));
+    }
+
+    #[test]
+    fn moving_with_the_keyboard_brings_the_selection_into_view_and_clicking_does_not() {
+        let (_conn, mut state) = five_wads();
+        state.reveal_selection = false;
+        let second = state.wads[1].id;
+
+        state.select_wad(second);
+        assert!(!state.reveal_selection);
+
+        state.move_selection(1);
+        assert!(state.reveal_selection);
+    }
+
+    /// A grid of two columns: A B / C D / E.
+    #[test]
+    fn moving_down_a_grid_reaches_a_last_row_that_stops_short() {
+        let (_conn, mut state) = five_wads();
+        state.select_down(2);
+        assert_eq!(selected_title(&state), Some("C"));
+        // From D there is nothing directly below, but E is still the next row down.
+        state.move_selection(1);
+        assert_eq!(selected_title(&state), Some("D"));
+        state.select_down(2);
+        assert_eq!(selected_title(&state), Some("E"));
+        // And from the last row there is nowhere to go.
+        state.select_down(2);
+        assert_eq!(selected_title(&state), Some("E"));
+        state.select_up(2);
+        assert_eq!(selected_title(&state), Some("C"));
+        state.select_up(2);
+        assert_eq!(selected_title(&state), Some("A"));
+        state.select_up(2);
+        assert_eq!(selected_title(&state), Some("A"));
     }
 
     #[test]

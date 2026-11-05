@@ -403,7 +403,7 @@ fn file_table(
         .header(row_height + 2.0, |mut header| {
             for label in headers {
                 header.col(|ui| {
-                    ui.strong(label);
+                    ui.label(theme::column_header(label));
                 });
             }
         })

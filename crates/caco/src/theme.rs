@@ -10,7 +10,9 @@ pub const BG_SIDEBAR: Color32 = Color32::from_rgb(0x16, 0x10, 0x0c);
 pub const BG_DARK: Color32 = Color32::from_rgb(0x1c, 0x14, 0x10);
 pub const BG_MEDIUM: Color32 = Color32::from_rgb(0x20, 0x18, 0x10);
 pub const BG_LIGHT: Color32 = Color32::from_rgb(0x26, 0x1c, 0x14);
-pub const BG_SELECTED: Color32 = Color32::from_rgb(0x2a, 0x18, 0x08);
+/// A chosen row, tab or chip: warmer than a stripe, and as far as it can go with every text
+/// colour still readable on it.
+pub const BG_SELECTED: Color32 = Color32::from_rgb(0x30, 0x1d, 0x0e);
 /// Dialogs, and the bar along the top of the app.
 pub const BG_WINDOW: Color32 = Color32::from_rgb(0x1a, 0x14, 0x10);
 /// The banner over the library.
@@ -18,6 +20,21 @@ pub const BG_HERO: Color32 = Color32::from_rgb(0x22, 0x18, 0x0c);
 
 pub const BORDER: Color32 = Color32::from_rgb(0x2a, 0x1e, 0x16);
 pub const BORDER_MED: Color32 = Color32::from_rgb(0x3a, 0x2e, 0x24);
+
+// ---------------------------------------------------------------------------
+// Controls
+// ---------------------------------------------------------------------------
+
+/// What a button is filled with at rest. A warm one: egui's own is a cold grey, and every
+/// button in the app used to be a grey patch on brown.
+pub const CONTROL_FILL: Color32 = Color32::from_rgb(0x32, 0x27, 0x1d);
+pub const CONTROL_FILL_HOVER: Color32 = Color32::from_rgb(0x3f, 0x31, 0x25);
+/// The edge of what can be typed in or ticked: 3:1 against everything it sits on, the WCAG line
+/// for the boundary of a control. Without one a field is a slightly darker patch of a dark
+/// panel, and nothing says it can be typed in.
+pub const CONTROL_BORDER: Color32 = Color32::from_rgb(0x7b, 0x69, 0x56);
+/// The part of a scrollbar that moves, in the bars that are always there.
+const SCROLL_HANDLE: Color32 = Color32::from_rgb(0x6a, 0x58, 0x47);
 
 // ---------------------------------------------------------------------------
 // Text
@@ -42,7 +59,7 @@ pub const CHART_BAR: Color32 = Color32::from_rgb(0xc8, 0x76, 0x46);
 // ---------------------------------------------------------------------------
 
 pub const COLOR_SUCCESS: Color32 = Color32::from_rgb(0x4f, 0xc9, 0x6f);
-pub const COLOR_WARNING: Color32 = Color32::from_rgb(0xcc, 0xcc, 0x33);
+pub const COLOR_WARNING: Color32 = Color32::from_rgb(0xe3, 0xc2, 0x3d);
 pub const COLOR_ERROR: Color32 = Color32::from_rgb(0xe8, 0x60, 0x5a);
 
 /// Over the app, behind a dialog.
@@ -238,8 +255,10 @@ pub fn small_primary_button(text: impl Into<String>) -> egui::Button<'static> {
             .color(TEXT_ON_ACCENT),
     )
     .fill(TEXT_ACCENT)
+    .stroke(egui::Stroke::new(1.0_f32, TEXT_ACCENT))
 }
 
+/// Its own colour for an edge, or it would have the outline every other control has.
 fn filled_button(text: impl Into<String>, fill: Color32) -> egui::Button<'static> {
     egui::Button::new(
         egui::RichText::new(text.into())
@@ -247,6 +266,7 @@ fn filled_button(text: impl Into<String>, fill: Color32) -> egui::Button<'static
             .color(TEXT_ON_ACCENT),
     )
     .fill(fill)
+    .stroke(egui::Stroke::new(1.0_f32, fill))
 }
 
 /// Render a clickable status filter pill. Returns true if clicked.
@@ -262,8 +282,7 @@ pub fn filter_pill(
     let (fill, text_color, stroke) = if is_active {
         let c = accent.unwrap_or(TEXT_ACCENT);
         // Active: tinted background, bright text, accent border
-        let bg = Color32::from_rgba_premultiplied(c.r() / 5, c.g() / 5, c.b() / 5, 255);
-        (bg, c, egui::Stroke::new(1.0_f32, c))
+        (blend(BG_DARK, c, 0.16), c, egui::Stroke::new(1.0_f32, c))
     } else {
         // Inactive: subtle background, muted text, no visible border
         (BG_LIGHT, TEXT_SECONDARY, egui::Stroke::new(1.0_f32, BORDER))
@@ -349,8 +368,45 @@ pub fn paint_thumb_placeholder(
 }
 
 // ---------------------------------------------------------------------------
-// UI helpers — pills, badges, section labels
+// Headings, and the columns of a table
 // ---------------------------------------------------------------------------
+
+/// A heading inside a page or a dialog: quiet capitals, as the sidebar's own are. Accent is for
+/// what can be acted on, and a heading can't be.
+pub fn section_heading(ui: &mut egui::Ui, title: &str) -> egui::Response {
+    ui.label(
+        egui::RichText::new(title.to_uppercase())
+            .size(11.0)
+            .strong()
+            .color(TEXT_SECONDARY)
+            .extra_letter_spacing(0.8),
+    )
+}
+
+/// A scrollbar that is always there, for a list whose end could look like the end of the list.
+/// Draws its handle in the colour egui takes from a control's fill, which is the dark inside of
+/// a checkbox everywhere else, so the handle used to be the one part of it that could not be
+/// seen. Applies to the rest of `ui`.
+pub fn solid_scrollbar(ui: &mut egui::Ui) {
+    ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
+    let widgets = &mut ui.visuals_mut().widgets;
+    widgets.inactive.bg_fill = SCROLL_HANDLE;
+    widgets.hovered.bg_fill = lift(SCROLL_HANDLE);
+    widgets.active.bg_fill = lift(SCROLL_HANDLE);
+}
+
+/// What heads a column.
+pub fn column_header(text: impl Into<String>) -> egui::RichText {
+    egui::RichText::new(text.into())
+        .size(12.0)
+        .color(TEXT_SECONDARY)
+}
+
+/// Make a chosen row in a table read as chosen and stay readable: its text keeps its own weight
+/// rather than turning accent, which also took every status colour off the row with it.
+pub fn calm_table_selection(ui: &mut egui::Ui) {
+    ui.visuals_mut().selection.stroke.color = TEXT_PRIMARY;
+}
 
 // ---------------------------------------------------------------------------
 // How much room there is
@@ -548,7 +604,7 @@ pub fn apply_doom_theme(ctx: &egui::Context) {
     visuals.extreme_bg_color = BG_SIDEBAR;
     visuals.faint_bg_color = BG_MEDIUM;
 
-    // Selection
+    // Selection: what is chosen, and what has the keyboard.
     visuals.selection.bg_fill = BG_SELECTED;
     visuals.selection.stroke.color = TEXT_ACCENT;
 
@@ -564,26 +620,45 @@ pub fn apply_doom_theme(ctx: &egui::Context) {
     visuals.widgets.noninteractive.fg_stroke.color = TEXT_SECONDARY;
     visuals.widgets.noninteractive.bg_stroke.color = BORDER;
 
-    // Widget styles — inactive (hoverable but not hovered)
-    visuals.widgets.inactive.bg_fill = BG_LIGHT;
+    // Widget styles — inactive (hoverable but not hovered). `bg_fill` is the inside of a
+    // checkbox, `weak_bg_fill` a button, and `bg_stroke` the edge of both and of a text field,
+    // which had a colour here and no width until now.
+    visuals.widgets.inactive.bg_fill = BG_SIDEBAR;
+    visuals.widgets.inactive.weak_bg_fill = CONTROL_FILL;
     visuals.widgets.inactive.fg_stroke.color = TEXT_PRIMARY;
-    visuals.widgets.inactive.bg_stroke.color = BORDER_MED;
+    visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0_f32, CONTROL_BORDER);
 
     // Widget styles — hovered
-    visuals.widgets.hovered.bg_fill = BG_LIGHT;
-    visuals.widgets.hovered.fg_stroke.color = TEXT_ACCENT;
-    visuals.widgets.hovered.bg_stroke.color = TEXT_ACCENT;
+    visuals.widgets.hovered.bg_fill = BG_SIDEBAR;
+    visuals.widgets.hovered.weak_bg_fill = CONTROL_FILL_HOVER;
+    visuals.widgets.hovered.fg_stroke.color = TEXT_PRIMARY;
+    visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0_f32, TEXT_ACCENT);
 
-    // Widget styles — active (being clicked)
-    visuals.widgets.active.bg_fill = BG_SELECTED;
-    visuals.widgets.active.fg_stroke.color = TEXT_ACCENT;
-    visuals.widgets.active.bg_stroke.color = TEXT_ACCENT;
+    // Widget styles — active (being clicked, or has the keyboard). This one is also what egui
+    // calls strong text, wherever it is, so it being accent turned every heading in every
+    // dialog orange, and it has to stay something a heading can be.
+    visuals.widgets.active.bg_fill = BG_SIDEBAR;
+    visuals.widgets.active.weak_bg_fill = BG_SELECTED;
+    visuals.widgets.active.fg_stroke.color = TEXT_PRIMARY;
+    visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0_f32, TEXT_ACCENT);
+
+    // An open menu or combo box.
+    visuals.widgets.open.bg_fill = CONTROL_FILL_HOVER;
+    visuals.widgets.open.weak_bg_fill = CONTROL_FILL_HOVER;
+    visuals.widgets.open.fg_stroke.color = TEXT_PRIMARY;
+    visuals.widgets.open.bg_stroke = egui::Stroke::new(1.0_f32, CONTROL_BORDER);
 
     // Hyperlinks
     visuals.hyperlink_color = TEXT_ACCENT;
 
+    // What can be clicked says so, wherever the pointer finds it.
+    visuals.interact_cursor = Some(egui::CursorIcon::PointingHand);
+
     // Striped table rows
     visuals.striped = true;
+
+    // A menu or a tooltip over a panel of nearly the same colour needs an edge of its own.
+    visuals.window_stroke = egui::Stroke::new(1.0_f32, BORDER_MED);
 
     // Window shadow
     visuals.window_shadow.offset = [0, 8];
@@ -661,6 +736,49 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// WCAG's line for the edge of a control. A field nobody can see is a field nobody types in.
+    #[test]
+    fn the_edge_of_a_control_can_be_seen_on_every_surface_it_sits_on() {
+        for (name, surface) in [
+            ("BG_SIDEBAR", BG_SIDEBAR),
+            ("BG_DARK", BG_DARK),
+            ("BG_MEDIUM", BG_MEDIUM),
+            ("BG_LIGHT", BG_LIGHT),
+            ("BG_WINDOW", BG_WINDOW),
+            ("BG_HERO", BG_HERO),
+        ] {
+            let ratio = contrast(CONTROL_BORDER, surface);
+            assert!(
+                ratio >= 3.0,
+                "CONTROL_BORDER on {name} is only {ratio:.2}:1"
+            );
+        }
+    }
+
+    /// Text in a button is on the button's fill, whichever state it is in.
+    #[test]
+    fn what_a_button_says_is_readable_in_every_state() {
+        for (name, fill) in [
+            ("CONTROL_FILL", CONTROL_FILL),
+            ("CONTROL_FILL_HOVER", CONTROL_FILL_HOVER),
+            ("BG_SELECTED", BG_SELECTED),
+        ] {
+            let ratio = contrast(TEXT_PRIMARY, fill);
+            assert!(
+                ratio >= READABLE,
+                "TEXT_PRIMARY on {name} is only {ratio:.2}:1"
+            );
+        }
+    }
+
+    /// `.strong()` takes this colour. It being accent is what turned every heading orange.
+    #[test]
+    fn strong_text_is_not_the_colour_of_an_action() {
+        let ctx = egui::Context::default();
+        apply_doom_theme(&ctx);
+        assert_eq!(ctx.global_style().visuals.strong_text_color(), TEXT_PRIMARY);
     }
 
     #[test]
