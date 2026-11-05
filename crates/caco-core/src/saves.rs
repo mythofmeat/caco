@@ -281,18 +281,11 @@ pub fn list_backups(wad_id: i64) -> Vec<BackupInfo> {
     backups
 }
 
-/// List all existing backups across all WADs.
+/// List every backup in a directory, newest first.
 ///
-/// Sorted by creation time (newest first).
-pub fn list_all_backups() -> Vec<BackupInfo> {
-    list_backups_in(&get_backup_dir())
-}
-
-/// List every backup in an explicit directory.
-///
-/// Callers that decide what to delete take this rather than
-/// [`list_all_backups`], so their tests can point at a temp dir instead of
-/// the user's real backups.
+/// The directory is a parameter because callers that decide what to delete take
+/// this, so that their tests can point at a temp dir instead of the user's real
+/// backups.
 pub fn list_backups_in(backup_dir: &Path) -> Vec<BackupInfo> {
     if !backup_dir.is_dir() {
         return Vec::new();
@@ -347,34 +340,6 @@ pub fn clean_save_files(data_dir: &Path) -> Vec<PathBuf> {
         }
     }
     deleted
-}
-
-/// Resolve a backup argument to a path.
-///
-/// If `backup_arg` is None, returns the most recent backup for the WAD.
-/// If `backup_arg` is a filename, looks it up in the backup directory.
-/// If `backup_arg` is an absolute path, returns it directly.
-pub fn resolve_backup_path(wad_id: i64, backup_arg: Option<&str>) -> Option<PathBuf> {
-    if let Some(arg) = backup_arg {
-        let candidate = PathBuf::from(arg);
-        if candidate.is_absolute() {
-            return if candidate.is_file() {
-                Some(candidate)
-            } else {
-                None
-            };
-        }
-
-        let candidate = get_backup_dir().join(arg);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-        return None;
-    }
-
-    // No arg — use most recent
-    let backups = list_backups(wad_id);
-    backups.into_iter().next().map(|b| b.path)
 }
 
 #[cfg(test)]
@@ -445,11 +410,6 @@ mod tests {
         assert_eq!(deleted.len(), 2);
         assert!(!dir.path().join("save1.dsg").exists());
         assert!(dir.path().join("stats.txt").exists());
-    }
-
-    #[test]
-    fn test_resolve_backup_nonexistent() {
-        assert!(resolve_backup_path(999, None).is_none());
     }
 
     #[test]

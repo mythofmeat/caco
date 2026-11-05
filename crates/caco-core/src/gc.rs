@@ -362,13 +362,6 @@ fn clean_wad(conn: &Connection, entry: &WadPlanEntry, opts: GcOptions) -> crate:
     Ok(freed)
 }
 
-/// Exclude a WAD from GC, or put it back in scope.
-pub fn set_gc_ignore(conn: &Connection, wad_id: i64, ignore: bool) -> crate::Result<()> {
-    let update = db::WadUpdate::new().set_int("gc_ignore", Some(i64::from(ignore)));
-    db::update_wad(conn, wad_id, &update)?;
-    Ok(())
-}
-
 // =============================================================================
 // Data directory walking
 // =============================================================================
@@ -634,6 +627,11 @@ mod tests {
         conn
     }
 
+    fn set_gc_ignore(conn: &Connection, wad_id: i64, ignore: bool) {
+        let update = db::WadUpdate::new().set_int("gc_ignore", Some(i64::from(ignore)));
+        db::update_wad(conn, wad_id, &update).unwrap();
+    }
+
     fn write(path: &Path, bytes: usize) {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).unwrap();
@@ -749,7 +747,7 @@ mod tests {
         assert_eq!(measured.wads.len(), 1);
         assert_eq!(measured.wads[0].data_size, 100);
 
-        set_gc_ignore(&conn, wad_id, true).unwrap();
+        set_gc_ignore(&conn, wad_id, true);
         assert!(
             plan(&conn, GcOptions::default(), &sandbox.paths)
                 .unwrap()
@@ -757,7 +755,7 @@ mod tests {
                 .is_empty()
         );
 
-        set_gc_ignore(&conn, wad_id, false).unwrap();
+        set_gc_ignore(&conn, wad_id, false);
         assert_eq!(
             plan(&conn, GcOptions::default(), &sandbox.paths)
                 .unwrap()
@@ -897,7 +895,7 @@ mod tests {
         let conn = setup();
         let keep = add_status_wad(&conn, "Keep", "completed", None);
         add_status_wad(&conn, "Sweep", "completed", None);
-        set_gc_ignore(&conn, keep, true).unwrap();
+        set_gc_ignore(&conn, keep, true);
 
         let titles: Vec<String> = gc_candidates(&conn)
             .unwrap()

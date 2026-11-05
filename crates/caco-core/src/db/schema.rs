@@ -178,6 +178,7 @@ static MIGRATIONS: &[Migration] = &[
         migrate_key_cacowards_on_dataset,
     ),
     (43, "add_mirror_files", migrate_add_mirror_files),
+    (44, "drop_dead_columns", migrate_drop_dead_columns),
 ];
 
 // ---------------------------------------------------------------------------
@@ -951,6 +952,19 @@ fn migrate_add_mirror_files(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Drop two columns nothing has written since the Python port: `wads.companion_files`,
+/// superseded by `wad_companions`, and `sessions.demo_file`, which demos never used,
+/// since they are found on disk.
+fn migrate_drop_dead_columns(conn: &Connection) -> Result<()> {
+    if has_column(conn, "wads", "companion_files")? {
+        conn.execute("ALTER TABLE wads DROP COLUMN companion_files", [])?;
+    }
+    if has_column(conn, "sessions", "demo_file")? {
+        conn.execute("ALTER TABLE sessions DROP COLUMN demo_file", [])?;
+    }
+    Ok(())
+}
+
 fn migrate_consolidate_status(conn: &Connection) -> Result<()> {
     // Step 1: Map old status values to new ones
     conn.execute_batch(
@@ -1024,6 +1038,14 @@ mod tests {
     }
 
     #[test]
+    fn test_dead_columns_are_gone() {
+        let conn = open_memory().unwrap();
+        init_db(&conn).unwrap();
+        assert!(!has_column(&conn, "wads", "companion_files").unwrap());
+        assert!(!has_column(&conn, "sessions", "demo_file").unwrap());
+    }
+
+    #[test]
     fn test_init_db_idempotent() {
         let conn = open_memory().unwrap();
         init_db(&conn).unwrap();
@@ -1075,7 +1097,6 @@ mod tests {
             "deleted_at",
             "version",
             "stats_snapshot",
-            "companion_files",
             "complevel",
             "custom_config",
             "gc_ignore",
@@ -1380,7 +1401,6 @@ mod tests {
             "notes",
             "stats_before",
             "stats_after",
-            "demo_file",
             "exit_code",
             "playthrough_id",
             "content_sha256",
