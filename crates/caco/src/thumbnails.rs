@@ -251,14 +251,6 @@ impl ThumbnailManager {
         self.pending.remove(&wad_id);
         self.failed.insert(wad_id);
     }
-
-    /// Clear all cached textures (e.g., on library reload).
-    #[allow(dead_code)]
-    pub fn clear(&mut self) {
-        self.textures.clear();
-        self.pending.clear();
-        self.failed.clear();
-    }
 }
 
 /// Longest edge any thumbnail texture may have.
@@ -341,17 +333,5 @@ mod tests {
         assert!(!tm.pending.contains(&3));
         assert!(tm.failed.contains(&3));
         assert!(!tm.needs_request(3));
-    }
-
-    #[test]
-    fn clear_resets_all_state() {
-        let mut tm = ThumbnailManager::new();
-        tm.pending.insert(1);
-        tm.failed.insert(2);
-        tm.clear();
-        assert!(tm.pending.is_empty());
-        assert!(tm.failed.is_empty());
-        assert!(tm.needs_request(1));
-        assert!(tm.needs_request(2));
     }
 }

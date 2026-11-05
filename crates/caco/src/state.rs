@@ -815,11 +815,6 @@ impl AppState {
         }
     }
 
-    /// Get stats for the currently selected WAD.
-    pub fn selected_stats(&self) -> Option<&WadStats> {
-        self.selected_wad_id.and_then(|id| self.stats_map.get(&id))
-    }
-
     /// Produce a snapshot of persistent GUI state for saving.
     pub fn to_persisted(&self) -> persist::GuiState {
         persist::GuiState {

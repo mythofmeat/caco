@@ -48,15 +48,6 @@ impl ImportState {
             SearchSource::Doomwiki => &mut self.doomwiki,
         }
     }
-
-    /// Get a mutable reference to the form state for the given kind.
-    pub fn form_state_mut(&mut self, kind: FormKind) -> &mut FormState {
-        match kind {
-            FormKind::Doomworld => &mut self.doomworld,
-            FormKind::Url => &mut self.url_form,
-            FormKind::Local => &mut self.local_form,
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------

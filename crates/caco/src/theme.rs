@@ -26,10 +26,6 @@ pub const COLOR_ERROR: Color32 = Color32::from_rgb(0xcc, 0x44, 0x44);
 pub const COLOR_SECRET_FILL: Color32 = Color32::from_rgb(0x99, 0x44, 0x22);
 
 // ---------------------------------------------------------------------------
-// Status colors
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // Status helpers
 // ---------------------------------------------------------------------------
 
@@ -62,20 +58,6 @@ pub fn status_query(status: Status) -> &'static str {
         Status::Completed => "status:completed",
         Status::Abandoned => "status:abandoned",
     }
-}
-
-/// Render a status value as a colored pill badge.
-pub fn status_pill(ui: &mut egui::Ui, status: Status) {
-    let color = status_color(status);
-    let label = status_display(status);
-    let bg = status_bg(status);
-    egui::Frame::new()
-        .fill(bg)
-        .corner_radius(6)
-        .inner_margin(egui::Margin::symmetric(10, 3))
-        .show(ui, |ui| {
-            ui.colored_label(color, egui::RichText::new(label).small().strong());
-        });
 }
 
 /// Render a clickable status filter pill. Returns true if clicked.
@@ -171,20 +153,6 @@ pub fn thumb_colors(wad_id: i64) -> (Color32, Color32, Color32) {
 // ---------------------------------------------------------------------------
 // UI helpers — pills, badges, section labels
 // ---------------------------------------------------------------------------
-
-/// Render a tag as a small accent-tinted pill.
-pub fn tag_pill(ui: &mut egui::Ui, tag: &str) {
-    egui::Frame::new()
-        .fill(Color32::from_rgb(0x26, 0x1c, 0x14))
-        .corner_radius(8)
-        .inner_margin(egui::Margin::symmetric(8, 2))
-        .show(ui, |ui| {
-            ui.colored_label(
-                Color32::from_rgb(0xcc, 0x77, 0x44),
-                egui::RichText::new(tag).small(),
-            );
-        });
-}
 
 /// Render an uppercase section label.
 pub fn section_label(ui: &mut egui::Ui, text: &str) {
