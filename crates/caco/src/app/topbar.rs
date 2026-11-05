@@ -9,10 +9,9 @@ pub(super) fn render_topbar(ui: &mut egui::Ui, state: &mut AppState) {
         // Breadcrumbs
         render_breadcrumbs(ui, state);
 
-        // Filter / sort widgets only make sense in Library; Cacowards has
-        // its own year strip + category sections and Import has its own
-        // search box, so suppress them here to avoid the dead-control
-        // anti-affordance the user sees on those views.
+        // Filter and sort only make sense in Library, where they act on what is showing, and
+        // are not drawn where they could do nothing. Cacowards has years to go by, and how
+        // it lays them out.
         if state.view_mode == ViewMode::Library {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 panels::layout_toggle(ui, &mut state.view_layout);
@@ -23,6 +22,10 @@ pub(super) fn render_topbar(ui: &mut egui::Ui, state: &mut AppState) {
 
                 // Search/filter
                 panels::filter_bar::render(ui, state);
+            });
+        } else if state.view_mode == ViewMode::Cacowards {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                panels::layout_toggle(ui, &mut state.cacowards.layout);
             });
         }
     });

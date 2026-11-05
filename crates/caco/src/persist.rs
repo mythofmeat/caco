@@ -5,6 +5,9 @@ use std::path::PathBuf;
 pub struct GuiState {
     #[serde(default)]
     pub view_layout: String,
+    /// The Cacowards view's own, since a year is a list to go through.
+    #[serde(default)]
+    pub cacowards_layout: String,
     /// Which sort field, by its key: `state::SORT_FIELDS`. None is the default.
     #[serde(default)]
     pub sort_field: Option<String>,
@@ -30,6 +33,7 @@ impl Default for GuiState {
     fn default() -> Self {
         Self {
             view_layout: "grid".to_string(),
+            cacowards_layout: "list".to_string(),
             sort_field: None,
             sort_field_index: None,
             sort_desc: true,

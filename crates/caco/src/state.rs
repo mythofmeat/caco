@@ -394,6 +394,9 @@ pub struct CacowardsState {
     /// after import). The app's update loop drains this flag
     /// and re-runs `db::search_cacowards`.
     pub needs_reload: bool,
+
+    /// A list to go through, or posters to look at.
+    pub layout: ViewLayout,
 }
 
 impl Default for CacowardsState {
@@ -407,6 +410,7 @@ impl Default for CacowardsState {
             // Eager-load on first view-mode entry so the magazine has
             // something to render the moment the user clicks the nav item.
             needs_reload: true,
+            layout: ViewLayout::List,
         }
     }
 }
@@ -447,13 +451,25 @@ impl CacowardsState {
     }
 }
 
+fn layout_from(saved: &str) -> ViewLayout {
+    match saved {
+        "grid" => ViewLayout::Grid,
+        _ => ViewLayout::List,
+    }
+}
+
+fn layout_name(layout: ViewLayout) -> String {
+    match layout {
+        ViewLayout::List => "list".to_string(),
+        ViewLayout::Grid => "grid".to_string(),
+    }
+}
+
 impl AppState {
     pub fn new(db_path: PathBuf) -> Self {
         let persisted = persist::load();
-        let view_layout = match persisted.view_layout.as_str() {
-            "grid" => ViewLayout::Grid,
-            _ => ViewLayout::List,
-        };
+        let view_layout = layout_from(&persisted.view_layout);
+        let cacowards_layout = layout_from(&persisted.cacowards_layout);
         let sort_field_index = persisted
             .sort_field
             .as_deref()
@@ -483,7 +499,10 @@ impl AppState {
             total_wad_count: 0,
             sidebar_collections: Vec::new(),
             active_collection: None,
-            cacowards: CacowardsState::default(),
+            cacowards: CacowardsState {
+                layout: cacowards_layout,
+                ..CacowardsState::default()
+            },
             stats: StatsState::default(),
             mirror_offers: VecDeque::new(),
             uploads: Vec::new(),
@@ -887,10 +906,8 @@ impl AppState {
     /// Produce a snapshot of persistent GUI state for saving.
     pub fn to_persisted(&self) -> persist::GuiState {
         persist::GuiState {
-            view_layout: match self.view_layout {
-                ViewLayout::List => "list".to_string(),
-                ViewLayout::Grid => "grid".to_string(),
-            },
+            view_layout: layout_name(self.view_layout),
+            cacowards_layout: layout_name(self.cacowards.layout),
             sort_field: Some(SORT_FIELDS[self.sort_field_index].0.to_string()),
             sort_field_index: None,
             sort_desc: self.sort_desc,

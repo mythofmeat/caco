@@ -745,6 +745,17 @@ fn shoot_every_surface() {
     ] {
         s.shot_view(name, mode);
     }
+    // Posters, for looking at the pictures, and with them the thumbnails come in.
+    s.shot_view_after("03-cacowards-grid", ViewMode::Cacowards, |s| {
+        s.harness.get_by_label("Grid").click_accesskit();
+        s.settle(4, WORKER_PAUSE);
+    });
+    s.harness.state_mut().set_view(ViewMode::Cacowards);
+    s.settle(2, Duration::ZERO);
+    s.harness.get_by_label("List").click_accesskit();
+    s.settle(2, Duration::ZERO);
+    s.harness.state_mut().set_view(ViewMode::Library);
+    s.settle(1, Duration::ZERO);
 
     // The far end of a strip that has to scroll to reach it, since the newest year
     // is what opens. An old year also has different sections to lay out: no

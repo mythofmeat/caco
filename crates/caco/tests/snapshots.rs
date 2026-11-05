@@ -456,7 +456,10 @@ impl Shooter {
 
         self.view(ViewMode::Cacowards);
         self.click("2023");
-        self.snap("cacowards");
+        self.snap("cacowards-list");
+        self.click("Grid");
+        self.snap("cacowards-grid");
+        self.click("List");
 
         self.view(ViewMode::Import);
         self.snap("import");

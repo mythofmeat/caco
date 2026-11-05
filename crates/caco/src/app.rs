@@ -1411,7 +1411,9 @@ impl eframe::App for CacoApp {
                     }
                 }
             }
-        } else if self.state.view_mode == ViewMode::Cacowards {
+        } else if self.state.view_mode == ViewMode::Cacowards
+            && self.state.cacowards.layout == ViewLayout::Grid
+        {
             let sender = self.bg.sender();
             // Linked WADs use their wad_id and the existing pipeline
             // (cache → TITLEPIC → wiki scrape).

@@ -234,6 +234,17 @@ pub fn danger_button(text: impl Into<String>) -> egui::Button<'static> {
     filled_button(text, COLOR_ERROR)
 }
 
+/// [`primary_button`] for a row or a card, where it is one of many and sits beside small text.
+pub fn small_primary_button(text: impl Into<String>) -> egui::Button<'static> {
+    egui::Button::new(
+        egui::RichText::new(text.into())
+            .size(11.0)
+            .strong()
+            .color(TEXT_ON_ACCENT),
+    )
+    .fill(TEXT_ACCENT)
+}
+
 fn filled_button(text: impl Into<String>, fill: Color32) -> egui::Button<'static> {
     egui::Button::new(
         egui::RichText::new(text.into())
