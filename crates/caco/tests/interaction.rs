@@ -719,3 +719,75 @@ fn hiding_what_is_finished_leaves_what_is_not() {
     assert!(rows(&app) <= before);
     assert!(rows(&app) > 0);
 }
+
+#[test]
+fn a_number_in_stats_goes_to_what_it_counts() {
+    let db_path = library("stats-goes", 3);
+    let conn = db::open_connection(&db_path).expect("open library");
+    conn.execute(
+        "UPDATE wads SET status = 'completed' WHERE title = 'WAD 001'",
+        [],
+    )
+    .expect("finish a WAD");
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+    app.state_mut().set_view(ViewMode::Stats);
+    settle(&mut app);
+
+    app.get_by_label("Completed: 1 WAD").click_accesskit();
+    settle(&mut app);
+
+    assert_eq!(app.state().selected_wad_title(), Some("WAD 001"));
+    assert!(app.query_by_label("1 of 3 WADs").is_some());
+}
+
+#[test]
+fn a_year_in_stats_goes_to_its_cacowards() {
+    let db_path = library("stats-year", 1);
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+    app.state_mut().set_view(ViewMode::Stats);
+    settle(&mut app);
+
+    app.get_by_label_contains("2011:").click_accesskit();
+    settle(&mut app);
+
+    assert!(app.query_by_label("Hide Finished").is_some());
+}
+
+/// Nothing used to say what a new library needed until Play failed for want of it.
+#[test]
+fn an_empty_library_says_what_there_is_to_do_first() {
+    let db_path = library("first-run", 0);
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+
+    assert!(app.query_by_label("Your library is empty").is_some());
+    assert!(app.query_by_label("No game files yet").is_some());
+
+    app.get_by_label("See the Cacowards").click_accesskit();
+    settle(&mut app);
+    assert!(app.query_by_label("Hide Finished").is_some());
+}
+
+#[test]
+fn the_main_button_of_a_dialog_is_on_a_key_too() {
+    let db_path = library("ctrl-enter", 2);
+    let conn = db::open_connection(&db_path).expect("open library");
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+
+    press(&mut app, egui::Key::D);
+    app.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Enter);
+    settle(&mut app);
+
+    assert_eq!(wads_in_library(&conn), 1);
+    assert!(
+        app.query_by_role_and_label(Role::Window, "Delete WAD")
+            .is_none()
+    );
+}
+
+#[test]
+fn help_says_how_to_write_a_filter() {
+    let db_path = library("help-filter", 1);
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+    press(&mut app, egui::Key::F1);
+    assert!(app.query_by_label("^status:abandoned").is_some());
+}

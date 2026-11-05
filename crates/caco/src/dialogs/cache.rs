@@ -135,7 +135,8 @@ impl CacheDialogState {
                         } else {
                             theme::COLOR_ERROR
                         };
-                        ui.colored_label(color, &entry.path);
+                        ui.colored_label(color, super::short_path(&entry.path))
+                            .on_hover_text(&entry.path);
                     });
                     row.col(|ui| {
                         let size_str = match entry.size {
@@ -196,7 +197,10 @@ impl CacheDialogState {
                 return;
             }
             let clear_label = if skipping > 0 {
-                format!("Clear {clearable} Caco Can Download Again")
+                format!(
+                    "Clear {} caco Can Fetch Again",
+                    count(clearable, "File", "Files")
+                )
             } else {
                 format!("Clear All ({clearable})")
             };

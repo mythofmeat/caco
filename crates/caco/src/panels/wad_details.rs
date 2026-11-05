@@ -480,20 +480,13 @@ fn tag_chips(ui: &mut egui::Ui, tags: &[String]) -> Option<ActionRequest> {
         ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
         for tag in tags {
             if chip(ui, tag, theme::TEXT_TAG, "Show everything with this tag") {
-                action = Some(ActionRequest::FilterLibrary(tag_query(tag)));
+                action = Some(ActionRequest::FilterLibrary(crate::panels::field_query(
+                    "tag", tag,
+                )));
             }
         }
     });
     action
-}
-
-/// The query for a tag, quoted if it has to be.
-fn tag_query(tag: &str) -> String {
-    if tag.contains(char::is_whitespace) {
-        format!("tag:\"{tag}\"")
-    } else {
-        format!("tag:{tag}")
-    }
 }
 
 /// What it takes to run, for a WAD where anything has been decided or worked out.
@@ -551,7 +544,7 @@ fn file_summary(wad: &WadRecord) -> (String, bool) {
     }
     let folder = text_of(&wad.last_known_path)
         .and_then(|path| std::path::Path::new(path).parent())
-        .map(|parent| parent.display().to_string());
+        .map(|parent| crate::dialogs::short_path(&parent.display().to_string()));
     match folder {
         Some(folder) => (format!("Not on this machine. Last seen in {folder}."), true),
         None => (
@@ -696,12 +689,6 @@ mod tests {
                 ("Finished", "Twice".to_string()),
             ]
         );
-    }
-
-    #[test]
-    fn a_tag_with_a_space_in_it_is_quoted_as_the_filter_expects() {
-        assert_eq!(tag_query("caco"), "tag:caco");
-        assert_eq!(tag_query("to play"), "tag:\"to play\"");
     }
 
     #[test]

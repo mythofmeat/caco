@@ -226,7 +226,10 @@ impl WadStatsDialogState {
     fn render_left_pane(&mut self, ui: &mut egui::Ui, height: f32) {
         ui.colored_label(
             theme::TEXT_SECONDARY,
-            count(self.completion_count(), "time finished", "times finished"),
+            match self.completion_count() {
+                0 => "Not finished yet".to_string(),
+                n => count(n, "time finished", "times finished"),
+            },
         );
         ui.add_space(4.0);
         scroll_body(ui, height - 24.0, |ui| {

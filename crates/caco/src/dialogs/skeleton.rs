@@ -248,6 +248,21 @@ impl<'a> DialogBody<'a> {
         DialogFooter::new(self.ui, self.measure)
     }
 
+    /// A body with nothing to show yet and one with a table to fill, in one call: a sentence in
+    /// a window the height of the table it stands in for looks like something failed to load.
+    pub fn pick_body(
+        self,
+        nothing_yet: bool,
+        empty: impl FnOnce(&mut egui::Ui),
+        full: impl FnOnce(&mut egui::Ui, f32),
+    ) -> DialogFooter<'a> {
+        if nothing_yet {
+            self.scroll(empty)
+        } else {
+            self.fill(full)
+        }
+    }
+
     /// A body that takes the whole height, and is told what that is. For one that looks after
     /// its own scrolling: panes side by side, or a table. It should stay inside what it is
     /// given, since the window would grow to fit if it did not.
@@ -407,7 +422,11 @@ impl<'a> Primary<'a> {
         let response = ui.add_enabled(self.waiting_for.is_none(), button);
         match self.waiting_for {
             Some(why) => response.on_disabled_hover_text(why).clicked(),
-            None => response.clicked(),
+            None => {
+                let pressed =
+                    ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter));
+                response.on_hover_text("Ctrl+Enter").clicked() || pressed
+            }
         }
     }
 }
@@ -618,6 +637,33 @@ mod tests {
             .get_by_role_and_label(egui::accesskit::Role::Window, "Test")
             .rect();
         assert!(window.height() < 200.0, "{window:?}");
+    }
+
+    /// Without leaving the keyboard for the last step of something done with it.
+    #[test]
+    fn ctrl_enter_presses_the_main_button_but_not_one_still_waiting() {
+        let run = |ready: bool| {
+            let pressed = std::rc::Rc::new(std::cell::Cell::new(false));
+            let seen = pressed.clone();
+            let mut harness = Harness::builder()
+                .with_size(egui::vec2(800.0, 400.0))
+                .build_ui(move |ui| {
+                    Dialog::new("Test", [400.0, 200.0]).show(ui.ctx(), |dialog| {
+                        dialog.scroll(|_| {}).buttons(|row| {
+                            let primary = Primary::new("Save").when(ready, "needs a name");
+                            if row.end(Some("Cancel"), Some(primary)).primary {
+                                seen.set(true);
+                            }
+                        })
+                    });
+                });
+            harness.step();
+            harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Enter);
+            harness.step();
+            pressed.get()
+        };
+        assert!(run(true));
+        assert!(!run(false));
     }
 
     #[test]

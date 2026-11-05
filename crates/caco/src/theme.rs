@@ -475,6 +475,23 @@ pub fn solid_scrollbar(ui: &mut egui::Ui) {
     widgets.active.bg_fill = lift(SCROLL_HANDLE);
 }
 
+/// A key on the keyboard, as a little cap with its name on it.
+pub fn key_cap(ui: &mut egui::Ui, key: &str) {
+    egui::Frame::new()
+        .fill(BG_LIGHT)
+        .stroke(egui::Stroke::new(1.0_f32, BORDER_MED))
+        .corner_radius(4)
+        .inner_margin(egui::Margin::symmetric(5, 1))
+        .show(ui, |ui| {
+            ui.label(
+                egui::RichText::new(key)
+                    .monospace()
+                    .size(11.0)
+                    .color(TEXT_PRIMARY),
+            );
+        });
+}
+
 /// What heads a column.
 pub fn column_header(text: impl Into<String>) -> egui::RichText {
     egui::RichText::new(text.into())

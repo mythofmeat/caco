@@ -13,10 +13,10 @@ pub(super) fn render_topbar(
         // Breadcrumbs
         render_breadcrumbs(ui, state);
 
-        // Filter and sort only make sense in Library, where they act on what is showing, and
-        // are not drawn where they could do nothing. Cacowards has years to go by, and how
+        // Filter and sort only make sense in a library with something in it, where they act on
+        // what is showing, and are not drawn where they could do nothing. Cacowards has years to go by, and how
         // it lays them out.
-        if state.view_mode == ViewMode::Library {
+        if state.view_mode == ViewMode::Library && state.total_wad_count > 0 {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let hint = if state.wide_window {
                     "Show or hide what is known about the selected WAD. Or press I."

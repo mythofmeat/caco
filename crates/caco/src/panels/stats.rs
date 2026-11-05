@@ -6,7 +6,8 @@
 //! This used to show five figures about completion on one screen, each defined differently and
 //! none explained, and leave half the page empty.
 //!
-//! A view rather than a dialog: nothing in it is an action, and you go there to read.
+//! A view rather than a dialog: you go there to read. What is worth reading more about goes to
+//! where the number came from: a status or an author to the library, and a year to its Cacowards.
 //!
 //! Charts are painted by hand rather than through a plotting crate, since two bar charts and
 //! some thin bars are all there are. Every mark's value is in its tooltip and its accessible
@@ -15,7 +16,8 @@
 use caco_core::db::Status;
 use caco_core::db::sessions::{StatsSnapshot, Tally};
 
-use crate::state::AppState;
+use crate::panels::field_query;
+use crate::state::{ActionRequest, AppState};
 use crate::theme;
 
 /// Width below which the two-column body stacks instead.
@@ -39,16 +41,18 @@ const MAX_MONTHS: usize = 24;
 const BAR_ROW_HEIGHT: f32 = 18.0;
 const BAR_HEIGHT: f32 = 10.0;
 
-pub fn render(ui: &mut egui::Ui, state: &AppState) {
+/// Render the view. Returns where it was asked to go, if anywhere.
+pub fn render(ui: &mut egui::Ui, state: &AppState) -> Option<ActionRequest> {
     let Some(snap) = &state.stats.snapshot else {
         ui.add_space(24.0);
         ui.horizontal(|ui| {
             ui.add_space(24.0);
             ui.colored_label(theme::TEXT_SECONDARY, "No statistics available.");
         });
-        return;
+        return None;
     };
 
+    let mut action = None;
     egui::Frame::new()
         .inner_margin(egui::Margin::symmetric(24, 16))
         .show(ui, |ui| {
@@ -60,9 +64,9 @@ pub fn render(ui: &mut egui::Ui, state: &AppState) {
                 ui.add_space(SECTION_GAP);
                 completions_chart(ui, snap);
                 ui.add_space(SECTION_GAP);
-                by_status(ui, snap);
+                by_status(ui, snap, &mut action);
                 ui.add_space(SECTION_GAP);
-                cacowards(ui, state);
+                cacowards(ui, state, &mut action);
             } else {
                 // Halve the row, less the gap, so neither column claims the
                 // slack — an unbalanced split reads as a bug at wide sizes.
@@ -77,16 +81,17 @@ pub fn render(ui: &mut egui::Ui, state: &AppState) {
                     ui.add_space(COLUMN_GAP - ui.spacing().item_spacing.x);
                     ui.vertical(|ui| {
                         ui.set_width(column);
-                        by_status(ui, snap);
+                        by_status(ui, snap, &mut action);
                         ui.add_space(SECTION_GAP);
-                        cacowards(ui, state);
+                        cacowards(ui, state, &mut action);
                     });
                 });
             }
 
             ui.add_space(SECTION_GAP);
-            breakdowns(ui, snap);
+            breakdowns(ui, snap, &mut action);
         });
+    action
 }
 
 /// The four numbers worth seeing without reading: a tile row, each with what it means.
@@ -524,6 +529,8 @@ fn bar_chart(
 // ---------------------------------------------------------------------------
 
 /// A label, a thin bar and a figure on a line, with the columns lined up from row to row.
+/// A row that goes somewhere when clicked. True if it was.
+#[allow(clippy::too_many_arguments)]
 fn bar_row(
     ui: &mut egui::Ui,
     label: &str,
@@ -532,26 +539,33 @@ fn bar_row(
     figure: &str,
     color: egui::Color32,
     says: &str,
-) {
+    goes_to: &str,
+) -> bool {
     /// What the figure is given at the right, since it is a number and a short one.
     const FIGURE_WIDTH: f32 = 72.0;
 
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), BAR_ROW_HEIGHT),
-        egui::Sense::hover(),
+        egui::Sense::click(),
     );
-    let response = response.on_hover_text(says);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, says));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, says));
+    let response = response.on_hover_text(format!("{says}\n{goes_to}"));
+    let clicked = response.clicked();
 
     let painter = ui.painter_at(rect);
     let y = rect.center().y;
     let font = egui::FontId::proportional(12.0);
+    let label_color = if response.hovered() {
+        theme::TEXT_PRIMARY
+    } else {
+        theme::TEXT_SECONDARY
+    };
     theme::paint_truncated(
         &painter,
         egui::pos2(rect.min.x, y - 8.0),
         label,
         font.clone(),
-        theme::TEXT_SECONDARY,
+        label_color,
         label_width - 6.0,
     );
     painter.text(
@@ -567,7 +581,7 @@ fn bar_row(
         egui::pos2(rect.max.x - FIGURE_WIDTH, y + BAR_HEIGHT / 2.0),
     );
     if track.width() <= 0.0 {
-        return;
+        return clicked;
     }
     painter.rect_filled(track, 2.0, theme::BG_MEDIUM);
     let fraction = fraction.clamp(0.0, 1.0);
@@ -583,10 +597,11 @@ fn bar_row(
         };
         painter.rect_filled(fill, 2.0, fill_color);
     }
+    clicked
 }
 
 /// How the library is split. Each status in its own colour, and its figure beside it.
-fn by_status(ui: &mut egui::Ui, snap: &StatsSnapshot) {
+fn by_status(ui: &mut egui::Ui, snap: &StatsSnapshot, action: &mut Option<ActionRequest>) {
     section_header(ui, "Your library", "");
     ui.spacing_mut().item_spacing.y = 0.0;
     let total = snap.total_wads.max(1) as f32;
@@ -594,7 +609,7 @@ fn by_status(ui: &mut egui::Ui, snap: &StatsSnapshot) {
         let n = snap.with_status(status);
         let style = theme::status_style(status);
         let share = n as f32 / total;
-        bar_row(
+        if bar_row(
             ui,
             style.word,
             88.0,
@@ -602,7 +617,10 @@ fn by_status(ui: &mut egui::Ui, snap: &StatsSnapshot) {
             &format!("{n}  {:.0}%", share * 100.0),
             style.color,
             &format!("{}: {}", style.word, count(n, "WAD", "WADs")),
-        );
+            "Show them in the library",
+        ) {
+            *action = Some(ActionRequest::FilterStatus(status));
+        }
     }
     ui.spacing_mut().item_spacing.y = 4.0;
 }
@@ -620,7 +638,7 @@ fn cacoward_totals(state: &AppState) -> (usize, usize) {
 }
 
 /// How far through each year's awards the library is.
-fn cacowards(ui: &mut egui::Ui, state: &AppState) {
+fn cacowards(ui: &mut egui::Ui, state: &AppState, action: &mut Option<ActionRequest>) {
     let years = state.cacowards.years();
     if years.is_empty() {
         return;
@@ -645,7 +663,7 @@ fn cacowards(ui: &mut egui::Ui, state: &AppState) {
                     } else {
                         0.0
                     };
-                    bar_row(
+                    if bar_row(
                         ui,
                         &year.to_string(),
                         38.0,
@@ -653,7 +671,10 @@ fn cacowards(ui: &mut egui::Ui, state: &AppState) {
                         &format!("{done} of {total}"),
                         color,
                         &format!("{year}: {done} of {total} completed"),
-                    );
+                        "See that year's Cacowards",
+                    ) {
+                        *action = Some(ActionRequest::ShowCacowards(*year));
+                    }
                 }
             });
         }
@@ -664,7 +685,7 @@ fn cacowards(ui: &mut egui::Ui, state: &AppState) {
 type Breakdown<'a> = (&'a str, &'a [Tally], &'a dyn Fn(i64) -> String);
 
 /// What the library is made of: four short ranked lists, as many across as fit.
-fn breakdowns(ui: &mut egui::Ui, snap: &StatsSnapshot) {
+fn breakdowns(ui: &mut egui::Ui, snap: &StatsSnapshot, action: &mut Option<ActionRequest>) {
     let duration = |seconds: i64| {
         // Hours are enough for a figure beside a bar, and the tooltip has the rest.
         format!("{}h", seconds / 3600)
@@ -689,7 +710,14 @@ fn breakdowns(ui: &mut egui::Ui, snap: &StatsSnapshot) {
                 }
                 ui.vertical(|ui| {
                     ui.set_width(column);
-                    ranked_list(ui, title, tallies, figure);
+                    // By name, since that is the one of these the library can be filtered by
+                    // with what this has: the others are spelled differently here.
+                    let picked = ranked_list(ui, title, tallies, figure);
+                    if *title == "Most played authors"
+                        && let Some(author) = picked
+                    {
+                        *action = Some(ActionRequest::FilterLibrary(field_query("author", author)));
+                    }
                 });
             }
         });
@@ -697,14 +725,20 @@ fn breakdowns(ui: &mut egui::Ui, snap: &StatsSnapshot) {
     }
 }
 
-fn ranked_list(ui: &mut egui::Ui, title: &str, tallies: &[Tally], figure: &dyn Fn(i64) -> String) {
+/// Returns the name of the line that was clicked, if one was.
+fn ranked_list<'a>(
+    ui: &mut egui::Ui,
+    title: &str,
+    tallies: &'a [Tally],
+    figure: &dyn Fn(i64) -> String,
+) -> Option<&'a str> {
     section_header(ui, title, "");
     if tallies.is_empty() {
         ui.colored_label(
             theme::TEXT_MUTED,
             egui::RichText::new("Nothing yet.").size(12.0),
         );
-        return;
+        return None;
     }
     let max = tallies
         .iter()
@@ -713,21 +747,50 @@ fn ranked_list(ui: &mut egui::Ui, title: &str, tallies: &[Tally], figure: &dyn F
         .unwrap_or(1)
         .max(1) as f32;
     ui.spacing_mut().item_spacing.y = 0.0;
+    let mut picked = None;
+    let clickable = title == "Most played authors";
     for tally in tallies {
         let value = figure(tally.value);
-        ranked_row(ui, tally, tally.value as f32 / max, &value);
+        if ranked_row(ui, tally, tally.value as f32 / max, &value, clickable) {
+            picked = Some(tally.name.as_str());
+        }
     }
+    picked
 }
 
 /// A name over a thin bar, since a name is as long as it is and a column of them can be narrow.
-fn ranked_row(ui: &mut egui::Ui, tally: &Tally, fraction: f32, figure: &str) {
+///
+/// True if it was clicked, for one that can be.
+fn ranked_row(
+    ui: &mut egui::Ui,
+    tally: &Tally,
+    fraction: f32,
+    figure: &str,
+    clickable: bool,
+) -> bool {
+    let sense = if clickable {
+        egui::Sense::click()
+    } else {
+        egui::Sense::hover()
+    };
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), BAR_ROW_HEIGHT + 4.0),
-        egui::Sense::hover(),
+        sense,
     );
     let says = format!("{}: {figure}", tally.name);
-    let response = response.on_hover_text(&says);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &says));
+    let role = if clickable {
+        egui::Role::Button
+    } else {
+        egui::Role::Label
+    };
+    response.widget_info(|| egui::WidgetInfo::labeled(role, true, &says));
+    let hint = if clickable {
+        format!("{says}\nShow their WADs in the library")
+    } else {
+        says
+    };
+    let response = response.on_hover_text(hint);
+    let clicked = response.clicked();
 
     let painter = ui.painter_at(rect);
     let font = egui::FontId::proportional(12.0);
@@ -765,6 +828,7 @@ fn ranked_row(ui: &mut egui::Ui, tally: &Tally, fraction: f32, figure: &str) {
         theme::CHART_BAR
     };
     painter.rect_filled(fill, 1.0, color);
+    clicked
 }
 
 #[cfg(test)]

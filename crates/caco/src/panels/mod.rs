@@ -9,7 +9,7 @@ pub mod wad_table;
 use caco_core::db::{Status, WadRecord};
 
 use crate::get::GetTarget;
-use crate::state::{ActionRequest, AppState, ViewLayout};
+use crate::state::{ActionRequest, AppState, ViewLayout, ViewMode};
 use crate::theme;
 
 /// Grid or list, in a right-to-left row. The same control wherever a view offers both: one
@@ -67,25 +67,43 @@ pub fn layout_toggle(ui: &mut egui::Ui, layout: &mut ViewLayout) {
         });
 }
 
-/// What was asked for by the library's empty state.
-pub enum EmptyLibraryAction {
-    None,
-    Import,
-    Cacowards,
-    ClearFilter,
+/// A term for the filter: `field:value`, quoted if it has to be, as the filter expects.
+pub fn field_query(field: &str, value: &str) -> String {
+    if value.contains(char::is_whitespace) {
+        format!("{field}:\"{}\"", value.replace('"', ""))
+    } else {
+        format!("{field}:{value}")
+    }
 }
 
-/// What the library shows when it has nothing to show: where to get a WAD from if it is
-/// empty, and that the filter is why if it isn't, with the way out of that.
-pub fn render_empty_library(ui: &mut egui::Ui, total_wads: usize) -> EmptyLibraryAction {
-    let mut action = EmptyLibraryAction::None;
+/// How far along a new library is towards playing something.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Setup {
+    /// What will run what gets played, if anything has been found.
+    pub sourceport: Option<String>,
+    /// How many game files caco knows about.
+    pub iwads: usize,
+}
+
+/// How wide the list of what to do first gets.
+const SETUP_WIDTH: f32 = 480.0;
+
+/// What the library shows when it has nothing to show. If it is really empty, what there is to
+/// do before anything can be played, which nothing used to mention until Play failed. If not,
+/// that the filter is why, with the way out of that.
+pub fn render_empty_library(
+    ui: &mut egui::Ui,
+    total_wads: usize,
+    setup: &Setup,
+) -> Option<ActionRequest> {
+    let mut action = None;
     ui.add_space(24.0);
     ui.vertical_centered(|ui| {
         if total_wads > 0 {
             ui.colored_label(theme::TEXT_SECONDARY, "No WADs match.");
             ui.add_space(4.0);
             if ui.button("Show All WADs").clicked() {
-                action = EmptyLibraryAction::ClearFilter;
+                action = Some(ActionRequest::ClearFilters);
             }
             return;
         }
@@ -93,21 +111,112 @@ pub fn render_empty_library(ui: &mut egui::Ui, total_wads: usize) -> EmptyLibrar
             theme::TEXT_PRIMARY,
             egui::RichText::new("Your library is empty").size(16.0),
         );
-        ui.add_space(4.0);
-        ui.colored_label(
-            theme::TEXT_SECONDARY,
-            "Find something on idgames or the Doom Wiki, paste a link, or add a file you have.",
+        ui.add_space(12.0);
+
+        let width = ui.available_width().min(SETUP_WIDTH);
+        ui.allocate_ui_with_layout(
+            egui::vec2(width, 0.0),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.set_width(width);
+                setup_steps(ui, setup, &mut action);
+            },
         );
-        ui.add_space(8.0);
-        if ui.add(theme::primary_button("Import a WAD")).clicked() {
-            action = EmptyLibraryAction::Import;
-        }
-        ui.add_space(2.0);
-        if ui.button("See the Cacowards").clicked() {
-            action = EmptyLibraryAction::Cacowards;
-        }
     });
     action
+}
+
+fn setup_steps(ui: &mut egui::Ui, setup: &Setup, action: &mut Option<ActionRequest>) {
+    let (title, detail, button, go) = match &setup.sourceport {
+        Some(name) => (
+            format!("{name} will run what you play"),
+            "Change it, or set one up for each WAD, in Settings.",
+            "Settings",
+            ActionRequest::Settings,
+        ),
+        None => (
+            "No sourceport found".to_string(),
+            "caco needs one to launch anything. Install one, or build one here.",
+            "Sourceports",
+            ActionRequest::Sourceports,
+        ),
+    };
+    if setup_step(ui, setup.sourceport.is_some(), &title, detail, button) {
+        *action = Some(go);
+    }
+
+    let iwads = if setup.iwads == 0 {
+        "No game files yet".to_string()
+    } else {
+        format!(
+            "{} ready",
+            crate::dialogs::count(setup.iwads, "game file", "game files")
+        )
+    };
+    if setup_step(
+        ui,
+        setup.iwads > 0,
+        &iwads,
+        "The IWADs you own, such as doom2.wad, which most WADs need to run.",
+        "IWADs",
+    ) {
+        *action = Some(ActionRequest::Resources);
+    }
+
+    ui.add_space(8.0);
+    ui.colored_label(theme::TEXT_PRIMARY, "Then find something to play");
+    ui.add_space(2.0);
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(
+                "Search idgames or the Doom Wiki, paste a link, or add a file you have. The \
+                 Cacowards are every year's best, and a good place to start.",
+            )
+            .size(12.0)
+            .color(theme::TEXT_SECONDARY),
+        )
+        .wrap(),
+    );
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        if ui.add(theme::primary_button("Import a WAD")).clicked() {
+            *action = Some(ActionRequest::ShowView(ViewMode::Import));
+        }
+        if ui.button("See the Cacowards").clicked() {
+            *action = Some(ActionRequest::ShowView(ViewMode::Cacowards));
+        }
+    });
+}
+
+/// One line of what there is to do first. True if its button was pressed.
+fn setup_step(ui: &mut egui::Ui, done: bool, title: &str, detail: &str, button: &str) -> bool {
+    let mut pressed = false;
+    ui.horizontal(|ui| {
+        // Colour is never the only signal, and these are different shapes as well.
+        let (mark, color) = if done {
+            ("\u{2713}", theme::COLOR_SUCCESS)
+        } else {
+            ("\u{25cb}", theme::COLOR_WARNING)
+        };
+        ui.colored_label(color, egui::RichText::new(mark).size(14.0));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            pressed = ui.button(button).clicked();
+            ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                ui.spacing_mut().item_spacing.y = 1.0;
+                ui.colored_label(theme::TEXT_PRIMARY, title);
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(detail)
+                            .size(12.0)
+                            .color(theme::TEXT_SECONDARY),
+                    )
+                    .wrap(),
+                );
+            });
+        });
+    });
+    ui.add_space(6.0);
+    pressed
 }
 
 /// Show a right-click context menu for a WAD with standard actions, what you might do first at

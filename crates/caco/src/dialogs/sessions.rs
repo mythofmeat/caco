@@ -97,7 +97,17 @@ impl SessionsDialogState {
             .about(&self.wad_title)
             .show(ctx, |dialog| {
                 dialog
-                    .fill(|ui, height| self.render_table(ui, height))
+                    .pick_body(
+                        self.sessions.is_empty(),
+                        |ui| {
+                            ui.colored_label(
+                                theme::TEXT_SECONDARY,
+                                "Nothing yet. A session is recorded each time you play this from \
+                             caco.",
+                            );
+                        },
+                        |ui, height| self.render_table(ui, height),
+                    )
                     .buttons(|row| {
                         if row.close() {
                             result = SessionsResult::Closed;
@@ -113,11 +123,6 @@ impl SessionsDialogState {
     }
 
     fn render_table(&self, ui: &mut egui::Ui, height: f32) {
-        if self.sessions.is_empty() {
-            ui.colored_label(theme::TEXT_SECONDARY, "No sessions yet.");
-            return;
-        }
-
         ui.colored_label(
             theme::TEXT_SECONDARY,
             count(self.sessions.len(), "session", "sessions"),

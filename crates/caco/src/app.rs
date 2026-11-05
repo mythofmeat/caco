@@ -819,6 +819,9 @@ impl CacoApp {
             ActionRequest::FilterLibrary(query) => {
                 self.state.filter_library(query);
             }
+            ActionRequest::FilterStatus(status) => self.state.filter_by_status(status),
+            ActionRequest::ClearFilters => self.state.clear_filters(),
+            ActionRequest::ShowView(mode) => self.state.show_view(mode),
             ActionRequest::ShowCacowards(year) => {
                 self.state.show_view(ViewMode::Cacowards);
                 self.state.cacowards.selected_year = Some(year);
@@ -1586,27 +1589,19 @@ impl eframe::App for CacoApp {
                                 }
 
                                 // Section header with view toggle
-                                ui.add_space(4.0);
-                                render_section_header(ui, &mut self.state, &mut actions);
-                                ui.add_space(8.0);
+                                if self.state.total_wad_count > 0 {
+                                    ui.add_space(4.0);
+                                    render_section_header(ui, &mut self.state, &mut actions);
+                                    ui.add_space(8.0);
+                                }
 
                                 // WAD grid or table, or why there is neither
                                 if self.state.wads.is_empty() {
-                                    match panels::render_empty_library(
+                                    actions.extend(panels::render_empty_library(
                                         ui,
                                         self.state.total_wad_count,
-                                    ) {
-                                        panels::EmptyLibraryAction::None => {}
-                                        panels::EmptyLibraryAction::Import => {
-                                            self.state.view_mode = ViewMode::Import;
-                                        }
-                                        panels::EmptyLibraryAction::Cacowards => {
-                                            self.state.show_view(ViewMode::Cacowards);
-                                        }
-                                        panels::EmptyLibraryAction::ClearFilter => {
-                                            self.state.clear_filters();
-                                        }
-                                    }
+                                        &self.state.setup,
+                                    ));
                                     return;
                                 }
                                 let view_action = match self.state.view_layout {
@@ -1642,7 +1637,7 @@ impl eframe::App for CacoApp {
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
                                 ui.set_min_width(ui.available_width());
-                                panels::stats::render(ui, &self.state);
+                                actions.extend(panels::stats::render(ui, &self.state));
                             });
                     }
                     ViewMode::Cacowards => {

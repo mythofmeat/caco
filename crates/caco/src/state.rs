@@ -78,6 +78,12 @@ pub enum ActionRequest {
     ToggleDetails,
     /// Show the library with this in the filter.
     FilterLibrary(String),
+    /// Show only the WADs with this status.
+    FilterStatus(caco_core::db::Status),
+    /// Show all of the library.
+    ClearFilters,
+    /// Go to a view.
+    ShowView(ViewMode),
     /// Show a year's Cacowards.
     ShowCacowards(i64),
     /// Put a WAD just deleted back in the library.
@@ -303,6 +309,10 @@ pub struct AppState {
     // Sidebar status counts (status → count)
     pub status_counts: HashMap<String, usize>,
     pub total_wad_count: usize,
+
+    /// How far along a library with nothing in it is. Read when it is found to be empty, since
+    /// nobody else wants it.
+    pub setup: crate::panels::Setup,
 
     // Sidebar collections (cached for display)
     pub sidebar_collections: Vec<CollectionRecord>,
@@ -587,6 +597,7 @@ impl AppState {
             last_g_press: None,
             status_counts: HashMap::new(),
             total_wad_count: 0,
+            setup: crate::panels::Setup::default(),
             sidebar_collections: Vec::new(),
             active_collection: None,
             cacowards: CacowardsState {
@@ -854,6 +865,15 @@ impl AppState {
 
         // Refresh sidebar counts and collections
         self.refresh_status_counts(conn);
+        if self.total_wad_count == 0 {
+            self.setup = crate::panels::Setup {
+                sourceport: Some(caco_core::config::load_config().sourceport.clone())
+                    .filter(|name| !name.is_empty()),
+                iwads: caco_core::db::iwads::get_all_iwads(conn)
+                    .map(|iwads| iwads.len())
+                    .unwrap_or(0),
+            };
+        }
         self.refresh_collections(conn);
 
         self.needs_reload = false;
@@ -1046,6 +1066,13 @@ impl AppState {
         self.clear_filters();
         self.select_wad(wad_id);
         self.reveal_selection = true;
+    }
+
+    /// Show only what has this status.
+    pub fn filter_by_status(&mut self, status: caco_core::db::Status) {
+        self.show_view(ViewMode::Library);
+        self.clear_filters();
+        self.status_filters.insert(status.as_str().to_string());
     }
 
     /// Show the whole library.
