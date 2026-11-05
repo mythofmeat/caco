@@ -179,6 +179,7 @@ static MIGRATIONS: &[Migration] = &[
     ),
     (43, "add_mirror_files", migrate_add_mirror_files),
     (44, "drop_dead_columns", migrate_drop_dead_columns),
+    (45, "add_sync", migrate_add_sync),
 ];
 
 // ---------------------------------------------------------------------------
@@ -205,6 +206,8 @@ pub fn init_db(conn: &Connection) -> Result<()> {
     let has_pending = MIGRATIONS.iter().any(|&(v, _, _)| v > current_version);
     if has_pending {
         backup_before_migration(conn, current_version);
+        // What a migration rewrites is nobody's edit, and every machine runs the same one.
+        crate::sync::capture::uninstall(conn)?;
     }
 
     // Run only pending migrations. Each migration + its version-record INSERT run in
@@ -227,6 +230,8 @@ pub fn init_db(conn: &Connection) -> Result<()> {
 
     // Post-migration indexes
     conn.execute_batch(POST_MIGRATION_INDEXES)?;
+
+    crate::sync::capture::install(conn)?;
 
     Ok(())
 }
@@ -965,6 +970,121 @@ fn migrate_drop_dead_columns(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Give every row a name that means the same on every machine, and add what keeping a log
+/// of them takes: see `crate::sync`.
+///
+/// Two machines with copies of one library each run this, and they have to come out
+/// agreeing, or every WAD would be two WADs the first time they met. So nothing here is
+/// random: a WAD goes by what its source calls it, or else by what a copy of a row cannot
+/// change (its rowid and when it was made), and what hangs off a WAD goes by the WAD and
+/// its own time. Rows made on one machine since the copy was taken differ in those, as
+/// they should, and a WAD on both that its source names is rightly one WAD.
+///
+/// A WAD keeps the folder it has: `data_key` is its rowid, which is what the folder is
+/// called. Everything is logged as it stands here, in the same transaction, so a crash
+/// cannot leave a library with rows its log will never mention.
+fn migrate_add_sync(conn: &Connection) -> Result<()> {
+    use sha2::{Digest, Sha256};
+
+    add_column_if_missing(conn, "wads", "uid", "TEXT")?;
+    add_column_if_missing(conn, "wads", "data_key", "TEXT")?;
+    for table in ["sessions", "wad_completions", "playthroughs"] {
+        add_column_if_missing(conn, table, "uid", "TEXT")?;
+    }
+    conn.execute_batch(crate::sync::capture::SYNC_TABLES)?;
+
+    let hashed = |parts: &[&str]| -> String {
+        let digest = Sha256::digest(parts.join("\n").as_bytes());
+        hex::encode(digest)[..32].to_string()
+    };
+
+    struct Wad {
+        id: i64,
+        source_type: String,
+        source_id: Option<String>,
+        created_at: Option<String>,
+    }
+    let wads: Vec<Wad> = conn
+        .prepare("SELECT id, source_type, source_id, created_at FROM wads ORDER BY id")?
+        .query_map([], |row| {
+            Ok(Wad {
+                id: row.get(0)?,
+                source_type: row.get(1)?,
+                source_id: row.get(2)?,
+                created_at: row.get(3)?,
+            })
+        })?
+        .collect::<std::result::Result<_, _>>()?;
+
+    let mut taken = std::collections::HashSet::new();
+    let mut uids = std::collections::HashMap::new();
+    for wad in &wads {
+        let natural = wad.source_id.as_deref().and_then(|id| {
+            let names_things = matches!(
+                wad.source_type.as_str(),
+                "idgames" | "doomwiki" | "doomworld"
+            );
+            let is_number = !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit());
+            (names_things && is_number).then(|| format!("{}-{id}", wad.source_type))
+        });
+        // The first of two rows with one name keeps it, as it would have when imported.
+        let uid = natural
+            .filter(|uid| taken.insert(uid.clone()))
+            .unwrap_or_else(|| {
+                hashed(&[
+                    "wad",
+                    &wad.id.to_string(),
+                    wad.created_at.as_deref().unwrap_or_default(),
+                    &wad.source_type,
+                ])
+            });
+        conn.execute(
+            "UPDATE wads SET uid = ?1, data_key = ?2 WHERE id = ?3",
+            rusqlite::params![uid, wad.id.to_string(), wad.id],
+        )?;
+        uids.insert(wad.id, uid);
+    }
+
+    for (kind, table, time) in [
+        ("session", "sessions", "started_at"),
+        ("completion", "wad_completions", "completed_at"),
+        ("playthrough", "playthroughs", "started_at"),
+    ] {
+        let rows: Vec<(i64, i64, Option<String>)> = conn
+            .prepare(&format!(
+                "SELECT id, wad_id, {time} FROM {table} ORDER BY id"
+            ))?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+            .collect::<std::result::Result<_, _>>()?;
+        // Two rows of one WAD at one time, which old second-resolution rows could be.
+        let mut seen: std::collections::HashMap<(i64, Option<String>), u32> =
+            std::collections::HashMap::new();
+        for (id, wad_id, at) in rows {
+            let nth = seen.entry((wad_id, at.clone())).or_default();
+            let uid = hashed(&[
+                kind,
+                uids.get(&wad_id).map(String::as_str).unwrap_or_default(),
+                at.as_deref().unwrap_or_default(),
+                &nth.to_string(),
+            ]);
+            *nth += 1;
+            conn.execute(
+                &format!("UPDATE {table} SET uid = ?1 WHERE id = ?2"),
+                rusqlite::params![uid, id],
+            )?;
+        }
+    }
+
+    conn.execute_batch(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_wads_uid ON wads(uid);
+         CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_uid ON sessions(uid);
+         CREATE UNIQUE INDEX IF NOT EXISTS idx_wad_completions_uid ON wad_completions(uid);
+         CREATE UNIQUE INDEX IF NOT EXISTS idx_playthroughs_uid ON playthroughs(uid);",
+    )?;
+
+    crate::sync::capture::log_existing_rows(conn)
+}
+
 fn migrate_consolidate_status(conn: &Connection) -> Result<()> {
     // Step 1: Map old status values to new ones
     conn.execute_batch(
@@ -1114,25 +1234,12 @@ mod tests {
     #[test]
     fn test_migration_add_required_sourceport_family() {
         let conn = open_memory().unwrap();
+        init_db(&conn).unwrap();
+        // Back to before it, and every migration after it, as a real library would be.
+        crate::sync::capture::uninstall(&conn).unwrap();
         conn.execute_batch(
-            "CREATE TABLE wads (
-                id INTEGER PRIMARY KEY,
-                title TEXT NOT NULL,
-                status TEXT DEFAULT 'unplayed',
-                source_type TEXT NOT NULL,
-                source_id TEXT,
-                source_url TEXT,
-                idgames_id TEXT,
-                cached_path TEXT,
-                deleted_at TEXT
-            );
-            CREATE TABLE schema_migrations (
-                version INTEGER PRIMARY KEY,
-                name TEXT NOT NULL,
-                applied_at TEXT DEFAULT CURRENT_TIMESTAMP
-            );
-            INSERT INTO schema_migrations (version, name)
-            VALUES (34, 'add_download_urls');",
+            "ALTER TABLE wads DROP COLUMN required_sourceport_family;
+             DELETE FROM schema_migrations WHERE version >= 35;",
         )
         .unwrap();
 

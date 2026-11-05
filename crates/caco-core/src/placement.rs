@@ -52,7 +52,7 @@ pub fn destination(dir: &Path, filename: &str, sha256: &str) -> io::Result<Desti
 }
 
 /// `road.zip` as `road-1a2b3c4d.zip`.
-fn name_with_hash(filename: &str, sha256: &str) -> String {
+pub(crate) fn name_with_hash(filename: &str, sha256: &str) -> String {
     let short = sha256.get(..8).unwrap_or(sha256);
     match filename.rsplit_once('.') {
         Some((stem, extension)) if !stem.is_empty() => format!("{stem}-{short}.{extension}"),

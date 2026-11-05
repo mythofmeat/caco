@@ -9,6 +9,7 @@
 //! session it starts, so the same file is not asked about again.
 
 use caco_core::identity::ContentChange;
+use caco_core::player::PlayOptions;
 
 use crate::theme;
 
@@ -16,21 +17,24 @@ pub struct FileChangedDialogState {
     wad_id: i64,
     wad_title: String,
     change: ContentChange,
+    /// What the launch had already been told to go ahead with.
+    opts: PlayOptions,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub enum FileChangedResult {
     Open,
-    PlayAnyway(i64),
+    PlayAnyway(i64, PlayOptions),
     Cancelled,
 }
 
 impl FileChangedDialogState {
-    pub fn new(wad_id: i64, wad_title: String, change: ContentChange) -> Self {
+    pub fn new(wad_id: i64, wad_title: String, change: ContentChange, opts: PlayOptions) -> Self {
         Self {
             wad_id,
             wad_title,
             change,
+            opts,
         }
     }
 
@@ -67,7 +71,13 @@ impl FileChangedDialogState {
 
             ui.horizontal(|ui| {
                 if ui.button("Play Anyway").clicked() {
-                    result = FileChangedResult::PlayAnyway(self.wad_id);
+                    result = FileChangedResult::PlayAnyway(
+                        self.wad_id,
+                        PlayOptions {
+                            accept_changed_file: true,
+                            ..self.opts
+                        },
+                    );
                 }
                 if ui.button("Cancel").clicked() {
                     result = FileChangedResult::Cancelled;

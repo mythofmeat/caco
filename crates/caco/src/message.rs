@@ -88,6 +88,19 @@ pub struct IdgamesIndexRun {
     pub asked_for: bool,
 }
 
+/// What a pass of the sync worker did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncRun {
+    pub report: caco_core::sync::SyncReport,
+    /// How many WADs turned out to have their file here already.
+    pub adopted: usize,
+    /// Which machine this is, to tell its own history apart from anyone else's. Blank if
+    /// that could not be found out, which the report says.
+    pub this_machine: String,
+    /// Someone pressed Sync Now, and wants to hear how it went.
+    pub asked_for: bool,
+}
+
 pub enum AppMessage {
     Notify(Notification),
     PlayFinished {
@@ -106,7 +119,19 @@ pub enum AppMessage {
         wad_id: i64,
         title: String,
         change: caco_core::identity::ContentChange,
+        opts: caco_core::player::PlayOptions,
     },
+    /// Another machine has saves for the WAD that this one does not, so the launch stopped
+    /// to ask. Opens the "Newer Saves" dialog. `opts` is what the launch had already been
+    /// told to go ahead with.
+    PlayNewerSaves {
+        wad_id: i64,
+        title: String,
+        saves: caco_core::sync::NewerSaves,
+        opts: caco_core::player::PlayOptions,
+    },
+    /// A pass of the sync worker has something to report.
+    SyncFinished(SyncRun),
     /// A file has finished arriving in the Downloads folder while a Get was waiting.
     DownloadLanded(caco_core::downloads::Arrival),
     /// The file the user said to link has been dealt with.

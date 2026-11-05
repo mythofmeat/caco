@@ -68,6 +68,15 @@ pub enum Error {
         change: crate::identity::ContentChange,
     },
 
+    /// Another machine has said something about its saves for this WAD since this one
+    /// last did, and they are not on this disk. Its own variant because the GUI asks
+    /// before launching: playing here would carry on from older saves, or overwrite them.
+    #[error("'{title}' has newer saves on {}", saves.machine)]
+    NewerSavesElsewhere {
+        title: String,
+        saves: crate::sync::NewerSaves,
+    },
+
     #[error("invalid WAD format: {0}")]
     InvalidWadFormat(String),
 

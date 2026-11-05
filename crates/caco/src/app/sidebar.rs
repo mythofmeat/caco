@@ -248,6 +248,11 @@ const TOOLS: &[Tool] = &[
         hint: "Your own stores of WAD files",
     },
     Tool {
+        label: "Sync",
+        action: || ActionRequest::Sync,
+        hint: "Keep this library on several machines",
+    },
+    Tool {
         label: "Enrich",
         action: || ActionRequest::Enrich,
         hint: "Re-run metadata detection",

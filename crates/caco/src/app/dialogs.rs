@@ -11,12 +11,14 @@ use crate::dialogs::file_changed::FileChangedResult;
 use crate::dialogs::link::LinkResult;
 use crate::dialogs::mirror_offer::MirrorOfferResult;
 use crate::dialogs::mirrors::MirrorsResult;
+use crate::dialogs::newer_saves::NewerSavesResult;
 use crate::dialogs::profiles::ProfilesResult;
 use crate::dialogs::resources::ResourcesResult;
 use crate::dialogs::sessions::SessionsResult;
 use crate::dialogs::settings::SettingsResult;
 use crate::dialogs::sourceports::SourceportsResult;
 use crate::dialogs::storage::StorageResult;
+use crate::dialogs::sync::SyncResult;
 use crate::dialogs::wad_data::WadDataResult;
 use crate::dialogs::wad_stats::WadStatsResult;
 use crate::get::GetTarget;
@@ -228,14 +230,33 @@ pub(super) fn render_active_dialog(
                 }
             }
             ActiveDialog::FileChanged(dialog) => match dialog.render(ctx) {
-                FileChangedResult::PlayAnyway(wad_id) => {
+                FileChangedResult::PlayAnyway(wad_id, opts) => {
                     close_dialog = true;
-                    follow_up_action = Some(ActionRequest::PlayAnyway(wad_id));
+                    follow_up_action = Some(ActionRequest::PlayWith(wad_id, opts));
                 }
                 FileChangedResult::Cancelled => {
                     close_dialog = true;
                 }
                 FileChangedResult::Open => {}
+            },
+            ActiveDialog::NewerSaves(dialog) => match dialog.render(ctx) {
+                NewerSavesResult::PlayAnyway(wad_id, opts) => {
+                    close_dialog = true;
+                    follow_up_action = Some(ActionRequest::PlayWith(wad_id, opts));
+                }
+                NewerSavesResult::Cancelled => {
+                    close_dialog = true;
+                }
+                NewerSavesResult::Open => {}
+            },
+            ActiveDialog::Sync(dialog) => match dialog.render(ctx, state.sync_report.as_ref()) {
+                SyncResult::SyncNow => {
+                    follow_up_action = Some(ActionRequest::SyncNow);
+                }
+                SyncResult::Closed => {
+                    close_dialog = true;
+                }
+                SyncResult::Open => {}
             },
             ActiveDialog::CacowardLink(dialog) => match dialog.render(ctx) {
                 CacowardLinkResult::Linked(pk, wad_id) => {

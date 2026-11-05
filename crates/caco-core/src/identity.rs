@@ -609,6 +609,99 @@ pub fn check_library(conn: &Connection) -> crate::Result<usize> {
 }
 
 // ---------------------------------------------------------------------------
+// Finding a file by what it is
+// ---------------------------------------------------------------------------
+
+/// Link every WAD that knows what its file is and has no path for it, to a file that is
+/// here. Returns how many were linked.
+///
+/// A row that came from another machine's log says what its file is and nothing of where,
+/// since that is only true over there. The file may well be here anyway: in the keep dir,
+/// which is on the side that travels, or in a cache left over from before the library was
+/// rebuilt. It goes by the name a store dir would have given it, and then by its hash,
+/// which is not optional. Unrelated WADs share names, `castle.zip` is on idgames seven
+/// times, and a WAD linked to some other WAD's file would play the wrong game.
+///
+/// Off the UI thread, since it reads whatever it finds with the right name and size.
+pub fn adopt_files(conn: &Connection, paths: &crate::presence::StorePaths) -> crate::Result<usize> {
+    let wads: Vec<WadRecord> = {
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {} FROM wads \
+             WHERE COALESCE(cached_path, '') = '' AND file_sha256 IS NOT NULL \
+               AND COALESCE(filename, '') <> ''",
+            db::WAD_COLUMNS
+        ))?;
+        stmt.query_map([], WadRecord::from_row)?
+            .collect::<std::result::Result<_, _>>()?
+    };
+
+    let mut adopted = 0;
+    for wad in &wads {
+        let Some((path, found)) = find_by_identity(wad, paths) else {
+            continue;
+        };
+        let linked = db::with_transaction(conn, |tx| {
+            // Not if it was given a file while this one was being read.
+            let free = tx.execute(
+                "UPDATE wads SET cached_path = ?1, last_known_path = NULL \
+                 WHERE id = ?2 AND COALESCE(cached_path, '') = ''",
+                rusqlite::params![path.to_string_lossy(), wad.id],
+            )? > 0;
+            if free {
+                record(tx, wad.id, &path, &found)?;
+            }
+            Ok(free)
+        })?;
+        if linked {
+            adopted += 1;
+        }
+    }
+    Ok(adopted)
+}
+
+/// A file in a store dir that is the one `wad` says it has, under its own name or the one
+/// [`crate::placement`] gives a file whose name was taken.
+fn find_by_identity(
+    wad: &WadRecord,
+    paths: &crate::presence::StorePaths,
+) -> Option<(std::path::PathBuf, Identified)> {
+    let identity = wad.identity.as_ref()?;
+    let filename = wad.filename.as_deref()?;
+    // A row can say anything here, and a name with a directory in it is not one.
+    if Path::new(filename)
+        .file_name()
+        .and_then(|name| name.to_str())
+        != Some(filename)
+    {
+        return None;
+    }
+    let hashed = crate::placement::name_with_hash(filename, &identity.file.sha256);
+    for dir in paths.search_order(wad.retrievability()) {
+        for name in [filename, hashed.as_str()] {
+            let path = dir.join(name);
+            // Most of what this finds is the file, so the read is rarely wasted, and the
+            // size keeps it that way for a `map01.wad` that is some other WAD's.
+            let same_size = fs::metadata(&path)
+                .is_ok_and(|meta| meta.is_file() && meta.len() == identity.file.size);
+            if !same_size {
+                continue;
+            }
+            match identify(&path) {
+                Ok(found)
+                    if found.identity.file.sha256 == identity.file.sha256
+                        || found.identity.content_sha256 == identity.content_sha256 =>
+                {
+                    return Some((path, found));
+                }
+                Ok(_) => {}
+                Err(e) => tracing::warn!("cannot read {}: {e}", path.display()),
+            }
+        }
+    }
+    None
+}
+
+// ---------------------------------------------------------------------------
 // What was played
 // ---------------------------------------------------------------------------
 
@@ -736,6 +829,178 @@ pub fn find_by_content(
         )
         .optional()?;
     Ok(found)
+}
+
+#[cfg(test)]
+mod adopt_tests {
+    use super::*;
+    use crate::db::{NewWad, SourceType};
+    use crate::presence::StorePaths;
+
+    const BYTES: &[u8] = b"PWAD the one this row means";
+
+    struct Fixture {
+        conn: Connection,
+        paths: StorePaths,
+        _root: tempfile::TempDir,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let root = tempfile::tempdir().unwrap();
+            let paths = StorePaths {
+                cache_dir: root.path().join("cache"),
+                keep_dir: root.path().join("keep"),
+            };
+            fs::create_dir_all(&paths.cache_dir).unwrap();
+            fs::create_dir_all(&paths.keep_dir).unwrap();
+            let conn = db::open_memory().unwrap();
+            db::init_db(&conn).unwrap();
+            Self {
+                conn,
+                paths,
+                _root: root,
+            }
+        }
+
+        /// A row as it comes from another machine: what its file is, and not where.
+        fn row(&self, filename: &str, bytes: &[u8]) -> i64 {
+            let id = db::add_wad(
+                &self.conn,
+                &NewWad::new("Road", SourceType::Doomworld).filename(filename),
+            )
+            .unwrap();
+            let hashes = hash_reader(bytes).unwrap();
+            self.conn
+                .execute(
+                    "UPDATE wads SET file_size = ?1, file_sha256 = ?2, file_sha1 = ?3, \
+                     content_sha256 = ?2 WHERE id = ?4",
+                    rusqlite::params![hashes.size as i64, hashes.sha256, hashes.sha1, id],
+                )
+                .unwrap();
+            id
+        }
+
+        fn cached(&self, id: i64) -> Option<String> {
+            db::get_wad(&self.conn, id, false)
+                .unwrap()
+                .unwrap()
+                .cached_path
+        }
+
+        fn adopt(&self) -> usize {
+            adopt_files(&self.conn, &self.paths).unwrap()
+        }
+    }
+
+    #[test]
+    fn test_a_file_with_the_right_name_and_hash_is_this_wads() {
+        let f = Fixture::new();
+        let id = f.row("road.wad", BYTES);
+        let file = f.paths.keep_dir.join("road.wad");
+        fs::write(&file, BYTES).unwrap();
+
+        assert_eq!(f.adopt(), 1);
+        assert_eq!(f.cached(id).as_deref(), file.to_str());
+        // With its stamp, so that the next check does not read it all again.
+        let wad = db::get_wad(&f.conn, id, false).unwrap().unwrap();
+        assert!(wad.file_mtime.is_some());
+        assert_eq!(f.adopt(), 0);
+    }
+
+    /// `castle.zip` is on idgames seven times. The whole reason a hash is asked for.
+    #[test]
+    fn test_a_file_with_the_right_name_and_the_wrong_hash_is_someone_elses() {
+        let f = Fixture::new();
+        let id = f.row("map01.wad", BYTES);
+        let other: Vec<u8> = BYTES.iter().map(|b| b.wrapping_add(1)).collect();
+        fs::write(f.paths.keep_dir.join("map01.wad"), &other).unwrap();
+        fs::write(f.paths.cache_dir.join("map01.wad"), b"different size").unwrap();
+
+        assert_eq!(f.adopt(), 0);
+        assert_eq!(f.cached(id), None);
+    }
+
+    /// Where `placement` puts a second file of the same name.
+    #[test]
+    fn test_a_file_is_found_under_the_name_placement_gives_it() {
+        let f = Fixture::new();
+        let id = f.row("map01.wad", BYTES);
+        let other: Vec<u8> = BYTES.iter().map(|b| b.wrapping_add(1)).collect();
+        fs::write(f.paths.cache_dir.join("map01.wad"), &other).unwrap();
+        let sha256 = hash_reader(BYTES).unwrap().sha256;
+        let name = crate::placement::name_with_hash("map01.wad", &sha256);
+        let file = f.paths.cache_dir.join(name);
+        fs::write(&file, BYTES).unwrap();
+
+        assert_eq!(f.adopt(), 1);
+        assert_eq!(f.cached(id).as_deref(), file.to_str());
+    }
+
+    #[test]
+    fn test_nothing_outside_the_store_dirs_is_ever_looked_at() {
+        let f = Fixture::new();
+        let root = f.paths.cache_dir.parent().unwrap();
+        fs::write(root.join("escaped.wad"), BYTES).unwrap();
+        let id = f.row("../escaped.wad", BYTES);
+        let absolute = root.join("escaped.wad").display().to_string();
+        let other = f.row(&absolute, BYTES);
+
+        assert_eq!(f.adopt(), 0);
+        assert_eq!(f.cached(id), None);
+        assert_eq!(f.cached(other), None);
+    }
+
+    /// A row that already has a file, however it got one, keeps it.
+    #[test]
+    fn test_a_row_with_a_file_is_not_asked_about() {
+        let f = Fixture::new();
+        let id = f.row("road.wad", BYTES);
+        f.conn
+            .execute(
+                "UPDATE wads SET cached_path = '/elsewhere/road.wad' WHERE id = ?1",
+                [id],
+            )
+            .unwrap();
+        fs::write(f.paths.keep_dir.join("road.wad"), BYTES).unwrap();
+
+        assert_eq!(f.adopt(), 0);
+        assert_eq!(f.cached(id).as_deref(), Some("/elsewhere/road.wad"));
+    }
+
+    /// A row that knows nothing about its file has nothing to go by but the name, which
+    /// is not enough, so it is left for whoever links one by hand.
+    #[test]
+    fn test_a_row_with_no_hash_is_not_given_a_file_on_its_name_alone() {
+        let f = Fixture::new();
+        let id = db::add_wad(
+            &f.conn,
+            &NewWad::new("Road", SourceType::Doomworld).filename("road.wad"),
+        )
+        .unwrap();
+        fs::write(f.paths.keep_dir.join("road.wad"), BYTES).unwrap();
+
+        assert_eq!(f.adopt(), 0);
+        assert_eq!(f.cached(id), None);
+    }
+
+    /// `presence` would otherwise go on looking in the old place too.
+    #[test]
+    fn test_being_found_clears_where_it_was_last_seen() {
+        let f = Fixture::new();
+        let id = f.row("road.wad", BYTES);
+        f.conn
+            .execute(
+                "UPDATE wads SET last_known_path = '/gone/road.wad' WHERE id = ?1",
+                [id],
+            )
+            .unwrap();
+        fs::write(f.paths.keep_dir.join("road.wad"), BYTES).unwrap();
+
+        assert_eq!(f.adopt(), 1);
+        let wad = db::get_wad(&f.conn, id, false).unwrap().unwrap();
+        assert_eq!(wad.last_known_path, None);
+    }
 }
 
 #[cfg(test)]

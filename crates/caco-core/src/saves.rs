@@ -3,18 +3,14 @@
 use std::fs::{self, File};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
 
 use chrono::Local;
-use regex::Regex;
 use zip::ZipArchive;
 use zip::write::SimpleFileOptions;
 
-use crate::config::get_backup_dir;
+use crate::config::{data_key_of, get_backup_dir};
 use crate::sourceports::ALL_SAVE_EXTENSIONS;
 use crate::utils::{sanitize_dirname, system_time_to_rfc3339};
-
-static BACKUP_ID_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\d+)_").unwrap());
 
 /// Information about a save file.
 #[derive(Debug, Clone)]
@@ -31,7 +27,8 @@ pub struct SaveFile {
 pub struct BackupInfo {
     pub path: PathBuf,
     pub name: String,
-    pub wad_id: Option<i64>,
+    /// The data key of the WAD it was taken from, if its name has one.
+    pub data_key: Option<String>,
     pub size: u64,
     pub created_iso: String,
 }
@@ -97,8 +94,8 @@ fn collect_save_files_recursive(base: &Path, dir: &Path, saves: &mut Vec<SaveFil
 /// Create a zip backup of a WAD's entire data directory.
 ///
 /// Returns the path to the created backup file.
-pub fn create_backup(wad_id: i64, title: &str, data_dir: &Path) -> crate::Result<PathBuf> {
-    create_backup_in(wad_id, title, data_dir, &get_backup_dir())
+pub fn create_backup(data_key: &str, title: &str, data_dir: &Path) -> crate::Result<PathBuf> {
+    create_backup_in(data_key, title, data_dir, &get_backup_dir())
 }
 
 /// [`create_backup`] writing into an explicit directory.
@@ -108,7 +105,7 @@ pub fn create_backup(wad_id: i64, title: &str, data_dir: &Path) -> crate::Result
 /// real library from a test. It could before — `test_backup_and_restore` wrote
 /// a zip into the real backup dir on every `cargo test` run.
 pub fn create_backup_in(
-    wad_id: i64,
+    data_key: &str,
     title: &str,
     data_dir: &Path,
     backup_dir: &Path,
@@ -124,7 +121,7 @@ pub fn create_backup_in(
 
     let timestamp = Local::now().format("%Y%m%d_%H%M%S_%f").to_string();
     let sanitized = sanitize_dirname(title);
-    let backup_name = format!("{wad_id}_{sanitized}_{timestamp}.zip");
+    let backup_name = format!("{data_key}_{sanitized}_{timestamp}.zip");
     let backup_path = backup_dir.join(&backup_name);
 
     let file = File::create(&backup_path)?;
@@ -237,13 +234,13 @@ pub fn restore_backup(backup_path: &Path, data_dir: &Path) -> crate::Result<usiz
 /// List existing backups for a specific WAD.
 ///
 /// Sorted by creation time (newest first).
-pub fn list_backups(wad_id: i64) -> Vec<BackupInfo> {
+pub fn list_backups(data_key: &str) -> Vec<BackupInfo> {
     let backup_dir = get_backup_dir();
     if !backup_dir.is_dir() {
         return Vec::new();
     }
 
-    let prefix = format!("{wad_id}_");
+    let prefix = format!("{data_key}_");
     let mut backups = Vec::new();
 
     if let Ok(entries) = fs::read_dir(&backup_dir) {
@@ -268,7 +265,7 @@ pub fn list_backups(wad_id: i64) -> Vec<BackupInfo> {
                         .unwrap_or_default()
                         .to_string_lossy()
                         .into_owned(),
-                    wad_id: Some(wad_id),
+                    data_key: Some(data_key.to_string()),
                     size: meta.len(),
                     created_iso: created,
                     path,
@@ -302,9 +299,7 @@ pub fn list_backups_in(backup_dir: &Path) -> Vec<BackupInfo> {
                     .unwrap_or_default()
                     .to_string_lossy()
                     .into_owned();
-                let wad_id = BACKUP_ID_RE
-                    .captures(&name)
-                    .and_then(|c| c[1].parse::<i64>().ok());
+                let data_key = data_key_of(&name).map(str::to_string);
 
                 if let Ok(meta) = path.metadata() {
                     let created = meta
@@ -315,7 +310,7 @@ pub fn list_backups_in(backup_dir: &Path) -> Vec<BackupInfo> {
                     backups.push(BackupInfo {
                         path,
                         name,
-                        wad_id,
+                        data_key,
                         size: meta.len(),
                         created_iso: created,
                     });
@@ -387,7 +382,7 @@ mod tests {
         fs::write(data_dir.join("stats.txt"), b"stats data").unwrap();
 
         let backup_dir = dir.path().join("backups");
-        let backup_path = create_backup_in(42, "Test WAD", &data_dir, &backup_dir).unwrap();
+        let backup_path = create_backup_in("42", "Test WAD", &data_dir, &backup_dir).unwrap();
         assert!(backup_path.exists());
         assert!(backup_path.to_string_lossy().contains("42_test-wad_"));
 

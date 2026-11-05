@@ -511,6 +511,25 @@ pub fn merge_stats(stats_list: &[WadStats]) -> WadStats {
     }
 }
 
+/// `base`, with whatever else `other` knows, as JSON. `None` if `other` is not stats.
+///
+/// `base` is returned as it was if the two are the same, or if there is no sense to be
+/// made of it. Then its bytes are what get compared, so a snapshot that has nothing new
+/// reads as unchanged.
+pub fn merge_json(base: Option<&str>, other: &str) -> Option<String> {
+    let parsed_other = stats_from_json(other).ok()?;
+    let Some(base) = base else {
+        return Some(other.to_string());
+    };
+    if base == other {
+        return Some(base.to_string());
+    }
+    match stats_from_json(base) {
+        Ok(parsed_base) => stats_to_json(&merge_stats(&[parsed_base, parsed_other])).ok(),
+        Err(_) => Some(other.to_string()),
+    }
+}
+
 // --- Delta computation ---
 
 /// Per-map delta information from a play session.
@@ -797,6 +816,57 @@ pub fn get_progress_display(stats_json: Option<&str>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn one_map(lump: &str, exits: i32) -> String {
+        format!(
+            r#"{{"format":"stats_txt","version":1,"header_total_kills":0,"maps":[{{"lump":"{lump}","kills":0,"total_kills":-1,"items":0,"total_items":-1,"secrets":0,"total_secrets":-1,"episode":1,"map_num":1,"best_skill":4,"best_time":-1,"best_max_time":-1,"best_nm_time":-1,"total_exits":{exits},"cumulative_kills":0,"time_secs":-1.0,"total_time_secs":-1.0}}]}}"#
+        )
+    }
+
+    /// Beating map 10 on one machine does not undo map 20 on another.
+    #[test]
+    fn test_merging_keeps_what_either_side_knows() {
+        let merged = merge_json(Some(&one_map("MAP10", 1)), &one_map("MAP20", 2)).unwrap();
+        let stats = stats_from_json(&merged).unwrap();
+        let lumps: Vec<_> = stats.maps.iter().map(|m| m.lump.as_str()).collect();
+        assert_eq!(lumps, ["MAP10", "MAP20"]);
+    }
+
+    /// Whichever arrives first, or twice, every machine has to end up with the same text.
+    #[test]
+    fn test_merging_is_the_same_in_any_order_and_any_number_of_times() {
+        let (a, b, c) = (
+            one_map("MAP01", 1),
+            one_map("MAP02", 2),
+            one_map("MAP01", 3),
+        );
+        let fold = |order: [&String; 3]| {
+            order.iter().fold(None, |merged: Option<String>, next| {
+                merge_json(merged.as_deref(), next)
+            })
+        };
+        let first = fold([&a, &b, &c]);
+        assert_eq!(first, fold([&c, &b, &a]));
+        assert_eq!(first, fold([&b, &a, &c]));
+        assert_eq!(first, merge_json(first.as_deref(), &a));
+        assert_eq!(first, merge_json(first.as_deref(), &b));
+    }
+
+    #[test]
+    fn test_merging_what_is_not_stats_says_so() {
+        assert_eq!(merge_json(Some(&one_map("MAP01", 1)), "not json"), None);
+        assert_eq!(merge_json(None, "not json"), None);
+    }
+
+    #[test]
+    fn test_merging_leaves_the_bytes_alone_if_there_is_nothing_new() {
+        let spaced = one_map("MAP01", 1).replace(":", ": ");
+        assert_eq!(
+            merge_json(Some(&spaced), &spaced).as_deref(),
+            Some(spaced.as_str())
+        );
+        assert_eq!(merge_json(None, &spaced).as_deref(), Some(spaced.as_str()));
+    }
 
     #[test]
     fn test_format_time_tics() {

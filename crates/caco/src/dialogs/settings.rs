@@ -35,6 +35,7 @@ pub struct SettingsDialogState {
     auto_detect_iwad: bool,
     auto_detect_complevel: bool,
     auto_doomwiki_enrich: bool,
+    warn_newer_saves: bool,
 
     // Cache
     cache_auto_clean: bool,
@@ -52,6 +53,9 @@ pub struct SettingsDialogState {
     downloads_dir: String,
     /// What an empty `downloads_dir` means on this machine, to say so in the field.
     default_downloads_dir: String,
+    sync_dir: String,
+    /// What an empty `sync_dir` means for this library, to say so in the field.
+    default_sync_dir: String,
 
     error: Option<String>,
 }
@@ -102,6 +106,7 @@ impl SettingsDialogState {
             auto_detect_iwad: cfg.auto_detect_iwad,
             auto_detect_complevel: cfg.auto_detect_complevel,
             auto_doomwiki_enrich: cfg.auto_doomwiki_enrich,
+            warn_newer_saves: cfg.warn_newer_saves,
             cache_auto_clean: cfg.cache_auto_clean,
             cache_max_size_gb: cfg.cache_max_size_gb,
             cache_max_age_days: cfg.cache_max_age_days,
@@ -114,6 +119,11 @@ impl SettingsDialogState {
             db_path: cfg.db_path.clone(),
             downloads_dir: cfg.downloads_dir.clone(),
             default_downloads_dir: config::default_downloads_dir().display().to_string(),
+            sync_dir: cfg.sync_dir.clone(),
+            default_sync_dir: config::get_db_path()
+                .with_file_name("sync")
+                .display()
+                .to_string(),
             error: None,
         }
     }
@@ -147,6 +157,7 @@ impl SettingsDialogState {
         cfg.auto_detect_iwad = self.auto_detect_iwad;
         cfg.auto_detect_complevel = self.auto_detect_complevel;
         cfg.auto_doomwiki_enrich = self.auto_doomwiki_enrich;
+        cfg.warn_newer_saves = self.warn_newer_saves;
         cfg.cache_auto_clean = self.cache_auto_clean;
         cfg.cache_max_size_gb = self.cache_max_size_gb.max(0.0);
         cfg.cache_max_age_days = self.cache_max_age_days.max(0);
@@ -158,6 +169,7 @@ impl SettingsDialogState {
         cfg.profile_dir = self.profile_dir.trim().to_string();
         cfg.db_path = self.db_path.trim().to_string();
         cfg.downloads_dir = self.downloads_dir.trim().to_string();
+        cfg.sync_dir = self.sync_dir.trim().to_string();
         Ok(cfg)
     }
 
@@ -305,6 +317,7 @@ impl SettingsDialogState {
 
     fn section_sourceports(&mut self, ui: &mut egui::Ui) {
         Self::section_header(ui, "Sourceports");
+        Self::this_machine_note(ui);
 
         ui.columns(2, |cols| {
             let label = form_label(&mut cols[0], "Default sourceport");
@@ -449,6 +462,16 @@ impl SettingsDialogState {
         });
     }
 
+    /// Said where it applies, since these are the settings a person would otherwise expect
+    /// to come across with the rest. See `config::MACHINE_KEYS`.
+    fn this_machine_note(ui: &mut egui::Ui) {
+        ui.colored_label(
+            theme::TEXT_MUTED,
+            egui::RichText::new("For this machine only, and not synced with the rest.").small(),
+        );
+        ui.add_space(2.0);
+    }
+
     fn section_behavior(&mut self, ui: &mut egui::Ui) {
         Self::section_header(ui, "Behavior");
 
@@ -523,6 +546,10 @@ impl SettingsDialogState {
             &mut self.auto_doomwiki_enrich,
             "Auto-enrich imports with Doom Wiki metadata",
         );
+        ui.checkbox(
+            &mut self.warn_newer_saves,
+            "Ask before playing a WAD another machine has newer saves for",
+        );
 
         ui.add_space(4.0);
         ui.horizontal(|ui| {
@@ -575,6 +602,7 @@ impl SettingsDialogState {
 
     fn section_paths(&mut self, ui: &mut egui::Ui) {
         Self::section_header(ui, "Paths");
+        Self::this_machine_note(ui);
         for (text, value) in [
             ("WAD cache dir", &mut self.cache_dir),
             ("Data dir", &mut self.data_dir),
@@ -610,6 +638,16 @@ impl SettingsDialogState {
         )
         .labelled_by(label.id)
         .on_hover_text("Where Get looks for what your browser downloads");
+
+        let label = form_label(ui, "Sync folder");
+        ui.add(
+            egui::TextEdit::singleline(&mut self.sync_dir)
+                .desired_width(f32::INFINITY)
+                .text_color(theme::TEXT_PRIMARY)
+                .hint_text(&self.default_sync_dir),
+        )
+        .labelled_by(label.id)
+        .on_hover_text("Where each machine keeps its log. See Manage, Sync.");
     }
 }
 

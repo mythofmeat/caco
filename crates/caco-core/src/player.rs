@@ -16,6 +16,7 @@ use crate::iwad_detect;
 use crate::presence;
 use crate::sourceports;
 use crate::stats_watcher;
+use crate::sync;
 use crate::wad_stats;
 use crate::zdoom_detect;
 
@@ -70,6 +71,9 @@ pub struct PlayOptions {
     /// last played with. Without it, [`play`] fails with
     /// [`crate::Error::WadFileChanged`] so the user can be asked first.
     pub accept_changed_file: bool,
+    /// Launch even though another machine has newer saves for it. Without it, [`play`]
+    /// fails with [`crate::Error::NewerSavesElsewhere`] so the user can be asked first.
+    pub accept_newer_saves: bool,
 }
 
 /// What a launch is being built for.
@@ -201,7 +205,7 @@ fn detect_and_persist_zdoom_required_if_missing(
 /// and clears the live stats snapshot so progress tracks fresh.
 /// The prior playthrough's stats are preserved on its own record.
 pub fn start_new_playthrough(conn: &Connection, wad_id: i64) -> crate::Result<i64> {
-    db::get_wad(conn, wad_id, false)?.ok_or(crate::Error::WadNotFound(wad_id))?;
+    let wad = db::get_wad(conn, wad_id, false)?.ok_or(crate::Error::WadNotFound(wad_id))?;
 
     // Guard: must not already have an active playthrough
     if db::get_active_playthrough(conn, wad_id)?.is_some() {
@@ -222,7 +226,7 @@ pub fn start_new_playthrough(conn: &Connection, wad_id: i64) -> crate::Result<i6
     // prior playthrough's stats.txt right back and instantly auto-complete
     // the new playthrough. Archive the disk files too; the prior
     // playthrough's final stats already live on its own DB record.
-    if let Some(data_dir) = config::find_wad_data_dir(wad_id) {
+    if let Some(data_dir) = config::find_wad_data_dir(&wad.data_key, &wad.title) {
         archive_stats_files(&data_dir);
     }
 
@@ -279,6 +283,7 @@ fn build_launch(
     let identity = identity::verify(conn, &wad, &wad_path)?.map(identity::Checked::into_identity);
     if let LaunchMode::Play(opts) = mode {
         refuse_changed_file(conn, &wad, identity.as_ref(), opts)?;
+        refuse_newer_saves(conn, &wad, opts)?;
     }
 
     // Auto-detect zdoom_required if not already set. This remains metadata only:
@@ -396,8 +401,8 @@ fn build_launch(
     // Inject per-WAD data directory args
     let mut wad_data_dir = None;
     if config::get_manage_data_dirs() {
-        let data_dir = config::find_wad_data_dir(wad_id)
-            .unwrap_or_else(|| config::get_wad_data_dir(wad_id, &wad.title));
+        let data_dir = config::find_wad_data_dir(&wad.data_key, &wad.title)
+            .unwrap_or_else(|| config::get_wad_data_dir(&wad.data_key, &wad.title));
         if let Err(e) = std::fs::create_dir_all(&data_dir) {
             tracing::warn!("failed to create WAD data dir {data_dir:?}: {e}");
         }
@@ -545,6 +550,57 @@ fn refuse_changed_file(
     }
 }
 
+/// Stop a launch if another machine has saves for this WAD that this one does not, since
+/// playing would carry on from older ones, and maybe overwrite the slot. Only the person
+/// playing knows if that is what they want: see [`crate::sync::saves`].
+///
+/// Asked before the launch persists a detected setting or creates a directory, as
+/// [`refuse_changed_file`] is. Not being able to tell which machine this is means not being
+/// able to tell which saves are newer, which is no reason to stop anyone playing.
+fn refuse_newer_saves(
+    conn: &Connection,
+    wad: &db::WadRecord,
+    opts: PlayOptions,
+) -> crate::Result<()> {
+    if opts.accept_newer_saves || !config::get_warn_newer_saves() || !config::get_manage_data_dirs()
+    {
+        return Ok(());
+    }
+    let machine = match sync::machine::this_machine() {
+        Ok(machine) => machine,
+        Err(e) => {
+            tracing::warn!("cannot tell which machine this is: {e}");
+            return Ok(());
+        }
+    };
+    let local = config::find_wad_data_dir(&wad.data_key, &wad.title)
+        .map(|dir| sync::saves::read_saves(&dir))
+        .unwrap_or_default();
+    match sync::saves::newer_saves_elsewhere(conn, wad.id, &wad.uid, &machine, &local)? {
+        Some(saves) => Err(crate::Error::NewerSavesElsewhere {
+            title: wad.title.clone(),
+            saves,
+        }),
+        None => Ok(()),
+    }
+}
+
+/// Say what this machine's saves for a WAD are now that a session has changed them.
+///
+/// Failing here costs nothing but a question that should not have needed asking, so it
+/// does not fail the session that has just been played.
+fn record_saves(conn: &Connection, wad: &db::WadRecord, data_dir: &Path, opts: PlayOptions) {
+    let recorded = sync::machine::this_machine()
+        .map_err(crate::Error::from)
+        .and_then(|machine| {
+            let entries = sync::saves::read_saves(data_dir);
+            sync::saves::record_saves(conn, wad.id, &machine, &entries, opts.accept_newer_saves)
+        });
+    if let Err(e) = recorded {
+        tracing::warn!("could not record saves for {}: {e}", wad.title);
+    }
+}
+
 /// Launch a WAD, tracking the session and reconciling stats afterwards.
 pub fn play(conn: &Connection, wad_id: i64, opts: PlayOptions) -> crate::Result<PlayResult> {
     let BuiltLaunch {
@@ -556,6 +612,7 @@ pub fn play(conn: &Connection, wad_id: i64, opts: PlayOptions) -> crate::Result<
         is_zdoom,
         is_helion,
     } = build_launch(conn, wad_id, LaunchMode::Play(opts))?;
+    let wad = db::get_wad(conn, wad_id, false)?.ok_or(crate::Error::WadNotFound(wad_id))?;
 
     // Absorb any on-disk stats progress the DB doesn't yet know about
     // (e.g. from an orphaned session where caco exited before the
@@ -567,7 +624,7 @@ pub fn play(conn: &Connection, wad_id: i64, opts: PlayOptions) -> crate::Result<
     // Capture stats snapshot before play. Prefer disk, but fall back to the
     // DB snapshot when legacy/imported progress has not been materialized as a
     // sourceport stats file yet.
-    let stats_before = read_session_stats_before(conn, wad_id);
+    let stats_before = read_session_stats_before(conn, &wad);
 
     // Launch sourceport
     let session_start = std::time::SystemTime::now();
@@ -619,8 +676,13 @@ pub fn play(conn: &Connection, wad_id: i64, opts: PlayOptions) -> crate::Result<
         stats_watcher::collect_helion_stats(data_dir, Some(session_start));
     }
 
+    // What the session did to this machine's saves.
+    if let Some(ref data_dir) = wad_data_dir {
+        record_saves(conn, &wad, data_dir, opts);
+    }
+
     // Auto-track stats
-    let stats_after = auto_track_stats(conn, wad_id);
+    let stats_after = auto_track_stats(conn, &wad);
 
     // Attach before/after snapshots
     if stats_before.is_some() || stats_after.is_some() {
@@ -643,8 +705,12 @@ pub fn play(conn: &Connection, wad_id: i64, opts: PlayOptions) -> crate::Result<
         )?;
     }
 
-    // Auto-completion detection: check if all required maps have been beaten
-    let auto_complete = check_auto_completion(conn, wad_id, &wad_path, stats_after.as_deref());
+    // Auto-completion detection: check if all required maps have been beaten, on any
+    // machine. The last map being beaten here finishes a WAD started on another.
+    let everything_known = stats_after
+        .as_deref()
+        .map(|disk| with_other_machines(conn, wad_id, disk));
+    let auto_complete = check_auto_completion(conn, wad_id, &wad_path, everything_known.as_deref());
 
     Ok(PlayResult {
         duration: Some(elapsed),
@@ -665,8 +731,8 @@ pub fn play(conn: &Connection, wad_id: i64, opts: PlayOptions) -> crate::Result<
 /// playtime.
 pub fn play_demo(conn: &Connection, wad_id: i64, demo: Option<&str>) -> crate::Result<PathBuf> {
     let wad = db::get_wad(conn, wad_id, false)?.ok_or(crate::Error::WadNotFound(wad_id))?;
-    let data_dir = config::find_wad_data_dir(wad_id)
-        .unwrap_or_else(|| config::get_wad_data_dir(wad_id, &wad.title));
+    let data_dir = config::find_wad_data_dir(&wad.data_key, &wad.title)
+        .unwrap_or_else(|| config::get_wad_data_dir(&wad.data_key, &wad.title));
     let demo_path = demos::resolve_demo_path(&data_dir, demo)?;
 
     let mut built = build_launch(conn, wad_id, LaunchMode::Playback(&demo_path))?;
@@ -785,12 +851,12 @@ fn collect_stats_files_recursive(dir: &Path, results: &mut Vec<PathBuf>) {
 ///
 /// When multiple stats files exist (e.g. from IWAD/sourceport changes),
 /// merges them keeping the best data per map.
-fn read_stats_snapshot(wad_id: i64) -> Option<String> {
+fn read_stats_snapshot(wad: &db::WadRecord) -> Option<String> {
     if !config::get_auto_stats() || !config::get_manage_data_dirs() {
         return None;
     }
 
-    let data_dir = config::find_wad_data_dir(wad_id)?;
+    let data_dir = config::find_wad_data_dir(&wad.data_key, &wad.title)?;
     if !data_dir.is_dir() {
         return None;
     }
@@ -817,8 +883,8 @@ fn read_stats_snapshot(wad_id: i64) -> Option<String> {
 ///
 /// Prefers the sourceport's own stats file, falling back to the DB snapshot
 /// when legacy or imported progress has not been materialized on disk yet.
-fn read_session_stats_before(conn: &Connection, wad_id: i64) -> Option<String> {
-    session_stats_before_with(read_stats_snapshot(wad_id), conn, wad_id)
+fn read_session_stats_before(conn: &Connection, wad: &db::WadRecord) -> Option<String> {
+    session_stats_before_with(read_stats_snapshot(wad), conn, wad.id)
 }
 
 /// Inner logic for [`read_session_stats_before`] without filesystem dependencies.
@@ -863,14 +929,30 @@ fn session_made_progress(stats_before: Option<&str>, stats_after: Option<&str>) 
         .is_empty()
 }
 
-/// Read stats and store on the WAD record.
-fn auto_track_stats(conn: &Connection, wad_id: i64) -> Option<String> {
-    let json_str = read_stats_snapshot(wad_id)?;
-    let update = db::WadUpdate::new().set_text("stats_snapshot", Some(json_str.clone()));
-    if let Err(e) = db::update_wad(conn, wad_id, &update) {
-        tracing::warn!("failed to persist stats snapshot for wad {wad_id}: {e}");
+/// Read stats and store on the WAD record. Returns what this machine's own stats files
+/// say, which is what a session is measured by: the row also has what is known from other
+/// machines, which that session did not do.
+fn auto_track_stats(conn: &Connection, wad: &db::WadRecord) -> Option<String> {
+    let disk = read_stats_snapshot(wad)?;
+    let update = db::WadUpdate::new().set_text(
+        "stats_snapshot",
+        Some(with_other_machines(conn, wad.id, &disk)),
+    );
+    if let Err(e) = db::update_wad(conn, wad.id, &update) {
+        tracing::warn!("failed to persist stats snapshot for wad {}: {e}", wad.id);
     }
-    Some(json_str)
+    Some(disk)
+}
+
+/// What this machine's stats files say, with whatever is known from other machines, by map.
+///
+/// With no other machines this is the file as it is, and the row follows the file as it
+/// always has, including when the file goes backwards.
+fn with_other_machines(conn: &Connection, wad_id: i64, disk: &str) -> String {
+    sync::merge::with_other_machines(conn, wad_id, disk).unwrap_or_else(|e| {
+        tracing::warn!("cannot read other machines' stats for wad {wad_id}: {e}");
+        disk.to_string()
+    })
 }
 
 /// Check if a WAD has been completed based on map exit stats vs WAD analysis.
@@ -969,7 +1051,7 @@ fn reconcile_stats(conn: &Connection, wad_id: i64) -> AutoCompleteResult {
         _ => return AutoCompleteResult::Unknown,
     };
 
-    let disk_json = match read_stats_snapshot(wad_id) {
+    let disk_json = match read_stats_snapshot(&wad) {
         Some(s) => s,
         None => return AutoCompleteResult::Unknown,
     };
@@ -995,7 +1077,8 @@ fn reconcile_stats_with(
     disk_json: &str,
     wad_path: Option<&Path>,
 ) -> AutoCompleteResult {
-    let snapshot_changed = wad.stats_snapshot.as_deref() != Some(disk_json);
+    let known = with_other_machines(conn, wad_id, disk_json);
+    let snapshot_changed = wad.stats_snapshot.as_deref() != Some(known.as_str());
 
     let disk_has_exits = match wad_stats::stats_from_json(disk_json) {
         Ok(s) => s
@@ -1014,13 +1097,13 @@ fn reconcile_stats_with(
         if wad.status == db::Status::InProgress
             && let Some(path) = wad_path
         {
-            return check_auto_completion(conn, wad_id, path, Some(disk_json));
+            return check_auto_completion(conn, wad_id, path, Some(&known));
         }
         return AutoCompleteResult::Unknown;
     }
 
     if snapshot_changed {
-        let update = db::WadUpdate::new().set_text("stats_snapshot", Some(disk_json.to_string()));
+        let update = db::WadUpdate::new().set_text("stats_snapshot", Some(known.clone()));
         if let Err(e) = db::update_wad(conn, wad_id, &update) {
             tracing::warn!("reconcile: failed to persist stats snapshot for wad {wad_id}: {e}");
             return AutoCompleteResult::Unknown;
@@ -1038,7 +1121,7 @@ fn reconcile_stats_with(
     // call. Without a cached file we still detect completion if analysis
     // was previously saved, otherwise it returns Unknown.
     match wad_path {
-        Some(path) => check_auto_completion(conn, wad_id, path, Some(disk_json)),
+        Some(path) => check_auto_completion(conn, wad_id, path, Some(&known)),
         None => AutoCompleteResult::Unknown,
     }
 }
@@ -1786,6 +1869,7 @@ mod tests {
 
         let accept = PlayOptions {
             accept_changed_file: true,
+            ..PlayOptions::default()
         };
         assert!(refuse_changed_file(&conn, &wad, Some(&file_playing("v2")), accept).is_ok());
     }
