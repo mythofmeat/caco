@@ -168,8 +168,9 @@ impl Card<'_> {
         // A painted card is pixels otherwise, and says nothing to a screen reader.
         let name = format!("{}, {word}", self.wad.title);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
-        let hover = self.hover_text();
-        response.clone().on_hover_text(hover);
+        response.clone().on_hover_ui(|ui| {
+            ui.label(self.hover_text());
+        });
 
         painter.rect_filled(rect, rounding, theme::BG_MEDIUM);
 

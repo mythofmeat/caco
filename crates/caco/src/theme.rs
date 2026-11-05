@@ -15,8 +15,6 @@ pub const BG_SELECTED: Color32 = Color32::from_rgb(0x2a, 0x18, 0x08);
 pub const BG_WINDOW: Color32 = Color32::from_rgb(0x1a, 0x14, 0x10);
 /// The banner over the library.
 pub const BG_HERO: Color32 = Color32::from_rgb(0x22, 0x18, 0x0c);
-/// Behind a message saying something went wrong.
-pub const BG_ERROR: Color32 = Color32::from_rgb(0x2a, 0x0d, 0x0d);
 
 pub const BORDER: Color32 = Color32::from_rgb(0x2a, 0x1e, 0x16);
 pub const BORDER_MED: Color32 = Color32::from_rgb(0x3a, 0x2e, 0x24);
@@ -46,9 +44,6 @@ pub const CHART_BAR: Color32 = Color32::from_rgb(0xc8, 0x76, 0x46);
 pub const COLOR_SUCCESS: Color32 = Color32::from_rgb(0x4f, 0xc9, 0x6f);
 pub const COLOR_WARNING: Color32 = Color32::from_rgb(0xcc, 0xcc, 0x33);
 pub const COLOR_ERROR: Color32 = Color32::from_rgb(0xe8, 0x60, 0x5a);
-
-/// The badge on the banner saying how many secret maps there are.
-pub const COLOR_SECRET_FILL: Color32 = Color32::from_rgb(0x99, 0x44, 0x22);
 
 /// Over the app, behind a dialog.
 pub const SCRIM: Color32 = Color32::from_black_alpha(160);
@@ -165,14 +160,6 @@ pub fn paint_status_pill(
     let rect = egui::Rect::from_min_size(egui::pos2(left, center_y - size.y / 2.0), size);
     paint_pill(painter, rect, galley, style);
     rect
-}
-
-/// How wide a pill would be, to tell whether it fits beside something else.
-pub fn status_pill_width(ui: &egui::Ui, style: StatusStyle, extra: &str) -> f32 {
-    let galley =
-        ui.painter()
-            .layout_no_wrap(format!("{}{extra}", style.word), pill_font(), style.color);
-    galley.size().x + PILL_PADDING.x * 2.0
 }
 
 const PILL_PADDING: egui::Vec2 = egui::vec2(8.0, 2.0);
@@ -364,16 +351,6 @@ pub fn paint_thumb_placeholder(
 // ---------------------------------------------------------------------------
 // UI helpers — pills, badges, section labels
 // ---------------------------------------------------------------------------
-
-/// Render an uppercase section label.
-pub fn section_label(ui: &mut egui::Ui, text: &str) {
-    ui.add_space(4.0);
-    ui.colored_label(
-        TEXT_MUTED,
-        egui::RichText::new(text.to_uppercase()).small().strong(),
-    );
-    ui.add_space(2.0);
-}
 
 // ---------------------------------------------------------------------------
 // How much room there is
