@@ -9,8 +9,9 @@
 //! [`super::include_at_risk_toggle`].
 //!
 //! Each tab keeps its own module and its own state. This file owns only the
-//! window, the tab strip, the shared Close button, and the routing of Escape —
-//! chrome that was previously copy-pasted four times.
+//! window, the tab strip, and the routing of Escape. A tab says what goes in the
+//! one footer they share, with its own way out, because whether that is Close or
+//! Cancel depends on whether the tab is in the middle of asking something.
 
 use rusqlite::Connection;
 
@@ -18,6 +19,7 @@ use crate::dialogs::cache::CacheDialogState;
 use crate::dialogs::companions::CompanionsDialogState;
 use crate::dialogs::gc::GcDialogState;
 use crate::dialogs::trash::TrashDialogState;
+use crate::dialogs::{Dialog, FooterRow, tab_bar};
 use crate::theme;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -29,28 +31,19 @@ pub enum StorageTab {
 }
 
 impl StorageTab {
-    const ALL: [StorageTab; 4] = [
-        StorageTab::Cache,
-        StorageTab::Clean,
-        StorageTab::Trash,
-        StorageTab::Files,
+    const ALL: [(StorageTab, &'static str); 4] = [
+        (StorageTab::Cache, "Cache"),
+        (StorageTab::Clean, "Clean"),
+        (StorageTab::Trash, "Trash"),
+        (StorageTab::Files, "Files"),
     ];
-
-    fn label(self) -> &'static str {
-        match self {
-            StorageTab::Cache => "Cache",
-            StorageTab::Clean => "Clean",
-            StorageTab::Trash => "Trash",
-            StorageTab::Files => "Files",
-        }
-    }
 
     fn blurb(self) -> &'static str {
         match self {
-            StorageTab::Cache => "Downloaded WAD files on disk",
-            StorageTab::Clean => "Reclaim space from finished WADs and orphans",
-            StorageTab::Trash => "Restore or permanently delete removed WADs",
-            StorageTab::Files => "Companion files and the WADs using them",
+            StorageTab::Cache => "The WAD files on this machine",
+            StorageTab::Clean => "Get space back from finished WADs and what was left behind",
+            StorageTab::Trash => "WADs you deleted, which can still be restored",
+            StorageTab::Files => "Companion files, and the WADs using them",
         }
     }
 }
@@ -60,15 +53,12 @@ pub enum StorageResult {
     Closed,
 }
 
-/// Height of what this window draws around whichever tab is showing: the title
-/// bar, the tab strip, the blurb, both separators and the Close row.
-const CHROME: f32 = 150.0;
+/// Sized for the widest tab (Clean's row list). Every tab gets the same body height whatever
+/// it holds, so switching tabs cannot resize the window under the pointer.
+const DESIRED: [f32; 2] = [860.0, 560.0];
 
-/// Sized for the widest tab (Clean's row list). Every tab gets the same body
-/// height whatever it holds, so switching tabs cannot resize the window under
-/// the pointer — and an empty Trash does not leave a full-screen window with
-/// three rows in it.
-const DESIRED: [f32; 2] = [860.0, 600.0];
+/// What the strip and the blurb above the tab take from its height.
+const STRIP: f32 = 34.0;
 
 pub struct StorageDialogState {
     tab: StorageTab,
@@ -109,39 +99,22 @@ impl StorageDialogState {
     pub fn render(&mut self, ctx: &egui::Context, conn: &Connection) -> StorageResult {
         let mut result = StorageResult::Open;
 
-        crate::dialogs::modal_window(ctx, "Storage", DESIRED).show(ctx, |ui| {
-            self.render_tab_strip(ui);
-            ui.add_space(6.0);
-            ui.colored_label(theme::TEXT_MUTED, self.tab.blurb());
-            ui.add_space(6.0);
-            ui.separator();
-            ui.add_space(6.0);
-
-            // One budget for the whole tab, handed down. The tabs used to ask
-            // the screen how tall they could be, which ignored everything this
-            // window draws around them and overflowed the viewport by the
-            // same amount on every tab.
-            //
-            // The tab is also wrapped in the budget rather than merely told
-            // about it: a tab's own furniture — Cache's summary, at-risk
-            // toggle and two-button row — can exceed the whole budget at the
-            // 800x400 minimum window, and then no cap on its list saves it.
-            // This scroller only engages in that case.
-            let avail = crate::dialogs::modal_body_height(ctx, CHROME).min(DESIRED[1] - CHROME);
-            crate::dialogs::scroll_body(ui, avail, |ui| {
-                self.render_active_tab(ui, conn, avail);
-            });
-
-            ui.add_space(6.0);
-            ui.separator();
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Close").clicked() {
+        Dialog::new("Storage", DESIRED).show(ctx, |dialog| {
+            dialog
+                .pinned(|ui| {
+                    tab_bar(ui, &mut self.tab, &StorageTab::ALL);
+                })
+                .fill(|ui, height| {
+                    ui.colored_label(theme::TEXT_SECONDARY, self.tab.blurb());
+                    ui.add_space(6.0);
+                    self.render_active_tab(ui, conn, height - STRIP);
+                })
+                .above(|ui| self.render_tab_notes(ui))
+                .buttons(|row| {
+                    if self.render_tab_footer(row, conn) {
                         result = StorageResult::Closed;
                     }
-                });
-            });
+                })
         });
 
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && self.escape() {
@@ -151,63 +124,80 @@ impl StorageDialogState {
         result
     }
 
-    fn render_tab_strip(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            for tab in StorageTab::ALL {
-                let active = self.tab == tab;
-                let text = egui::RichText::new(tab.label())
-                    .size(13.0)
-                    .color(if active {
-                        theme::TEXT_ACCENT
-                    } else {
-                        theme::TEXT_SECONDARY
-                    });
-                if ui
-                    .selectable_label(active, text)
-                    .on_hover_text(tab.blurb())
-                    .clicked()
-                {
-                    self.tab = tab;
-                }
-            }
-        });
+    fn render_active_tab(&mut self, ui: &mut egui::Ui, conn: &Connection, height: f32) {
+        match self.tab {
+            StorageTab::Cache => self
+                .cache
+                .get_or_insert_with(|| CacheDialogState::new(conn))
+                .render_body(ui, height),
+            StorageTab::Clean => self
+                .gc
+                .get_or_insert_with(|| Box::new(GcDialogState::new(conn)))
+                .render_body(ui, conn, height),
+            StorageTab::Trash => self
+                .trash
+                .get_or_insert_with(|| TrashDialogState::new(conn))
+                .render_body(ui, height),
+            StorageTab::Files => self
+                .files
+                .get_or_insert_with(|| CompanionsDialogState::new(conn))
+                .render_body(ui, height),
+        }
     }
 
-    fn render_active_tab(&mut self, ui: &mut egui::Ui, conn: &Connection, avail: f32) {
-        let changed = match self.tab {
+    /// What has to stay in view above the buttons: how the last action went, or what is
+    /// being asked.
+    fn render_tab_notes(&mut self, ui: &mut egui::Ui) {
+        match self.tab {
             StorageTab::Cache => {
-                let state = self
-                    .cache
-                    .get_or_insert_with(|| CacheDialogState::new(conn));
-                state.render_body(ui, conn, avail);
-                std::mem::take(&mut state.modified)
+                if let Some(state) = &mut self.cache {
+                    state.render_notes(ui);
+                }
             }
             StorageTab::Clean => {
-                let state = self
-                    .gc
-                    .get_or_insert_with(|| Box::new(GcDialogState::new(conn)));
-                state.render_body(ui, conn, avail);
-                std::mem::take(&mut state.modified)
+                if let Some(state) = &mut self.gc {
+                    state.render_notes(ui);
+                }
             }
             StorageTab::Trash => {
-                let state = self
-                    .trash
-                    .get_or_insert_with(|| TrashDialogState::new(conn));
-                state.render_body(ui, conn, avail);
-                std::mem::take(&mut state.modified)
+                if let Some(state) = &self.trash {
+                    state.render_notes(ui);
+                }
             }
             StorageTab::Files => {
-                let state = self
-                    .files
-                    .get_or_insert_with(|| CompanionsDialogState::new(conn));
-                state.render_body(ui, conn, avail);
-                std::mem::take(&mut state.modified)
+                if let Some(state) = &self.files {
+                    state.render_notes(ui);
+                }
             }
-        };
+        }
+    }
 
+    /// The buttons for this tab. True if one of them closed Storage.
+    fn render_tab_footer(&mut self, row: &mut FooterRow<'_>, conn: &Connection) -> bool {
+        let (closed, changed) = match self.tab {
+            StorageTab::Cache => self.cache.as_mut().map(|state| {
+                let closed = state.render_footer(row, conn);
+                (closed, std::mem::take(&mut state.modified))
+            }),
+            StorageTab::Clean => self.gc.as_mut().map(|state| {
+                let closed = state.render_footer(row, conn);
+                (closed, std::mem::take(&mut state.modified))
+            }),
+            StorageTab::Trash => self.trash.as_mut().map(|state| {
+                let closed = state.render_footer(row, conn);
+                (closed, std::mem::take(&mut state.modified))
+            }),
+            StorageTab::Files => self.files.as_mut().map(|state| {
+                let closed = state.render_footer(row, conn);
+                (closed, std::mem::take(&mut state.modified))
+            }),
+        }
+        // The tab builds its state the frame it is first shown, and that is before this.
+        .unwrap_or((false, false));
         if changed {
             self.record_change();
         }
+        closed
     }
 
     fn record_change(&mut self) {

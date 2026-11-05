@@ -77,7 +77,7 @@ cask clears its quarantine flag on install. Apple silicon only.
 
 ### Versioning
 
-The version shown in the sidebar and the About dialog is the workspace
+The version shown in the Help dialog (`F1`) is the workspace
 `version` in the root `Cargo.toml`. Releases are cut by the **release** workflow
 in the Actions tab, which bumps it — see `CLAUDE.md` for what it does.
 
@@ -98,19 +98,22 @@ the sourceport.
 
 ## The Interface
 
-- Grid and list views with sortable columns and a live filter bar
+- Grid and list views, sorted by what you played last unless you say otherwise, and a live filter bar
 - WAD thumbnails scraped from the Doom Wiki (or extracted from TITLEPIC) with on-disk caching
 - Right-click context menu (play, edit, delete, sessions, map stats, saves & demos, new playthrough, and get in browser for a WAD caco can't fetch)
-- Right-hand detail sidebar with metadata, play stats, and quick actions
-- Cacowards view — a year-by-year browse of Doomworld's awards where entries you
-  don't own yet are flagged `absent`, with an inline Import button, and a Get button
-  for those that aren't on idgames. A WAD imported
+- Continue Playing — the WAD in progress you played last, in a banner that collapses to a
+  line in a short window
+- Cacowards view — a year-by-year list of Doomworld's awards, with posters a click away,
+  where entries you don't have yet are marked `Not in Library`, with an Import button, and a
+  Get button for those that aren't on idgames. A WAD imported
   any other way links itself to its entry, by file hash, idgames id, Doomworld
   thread, Doom Wiki page or an exact title match. A year's total counts the winners,
   runners-up, honorable mentions and Mordeth award; its other awards are listed
   under them
-- Stats view — headline totals, a status breakdown, and month-by-month activity
-- Keyboard shortcuts: `j/k`, `g`/`G`, `Home`/`End`, `Enter`, `E`, `D`, `S`, `M`, `F`, `P`, `Esc`
+- Stats view — totals, playtime and finishes by month, how far through each year's Cacowards
+  you are, and your most played authors, sourceports, IWADs and complevels
+- Keyboard shortcuts: `j/k`, `g`/`G`, `Home`/`End`, `Enter`, `E`, `D`, `S`, `M`, `F`, `P`, `Esc`,
+  and `F1` for the list of them
 
 ### Dialogs
 
@@ -120,7 +123,7 @@ the sourceport.
 | Profiles | Per-sourceport config profiles, edited in place |
 | IWADs | Registered IWADs and id24 resources |
 | Sourceports | Build sourceports from source into caco's own prefix |
-| Enrich | Re-run complevel / IWAD / sourceport detection across the library |
+| Enrich | Fill in the complevel, IWAD and sourceport of WADs that don't have them |
 | Mirrors | Your own stores of WAD files: set one up, fill it, change it — see [Mirrors](#mirrors) |
 | Sync | Where the logs are, and which machines this library has heard from — see [Several Machines](#several-machines) |
 | Settings | Sourceports, launch args, behavior toggles, cache limits, paths |
@@ -327,7 +330,7 @@ caco would be caco's.
 
 ### Setting one up
 
-Everything happens in **Manage → Mirrors**, with nothing to edit by hand. The first time
+Everything happens in the **Mirrors** tool, with nothing to edit by hand. The first time
 it opens on a wizard, which asks where you want to keep it and says what to do for that
 kind of store:
 

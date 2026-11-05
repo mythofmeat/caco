@@ -8,13 +8,19 @@ pub const FILTER_ID_SOURCE: &str = "filter_input";
 
 /// Render the filter/search bar.
 pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
-    let response = ui.add(
-        egui::TextEdit::singleline(&mut state.filter.input)
-            .hint_text("Filter WADs...")
-            .text_color(theme::TEXT_PRIMARY)
-            .desired_width(250.0)
-            .id(egui::Id::unique(FILTER_ID_SOURCE)),
-    );
+    let response = ui
+        .add(
+            egui::TextEdit::singleline(&mut state.filter.input)
+                .hint_text("Filter WADs...")
+                .text_color(theme::TEXT_PRIMARY)
+                .desired_width(200.0)
+                .id(egui::Id::unique(FILTER_ID_SOURCE)),
+        )
+        .accessible_name("Filter WADs")
+        .on_hover_text(
+            "Words look in titles, authors and descriptions. Also status:completed, tag:caco*, \
+         author:skillsaw, year:2016, cacoward:2023 and ^status:abandoned.",
+        );
 
     if response.changed() {
         state.filter.mark_changed(Instant::now());

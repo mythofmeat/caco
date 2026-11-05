@@ -1,302 +1,294 @@
-//! "Now Playing" / "Continue Playing" hero banner rendered at the top of the library view.
+//! The banner over the library: what is being played, or what to carry on with.
+//!
+//! At full height it has room for the picture and the progress, and below
+//! `theme::SHORT_WINDOW` it collapses to a line, since at the 800x400 minimum it used to take
+//! half the window and leave the grid the tops of two cards.
 
-use egui::Color32;
+use caco_core::db::sessions::WadStats;
+use caco_core::db::{Status, WadRecord};
+use std::collections::HashMap;
 
 use crate::panels;
-use crate::state::{ActionRequest, AppState, PlayState};
+use crate::state::{ActionRequest, AppState, MapProgress, PlayState};
 use crate::theme;
 use crate::thumbnails::ThumbnailManager;
 
-/// Render the hero banner. Returns an action request if the user interacted with it.
+const FULL_THUMB: egui::Vec2 = egui::vec2(96.0, 72.0);
+const SHORT_THUMB: egui::Vec2 = egui::vec2(48.0, 36.0);
+const THUMB_ROUNDING: u8 = 8;
+
+/// Render the banner. Returns an action request if the user interacted with it.
 pub(super) fn render_now_playing_hero(
     ui: &mut egui::Ui,
     state: &AppState,
     thumbnails: &ThumbnailManager,
 ) -> Option<ActionRequest> {
-    // Find the first WAD with "playing" status, or show active play state
-    let (wad_title, wad_author, wad_id, is_active) =
-        if let PlayState::Playing {
-            wad_id, wad_title, ..
-        } = &state.play_state
-        {
-            let author = state
-                .wads
-                .iter()
-                .find(|w| w.id == *wad_id)
-                .and_then(|w| w.author.clone());
-            (wad_title.clone(), author, *wad_id, true)
-        } else {
-            // Show the first WAD with in-progress status
-            let playing_wad = state
-                .wads
-                .iter()
-                .find(|w| w.status == caco_core::db::Status::InProgress);
-            {
-                let w = playing_wad?;
-                (w.title.clone(), w.author.clone(), w.id, false)
-            }
-        };
+    let (wad_id, title, is_active) = match &state.play_state {
+        PlayState::Playing { wad_id, wad_title } => (*wad_id, wad_title.clone(), true),
+        PlayState::Idle => {
+            let wad = continue_playing(&state.wads, &state.stats_map)?;
+            (wad.id, wad.title.clone(), false)
+        }
+    };
+    let wad = state.wads.iter().find(|wad| wad.id == wad_id);
+    let author = wad.and_then(|wad| wad.author.as_deref()).unwrap_or("");
+    let playtime = state
+        .stats_map
+        .get(&wad_id)
+        .filter(|stats| stats.playtime > 0)
+        .map(|stats| caco_core::player::format_duration(stats.playtime));
+    let progress = wad.and_then(|wad| state.map_progress(wad));
+    let heading = if is_active {
+        "NOW PLAYING"
+    } else {
+        "CONTINUE PLAYING"
+    };
+
+    let short = theme::is_short_window(ui.ctx());
+    let (margin_y, thumb_size) = if short {
+        (6, SHORT_THUMB)
+    } else {
+        (12, FULL_THUMB)
+    };
 
     let mut action = None;
-
-    let stats = state.stats_map.get(&wad_id);
-
-    ui.add_space(16.0);
-
-    // Hero frame
-    let hero_frame = egui::Frame::new()
-        .fill(Color32::from_rgb(0x22, 0x18, 0x0c))
-        .corner_radius(16)
-        .inner_margin(egui::Margin::symmetric(24, 20))
-        .stroke(egui::Stroke::new(
-            1.0_f32,
-            Color32::from_rgb(0x3a, 0x2e, 0x1a),
-        ))
-        .outer_margin(egui::Margin::symmetric(20, 0));
-
-    hero_frame.show(ui, |ui| {
-        ui.horizontal(|ui| {
-            // Thumbnail (real or placeholder) — double-click to play, right-click for menu
-            let thumb_size = egui::vec2(120.0, 90.0);
-            let (thumb_rect, thumb_resp) =
-                ui.allocate_exact_size(thumb_size, egui::Sense::click());
-
-            if let Some(tex) = thumbnails.get(wad_id) {
-                let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-                ui.painter()
-                    .rect_filled(thumb_rect, 10.0, Color32::BLACK);
-                ui.painter()
-                    .image(tex.id(), thumb_rect, uv, Color32::WHITE);
-            } else {
-                let (c1, _c2, ci) = theme::thumb_colors(wad_id);
-                ui.painter().rect_filled(thumb_rect, 10.0, c1);
-                let initials: String = wad_title
-                    .chars()
-                    .filter(|c| c.is_alphanumeric())
-                    .take(2)
-                    .flat_map(|c| c.to_uppercase())
-                    .collect();
-                ui.painter().text(
-                    thumb_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    &initials,
-                    egui::FontId::proportional(28.0),
-                    ci,
-                );
-            }
-
-            // Hover outline on thumbnail
-            if thumb_resp.hovered() {
-                ui.painter().rect_stroke(
-                    thumb_rect,
-                    10.0,
-                    egui::Stroke::new(1.5_f32, theme::TEXT_ACCENT),
-                    egui::StrokeKind::Outside,
-                );
-            }
-
-            // Double-click to play
-            if thumb_resp.double_clicked() {
-                action = Some(ActionRequest::Play(wad_id));
-            }
-
-            // Right-click context menu
-            let wad = state.wads.iter().find(|w| w.id == wad_id);
-            let wad_status = wad
-                .map(|w| w.status)
-                .unwrap_or(caco_core::db::Status::Unplayed);
-            let lost = wad.is_some_and(caco_core::db::WadRecord::is_lost);
-            if let Some(a) = panels::wad_context_menu(&thumb_resp, wad_id, wad_status, lost) {
-                action = Some(a);
-            }
-
-            ui.add_space(16.0);
-
-            // Info area. Bound the width so degenerately long titles or
-            // author lists (e.g. community megawads with 10+ collaborators)
-            // truncate with an ellipsis instead of overflowing into the
-            // playtime/progress block on the right.
-            const RIGHT_BLOCK_RESERVE: f32 = 240.0;
-            let info_width = (ui.available_width() - RIGHT_BLOCK_RESERVE).max(120.0);
-            ui.allocate_ui_with_layout(
-                egui::vec2(info_width, ui.available_height()),
-                egui::Layout::top_down(egui::Align::LEFT),
-                |ui| {
-                    let label_color = if is_active {
-                        theme::COLOR_SUCCESS
-                    } else {
-                        Color32::from_rgb(0x55, 0x88, 0xdd)
-                    };
-                    let label_text = if is_active {
-                        "NOW PLAYING"
-                    } else {
-                        "CONTINUE PLAYING"
-                    };
-                    ui.colored_label(
-                        label_color,
-                        egui::RichText::new(label_text).size(11.0).strong(),
-                    );
-                    ui.add_space(2.0);
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(&wad_title)
-                                .size(20.0)
-                                .strong()
-                                .color(theme::TEXT_PRIMARY),
-                        )
-                        .truncate(),
-                    );
-                    ui.add_space(2.0);
-                    let meta = wad_author.as_deref().unwrap_or("");
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(meta)
-                                .size(13.0)
-                                .color(theme::TEXT_SECONDARY),
-                        )
-                        .truncate(),
-                    );
-                },
+    ui.add_space(if short { 8.0 } else { 16.0 });
+    let frame = egui::Frame::new()
+        .fill(theme::BG_HERO)
+        .corner_radius(12)
+        .inner_margin(egui::Margin::symmetric(14, margin_y))
+        .stroke(egui::Stroke::new(1.0_f32, theme::BORDER_MED))
+        .outer_margin(egui::Margin::symmetric(20, 0))
+        .show(ui, |ui| {
+            let (row, _) = ui.allocate_exact_size(
+                egui::vec2(ui.available_width(), thumb_size.y),
+                egui::Sense::hover(),
+            );
+            let thumb = egui::Rect::from_min_size(row.min, thumb_size);
+            theme::paint_thumbnail(
+                ui.painter(),
+                thumb,
+                egui::CornerRadius::same(THUMB_ROUNDING),
+                thumbnails.get(wad_id),
             );
 
-            // Right side: playtime + progress
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.vertical(|ui| {
-                    ui.with_layout(egui::Layout::top_down(egui::Align::RIGHT), |ui| {
-                        if let Some(s) = stats
-                            && s.playtime > 0
-                        {
-                            ui.colored_label(
-                                theme::TEXT_PRIMARY,
-                                egui::RichText::new(
-                                    caco_core::player::format_duration(s.playtime),
-                                )
-                                .size(22.0)
-                                .strong(),
-                            );
-                            ui.colored_label(
-                                theme::TEXT_MUTED,
-                                egui::RichText::new("TOTAL PLAYTIME").size(10.0),
-                            );
-                        }
-
-                        // Progress bar — sourced from `state.analyses_map`
-                        // (the same Required set the auto-completion verdict
-                        // uses). Hidden when no fresh analysis is cached so
-                        // we never show a misleading number derived from the
-                        // levelstat snapshot's played-only map list.
-                        let wad = state.wads.iter().find(|w| w.id == wad_id);
-                        if let Some(wad) = wad
-                            && let Some(analysis) = state.analyses_map.get(&wad_id)
-                            && analysis.required_maps > 0
-                            && let Some(ref snapshot_json) = wad.stats_snapshot
-                            && let Ok(wad_stats) =
-                                serde_json::from_str::<caco_core::wad_stats::WadStats>(
-                                    snapshot_json,
-                                )
-                        {
-                            use caco_core::wad_analysis::MapClassification;
-                            let required_set: std::collections::HashSet<&str> = analysis
-                                .maps
-                                .iter()
-                                .filter(|m| m.classification == MapClassification::Required)
-                                .map(|m| m.lump.as_str())
-                                .collect();
-                            let secret_set: std::collections::HashSet<&str> = analysis
-                                .secret_maps
-                                .iter()
-                                .map(|s| s.as_str())
-                                .collect();
-
-                            let exited: std::collections::HashSet<&str> = wad_stats
-                                .maps
-                                .iter()
-                                .filter(|m| m.total_exits >= 1)
-                                .map(|m| m.lump.as_str())
-                                .collect();
-
-                            let played_required =
-                                required_set.iter().filter(|l| exited.contains(*l)).count();
-                            let required_total = analysis.required_maps;
-                            let secret_total = secret_set.len();
-                            let played_secret =
-                                secret_set.iter().filter(|l| exited.contains(*l)).count();
-
-                            // Bar tracks required maps only
-                            let pct = played_required as f32 / required_total as f32;
-
-                            ui.add_space(8.0);
-
-                            let bar_width = 200.0_f32;
-                            let bar_height = 6.0;
-                            let (bar_rect, _) = ui.allocate_exact_size(
-                                egui::vec2(bar_width, bar_height),
-                                egui::Sense::hover(),
-                            );
-                            ui.painter().rect_filled(
-                                bar_rect,
-                                3.0,
-                                Color32::from_rgb(0x3a, 0x2e, 0x1a),
-                            );
-                            if pct > 0.0 {
-                                let fill_rect = egui::Rect::from_min_size(
-                                    bar_rect.min,
-                                    egui::vec2(
-                                        bar_rect.width() * pct.min(1.0),
-                                        bar_height,
-                                    ),
-                                );
-                                ui.painter().rect_filled(
-                                    fill_rect,
-                                    3.0,
-                                    theme::COLOR_SUCCESS,
-                                );
-                            }
-
-                            let pct_display = (pct * 100.0).min(100.0) as u32;
-                            // Label with secret badge when applicable
-                            ui.horizontal(|ui| {
-                                ui.colored_label(
-                                    theme::TEXT_MUTED,
-                                    egui::RichText::new(format!(
-                                        "{played_required} / {required_total} maps \u{00b7} {pct_display}%"
-                                    ))
-                                    .size(11.0),
-                                );
-                                if secret_total > 0 {
-                                    let badge = egui::RichText::new(format!(
-                                        "{played_secret}/{secret_total} secret"
-                                    ))
-                                    .size(9.0)
-                                    .color(theme::TEXT_PRIMARY);
-                                    let badge_resp = ui.add(
-                                        egui::Label::new(badge)
-                                            .selectable(false),
-                                    );
-                                    let badge_rect = badge_resp.rect.expand2(
-                                        egui::vec2(4.0, 1.0),
-                                    );
-                                    ui.painter_at(badge_rect).rect_filled(
-                                        badge_rect,
-                                        3.0,
-                                        theme::COLOR_SECRET_FILL,
-                                    );
-                                    // Re-draw text on top of the background
-                                    ui.painter_at(badge_rect).text(
-                                        badge_rect.center(),
-                                        egui::Align2::CENTER_CENTER,
-                                        format!("{played_secret}/{secret_total} secret"),
-                                        egui::FontId::proportional(9.0),
-                                        theme::TEXT_PRIMARY,
-                                    );
-                                }
-                            });
-                        }
-                    });
-                });
-            });
+            // From the right first, so that the details get what is left of the row, whatever
+            // the two take: nesting them in layouts leaves the details no width at all.
+            let mut right = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(row)
+                    .layout(egui::Layout::right_to_left(egui::Align::Center)),
+            );
+            if !is_active && right.add(theme::primary_button("Play")).clicked() {
+                action = Some(ActionRequest::Play(wad_id));
+            }
+            if let Some(playtime) = &playtime {
+                right.add_space(8.0);
+                playtime_block(&mut right, playtime, short);
+            }
+            let details = egui::Rect::from_min_max(
+                egui::pos2(thumb.max.x + 12.0, row.min.y),
+                egui::pos2(right.min_rect().min.x - 12.0, row.max.y),
+            );
+            let mut details_ui = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(details)
+                    .layout(egui::Layout::top_down(egui::Align::Min)),
+            );
+            details_ui.spacing_mut().item_spacing.y = 2.0;
+            if short {
+                short_details(&mut details_ui, heading, &title, progress.as_ref());
+            } else {
+                full_details(&mut details_ui, heading, &title, author, progress.as_ref());
+            }
         });
-    });
+
+    // The whole banner stands for the WAD: double-click to play it, right-click for the rest.
+    let banner = frame.response.interact(egui::Sense::click());
+    if banner.double_clicked() && !is_active {
+        action = Some(ActionRequest::Play(wad_id));
+    }
+    let status = wad.map_or(Status::Unplayed, |wad| wad.status);
+    let lost = wad.is_some_and(WadRecord::is_lost);
+    if let Some(picked) = panels::wad_context_menu(&banner, wad_id, status, lost) {
+        action = Some(picked);
+    }
 
     action
+}
+
+/// Which WAD to offer: the one in progress that was played last, rather than whichever
+/// comes first in the sort order, which is not what "continue" means.
+fn continue_playing<'a>(
+    wads: &'a [WadRecord],
+    stats: &HashMap<i64, WadStats>,
+) -> Option<&'a WadRecord> {
+    wads.iter()
+        .rev()
+        .filter(|wad| wad.status == Status::InProgress)
+        .max_by_key(|wad| {
+            stats
+                .get(&wad.id)
+                .and_then(|stats| stats.last_played.as_deref())
+        })
+}
+
+fn heading_label(ui: &mut egui::Ui, heading: &str) {
+    ui.colored_label(
+        theme::status_color(Status::InProgress),
+        egui::RichText::new(heading).size(11.0).strong(),
+    );
+}
+
+fn full_details(
+    ui: &mut egui::Ui,
+    heading: &str,
+    title: &str,
+    author: &str,
+    progress: Option<&MapProgress>,
+) {
+    heading_label(ui, heading);
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(title)
+                .size(18.0)
+                .strong()
+                .color(theme::TEXT_PRIMARY),
+        )
+        .truncate(),
+    );
+    if !author.is_empty() {
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(author)
+                    .size(12.0)
+                    .color(theme::TEXT_SECONDARY),
+            )
+            .truncate(),
+        );
+    }
+    if let Some(progress) = progress {
+        ui.add_space(2.0);
+        ui.horizontal(|ui| {
+            let (bar, _) = ui.allocate_exact_size(egui::vec2(160.0, 5.0), egui::Sense::hover());
+            paint_progress_bar(ui.painter(), bar, progress);
+            ui.colored_label(
+                theme::TEXT_SECONDARY,
+                egui::RichText::new(progress.summary()).size(11.0),
+            );
+        });
+    }
+}
+
+fn short_details(ui: &mut egui::Ui, heading: &str, title: &str, progress: Option<&MapProgress>) {
+    ui.horizontal(|ui| {
+        heading_label(ui, heading);
+        if let Some(progress) = progress {
+            ui.colored_label(
+                theme::TEXT_SECONDARY,
+                egui::RichText::new(progress.summary()).size(11.0),
+            );
+        }
+    });
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(title)
+                .size(14.0)
+                .strong()
+                .color(theme::TEXT_PRIMARY),
+        )
+        .truncate(),
+    );
+}
+
+/// Painted to its own measure rather than in a right-aligned layout, which would take all the
+/// width it was offered and leave none for the details.
+fn playtime_block(ui: &mut egui::Ui, playtime: &str, short: bool) {
+    let painter = ui.painter();
+    let value = painter.layout_no_wrap(
+        playtime.to_string(),
+        egui::FontId::proportional(if short { 14.0 } else { 20.0 }),
+        theme::TEXT_PRIMARY,
+    );
+    let caption = painter.layout_no_wrap(
+        "played".to_string(),
+        egui::FontId::proportional(11.0),
+        theme::TEXT_MUTED,
+    );
+    let size = egui::vec2(
+        value.size().x.max(caption.size().x),
+        value.size().y + caption.size().y,
+    );
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::hover());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::Role::Label, true, format!("{playtime} played"))
+    });
+    let right = rect.right();
+    let caption_top = rect.top() + value.size().y;
+    let value_left = right - value.size().x;
+    let caption_left = right - caption.size().x;
+    let painter = ui.painter();
+    painter.galley(
+        egui::pos2(value_left, rect.top()),
+        value,
+        theme::TEXT_PRIMARY,
+    );
+    painter.galley(
+        egui::pos2(caption_left, caption_top),
+        caption,
+        theme::TEXT_MUTED,
+    );
+}
+
+fn paint_progress_bar(painter: &egui::Painter, bar: egui::Rect, progress: &MapProgress) {
+    painter.rect_filled(bar, 2.0, theme::BORDER_MED);
+    let fraction = progress.fraction();
+    if fraction > 0.0 {
+        let fill =
+            egui::Rect::from_min_size(bar.min, egui::vec2(bar.width() * fraction, bar.height()));
+        painter.rect_filled(fill, 2.0, theme::status_color(Status::InProgress));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use caco_core::db::{self, NewWad, SourceType};
+
+    #[test]
+    fn it_offers_the_wad_in_progress_that_was_played_last() {
+        let conn = db::open_memory().unwrap();
+        db::init_db(&conn).unwrap();
+        let add = |title: &str, status: Status| {
+            let id =
+                db::add_wad(&conn, &NewWad::new(title, SourceType::Local).status(status)).unwrap();
+            db::get_wad(&conn, id, false).unwrap().unwrap()
+        };
+        let played = |at: &str| WadStats {
+            playtime: 100,
+            last_played: Some(at.to_string()),
+            session_count: 1,
+            times_beaten: 0,
+        };
+
+        let wads = vec![
+            add("Older", Status::InProgress),
+            add("Finished", Status::Completed),
+            add("Newer", Status::InProgress),
+            add("Never", Status::InProgress),
+        ];
+        let stats = HashMap::from([
+            (wads[0].id, played("2026-01-01T00:00:00+00:00")),
+            (wads[1].id, played("2026-09-01T00:00:00+00:00")),
+            (wads[2].id, played("2026-02-01T00:00:00+00:00")),
+        ]);
+
+        assert_eq!(continue_playing(&wads, &stats).unwrap().title, "Newer");
+
+        // Nothing to go by, so the first it is.
+        let unplayed = HashMap::new();
+        assert_eq!(continue_playing(&wads, &unplayed).unwrap().title, "Older");
+
+        assert!(continue_playing(&wads[1..2], &stats).is_none());
+    }
 }

@@ -8,12 +8,9 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use crate::dialogs::{Dialog, Primary, count};
 use crate::message::EnrichReport;
 use crate::theme;
-
-/// Height of everything that stays put around the output: title bar, the
-/// controls and the Close row.
-const CHROME: f32 = 212.0;
 
 /// Which WADs a run should visit.
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -107,29 +104,30 @@ impl EnrichDialogState {
     pub fn render(&mut self, ctx: &egui::Context) -> EnrichResult {
         let mut result = EnrichResult::Open;
 
-        crate::dialogs::modal_window(ctx, "Enrich", [640.0, 460.0]).show(ctx, |ui| {
-            self.render_controls(ui, &mut result);
-
-            ui.add_space(8.0);
-            ui.separator();
-            ui.add_space(6.0);
-            // Only the output scrolls: a long report must not push the controls
-            // or Close out of a small window. It shrinks to fit, unlike
-            // `modal_body`, because "Idle." has no use for a full-height window.
-            egui::ScrollArea::vertical()
-                .auto_shrink([false, true])
-                .max_height(crate::dialogs::modal_body_height(ctx, CHROME))
-                .show(ui, |ui| self.render_output(ui));
-
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                if ui
-                    .add_enabled(!self.running, egui::Button::new("Close"))
-                    .clicked()
-                {
-                    result = EnrichResult::Closed;
-                }
-            });
+        Dialog::new("Enrich", [640.0, 460.0]).show(ctx, |dialog| {
+            dialog
+                .scroll(|ui| {
+                    self.render_controls(ui);
+                    self.render_output(ui);
+                })
+                .buttons(|row| {
+                    if self.running {
+                        // No way out but stopping: the worker holds a connection, and the
+                        // report would have nowhere to go.
+                        let ended = row.end(Some("Stop"), None);
+                        if ended.dismissed {
+                            self.cancel.store(true, Ordering::Relaxed);
+                        }
+                    } else {
+                        let ended = row.end(Some("Close"), Some(Primary::new("Enrich Library")));
+                        if ended.dismissed {
+                            result = EnrichResult::Closed;
+                        }
+                        if ended.primary {
+                            result = EnrichResult::Start(self.start());
+                        }
+                    }
+                })
         });
 
         // Escape must not close mid-run: the worker holds a DB connection and
@@ -141,47 +139,37 @@ impl EnrichDialogState {
         result
     }
 
-    fn render_controls(&mut self, ui: &mut egui::Ui, result: &mut EnrichResult) {
-        ui.strong("Library metadata");
+    fn render_controls(&mut self, ui: &mut egui::Ui) {
         ui.colored_label(
             theme::TEXT_SECONDARY,
-            "Fills in complevel, IWAD and zdoom-required from the WAD file, \
-             falling back to the Doom Wiki. Existing values are never overwritten.",
+            "Looks up the complevel, IWAD and sourceport each WAD needs, from its file and then \
+             the Doom Wiki, and fills in the ones you haven't set.",
         );
-        ui.add_space(4.0);
+        ui.add_space(8.0);
 
         ui.add_enabled_ui(!self.running, |ui| {
             ui.horizontal(|ui| {
                 ui.selectable_value(
                     &mut self.scope,
                     EnrichScope::MissingComplevel,
-                    "Missing complevel",
+                    "WADs with no complevel",
                 );
                 ui.selectable_value(&mut self.scope, EnrichScope::All, "All WADs");
-                ui.checkbox(&mut self.dry_run, "Dry run")
-                    .on_hover_text("Detect and report, but write nothing");
+                ui.add_space(8.0);
+                ui.checkbox(&mut self.dry_run, "Only show what would change");
             });
-        });
-        ui.add_space(4.0);
-
-        ui.horizontal(|ui| {
-            if ui
-                .add_enabled(!self.running, egui::Button::new("Enrich Library"))
-                .clicked()
-            {
-                *result = EnrichResult::Start(self.start());
-            }
-            if ui
-                .add_enabled(self.running, egui::Button::new("Cancel"))
-                .on_hover_text("Stops after the WAD in flight; work already done is kept")
-                .clicked()
-            {
-                self.cancel.store(true, Ordering::Relaxed);
-            }
         });
     }
 
+    /// How it is going, or how it went. Nothing at all before it has been run.
     fn render_output(&mut self, ui: &mut egui::Ui) {
+        if self.error.is_none() && !self.running && self.report.is_none() {
+            return;
+        }
+        ui.add_space(8.0);
+        ui.separator();
+        ui.add_space(6.0);
+
         if let Some(error) = &self.error {
             ui.colored_label(theme::COLOR_ERROR, error);
             return;
@@ -192,7 +180,7 @@ impl EnrichDialogState {
                 Some((done, total, title)) if *total > 0 => {
                     ui.add(
                         egui::ProgressBar::new(*done as f32 / *total as f32)
-                            .text(format!("{done}/{total}")),
+                            .text(format!("{done} of {total}")),
                     );
                     ui.colored_label(theme::TEXT_SECONDARY, title);
                 }
@@ -205,27 +193,10 @@ impl EnrichDialogState {
         }
 
         let Some(report) = &self.report else {
-            ui.colored_label(theme::TEXT_SECONDARY, "Idle.");
             return;
         };
-
-        let EnrichReport {
-            examined,
-            findings,
-            wiki_lookups,
-            wiki_blocked,
-            cancelled,
-            dry_run,
-        } = report;
-        let verb = if *dry_run { "would change" } else { "changed" };
-        let mut headline = format!("{} of {examined} WAD(s) {verb}", findings.len());
-        if *cancelled {
-            headline.push_str(" (cancelled)");
-        }
-        if *wiki_lookups > 0 {
-            headline.push_str(&format!(", {wiki_lookups} wiki lookup(s)"));
-        }
-        ui.colored_label(theme::TEXT_SECONDARY, headline);
+        let wiki_blocked = report.wiki_blocked.as_deref();
+        ui.colored_label(theme::TEXT_SECONDARY, report_headline(report));
         if let Some(blocked) = wiki_blocked {
             ui.colored_label(theme::COLOR_WARNING, blocked);
         }
@@ -236,8 +207,33 @@ impl EnrichDialogState {
         } else {
             "Nothing new detected."
         };
-        report_lines(ui, findings, empty);
+        report_lines(ui, &report.findings, empty);
     }
+}
+
+/// "Changed 3 of 116 WADs, looking up 12 on the Doom Wiki."
+fn report_headline(report: &EnrichReport) -> String {
+    let verb = if report.dry_run {
+        "Would change"
+    } else {
+        "Changed"
+    };
+    let mut headline = format!(
+        "{verb} {} of {}",
+        report.findings.len(),
+        count(report.examined, "WAD", "WADs")
+    );
+    if report.wiki_lookups > 0 {
+        headline.push_str(&format!(
+            ", looking up {} on the Doom Wiki",
+            report.wiki_lookups
+        ));
+    }
+    if report.cancelled {
+        headline.push_str(", then stopped");
+    }
+    headline.push('.');
+    headline
 }
 
 /// Render a list of report lines, or `empty` when there are none.
@@ -250,5 +246,52 @@ fn report_lines(ui: &mut egui::Ui, lines: &[String], empty: &str) {
     }
     for line in lines {
         ui.label(line);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn report() -> EnrichReport {
+        EnrichReport {
+            examined: 116,
+            findings: vec!["Road \u{2192} complevel 9 (Boom)".to_string()],
+            wiki_lookups: 0,
+            wiki_blocked: None,
+            cancelled: false,
+            dry_run: false,
+        }
+    }
+
+    #[test]
+    fn the_headline_reads_as_a_sentence() {
+        assert_eq!(report_headline(&report()), "Changed 1 of 116 WADs.");
+
+        let one = EnrichReport {
+            examined: 1,
+            ..report()
+        };
+        assert_eq!(report_headline(&one), "Changed 1 of 1 WAD.");
+
+        let everything = EnrichReport {
+            wiki_lookups: 12,
+            cancelled: true,
+            dry_run: true,
+            ..report()
+        };
+        assert_eq!(
+            report_headline(&everything),
+            "Would change 1 of 116 WADs, looking up 12 on the Doom Wiki, then stopped."
+        );
+    }
+
+    /// There is nothing to report before anything has been run, and it says nothing.
+    #[test]
+    fn an_idle_dialog_has_no_output_to_show() {
+        let state = EnrichDialogState::new();
+        assert!(!state.running);
+        assert!(state.report.is_none());
+        assert!(state.error.is_none());
     }
 }

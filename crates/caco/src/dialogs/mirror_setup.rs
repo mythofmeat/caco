@@ -17,6 +17,7 @@ use caco_core::config::{MirrorConfig, MirrorLayout, SavedToken};
 use caco_core::mirror_tokens::TokenFile;
 use caco_sources::mirror::MirrorProbe;
 
+use crate::dialogs::{FooterRow, Primary, form_label};
 use crate::theme;
 use crate::workers::{FileDialogReceiver, FileDialogRequest, spawn_file_dialog};
 
@@ -440,15 +441,6 @@ impl MirrorSetup {
         matches!(self.check, Check::Running | Check::SettingUp)
     }
 
-    /// How much taller the footer is than its button row, to keep out of the body.
-    pub fn footer_extra(&self) -> f32 {
-        if self.kind.is_none() || self.check == Check::NotRun {
-            0.0
-        } else {
-            CHECK_HEIGHT + 8.0
-        }
-    }
-
     pub fn render(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         // The result only stands for what it was run on, whatever has been typed since.
         if let Some(kind) = self.kind
@@ -462,65 +454,41 @@ impl MirrorSetup {
         }
     }
 
-    /// The page's footer, so that none of it is scrolled out of reach: the buttons, and
-    /// above them how a test went. Below the fields it would be below the fold, and at
-    /// the smallest window pressing Test It would seem to do nothing.
-    pub fn render_footer(&mut self, ui: &mut egui::Ui) -> SetupAction {
+    /// How a test went, above the buttons so that it is never scrolled out of reach. Below
+    /// the fields it would be below the fold, and at the smallest window pressing Test It
+    /// would seem to do nothing.
+    pub fn render_check_area(&self, ui: &mut egui::Ui) {
         let Some(kind) = self.kind else {
-            if ui.button("Cancel").clicked() {
+            return;
+        };
+        if self.check != Check::NotRun {
+            egui::ScrollArea::vertical()
+                .id_salt("mirror_check")
+                .max_height(CHECK_HEIGHT)
+                .auto_shrink([false, true])
+                .show(ui, |ui| self.render_check(ui, kind));
+        }
+    }
+
+    pub fn render_footer(&mut self, row: &mut FooterRow<'_>) -> SetupAction {
+        let Some(kind) = self.kind else {
+            if row.end(Some("Cancel"), None).dismissed {
                 return SetupAction::Cancel;
             }
             return SetupAction::None;
         };
 
-        if self.check != Check::NotRun {
-            egui::ScrollArea::vertical()
-                .id_salt("mirror_check")
-                .max_height(CHECK_HEIGHT)
-                .auto_shrink([false, false])
-                .show(ui, |ui| self.render_check(ui, kind));
-            ui.add_space(4.0);
-        }
-
         let config = self.config(kind);
+        let problem = self.problem(kind);
+        let busy = self.is_busy();
         let mut action = SetupAction::None;
-        ui.horizontal(|ui| {
-            let busy = self.is_busy();
-            if self.editing.is_some() {
-                if ui.add_enabled(!busy, egui::Button::new("Cancel")).clicked() {
-                    action = SetupAction::Cancel;
-                }
-            } else if ui.add_enabled(!busy, egui::Button::new("Back")).clicked() {
-                self.kind = None;
-                return;
-            }
 
-            let problem = self.problem(kind);
-            let ready = matches!(&self.check, Check::Passed(probe) if probe.is_ok())
-                || matches!(self.check, Check::SetUpFailed(_));
-
-            if ready {
-                if primary(ui, "Finish", problem.is_none()) {
-                    self.checked = Some(config.clone());
-                    self.check = Check::SettingUp;
-                    action = SetupAction::SetUp(Box::new(config.clone()));
-                }
-            } else {
-                let label = match self.check {
-                    Check::NotRun | Check::Running | Check::SettingUp => "Test It",
-                    _ => "Test Again",
-                };
-                if primary(ui, label, problem.is_none() && !busy) {
-                    self.checked = Some(config.clone());
-                    self.check = Check::Running;
-                    action = SetupAction::Probe(Box::new(config.clone()));
-                }
-            }
+        row.left(|ui| {
             if busy {
                 ui.spinner();
             }
-            // A server that is down today can still be the right one, and a laptop
-            // away from home should not have to wait to be told so.
+            // A server that is down today can still be the right one, and a laptop away from
+            // home should not have to wait to be told so.
             let failed = matches!(self.check, Check::Failed(_))
                 || matches!(&self.check, Check::Passed(probe) if !probe.is_ok());
             if failed && ui.button("Add Anyway").clicked() {
@@ -533,6 +501,43 @@ impl MirrorSetup {
                 );
             }
         });
+
+        let ready = matches!(&self.check, Check::Passed(probe) if probe.is_ok())
+            || matches!(self.check, Check::SetUpFailed(_));
+        let primary_label = if ready {
+            "Finish"
+        } else {
+            match self.check {
+                Check::NotRun | Check::Running | Check::SettingUp => "Test It",
+                _ => "Test Again",
+            }
+        };
+        let waiting_for = problem.as_deref().unwrap_or("Waiting for the answer");
+        let primary = Primary::new(primary_label).when(problem.is_none() && !busy, waiting_for);
+        // A change of page has to wait for what is running: the answer would otherwise land
+        // on a form that is no longer what it was asked about.
+        let dismiss = match (busy, self.editing.is_some()) {
+            (true, _) => None,
+            (false, true) => Some("Cancel"),
+            (false, false) => Some("Back"),
+        };
+        let ended = row.end(dismiss, Some(primary));
+        if ended.dismissed {
+            if self.editing.is_some() {
+                return SetupAction::Cancel;
+            }
+            self.kind = None;
+            return SetupAction::None;
+        }
+        if ended.primary {
+            self.checked = Some(config.clone());
+            if ready {
+                self.check = Check::SettingUp;
+                return SetupAction::SetUp(Box::new(config));
+            }
+            self.check = Check::Running;
+            return SetupAction::Probe(Box::new(config));
+        }
         action
     }
 
@@ -649,6 +654,7 @@ impl MirrorSetup {
                 !server.is_empty(),
                 egui::Button::new("Open Gitea's Token Page"),
             )
+            .on_disabled_hover_text("Fill in the server first")
             .clicked()
         {
             let _ = open::that(gitea_token_page(&server));
@@ -966,14 +972,6 @@ fn is_http(place: &str) -> bool {
     place.starts_with("http://") || place.starts_with("https://")
 }
 
-fn primary(ui: &mut egui::Ui, label: &str, enabled: bool) -> bool {
-    ui.add_enabled(
-        enabled,
-        egui::Button::new(egui::RichText::new(label).strong()),
-    )
-    .clicked()
-}
-
 fn step(ui: &mut egui::Ui, text: &str) {
     ui.add_space(4.0);
     ui.colored_label(
@@ -999,13 +997,6 @@ fn good(ui: &mut egui::Ui, text: &str) {
 
 fn bad(ui: &mut egui::Ui, text: &str) {
     ui.colored_label(theme::COLOR_ERROR, text);
-}
-
-fn form_label(ui: &mut egui::Ui, label: &str) -> egui::Response {
-    ui.colored_label(
-        theme::TEXT_SECONDARY,
-        egui::RichText::new(label).size(12.0).strong(),
-    )
 }
 
 /// A labelled text field the width of its column, named after its label.

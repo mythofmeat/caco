@@ -6,6 +6,7 @@ use caco_core::placement;
 use caco_core::presence::StorePaths;
 use rusqlite::Connection;
 
+use crate::dialogs::{Dialog, Primary};
 use crate::theme;
 use crate::workers::{FileDialogReceiver, FileDialogRequest, spawn_file_dialog};
 
@@ -96,94 +97,61 @@ impl LinkDialogState {
         }
 
         let mut result = LinkResult::Open;
+        let picker_busy = self.pending_picker.is_some();
+        let mut pick = false;
 
-        crate::dialogs::modal_window(ctx, "WAD Unavailable", [440.0, 240.0]).show(ctx, |ui| {
-            ui.spacing_mut().item_spacing.y = 8.0;
-
-            // Title
-            ui.colored_label(
-                theme::TEXT_PRIMARY,
-                egui::RichText::new(&self.wad_title).heading(),
-            );
-
-            ui.add_space(4.0);
-
-            match &self.last_seen {
-                Some(path) => {
-                    ui.colored_label(
-                        theme::TEXT_SECONDARY,
-                        "This WAD's file is not on this machine. It was last seen at:",
-                    );
-                    ui.label(
-                        egui::RichText::new(path)
-                            .monospace()
-                            .color(theme::TEXT_PRIMARY),
-                    );
-                    ui.colored_label(
-                        theme::TEXT_SECONDARY,
-                        "On another machine, or on a drive that isn't mounted? Once it's \
-                         back there, Play will find it.",
-                    );
-                }
-                None => {
-                    ui.colored_label(
-                        theme::TEXT_SECONDARY,
-                        "The WAD file for this entry is not available locally.",
-                    );
-                }
-            }
-
-            ui.colored_label(
-                theme::TEXT_SECONDARY,
-                "Get in Browser opens its page and watches your Downloads folder, so all \
-                 you do is download it. Or link a copy you already have.",
-            );
-
-            ui.add_space(8.0);
-            if let Some(error) = &self.error_message {
-                ui.colored_label(theme::COLOR_ERROR, error);
-                ui.add_space(4.0);
-            }
-            ui.separator();
-            ui.add_space(4.0);
-
-            // Buttons
-            ui.horizontal(|ui| {
-                if ui
-                    .add_enabled(self.has_page, egui::Button::new("Get in Browser"))
-                    .on_disabled_hover_text("caco knows no page for this WAD.")
-                    .clicked()
-                {
-                    result = LinkResult::Get(self.wad_id);
-                }
-
-                // Link Local File button — spawn an async picker. Disabled
-                // while one is already in flight.
-                let picker_busy = self.pending_picker.is_some();
-                if ui
-                    .add_enabled(!picker_busy, egui::Button::new("Link Local File"))
-                    .clicked()
-                {
-                    self.error_message = None;
-                    // Where a file someone downloaded a while ago will be. Both cases,
-                    // because some platforms' pickers go by exact match, and a WAD
-                    // from the nineties is as likely as not to be called DOOM.WAD.
-                    let extensions: Vec<String> = downloads::WAD_SHAPED
-                        .iter()
-                        .flat_map(|ext| [ext.to_string(), ext.to_uppercase()])
-                        .collect();
-                    let extensions: Vec<&str> = extensions.iter().map(String::as_str).collect();
-                    let req = FileDialogRequest::open()
-                        .add_filter("WAD files", &extensions)
-                        .set_directory(caco_core::config::downloads_dir());
-                    self.pending_picker = Some(spawn_file_dialog(Some(ctx.clone()), req));
-                }
-
-                if ui.button("Cancel").clicked() {
-                    result = LinkResult::Cancelled;
-                }
+        Dialog::new("WAD Unavailable", [480.0, 280.0])
+            .about(&self.wad_title)
+            .show(ctx, |dialog| {
+                dialog
+                    .scroll(|ui| self.render_explanation(ui))
+                    .above(|ui| {
+                        if let Some(error) = &self.error_message {
+                            ui.colored_label(theme::COLOR_ERROR, error);
+                        }
+                    })
+                    .buttons(|row| {
+                        let (get, link) = ("Get in Browser", "Link Local File");
+                        if self.has_page {
+                            row.left(|ui| {
+                                pick = ui
+                                    .add_enabled(!picker_busy, egui::Button::new(link))
+                                    .clicked();
+                            });
+                            let ended = row.end(Some("Cancel"), Some(Primary::new(get)));
+                            if ended.dismissed {
+                                result = LinkResult::Cancelled;
+                            }
+                            if ended.primary {
+                                result = LinkResult::Get(self.wad_id);
+                            }
+                        } else {
+                            let primary = Primary::new(link)
+                                .when(!picker_busy, "Waiting for you to pick a file");
+                            let ended = row.end(Some("Cancel"), Some(primary));
+                            if ended.dismissed {
+                                result = LinkResult::Cancelled;
+                            }
+                            pick = ended.primary;
+                        }
+                    })
             });
-        });
+
+        if pick {
+            self.error_message = None;
+            // Where a file someone downloaded a while ago will be. Both cases, because some
+            // platforms' pickers go by exact match, and a WAD from the nineties is as likely
+            // as not to be called DOOM.WAD.
+            let extensions: Vec<String> = downloads::WAD_SHAPED
+                .iter()
+                .flat_map(|ext| [ext.to_string(), ext.to_uppercase()])
+                .collect();
+            let extensions: Vec<&str> = extensions.iter().map(String::as_str).collect();
+            let req = FileDialogRequest::open()
+                .add_filter("WAD files", &extensions)
+                .set_directory(caco_core::config::downloads_dir());
+            self.pending_picker = Some(spawn_file_dialog(Some(ctx.clone()), req));
+        }
 
         // Close on Escape
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -191,6 +159,43 @@ impl LinkDialogState {
         }
 
         result
+    }
+
+    fn render_explanation(&self, ui: &mut egui::Ui) {
+        ui.spacing_mut().item_spacing.y = 6.0;
+        match &self.last_seen {
+            Some(path) => {
+                ui.colored_label(
+                    theme::TEXT_SECONDARY,
+                    "This WAD's file is not on this machine. It was last seen at:",
+                );
+                ui.label(
+                    egui::RichText::new(path)
+                        .monospace()
+                        .color(theme::TEXT_PRIMARY),
+                );
+                ui.colored_label(
+                    theme::TEXT_SECONDARY,
+                    "On another machine, or on a drive that isn't mounted? Once it's back \
+                     there, Play will find it.",
+                );
+            }
+            None => {
+                ui.colored_label(
+                    theme::TEXT_SECONDARY,
+                    "This WAD's file is not on this machine.",
+                );
+            }
+        }
+        ui.colored_label(
+            theme::TEXT_SECONDARY,
+            if self.has_page {
+                "Get in Browser opens its page and watches your Downloads folder, so all you \
+                 do is download it. Or link a copy you already have."
+            } else {
+                "caco doesn't know a page for it, so if you have a copy, link it."
+            },
+        );
     }
 }
 

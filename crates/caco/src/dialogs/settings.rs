@@ -10,6 +10,7 @@ use caco_core::config::{self, Config};
 use caco_core::sourceports;
 use caco_sources::idgames::MIRRORS;
 
+use crate::dialogs::{Dialog, Primary, form_label};
 use crate::theme;
 
 /// State for the settings dialog.
@@ -197,105 +198,30 @@ impl SettingsDialogState {
     pub fn render(&mut self, ctx: &egui::Context) -> SettingsResult {
         let mut result = SettingsResult::Open;
 
-        crate::dialogs::modal_window(ctx, "settings_dialog", [560.0, 580.0])
-            .title_bar(false)
-            .frame(
-                egui::Frame::new()
-                    .fill(egui::Color32::from_rgb(0x1a, 0x14, 0x10))
-                    .corner_radius(16)
-                    .stroke(egui::Stroke::new(1.0_f32, theme::BORDER_MED))
-                    .shadow(egui::Shadow {
-                        offset: [0, 8],
-                        blur: 32,
-                        spread: 8,
-                        color: egui::Color32::from_black_alpha(128),
-                    }),
-            )
-            .show(ctx, |ui| {
-                // ── Header ──
-                egui::Frame::new()
-                    .inner_margin(egui::Margin::symmetric(20, 14))
-                    .stroke(egui::Stroke::new(1.0_f32, theme::BORDER))
-                    .show(ui, |ui| {
-                        ui.vertical(|ui| {
-                            ui.colored_label(
-                                theme::TEXT_PRIMARY,
-                                egui::RichText::new("Settings").size(16.0).strong(),
-                            );
-                            ui.colored_label(
-                                theme::TEXT_SECONDARY,
-                                // Resolved, not spelled: the config lives in
-                                // the data dir (and moves with CACO_HOME or
-                                // CACO_CONFIG), and what is this machine's
-                                // somewhere that does not travel with it.
-                                egui::RichText::new(format!(
-                                    "Saved to {}, and for this machine to {}",
-                                    caco_core::config::config_file().display(),
-                                    caco_core::config::machine_config_file().display()
-                                ))
-                                .size(11.0),
-                            );
-                        });
-                    });
-
-                // ── Error banner ──
-                if let Some(ref err) = self.error {
-                    egui::Frame::new()
-                        .fill(egui::Color32::from_rgb(0x2a, 0x0d, 0x0d))
-                        .inner_margin(egui::Margin::symmetric(20, 6))
-                        .show(ui, |ui| {
-                            ui.colored_label(theme::COLOR_ERROR, err);
-                        });
-                }
-
-                // ── Body ──
-                // Height comes from what is left after the header and the
-                // Save/Cancel row, not from a constant: 440 plus that chrome
-                // is taller than the 800x400 minimum window, which put Save
-                // below the bottom edge.
-                let body_height = crate::dialogs::modal_body_height(ctx, 150.0);
-                egui::ScrollArea::vertical()
-                    .max_height(body_height)
-                    .show(ui, |ui| {
-                        egui::Frame::new()
-                            .inner_margin(egui::Margin::symmetric(20, 16))
-                            .show(ui, |ui| {
-                                ui.spacing_mut().item_spacing.y = 8.0;
-                                self.section_sourceports(ui);
-                                self.section_behavior(ui);
-                                self.section_cache(ui);
-                                self.section_paths(ui);
-                            });
-                    });
-
-                // ── Footer ──
-                ui.add_space(4.0);
-                egui::Frame::new()
-                    .inner_margin(egui::Margin::symmetric(20, 10))
-                    .stroke(egui::Stroke::new(1.0_f32, theme::BORDER))
-                    .show(ui, |ui| {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui
-                                .add(
-                                    egui::Button::new(
-                                        egui::RichText::new("Save")
-                                            .color(egui::Color32::WHITE)
-                                            .strong(),
-                                    )
-                                    .fill(theme::TEXT_ACCENT)
-                                    .corner_radius(8),
-                                )
-                                .clicked()
-                                && self.save()
-                            {
-                                result = SettingsResult::Saved;
-                            }
-                            if ui.button("Cancel").clicked() {
-                                result = SettingsResult::Closed;
-                            }
-                        });
-                    });
-            });
+        Dialog::new("Settings", [600.0, 640.0]).show(ctx, |dialog| {
+            dialog
+                .scroll(|ui| {
+                    ui.spacing_mut().item_spacing.y = 8.0;
+                    self.section_sourceports(ui);
+                    self.section_behavior(ui);
+                    self.section_cache(ui);
+                    self.section_paths(ui);
+                })
+                .above(|ui| {
+                    if let Some(error) = &self.error {
+                        ui.colored_label(theme::COLOR_ERROR, error);
+                    }
+                })
+                .buttons(|row| {
+                    let ended = row.end(Some("Cancel"), Some(Primary::new("Save")));
+                    if ended.dismissed {
+                        result = SettingsResult::Closed;
+                    }
+                    if ended.primary && self.save() {
+                        result = SettingsResult::Saved;
+                    }
+                })
+        });
 
         // Escape closes without saving
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -359,10 +285,10 @@ impl SettingsDialogState {
                         .text_color(theme::TEXT_PRIMARY),
                 )
                 .labelled_by(label.id)
-                .on_hover_text("Used for WADs that require a zdoom-family sourceport");
+                .on_hover_text("Used for WADs that need a ZDoom-family sourceport");
         });
 
-        let label = form_label(ui, "Global launch args (every sourceport)");
+        let label = form_label(ui, "Launch arguments for every sourceport");
         ui.add(
             egui::TextEdit::singleline(&mut self.sourceport_args)
                 .desired_width(f32::INFINITY)
@@ -376,7 +302,7 @@ impl SettingsDialogState {
 
     /// Per-sourceport launch args list: one row per sourceport, plus an add row.
     fn subsection_port_args(&mut self, ui: &mut egui::Ui) {
-        form_label(ui, "Per-sourceport launch args");
+        form_label(ui, "Launch arguments for one sourceport");
 
         let mut remove: Option<usize> = None;
         for (idx, (sourceport, args)) in self.executable_args.iter_mut().enumerate() {
@@ -422,7 +348,7 @@ impl SettingsDialogState {
                 .collect();
             egui::ComboBox::from_id_salt("add_port_args")
                 .selected_text(if self.new_sourceport_name.is_empty() {
-                    "add sourceport…"
+                    "add a sourceport\u{2026}"
                 } else {
                     self.new_sourceport_name.as_str()
                 })
@@ -505,7 +431,7 @@ impl SettingsDialogState {
         });
 
         ui.columns(2, |cols| {
-            let label = form_label(&mut cols[0], "Import link mode");
+            let label = form_label(&mut cols[0], "When linking a download");
             egui::ComboBox::from_id_salt("link_mode")
                 .selected_text(&self.link_mode)
                 .width(cols[0].available_width())
@@ -519,7 +445,7 @@ impl SettingsDialogState {
                 .on_hover_text(
                     "What happens to a file you link when Get finds it in your Downloads folder.",
                 );
-            let label = form_label(&mut cols[1], "Orphaned companions");
+            let label = form_label(&mut cols[1], "When a companion file is left unused");
             egui::ComboBox::from_id_salt("companion_orphan_cleanup")
                 .selected_text(&self.companion_orphan_cleanup)
                 .width(cols[1].available_width())
@@ -539,14 +465,20 @@ impl SettingsDialogState {
         ui.add_space(4.0);
         ui.checkbox(
             &mut self.manage_data_dirs,
-            "Manage per-WAD data directories (saves, stats, configs)",
+            "Keep each WAD's saves, stats and config in a folder of its own",
         );
         ui.checkbox(&mut self.auto_stats, "Track per-map stats automatically");
-        ui.checkbox(&mut self.auto_detect_iwad, "Auto-detect required IWAD");
-        ui.checkbox(&mut self.auto_detect_complevel, "Auto-detect complevel");
+        ui.checkbox(
+            &mut self.auto_detect_iwad,
+            "Work out which IWAD a WAD needs from its file",
+        );
+        ui.checkbox(
+            &mut self.auto_detect_complevel,
+            "Work out a WAD's complevel from its file",
+        );
         ui.checkbox(
             &mut self.auto_doomwiki_enrich,
-            "Auto-enrich imports with Doom Wiki metadata",
+            "Look up what I import on the Doom Wiki",
         );
         ui.checkbox(
             &mut self.warn_newer_saves,
@@ -562,7 +494,10 @@ impl SettingsDialogState {
                     .range(0..=i64::MAX),
             )
             .labelled_by(label.id)
-            .on_hover_text("One `git ls-remote` per built sourceport at startup. 0 = never check.");
+            .on_hover_text(
+                "When caco starts, asks each sourceport you built whether there is a newer \
+                 version. 0 means never.",
+            );
         });
         ui.horizontal(|ui| {
             let label = form_label(ui, "Update the idgames index every (days)");
@@ -573,32 +508,36 @@ impl SettingsDialogState {
             )
             .labelled_by(label.id)
             .on_hover_text(
-                "Asks a mirror for a new listing of the archive at startup, and only downloads                  it if there is one. 0 = never: search goes by what the index already has, then                  by idgames itself.",
+                "When caco starts, asks a mirror whether idgames has anything new. 0 means never: \
+                 search then goes by what caco already knows, and by idgames itself.",
             );
         });
     }
 
     fn section_cache(&mut self, ui: &mut egui::Ui) {
-        Self::section_header(ui, "WAD cache");
-        ui.checkbox(&mut self.cache_auto_clean, "Auto-clean cache after play");
+        Self::section_header(ui, "Downloaded WADs");
+        ui.checkbox(
+            &mut self.cache_auto_clean,
+            "Clear out old downloads after playing",
+        );
         ui.horizontal(|ui| {
-            let label = form_label(ui, "Max size (GB)");
+            let label = form_label(ui, "Keep up to (GB)");
             ui.add(
                 egui::DragValue::new(&mut self.cache_max_size_gb)
                     .speed(0.5)
                     .range(0.0..=f64::MAX),
             )
             .labelled_by(label.id)
-            .on_hover_text("0 = unlimited");
+            .on_hover_text("0 means no limit");
             ui.add_space(16.0);
-            let label = form_label(ui, "Max age (days)");
+            let label = form_label(ui, "For up to (days)");
             ui.add(
                 egui::DragValue::new(&mut self.cache_max_age_days)
                     .speed(1)
                     .range(0..=i64::MAX),
             )
             .labelled_by(label.id)
-            .on_hover_text("0 = unlimited");
+            .on_hover_text("0 means no limit");
         });
     }
 
@@ -606,10 +545,10 @@ impl SettingsDialogState {
         Self::section_header(ui, "Paths");
         Self::this_machine_note(ui);
         for (text, value) in [
-            ("WAD cache dir", &mut self.cache_dir),
-            ("Data dir", &mut self.data_dir),
-            ("IWAD dir", &mut self.iwad_dir),
-            ("Sourceport config dir", &mut self.profile_dir),
+            ("Downloaded WADs folder", &mut self.cache_dir),
+            ("Saves and stats folder", &mut self.data_dir),
+            ("IWADs folder", &mut self.iwad_dir),
+            ("Sourceport profiles folder", &mut self.profile_dir),
         ] {
             let label = form_label(ui, text);
             ui.add(
@@ -620,7 +559,7 @@ impl SettingsDialogState {
             .labelled_by(label.id);
         }
 
-        let label = form_label(ui, "Database path");
+        let label = form_label(ui, "Library file");
         ui.add(
             egui::TextEdit::singleline(&mut self.db_path)
                 .desired_width(f32::INFINITY)
@@ -649,18 +588,19 @@ impl SettingsDialogState {
                 .hint_text(&self.default_sync_dir),
         )
         .labelled_by(label.id)
-        .on_hover_text("Where each machine keeps its log. See Manage, Sync.");
-    }
-}
+        .on_hover_text("Where each machine keeps its log. See the Sync tool.");
 
-/// A field's visible label. Returned so the field can name itself after it
-/// with `labelled_by`: without that, seeing the two side by side is the only
-/// thing connecting them.
-fn form_label(ui: &mut egui::Ui, label: &str) -> egui::Response {
-    ui.colored_label(
-        theme::TEXT_SECONDARY,
-        egui::RichText::new(label).size(12.0).strong(),
-    )
+        ui.add_space(4.0);
+        ui.colored_label(
+            theme::TEXT_MUTED,
+            egui::RichText::new(format!(
+                "Settings are saved in {}, and for this machine in {}.",
+                config::config_file().display(),
+                config::machine_config_file().display()
+            ))
+            .small(),
+        );
+    }
 }
 
 /// Join an args vec into a shell-style string (quoting where needed).

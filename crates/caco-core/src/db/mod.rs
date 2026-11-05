@@ -59,10 +59,10 @@ pub use playthroughs::{
 pub use query::{compose_and, find_duplicate, normalize_status, parse_query, search_wads};
 pub use schema::init_db;
 pub use sessions::{
-    ActivityPeriod, CompletionRecord, SessionRecord, StatsSnapshot, WadStats, add_wad_completion,
-    clear_cached_path, delete_wad_completion, end_session, get_cached_wads, get_sessions,
-    get_stats_snapshot, get_wad_completions, get_wad_stats, get_wad_stats_batch,
-    get_wads_played_by_period, start_session, update_session_stats, update_wad_completion,
+    ActivityPeriod, CompletionRecord, SessionRecord, StatsSnapshot, Tally, WadStats,
+    add_wad_completion, clear_cached_path, delete_wad_completion, end_session, get_cached_wads,
+    get_sessions, get_stats_snapshot, get_wad_completions, get_wad_stats, get_wad_stats_batch,
+    start_session, update_session_stats, update_wad_completion,
 };
 pub use wads::{
     FieldValue, NewWad, WadUpdate, add_tag, add_wad, delete_wad, get_status_counts, get_wad,

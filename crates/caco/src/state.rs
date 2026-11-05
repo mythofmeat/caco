@@ -84,6 +84,7 @@ pub enum ActionRequest {
     /// trash and the companion registry all live in there.
     Storage(StorageTab),
     Settings,
+    Help,
     Resources,
     Profiles,
     Collections,
@@ -183,7 +184,6 @@ pub enum ActiveDialog {
     CacowardLink(CacowardLinkDialogState),
     Settings(SettingsDialogState),
     Help,
-    About,
 }
 
 pub enum PlayState {
@@ -195,14 +195,17 @@ pub enum PlayState {
 // Sort definitions
 // ---------------------------------------------------------------------------
 
+/// The ways to sort the library, by the key `db::search_wads` knows them by. The first is the
+/// default: what you played last comes first, and a library that has never been played falls
+/// back to the order it was added in.
 pub const SORT_FIELDS: &[(&str, &str)] = &[
-    ("id", "ID"),
+    ("last_played", "Last Played"),
     ("title", "Title"),
     ("author", "Author"),
     ("playtime", "Playtime"),
-    ("last_played", "Last Played"),
     ("year", "Year"),
     ("rating", "Rating"),
+    ("created", "Date Added"),
     ("random", "Random"),
 ];
 
@@ -296,6 +299,34 @@ pub struct AppState {
     pub gets: Gets,
 }
 
+/// How far through a WAD's maps a playthrough has got.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MapProgress {
+    pub finished: usize,
+    pub required: usize,
+    pub secret_finished: usize,
+    pub secret_total: usize,
+}
+
+impl MapProgress {
+    /// How full a bar should be. Tracks required maps only.
+    pub fn fraction(&self) -> f32 {
+        (self.finished as f32 / self.required.max(1) as f32).clamp(0.0, 1.0)
+    }
+
+    /// "3 of 8 maps, 1 of 2 secret"
+    pub fn summary(&self) -> String {
+        let mut text = format!("{} of {} maps", self.finished, self.required);
+        if self.secret_total > 0 {
+            text.push_str(&format!(
+                ", {} of {} secret",
+                self.secret_finished, self.secret_total
+            ));
+        }
+        text
+    }
+}
+
 /// Where a bulk upload to a mirror has got to.
 pub struct MirrorBulk {
     pub mirror: String,
@@ -363,6 +394,9 @@ pub struct CacowardsState {
     /// after import). The app's update loop drains this flag
     /// and re-runs `db::search_cacowards`.
     pub needs_reload: bool,
+
+    /// A list to go through, or posters to look at.
+    pub layout: ViewLayout,
 }
 
 impl Default for CacowardsState {
@@ -376,6 +410,7 @@ impl Default for CacowardsState {
             // Eager-load on first view-mode entry so the magazine has
             // something to render the moment the user clicks the nav item.
             needs_reload: true,
+            layout: ViewLayout::List,
         }
     }
 }
@@ -416,18 +451,30 @@ impl CacowardsState {
     }
 }
 
+fn layout_from(saved: &str) -> ViewLayout {
+    match saved {
+        "grid" => ViewLayout::Grid,
+        _ => ViewLayout::List,
+    }
+}
+
+fn layout_name(layout: ViewLayout) -> String {
+    match layout {
+        ViewLayout::List => "list".to_string(),
+        ViewLayout::Grid => "grid".to_string(),
+    }
+}
+
 impl AppState {
     pub fn new(db_path: PathBuf) -> Self {
         let persisted = persist::load();
-        let view_layout = match persisted.view_layout.as_str() {
-            "grid" => ViewLayout::Grid,
-            _ => ViewLayout::List,
-        };
-        let sort_field_index = if persisted.sort_field_index < SORT_FIELDS.len() {
-            persisted.sort_field_index
-        } else {
-            0
-        };
+        let view_layout = layout_from(&persisted.view_layout);
+        let cacowards_layout = layout_from(&persisted.cacowards_layout);
+        let sort_field_index = persisted
+            .sort_field
+            .as_deref()
+            .and_then(|field| SORT_FIELDS.iter().position(|(key, _)| *key == field))
+            .unwrap_or(0);
 
         Self {
             view_mode: ViewMode::default(),
@@ -452,7 +499,10 @@ impl AppState {
             total_wad_count: 0,
             sidebar_collections: Vec::new(),
             active_collection: None,
-            cacowards: CacowardsState::default(),
+            cacowards: CacowardsState {
+                layout: cacowards_layout,
+                ..CacowardsState::default()
+            },
             stats: StatsState::default(),
             mirror_offers: VecDeque::new(),
             uploads: Vec::new(),
@@ -496,6 +546,44 @@ impl AppState {
         self.needs_reload = true;
         self.cacowards.needs_reload = true;
         self.stats.needs_reload = true;
+    }
+
+    /// How far through a WAD's maps it has got, by `analyses_map`, the same list of what
+    /// counts as a map that the verdict on whether it is finished goes by. `None` without a
+    /// fresh analysis, rather than a misleading number from the stats alone, which only
+    /// ever list maps that have been played.
+    pub fn map_progress(&self, wad: &WadRecord) -> Option<MapProgress> {
+        use caco_core::wad_analysis::MapClassification;
+
+        let analysis = self.analyses_map.get(&wad.id)?;
+        if analysis.required_maps == 0 {
+            return None;
+        }
+        let stats: caco_core::wad_stats::WadStats =
+            serde_json::from_str(wad.stats_snapshot.as_deref()?).ok()?;
+        let exited: HashSet<&str> = stats
+            .maps
+            .iter()
+            .filter(|map| map.total_exits >= 1)
+            .map(|map| map.lump.as_str())
+            .collect();
+        let finished = analysis
+            .maps
+            .iter()
+            .filter(|map| map.classification == MapClassification::Required)
+            .filter(|map| exited.contains(map.lump.as_str()))
+            .count();
+        let secret_finished = analysis
+            .secret_maps
+            .iter()
+            .filter(|lump| exited.contains(lump.as_str()))
+            .count();
+        Some(MapProgress {
+            finished,
+            required: analysis.required_maps,
+            secret_finished,
+            secret_total: analysis.secret_maps.len(),
+        })
     }
 
     /// Refresh sidebar status counts from the database.
@@ -654,7 +742,7 @@ impl AppState {
 
     /// Pull the library-wide stats snapshot for [`ViewMode::Stats`].
     pub fn reload_stats(&mut self, conn: &Connection) {
-        self.stats.snapshot = caco_core::db::sessions::get_stats_snapshot(conn, "month").ok();
+        self.stats.snapshot = caco_core::db::sessions::get_stats_snapshot(conn).ok();
         self.stats.needs_reload = false;
     }
 
@@ -815,19 +903,13 @@ impl AppState {
         }
     }
 
-    /// Get stats for the currently selected WAD.
-    pub fn selected_stats(&self) -> Option<&WadStats> {
-        self.selected_wad_id.and_then(|id| self.stats_map.get(&id))
-    }
-
     /// Produce a snapshot of persistent GUI state for saving.
     pub fn to_persisted(&self) -> persist::GuiState {
         persist::GuiState {
-            view_layout: match self.view_layout {
-                ViewLayout::List => "list".to_string(),
-                ViewLayout::Grid => "grid".to_string(),
-            },
-            sort_field_index: self.sort_field_index,
+            view_layout: layout_name(self.view_layout),
+            cacowards_layout: layout_name(self.cacowards.layout),
+            sort_field: Some(SORT_FIELDS[self.sort_field_index].0.to_string()),
+            sort_field_index: None,
             sort_desc: self.sort_desc,
             status_filters: self.status_filters.iter().cloned().collect(),
             status_filter: None,
@@ -844,6 +926,25 @@ mod tests {
         caco_core::db::init_db(&conn).unwrap();
         let state = AppState::new(PathBuf::from("test-library.db"));
         (conn, state)
+    }
+
+    #[test]
+    fn progress_reads_as_a_person_would_say_it() {
+        let progress = MapProgress {
+            finished: 3,
+            required: 8,
+            secret_finished: 0,
+            secret_total: 0,
+        };
+        assert_eq!(progress.summary(), "3 of 8 maps");
+        assert_eq!(progress.fraction(), 3.0 / 8.0);
+
+        let with_secrets = MapProgress {
+            secret_finished: 1,
+            secret_total: 2,
+            ..progress
+        };
+        assert_eq!(with_secrets.summary(), "3 of 8 maps, 1 of 2 secret");
     }
 
     #[test]

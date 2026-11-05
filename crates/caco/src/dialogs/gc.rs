@@ -1,7 +1,4 @@
-//! Reclaim disk space from finished WADs and orphaned files.
-//!
-//! The GUI answer to `caco gc`. The CLI asks y/n per section because a
-//! terminal can only ask one question at a time; here the whole plan is a
+//! Reclaim disk space from finished WADs and what was left behind. The whole plan is a
 //! checkbox list, so a run can keep one WAD's saves while dropping another's.
 //!
 //! Nothing is measured or deleted in this file — `caco_core::gc` produces the
@@ -14,6 +11,7 @@ use rusqlite::Connection;
 use caco_core::gc::{self, GcOptions, GcPaths, GcPlan, GcSelection, OrphanEntry, WadPlanEntry};
 use caco_core::utils::format_size;
 
+use crate::dialogs::{FooterRow, Primary, StatusLine, count, include_at_risk_toggle, scroll_body};
 use crate::theme;
 
 /// Which list a row belongs to, for the "select all in section" controls.
@@ -35,35 +33,26 @@ impl Section {
 
     fn title(self) -> &'static str {
         match self {
-            Section::Wads => "Finished & abandoned WADs",
-            Section::DataDirs => "Orphaned data directories",
-            Section::Companions => "Orphaned companion files",
-            Section::Backups => "Orphaned backups",
+            Section::Wads => "Completed and abandoned WADs",
+            Section::DataDirs => "Folders of WADs you deleted",
+            Section::Companions => "Companion files nothing uses",
+            Section::Backups => "Backups of WADs you deleted",
         }
     }
 
     /// Why the rows in this section are safe to remove.
     fn blurb(self) -> &'static str {
         match self {
-            Section::Wads => {
-                "Completed or abandoned. Cached downloads can be re-fetched; \
-                 saves and demos cannot."
-            }
+            Section::Wads => "Downloads can usually be fetched again, but saves and demos can't.",
             Section::DataDirs | Section::Companions | Section::Backups => {
-                "No WAD in the library points at these any more."
+                "No WAD in the library is using these any more."
             }
         }
     }
 }
 
-struct StatusLine {
-    text: String,
-    is_error: bool,
-}
-
-/// Height of everything this tab draws outside its scrolling row list: the
-/// keep-toggles, the separators, the Clean/Rescan row and the status line.
-const FURNITURE: f32 = 140.0;
+/// What the keep-toggles take from the tab's height, above its scrolling row list.
+const OPTIONS: f32 = 56.0;
 
 pub struct GcDialogState {
     opts: GcOptions,
@@ -123,10 +112,7 @@ impl GcDialogState {
             }
             Err(e) => {
                 self.plan = GcPlan::default();
-                self.status = Some(StatusLine {
-                    text: e.to_string(),
-                    is_error: true,
-                });
+                self.status = Some(StatusLine::error(e.to_string()));
             }
         }
     }
@@ -221,24 +207,18 @@ impl GcDialogState {
         match gc::execute(conn, &selection, self.opts) {
             Ok(freed) => {
                 self.modified = freed > 0;
-                self.status = Some(StatusLine {
-                    text: format!("Freed {}.", format_size(freed)),
-                    is_error: false,
-                });
+                self.status = Some(StatusLine::info(format!("Freed {}.", format_size(freed))));
                 self.rescan(conn);
             }
             Err(e) => {
-                self.status = Some(StatusLine {
-                    text: e.to_string(),
-                    is_error: true,
-                });
+                self.status = Some(StatusLine::error(e.to_string()));
                 self.confirming = false;
             }
         }
     }
 
-    /// Render the Clean tab inside `avail` points of vertical space.
-    pub fn render_body(&mut self, ui: &mut egui::Ui, conn: &Connection, avail: f32) {
+    /// The Clean tab: what to keep, and everything that would go otherwise.
+    pub fn render_body(&mut self, ui: &mut egui::Ui, conn: &Connection, height: f32) {
         self.render_options(ui, conn);
         ui.add_space(6.0);
         ui.separator();
@@ -246,31 +226,77 @@ impl GcDialogState {
 
         if self.plan.is_empty() {
             ui.colored_label(theme::TEXT_SECONDARY, "Nothing to clean up.");
-        } else {
-            // Only the row list scrolls: the keep-toggles above and the
-            // Clean/Rescan row plus status line below must stay put, or the
-            // button that performs the deletion scrolls out of reach.
-            crate::dialogs::scroll_body(ui, avail - FURNITURE, |ui| {
-                for section in Section::ALL {
-                    self.render_section(ui, section);
-                }
-            });
+            return;
         }
+        scroll_body(ui, height - OPTIONS, |ui| {
+            for section in Section::ALL {
+                self.render_section(ui, section);
+            }
+        });
+    }
 
-        ui.add_space(6.0);
-        ui.separator();
-        ui.add_space(6.0);
-        self.render_actions(ui, conn);
-
+    /// How much is ticked, what is being asked, and how the last thing went.
+    pub fn render_notes(&self, ui: &mut egui::Ui) {
+        if self.confirming {
+            ui.colored_label(
+                theme::COLOR_ERROR,
+                format!(
+                    "Permanently delete {}, freeing {}?",
+                    count(self.selected_count(), "item", "items"),
+                    format_size(self.selected_size())
+                ),
+            );
+            ui.colored_label(
+                theme::TEXT_SECONDARY,
+                "Saves and demos can't be got back afterwards.",
+            );
+        }
         if let Some(status) = &self.status {
-            ui.add_space(4.0);
-            let color = if status.is_error {
-                theme::COLOR_ERROR
-            } else {
-                theme::TEXT_SECONDARY
-            };
-            ui.colored_label(color, &status.text);
+            status.show(ui);
         }
+    }
+
+    /// Clean what is ticked, or look again. True if Close was pressed.
+    pub fn render_footer(&mut self, row: &mut FooterRow<'_>, conn: &Connection) -> bool {
+        if self.confirming {
+            let ended = row.end(Some("Cancel"), Some(Primary::danger("Delete")));
+            if ended.dismissed {
+                self.confirming = false;
+            }
+            if ended.primary {
+                self.confirming = false;
+                self.clean(conn);
+            }
+            return false;
+        }
+
+        let selected = self.selected_count();
+        row.left(|ui| {
+            if ui
+                .button("Look Again")
+                .on_hover_text("Measure everything again")
+                .clicked()
+            {
+                self.rescan(conn);
+            }
+            if !self.plan.is_empty() {
+                ui.colored_label(
+                    theme::TEXT_SECONDARY,
+                    format!(
+                        "{} selected, {}",
+                        count(selected, "item", "items"),
+                        format_size(self.selected_size())
+                    ),
+                );
+            }
+        });
+        let primary = (!self.plan.is_empty())
+            .then(|| Primary::new("Clean").when(selected > 0, "Tick what you want to go first"));
+        let ended = row.end(Some("Close"), primary);
+        if ended.primary {
+            self.confirming = true;
+        }
+        ended.dismissed
     }
 
     /// Escape. Backs out of the staged confirmation before it closes Storage.
@@ -283,20 +309,18 @@ impl GcDialogState {
     }
 
     fn render_options(&mut self, ui: &mut egui::Ui, conn: &Connection) {
-        ui.strong("Keep");
-        ui.add_space(2.0);
-
         let before = self.opts;
         ui.horizontal_wrapped(|ui| {
-            ui.checkbox(&mut self.opts.keep_saves, "Saves")
-                .on_hover_text("Leave .dsg / .zds / .hsg files in place");
+            ui.colored_label(theme::TEXT_SECONDARY, "Keep");
+            ui.checkbox(&mut self.opts.keep_saves, "Saves");
             ui.checkbox(&mut self.opts.keep_demos, "Demos");
-            ui.checkbox(&mut self.opts.keep_data, "All data dirs");
-            ui.checkbox(&mut self.opts.keep_cache, "Cached downloads");
-            ui.checkbox(&mut self.opts.keep_companions, "Companions");
+            ui.checkbox(&mut self.opts.keep_data, "Everything saved")
+                .on_hover_text("Saves, demos, stats and configs");
+            ui.checkbox(&mut self.opts.keep_cache, "Downloads");
+            ui.checkbox(&mut self.opts.keep_companions, "Companion files");
             ui.separator();
-            ui.checkbox(&mut self.opts.orphans_only, "Orphans only")
-                .on_hover_text("Leave finished WADs alone; only sweep unreachable files");
+            ui.checkbox(&mut self.opts.orphans_only, "Finished WADs")
+                .on_hover_text("Leave those alone, and only clean what was left behind");
         });
 
         // Options change what is reclaimable, so the plan has to be re-measured.
@@ -347,7 +371,7 @@ impl GcDialogState {
                 .filter(|w| Self::is_at_risk(w))
                 .count();
             let before = self.include_at_risk;
-            crate::dialogs::include_at_risk_toggle(ui, &mut self.include_at_risk, at_risk);
+            include_at_risk_toggle(ui, &mut self.include_at_risk, at_risk);
             // Untick what the toggle no longer permits, so the count above the
             // Clean button cannot claim rows the rule now excludes.
             if before && !self.include_at_risk {
@@ -390,10 +414,10 @@ impl GcDialogState {
             .map(|w| {
                 let mut detail = Vec::new();
                 if w.data_size > 0 {
-                    detail.push(format!("data {}", format_size(w.data_size)));
+                    detail.push(format!("saves {}", format_size(w.data_size)));
                 }
                 if w.cache_size > 0 {
-                    detail.push(format!("cache {}", format_size(w.cache_size)));
+                    detail.push(format!("download {}", format_size(w.cache_size)));
                 }
                 if w.companion_size > 0 {
                     detail.push(format!("companions {}", format_size(w.companion_size)));
@@ -415,9 +439,7 @@ impl GcDialogState {
             let mut checked = self.selected_wads.contains(&wad_id);
             let response = ui.checkbox(&mut checked, label);
             if at_risk {
-                response.on_hover_text(
-                    "This manually added file cannot be downloaded again after deletion.",
-                );
+                response.on_hover_text("caco can't download this file again after deleting it.");
             }
             if checked {
                 self.selected_wads.insert(wad_id);
@@ -478,53 +500,6 @@ impl GcDialogState {
         } else {
             HashSet::new()
         };
-    }
-
-    fn render_actions(&mut self, ui: &mut egui::Ui, conn: &Connection) {
-        let count = self.selected_count();
-        let size = self.selected_size();
-
-        if self.confirming {
-            ui.colored_label(
-                theme::COLOR_ERROR,
-                format!(
-                    "Permanently delete {count} item(s), freeing {}?",
-                    format_size(size)
-                ),
-            );
-            ui.colored_label(
-                theme::TEXT_SECONDARY,
-                "Save games and demos cannot be recovered.",
-            );
-            ui.horizontal(|ui| {
-                if ui.button("Delete").clicked() {
-                    self.confirming = false;
-                    self.clean(conn);
-                }
-                if ui.button("Cancel").clicked() {
-                    self.confirming = false;
-                }
-            });
-            return;
-        }
-
-        ui.horizontal(|ui| {
-            ui.colored_label(
-                theme::TEXT_SECONDARY,
-                format!("{count} selected · {}", format_size(size)),
-            );
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("Rescan").clicked() {
-                    self.rescan(conn);
-                }
-                if ui
-                    .add_enabled(count > 0, egui::Button::new("Clean"))
-                    .clicked()
-                {
-                    self.confirming = true;
-                }
-            });
-        });
     }
 }
 

@@ -1,4 +1,4 @@
-//! Left navigation sidebar — logo, view toggle, collections, admin links.
+//! Left navigation sidebar: logo, views, collections, tools.
 
 use crate::dialogs::storage::StorageTab;
 use crate::state::{ActionRequest, AppState, ViewMode};
@@ -9,7 +9,10 @@ pub(super) fn render_sidebar(
     state: &mut AppState,
     actions: &mut Vec<ActionRequest>,
 ) {
-    ui.add_space(16.0);
+    let short = theme::is_short_window(ui.ctx());
+    // The rows are spaced by their own height, or fewer of them fit in a short window.
+    ui.spacing_mut().item_spacing.y = 0.0;
+    ui.add_space(if short { 8.0 } else { 16.0 });
 
     // Logo
     ui.horizontal(|ui| {
@@ -20,7 +23,7 @@ pub(super) fn render_sidebar(
         );
     });
 
-    ui.add_space(24.0);
+    ui.add_space(if short { 6.0 } else { 20.0 });
 
     // Navigation items. Library/Import/Collections are mutually exclusive
     // sidebar selections: clicking Library or Import clears any active
@@ -62,8 +65,35 @@ pub(super) fn render_sidebar(
         state.stats.needs_reload = true;
     }
 
-    // Divider
-    ui.add_space(12.0);
+    ui.add_space(if short { 4.0 } else { 12.0 });
+    divider(ui);
+
+    // The rest scrolls, because at the 800x400 minimum there is not the room for all of it,
+    // with what always has to be in reach pinned below. Solid rather than the floating bar
+    // that only shows on hover, or tools below the fold would look as if there were none.
+    let scrolling = (ui.available_height() - PINNED).max(0.0);
+    ui.scope(|ui| {
+        ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
+        egui::ScrollArea::vertical()
+            .id_salt("sidebar-tools")
+            .auto_shrink([false, false])
+            .max_height(scrolling)
+            .show(ui, |ui| {
+                ui.add_space(8.0);
+                render_collections(ui, state, actions);
+                ui.add_space(12.0);
+                section_heading(ui, "TOOLS");
+                render_tools(ui, TOOLS, actions);
+                ui.add_space(8.0);
+            });
+    });
+
+    divider(ui);
+    ui.add_space(4.0);
+    render_tools(ui, PINNED_TOOLS, actions);
+}
+
+fn divider(ui: &mut egui::Ui) {
     let rect = ui.available_rect_before_wrap();
     ui.painter().line_segment(
         [
@@ -72,9 +102,21 @@ pub(super) fn render_sidebar(
         ],
         egui::Stroke::new(1.0_f32, theme::BORDER),
     );
-    ui.add_space(16.0);
+    ui.add_space(1.0);
+}
 
-    // Collections section
+fn section_heading(ui: &mut egui::Ui, title: &str) {
+    ui.horizontal(|ui| {
+        ui.add_space(20.0);
+        ui.colored_label(
+            theme::TEXT_MUTED,
+            egui::RichText::new(title).size(11.0).strong(),
+        );
+    });
+    ui.add_space(2.0);
+}
+
+fn render_collections(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<ActionRequest>) {
     ui.horizontal(|ui| {
         ui.add_space(20.0);
         ui.colored_label(
@@ -95,7 +137,7 @@ pub(super) fn render_sidebar(
             }
         });
     });
-    ui.add_space(4.0);
+    ui.add_space(2.0);
 
     if state.sidebar_collections.is_empty() {
         ui.horizontal(|ui| {
@@ -105,142 +147,77 @@ pub(super) fn render_sidebar(
                 egui::RichText::new("No collections yet").size(12.0),
             );
         });
-    } else {
-        // Clone names to avoid borrow conflict
-        let collection_names: Vec<String> = state
-            .sidebar_collections
-            .iter()
-            .map(|c| c.name.clone())
-            .collect();
-
-        for name in &collection_names {
-            // Only highlight while in Library view — collections are
-            // mutually exclusive with the Import nav item.
-            let is_active = state.view_mode == ViewMode::Library
-                && state.active_collection.as_deref() == Some(name.as_str());
-            let resp = theme::sidebar_collection_item(ui, name, is_active);
-
-            if resp.clicked() && state.activate_collection(name) {
-                state.view_mode = ViewMode::Library;
-                state.needs_reload = true;
-            }
-
-            // Right-click context menu
-            let ctx_name = name.clone();
-            resp.context_menu(|ui| {
-                if ui.button("Edit").clicked() {
-                    actions.push(ActionRequest::EditCollection(ctx_name.clone()));
-                    ui.close();
-                }
-                if ui.button("Delete").clicked() {
-                    actions.push(ActionRequest::DeleteCollection(ctx_name.clone()));
-                    ui.close();
-                }
-            });
-        }
+        return;
     }
 
-    // (Status filter pills are now rendered in the section header)
+    // Clone names to avoid borrow conflict
+    let collection_names: Vec<String> = state
+        .sidebar_collections
+        .iter()
+        .map(|c| c.name.clone())
+        .collect();
 
-    // Bottom spacer + admin links
-    ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            ui.add_space(20.0);
-            ui.colored_label(
-                theme::TEXT_MUTED,
-                egui::RichText::new(format!("v{}", crate::VERSION)).size(11.0),
-            );
-        });
-        ui.add_space(4.0);
+    for name in &collection_names {
+        // Only highlight while in Library view — collections are
+        // mutually exclusive with the Import nav item.
+        let is_active = state.view_mode == ViewMode::Library
+            && state.active_collection.as_deref() == Some(name.as_str());
+        let resp = theme::sidebar_collection_item(ui, name, is_active);
 
-        // Divider above bottom links
-        let rect = ui.available_rect_before_wrap();
-        ui.painter().line_segment(
-            [
-                egui::pos2(rect.min.x + 20.0, rect.max.y),
-                egui::pos2(rect.max.x - 20.0, rect.max.y),
-            ],
-            egui::Stroke::new(1.0_f32, theme::BORDER),
-        );
-        ui.add_space(12.0);
+        if resp.clicked() && state.activate_collection(name) {
+            state.view_mode = ViewMode::Library;
+            state.needs_reload = true;
+        }
 
-        // Keep the maintenance controls out of the navigation hierarchy until
-        // they are wanted. The open state belongs to this bit of UI, so egui's
-        // persisted memory is enough; it does not need to become application
-        // state or configuration.
-        //
-        // Emitted bottom-up, so the rows are written back to front: the first
-        // one placed sits lowest. Wrapping them in a `ui.vertical` would read
-        // in order, but a child region inside a bottom-up parent is handed the
-        // whole remaining rect and then lays out top-down inside it — which is
-        // exactly what parked this block under Collections instead of at the
-        // panel's bottom edge.
-        //
-        // A drawer: it opens over whatever is above it when there is not the room, as
-        // at the 800x400 minimum, on a background of its own so that it does not paint
-        // its rows through the navigation. Scrolling inside the room that is left would
-        // show barely one tool at that size, and these should all be one click away.
-        let open_id = ui.make_persistent_id("sidebar_manage_open");
-        let open = ui.data_mut(|data| data.get_persisted::<bool>(open_id).unwrap_or(false));
-        ui.spacing_mut().item_spacing.y = 0.0;
-
-        if open {
-            let rows = TOOLS.len() as f32 + 1.0;
-            let bottom = ui.cursor().bottom();
-            let left = ui.max_rect().left();
-            let right = ui.max_rect().right();
-            let drawer = egui::Rect::from_min_max(
-                egui::pos2(left, bottom - rows * TOOL_ROW),
-                egui::pos2(right, bottom),
-            );
-            ui.painter().rect_filled(drawer, 0.0, theme::BG_SIDEBAR);
-            ui.painter().line_segment(
-                [drawer.left_top(), drawer.right_top()],
-                egui::Stroke::new(1.0_f32, theme::BORDER),
-            );
-
-            for tool in TOOLS.iter().rev() {
-                let resp = theme::sidebar_tool_item(ui, tool.label);
-                let resp = if tool.hint.is_empty() {
-                    resp
-                } else {
-                    resp.on_hover_text(tool.hint)
-                };
-                if resp.clicked() {
-                    actions.push((tool.action)());
-                }
+        // Right-click context menu
+        let ctx_name = name.clone();
+        resp.context_menu(|ui| {
+            if ui.button("Edit").clicked() {
+                actions.push(ActionRequest::EditCollection(ctx_name.clone()));
+                ui.close();
             }
-        }
-
-        let label = if open { "Manage  ▾" } else { "Manage  ▸" };
-        if theme::sidebar_tool_item(ui, label).clicked() {
-            ui.data_mut(|data| data.insert_persisted(open_id, !open));
-        }
-        ui.add_space(4.0);
-    });
+            if ui.button("Delete").clicked() {
+                actions.push(ActionRequest::DeleteCollection(ctx_name.clone()));
+                ui.close();
+            }
+        });
+    }
 }
 
-/// Height of a row in the sidebar's management list: see `theme::sidebar_tool_item`.
+fn render_tools(ui: &mut egui::Ui, tools: &[Tool], actions: &mut Vec<ActionRequest>) {
+    for tool in tools {
+        if theme::sidebar_tool_item(ui, tool.label)
+            .on_hover_text(tool.hint)
+            .clicked()
+        {
+            actions.push((tool.action)());
+        }
+    }
+}
+
+/// Height of a row in the list of tools: see `theme::sidebar_tool_item`.
 const TOOL_ROW: f32 = 26.0;
 
-/// One entry in the sidebar's management list.
+/// What has to stay below the part that scrolls: the rule, the gap and the rows.
+const PINNED: f32 = 1.0 + 4.0 + TOOL_ROW * PINNED_TOOLS.len() as f32 + 6.0;
+
+/// One entry in the sidebar's list of tools.
 struct Tool {
     label: &'static str,
     /// A constructor rather than a value: `ActionRequest` is not `Clone`, and
     /// these are only ever built when the row is clicked.
     action: fn() -> ActionRequest,
-    /// Empty means no tooltip.
     hint: &'static str,
 }
 
-/// The management dialogs, in the order they appear in the sidebar: disk
-/// first, then library maintenance, then setup.
+/// The tools, in the order they appear in the sidebar: disk first, then library maintenance,
+/// then setup. In the open, since the sidebar is where a person looks for what caco can do,
+/// and they used to be folded away under a heading of their own.
 const TOOLS: &[Tool] = &[
     Tool {
         label: "Storage",
         action: || ActionRequest::Storage(StorageTab::Cache),
-        hint: "Cached files, cleanup, trash and companion files",
+        hint: "What is taking up space, and getting it back",
     },
     Tool {
         label: "Mirrors",
@@ -255,26 +232,35 @@ const TOOLS: &[Tool] = &[
     Tool {
         label: "Enrich",
         action: || ActionRequest::Enrich,
-        hint: "Re-run metadata detection",
+        hint: "Fill in what is missing about your WADs",
     },
     Tool {
         label: "IWADs",
         action: || ActionRequest::Resources,
-        hint: "Managed IWADs and id24",
+        hint: "The game files you own",
     },
     Tool {
         label: "Sourceports",
         action: || ActionRequest::Sourceports,
-        hint: "Build and manage sourceports from source",
+        hint: "Build sourceports from their source code",
     },
     Tool {
         label: "Profiles",
         action: || ActionRequest::Profiles,
-        hint: "Sourceport config profiles",
+        hint: "Sourceport settings you can give each WAD",
     },
+];
+
+/// In reach whatever the size of the window.
+const PINNED_TOOLS: &[Tool] = &[
     Tool {
         label: "Settings",
         action: || ActionRequest::Settings,
-        hint: "",
+        hint: "Sourceports, downloads, and where things go",
+    },
+    Tool {
+        label: "Help",
+        action: || ActionRequest::Help,
+        hint: "Keyboard shortcuts, and which version this is",
     },
 ];

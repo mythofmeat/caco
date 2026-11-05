@@ -10,7 +10,7 @@ use caco_sources::idgames::{IdgamesRef, IndexStatus};
 
 use crate::message::IdgamesIndexRun;
 
-pub const IMPORT_SOURCES: &[&str] = &["idgames", "doomwiki", "doomworld", "URL", "local"];
+pub const IMPORT_SOURCES: &[&str] = &["idgames", "Doom Wiki", "Doomworld", "URL", "Local File"];
 
 // ---------------------------------------------------------------------------
 // Top-level import state
@@ -46,15 +46,6 @@ impl ImportState {
         match source {
             SearchSource::Idgames => &mut self.idgames,
             SearchSource::Doomwiki => &mut self.doomwiki,
-        }
-    }
-
-    /// Get a mutable reference to the form state for the given kind.
-    pub fn form_state_mut(&mut self, kind: FormKind) -> &mut FormState {
-        match kind {
-            FormKind::Doomworld => &mut self.doomworld,
-            FormKind::Url => &mut self.url_form,
-            FormKind::Local => &mut self.local_form,
         }
     }
 }

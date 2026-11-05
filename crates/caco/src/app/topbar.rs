@@ -1,7 +1,7 @@
 //! Top bar — breadcrumbs (left) + filter bar + sort controls (right).
 
 use crate::panels;
-use crate::state::{ActiveDialog, AppState, ViewMode};
+use crate::state::{AppState, ViewMode};
 use crate::theme;
 
 pub(super) fn render_topbar(ui: &mut egui::Ui, state: &mut AppState) {
@@ -9,17 +9,23 @@ pub(super) fn render_topbar(ui: &mut egui::Ui, state: &mut AppState) {
         // Breadcrumbs
         render_breadcrumbs(ui, state);
 
-        // Filter / sort widgets only make sense in Library; Cacowards has
-        // its own year strip + category sections and Import has its own
-        // search box, so suppress them here to avoid the dead-control
-        // anti-affordance the user sees on those views.
+        // Filter and sort only make sense in Library, where they act on what is showing, and
+        // are not drawn where they could do nothing. Cacowards has years to go by, and how
+        // it lays them out.
         if state.view_mode == ViewMode::Library {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                panels::layout_toggle(ui, &mut state.view_layout);
+                ui.add_space(4.0);
+
                 // Sort controls (right-aligned)
                 panels::sort_controls::render(ui, state);
 
                 // Search/filter
                 panels::filter_bar::render(ui, state);
+            });
+        } else if state.view_mode == ViewMode::Cacowards {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                panels::layout_toggle(ui, &mut state.cacowards.layout);
             });
         }
     });
@@ -37,13 +43,7 @@ fn render_breadcrumbs(ui: &mut egui::Ui, state: &AppState) {
             ViewMode::Library => "Library",
         };
 
-        // If a dialog is open, the base is clickable (concept: navigate back)
-        let has_detail = state.active_dialog.is_some();
-        if has_detail {
-            ui.colored_label(theme::TEXT_SECONDARY, base);
-        } else {
-            ui.colored_label(theme::TEXT_PRIMARY, egui::RichText::new(base).strong());
-        }
+        ui.colored_label(theme::TEXT_PRIMARY, egui::RichText::new(base).strong());
 
         // Year crumb on the Cacowards view, when one is selected.
         if state.view_mode == ViewMode::Cacowards
@@ -54,20 +54,6 @@ fn render_breadcrumbs(ui: &mut egui::Ui, state: &AppState) {
                 theme::TEXT_ACCENT,
                 egui::RichText::new(year.to_string()).strong(),
             );
-        }
-
-        // WAD name crumb (when edit/sessions/etc dialog is open)
-        if let Some(ref dialog) = state.active_dialog {
-            let wad_title = match dialog {
-                ActiveDialog::Edit(e) => Some(e.title()),
-                _ => None,
-            };
-            if let Some(title) = wad_title {
-                ui.colored_label(theme::TEXT_MUTED, "  /  ");
-                ui.colored_label(theme::TEXT_SECONDARY, title);
-                ui.colored_label(theme::TEXT_MUTED, "  /  ");
-                ui.colored_label(theme::TEXT_ACCENT, egui::RichText::new("Edit").strong());
-            }
         }
     });
 }

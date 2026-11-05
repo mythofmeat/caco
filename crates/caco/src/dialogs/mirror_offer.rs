@@ -9,6 +9,7 @@ use caco_core::config::{self, MirrorConfig};
 use caco_core::mirrors::offer_targets;
 use rusqlite::Connection;
 
+use crate::dialogs::{Dialog, Primary};
 use crate::theme;
 
 pub struct MirrorOfferDialogState {
@@ -56,46 +57,50 @@ impl MirrorOfferDialogState {
 
     pub fn render(&self, ctx: &egui::Context) -> MirrorOfferResult {
         let mut result = MirrorOfferResult::Open;
+        // The first mirror is the main button, and any others go beside it.
+        let (first, others) = self
+            .targets
+            .split_first()
+            .expect("an offer with nowhere to go is not made");
 
-        crate::dialogs::modal_window(ctx, "Keep a Copy on Your Mirror?", [440.0, 190.0]).show(
-            ctx,
-            |ui| {
-                ui.spacing_mut().item_spacing.y = 8.0;
-
-                ui.colored_label(
-                    theme::TEXT_PRIMARY,
-                    egui::RichText::new(&self.title).heading(),
-                );
-                ui.add_space(4.0);
-                ui.colored_label(
-                    theme::TEXT_SECONDARY,
-                    format!(
-                        "caco can't download {} again if this copy goes. A copy on your \
-                         mirror means any machine with this library can get it back.",
-                        self.filename
-                    ),
-                );
-
-                ui.add_space(8.0);
-                ui.separator();
-                ui.add_space(4.0);
-
-                // Wrapped, because nothing limits how many mirrors there are.
-                ui.horizontal_wrapped(|ui| {
-                    for mirror in &self.targets {
-                        if ui.button(format!("Upload to {mirror}")).clicked() {
+        Dialog::new("Keep a Copy on Your Mirror?", [460.0, 190.0])
+            .about(&self.title)
+            .show(ctx, |dialog| {
+                dialog
+                    .scroll(|ui| {
+                        ui.colored_label(
+                            theme::TEXT_SECONDARY,
+                            format!(
+                                "caco can't download {} again if this copy goes. A copy on your \
+                                 mirror means any machine with this library can get it back.",
+                                self.filename
+                            ),
+                        );
+                    })
+                    .buttons(|row| {
+                        row.left(|ui| {
+                            for mirror in others {
+                                if ui.button(format!("Upload to {mirror}")).clicked() {
+                                    result = MirrorOfferResult::Upload {
+                                        wad_id: self.wad_id,
+                                        mirror: mirror.clone(),
+                                    };
+                                }
+                            }
+                        });
+                        let upload = format!("Upload to {first}");
+                        let ended = row.end(Some("Not Now"), Some(Primary::new(&upload)));
+                        if ended.dismissed {
+                            result = MirrorOfferResult::Declined;
+                        }
+                        if ended.primary {
                             result = MirrorOfferResult::Upload {
                                 wad_id: self.wad_id,
-                                mirror: mirror.clone(),
+                                mirror: first.clone(),
                             };
                         }
-                    }
-                    if ui.button("Not Now").clicked() {
-                        result = MirrorOfferResult::Declined;
-                    }
-                });
-            },
-        );
+                    })
+            });
 
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             return MirrorOfferResult::Declined;

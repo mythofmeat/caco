@@ -1,20 +1,19 @@
-//! Library-wide companion file registry.
-//!
-//! The GUI answer to `caco companion ls` with no query. Per-WAD linking lives
-//! in the edit dialog's Companions tab; this is the other half — what is in
-//! managed storage, who still uses it, and what can be cleaned up.
+//! Library-wide companion file registry. Per-WAD linking lives in the edit dialog's
+//! Companions tab; this is the other half: what is in managed storage, who still uses it,
+//! and what can be cleaned up.
 //!
 //! Companion files are deduplicated by MD5, so one managed file can serve
 //! several WADs. That is why every row shows its users: deleting is only safe
 //! once nothing points at it.
 
-use egui_extras::{Column, TableBuilder};
+use egui_extras::Column;
 use rusqlite::Connection;
 
 use caco_core::companion_service;
 use caco_core::db;
 use caco_core::utils::format_size;
 
+use crate::dialogs::{FooterRow, Primary, StatusLine, count, dialog_table};
 use crate::theme;
 
 /// One registry row, with the WADs that link it resolved up front.
@@ -27,19 +26,13 @@ struct Entry {
 }
 
 impl Entry {
-    fn is_orphan(&self) -> bool {
+    fn is_unused(&self) -> bool {
         self.users.is_empty()
     }
 }
 
-struct StatusLine {
-    text: String,
-    is_error: bool,
-}
-
-/// Height of everything this tab draws outside its table: the summary line,
-/// the "used by" line, the separator, the button row and the status line.
-const FURNITURE: f32 = 115.0;
+/// What this tab draws outside its table: the summary line and the "used by" line.
+const FURNITURE: f32 = 56.0;
 
 pub struct CompanionsDialogState {
     entries: Vec<Entry>,
@@ -88,22 +81,16 @@ impl CompanionsDialogState {
         self.selected = (!self.entries.is_empty()).then_some(0);
     }
 
-    fn orphan_count(&self) -> usize {
-        self.entries.iter().filter(|e| e.is_orphan()).count()
+    fn unused_count(&self) -> usize {
+        self.entries.iter().filter(|e| e.is_unused()).count()
     }
 
     fn set_error(&mut self, text: impl Into<String>) {
-        self.status = Some(StatusLine {
-            text: text.into(),
-            is_error: true,
-        });
+        self.status = Some(StatusLine::error(text));
     }
 
     fn set_info(&mut self, text: impl Into<String>) {
-        self.status = Some(StatusLine {
-            text: text.into(),
-            is_error: false,
-        });
+        self.status = Some(StatusLine::info(text));
     }
 
     fn delete_selected(&mut self, conn: &Connection, idx: usize) {
@@ -123,11 +110,11 @@ impl CompanionsDialogState {
         }
     }
 
-    fn purge_orphans(&mut self, conn: &Connection) {
+    fn purge_unused(&mut self, conn: &Connection) {
         let ids: Vec<i64> = self
             .entries
             .iter()
-            .filter(|e| e.is_orphan())
+            .filter(|e| e.is_unused())
             .map(|e| e.companion_id)
             .collect();
 
@@ -144,7 +131,10 @@ impl CompanionsDialogState {
         self.modified = deleted > 0;
         self.reload(conn);
         if failures.is_empty() {
-            self.set_info(format!("Deleted {deleted} orphaned file(s)."));
+            self.set_info(format!(
+                "Deleted {}.",
+                count(deleted, "unused file", "unused files")
+            ));
         } else {
             self.set_error(format!(
                 "Deleted {deleted}, {} failed: {}",
@@ -154,62 +144,62 @@ impl CompanionsDialogState {
         }
     }
 
-    /// Render the Files tab inside `avail` points of vertical space.
-    pub fn render_body(&mut self, ui: &mut egui::Ui, conn: &Connection, avail: f32) {
-        let total: i64 = self.entries.iter().map(|e| e.size).sum();
-        let orphans = self.orphan_count();
-        ui.colored_label(
-            theme::TEXT_SECONDARY,
-            format!(
-                "{} registered, {} — {} orphaned",
-                self.entries.len(),
-                format_size(total.max(0) as u64),
-                orphans
-            ),
-        );
-        ui.add_space(6.0);
-
+    /// The Files tab: every companion file, and who is using it.
+    pub fn render_body(&mut self, ui: &mut egui::Ui, height: f32) {
         if self.entries.is_empty() {
             ui.colored_label(
                 theme::TEXT_SECONDARY,
-                "No companion files registered. Add one from a WAD's Edit dialog.",
+                "No companion files yet. Add one from a WAD's Edit dialog.",
             );
-        } else {
-            self.render_table(ui, avail - FURNITURE);
-            self.render_users(ui);
+            return;
         }
 
-        ui.add_space(4.0);
-        ui.separator();
-        ui.add_space(4.0);
+        let total: i64 = self.entries.iter().map(|e| e.size).sum();
+        ui.colored_label(
+            theme::TEXT_SECONDARY,
+            format!(
+                "{}, {}, {} unused",
+                count(self.entries.len(), "file", "files"),
+                format_size(total.max(0) as u64),
+                self.unused_count()
+            ),
+        );
+        ui.add_space(6.0);
+        self.render_table(ui, height - FURNITURE);
+        self.render_users(ui);
+    }
 
+    /// What is being asked, and how the last thing went.
+    pub fn render_notes(&self, ui: &mut egui::Ui) {
         if self.pending_purge {
             ui.colored_label(
                 theme::COLOR_ERROR,
-                format!("Delete all {orphans} orphaned companion file(s)?"),
+                format!(
+                    "Delete {}?",
+                    count(self.unused_count(), "unused file", "unused files")
+                ),
             );
-            ui.horizontal(|ui| {
-                if ui.button("Delete All").clicked() {
-                    self.pending_purge = false;
-                    self.purge_orphans(conn);
-                }
-                if ui.button("Cancel").clicked() {
-                    self.pending_purge = false;
-                }
-            });
-        } else {
-            self.render_actions(ui, conn);
         }
-
         if let Some(status) = &self.status {
-            ui.add_space(4.0);
-            let color = if status.is_error {
-                theme::COLOR_ERROR
-            } else {
-                theme::TEXT_SECONDARY
-            };
-            ui.colored_label(color, &status.text);
+            status.show(ui);
         }
+    }
+
+    /// Delete what nothing uses. True if Close was pressed.
+    pub fn render_footer(&mut self, row: &mut FooterRow<'_>, conn: &Connection) -> bool {
+        if self.pending_purge {
+            let ended = row.end(Some("Cancel"), Some(Primary::danger("Delete All")));
+            if ended.dismissed {
+                self.pending_purge = false;
+            }
+            if ended.primary {
+                self.pending_purge = false;
+                self.purge_unused(conn);
+            }
+            return false;
+        }
+        row.left(|ui| self.render_actions(ui, conn));
+        row.close()
     }
 
     /// Escape. Dismisses a staged confirmation before it closes Storage.
@@ -226,18 +216,13 @@ impl CompanionsDialogState {
         let mut clicked = None;
         let selected = self.selected;
 
-        TableBuilder::new(ui)
-            .striped(true)
-            .resizable(true)
-            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+        dialog_table(ui, height)
             .sense(egui::Sense::click())
-            .column(Column::remainder().at_least(180.0)) // Filename
+            .column(Column::remainder().at_least(180.0).clip(true)) // Filename
             .column(Column::initial(80.0).at_least(60.0)) // Size
-            .column(Column::initial(110.0).at_least(80.0)) // MD5
             .column(Column::initial(110.0).at_least(70.0)) // Used by
-            .max_scroll_height(height.max(80.0))
             .header(row_height + 2.0, |mut header| {
-                for label in ["Filename", "Size", "MD5", "Used by"] {
+                for label in ["File", "Size", "Used by"] {
                     header.col(|ui| {
                         ui.strong(label);
                     });
@@ -256,26 +241,18 @@ impl CompanionsDialogState {
                         ui.label(format_size(entry.size.max(0) as u64));
                     });
                     row.col(|ui| {
-                        ui.colored_label(
-                            theme::TEXT_SECONDARY,
-                            &entry.md5[..12.min(entry.md5.len())],
-                        );
-                    });
-                    row.col(|ui| {
-                        if entry.is_orphan() {
-                            ui.colored_label(theme::COLOR_ERROR, "orphan");
+                        if entry.is_unused() {
+                            ui.colored_label(theme::TEXT_SECONDARY, "Nothing");
                         } else {
-                            ui.label(format!(
-                                "{} WAD{}",
-                                entry.users.len(),
-                                if entry.users.len() == 1 { "" } else { "s" }
-                            ));
+                            ui.label(count(entry.users.len(), "WAD", "WADs"));
                         }
                     });
 
-                    if row.response().clicked() {
+                    let response = row.response();
+                    if response.clicked() {
                         clicked = Some(idx);
                     }
+                    response.on_hover_text(format!("MD5 {}", entry.md5));
                 });
             });
 
@@ -291,8 +268,8 @@ impl CompanionsDialogState {
             return;
         };
         ui.add_space(4.0);
-        if entry.is_orphan() {
-            ui.colored_label(theme::TEXT_SECONDARY, "Not linked to any WAD.");
+        if entry.is_unused() {
+            ui.colored_label(theme::TEXT_SECONDARY, "No WAD is using it.");
             return;
         }
         ui.colored_label(
@@ -301,31 +278,17 @@ impl CompanionsDialogState {
         );
     }
 
+    /// Only what nothing uses can be deleted, so that is all that is offered.
     fn render_actions(&mut self, ui: &mut egui::Ui, conn: &Connection) {
-        ui.horizontal(|ui| {
-            let selected_is_orphan = self
-                .selected
-                .and_then(|i| self.entries.get(i))
-                .is_some_and(Entry::is_orphan);
-
-            if ui
-                .add_enabled(selected_is_orphan, egui::Button::new("Delete Selected"))
-                .on_hover_text("Only files no WAD links can be deleted")
-                .clicked()
-                && let Some(idx) = self.selected
-            {
-                self.delete_selected(conn, idx);
-            }
-
-            if ui
-                .add_enabled(
-                    self.orphan_count() > 0,
-                    egui::Button::new("Delete All Orphans"),
-                )
-                .clicked()
-            {
-                self.pending_purge = true;
-            }
-        });
+        if let Some(idx) = self
+            .selected
+            .filter(|i| self.entries.get(*i).is_some_and(Entry::is_unused))
+            && ui.button("Delete Selected").clicked()
+        {
+            self.delete_selected(conn, idx);
+        }
+        if self.unused_count() > 0 && ui.button("Delete Unused Files").clicked() {
+            self.pending_purge = true;
+        }
     }
 }

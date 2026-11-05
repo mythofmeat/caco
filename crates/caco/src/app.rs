@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 
-use egui::Color32;
 use rusqlite::Connection;
 
 use crate::dialogs::collections::CollectionsDialogState;
@@ -56,7 +55,7 @@ fn describe_outcome(outcome: &caco_sources::enrich_service::EnrichOutcome) -> St
         parts.push(format!("IWAD {iwad}"));
     }
     if outcome.zdoom_required == Some(true) {
-        parts.push("zdoom required".to_string());
+        parts.push("needs a ZDoom-family sourceport".to_string());
     }
     format!("{} → {}", outcome.title, parts.join(", "))
 }
@@ -292,13 +291,7 @@ impl CacoApp {
             );
 
             let message = outcome
-                .map(|installed| {
-                    format!(
-                        "Built {} — {}",
-                        installed.manifest.name,
-                        installed.binary_path().display()
-                    )
-                })
+                .map(|installed| format!("Built {}.", installed.manifest.name))
                 .map_err(|e| e.to_string());
             sender.send(AppMessage::SourceportBuildComplete(message));
         });
@@ -607,6 +600,18 @@ impl CacoApp {
         !self.state.gets.linking().is_empty()
     }
 
+    /// How many thumbnails are still on their way. Public for `tests/snapshots.rs`, which
+    /// must not compare a picture of a card whose thumbnail is about to arrive.
+    pub fn thumbnails_pending(&self) -> usize {
+        self.thumbnails.pending_count()
+    }
+
+    /// Clear the status bar. Public for `tests/snapshots.rs`: a notification goes away by
+    /// the clock, and a picture must not depend on how long a run took to get there.
+    pub fn dismiss_notification(&mut self) {
+        self.state.notification = None;
+    }
+
     /// Dispatch an action request (from detail panel buttons or table shortcuts).
     ///
     /// Public so `tests/screenshots.rs` can open any dialog the same way a
@@ -639,6 +644,9 @@ impl CacoApp {
             ActionRequest::Settings => {
                 let dialog = crate::dialogs::settings::SettingsDialogState::new();
                 self.state.active_dialog = Some(ActiveDialog::Settings(dialog));
+            }
+            ActionRequest::Help => {
+                self.state.active_dialog = Some(ActiveDialog::Help);
             }
             ActionRequest::Resources => {
                 let dialog = ResourcesDialogState::new(&self.conn);
@@ -1177,9 +1185,8 @@ impl eframe::App for CacoApp {
                             if ir.is_duplicate {
                                 let title =
                                     ir.duplicate_title.unwrap_or_else(|| "unknown".to_string());
-                                let id = ir.duplicate_id.unwrap_or(0);
                                 self.state.notification = Some(Notification::warning(format!(
-                                    "Already imported as {title} (#{id})"
+                                    "Already in your library, as {title}."
                                 )));
                             } else {
                                 self.state.notification = Some(Notification::info(
@@ -1211,7 +1218,10 @@ impl eframe::App for CacoApp {
             self.state.reload(&self.conn);
             self.kick_reanalysis();
         }
-        if self.state.cacowards.needs_reload && self.state.view_mode == ViewMode::Cacowards {
+        // Stats says how far through each year you are, by the same reckoning.
+        if self.state.cacowards.needs_reload
+            && matches!(self.state.view_mode, ViewMode::Cacowards | ViewMode::Stats)
+        {
             self.state.reload_cacowards(&self.conn);
         }
         if self.state.stats.needs_reload && self.state.view_mode == ViewMode::Stats {
@@ -1245,6 +1255,9 @@ impl eframe::App for CacoApp {
             if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Q)) {
                 quit = true;
             }
+            if ctx.input(|i| i.key_pressed(egui::Key::F1)) {
+                self.dispatch_action(ActionRequest::Help);
+            }
             if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::F)) {
                 let id = egui::Id::unique(panels::filter_bar::FILTER_ID_SOURCE);
                 ctx.memory_mut(|m| m.request_focus(id));
@@ -1254,8 +1267,9 @@ impl eframe::App for CacoApp {
             // new values.
             if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::R)) {
                 caco_core::config::reload_config();
-                self.state.notification =
-                    Some(Notification::info("Config reloaded from disk".to_string()));
+                self.state.notification = Some(Notification::info(
+                    "Settings reloaded from disk.".to_string(),
+                ));
                 // The mirrors may be what was edited.
                 mirrors::spawn_sync(self.bg.sender(), self.state.db_path.clone());
             }
@@ -1280,7 +1294,7 @@ impl eframe::App for CacoApp {
         egui::Panel::top("topbar")
             .frame(
                 egui::Frame::new()
-                    .fill(Color32::from_rgb(0x1a, 0x14, 0x10))
+                    .fill(theme::BG_WINDOW)
                     .inner_margin(egui::Margin::symmetric(16, 8))
                     .stroke(egui::Stroke::new(1.0_f32, theme::BORDER)),
             )
@@ -1323,7 +1337,14 @@ impl eframe::App for CacoApp {
                                 render_section_header(ui, &mut self.state);
                                 ui.add_space(8.0);
 
-                                // WAD grid or table
+                                // WAD grid or table, or why there is neither
+                                if self.state.wads.is_empty() {
+                                    let total = self.state.total_wad_count;
+                                    if panels::render_empty_library(ui, total) {
+                                        self.state.view_mode = ViewMode::Import;
+                                    }
+                                    return;
+                                }
                                 let view_action = match self.state.view_layout {
                                     ViewLayout::List => {
                                         panels::wad_table::render(ui, &mut self.state)
@@ -1340,9 +1361,16 @@ impl eframe::App for CacoApp {
                             });
                     }
                     ViewMode::Import => {
-                        if let Some(import_action) = import::render(ui, &mut self.state.import) {
-                            self.dispatch_import_action(import_action);
-                        }
+                        // The margin every other view has.
+                        egui::Frame::new()
+                            .inner_margin(egui::Margin::symmetric(20, 8))
+                            .show(ui, |ui| {
+                                if let Some(import_action) =
+                                    import::render(ui, &mut self.state.import)
+                                {
+                                    self.dispatch_import_action(import_action);
+                                }
+                            });
                     }
                     ViewMode::Stats => {
                         egui::ScrollArea::vertical()
@@ -1393,7 +1421,9 @@ impl eframe::App for CacoApp {
                     }
                 }
             }
-        } else if self.state.view_mode == ViewMode::Cacowards {
+        } else if self.state.view_mode == ViewMode::Cacowards
+            && self.state.cacowards.layout == ViewLayout::Grid
+        {
             let sender = self.bg.sender();
             // Linked WADs use their wad_id and the existing pipeline
             // (cache → TITLEPIC → wiki scrape).

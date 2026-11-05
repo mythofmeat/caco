@@ -50,6 +50,11 @@ cargo test --workspace
 cargo test -p caco --test screenshots -- --ignored --nocapture
 CACO_SHOT_SIZE=800x400 cargo test -p caco --test screenshots -- --ignored --nocapture
 
+# Compare the main surfaces with the images committed for them, and update those when the
+# change is the point (see Snapshots below)
+cargo test -p caco --test snapshots -- --ignored --nocapture
+UPDATE_SNAPSHOTS=1 cargo test -p caco --test snapshots -- --ignored --nocapture
+
 # Draft a year's Cacowards data file from saved wikitext (see Cacowards dataset below)
 cargo run -p caco-sources --example cacowards_draft -- 2026 2026.wikitext
 
@@ -121,7 +126,7 @@ crates/
 - `examples/idgames_sync/` — builds the index from the real thing, away from the app, and searches it, for finding out what a change does to the real archive. Nothing else runs the whole of it against the real mirrors and API.
 - `examples/cacowards_draft/` — the maintainer's tool for the year's data, and the only code that still parses a `Cacowards_YYYY` wiki page. An example rather than an `xtask`, because `cargo build --workspace --release` would compile a new crate into every package, while `cargo test` builds examples anyway and `test = true` on its `[[example]]` runs its parser's tests.
 
-**caco**: `app.rs` hosts the `CacoApp` state machine. Panels in `src/panels/`, dialogs in `src/dialogs/`, import flow in `src/import/`. `app/file_check.rs` runs `presence::check_library` on a worker when the app is created — it used to run in `main.rs` before the window existed, where a stat on a dead mount held the window back — and turns its report into at most one status-bar line, a warning only for files caco cannot fetch again. It sends that answer before running `identity::check_library`, whose first run reads the whole library, and that pass is silent: a changed file is only worth a word when it is about to be played, so it just reloads the views (a changed file has lost its analysis). `thumbnails.rs` extracts and caches TITLEPIC; `wiki_scraper.rs` fetches Doom Wiki thumbs; `workers.rs` coordinates background search/import/play via mpsc channels. The Cacowards view (`ViewMode::Cacowards`) is rendered by `panels/cacowards.rs` in a deliberately editorial layout (hero banner + year strip + category card grid) to signal the curated-external-feed origin while sharing the rest of the GUI chrome. Imports kicked off from cacoward cards spawn through `import::workers::spawn_import_cacoward` so they reuse the existing duplicate-detection and auto-link plumbing, trying each source the entry names in turn (idgames, then the Doomworld thread, then the Doom Wiki), since which site is behind a challenge changes from day to day. What a card offers on its face is `card_buttons`: Get leads for an entry not on idgames, since only a browser can fetch it, and a WAD the user has finished with keeps Open even with its file gone, so that a list of what was cleaned up does not read as a list of things left to do. `app.rs::sync_cacowards` writes the dataset to the table as the app is created, before the window opens, so the view can never open empty on a new library. `dialogs/settings.rs` is the GUI settings editor: it snapshots the live `Config`, edits a curated field subset (sourceports, behavior, cache, paths), and on Save writes the full struct via `config::save_config` + `config::reload_config` so unexposed sections (list, sourceport_preferences, iwad_priority) survive round-trips and changes apply without restart. `dialogs/profiles.rs` manages sourceport config profiles (list on the left, contents editable on the right); it is the GUI counterpart to `caco profile` and shares `caco_core::profiles` with it. Deleting a profile stages a confirmation that lists the WADs still referencing it rather than warning after the fact. `dialogs/gc.rs` is the cleanup panel (Storage's Clean tab): keep-toggles across the top re-measure the plan on change, every row is a checkbox (so one WAD's saves can be kept while another's go), and Clean stages a confirmation naming the item count and size. `dialogs/enrich.rs` drives `caco_sources::enrich_service::enrich_wads` from the GUI: it owns only the request, live progress and the report, while `app.rs::spawn_enrich` runs the work on a thread and streams `AppMessage::EnrichProgress` / `EnrichComplete` back. Cancellation is an `Arc<AtomicBool>` the dialog shares with the worker; a fresh one is minted per run so a previously cancelled flag can't abort the next one instantly. `dialogs/companions.rs` is the library-wide companion registry (Storage's Files tab, `caco companion ls` with no query): every managed file with its size, MD5 and the WADs still linking it, plus per-row and bulk orphan deletion. Per-WAD linking stays in the edit dialog's Companions tab, which stages the orphan question when `plan_unregister` returns `None`. `dialogs/wad_data.rs` is the per-WAD Saves / Backups / Demos dialog (`caco saves` + `caco demos` in one place, since both act on the same data dir); every destructive action stages a confirmation, and demo playback returns `WadDataResult::PlayDemo` so `app.rs` can run the blocking launch on a worker thread while the dialog stays open. `app/idgames_index.rs` keeps the local index of idgames up to date on a worker when the app is created, when a copy of idgames is added, and when Update is pressed. It says nothing about a run nobody asked for, whatever came of it, since an offline laptop should not hear about that every time it starts: the Import view has the line (`import::render_index_bar`, over `state::IndexPanel`). `app/mirrors.rs` reads every mirror's index on a worker when the app is created, when a mirror is added, changed or removed, and on Ctrl+R, and runs the probes, set-ups and uploads. `dialogs/mirrors.rs` is the Mirrors tool: one window over three pages, the list, the wizard (`dialogs/mirror_setup.rs`) and filling a mirror, which opens straight on the wizard when there are none. The wizard's form makes a `MirrorConfig`, and a test's result stands only for the config it was run on, so changing a field clears it and Finish cannot act on a stale pass. How a test went sits in the footer rather than under the fields, because at 800x400 it would be below the fold, and Test It would seem to do nothing. A bulk upload's state is in `AppState::mirror_bulk` rather than the dialog, because it outlives the dialog being closed. `dialogs/mirror_offer.rs` is the offer to upload: WADs wait in `AppState::mirror_offers` until no dialog is open and nothing is playing, because linking a file launches the WAD straight after, and the question should wait for the game to close rather than sit behind it or be replaced by what the launch asks. Whether to ask is decided when it opens, not when the WAD was queued. `get.rs` is Get's state (what is waiting, what has landed, which is being asked about) and the worker watching the Downloads folder; `app/get.rs` links what the user said to link on a worker; `dialogs/get_prompt.rs` asks. `dialogs/file_changed.rs` is the question the Play worker's `AppMessage::PlayFileChanged` opens: Play Anyway dispatches `ActionRequest::PlayWith`, which goes through the same `app.rs::spawn_play` worker with `accept_changed_file` set. `dialogs/newer_saves.rs` is its sibling for `AppMessage::PlayNewerSaves`, and both carry the `PlayOptions` the launch already had, since one launch can be asked both. `app/sync.rs` is the worker doing sync passes, at startup, every 30 seconds, when a session ends, when asked and when the app closes, which waits two seconds at most, since the folder may be somewhere that will never answer. It starts after `sync_cacowards`, or what is said about a Cacoward on a new library would have no row to go to until the second pass. `dialogs/sync.rs` is the Sync tool. `dialogs/wad_file.rs` is the File section at the foot of the edit dialog's Sources tab: where the file is (or was last seen), which mirrors have it, its size and hashes, the files inside it, and any other WAD with the same content. It is shown when the file is gone too, since then the hash is the one thing that can still name it. It edits nothing, and its one action is uploading to a mirror without the file, for a file that was here before the mirror was, which nothing else would ever offer.
+**caco**: `app.rs` hosts the `CacoApp` state machine. Panels in `src/panels/`, dialogs in `src/dialogs/`, import flow in `src/import/`. How anything in it should look and read is in `docs/ui.md`: read that before adding to it. `app/file_check.rs` runs `presence::check_library` on a worker when the app is created — it used to run in `main.rs` before the window existed, where a stat on a dead mount held the window back — and turns its report into at most one status-bar line, a warning only for files caco cannot fetch again. It sends that answer before running `identity::check_library`, whose first run reads the whole library, and that pass is silent: a changed file is only worth a word when it is about to be played, so it just reloads the views (a changed file has lost its analysis). `thumbnails.rs` extracts and caches TITLEPIC; `wiki_scraper.rs` fetches Doom Wiki thumbs; `workers.rs` coordinates background search/import/play via mpsc channels. The Cacowards view (`ViewMode::Cacowards`) is rendered by `panels/cacowards.rs`: an editorial header to signal the curated-external-feed origin, a year strip, and a compact list of each category's entries, or posters on the same toggle the library has. Imports kicked off from cacoward entries spawn through `import::workers::spawn_import_cacoward` so they reuse the existing duplicate-detection and auto-link plumbing, trying each source the entry names in turn (idgames, then the Doomworld thread, then the Doom Wiki), since which site is behind a challenge changes from day to day. What a card offers on its face is `card_buttons`: Get leads for an entry not on idgames, since only a browser can fetch it, and a WAD the user has finished with keeps a quiet Play even with its file gone, so that a list of what was cleaned up does not read as a list of things left to do. `app.rs::sync_cacowards` writes the dataset to the table as the app is created, before the window opens, so the view can never open empty on a new library. `dialogs/settings.rs` is the GUI settings editor: it snapshots the live `Config`, edits a curated field subset (sourceports, behavior, cache, paths), and on Save writes the full struct via `config::save_config` + `config::reload_config` so unexposed sections (list, sourceport_preferences, iwad_priority) survive round-trips and changes apply without restart. `dialogs/profiles.rs` manages sourceport config profiles (list on the left, contents editable on the right); it is the GUI counterpart to `caco profile` and shares `caco_core::profiles` with it. Deleting a profile stages a confirmation that lists the WADs still referencing it rather than warning after the fact. `dialogs/gc.rs` is the cleanup panel (Storage's Clean tab): keep-toggles across the top re-measure the plan on change, every row is a checkbox (so one WAD's saves can be kept while another's go), and Clean stages a confirmation naming the item count and size. `dialogs/enrich.rs` drives `caco_sources::enrich_service::enrich_wads` from the GUI: it owns only the request, live progress and the report, while `app.rs::spawn_enrich` runs the work on a thread and streams `AppMessage::EnrichProgress` / `EnrichComplete` back. Cancellation is an `Arc<AtomicBool>` the dialog shares with the worker; a fresh one is minted per run so a previously cancelled flag can't abort the next one instantly. `dialogs/companions.rs` is the library-wide companion registry (Storage's Files tab, `caco companion ls` with no query): every managed file with its size and the WADs still linking it, plus deleting what nothing uses, one at a time or all together. Per-WAD linking stays in the edit dialog's Companions tab, which stages the orphan question when `plan_unregister` returns `None`. `dialogs/wad_data.rs` is the per-WAD Saves / Backups / Demos dialog (`caco saves` + `caco demos` in one place, since both act on the same data dir); every destructive action stages a confirmation, and demo playback returns `WadDataResult::PlayDemo` so `app.rs` can run the blocking launch on a worker thread while the dialog stays open. `app/idgames_index.rs` keeps the local index of idgames up to date on a worker when the app is created, when a copy of idgames is added, and when Update is pressed. It says nothing about a run nobody asked for, whatever came of it, since an offline laptop should not hear about that every time it starts: the Import view has the line (`import::render_index_bar`, over `state::IndexPanel`). `app/mirrors.rs` reads every mirror's index on a worker when the app is created, when a mirror is added, changed or removed, and on Ctrl+R, and runs the probes, set-ups and uploads. `dialogs/mirrors.rs` is the Mirrors tool: one window over three pages, the list, the wizard (`dialogs/mirror_setup.rs`) and filling a mirror, which opens straight on the wizard when there are none. The wizard's form makes a `MirrorConfig`, and a test's result stands only for the config it was run on, so changing a field clears it and Finish cannot act on a stale pass. How a test went sits in the footer rather than under the fields, because at 800x400 it would be below the fold, and Test It would seem to do nothing. A bulk upload's state is in `AppState::mirror_bulk` rather than the dialog, because it outlives the dialog being closed. `dialogs/mirror_offer.rs` is the offer to upload: WADs wait in `AppState::mirror_offers` until no dialog is open and nothing is playing, because linking a file launches the WAD straight after, and the question should wait for the game to close rather than sit behind it or be replaced by what the launch asks. Whether to ask is decided when it opens, not when the WAD was queued. `get.rs` is Get's state (what is waiting, what has landed, which is being asked about) and the worker watching the Downloads folder; `app/get.rs` links what the user said to link on a worker; `dialogs/get_prompt.rs` asks. `dialogs/file_changed.rs` is the question the Play worker's `AppMessage::PlayFileChanged` opens: Play Anyway dispatches `ActionRequest::PlayWith`, which goes through the same `app.rs::spawn_play` worker with `accept_changed_file` set. `dialogs/newer_saves.rs` is its sibling for `AppMessage::PlayNewerSaves`, and both carry the `PlayOptions` the launch already had, since one launch can be asked both. `app/sync.rs` is the worker doing sync passes, at startup, every 30 seconds, when a session ends, when asked and when the app closes, which waits two seconds at most, since the folder may be somewhere that will never answer. It starts after `sync_cacowards`, or what is said about a Cacoward on a new library would have no row to go to until the second pass. `dialogs/sync.rs` is the Sync tool. `dialogs/wad_file.rs` is the File section at the foot of the edit dialog's Sources tab: where the file is (or was last seen), which mirrors have it, its size and hashes, the files inside it, and any other WAD with the same content. It is shown when the file is gone too, since then the hash is the one thing that can still name it. It edits nothing, and its one action is uploading to a mirror without the file, for a file that was here before the mirror was, which nothing else would ever offer.
 
 ## Dependencies (key crates)
 
@@ -208,34 +213,44 @@ egui = "0.37"
 - **Player**: wraps sourceport execution; injects companion files, data dir args, complevel args, config profile; returns `PlayResult` with crash detection. Anything in `player.rs` that reads on-disk stats has a `*_with` twin holding the filesystem-free logic — `reconcile_stats` / `reconcile_stats_with`, `read_session_stats_before` / `session_stats_before_with` — and the tests only ever call the twin. `read_stats_snapshot` resolves the data dir through global config, so a test that calls the outer function reads whatever WAD happens to share its id in the developer's own library: `read_session_stats_before` had exactly that bug and failed only when run against a populated library. Same reasoning as `GcPaths` — the difference is that the seam here is the resolved snapshot rather than the path.
 - **GUI background work**: egui is immediate-mode; `CacoApp` holds all state; background workers for search/import/play use `std::thread` + `std::sync::mpsc`.
 - **Transactions take the write lock up front**: `db::with_transaction` is `BEGIN IMMEDIATE`. Every caller writes, and several read first (`update_wad` reads the status, `identity::record` the previous identity). Under WAL a deferred transaction that reads and then writes cannot wait for the lock. If another connection commits in between, SQLite fails the write at once instead of calling the busy handler (rusqlite's 5 s default). The startup identity pass writes from a worker for as long as a library takes to hash, which made that race reachable. `test_with_transaction_takes_the_write_lock_before_it_reads` pins it.
-- **Modal sizing**: `dialogs::modal_window` is the only place a dialog's size is
-  decided, and `dialogs::modal_body` the only place its scrolling is. Every
-  dialog used to spell out its own `default_size([W, H])` picked for a
-  comfortable window and never checked against a small one, so at the 800x400
-  minimum window four of them rendered past the app's edges with their button
-  rows unreachable. Clamping alone does not fix that: egui resolves a window as
-  `natural.at_most(max).at_least(min)`, so a body with a large *minimum* —
-  a full-length list, an unwrappable absolute path — beats the cap. The body
-  must be able to shrink, which is what `modal_body` (and `TableBuilder`'s
-  `max_scroll_height`) provides, as does the shrinking `ScrollArea` in
-  `dialogs/enrich.rs`, whose idle state has no use for a full-height window. Heights
-  come from `modal_body_height`, which
-  budgets off `ctx.content_rect()` rather than `ui.available_height()`: inside a
-  window that is still settling the latter reports last frame's size, so a cap
-  derived from it never converges. (`content_rect` was `screen_rect` before egui
-  0.36 — same rect on desktop, minus any OS status bar or display notch.)
-- **A body rendered inside another dialog is handed its height, never asks for
-  it**: `modal_body` budgets against the screen, which is right for a body that
-  *is* the window and wrong for a Storage tab — asking the screen ignores the
-  tab strip and Close row above and below it, so every tab overflowed by the
-  same amount. `dialogs::scroll_body(ui, height, ..)` takes the budget instead,
-  and `storage.rs` derives it once from `CHROME`, passes it to the tab, *and*
-  wraps the tab in it. Both, because a tab's own furniture (Cache's summary,
-  at-risk toggle and button row) can exceed the whole budget at the 800x400
-  minimum, and then no cap on its list would save it; the wrapper's scrollbar
-  only ever appears in that case.
+- **Every dialog is a `dialogs::Dialog`** (`dialogs/skeleton.rs`), which owns its
+  header, its size, where its buttons go and how its body fits. `tests/ui_rules.rs`
+  fails on a window opened anywhere else. A body is `scroll` (shrinks to what it holds)
+  or `fill` (takes the whole height and is told what that is, for panes and tables that
+  scroll themselves), and hands back a footer, which alone makes the `DialogDone` the
+  closure must return. Windows are not resizable, and their size is a request that
+  gets less on a small window. This came out of three mistakes. Each dialog used to pick
+  its own size and never check it against a small window, so at 800x400 four of them
+  rendered past the app's edges with their button rows unreachable. Clamping alone
+  doesn't fix that: egui's window is as big as its content was last frame, so a body
+  with a large *minimum*, a full-length list or an unwrappable path, beats the cap, and
+  the body has to be able to shrink. And a body filling what is available fills what the
+  window was last frame, so with a footer below it the window grew a little every frame
+  until it hit the cap, which is why Profiles took the whole screen with nothing in it. So
+  a body's height never comes from `ui.available_height()`: it is `Dialog`'s height less
+  what is above it and the footer's height as measured last frame.
+- **A body rendered inside another dialog is handed its height, never asks for it**:
+  `fill`'s closure gets the budget, and Storage passes it down to the tab, whose list
+  goes in `dialogs::scroll_body(ui, height, ..)`. A tab's actions are not in its body:
+  it gets a `FooterRow`, since whether the way out is Close or Cancel depends on
+  whether it is in the middle of asking something.
+- **A table in a dialog is `dialogs::dialog_table`**: `TableBuilder` won't scroll below 200pt
+  of its own accord, which is more than a dialog has at 800x400 once there is a footer, so
+  Map Stats ran off the window as soon as it had anything to list. `ui_rules` fails on a table
+  built any other way, bar Sync's, which does not scroll, inside a body that does. `snapshots.rs`
+  checks every window against the screen too, because its library has something in it, and
+  `screenshots.rs`'s may not.
+- **A dialog blocks the app by being in the way**: `dialogs::modal_backdrop` is a scrim in a
+  layer of its own, in front of the panels and behind the windows, that takes the pointer.
+  A window only stops clicks where it actually is, so without it a WAD behind Settings could
+  be double-clicked and launched. It is egui's modal layer too, or Tab goes on past a dialog's
+  controls to the sidebar, and a field that had focus when the dialog opened goes on taking what
+  is typed. Not `ui.disable()`, which does all that and also fades everything it covers, panels'
+  backgrounds included, so the app behind turned grey. Its sense is `CLICK | DRAG` because
+  `click_and_drag()` can take focus, and Tab then stops on the backdrop. `screenshots.rs` presses
+  all of this for real.
 - **Inputs are named after their label**: `response.labelled_by(label.id)` ties
-  a field to the label a sighted user reads (`dialogs/settings.rs::form_label`
+  a field to the label a sighted user reads (`dialogs::form_label`
   returns its `Response` for this), and `accessible_name` is for a control with
   nothing visible to point at. The screenshot harness fails on an input with no
   name at all, but a placeholder or a tooltip is enough to pass it, and the name
@@ -246,7 +261,37 @@ egui = "0.37"
   panel from the rect its contents actually occupied, so the overflow displaces
   every panel after it. Ten management buttons in one row cost five of them
   (Clean, Trash, IWADs, Sourceports, Settings were unreachable) *and* 180pt of the
-  library grid. Stacked `theme::sidebar_tool_item` rows cannot do either.
+  library grid. Stacked `theme::sidebar_tool_item` rows cannot do either. They are not
+  folded away under anything either: everything but Settings and Help scrolls if a short
+  window needs it to, and those two are pinned below.
+- **A window can be short**: `theme::SHORT_WINDOW` is where the Continue Playing banner and
+  the Cacowards header collapse to a line and the sidebar's rows tighten, since at the
+  800x400 minimum they took most of what the content needed.
+
+## Snapshots
+
+`crates/caco/tests/snapshots.rs` compares the main surfaces with the images in
+`crates/caco/tests/snapshots/`, at the default window and the minimum. It is the difference
+between "the UI still renders" and "the UI looks as it did": an egui upgrade that moves a button
+fails it, and the images in the pull request are the review, including on the weekly dependency
+update, which `verify` would otherwise wave through to a release nobody looked at.
+
+- **When a change is meant to show**: `UPDATE_SNAPSHOTS=1 cargo test -p caco --test snapshots
+  -- --ignored`, and commit the images. When it fails on CI, the `snapshot-changes` artifact has
+  what it rendered and what differs.
+- **Any machine can make them**, because `THRESHOLD` in `snapshots.rs` is set from measuring
+  two. CI's lavapipe and a real Radeon do not agree: kittest's default failed 16 images of 32
+  on the same content, though nothing scored past 2 on its scale, where one level of grey is
+  0.5 and the two closest text colours are 196 apart. A failure's message counts the pixels at
+  each threshold, so read that before changing it.
+- **Nothing in a picture may depend on the machine or the day**: the library is made up,
+  its dates are years old, it runs in UTC at a fixed path, and nothing it does reaches the
+  network (`CACO_IDGAMES_API` and `CACO_DOOMWIKI_API` say where the API and the wiki are). Which is why the charts end at the last month with anything in it rather than
+  today, and why Last Played gives a date past a year: "6y ago" would change on its own one
+  day and fail a dependency update that had nothing to do with it. The version number moved out
+  of the sidebar for the same reason, since it changed every surface on every release.
+- A surface that depends on what a machine has installed, such as Sourceports' list of what
+  is missing, is for `screenshots.rs`.
 
 ## Screenshots
 
@@ -578,7 +623,7 @@ The annual update, usually in December:
 3. Settle each `# CHECK:` comment, which a test refuses to ship: split joint entries, drop what the library couldn't hold, and set `supported = false` on what no sourceport caco launches can run. A suggested idgames id is only a shared title, so take it when the author and date agree too: "Crusader" is a 2004 WAD and a 2023 one.
 4. Add the file to `BUILTIN` in `cacowards/mod.rs`, which a test also enforces. The release workflow ships it.
 
-**GUI Cacowards view**: a magazine-style central panel reachable from the left sidebar. Backed by `state::CacowardsState` (all entries + selected year, refreshed via `AppState::reload_cacowards`). Each entry renders as a card tagged with its linked WAD's status. The action button on each card is contextual: absent entries get an `Import` button that fires `ActionRequest::ImportCacoward(pk)` and, when they are not on idgames, a `Get` button in front of it; library entries get a `Play`/`Open` button reusing the existing `ActionRequest::Play(wad_id)`, or `Get` for a WAD still being played whose file is not here and cannot be fetched. After an import completes, both `state.needs_reload` and `state.cacowards.needs_reload` are set so the library list and the magazine view both pick up the new link without a manual refresh. The year strip scrolls, since no window is wide enough to be sure of twenty-odd chips, and the thumbnail loop only asks the wiki about the year on screen, or opening the view would ask about every entry there is.
+**GUI Cacowards view**: a central panel reachable from the left sidebar, with the magazine look in its header. Backed by `state::CacowardsState` (all entries + selected year, refreshed via `AppState::reload_cacowards`). Each entry renders as a line in a list, in as many columns as fit, or as a poster on the toggle in the top bar, tagged with its linked WAD's status from `theme::cacoward_style`, in page order. The list is the default because this is a checklist more than a gallery: it fits about thirty entries at the default window, where posters fitted six. The action button on each entry is contextual: absent entries get an `Import` button that fires `ActionRequest::ImportCacoward(pk)` and, when they are not on idgames, a `Get` button beside it; library entries get a `Play` button reusing the existing `ActionRequest::Play(wad_id)`, or `Get` for a WAD still being played whose file is not here and cannot be fetched. After an import completes, both `state.needs_reload` and `state.cacowards.needs_reload` are set so the library list and the magazine view both pick up the new link without a manual refresh. The year strip scrolls, since no window is wide enough to be sure of twenty-odd chips, and the thumbnail loop only asks the wiki about the year on screen, and only for posters, or opening the view would ask about every entry there is.
 
 ## GUI Surfaces
 
@@ -591,13 +636,18 @@ Views (`app/sidebar.rs` sets `ViewMode` directly):
 
 | Entry | Panel | Backed by |
 |-------|-------|-----------|
-| Library | `panels/library.rs` + `wad_grid` / `wad_table` | `db::search_wads` |
+| Library | `panels/wad_grid.rs` / `wad_table.rs` | `db::search_wads` |
 | Import | `import/` | `caco_sources::import_service` |
 | Cacowards | `panels/cacowards.rs` | `state::CacowardsState` |
 | Stats | `panels/stats.rs` | `state::StatsState` ← `db::sessions::get_stats_snapshot` |
 
 Each view owns a `needs_reload` flag its sidebar entry sets on entry, so a
 figure that predates the session you just finished cannot be shown.
+
+Stats has one meaning per number and shares them with everything else: Completed is the
+status, the number on the library's filter (`StatsSnapshot::with_status`), a year's progress
+is `CacowardsState::year_summary`, and all of it is about the library as it stands, without the
+Trash. A second "completed" counting only WADs with a session used to disagree with the first.
 
 Tools (`app/sidebar.rs` → `ActionRequest` → `app.rs::dispatch_action`):
 
@@ -625,10 +675,11 @@ and Clean came to disagree about irreplaceable files in the first place.
 | Trash | `dialogs/trash.rs` | `db::restore_wad` / `purge_all_deleted` |
 | Files | `dialogs/companions.rs` | `companion_service` + `db::get_wads_for_companion` |
 
-Each tab keeps its own module and its own state, and exposes three things to
-`storage.rs`: `render_body(ui, conn, avail)`, `escape() -> bool` (false when it
-consumed the key to back out of a staged confirmation, so dismissing "Empty
-Trash?" cannot also close the window), and a `modified` flag. Tab state is
+Each tab keeps its own module and its own state, and exposes what `storage.rs` needs:
+`render_body(ui, .., height)`, `render_notes(ui)` for what stays in view above the buttons,
+`render_footer(row, conn) -> bool` for the buttons, true if Close was pressed,
+`escape() -> bool` (false when it consumed the key to back out of a staged confirmation, so
+dismissing "Empty Trash?" cannot also close the window), and a `modified` flag. Tab state is
 built on first visit — `GcDialogState::new` runs a full `gc::plan` over the
 data dir, the backup dir and every cached file, which opening Storage to look
 at Trash must not pay for — and `StorageDialogState::modified()` therefore
@@ -674,7 +725,8 @@ projects release the same way:
   `homebrew` job runs `brew trust --cask` on the linked-in tap first: since
   Homebrew 7, audit refuses to load a cask from an untrusted tap, and that
   failure kept the 2026-11-01 weekly update from merging. A `screenshots` job
-  renders every GUI surface on a software Vulkan driver (see Screenshots). The
+  renders every GUI surface on a software Vulkan driver and compares the main ones
+  with their committed images (see Screenshots and Snapshots). The
   jobs are named `rust`, `screenshots` and `homebrew` so a ruleset can require
   them. The `rust` job exports `CFLAGS=-O2`, as makepkg and rpmbuild do: v4.1.6
   tagged and then failed its Arch build because `cc` 1.6 stopped `aws-lc-sys`
@@ -746,8 +798,8 @@ wgpu upgrade rather than guessing.
 
 **The version the binary reports comes from `Cargo.toml`.** The root
 `[workspace.package] version` is the single source; every crate inherits it via
-`version.workspace = true`, and `caco::VERSION` (read by the sidebar footer and
-the About dialog) is `env!("CARGO_PKG_VERSION")`. There is no build script and
+`version.workspace = true`, and `caco::VERSION` (read by the Help dialog) is
+`env!("CARGO_PKG_VERSION")`. There is no build script and
 nothing derives the version from git.
 
 **This repository is its own Homebrew tap**: `Casks/caco.rb`, tapped as

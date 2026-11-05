@@ -1,48 +1,57 @@
-//! Magazine-style Cacowards view — the GUI surface for browsing yearly
-//! awards, completion stats, and entry-level actions (import / get / open / play).
+//! The Cacowards view, for browsing a year's awards, how far through them you are, and
+//! doing something about each one (import / get / play).
 //!
 //! Layout:
-//! 1. Hero banner with the year, and a link to Doomworld's write-ups for it.
-//! 2. Year strip with per-year completion ratios.
-//! 3. Category sections (winner / runner-up / honorable-mention / mordeth)
-//!    rendered as poster cards, each tagged with the linked WAD's status.
-//! 4. Every other award the year gave, the same way, under a heading saying that
-//!    they don't count towards its completion.
+//! 1. A header with the year, how far through it you are, and a link to Doomworld's write-ups
+//!    for it. The magazine look lives here, and it collapses to a line in a short window.
+//! 2. A strip of years with how far through each you are.
+//! 3. Category sections (winner / runner-up / honorable-mention / mordeth), each entry tagged
+//!    with its linked WAD's status.
+//! 4. Every other award the year gave, the same way, under a heading saying that they don't
+//!    count towards its completion.
 //!
-//! Cards are drawn with manual `allocate_exact_size` + direct painter calls
-//! (the same pattern as `wad_grid.rs`) rather than `egui::Grid`. Using Grid
-//! sized columns to the widest content, which made cards expand to the
-//! full content area and overlap.
+//! Entries come as a compact list, because this is a checklist more than a gallery, and a
+//! year's fifty or so nearly fit on a screen that way, where six posters did. Posters are one
+//! click away, on the same toggle the library has, for looking at the pictures.
+//!
+//! Entries stay in the order of the page they came from, which is not a ranking. They used to
+//! move around as they were completed, so that an entry was never quite where you left it.
 
 use caco_core::db::cacowards::{CacowardRecord, EffectiveStatus};
 use caco_core::db::{CORE_CATEGORIES, Status, is_core_category};
-use egui::{Color32, CornerRadius, Rect, StrokeKind, Vec2};
+use egui::{CornerRadius, Rect, StrokeKind, Vec2};
 
 use crate::get::GetTarget;
-use crate::state::{ActionRequest, AppState};
+use crate::state::{ActionRequest, AppState, ViewLayout};
 use crate::theme;
 
-const HERO_HEIGHT: f32 = 150.0;
-const HERO_PAD_X: f32 = 40.0;
-const SECTION_PAD_X: f32 = 40.0;
-const SECTION_PAD_Y: f32 = 24.0;
+const HERO_HEIGHT: f32 = 100.0;
+/// In a short window: the title and the bar, on a line.
+const SHORT_HERO_HEIGHT: f32 = 44.0;
+const SECTION_PAD_X: f32 = 20.0;
+const SECTION_PAD_Y: f32 = 14.0;
 
-const YEAR_CHIP_WIDTH: f32 = 78.0;
-const YEAR_CHIP_HEIGHT: f32 = 40.0;
+const YEAR_CHIP_WIDTH: f32 = 66.0;
+const YEAR_CHIP_HEIGHT: f32 = 36.0;
 const YEAR_CHIP_GAP: f32 = 6.0;
-const YEAR_STRIP_VPAD: f32 = 14.0;
+const YEAR_STRIP_VPAD: f32 = 8.0;
 
-const CARD_MIN_WIDTH: f32 = 240.0;
-const CARD_MAX_WIDTH: f32 = 320.0;
+/// A list column is at least this wide, so two across at the default window and one at the
+/// minimum, and three on a big screen.
+const LIST_COLUMN_MIN: f32 = 420.0;
+const LIST_COLUMN_GAP: f32 = 16.0;
+const LIST_ROW_HEIGHT: f32 = 28.0;
+const LIST_ROW_PADDING: f32 = 8.0;
+
+const CARD_MIN_WIDTH: f32 = 176.0;
+const CARD_MAX_WIDTH: f32 = 260.0;
 const CARD_GAP: f32 = 14.0;
 const CARD_ROUNDING: u8 = 8;
-/// Thumbnail height as a multiple of card width. Matches the 5:3 poster
-/// proportion the magazine view leans on; a touch shorter than the
-/// library grid's 4:3 so the body has room for title + button.
+/// Thumbnail height as a multiple of card width: the 5:3 poster, a touch shorter than the
+/// library grid's 4:3.
 const THUMB_ASPECT: f32 = 0.6;
-/// Fixed body height (title up to 2 lines + author + action button +
-/// padding). Card height is `thumb_h + CARD_BODY_HEIGHT`.
-const CARD_BODY_HEIGHT: f32 = 96.0;
+/// Title, author and the row with the status and the action in it, and the gaps around them.
+const CARD_BODY_HEIGHT: f32 = 76.0;
 
 /// Render the Cacowards central panel.
 pub fn render(
@@ -132,36 +141,18 @@ fn render_empty(ui: &mut egui::Ui) -> Option<ActionRequest> {
 // ---------------------------------------------------------------------------
 
 fn render_hero(ui: &mut egui::Ui, state: &AppState, year: i64) {
+    let short = theme::is_short_window(ui.ctx());
+    let height = if short {
+        SHORT_HERO_HEIGHT
+    } else {
+        HERO_HEIGHT
+    };
     let (rect, _) = ui.allocate_exact_size(
-        Vec2::new(ui.available_width(), HERO_HEIGHT),
+        Vec2::new(ui.available_width(), height),
         egui::Sense::hover(),
     );
     let painter = ui.painter_at(rect);
-
-    // Flat dark background with a very slightly warmer right edge — the
-    // previous attempt used a semi-transparent overlay rect which painted
-    // as a hard-edged solid block. Easier to just blend the warm tone
-    // into the base color directly.
     painter.rect_filled(rect, 0, theme::BG_MEDIUM);
-
-    // Subtle warm tint on the right third — built from rect bands so it
-    // fades rather than presenting as a colored panel.
-    let bands = 12;
-    let band_w = 160.0 / bands as f32;
-    for i in 0..bands {
-        let t = (i + 1) as f32 / bands as f32; // 1/bands … 1.0
-        let x = rect.max.x - 160.0 + band_w * i as f32;
-        let band_rect = Rect::from_min_max(
-            egui::pos2(x, rect.min.y),
-            egui::pos2(x + band_w + 0.5, rect.max.y),
-        );
-        // Lerp BG_MEDIUM → slightly warmer; max contribution stays
-        // dim enough that it reads as ambient rather than a panel.
-        let r = lerp_byte(theme::BG_MEDIUM.r(), 0x32, t * 0.45);
-        let g = lerp_byte(theme::BG_MEDIUM.g(), 0x1c, t * 0.45);
-        let b = lerp_byte(theme::BG_MEDIUM.b(), 0x14, t * 0.45);
-        painter.rect_filled(band_rect, 0, Color32::from_rgb(r, g, b));
-    }
 
     // Bottom rule
     painter.line_segment(
@@ -178,79 +169,82 @@ fn render_hero(ui: &mut egui::Ui, state: &AppState, year: i64) {
         state.cacowards.pages.get(&year).map(String::as_str),
     );
 
-    let mut cursor_y = rect.min.y + 24.0;
+    let left = rect.min.x + SECTION_PAD_X;
+    let (total, done) = state.cacowards.year_summary(year);
+    let progress = if total > 0 {
+        format!(
+            "{done} of {total} completed ({:.0}%)",
+            done as f32 * 100.0 / total as f32
+        )
+    } else {
+        "Nothing here counts towards the year".to_string()
+    };
 
-    // Kicker
-    let kicker = hero_kicker(&state.cacowards.all_entries, year);
-    painter.text(
-        egui::pos2(rect.min.x + HERO_PAD_X, cursor_y),
-        egui::Align2::LEFT_TOP,
-        kicker,
-        egui::FontId::proportional(11.0),
-        Color32::from_rgb(0xd4, 0xa1, 0x4a), // gold
-    );
-    cursor_y += 20.0;
+    let title_font = egui::FontId::proportional(if short { 20.0 } else { 28.0 });
+    let mut cursor_y = rect.min.y + 8.0;
+    if !short {
+        painter.text(
+            egui::pos2(left, cursor_y),
+            egui::Align2::LEFT_TOP,
+            hero_kicker(&state.cacowards.all_entries, year),
+            egui::FontId::proportional(11.0),
+            theme::GOLD,
+        );
+        cursor_y += 15.0;
+    }
 
-    // Title — "Cacowards YEAR"
-    let title_font = egui::FontId::proportional(40.0);
-    let prefix_galley = painter.layout_no_wrap(
+    // "Cacowards YEAR"
+    let prefix = painter.layout_no_wrap(
         "Cacowards ".to_string(),
         title_font.clone(),
         theme::TEXT_PRIMARY,
     );
-    let prefix_w = prefix_galley.size().x;
-    painter.galley(
-        egui::pos2(rect.min.x + HERO_PAD_X, cursor_y),
-        prefix_galley,
-        theme::TEXT_PRIMARY,
-    );
-    painter.text(
-        egui::pos2(rect.min.x + HERO_PAD_X + prefix_w, cursor_y),
+    let prefix_width = prefix.size().x;
+    painter.galley(egui::pos2(left, cursor_y), prefix, theme::TEXT_PRIMARY);
+    let year_right = painter.text(
+        egui::pos2(left + prefix_width, cursor_y),
         egui::Align2::LEFT_TOP,
         year.to_string(),
         title_font,
         theme::TEXT_ACCENT,
     );
-    cursor_y += 48.0;
 
-    // Byline
-    let (total, done) = state.cacowards.year_summary(year);
-    let pct = if total > 0 {
-        done as f32 * 100.0 / total as f32
+    if short {
+        painter.text(
+            egui::pos2(year_right.max.x + 12.0, year_right.center().y),
+            egui::Align2::LEFT_CENTER,
+            progress,
+            egui::FontId::proportional(12.0),
+            theme::TEXT_SECONDARY,
+        );
     } else {
-        0.0
-    };
-    let byline = format!(
-        "{done} of {total} entries completed ({pct:.0}%) · Doomworld's annual selection of the year's best WADs"
-    );
-    painter.text(
-        egui::pos2(rect.min.x + HERO_PAD_X, cursor_y),
-        egui::Align2::LEFT_TOP,
-        byline,
-        egui::FontId::proportional(13.0),
-        theme::TEXT_SECONDARY,
-    );
+        cursor_y += 35.0;
+        painter.text(
+            egui::pos2(left, cursor_y),
+            egui::Align2::LEFT_TOP,
+            format!("{progress} \u{00b7} Doomworld's annual selection of the year's best WADs"),
+            egui::FontId::proportional(12.0),
+            theme::TEXT_SECONDARY,
+        );
+    }
 
-    // Hero progress bar — wide, thin, just above the bottom rule.
-    // Replaces the byline as the gut-feel "look how far I've come"
-    // signal; the byline becomes the precise label below it. Fills
-    // green at 100% to mirror the per-category meter's swept state.
-    let bar_h = 4.0;
-    let bar_y = rect.max.y - bar_h - 12.0;
-    let bar_rect = Rect::from_min_max(
-        egui::pos2(rect.min.x + HERO_PAD_X, bar_y),
-        egui::pos2(rect.max.x - HERO_PAD_X, bar_y + bar_h),
+    // How far through the year, along the bottom. What fills it is completed entries, so it
+    // is the colour of Completed.
+    let bar = Rect::from_min_max(
+        egui::pos2(left, rect.max.y - 7.0),
+        egui::pos2(rect.max.x - SECTION_PAD_X, rect.max.y - 3.0),
     );
-    painter.rect_filled(bar_rect, CornerRadius::same(2), theme::BG_LIGHT);
+    painter.rect_filled(bar, CornerRadius::same(2), theme::BG_LIGHT);
     if total > 0 {
-        let fill_w = bar_rect.width() * (done as f32 / total as f32);
-        let fill_rect = Rect::from_min_size(bar_rect.min, Vec2::new(fill_w, bar_h));
-        let fill_color = if done == total {
-            theme::COLOR_SUCCESS
-        } else {
-            theme::TEXT_ACCENT
-        };
-        painter.rect_filled(fill_rect, CornerRadius::same(2), fill_color);
+        let fill = Rect::from_min_size(
+            bar.min,
+            Vec2::new(bar.width() * (done as f32 / total as f32), bar.height()),
+        );
+        painter.rect_filled(
+            fill,
+            CornerRadius::same(2),
+            theme::status_color(Status::Completed),
+        );
     }
 }
 
@@ -258,58 +252,59 @@ fn render_hero(ui: &mut egui::Ui, state: &AppState, year: i64) {
 /// own text, which is why caco links to them rather than carrying them.
 fn render_page_pill(ui: &mut egui::Ui, hero: Rect, page: Option<&str>) {
     let painter = ui.painter_at(hero);
-    let text = if page.is_some() {
-        "WRITE-UPS ON DOOMWORLD \u{2197}"
-    } else {
-        "FROM DOOMWORLD"
+    let Some(page) = page else {
+        return;
     };
-    let font = egui::FontId::proportional(10.0);
-    let galley = painter.layout_no_wrap(text.to_string(), font.clone(), theme::TEXT_MUTED);
+    let text = "Write-ups on Doomworld \u{2197}";
+    let font = egui::FontId::proportional(11.0);
+    let galley = painter.layout_no_wrap(text.to_string(), font.clone(), theme::TEXT_SECONDARY);
     let pad = Vec2::new(10.0, 4.0);
     let size = galley.size() + pad * 2.0;
     // On the title's row, whose right end is free at any window size. The kicker
     // above it reaches the pill's edge at the minimum width.
+    let short = theme::is_short_window(ui.ctx());
     let pill = Rect::from_min_size(
-        egui::pos2(hero.max.x - HERO_PAD_X - size.x, hero.min.y + 62.0),
+        egui::pos2(
+            hero.max.x - SECTION_PAD_X - size.x,
+            hero.min.y + if short { 10.0 } else { 26.0 },
+        ),
         size,
     );
 
-    let mut color = theme::TEXT_MUTED;
-    if let Some(page) = page {
-        let response = ui
-            .interact(
-                pill,
-                ui.scope_id().with("cacoward-page"),
-                egui::Sense::click(),
-            )
-            .on_hover_cursor(egui::CursorIcon::PointingHand)
-            .on_hover_text(page);
-        response.widget_info(|| {
-            egui::WidgetInfo::labeled(egui::Role::Link, true, "Write-ups on Doomworld")
-        });
-        if response.hovered() {
-            color = theme::TEXT_ACCENT;
-        }
-        if response.clicked() {
-            // Nothing to do about a machine with no browser to hand this to.
-            let _ = open::that(page);
-        }
+    let mut color = theme::TEXT_SECONDARY;
+    let response = ui
+        .interact(
+            pill,
+            ui.scope_id().with("cacoward-page"),
+            egui::Sense::click(),
+        )
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text(page);
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::Role::Link, true, "Write-ups on Doomworld")
+    });
+    if response.hovered() {
+        color = theme::TEXT_ACCENT;
+    }
+    if response.clicked() {
+        // Nothing to do about a machine with no browser to hand this to.
+        let _ = open::that(page);
     }
 
     painter.rect(
         pill,
         CornerRadius::same(11),
-        Color32::from_black_alpha(80),
+        theme::BG_DARK,
         egui::Stroke::new(1.0_f32, theme::BORDER_MED),
         StrokeKind::Inside,
     );
     painter.text(pill.min + pad, egui::Align2::LEFT_TOP, text, font, color);
 }
 
-/// "ANNUAL CACOWARDS · 12 winners · 2 runners-up", naming only what the year gave:
-/// most of them had no honorable mentions at all.
+/// "12 winners · 2 runners-up", naming only what the year gave: most of them had no honorable
+/// mentions at all.
 fn hero_kicker(entries: &[(CacowardRecord, EffectiveStatus)], year: i64) -> String {
-    let mut parts = vec!["ANNUAL CACOWARDS".to_string()];
+    let mut parts = Vec::new();
     for (category, one, many) in [
         ("winner", "winner", "winners"),
         ("runner-up", "runner-up", "runners-up"),
@@ -359,7 +354,7 @@ fn render_year_strip(ui: &mut egui::Ui, state: &AppState) -> Option<i64> {
     // twenty-odd chips is 1800pt, against 620pt or so at the minimum window size.
     let mut strip_ui = ui.new_child(
         egui::UiBuilder::new()
-            .max_rect(strip_rect.shrink2(Vec2::new(HERO_PAD_X, 0.0)))
+            .max_rect(strip_rect.shrink2(Vec2::new(SECTION_PAD_X, 0.0)))
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
     );
     // Solid rather than the floating bar that only shows on hover: the strip can
@@ -429,15 +424,15 @@ fn draw_year_chip(
         StrokeKind::Inside,
     );
     painter.text(
-        rect.center() + Vec2::new(0.0, -8.0),
+        rect.center() + Vec2::new(0.0, -7.0),
         egui::Align2::CENTER_CENTER,
         year.to_string(),
-        egui::FontId::proportional(14.0),
+        egui::FontId::proportional(13.0),
         fg,
     );
     let (total, done) = state.cacowards.year_summary(year);
     painter.text(
-        rect.center() + Vec2::new(0.0, 9.0),
+        rect.center() + Vec2::new(0.0, 8.0),
         egui::Align2::CENTER_CENTER,
         format!("{done}/{total}"),
         egui::FontId::proportional(10.0),
@@ -509,16 +504,11 @@ fn render_category_section(
 
     let swept = done == total && total > 0;
 
-    // Section header — small caps, accent
+    // Section header: all on one line, since it is on the screen once per section.
     egui::Frame::new()
-        .inner_margin(egui::Margin {
-            left: SECTION_PAD_X as i8,
-            right: SECTION_PAD_X as i8,
-            top: 0,
-            bottom: 0,
-        })
+        .inner_margin(egui::Margin::symmetric(SECTION_PAD_X as i8, 0))
         .show(ui, |ui| {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label(
                     egui::RichText::new(category_label(category))
                         .size(12.0)
@@ -526,43 +516,188 @@ fn render_category_section(
                         .color(theme::TEXT_ACCENT)
                         .extra_letter_spacing(2.0),
                 );
-                if swept {
-                    ui.add_space(8.0);
-                    paint_swept_chip(ui);
-                }
-            });
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                draw_meter(ui, done, total, 120.0, swept);
-                ui.add_space(10.0);
+                ui.add_space(6.0);
+                draw_meter(ui, done, total, 100.0);
+                ui.add_space(4.0);
                 let mut bits = vec![format!("{done} of {total} completed")];
                 if absent > 0 {
-                    bits.push(format!("{absent} absent"));
+                    bits.push(format!("{absent} not in library"));
                 }
                 if unsupported > 0 {
                     bits.push(format!("{unsupported} unsupported"));
                 }
-                ui.colored_label(theme::TEXT_SECONDARY, bits.join(" · "));
+                ui.colored_label(
+                    theme::TEXT_SECONDARY,
+                    egui::RichText::new(bits.join(" \u{00b7} ")).size(12.0),
+                );
+                if swept {
+                    ui.add_space(4.0);
+                    paint_swept_chip(ui);
+                }
             });
         });
 
-    ui.add_space(14.0);
+    ui.add_space(6.0);
 
-    // Reorder so undone supported entries render first, completed entries
-    // pile up next, and unsupported entries trail at the very end. Stable
-    // sort preserves page order within each group.
-    let mut ordered: Vec<&(CacowardRecord, EffectiveStatus)> = entries.to_vec();
-    ordered.sort_by_key(|(r, s)| {
-        if !r.supported {
-            2u8
-        } else if matches!(s, EffectiveStatus::Library(Status::Completed)) {
-            1
-        } else {
-            0
-        }
+    let layout = state.cacowards.layout;
+    let body = match layout {
+        ViewLayout::List => render_rows(ui, state, entries),
+        ViewLayout::Grid => render_cards(ui, state, entries, thumbnails),
+    };
+    if let Some(a) = body {
+        action.get_or_insert(a);
+    }
+
+    action
+}
+
+/// Entries as a list, as many columns across as fit.
+fn render_rows(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    entries: &[&(CacowardRecord, EffectiveStatus)],
+) -> Option<ActionRequest> {
+    let mut action = None;
+    let available = ui.available_width() - SECTION_PAD_X * 2.0;
+    let columns = ((available + LIST_COLUMN_GAP) / (LIST_COLUMN_MIN + LIST_COLUMN_GAP))
+        .floor()
+        .max(1.0) as usize;
+    let width = (available - (columns - 1) as f32 * LIST_COLUMN_GAP) / columns as f32;
+
+    ui.spacing_mut().item_spacing.y = 0.0;
+    for row in entries.chunks(columns) {
+        egui::Frame::new()
+            .inner_margin(egui::Margin::symmetric(SECTION_PAD_X as i8, 0))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = LIST_COLUMN_GAP;
+                    for (record, status) in row.iter().copied() {
+                        if let Some(a) = render_row(ui, state, record, *status, width) {
+                            action.get_or_insert(a);
+                        }
+                    }
+                });
+            });
+    }
+    action
+}
+
+/// One entry on one line: title, author, status, and what to do about it.
+fn render_row(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    record: &CacowardRecord,
+    status: EffectiveStatus,
+    width: f32,
+) -> Option<ActionRequest> {
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(width, LIST_ROW_HEIGHT), egui::Sense::click());
+    let style = theme::cacoward_style(status, record.supported);
+    let author = record.wad_author.as_deref().unwrap_or("");
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::Role::Button,
+            true,
+            format!("{}, {author}, {}", record.wad_title, style.word),
+        )
     });
 
-    // Card grid — manual layout to keep cards at a fixed width.
+    let selected = state.cacowards.selected_entry_pk == Some(record.id);
+    if response.clicked() {
+        state.cacowards.selected_entry_pk = Some(record.id);
+    }
+    let linked = record
+        .wad_id
+        .and_then(|id| state.cacowards.linked_wads.get(&id));
+    let get = get_target(record, status, linked);
+    let menu_action = entry_menu(&response, record, get);
+
+    let painter = ui.painter_at(rect);
+    if selected {
+        painter.rect_filled(rect, 4, theme::BG_SELECTED);
+    } else if response.hovered() {
+        painter.rect_filled(rect, 4, theme::BG_MEDIUM);
+    }
+
+    // From the right, so that the words get whatever that leaves.
+    let mut right = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(rect.shrink2(Vec2::new(LIST_ROW_PADDING, 0.0)))
+            .layout(egui::Layout::right_to_left(egui::Align::Center)),
+    );
+    let waiting = get.is_some_and(|target| state.gets.is_waiting_for(target));
+    let button_action = action_button(&mut right, record, status, get, waiting);
+    theme::status_pill(&mut right, style, "");
+
+    let left = rect.min.x + LIST_ROW_PADDING;
+    let room = (right.min_rect().min.x - LIST_ROW_PADDING - left).max(0.0);
+    let (title_color, author_color) = entry_text_colors(record);
+    let title_font = egui::FontId::proportional(13.0);
+    let author_font = egui::FontId::proportional(11.0);
+    let title_width = painter
+        .layout_no_wrap(record.wad_title.clone(), title_font.clone(), title_color)
+        .size()
+        .x;
+    let author_width = painter
+        .layout_no_wrap(author.to_string(), author_font.clone(), author_color)
+        .size()
+        .x;
+    let (title_room, author_room) = share_row(room, title_width, author_width);
+    let y = rect.center().y;
+    theme::paint_truncated(
+        &painter,
+        egui::pos2(left, y - 8.0),
+        &record.wad_title,
+        title_font,
+        title_color,
+        title_room,
+    );
+    if author_room > 0.0 {
+        theme::paint_truncated(
+            &painter,
+            egui::pos2(left + title_room + ROW_TEXT_GAP, y - 6.5),
+            author,
+            author_font,
+            author_color,
+            author_room,
+        );
+    }
+    response.on_hover_text(format!("{}\n{author}", record.wad_title));
+
+    menu_action.or(button_action)
+}
+
+const ROW_TEXT_GAP: f32 = 8.0;
+
+/// How to share a row's width between a title and an author who may not both fit. As much
+/// as each needs if they do, and otherwise the title has most of it.
+fn share_row(room: f32, title: f32, author: f32) -> (f32, f32) {
+    let room_for_both = room - ROW_TEXT_GAP;
+    if title + author <= room_for_both {
+        return (title, author);
+    }
+    let title_room = title.min((room_for_both - author).max(room_for_both * 0.62));
+    (title_room, (room_for_both - title_room).max(0.0))
+}
+
+/// Unsupported entries are out of the game, so they recede. Nothing else does.
+fn entry_text_colors(record: &CacowardRecord) -> (egui::Color32, egui::Color32) {
+    if record.supported {
+        (theme::TEXT_PRIMARY, theme::TEXT_SECONDARY)
+    } else {
+        (theme::TEXT_MUTED, theme::TEXT_MUTED)
+    }
+}
+
+/// Entries as posters.
+fn render_cards(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    entries: &[&(CacowardRecord, EffectiveStatus)],
+    thumbnails: Option<&crate::thumbnails::ThumbnailManager>,
+) -> Option<ActionRequest> {
+    let mut action = None;
+    // Manual layout to keep cards at a fixed width.
     let available = ui.available_width() - SECTION_PAD_X * 2.0;
     let card_w = card_width(available);
     let card_h = card_height(card_w);
@@ -570,24 +705,19 @@ fn render_category_section(
         .floor()
         .max(1.0) as usize;
 
-    let rows = ordered.len().div_ceil(columns);
+    let rows = entries.len().div_ceil(columns);
     for row in 0..rows {
         egui::Frame::new()
-            .inner_margin(egui::Margin {
-                left: SECTION_PAD_X as i8,
-                right: SECTION_PAD_X as i8,
-                top: 0,
-                bottom: 0,
-            })
+            .inner_margin(egui::Margin::symmetric(SECTION_PAD_X as i8, 0))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = CARD_GAP;
                     for col in 0..columns {
                         let idx = row * columns + col;
-                        if idx >= ordered.len() {
+                        if idx >= entries.len() {
                             break;
                         }
-                        let (record, status) = ordered[idx];
+                        let (record, status) = entries[idx];
                         if let Some(a) =
                             render_card(ui, state, record, *status, card_w, card_h, thumbnails)
                         {
@@ -600,19 +730,6 @@ fn render_category_section(
             ui.add_space(CARD_GAP);
         }
     }
-
-    ui.add_space(SECTION_PAD_Y);
-
-    // Section divider
-    let avail_rect = ui.available_rect_before_wrap();
-    ui.painter().line_segment(
-        [
-            egui::pos2(avail_rect.min.x + SECTION_PAD_X, avail_rect.min.y),
-            egui::pos2(avail_rect.max.x - SECTION_PAD_X, avail_rect.min.y),
-        ],
-        egui::Stroke::new(1.0_f32, theme::BORDER),
-    );
-
     action
 }
 
@@ -645,7 +762,6 @@ fn render_card(
         ui.allocate_exact_size(Vec2::new(width, height), egui::Sense::click_and_drag());
     let painter = ui.painter_at(rect);
     let rounding = CornerRadius::same(CARD_ROUNDING);
-    let absent = matches!(status, EffectiveStatus::Absent);
 
     // Selection click on the card surface (the action button has its own
     // click handler, but Button is rendered on top so its events take
@@ -655,43 +771,11 @@ fn render_card(
         state.cacowards.selected_entry_pk = Some(record.id);
     }
 
-    // Right-click context menu: manual linking + supported toggle. Used
-    // for the long tail of cases the auto-linker can't reach (renamed
-    // titles, alternative IWAD families, etc.).
     let linked = record
         .wad_id
         .and_then(|id| state.cacowards.linked_wads.get(&id));
     let get = get_target(record, status, linked);
-    let mut menu_action: Option<ActionRequest> = None;
-    response.context_menu(|ui| {
-        if let Some(target) = get
-            && ui.button("Get in Browser").clicked()
-        {
-            menu_action = Some(ActionRequest::Get(target));
-            ui.close();
-        }
-        if ui.button("Link to library WAD…").clicked() {
-            menu_action = Some(ActionRequest::LinkCacoward(record.id));
-            ui.close();
-        }
-        if record.wad_id.is_some() && ui.button("Unlink").clicked() {
-            menu_action = Some(ActionRequest::UnlinkCacoward(record.id));
-            ui.close();
-        }
-        ui.separator();
-        let toggle_label = if record.supported {
-            "Mark as unsupported"
-        } else {
-            "Mark as supported"
-        };
-        if ui.button(toggle_label).clicked() {
-            menu_action = Some(ActionRequest::SetCacowardSupported(
-                record.id,
-                !record.supported,
-            ));
-            ui.close();
-        }
-    });
+    let menu_action = entry_menu(&response, record, get);
 
     // Background — slightly lifted when selected.
     let bg = if selected {
@@ -712,83 +796,73 @@ fn render_card(
     };
     paint_card_thumbnail(&painter, thumb_rect, thumb_rounding, record, thumbnails);
 
-    // Completed and unsupported cards both get a dark wash over the
-    // thumbnail. Completed = "ticked off"; unsupported = "out of the
-    // game" — they recede for different reasons but the visual cue is
-    // the same so the eye lands on actionable cards first.
-    let dim = matches!(status, EffectiveStatus::Library(Status::Completed)) || !record.supported;
-    if dim {
-        painter.rect_filled(thumb_rect, thumb_rounding, Color32::from_black_alpha(140));
+    // What is out of the game recedes. What has been finished does not: it used to be dimmed
+    // too, which made the work done the hardest thing on the page to read.
+    if !record.supported {
+        painter.rect_filled(thumb_rect, thumb_rounding, theme::SCRIM);
     }
-
-    // Top overlay strip + status pill.
-    let strip = Rect::from_min_max(
-        thumb_rect.min,
-        egui::pos2(thumb_rect.max.x, thumb_rect.min.y + 32.0),
-    );
-    painter.rect_filled(strip, thumb_rounding, Color32::from_black_alpha(110));
-    paint_status_pill(
-        &painter,
-        thumb_rect.shrink2(Vec2::new(8.0, 8.0)),
-        status,
-        record.supported,
-    );
 
     // ── Body ──────────────────────────────────────────────────────────
     // (No status-colored left edge — the pill on the thumbnail conveys
     // the same info, and a square-cornered bar peeking past the card's
     // rounded border looked broken.)
 
-    let pad_x = 12.0;
+    let pad_x = 10.0;
     let body = Rect::from_min_max(
-        egui::pos2(rect.min.x + pad_x, thumb_rect.max.y + 10.0),
-        egui::pos2(rect.max.x - pad_x, rect.max.y - 10.0),
+        egui::pos2(rect.min.x + pad_x, thumb_rect.max.y + 8.0),
+        egui::pos2(rect.max.x - pad_x, rect.max.y - 8.0),
     );
 
-    let completed = matches!(status, EffectiveStatus::Library(Status::Completed));
-    let title_color = if completed || absent {
-        theme::TEXT_MUTED
-    } else {
-        theme::TEXT_PRIMARY
-    };
-    let author_color = if completed {
-        theme::TEXT_MUTED
-    } else {
-        theme::TEXT_SECONDARY
-    };
-    let mut title_job = egui::text::LayoutJob::single_section(
-        record.wad_title.clone(),
-        egui::TextFormat {
-            font_id: egui::FontId::proportional(14.0),
-            color: title_color,
-            ..Default::default()
-        },
+    let (title_color, author_color) = entry_text_colors(record);
+    theme::paint_truncated(
+        &painter,
+        body.min,
+        &record.wad_title,
+        egui::FontId::proportional(14.0),
+        title_color,
+        body.width(),
     );
-    title_job.wrap.max_width = body.width();
-    title_job.wrap.max_rows = 2;
-    title_job.wrap.break_anywhere = false;
-    let title_galley = painter.layout_job(title_job);
-    let title_h = title_galley.size().y;
-    painter.galley(body.min, title_galley, title_color);
-
     if let Some(author) = record.wad_author.as_deref() {
-        painter.text(
-            egui::pos2(body.min.x, body.min.y + title_h + 3.0),
-            egui::Align2::LEFT_TOP,
-            truncate(author, 36),
+        theme::paint_truncated(
+            &painter,
+            egui::pos2(body.min.x, body.min.y + 19.0),
+            author,
             egui::FontId::proportional(11.0),
             author_color,
+            body.width(),
         );
     }
+    response.clone().on_hover_text(format!(
+        "{}\n{}",
+        record.wad_title,
+        record.wad_author.as_deref().unwrap_or("")
+    ));
+    let style = theme::cacoward_style(status, record.supported);
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::Role::Button,
+            true,
+            format!("{}, {}", record.wad_title, style.word),
+        )
+    });
 
     let button_rect = Rect::from_min_max(
         egui::pos2(body.min.x, body.max.y - 22.0),
         egui::pos2(body.max.x, body.max.y),
     );
+    // On the picture rather than beside the buttons, since a card can be too narrow for an
+    // entry's status and both of the things to do about it.
+    theme::paint_status_pill(
+        &painter,
+        thumb_rect.min.x + 8.0,
+        thumb_rect.min.y + 16.0,
+        style,
+        "",
+    );
     let mut sub_ui = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(button_rect)
-            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+            .layout(egui::Layout::right_to_left(egui::Align::Center)),
     );
     let waiting = get.is_some_and(|target| state.gets.is_waiting_for(target));
     let button_action = action_button(&mut sub_ui, record, status, get, waiting);
@@ -804,10 +878,7 @@ fn render_card(
             egui::Stroke::new(2.0_f32, theme::TEXT_ACCENT),
             StrokeKind::Inside,
         );
-    } else if response.hovered() || absent {
-        // Hover and absent share the same muted ring — absent acts as
-        // the persistent "this row isn't in your library" affordance,
-        // hover is the transient pointer feedback.
+    } else if response.hovered() {
         painter.rect_stroke(
             rect,
             rounding,
@@ -829,86 +900,58 @@ fn paint_card_thumbnail(
     record: &CacowardRecord,
     thumbnails: Option<&crate::thumbnails::ThumbnailManager>,
 ) {
-    // Try the linked WAD's TITLEPIC first.
-    let thumb_key = record
+    // A linked WAD's own picture, or for an entry not in the library, the one its wiki
+    // page has, which the app asks for under a key of its own.
+    let key = record
         .wad_id
         .unwrap_or_else(|| thumb_key_for_absent(record.id));
-    if let Some(tm) = thumbnails
-        && let Some(tex) = tm.get(thumb_key)
-    {
-        painter.rect_filled(thumb_rect, thumb_rounding, Color32::BLACK);
-        let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-        painter.image(tex.id(), thumb_rect, uv, Color32::WHITE);
-        return;
-    }
-
-    // Gradient placeholder seeded by the cacoward pk so the same entry
-    // always paints the same way across renders.
-    let (c1, c2, ci) = theme::thumb_colors(record.id);
-    painter.rect_filled(thumb_rect, thumb_rounding, c1);
-    let steps = 32;
-    for i in 0..steps {
-        let t0 = i as f32 / steps as f32;
-        let t1 = (i + 1) as f32 / steps as f32;
-        let band_y0 = thumb_rect.min.y + thumb_rect.height() * t0;
-        let band_y1 = thumb_rect.min.y + thumb_rect.height() * t1;
-        let r = lerp_byte(c1.r(), c2.r(), t0);
-        let g = lerp_byte(c1.g(), c2.g(), t0);
-        let b = lerp_byte(c1.b(), c2.b(), t0);
-        let band = Rect::from_min_max(
-            egui::pos2(thumb_rect.min.x, band_y0),
-            egui::pos2(thumb_rect.max.x, band_y1),
-        );
-        painter.rect_filled(band, 0, Color32::from_rgb(r, g, b));
-    }
-    let initials: String = record
-        .wad_title
-        .chars()
-        .filter(|c| c.is_alphanumeric())
-        .take(2)
-        .flat_map(|c| c.to_uppercase())
-        .collect();
-    if !initials.is_empty() {
-        painter.text(
-            thumb_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            &initials,
-            egui::FontId::proportional(32.0),
-            ci,
-        );
-    }
-}
-
-fn paint_status_pill(
-    painter: &egui::Painter,
-    content: Rect,
-    status: EffectiveStatus,
-    supported: bool,
-) {
-    // Unsupported overrides whatever the linked-WAD status would say —
-    // the user has explicitly removed this entry from the completion
-    // game, so it shouldn't read "in progress" or "completed" either.
-    let (text, color) = if supported {
-        status_label_and_color(status)
-    } else {
-        ("unsupported", theme::TEXT_MUTED)
-    };
-    let font = egui::FontId::proportional(10.0);
-    let galley = painter.layout_no_wrap(text.to_string(), font.clone(), color);
-    let pad = Vec2::new(8.0, 2.0);
-    let pill_size = galley.size() + pad * 2.0;
-    let pill_rect = Rect::from_min_size(
-        egui::pos2(content.max.x - pill_size.x, content.min.y - 2.0),
-        pill_size,
-    );
-    let bg = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 32);
-    painter.rect_filled(pill_rect, CornerRadius::same(11), bg);
-    painter.galley(pill_rect.min + pad, galley, color);
+    let picture = thumbnails.and_then(|tm| tm.get(key));
+    theme::paint_thumbnail(painter, thumb_rect, thumb_rounding, picture);
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// What an entry offers on a right click: getting it, linking it by hand for the cases the
+/// automatic link can't reach (renamed titles and so on), and whether it counts.
+fn entry_menu(
+    response: &egui::Response,
+    record: &CacowardRecord,
+    get: Option<GetTarget>,
+) -> Option<ActionRequest> {
+    let mut action = None;
+    response.context_menu(|ui| {
+        if let Some(target) = get
+            && ui.button("Get in Browser").clicked()
+        {
+            action = Some(ActionRequest::Get(target));
+            ui.close();
+        }
+        if ui.button("Link to a WAD in Your Library\u{2026}").clicked() {
+            action = Some(ActionRequest::LinkCacoward(record.id));
+            ui.close();
+        }
+        if record.wad_id.is_some() && ui.button("Unlink").clicked() {
+            action = Some(ActionRequest::UnlinkCacoward(record.id));
+            ui.close();
+        }
+        ui.separator();
+        let toggle_label = if record.supported {
+            "Mark as Unsupported"
+        } else {
+            "Mark as Supported"
+        };
+        if ui.button(toggle_label).clicked() {
+            action = Some(ActionRequest::SetCacowardSupported(
+                record.id,
+                !record.supported,
+            ));
+            ui.close();
+        }
+    });
+    action
+}
 
 /// A section's heading. Categories are free text, so one this has never heard of
 /// still gets a heading, spelled from its name.
@@ -924,18 +967,6 @@ fn category_label(category: &str) -> String {
         "newcomer" => "HONORING A NEWCOMER".to_string(),
         "adrians-pen" => "ADRIAN'S PEN".to_string(),
         other => other.replace('-', " ").to_uppercase(),
-    }
-}
-
-fn status_label_and_color(status: EffectiveStatus) -> (&'static str, Color32) {
-    match status {
-        EffectiveStatus::Library(Status::Completed) => ("completed", theme::COLOR_SUCCESS),
-        EffectiveStatus::Library(Status::InProgress) => ("in progress", theme::COLOR_WARNING),
-        EffectiveStatus::Library(Status::Abandoned) => ("dropped", theme::COLOR_ERROR),
-        EffectiveStatus::Library(Status::Unplayed) => {
-            ("unplayed", Color32::from_rgb(0x33, 0x66, 0xcc))
-        }
-        EffectiveStatus::Absent => ("absent", theme::TEXT_SECONDARY),
     }
 }
 
@@ -955,7 +986,7 @@ fn get_target(
     }
 }
 
-/// What a card offers on its face. The rest is in its menu.
+/// What an entry offers on its face. The rest is in its menu.
 #[derive(Debug, PartialEq, Eq)]
 enum CardButtons {
     Import,
@@ -963,7 +994,6 @@ enum CardButtons {
     GetOrImport(GetTarget),
     Get(GetTarget),
     Play(i64),
-    Open(i64),
     None,
 }
 
@@ -973,7 +1003,7 @@ enum CardButtons {
 /// not, the file is what's missing and only a browser can get it, so Get leads, with
 /// Import beside it for the metadata on a day the forum lets caco in.
 ///
-/// A WAD the user has finished with keeps Open, whether or not its file is here. A
+/// A WAD the user has finished with keeps Play, whether or not its file is here. A
 /// missing file only needs doing something about if it is going to be played, and an
 /// accent-coloured button on every card that was cleaned up after would read as a list
 /// of things left to do.
@@ -991,8 +1021,7 @@ fn card_buttons(
             let still_playing = matches!(status, Status::InProgress | Status::Unplayed);
             match get {
                 Some(target) if still_playing => CardButtons::Get(target),
-                _ if still_playing => CardButtons::Play(wad_id),
-                _ => CardButtons::Open(wad_id),
+                _ => CardButtons::Play(wad_id),
             }
         }
     }
@@ -1031,11 +1060,6 @@ fn action_button(
                 action = Some(ActionRequest::Play(wad_id));
             }
         }
-        CardButtons::Open(wad_id) => {
-            if secondary_button(ui, "Open").clicked() {
-                action = Some(ActionRequest::Play(wad_id));
-            }
-        }
         CardButtons::None => {}
     }
     action
@@ -1050,15 +1074,9 @@ fn get_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
 
 fn primary_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
     ui.add(
-        egui::Button::new(
-            egui::RichText::new(label)
-                .size(11.0)
-                .strong()
-                .color(Color32::from_rgb(0x1a, 0x0a, 0x04)),
-        )
-        .fill(theme::TEXT_ACCENT)
-        .corner_radius(4.0)
-        .min_size(Vec2::new(0.0, 22.0)),
+        theme::small_primary_button(label)
+            .corner_radius(4.0)
+            .min_size(Vec2::new(0.0, 22.0)),
     )
 }
 
@@ -1076,21 +1094,18 @@ fn secondary_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
     )
 }
 
-fn draw_meter(ui: &mut egui::Ui, done: usize, total: usize, width: f32, swept: bool) {
+fn draw_meter(ui: &mut egui::Ui, done: usize, total: usize, width: f32) {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 6.0), egui::Sense::hover());
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, CornerRadius::same(3), theme::BG_LIGHT);
     if total > 0 {
         let fill_w = rect.width() * (done as f32 / total as f32);
         let fill_rect = Rect::from_min_size(rect.min, Vec2::new(fill_w, rect.height()));
-        // Fill turns green when the category is swept — the meter and
-        // the chip read the same status, so a glance is enough.
-        let fill_color = if swept {
-            theme::COLOR_SUCCESS
-        } else {
-            theme::TEXT_ACCENT
-        };
-        painter.rect_filled(fill_rect, CornerRadius::same(3), fill_color);
+        painter.rect_filled(
+            fill_rect,
+            CornerRadius::same(3),
+            theme::status_color(Status::Completed),
+        );
     }
 }
 
@@ -1099,16 +1114,14 @@ fn draw_meter(ui: &mut egui::Ui, done: usize, total: usize, width: f32, swept: b
 /// surface: a single Mordeth Award sweep is a one-clickaway badge of
 /// honour, a 12/12 Winners sweep is a year-long victory.
 fn paint_swept_chip(ui: &mut egui::Ui) {
-    let gold = Color32::from_rgb(0xd4, 0xa1, 0x4a);
-    let bg = Color32::from_rgba_unmultiplied(gold.r(), gold.g(), gold.b(), 40);
     egui::Frame::new()
-        .fill(bg)
+        .fill(theme::blend(theme::BG_DARK, theme::GOLD, 0.16))
         .corner_radius(11.0)
         .inner_margin(egui::Margin::symmetric(8, 2))
         .show(ui, |ui| {
             ui.label(
                 egui::RichText::new("✓ SWEPT")
-                    .color(gold)
+                    .color(theme::GOLD)
                     .size(10.0)
                     .strong()
                     .extra_letter_spacing(1.0),
@@ -1122,20 +1135,6 @@ fn paint_swept_chip(ui: &mut egui::Ui) {
 /// the existing thumbnail cache + worker pool with.
 pub fn thumb_key_for_absent(cacoward_pk: i64) -> i64 {
     -cacoward_pk
-}
-
-fn lerp_byte(a: u8, b: u8, t: f32) -> u8 {
-    let t = t.clamp(0.0, 1.0);
-    (a as f32 + (b as f32 - a as f32) * t).round() as u8
-}
-
-fn truncate(s: &str, max_chars: usize) -> String {
-    if s.chars().count() <= max_chars {
-        return s.to_string();
-    }
-    let mut out: String = s.chars().take(max_chars - 1).collect();
-    out.push('…');
-    out
 }
 
 #[cfg(test)]
@@ -1246,11 +1245,11 @@ mod tests {
         for status in [Status::Completed, Status::Abandoned] {
             assert_eq!(
                 card_buttons(&record, library(status), None),
-                CardButtons::Open(3)
+                CardButtons::Play(3)
             );
             assert_eq!(
                 card_buttons(&record, library(status), Some(wad)),
-                CardButtons::Open(3)
+                CardButtons::Play(3)
             );
         }
     }
@@ -1265,11 +1264,34 @@ mod tests {
             entry(2023, "runner-up"),
             entry(2023, "honorable-mention"),
         ];
-        assert_eq!(hero_kicker(&entries, 2011), "ANNUAL CACOWARDS · 2 winners");
+        assert_eq!(hero_kicker(&entries, 2011), "2 winners");
         assert_eq!(
             hero_kicker(&entries, 2023),
-            "ANNUAL CACOWARDS · 1 winner · 1 runner-up · 1 honorable mention"
+            "1 winner · 1 runner-up · 1 honorable mention"
         );
+    }
+
+    #[test]
+    fn a_row_gives_the_title_most_of_what_there_is_when_both_will_not_fit() {
+        // Room for both, and each has what it needs.
+        assert_eq!(share_row(300.0, 100.0, 50.0), (100.0, 50.0));
+        // A short title leaves the long author the rest.
+        assert_eq!(share_row(300.0, 100.0, 400.0), (100.0, 192.0));
+        // A long title takes most of it, and the author still gets something.
+        let (title, author) = share_row(300.0, 400.0, 400.0);
+        assert!(title > author, "{title} {author}");
+        assert_eq!(title + author, 300.0 - ROW_TEXT_GAP);
+    }
+
+    /// Why this is a list: a year's entries nearly fit on a screen, where six cards did.
+    #[test]
+    fn a_list_at_the_default_window_has_two_columns_and_the_smallest_has_one() {
+        let columns = |window: f32| {
+            let available: f32 = window - 200.0 - SECTION_PAD_X * 2.0;
+            ((available + LIST_COLUMN_GAP) / (LIST_COLUMN_MIN + LIST_COLUMN_GAP)).floor() as usize
+        };
+        assert_eq!(columns(1200.0), 2);
+        assert_eq!(columns(800.0), 1);
     }
 
     #[test]

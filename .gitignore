@@ -10,6 +10,11 @@ dist/
 target/
 *.pdb
 
+# What a snapshot comparison leaves beside the images it compared
+crates/caco/tests/snapshots/*.new.png
+crates/caco/tests/snapshots/*.diff.png
+crates/caco/tests/snapshots/*.old.png
+
 # IDE / editor
 .idea/
 .vscode/

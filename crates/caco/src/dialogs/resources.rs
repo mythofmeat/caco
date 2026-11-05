@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 
-use egui_extras::{Column, TableBuilder};
+use egui_extras::Column;
 use rusqlite::Connection;
 
 use caco_core::config;
@@ -10,6 +10,7 @@ use caco_core::db::id24::{self, Id24Record};
 use caco_core::db::iwads::{self, IwadRecord};
 use caco_core::resource_service;
 
+use crate::dialogs::{Dialog, dialog_table, form_label, tab_bar};
 use crate::theme;
 
 /// Active sub-tab within the Resources dialog.
@@ -125,106 +126,44 @@ impl ResourcesDialogState {
 
         let mut result = ResourcesResult::Open;
 
-        crate::dialogs::modal_window(ctx, "Resources", [750.0, 500.0]).show(ctx, |ui| {
-            // Tab bar
-            ui.horizontal(|ui| {
-                let iwad_active = self.active_tab == ResourceTab::Iwad;
-                let iwad_text = egui::RichText::new("IWAD");
-                let iwad_text = if iwad_active {
-                    iwad_text.strong().color(theme::TEXT_ACCENT)
-                } else {
-                    iwad_text.color(theme::TEXT_SECONDARY)
-                };
-                if ui.selectable_label(iwad_active, iwad_text).clicked() {
-                    self.active_tab = ResourceTab::Iwad;
-                }
-
-                let id24_active = self.active_tab == ResourceTab::Id24;
-                let id24_text = egui::RichText::new("id24");
-                let id24_text = if id24_active {
-                    id24_text.strong().color(theme::TEXT_ACCENT)
-                } else {
-                    id24_text.color(theme::TEXT_SECONDARY)
-                };
-                if ui.selectable_label(id24_active, id24_text).clicked() {
-                    self.active_tab = ResourceTab::Id24;
-                }
-            });
-
-            ui.add_space(4.0);
-
-            // Table
-            match self.active_tab {
-                ResourceTab::Iwad => self.render_iwad_table(ui),
-                ResourceTab::Id24 => self.render_id24_table(ui),
-            }
-
-            ui.add_space(4.0);
-            ui.separator();
-            ui.add_space(4.0);
-
-            // Import row
-            ui.horizontal(|ui| {
-                ui.label("Import path:");
-                let response = ui.add(
-                    egui::TextEdit::singleline(&mut self.import_path)
-                        .desired_width(ui.available_width() - 120.0)
-                        .hint_text("Path to IWAD or id24 WAD file..."),
-                );
-                let enter_pressed =
-                    response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                let browse_busy = self.pending_browse.is_some();
-                if ui
-                    .add_enabled(!browse_busy, egui::Button::new("Browse\u{2026}"))
-                    .clicked()
-                {
-                    let mut req =
-                        crate::workers::FileDialogRequest::open().add_filter("WAD files", &["wad"]);
-                    if let Some(dir) = dirs::home_dir() {
-                        req = req.set_directory(dir);
+        Dialog::new("IWADs", [760.0, 520.0]).show(ctx, |dialog| {
+            dialog
+                .pinned(|ui| {
+                    tab_bar(
+                        ui,
+                        &mut self.active_tab,
+                        &[(ResourceTab::Iwad, "IWADs"), (ResourceTab::Id24, "id24")],
+                    );
+                })
+                .fill(|ui, height| match self.active_tab {
+                    ResourceTab::Iwad => self.render_iwad_table(ui, height),
+                    ResourceTab::Id24 => self.render_id24_table(ui, height),
+                })
+                .above(|ui| {
+                    self.render_add_row(ctx, ui, conn);
+                    if let Some((text, is_error)) = &self.status_text {
+                        let color = if *is_error {
+                            theme::COLOR_ERROR
+                        } else {
+                            theme::TEXT_SECONDARY
+                        };
+                        ui.colored_label(color, text.as_str());
                     }
-                    self.pending_browse =
-                        Some(crate::workers::spawn_file_dialog(Some(ctx.clone()), req));
-                }
-                if ui.button("Add").clicked() || enter_pressed {
-                    self.do_import(conn);
-                }
-            });
-
-            // Status text
-            if let Some((text, is_error)) = &self.status_text {
-                let color = if *is_error {
-                    theme::COLOR_ERROR
-                } else {
-                    theme::COLOR_SUCCESS
-                };
-                ui.colored_label(color, text.as_str());
-            }
-
-            ui.add_space(4.0);
-            ui.separator();
-            ui.add_space(4.0);
-
-            // Button row
-            ui.horizontal(|ui| {
-                let has_selection = match self.active_tab {
-                    ResourceTab::Iwad => self.selected_iwad.is_some() && !self.iwads.is_empty(),
-                    ResourceTab::Id24 => self.selected_id24.is_some() && !self.id24s.is_empty(),
-                };
-
-                if ui
-                    .add_enabled(has_selection, egui::Button::new("Delete Selected"))
-                    .clicked()
-                {
-                    self.do_delete(conn);
-                }
-
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Close").clicked() {
+                })
+                .buttons(|row| {
+                    let has_selection = match self.active_tab {
+                        ResourceTab::Iwad => self.selected_iwad.is_some() && !self.iwads.is_empty(),
+                        ResourceTab::Id24 => self.selected_id24.is_some() && !self.id24s.is_empty(),
+                    };
+                    row.left(|ui| {
+                        if has_selection && ui.button("Delete Selected").clicked() {
+                            self.do_delete(conn);
+                        }
+                    });
+                    if row.close() {
                         result = ResourcesResult::Closed;
                     }
-                });
-            });
+                })
         });
 
         // Escape closes
@@ -235,28 +174,57 @@ impl ResourcesDialogState {
         result
     }
 
-    fn render_iwad_table(&mut self, ui: &mut egui::Ui) {
+    /// Adding a file, which can turn out to be either kind.
+    fn render_add_row(&mut self, ctx: &egui::Context, ui: &mut egui::Ui, conn: &Connection) {
+        ui.horizontal(|ui| {
+            let label = form_label(ui, "Add a file");
+            let response = ui
+                .add(
+                    egui::TextEdit::singleline(&mut self.import_path)
+                        .desired_width(ui.available_width() - 130.0)
+                        .hint_text("Where an IWAD or id24 WAD is"),
+                )
+                .labelled_by(label.id);
+            let enter_pressed =
+                response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            let browse_busy = self.pending_browse.is_some();
+            if ui
+                .add_enabled(!browse_busy, egui::Button::new("Browse\u{2026}"))
+                .clicked()
+            {
+                let mut req =
+                    crate::workers::FileDialogRequest::open().add_filter("WAD files", &["wad"]);
+                if let Some(dir) = dirs::home_dir() {
+                    req = req.set_directory(dir);
+                }
+                self.pending_browse =
+                    Some(crate::workers::spawn_file_dialog(Some(ctx.clone()), req));
+            }
+            if ui.button("Add").clicked() || enter_pressed {
+                self.do_import(conn);
+            }
+        });
+    }
+
+    fn render_iwad_table(&mut self, ui: &mut egui::Ui, height: f32) {
         if self.iwads.is_empty() {
-            ui.colored_label(theme::TEXT_SECONDARY, "No IWADs registered.");
+            ui.colored_label(
+                theme::TEXT_SECONDARY,
+                "No IWADs yet. Add the game files you own, such as doom2.wad, below.",
+            );
             return;
         }
 
         let text_height = ui.text_style_height(&egui::TextStyle::Body);
         let row_height = text_height + 6.0;
 
-        let table = TableBuilder::new(ui)
-            .striped(true)
-            .resizable(true)
-            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+        dialog_table(ui, height - row_height)
             .sense(egui::Sense::click())
-            .column(Column::initial(100.0).at_least(60.0)) // Family
-            .column(Column::initial(80.0).at_least(50.0)) // Variant
-            .column(Column::initial(200.0).at_least(100.0)) // Title
-            .column(Column::remainder().at_least(150.0)); // Path
-
-        table
+            .column(Column::exact(100.0)) // Family
+            .column(Column::exact(140.0)) // Version
+            .column(Column::remainder().at_least(150.0).clip(true)) // Title
             .header(row_height + 2.0, |mut header| {
-                for label in ["Family", "Variant", "Title", "Path"] {
+                for label in ["Game", "Version", "Title"] {
                     header.col(|ui| {
                         ui.strong(label);
                     });
@@ -277,49 +245,45 @@ impl ResourcesDialogState {
                         ui.label(&iwad.family);
                     });
                     row.col(|ui| {
-                        let variant_display = if is_preferred {
-                            format!("{} *", iwad.variant)
+                        let variant = if is_preferred {
+                            format!("{} (preferred)", iwad.variant)
                         } else {
                             iwad.variant.clone()
                         };
-                        ui.label(variant_display);
+                        ui.label(variant);
                     });
                     row.col(|ui| {
                         ui.label(iwad.title.as_deref().unwrap_or(""));
                     });
-                    row.col(|ui| {
-                        ui.colored_label(theme::TEXT_SECONDARY, &iwad.path);
-                    });
 
-                    if row.response().clicked() {
+                    let response = row.response();
+                    if response.clicked() {
                         self.selected_iwad = Some(idx);
                     }
+                    response.on_hover_text(&iwad.path);
                 });
             });
     }
 
-    fn render_id24_table(&mut self, ui: &mut egui::Ui) {
+    fn render_id24_table(&mut self, ui: &mut egui::Ui, height: f32) {
         if self.id24s.is_empty() {
-            ui.colored_label(theme::TEXT_SECONDARY, "No id24 WADs registered.");
+            ui.colored_label(
+                theme::TEXT_SECONDARY,
+                "No id24 WADs yet. Add one below, for WADs that need id24 resources.",
+            );
             return;
         }
 
         let text_height = ui.text_style_height(&egui::TextStyle::Body);
         let row_height = text_height + 6.0;
 
-        let table = TableBuilder::new(ui)
-            .striped(true)
-            .resizable(true)
-            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+        dialog_table(ui, height - row_height)
             .sense(egui::Sense::click())
-            .column(Column::initial(120.0).at_least(60.0)) // Name
-            .column(Column::initial(80.0).at_least(50.0)) // Version
-            .column(Column::initial(200.0).at_least(100.0)) // Title
-            .column(Column::remainder().at_least(150.0)); // Path
-
-        table
+            .column(Column::exact(140.0)) // Name
+            .column(Column::exact(100.0)) // Version
+            .column(Column::remainder().at_least(150.0).clip(true)) // Title
             .header(row_height + 2.0, |mut header| {
-                for label in ["Name", "Version", "Title", "Path"] {
+                for label in ["Name", "Version", "Title"] {
                     header.col(|ui| {
                         ui.strong(label);
                     });
@@ -343,13 +307,12 @@ impl ResourcesDialogState {
                     row.col(|ui| {
                         ui.label(record.title.as_deref().unwrap_or(""));
                     });
-                    row.col(|ui| {
-                        ui.colored_label(theme::TEXT_SECONDARY, &record.path);
-                    });
 
-                    if row.response().clicked() {
+                    let response = row.response();
+                    if response.clicked() {
                         self.selected_id24 = Some(idx);
                     }
+                    response.on_hover_text(&record.path);
                 });
             });
     }
@@ -366,7 +329,7 @@ impl ResourcesDialogState {
         match resource_service::register_iwad(conn, &path) {
             Ok(Some((name, _, title))) => {
                 self.import_path.clear();
-                self.status_text = Some((format!("Registered IWAD: {title} ({name})"), false));
+                self.status_text = Some((format!("Added {title} ({name})."), false));
                 self.active_tab = ResourceTab::Iwad;
                 self.modified = true;
                 self.load(conn);
@@ -383,14 +346,16 @@ impl ResourcesDialogState {
         match resource_service::register_id24(conn, &path) {
             Ok(Some((name, _, title))) => {
                 self.import_path.clear();
-                self.status_text = Some((format!("Registered id24: {title} ({name})"), false));
+                self.status_text = Some((format!("Added {title} ({name})."), false));
                 self.active_tab = ResourceTab::Id24;
                 self.modified = true;
                 self.load(conn);
             }
             Ok(None) => {
-                self.status_text =
-                    Some(("File not recognized as IWAD or id24 WAD".to_string(), true));
+                self.status_text = Some((
+                    "That doesn't look like an IWAD or an id24 WAD.".to_string(),
+                    true,
+                ));
             }
             Err(e) => {
                 self.status_text = Some((format!("Error: {e}"), true));
@@ -413,7 +378,7 @@ impl ResourcesDialogState {
                             let _ = fs::remove_file(p);
                         }
                     }
-                    self.status_text = Some(("IWAD removed".to_string(), false));
+                    self.status_text = Some(("IWAD removed.".to_string(), false));
                     self.modified = true;
                     self.load(conn);
                 }
@@ -430,7 +395,7 @@ impl ResourcesDialogState {
                             let _ = fs::remove_file(p);
                         }
                     }
-                    self.status_text = Some(("id24 WAD removed".to_string(), false));
+                    self.status_text = Some(("id24 WAD removed.".to_string(), false));
                     self.modified = true;
                     self.load(conn);
                 }

@@ -23,8 +23,8 @@ fn compute_relative_duration(dt: &NaiveDateTime) -> RelativeDuration {
     }
 }
 
-/// Format a timestamp as relative time (e.g., "2h ago", "3d ago").
-/// Used in the WAD table column.
+/// Format a timestamp as relative time (e.g., "2h ago", "3d ago"), or past a year the date,
+/// since "6y ago" says little and a date says when. Used in the WAD table column.
 pub fn relative_time(dt: &NaiveDateTime) -> String {
     let d = compute_relative_duration(dt);
 
@@ -41,7 +41,7 @@ pub fn relative_time(dt: &NaiveDateTime) -> String {
     } else if d.months < 12 {
         format!("{}mo ago", d.months)
     } else {
-        format!("{}y ago", d.years)
+        dt.format("%Y-%m-%d").to_string()
     }
 }
 
@@ -76,10 +76,39 @@ pub fn relative_time_full(dt: &NaiveDateTime) -> String {
     format!("{} ({})", relative, date)
 }
 
-/// Parse an ISO 8601 timestamp string into NaiveDateTime.
+/// Parse a stored timestamp into this machine's time.
+///
+/// A session's are RFC 3339 with a zone and nanoseconds, as `chrono` writes them. This only
+/// used to read the two zoneless forms, which meant that the table's Last Played column was
+/// always empty.
 pub fn parse_timestamp(ts: &str) -> Option<NaiveDateTime> {
-    // Try common formats: "2024-06-15T18:30:00" or "2024-06-15 18:30:00"
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(ts) {
+        return Some(dt.with_timezone(&Local).naive_local());
+    }
     NaiveDateTime::parse_from_str(ts, "%Y-%m-%dT%H:%M:%S")
         .or_else(|_| NaiveDateTime::parse_from_str(ts, "%Y-%m-%d %H:%M:%S"))
         .ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_what_sessions_actually_store_can_be_read() {
+        assert!(parse_timestamp("2026-11-05T06:41:33.517597605+00:00").is_some());
+        assert!(parse_timestamp("2026-06-24T06:30:53").is_some());
+        assert!(parse_timestamp("2026-06-24 06:30:53").is_some());
+        assert!(parse_timestamp("whenever").is_none());
+    }
+
+    #[test]
+    fn test_past_a_year_it_says_when() {
+        let long_ago = NaiveDateTime::parse_from_str("2019-06-14 12:00:00", "%Y-%m-%d %H:%M:%S")
+            .expect("a date");
+        assert_eq!(relative_time(&long_ago), "2019-06-14");
+
+        let recently = Local::now().naive_local() - chrono::Duration::days(3);
+        assert_eq!(relative_time(&recently), "3d ago");
+    }
 }

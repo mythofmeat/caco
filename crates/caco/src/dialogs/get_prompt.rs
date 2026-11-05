@@ -12,12 +12,11 @@ use caco_core::config::LinkMode;
 use caco_core::utils::format_size;
 use egui::text::{LayoutJob, TextFormat};
 
+use crate::dialogs::{Dialog, Primary};
 use crate::get::Asking;
 use crate::theme;
 
-/// Clear of the status bar below it and the window's edge beside it.
-const FROM_THE_CORNER: [f32; 2] = [-16.0, -36.0];
-const WIDTH: f32 = 340.0;
+const WIDTH: f32 = 360.0;
 
 /// What the user said about the file.
 #[derive(Debug, PartialEq, Eq)]
@@ -30,27 +29,26 @@ pub enum GetAnswer {
 /// that a dialog being open somewhere does not stop it being seen.
 pub fn render(ctx: &egui::Context, asking: &Asking<'_>, mode: LinkMode) -> Option<GetAnswer> {
     let mut answer = None;
-    egui::Window::new("Download Finished")
-        .order(egui::Order::Foreground)
-        .anchor(egui::Align2::RIGHT_BOTTOM, FROM_THE_CORNER)
-        .collapsible(false)
-        .resizable(false)
-        .default_width(WIDTH)
-        .show(ctx, |ui| {
-            ui.spacing_mut().item_spacing.y = 8.0;
-            ui.label(question(ui, asking));
-            ui.colored_label(
-                theme::TEXT_SECONDARY,
-                egui::RichText::new(details(asking.path, asking.size, mode)).size(11.0),
-            );
-            ui.horizontal(|ui| {
-                if ui.button("Link").clicked() {
-                    answer = Some(GetAnswer::Link);
-                }
-                if ui.button("Not This One").clicked() {
-                    answer = Some(GetAnswer::NotThisOne);
-                }
-            });
+    Dialog::new("Download Finished", [WIDTH, 240.0])
+        .in_the_corner()
+        .show(ctx, |dialog| {
+            dialog
+                .scroll(|ui| {
+                    ui.label(question(ui, asking));
+                    ui.colored_label(
+                        theme::TEXT_SECONDARY,
+                        egui::RichText::new(details(asking.path, asking.size, mode)).size(11.0),
+                    );
+                })
+                .buttons(|row| {
+                    let ended = row.end(Some("Not This One"), Some(Primary::new("Link")));
+                    if ended.dismissed {
+                        answer = Some(GetAnswer::NotThisOne);
+                    }
+                    if ended.primary {
+                        answer = Some(GetAnswer::Link);
+                    }
+                })
         });
     answer
 }
@@ -83,7 +81,7 @@ fn question(ui: &egui::Ui, asking: &Asking<'_>) -> LayoutJob {
     job.append(" to ", 0.0, plain.clone());
     job.append(asking.title, 0.0, title);
     job.append("?", 0.0, plain);
-    job.wrap.max_width = WIDTH;
+    job.wrap.max_width = ui.available_width();
     job
 }
 

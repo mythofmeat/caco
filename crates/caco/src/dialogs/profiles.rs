@@ -1,13 +1,11 @@
-//! Sourceport config profile management.
-//!
-//! The GUI answer to `caco profile`. Where the CLI shells out to `$EDITOR`,
-//! this edits the profile contents in place — the operations themselves live in
-//! `caco_core::profiles`, so both frontends share one implementation.
+//! Sourceport config profile management: the contents are edited in place, and the
+//! operations themselves live in `caco_core::profiles`.
 
 use rusqlite::Connection;
 
 use caco_core::profiles::{self, Profile};
 
+use crate::dialogs::{Dialog, Primary, StatusLine, count, form_label, scroll_body};
 use crate::theme;
 
 /// State for the profile management dialog.
@@ -23,11 +21,6 @@ pub struct ProfilesDialogState {
     /// Index awaiting delete confirmation, with the WADs still referencing it.
     pending_delete: Option<(usize, Vec<String>)>,
     status: Option<StatusLine>,
-}
-
-struct StatusLine {
-    text: String,
-    is_error: bool,
 }
 
 pub enum ProfilesResult {
@@ -78,17 +71,11 @@ impl ProfilesDialogState {
     }
 
     fn set_error(&mut self, text: impl Into<String>) {
-        self.status = Some(StatusLine {
-            text: text.into(),
-            is_error: true,
-        });
+        self.status = Some(StatusLine::error(text));
     }
 
     fn set_info(&mut self, text: impl Into<String>) {
-        self.status = Some(StatusLine {
-            text: text.into(),
-            is_error: false,
-        });
+        self.status = Some(StatusLine::info(text));
     }
 
     /// Sourceport to create new profiles under: the selected one, else default.
@@ -155,7 +142,7 @@ impl ProfilesDialogState {
         let referencing = profiles::referencing_wads(conn, &p.name)
             .unwrap_or_default()
             .into_iter()
-            .map(|w| format!("{}: {}", w.id, w.title))
+            .map(|w| w.title)
             .collect();
         self.pending_delete = Some((idx, referencing));
     }
@@ -180,40 +167,58 @@ impl ProfilesDialogState {
     pub fn render(&mut self, ctx: &egui::Context, conn: &Connection) -> ProfilesResult {
         let mut result = ProfilesResult::Open;
 
-        crate::dialogs::modal_window(ctx, "Sourceport Profiles", [760.0, 480.0]).show(ctx, |ui| {
-            // The two panes each capped their own scroll at a hardcoded 340pt,
-            // which together with the header and button row is taller than an
-            // 800x400 window — the Create/Save row ended up below the bottom
-            // edge. One scroll around both panes is what actually binds: the
-            // panes now size to their content and this bounds the pair.
-            crate::dialogs::modal_body(ctx, ui, 96.0, |ui| {
-                ui.horizontal_top(|ui| {
-                    self.render_list(ui);
-                    ui.separator();
-                    self.render_editor(ui);
-                });
+        Dialog::new("Profiles", [780.0, 520.0])
+            .about("Sourceport settings you can give each WAD")
+            .show(ctx, |dialog| {
+                dialog
+                    .fill(|ui, height| {
+                        ui.horizontal_top(|ui| {
+                            self.render_list(ui, height);
+                            ui.separator();
+                            self.render_editor(ui, height);
+                        });
+                    })
+                    .above(|ui| {
+                        if let Some((idx, referencing)) = self.pending_delete.clone() {
+                            self.render_delete_question(ui, idx, &referencing);
+                        } else {
+                            self.render_create_row(ui);
+                        }
+                        if let Some(status) = &self.status {
+                            status.show(ui);
+                        }
+                    })
+                    .buttons(|row| {
+                        if self.pending_delete.is_some() {
+                            let ended = row.end(Some("Cancel"), Some(Primary::danger("Delete")));
+                            if ended.dismissed {
+                                self.pending_delete = None;
+                            }
+                            if ended.primary {
+                                self.confirm_delete();
+                            }
+                            return;
+                        }
+                        row.left(|ui| {
+                            if self.dirty {
+                                if ui.button("Save").clicked() {
+                                    self.save_buffer();
+                                }
+                                if ui.button("Revert").clicked() {
+                                    self.load_buffer();
+                                }
+                            }
+                            if let Some(idx) = self.selected
+                                && ui.button("Delete").clicked()
+                            {
+                                self.stage_delete(conn, idx);
+                            }
+                        });
+                        if row.close() {
+                            result = ProfilesResult::Closed;
+                        }
+                    })
             });
-
-            ui.add_space(4.0);
-            ui.separator();
-            ui.add_space(4.0);
-
-            if let Some((idx, referencing)) = self.pending_delete.clone() {
-                self.render_delete_confirmation(ui, idx, &referencing);
-            } else {
-                self.render_actions(ui, conn, &mut result);
-            }
-
-            if let Some(status) = &self.status {
-                ui.add_space(4.0);
-                let color = if status.is_error {
-                    theme::COLOR_ERROR
-                } else {
-                    theme::TEXT_SECONDARY
-                };
-                ui.colored_label(color, &status.text);
-            }
-        });
 
         // Escape closes, unless it is dismissing a pending confirmation first.
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -227,20 +232,18 @@ impl ProfilesDialogState {
         result
     }
 
-    fn render_list(&mut self, ui: &mut egui::Ui) {
+    fn render_list(&mut self, ui: &mut egui::Ui, height: f32) {
         ui.vertical(|ui| {
-            ui.set_min_width(220.0);
-            ui.set_max_width(220.0);
-            ui.strong("Profiles");
-            ui.add_space(2.0);
+            ui.set_width(220.0);
+            ui.set_height(height);
 
             if self.profiles.is_empty() {
                 ui.colored_label(theme::TEXT_SECONDARY, "No profiles yet.");
                 return;
             }
 
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                let mut clicked = None;
+            let mut clicked = None;
+            scroll_body(ui, height, |ui| {
                 for (idx, profile) in self.profiles.iter().enumerate() {
                     let label = format!("{}/{}", profile.sourceport, profile.name);
                     if ui
@@ -250,51 +253,38 @@ impl ProfilesDialogState {
                         clicked = Some(idx);
                     }
                 }
-                if let Some(idx) = clicked
-                    && self.selected != Some(idx)
-                {
-                    self.selected = Some(idx);
-                    self.load_buffer();
-                }
             });
+            if let Some(idx) = clicked
+                && self.selected != Some(idx)
+            {
+                self.selected = Some(idx);
+                self.load_buffer();
+            }
         });
     }
 
-    fn render_editor(&mut self, ui: &mut egui::Ui) {
+    fn render_editor(&mut self, ui: &mut egui::Ui, height: f32) {
         ui.vertical(|ui| {
-            match self.selected.and_then(|i| self.profiles.get(i)) {
-                Some(p) => {
-                    ui.horizontal(|ui| {
-                        ui.strong(format!("{}/{}", p.sourceport, p.name));
-                        if self.dirty {
-                            ui.colored_label(theme::TEXT_SECONDARY, "(unsaved)");
-                        }
-                    });
-                    // Wrapped, not laid out on one line: a profile path is an
-                    // absolute path into the data dir, and as a non-wrapping
-                    // label it set the editor pane's minimum width, which set
-                    // the window's — pushing the whole dialog wider than the
-                    // app window and off its right edge.
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(p.path.display().to_string())
-                                .color(theme::TEXT_SECONDARY),
-                        )
-                        .wrap(),
-                    );
+            ui.set_height(height);
+            let Some(p) = self.selected.and_then(|i| self.profiles.get(i)) else {
+                ui.colored_label(
+                    theme::TEXT_SECONDARY,
+                    "A profile is a sourceport's config file, kept by caco, which a WAD can use \
+                     instead of the sourceport's own. Create one below.",
+                );
+                return;
+            };
+            ui.horizontal(|ui| {
+                ui.strong(format!("{}/{}", p.sourceport, p.name));
+                if self.dirty {
+                    ui.colored_label(theme::TEXT_SECONDARY, "(not saved)");
                 }
-                None => {
-                    ui.strong("No profile selected");
-                    ui.colored_label(theme::TEXT_SECONDARY, "Create one below.");
-                }
-            }
+            });
             ui.add_space(2.0);
 
-            let enabled = self.selected.is_some();
-            egui::ScrollArea::vertical().show(ui, |ui| {
+            scroll_body(ui, height - 24.0, |ui| {
                 let response = ui
-                    .add_enabled(
-                        enabled,
+                    .add(
                         egui::TextEdit::multiline(&mut self.buffer)
                             .font(egui::TextStyle::Monospace)
                             .desired_width(f32::INFINITY)
@@ -308,12 +298,7 @@ impl ProfilesDialogState {
         });
     }
 
-    fn render_delete_confirmation(
-        &mut self,
-        ui: &mut egui::Ui,
-        idx: usize,
-        referencing: &[String],
-    ) {
+    fn render_delete_question(&mut self, ui: &mut egui::Ui, idx: usize, referencing: &[String]) {
         let label = self
             .profiles
             .get(idx)
@@ -321,93 +306,48 @@ impl ProfilesDialogState {
             .unwrap_or_default();
 
         ui.colored_label(theme::COLOR_ERROR, format!("Delete {label}?"));
-        if !referencing.is_empty() {
+        if referencing.is_empty() {
+            return;
+        }
+        ui.colored_label(
+            theme::TEXT_SECONDARY,
+            format!(
+                "{} still using it:",
+                count(referencing.len(), "WAD is", "WADs are")
+            ),
+        );
+        for entry in referencing.iter().take(5) {
+            ui.colored_label(theme::TEXT_SECONDARY, format!("  {entry}"));
+        }
+        if referencing.len() > 5 {
             ui.colored_label(
                 theme::TEXT_SECONDARY,
-                format!(
-                    "{} WAD{} still reference this profile:",
-                    referencing.len(),
-                    if referencing.len() == 1 { "" } else { "s" }
-                ),
+                format!("  \u{2026} and {} more", referencing.len() - 5),
             );
-            for entry in referencing.iter().take(5) {
-                ui.colored_label(theme::TEXT_SECONDARY, format!("  {entry}"));
-            }
-            if referencing.len() > 5 {
-                ui.colored_label(
-                    theme::TEXT_SECONDARY,
-                    format!("  … and {} more", referencing.len() - 5),
-                );
-            }
         }
-
-        ui.horizontal(|ui| {
-            if ui.button("Delete").clicked() {
-                self.confirm_delete();
-            }
-            if ui.button("Cancel").clicked() {
-                self.pending_delete = None;
-            }
-        });
     }
 
-    fn render_actions(
-        &mut self,
-        ui: &mut egui::Ui,
-        conn: &Connection,
-        result: &mut ProfilesResult,
-    ) {
+    /// Making a new profile, from nothing or from the one selected.
+    fn render_create_row(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.label("Name:");
+            let label = form_label(ui, "New profile");
             ui.add(
                 egui::TextEdit::singleline(&mut self.new_name)
-                    .desired_width(140.0)
-                    .hint_text("new profile"),
-            );
+                    .desired_width(160.0)
+                    .hint_text("name"),
+            )
+            .labelled_by(label.id);
 
             if ui.button("Create").clicked() {
                 self.create(false);
             }
-
-            let has_selection = self.selected.is_some();
-            if ui
-                .add_enabled(has_selection, egui::Button::new("Duplicate"))
-                .on_hover_text("Create a copy of the selected profile under the new name")
-                .clicked()
+            if self.selected.is_some()
+                && ui
+                    .button("Duplicate")
+                    .on_hover_text("A copy of the selected profile, under this name")
+                    .clicked()
             {
                 self.create(true);
-            }
-        });
-
-        ui.add_space(2.0);
-
-        ui.horizontal(|ui| {
-            let has_selection = self.selected.is_some();
-
-            if ui
-                .add_enabled(has_selection && self.dirty, egui::Button::new("Save"))
-                .clicked()
-            {
-                self.save_buffer();
-            }
-
-            if ui
-                .add_enabled(has_selection && self.dirty, egui::Button::new("Revert"))
-                .clicked()
-            {
-                self.load_buffer();
-            }
-
-            if ui
-                .add_enabled(has_selection, egui::Button::new("Delete"))
-                .clicked()
-                && let Some(idx) = self.selected
-            {
-                self.stage_delete(conn, idx);
-            }
-
-            if ui.button("Close").clicked() {
-                *result = ProfilesResult::Closed;
             }
         });
     }

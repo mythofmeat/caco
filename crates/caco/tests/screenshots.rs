@@ -47,7 +47,7 @@ use caco_sources::idgames::sync::{
 };
 use caco_sources::idgames::{IdgamesClient, Index};
 use caco_sources::import_service::ImportResult;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 
 /// How long to leave worker threads to answer between rounds of frames.
 const WORKER_PAUSE: Duration = Duration::from_millis(80);
@@ -272,6 +272,7 @@ impl Shooter {
         self.settle(3, Duration::ZERO);
         // `settle` can end up skipping this: see there.
         self.harness.check_accessibility();
+        self.no_dead_way_out(name);
         let img = self
             .harness
             .render()
@@ -280,6 +281,20 @@ impl Shooter {
         img.save(&path)
             .unwrap_or_else(|e| panic!("save {name}: {e}"));
         println!("wrote {}", path.display());
+    }
+
+    /// Don't draw a control that can't act: a way out that does nothing is the worst of them.
+    /// See `docs/ui.md`. A button with a reason to wait, such as Finish on a form that is not
+    /// filled in, is not one of these.
+    fn no_dead_way_out(&self, name: &str) {
+        for label in ["Cancel", "Close", "Stop", "Stop Build", "Back", "Done"] {
+            for node in self.harness.query_all_by_label(label) {
+                assert!(
+                    !node.accesskit_node().is_disabled(),
+                    "{name} draws a disabled {label}"
+                );
+            }
+        }
     }
 
     /// Switch to a full-panel view and shoot it.
@@ -730,6 +745,17 @@ fn shoot_every_surface() {
     ] {
         s.shot_view(name, mode);
     }
+    // Posters, for looking at the pictures, and with them the thumbnails come in.
+    s.shot_view_after("03-cacowards-grid", ViewMode::Cacowards, |s| {
+        s.harness.get_by_label("Grid").click_accesskit();
+        s.settle(4, WORKER_PAUSE);
+    });
+    s.harness.state_mut().set_view(ViewMode::Cacowards);
+    s.settle(2, Duration::ZERO);
+    s.harness.get_by_label("List").click_accesskit();
+    s.settle(2, Duration::ZERO);
+    s.harness.state_mut().set_view(ViewMode::Library);
+    s.settle(1, Duration::ZERO);
 
     // The far end of a strip that has to scroll to reach it, since the newest year
     // is what opens. An old year also has different sections to lay out: no
@@ -742,6 +768,18 @@ fn shoot_every_surface() {
         s.harness.get_by_label("WORST WAD");
         assert!(s.harness.query_by_label("DOOM MOMA").is_none());
     });
+
+    // The forms, each with inputs to name. The `3`, `4` and `5` shortcuts reach them.
+    for (name, key) in [
+        ("04-import-doomworld", egui::Key::Num3),
+        ("04-import-url", egui::Key::Num4),
+        ("04-import-local", egui::Key::Num5),
+    ] {
+        s.shot_view_after(name, ViewMode::Import, |s| {
+            s.harness.key_press(key);
+            s.settle(1, Duration::ZERO);
+        });
+    }
 
     // A blocked source is the state this view most has to explain, and only a
     // worker can report it. Posted the way the search worker posts it, on the tab
@@ -900,6 +938,110 @@ fn shoot_every_surface() {
     ] {
         record(name, s.shot_dialog(&format!("dlg-{name}"), action));
     }
+
+    // Help, which nothing could open until there was a way to, and the dialogs about one WAD,
+    // which take one to open. A WAD of their own, since the library can be empty.
+    record("help", s.shot_dialog("dlg-help", ActionRequest::Help));
+    let one_wad = s.add_manual_wad_with_file("A Wad to Open Dialogs On", 999_100);
+    for (name, action) in [
+        ("edit-details", ActionRequest::Edit(one_wad)),
+        ("delete", ActionRequest::Delete(one_wad)),
+        ("sessions", ActionRequest::Sessions(one_wad)),
+        ("map-stats", ActionRequest::MapStats(one_wad)),
+        ("saves-demos", ActionRequest::WadData(one_wad)),
+    ] {
+        record(name, s.shot_dialog(&format!("dlg-{name}"), action));
+    }
+    s.purge_wad(one_wad);
+
+    // Linking an award to a WAD by hand, with a filter that has an input to name.
+    let an_award = s.absent_cacoward("2025-winner-below-the-gaudy-goblin");
+    record(
+        "cacoward-link",
+        s.shot_dialog("dlg-cacoward-link", ActionRequest::LinkCacoward(an_award)),
+    );
+
+    // The form Collections opens, whose fields only exist once it has.
+    record(
+        "collections-form",
+        s.shot_dialog_after("dlg-collections-form", ActionRequest::Collections, |s| {
+            s.harness.get_by_label("Add").click_accesskit();
+            s.settle(3, Duration::ZERO);
+            s.harness.get_by_label("Query");
+            s.harness.get_by_label("Save");
+        }),
+    );
+
+    // Being asked before something goes for good: in the footer, with the way out and the
+    // action where they always are. Through the button, on a WAD of its own in the Trash.
+    let trashed = s.add_manual_wad_with_file("A Wad in the Trash", 999_101);
+    {
+        let conn = caco_core::db::open_connection(&s.home.join("library.db")).expect("open db");
+        caco_core::db::delete_wad(&conn, trashed, false).expect("trash WAD");
+    }
+    record(
+        "storage-trash-asking",
+        s.shot_dialog_after(
+            "dlg-storage-trash-asking",
+            ActionRequest::Storage(StorageTab::Trash),
+            |s| {
+                s.harness.get_by_label("Empty Trash").click_accesskit();
+                s.settle(3, Duration::ZERO);
+                s.harness.get_by_label_contains("Permanently delete");
+                s.harness.get_by_label("Delete Permanently");
+            },
+        ),
+    );
+    s.purge_wad(trashed);
+
+    // A dialog is modal: a real click on the sidebar around it goes nowhere. Stats would have
+    // something to show if it went anywhere.
+    s.harness.state_mut().dispatch_action(ActionRequest::Enrich);
+    s.settle(2, Duration::ZERO);
+    s.harness.get_by_label("Stats").click();
+    s.settle(2, Duration::ZERO);
+    assert!(
+        s.harness.query_by_label("Playtime by month").is_none(),
+        "a click went through a dialog to the app behind it"
+    );
+
+    // Nor can the keyboard get there. Tab goes through everything that wants focus, which past
+    // the dialog's own controls would be the sidebar, where Enter presses what it lands on.
+    for press in 1..=12 {
+        s.harness.key_press(egui::Key::Tab);
+        s.settle(1, Duration::ZERO);
+        let ctx = &s.harness.ctx;
+        let focused = ctx
+            .memory(|m| m.focused())
+            .and_then(|id| ctx.read_response(id));
+        assert!(
+            focused
+                .as_ref()
+                .is_none_or(|widget| widget.layer_id.order != egui::Order::Background),
+            "Tab {press} went through a dialog to {focused:?}"
+        );
+    }
+    s.harness.state_mut().close_dialog();
+    s.settle(1, Duration::ZERO);
+
+    // And a field that had the keyboard when a dialog opened lets go of it, or what is typed
+    // goes to the app behind. Help has no fields of its own to take it.
+    s.harness.state_mut().set_view(ViewMode::Library);
+    s.settle(2, Duration::ZERO);
+    s.harness
+        .key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::F);
+    s.settle(2, Duration::ZERO);
+    s.harness.state_mut().dispatch_action(ActionRequest::Help);
+    s.settle(2, Duration::ZERO);
+    s.harness.event(egui::Event::Text("typed".to_string()));
+    s.settle(2, Duration::ZERO);
+    s.harness.state_mut().close_dialog();
+    s.settle(2, Duration::ZERO);
+    assert_eq!(
+        s.harness.get_by_label("Filter WADs").value().as_deref(),
+        Some(""),
+        "what was typed in a dialog reached the filter behind it"
+    );
 
     // The version picker only exists once a remote has answered, and that is
     // asked on demand, so opening the dialog alone never reaches it.
@@ -1427,14 +1569,28 @@ fn shoot_every_surface() {
     caco_core::config::save_config(&config).expect("save scratch config");
     caco_core::config::reload_config();
 
-    // The tool has to be reachable, and the list of tools fit, at the smallest window.
-    s.shot_view_after("05-manage-open", ViewMode::Library, |s| {
-        s.harness.get_by_label_contains("Manage").click();
-        s.settle(3, Duration::ZERO);
-        s.harness.get_by_label("Mirrors");
+    // The tools are in the sidebar, whatever the size of the window, and scrolled to if they
+    // have to be. Settings and Help are in reach without that.
+    s.shot_view_after("05-tools", ViewMode::Library, |s| {
+        for tool in [
+            "Storage",
+            "Mirrors",
+            "Sync",
+            "Enrich",
+            "IWADs",
+            "Sourceports",
+            "Profiles",
+        ] {
+            s.harness.get_by_label(tool);
+        }
+        for pinned in ["Settings", "Help"] {
+            let row = s.harness.get_by_label(pinned).rect();
+            assert!(
+                row.max.y <= shot_size().y,
+                "{pinned} is off the window: {row:?}"
+            );
+        }
     });
-    s.harness.get_by_label_contains("Manage").click();
-    s.settle(2, Duration::ZERO);
 
     // Only a WAD arriving with no way back brings up the offer.
     let manual = s.add_manual_wad_with_file("The Evil Reborn", 152000);

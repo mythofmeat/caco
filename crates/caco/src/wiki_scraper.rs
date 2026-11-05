@@ -8,6 +8,12 @@ use serde::Deserialize;
 
 const API_URL: &str = "https://doomwiki.org/w/api.php";
 
+/// The real wiki, unless `CACO_DOOMWIKI_API` says it is somewhere else: as with
+/// `CACO_IDGAMES_API`, which is how a test of the real app keeps its thumbnails to itself.
+fn api_url() -> String {
+    std::env::var("CACO_DOOMWIKI_API").unwrap_or_else(|_| API_URL.to_string())
+}
+
 fn client() -> Option<Client> {
     Client::builder()
         .user_agent(caco_sources::http::USER_AGENT)
@@ -40,7 +46,7 @@ pub fn search_wiki_image(title: &str) -> Option<Vec<u8>> {
 
     // MediaWiki opensearch: returns [search_term, [titles], [descriptions], [urls]]
     let resp = client
-        .get(API_URL)
+        .get(api_url())
         .query(&[
             ("action", "opensearch"),
             ("search", title),

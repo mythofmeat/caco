@@ -25,7 +25,7 @@ use crate::get::GetTarget;
 use crate::message::Notification;
 use crate::state::{ActionRequest, ActiveDialog, AppState};
 
-use super::help::{render_about_dialog, render_help_dialog};
+use super::help::render_help_dialog;
 
 /// Render the currently-active dialog (if any) and handle its result.
 ///
@@ -39,10 +39,7 @@ pub(super) fn render_active_dialog(
     let mut close_dialog = false;
     let mut follow_up_action = None;
     if let Some(dialog) = &mut state.active_dialog {
-        // Every dialog here is modal — the library behind it ignores clicks
-        // until it closes — but an undimmed one just looks like a floating
-        // panel, so a click that goes nowhere reads as the app being frozen.
-        crate::dialogs::dim_backdrop(ctx);
+        crate::dialogs::modal_backdrop(ctx);
         match dialog {
             ActiveDialog::Edit(edit_state) => match edit_state.render(ctx, conn) {
                 EditResult::Saved => {
@@ -56,6 +53,12 @@ pub(super) fn render_active_dialog(
                 EditResult::Modified => {
                     close_dialog = true;
                     state.invalidate_wad_views();
+                }
+                EditResult::Delete(wad_id) => {
+                    close_dialog = true;
+                    // Companions can have been changed on the way here.
+                    state.invalidate_wad_views();
+                    follow_up_action = Some(ActionRequest::Delete(wad_id));
                 }
                 EditResult::UploadToMirror { wad_id, mirror } => {
                     // Stay open: the upload runs on a worker thread, and the user
@@ -276,11 +279,6 @@ pub(super) fn render_active_dialog(
             },
             ActiveDialog::Help => {
                 if render_help_dialog(ctx) {
-                    close_dialog = true;
-                }
-            }
-            ActiveDialog::About => {
-                if render_about_dialog(ctx) {
                     close_dialog = true;
                 }
             }
