@@ -41,6 +41,24 @@ impl Default for ImportState {
 }
 
 impl ImportState {
+    /// The form for one of the sources that has one.
+    pub fn form_mut(&mut self, kind: FormKind) -> &mut FormState {
+        match kind {
+            FormKind::Doomworld => &mut self.doomworld,
+            FormKind::Url => &mut self.url_form,
+            FormKind::Local => &mut self.local_form,
+        }
+    }
+
+    /// Go to a form's tab.
+    pub fn show_form(&mut self, kind: FormKind) {
+        self.active_source = match kind {
+            FormKind::Doomworld => 2,
+            FormKind::Url => 3,
+            FormKind::Local => 4,
+        };
+    }
+
     /// The search box on the source showing, if it has one.
     pub fn active_search(&self) -> Option<&SearchState> {
         match self.active_source {
@@ -179,9 +197,34 @@ pub struct SearchState {
     /// The newest uploads have been asked for, so that opening the tab does not ask again
     /// on every frame until they come.
     pub newest_asked: bool,
+    /// The result being imported, by [`SearchResultEntry::key`].
+    pub importing: Option<String>,
+    /// The selection moved with the keyboard, and should be brought into view.
+    pub reveal_row: bool,
 }
 
 impl SearchState {
+    /// The result selected, if any.
+    pub fn selected_entry(&self) -> Option<&SearchResultEntry> {
+        self.results.get(self.selected_row?)
+    }
+
+    /// Whether this result is on its way into the library.
+    pub fn is_importing(&self, entry: &SearchResultEntry) -> bool {
+        self.importing.as_deref() == Some(entry.key().as_str())
+    }
+
+    /// An import from these results has finished. If it worked, the result it was for says so
+    /// from now on, duplicate or not, since either way it is what the library now holds.
+    pub fn import_finished(&mut self, wad_id: Option<i64>) {
+        let Some(key) = self.importing.take() else {
+            return;
+        };
+        if let Some(entry) = self.results.iter_mut().find(|entry| entry.key() == key) {
+            entry.in_library = wad_id;
+        }
+    }
+
     /// Update state after a search completes.
     pub fn set_results(&mut self, results: SearchResults) {
         let SearchResults { entries, note } = results;
@@ -258,26 +301,31 @@ impl FormState {
     pub fn new(kind: FormKind) -> Self {
         let fields = match kind {
             FormKind::Doomworld => vec![
-                FormField::new("url", "Forum URL", true),
-                FormField::new("title", "Title", false),
-                FormField::new("author", "Author", false),
-                FormField::new("year", "Year", false),
-                FormField::new("tags", "Tags (comma-separated)", false),
+                FormField::new(
+                    "url",
+                    "Forum URL",
+                    true,
+                    "https://www.doomworld.com/forum/...",
+                ),
+                FormField::new("title", "Title", false, "Read from the thread"),
+                FormField::new("author", "Author", false, "Read from the thread").short(),
+                FormField::new("year", "Year", false, "Read from the thread").short(),
+                FormField::new("tags", "Tags", false, "Separated by commas"),
             ],
             FormKind::Url => vec![
-                FormField::new("title", "Title", true),
-                FormField::new("url", "Download URL", true),
-                FormField::new("author", "Author", false),
-                FormField::new("year", "Year", false),
-                FormField::new("tags", "Tags (comma-separated)", false),
-                FormField::new("notes", "Notes", false),
+                FormField::new("url", "Download URL", true, "https://..."),
+                FormField::new("title", "Title", true, "What to call it"),
+                FormField::new("author", "Author", false, "Optional").short(),
+                FormField::new("year", "Year", false, "Optional").short(),
+                FormField::new("tags", "Tags", false, "Separated by commas").short(),
+                FormField::new("notes", "Notes", false, "Optional").short(),
             ],
             FormKind::Local => vec![
-                FormField::new("path", "File Path", true),
-                FormField::new("title", "Title", true),
-                FormField::new("author", "Author", false),
-                FormField::new("year", "Year", false),
-                FormField::new("tags", "Tags (comma-separated)", false),
+                FormField::new("path", "File", true, "Where the file is"),
+                FormField::new("title", "Title", true, "What to call it"),
+                FormField::new("author", "Author", false, "Optional").short(),
+                FormField::new("year", "Year", false, "Optional").short(),
+                FormField::new("tags", "Tags", false, "Separated by commas"),
             ],
         };
         Self {
@@ -286,6 +334,25 @@ impl FormState {
             is_submitting: false,
             status_text: String::new(),
             pending_browse: None,
+        }
+    }
+
+    /// The file to import, however it was chosen. A title is filled in from its name if none has
+    /// been given, since having to type one was the only thing left to do for most files.
+    pub fn set_path(&mut self, path: &std::path::Path) {
+        let display = path.display().to_string();
+        let name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned());
+        for field in &mut self.fields {
+            if field.name == "path" {
+                field.value = display.clone();
+            } else if field.name == "title"
+                && field.value.trim().is_empty()
+                && let Some(name) = &name
+            {
+                field.value = title_from_file_name(name);
+            }
         }
     }
 
@@ -321,25 +388,30 @@ impl FormState {
 pub struct FormField {
     pub name: &'static str,
     pub label: &'static str,
-    pub display_label: String,
+    /// What goes in it, and whether it can be left out, in place of a star that means nothing
+    /// until you have read the message for leaving it out.
+    pub hint: &'static str,
     pub value: String,
     pub required: bool,
+    /// Short enough to share a row with the next one that is.
+    pub short: bool,
 }
 
 impl FormField {
-    fn new(name: &'static str, label: &'static str, required: bool) -> Self {
-        let display_label = if required {
-            format!("{label}*:")
-        } else {
-            format!("{label}:")
-        };
+    fn new(name: &'static str, label: &'static str, required: bool, hint: &'static str) -> Self {
         Self {
             name,
             label,
-            display_label,
+            hint,
             value: String::new(),
             required,
+            short: false,
         }
+    }
+
+    fn short(mut self) -> Self {
+        self.short = true;
+        self
     }
 }
 
@@ -348,6 +420,36 @@ pub enum FormKind {
     Doomworld,
     Url,
     Local,
+}
+
+impl FormKind {
+    /// What this form is for, and what caco does with what is put in it.
+    pub fn describe(self) -> &'static str {
+        match self {
+            Self::Doomworld => {
+                "Paste a thread from the Doomworld forums. caco reads its title and author from \
+                 the first post, and finds the download links."
+            }
+            Self::Url => {
+                "For anything that is not on idgames or the forums. caco downloads it from this \
+                 link when you first play it."
+            }
+            Self::Local => {
+                "A WAD or an archive you already have. Browse for it, or drop it anywhere on this \
+                 window."
+            }
+        }
+    }
+}
+
+/// A title to start from for a file nobody has named yet: its name without the extension, and
+/// without the underscores a file name has for spaces.
+pub fn title_from_file_name(name: &str) -> String {
+    let stem = std::path::Path::new(name).file_stem().map_or_else(
+        || name.to_string(),
+        |stem| stem.to_string_lossy().into_owned(),
+    );
+    stem.replace('_', " ").trim().to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -368,22 +470,31 @@ pub struct SearchResultEntry {
     pub author: Option<String>,
     pub description: Option<String>,
     pub source_data: SearchSourceData,
+    /// The WAD in the library this is, if it is there already.
+    pub in_library: Option<i64>,
 }
 
 impl SearchResultEntry {
-    /// Display string for the table's extra column (derived from source_data).
-    pub fn extra_display(&self) -> String {
+    /// What goes in the table's last two columns (derived from source_data).
+    pub fn extra_columns(&self) -> [String; 2] {
         match &self.source_data {
-            SearchSourceData::Idgames { rating, date, .. } => {
-                let r = rating.map(|v| format!("{v:.1}")).unwrap_or_default();
-                let d = date.as_deref().unwrap_or("");
-                format!("{r}  {d}")
-            }
-            SearchSourceData::Doomwiki { year, port, .. } => {
-                let y = year.map(|v| v.to_string()).unwrap_or_default();
-                let p = port.as_deref().unwrap_or("");
-                format!("{y}  {p}")
-            }
+            SearchSourceData::Idgames { rating, date, .. } => [
+                rating.map(|v| format!("{v:.1}")).unwrap_or_default(),
+                date.clone().unwrap_or_default(),
+            ],
+            SearchSourceData::Doomwiki { year, port, .. } => [
+                year.map(|v| v.to_string()).unwrap_or_default(),
+                port.clone().unwrap_or_default(),
+            ],
+        }
+    }
+
+    /// What tells this result from any other for as long as an import takes, since the table
+    /// can have changed by the time it finishes.
+    pub fn key(&self) -> String {
+        match &self.source_data {
+            SearchSourceData::Idgames { target, .. } => format!("{target:?}"),
+            SearchSourceData::Doomwiki { .. } => self.title.clone(),
         }
     }
 }
@@ -413,6 +524,16 @@ pub enum SearchSource {
     Doomwiki,
 }
 
+/// Where an import was started from, for telling that part of the view when it has finished.
+/// Which tab is showing by then says nothing: going to another one used to leave a form saying
+/// "Importing..." for good.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ImportOrigin {
+    Search(SearchSource),
+    Form(FormKind),
+    Cacoward,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -429,6 +550,7 @@ mod tests {
                 dir: None,
                 filename: None,
             },
+            in_library: None,
         }
     }
 
@@ -721,6 +843,79 @@ mod tests {
         };
         assert_eq!(blocked(status(100, 0)), None);
         assert!(blocked(status(100, 90)).unwrap().contains("blocked"));
+    }
+
+    #[test]
+    fn a_result_being_imported_says_so_until_it_is_finished() {
+        let mut s = SearchState::default();
+        s.set_results(results(vec![idgames_entry(1, "a"), idgames_entry(2, "b")]));
+        s.importing = Some(s.results[0].key());
+        assert!(s.is_importing(&s.results[0]));
+        assert!(!s.is_importing(&s.results[1]));
+
+        s.import_finished(Some(42));
+
+        assert!(!s.is_importing(&s.results[0]));
+        assert_eq!(s.results[0].in_library, Some(42));
+        assert_eq!(s.results[1].in_library, None);
+    }
+
+    #[test]
+    fn an_import_that_failed_leaves_the_result_to_try_again() {
+        let mut s = SearchState::default();
+        s.set_results(results(vec![idgames_entry(1, "a")]));
+        s.importing = Some(s.results[0].key());
+
+        s.import_finished(None);
+
+        assert_eq!(s.importing, None);
+        assert_eq!(s.results[0].in_library, None);
+    }
+
+    /// Finding out a search has moved on since is no reason to mark something else.
+    #[test]
+    fn an_import_finishing_after_the_table_changed_marks_nothing() {
+        let mut s = SearchState::default();
+        s.set_results(results(vec![idgames_entry(1, "a")]));
+        s.importing = Some(s.results[0].key());
+        s.set_results(results(vec![idgames_entry(2, "b")]));
+
+        s.import_finished(Some(42));
+
+        assert_eq!(s.results[0].in_library, None);
+    }
+
+    #[test]
+    fn a_file_gives_a_title_to_start_from() {
+        assert_eq!(title_from_file_name("sunlust.wad"), "sunlust");
+        assert_eq!(
+            title_from_file_name("Ancient_Aliens-v2.zip"),
+            "Ancient Aliens-v2"
+        );
+        assert_eq!(title_from_file_name("Purgatory V1.1.PK3"), "Purgatory V1.1");
+        assert_eq!(title_from_file_name("no-extension"), "no-extension");
+    }
+
+    #[test]
+    fn choosing_a_file_fills_in_a_title_unless_there_is_one() {
+        let mut form = FormState::new(FormKind::Local);
+        let value = |form: &FormState, name: &str| {
+            form.fields
+                .iter()
+                .find(|field| field.name == name)
+                .unwrap()
+                .value
+                .clone()
+        };
+
+        form.set_path(std::path::Path::new("/wads/my_map.wad"));
+        assert_eq!(value(&form, "path"), "/wads/my_map.wad");
+        assert_eq!(value(&form, "title"), "my map");
+
+        // A title somebody has typed, or that came from the last file, stays.
+        form.set_path(std::path::Path::new("/wads/other.wad"));
+        assert_eq!(value(&form, "path"), "/wads/other.wad");
+        assert_eq!(value(&form, "title"), "my map");
     }
 
     #[test]

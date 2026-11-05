@@ -5,6 +5,7 @@ pub mod workers;
 
 use state::{FormKind, IMPORT_SOURCES, ImportState, SearchResultEntry, SearchSource};
 
+use crate::dialogs::tab_bar;
 use crate::theme;
 
 // ---------------------------------------------------------------------------
@@ -19,6 +20,8 @@ pub enum ImportAction {
     UpdateIndex,
     ImportSearchResult(SearchSource, SearchResultEntry),
     ImportForm(FormKind, Vec<(String, String)>),
+    /// Go to something that was already in the library.
+    ShowWad(i64),
 }
 
 // ---------------------------------------------------------------------------
@@ -29,20 +32,8 @@ pub fn render(ui: &mut egui::Ui, state: &mut ImportState) -> Option<ImportAction
     let mut action = None;
 
     // Source sub-tabs
-    ui.horizontal(|ui| {
-        for (i, label) in IMPORT_SOURCES.iter().enumerate() {
-            let is_active = state.active_source == i;
-            let text = egui::RichText::new(format!("{}. {label}", i + 1));
-            let text = if is_active {
-                text.strong().color(theme::TEXT_ACCENT)
-            } else {
-                text.color(theme::TEXT_SECONDARY)
-            };
-            if ui.selectable_label(is_active, text).clicked() {
-                state.active_source = i;
-            }
-        }
-    });
+    let tabs: Vec<(usize, &str)> = IMPORT_SOURCES.iter().copied().enumerate().collect();
+    tab_bar(ui, &mut state.active_source, &tabs);
     ui.separator();
 
     // Dispatch to active source panel
@@ -93,7 +84,8 @@ pub fn render(ui: &mut egui::Ui, state: &mut ImportState) -> Option<ImportAction
             .iter()
             .enumerate()
             {
-                if i.key_pressed(*key) {
+                // Not with Ctrl held, which is what goes to a view: this one, on Ctrl+2.
+                if i.modifiers.is_none() && i.key_pressed(*key) {
                     state.active_source = idx;
                 }
             }
@@ -159,6 +151,7 @@ fn map_search_action(source: SearchSource, a: search_panel::SearchPanelAction) -
         search_panel::SearchPanelAction::Import(entry) => {
             ImportAction::ImportSearchResult(source, entry)
         }
+        search_panel::SearchPanelAction::ShowInLibrary(wad_id) => ImportAction::ShowWad(wad_id),
     }
 }
 

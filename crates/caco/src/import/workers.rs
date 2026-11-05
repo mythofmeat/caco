@@ -5,7 +5,7 @@ use caco_sources::idgames::{Archive, FileEntry, IdgamesRef};
 use caco_sources::import_service::ImportService;
 
 use crate::import::state::{
-    FormKind, SearchResultEntry, SearchResults, SearchSource, SearchSourceData,
+    FormKind, ImportOrigin, SearchResultEntry, SearchResults, SearchSource, SearchSourceData,
 };
 use crate::message::AppMessage;
 use crate::workers::BackgroundSender;
@@ -23,11 +23,17 @@ fn non_empty(s: &str) -> Option<String> {
 // Search workers
 // ---------------------------------------------------------------------------
 
-pub fn spawn_search(sender: BackgroundSender, source: SearchSource, query: String) {
+pub fn spawn_search(
+    sender: BackgroundSender,
+    db_path: PathBuf,
+    source: SearchSource,
+    query: String,
+) {
     thread::spawn(move || {
+        let conn = caco_core::db::open_connection(&db_path).ok();
         let outcome = match source {
-            SearchSource::Idgames => search_idgames(&query),
-            SearchSource::Doomwiki => search_doomwiki(&query),
+            SearchSource::Idgames => search_idgames(&query, conn.as_ref()),
+            SearchSource::Doomwiki => search_doomwiki(&query, conn.as_ref()),
         };
         sender.send(AppMessage::SearchComplete(
             source,
@@ -41,12 +47,13 @@ const NEWEST_SHOWN: usize = 100;
 
 /// Fetch the newest uploads for the table, off the UI thread as everything to do with a
 /// database file is, and answer whether or not there are any.
-pub fn spawn_newest(sender: BackgroundSender) {
+pub fn spawn_newest(sender: BackgroundSender, db_path: PathBuf) {
     thread::spawn(move || {
+        let conn = caco_core::db::open_connection(&db_path).ok();
         let entries = Archive::open()
             .newest(NEWEST_SHOWN)
             .iter()
-            .map(idgames_result)
+            .map(|entry| idgames_result(entry, conn.as_ref()))
             .collect();
         sender.send(AppMessage::NewestUploads(SearchResults {
             entries,
@@ -55,16 +62,41 @@ pub fn spawn_newest(sender: BackgroundSender) {
     });
 }
 
-fn search_idgames(query: &str) -> caco_sources::Result<SearchResults> {
+fn search_idgames(
+    query: &str,
+    conn: Option<&rusqlite::Connection>,
+) -> caco_sources::Result<SearchResults> {
     let found = Archive::open().search(query)?;
     Ok(SearchResults {
-        entries: found.entries.iter().map(idgames_result).collect(),
+        entries: found
+            .entries
+            .iter()
+            .map(|entry| idgames_result(entry, conn))
+            .collect(),
         note: found.note,
     })
 }
 
-fn idgames_result(entry: &FileEntry) -> SearchResultEntry {
+/// The WAD in the library this upload is, going by what an import would go by, so that a check
+/// mark here and "already in your library" there can't disagree.
+fn idgames_in_library(entry: &FileEntry, conn: Option<&rusqlite::Connection>) -> Option<i64> {
+    let id = (entry.id > 0).then(|| entry.id.to_string());
+    let page = (!entry.url.is_empty()).then_some(entry.url.as_str());
+    let name = (!entry.author.is_empty()).then_some(entry.filename.as_str());
+    let found = caco_core::db::find_duplicate(
+        conn?,
+        caco_core::db::SourceType::Idgames,
+        id.as_deref(),
+        page,
+        name,
+        Some(&entry.author),
+    );
+    found.ok().flatten().map(|wad| wad.id)
+}
+
+fn idgames_result(entry: &FileEntry, conn: Option<&rusqlite::Connection>) -> SearchResultEntry {
     SearchResultEntry {
+        in_library: idgames_in_library(entry, conn),
         title: entry.title.clone(),
         author: non_empty(&entry.author),
         description: non_empty(&entry.description),
@@ -82,13 +114,27 @@ fn idgames_result(entry: &FileEntry) -> SearchResultEntry {
     }
 }
 
-fn search_doomwiki(query: &str) -> caco_sources::Result<SearchResults> {
+fn search_doomwiki(
+    query: &str,
+    conn: Option<&rusqlite::Connection>,
+) -> caco_sources::Result<SearchResults> {
     let client = caco_sources::doomwiki::DoomwikiClient::new();
     let entries = client.search_wads(query, 50)?;
     Ok(SearchResults {
         entries: entries
             .into_iter()
             .map(|e| SearchResultEntry {
+                in_library: conn.and_then(|conn| {
+                    let found = caco_core::db::find_duplicate(
+                        conn,
+                        caco_core::db::SourceType::Doomwiki,
+                        Some(&e.page_id.to_string()),
+                        None,
+                        None,
+                        None,
+                    );
+                    found.ok().flatten().map(|wad| wad.id)
+                }),
                 title: e.title.clone(),
                 author: non_empty(&e.author),
                 description: non_empty(&e.description),
@@ -119,7 +165,8 @@ pub fn spawn_import_idgames(sender: BackgroundSender, db_path: PathBuf, target: 
             }
             Ok(result)
         })();
-        sender.send(AppMessage::ImportComplete(result));
+        let origin = ImportOrigin::Search(SearchSource::Idgames);
+        sender.send(AppMessage::ImportComplete(origin, result));
     });
 }
 
@@ -139,7 +186,8 @@ pub fn spawn_import_doomwiki(sender: BackgroundSender, db_path: PathBuf, source_
             }
             Ok(result)
         })();
-        sender.send(AppMessage::ImportComplete(result));
+        let origin = ImportOrigin::Search(SearchSource::Doomwiki);
+        sender.send(AppMessage::ImportComplete(origin, result));
     });
 }
 
@@ -172,7 +220,7 @@ pub fn spawn_import_cacoward(sender: BackgroundSender, db_path: PathBuf, cacowar
 
             Ok(import_result)
         })();
-        sender.send(AppMessage::ImportComplete(result));
+        sender.send(AppMessage::ImportComplete(ImportOrigin::Cacoward, result));
     });
 }
 
@@ -349,7 +397,7 @@ pub fn spawn_import_form(
             }
             Ok(result)
         })();
-        sender.send(AppMessage::ImportComplete(result));
+        sender.send(AppMessage::ImportComplete(ImportOrigin::Form(kind), result));
     });
 }
 

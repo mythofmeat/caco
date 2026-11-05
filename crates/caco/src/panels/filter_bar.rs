@@ -49,6 +49,12 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
         }
     }
 
+    // Enter finishes typing, and that is all it does. Taken for the reason below: it used to go
+    // on to launch whatever happened to be selected.
+    if response.lost_focus() {
+        ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+    }
+
     // Escape while focused: clear filter text. And take the key, or the library, drawn after
     // this and with the keyboard free again, would go on to act on it too.
     if response.lost_focus()

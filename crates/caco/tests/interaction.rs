@@ -233,7 +233,7 @@ fn the_views_have_keys_in_the_order_the_sidebar_has_them() {
 
     app.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Num2);
     settle(&mut app);
-    assert!(app.query_by_label("Search:").is_some(), "Import");
+    assert!(app.query_by_label("Search idgames").is_some(), "Import");
 
     app.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Num4);
     settle(&mut app);
@@ -264,7 +264,7 @@ fn searching_from_import_goes_to_its_own_box() {
 
     type_text(&mut app, "/");
 
-    assert!(app.get_by_label("Search:").is_focused());
+    assert!(app.get_by_label("Search idgames").is_focused());
 }
 
 /// The library with one WAD selected and something to read about it.
@@ -523,4 +523,156 @@ fn a_card_offers_play_once_the_pointer_is_on_it() {
     settle(&mut app);
 
     assert_eq!(app.query_all_by_label("Play").count(), plays_before + 1);
+}
+
+/// A file dropped on the window, as far as the app can tell.
+#[derive(Debug)]
+struct Dropped(PathBuf);
+
+impl egui::DroppedFile for Dropped {
+    fn path(&self) -> &Path {
+        &self.0
+    }
+
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        std::fs::read(&self.0).map_err(|e| e.to_string())
+    }
+}
+
+/// The form's button, which is not the sidebar's entry of the same name: that is drawn first.
+fn press_import(app: &mut Harness) {
+    let button = app
+        .query_all_by_label("Import")
+        .last()
+        .expect("an Import button");
+    button.click_accesskit();
+    settle(app);
+}
+
+/// Until something a worker does has shown up, or the test has waited long enough to fail.
+fn wait_until(app: &mut Harness, what: &str, done: impl Fn(&Harness) -> bool) {
+    for _ in 0..200 {
+        if done(app) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+        settle(app);
+    }
+    panic!("timed out waiting for {what}");
+}
+
+#[test]
+fn a_file_dropped_on_the_window_can_be_imported_and_shown() {
+    let db_path = library("drop-file", 1);
+    let file = scratch().join("my_new_map.wad");
+    std::fs::write(&file, "PWAD").expect("write WAD file");
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+
+    app.input_mut()
+        .dropped_files
+        .push(std::sync::Arc::new(Dropped(file.clone())));
+    settle(&mut app);
+
+    // All it needed was a title, and it has one.
+    let path = file.display().to_string();
+    assert_eq!(
+        app.get_by_label("File").value().as_deref(),
+        Some(path.as_str())
+    );
+    assert_eq!(
+        app.get_by_label("Title").value().as_deref(),
+        Some("my new map")
+    );
+
+    press_import(&mut app);
+    wait_until(&mut app, "the import", |app| {
+        app.query_by_label("Imported my new map.").is_some()
+    });
+
+    app.get_by_label("Show").click_accesskit();
+    settle(&mut app);
+    assert_eq!(app.state().selected_wad_title(), Some("my new map"));
+    assert!(app.query_by_label("Filter WADs").is_some());
+}
+
+/// Going to another tab used to leave the form saying "Importing..." for good.
+#[test]
+fn an_import_finishing_on_another_tab_still_finishes_where_it_started() {
+    let db_path = library("import-tabs", 1);
+    let file = scratch().join("elsewhere.wad");
+    std::fs::write(&file, "PWAD").expect("write WAD file");
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+    app.input_mut()
+        .dropped_files
+        .push(std::sync::Arc::new(Dropped(file)));
+    settle(&mut app);
+
+    press_import(&mut app);
+    app.get_by_label("idgames").click_accesskit();
+    wait_until(&mut app, "the import", |app| {
+        app.query_by_label("Imported elsewhere.").is_some()
+    });
+
+    app.get_by_label("Local File").click_accesskit();
+    settle(&mut app);
+    assert!(app.query_by_label("Importing\u{2026}").is_none());
+    assert_eq!(app.get_by_label("File").value().as_deref(), Some(""));
+}
+
+#[test]
+fn a_form_says_what_is_missing_and_says_it_on_enter_too() {
+    let db_path = library("form-validate", 1);
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+    app.state_mut().set_view(ViewMode::Import);
+    settle(&mut app);
+    app.get_by_label("URL").click_accesskit();
+    settle(&mut app);
+
+    press_import(&mut app);
+
+    assert!(app.query_by_label("Download URL is required").is_some());
+}
+
+/// Finishing typing a filter used to launch whatever happened to be selected.
+#[test]
+fn enter_in_the_filter_finishes_typing_and_does_not_play_anything() {
+    let db_path = library("enter-in-filter", 3);
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+    type_text(&mut app, "/");
+    type_text(&mut app, "WAD");
+
+    press(&mut app, egui::Key::Enter);
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    settle(&mut app);
+
+    assert!(
+        app.query_by_role_and_label(Role::Window, "WAD Unavailable")
+            .is_none()
+    );
+
+    // And it is the library's keyboard again: this one means it.
+    press(&mut app, egui::Key::Enter);
+    wait_until(&mut app, "the launch to find no file", |app| {
+        app.query_by_role_and_label(Role::Window, "WAD Unavailable")
+            .is_some()
+    });
+}
+
+#[test]
+fn enter_in_the_search_box_searches_and_does_not_import_what_is_selected() {
+    let db_path = library("enter-in-search", 1);
+    let conn = db::open_connection(&db_path).expect("open library");
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+    app.state_mut().set_view(ViewMode::Import);
+    settle(&mut app);
+
+    app.get_by_label("Search idgames").focus();
+    settle(&mut app);
+    type_text(&mut app, "anything");
+    press(&mut app, egui::Key::Enter);
+
+    wait_until(&mut app, "the search to finish", |app| {
+        app.query_all_by_label("Searching...").next().is_none()
+    });
+    assert_eq!(wads_in_library(&conn), 1);
 }

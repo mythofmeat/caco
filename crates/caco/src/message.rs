@@ -4,7 +4,7 @@ use caco_core::player::PlayResult;
 use caco_core::wad_analysis::WadAnalysis;
 use caco_sources::import_service::ImportResult;
 
-use crate::import::state::{SearchResults, SearchSource};
+use crate::import::state::{ImportOrigin, SearchResults, SearchSource};
 use crate::state::ActionRequest;
 
 // ---------------------------------------------------------------------------
@@ -275,7 +275,7 @@ pub enum AppMessage {
     IdgamesIndexProgress(caco_sources::idgames::sync::SyncProgress),
     /// That worker finished, or could not start.
     IdgamesIndexFinished(Result<IdgamesIndexRun, String>),
-    ImportComplete(Result<ImportResult, String>),
+    ImportComplete(ImportOrigin, Result<ImportResult, String>),
     ThumbnailReady {
         wad_id: i64,
         width: u32,

@@ -35,7 +35,9 @@ use std::time::Duration;
 
 use caco::dialogs::storage::StorageTab;
 use caco::get::GetTarget;
-use caco::import::state::{SearchResultEntry, SearchResults, SearchSource, SearchSourceData};
+use caco::import::state::{
+    ImportOrigin, SearchResultEntry, SearchResults, SearchSource, SearchSourceData,
+};
 use caco::message::{AppMessage, EnrichReport, IdgamesIndexRun};
 use caco::state::{ActionRequest, ViewMode};
 use caco_core::sourceports::RemoteRefs;
@@ -616,6 +618,13 @@ impl Shooter {
         self.settle(2, Duration::ZERO);
     }
 
+    /// Edit in the mirrors tool, not the one for the WAD in the panel behind it.
+    fn mirrors_edit_button(&self) -> egui_kittest::Node<'_> {
+        self.harness
+            .get_by_role_and_label(egui::accesskit::Role::Window, "Mirrors")
+            .get_by_label("Edit")
+    }
+
     /// Open the mirrors tool on a kind's page, through the buttons a person would use.
     fn open_wizard_on(&mut self, kind: &str) {
         self.harness
@@ -682,13 +691,16 @@ impl Shooter {
     /// import worker posts.
     fn post_import_of(&mut self, wad_id: i64) {
         let tx = self.harness.state_mut().background_sender();
-        tx.send(AppMessage::ImportComplete(Ok(ImportResult {
-            wad_id: Some(wad_id),
-            is_duplicate: false,
-            duplicate_id: None,
-            duplicate_title: None,
-            error: None,
-        })));
+        tx.send(AppMessage::ImportComplete(
+            ImportOrigin::Cacoward,
+            Ok(ImportResult {
+                wad_id: Some(wad_id),
+                is_duplicate: false,
+                duplicate_id: None,
+                duplicate_title: None,
+                error: None,
+            }),
+        ));
         self.settle(2, WORKER_PAUSE);
     }
 
@@ -821,7 +833,7 @@ fn shoot_every_surface() {
         s.harness.get_all_by_label("Laocoön").next().unwrap();
     });
     s.shot_view_after("04-import-idgames-search", ViewMode::Import, |s| {
-        s.type_into("Search:", "Laocoon");
+        s.type_into("Search idgames", "Laocoon");
         s.harness.key_press(egui::Key::Enter);
         s.wait_for("the search", |s| {
             s.harness.query_by_label("1 result").is_some()
@@ -830,12 +842,12 @@ fn shoot_every_surface() {
         assert!(s.harness.query_by_label("Newest on idgames").is_none());
     });
     s.shot_view_after("04-import-idgames-same-name", ViewMode::Import, |s| {
-        s.harness.get_by_label("Search:").focus();
+        s.harness.get_by_label("Search idgames").focus();
         s.settle(1, Duration::ZERO);
         // Replacing what the last shot typed, as a person selecting it would.
         s.harness
             .key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
-        s.harness.get_by_label("Search:").type_text("castle");
+        s.harness.get_by_label("Search idgames").type_text("castle");
         s.settle(1, Duration::ZERO);
         s.harness.key_press(egui::Key::Enter);
         s.wait_for("the search", |s| {
@@ -888,6 +900,7 @@ fn shoot_every_surface() {
             SearchSource::Idgames,
             Ok(SearchResults {
                 entries: vec![SearchResultEntry {
+                    in_library: None,
                     title: "sunlust".to_string(),
                     author: None,
                     description: None,
@@ -1442,7 +1455,7 @@ fn shoot_every_surface() {
                 s.harness.query_by_label_contains("1 file").is_some()
             });
             s.harness.get_by_label("Add a Mirror");
-            s.harness.get_by_label("Edit");
+            s.mirrors_edit_button();
         }),
     );
 
@@ -1450,7 +1463,7 @@ fn shoot_every_surface() {
     record(
         "mirrors-edit",
         s.shot_dialog_after("dlg-mirrors-edit", ActionRequest::Mirrors, |s| {
-            s.harness.get_by_label("Edit").click_accesskit();
+            s.mirrors_edit_button().click_accesskit();
             s.settle(3, Duration::ZERO);
             assert_eq!(
                 s.harness.get_by_label("Folder").value().as_deref(),
@@ -1678,9 +1691,14 @@ fn shoot_every_surface() {
         .state_mut()
         .dispatch_action(ActionRequest::Play(gotten));
     s.wait_for("the link dialog", |s| {
-        s.harness.query_by_label("Get in Browser").is_some()
+        s.harness
+            .query_by_role_and_label(egui::accesskit::Role::Window, "WAD Unavailable")
+            .is_some()
     });
-    s.harness.get_by_label("Get in Browser").click_accesskit();
+    s.harness
+        .get_by_role_and_label(egui::accesskit::Role::Window, "WAD Unavailable")
+        .get_by_label("Get in Browser")
+        .click_accesskit();
     assert_eq!(s.wait_for_page(&opened), page);
     s.settle(2, Duration::ZERO);
     let waiting = "Waiting for download: Purgatory...";

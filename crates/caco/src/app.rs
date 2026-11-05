@@ -13,7 +13,7 @@ use crate::dialogs::sessions::SessionsDialogState;
 use crate::dialogs::wad_stats::WadStatsDialogState;
 use crate::get::{GetOutcome, GetTarget, PageOpener};
 use crate::import;
-use crate::import::state::SearchSourceData;
+use crate::import::state::{FormKind, ImportOrigin, SearchSourceData};
 use crate::message::{AppMessage, EnrichReport, NoticeAction, Notification};
 use crate::panels;
 use crate::persist;
@@ -67,6 +67,27 @@ const VIEW_KEYS: [(egui::Key, ViewMode); 4] = [
     (egui::Key::Num3, ViewMode::Cacowards),
     (egui::Key::Num4, ViewMode::Stats),
 ];
+
+/// Say what will happen to a file being dragged over the window. Nothing to go on otherwise, and
+/// nothing to say with a dialog open, since a file dropped then goes nowhere.
+fn render_drop_hint(ctx: &egui::Context, dialog_open: bool) {
+    if dialog_open || ctx.input(|i| i.raw.hovered_files.is_empty()) {
+        return;
+    }
+    let screen = ctx.content_rect();
+    let painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Foreground,
+        egui::Id::unique("drop-hint"),
+    ));
+    painter.rect_filled(screen, 0.0, theme::SCRIM);
+    painter.text(
+        screen.center(),
+        egui::Align2::CENTER_CENTER,
+        "Drop to import",
+        egui::FontId::proportional(20.0),
+        theme::TEXT_PRIMARY,
+    );
+}
 
 /// Whether `text` was typed this frame with nothing there to type it into, and if so take it,
 /// or it would land in the field it is about to put the keyboard in. Goes by what was typed
@@ -215,22 +236,26 @@ impl CacoApp {
 
         match action {
             import::ImportAction::Search(source, query) => {
-                import::workers::spawn_search(sender, source, query);
+                import::workers::spawn_search(sender, db_path, source, query);
             }
             import::ImportAction::Newest => {
-                import::workers::spawn_newest(sender);
+                import::workers::spawn_newest(sender, db_path);
             }
+            import::ImportAction::ShowWad(wad_id) => self.state.show_wad(wad_id),
             import::ImportAction::UpdateIndex => {
                 self.spawn_idgames_index(true);
             }
-            import::ImportAction::ImportSearchResult(_, entry) => match entry.source_data {
-                SearchSourceData::Idgames { target, .. } => {
-                    import::workers::spawn_import_idgames(sender, db_path, target);
+            import::ImportAction::ImportSearchResult(source, entry) => {
+                self.state.import.search_state_mut(source).importing = Some(entry.key());
+                match entry.source_data {
+                    SearchSourceData::Idgames { target, .. } => {
+                        import::workers::spawn_import_idgames(sender, db_path, target);
+                    }
+                    SearchSourceData::Doomwiki { .. } => {
+                        import::workers::spawn_import_doomwiki(sender, db_path, entry.title);
+                    }
                 }
-                SearchSourceData::Doomwiki { .. } => {
-                    import::workers::spawn_import_doomwiki(sender, db_path, entry.title);
-                }
-            },
+            }
             import::ImportAction::ImportForm(kind, values) => {
                 import::workers::spawn_import_form(sender, db_path, kind, values);
             }
@@ -650,6 +675,85 @@ impl CacoApp {
     /// the clock, and a picture must not depend on how long a run took to get there.
     pub fn dismiss_notification(&mut self) {
         self.state.notification = None;
+    }
+
+    /// A file dropped on the window goes to Import, ready to go, unless a dialog is open, which
+    /// is the one thing that has to be dealt with first.
+    fn take_dropped_file(&mut self, ctx: &egui::Context) {
+        let dropped = ctx.input(|i| i.raw.dropped_files.clone());
+        let Some(first) = dropped.first() else {
+            return;
+        };
+        if self.state.has_dialog() {
+            return;
+        }
+        self.state.import.local_form.set_path(first.path());
+        self.state.import.show_form(FormKind::Local);
+        self.state.show_view(ViewMode::Import);
+        if dropped.len() > 1 {
+            self.state.notification = Some(Notification::warning(
+                "One file at a time: this is the first of them.".to_string(),
+            ));
+        }
+    }
+
+    /// An import has finished, wherever it was started from.
+    fn import_finished(
+        &mut self,
+        origin: ImportOrigin,
+        result: Result<caco_sources::import_service::ImportResult, String>,
+    ) {
+        let import = &mut self.state.import;
+        match origin {
+            ImportOrigin::Form(kind) => {
+                let form = import.form_mut(kind);
+                form.is_submitting = false;
+                if result.as_ref().is_ok_and(|ir| !ir.is_duplicate) {
+                    form.reset();
+                }
+            }
+            ImportOrigin::Search(source) => {
+                let wad = result
+                    .as_ref()
+                    .ok()
+                    .and_then(|ir| ir.wad_id.or(ir.duplicate_id));
+                import.search_state_mut(source).import_finished(wad);
+            }
+            ImportOrigin::Cacoward => {}
+        }
+
+        let ir = match result {
+            Ok(ir) => ir,
+            Err(e) => {
+                self.state.notification = Some(Notification::error(format!("Import failed: {e}")));
+                return;
+            }
+        };
+        // A duplicate Cacoward import can still link the existing WAD to the award row, so
+        // every successful result may have changed a cached projection.
+        self.state.invalidate_wad_views();
+        if let Some(wad_id) = ir.wad_id {
+            self.state.mirror_offers.push_back(wad_id);
+        }
+        let (text, wad) = if ir.is_duplicate {
+            // Nothing went wrong: it is there, which is what was wanted.
+            let title = ir.duplicate_title.unwrap_or_else(|| "unknown".to_string());
+            (
+                format!("Already in your library, as {title}."),
+                ir.duplicate_id,
+            )
+        } else {
+            let title = ir
+                .wad_id
+                .and_then(|id| caco_core::db::get_wad(&self.conn, id, false).ok().flatten())
+                .map_or_else(|| "it".to_string(), |wad| wad.title);
+            (format!("Imported {title}."), ir.wad_id)
+        };
+        let notice = Notification::info(text);
+        self.state.notification = Some(match wad {
+            Some(id) => notice.with_action(NoticeAction::ShowWad(id)),
+            None => notice,
+        });
     }
 
     /// Write something about a WAD that was changed in passing, and show it everywhere.
@@ -1276,7 +1380,10 @@ impl eframe::App for CacoApp {
                         }
                         // What is on the table may now be out of date.
                         if run.report.changed() && self.state.import.idgames.showing_newest {
-                            import::workers::spawn_newest(self.bg.sender());
+                            import::workers::spawn_newest(
+                                self.bg.sender(),
+                                self.state.db_path.clone(),
+                            );
                         }
                         if let Some(notification) = idgames_index::notification(run) {
                             self.state.notification = Some(notification);
@@ -1300,62 +1407,8 @@ impl eframe::App for CacoApp {
                         self.state.analyses_map.insert(wad_id, analysis);
                     }
                 }
-                AppMessage::ImportComplete(result) => {
-                    // Reset only the active form's submitting state
-                    let active = self.state.import.active_source;
-                    match active {
-                        2 => self.state.import.doomworld.is_submitting = false,
-                        3 => self.state.import.url_form.is_submitting = false,
-                        4 => self.state.import.local_form.is_submitting = false,
-                        _ => {}
-                    }
-
-                    match result {
-                        Ok(ir) => {
-                            // A duplicate Cacoward import can still link the
-                            // existing WAD to the award row, so every successful
-                            // result may have changed a cached projection.
-                            self.state.invalidate_wad_views();
-                            if let Some(wad_id) = ir.wad_id {
-                                self.state.mirror_offers.push_back(wad_id);
-                            }
-                            if ir.is_duplicate {
-                                let title =
-                                    ir.duplicate_title.unwrap_or_else(|| "unknown".to_string());
-                                // Nothing went wrong: it is there, which is what was wanted.
-                                let notice = Notification::info(format!(
-                                    "Already in your library, as {title}."
-                                ));
-                                self.state.notification = Some(match ir.duplicate_id {
-                                    Some(id) => notice.with_action(NoticeAction::ShowWad(id)),
-                                    None => notice,
-                                });
-                            } else {
-                                let title = ir
-                                    .wad_id
-                                    .and_then(|id| {
-                                        caco_core::db::get_wad(&self.conn, id, false).ok().flatten()
-                                    })
-                                    .map_or_else(|| "it".to_string(), |wad| wad.title);
-                                let notice = Notification::info(format!("Imported {title}."));
-                                self.state.notification = Some(match ir.wad_id {
-                                    Some(id) => notice.with_action(NoticeAction::ShowWad(id)),
-                                    None => notice,
-                                });
-                                // Reset only the active form on success
-                                match active {
-                                    2 => self.state.import.doomworld.reset(),
-                                    3 => self.state.import.url_form.reset(),
-                                    4 => self.state.import.local_form.reset(),
-                                    _ => {}
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            self.state.notification =
-                                Some(Notification::error(format!("Import failed: {e}")));
-                        }
-                    }
+                AppMessage::ImportComplete(origin, result) => {
+                    self.import_finished(origin, result);
                 }
             }
         }
@@ -1364,6 +1417,7 @@ impl eframe::App for CacoApp {
         self.state.check_filter_debounce(ctx, &self.conn);
 
         self.state.wide_window = panels::wad_details::fits(ctx);
+        self.take_dropped_file(ctx);
 
         // 3. Reload data if needed (defer when on Import view)
         if self.state.needs_reload && self.state.view_mode == ViewMode::Library {
@@ -1672,6 +1726,8 @@ impl eframe::App for CacoApp {
                 self.thumbnails.request(key, None, &hint, &sender);
             }
         }
+
+        render_drop_hint(ctx, self.state.has_dialog());
 
         // 8. Dispatch action requests
         for action in actions {
