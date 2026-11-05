@@ -85,11 +85,12 @@ in the Actions tab, which bumps it — see `CLAUDE.md` for what it does.
 
 Launch `caco` (or pick it from your application menu), then:
 
-1. **Settings** in the sidebar — set your sourceport and IWAD directories.
+1. **Settings** in the sidebar — set your sourceport and IWAD directories. caco
+   adopts one it finds on its own, and an empty library says if it could not.
 2. **IWADs** in the sidebar — register your IWADs. Drop in a directory and caco
    identifies each file by MD5.
 3. **Import** in the sidebar — search idgames or the Doom Wiki, paste a
-   Doomworld thread URL, or point at a local file.
+   Doomworld thread URL, or point at a local file, or drop one on the window.
 4. Select a WAD and press **Enter** to play. On first launch caco detects the
    required IWAD and complevel from the WAD file itself.
 
@@ -98,22 +99,33 @@ the sourceport.
 
 ## The Interface
 
-- Grid and list views, sorted by what you played last unless you say otherwise, and a live filter bar
+- Grid and list views, sorted by what you played last unless you say otherwise, or by whichever
+  column heading you click in the list, and a live filter bar whose search can be kept as a
+  collection with one click
+- Details beside the library for the selected WAD: its picture, description, tags, awards, notes,
+  how far through it you are, where its file is, and buttons for all of what can be done with it,
+  with status and rating changed right there. `I` puts them away, and a window too small for both
+  opens them in a dialog
 - WAD thumbnails scraped from the Doom Wiki (or extracted from TITLEPIC) with on-disk caching
-- Right-click context menu (play, edit, delete, sessions, map stats, saves & demos, new playthrough, and get in browser for a WAD caco can't fetch)
+- Right-click context menu (play, details, status, rating, sessions, map stats, saves & demos, edit, delete, new playthrough, and get in browser for a WAD caco can't fetch)
+- A status bar that says how many WADs are showing, and what there is to press. What it tells you
+  stays until it could have been read, an error until you dismiss it, and it offers what to do about
+  it: Undo after a delete, Show after an import
 - Continue Playing — the WAD in progress you played last, in a banner that collapses to a
   line in a short window
 - Cacowards view — a year-by-year list of Doomworld's awards, with posters a click away,
-  where entries you don't have yet are marked `Not in Library`, with an Import button, and a
-  Get button for those that aren't on idgames. A WAD imported
+  where entries you don't have yet have an Import button, and a Get button for those that
+  aren't on idgames. Hide Finished leaves what is left to play. A WAD imported
   any other way links itself to its entry, by file hash, idgames id, Doomworld
   thread, Doom Wiki page or an exact title match. A year's total counts the winners,
   runners-up, honorable mentions and Mordeth award; its other awards are listed
   under them
 - Stats view — totals, playtime and finishes by month, how far through each year's Cacowards
-  you are, and your most played authors, sourceports, IWADs and complevels
-- Keyboard shortcuts: `j/k`, `g`/`G`, `Home`/`End`, `Enter`, `E`, `D`, `S`, `M`, `F`, `P`, `Esc`,
-  and `F1` for the list of them
+  you are, and your most played authors, sourceports, IWADs and complevels. A status, an author or a
+  year goes to what it counts
+- Keyboard: `j/k` and the arrows, `Page Up/Down`, `g g`/`G`, `Home`/`End`, `Enter`, `I`, `E`,
+  `D`/`Delete`, `S`, `M`, `F`, `P`, `Esc`, `/` to search, `Ctrl+1`-`4` for the views, `Ctrl+Enter` for
+  a dialog's main button, and `?` or `F1` for the list of them, and how to write a filter
 
 ### Dialogs
 
@@ -201,13 +213,14 @@ Save a query as a collection to pin it to the sidebar.
 
 ## Importing
 
-The Import view auto-detects what you give it — an idgames search term or file
-ID, a Doom Wiki or Doomworld URL, or a path to a local file or directory. WAD
-files that turn out to be IWADs are registered as IWADs rather than library
-entries.
+The Import view has a tab for each way in: searching idgames or the Doom Wiki, a
+Doomworld thread, a link to a file, or a file you have, which can also be dropped
+anywhere on the window. WAD files that turn out to be IWADs are registered as IWADs
+rather than library entries.
 
 Non-Doomwiki imports are auto-enriched with Doom Wiki metadata (author, year,
-description, IWAD). Duplicate detection warns before re-importing.
+description, IWAD). A search result already in your library has a check mark and a
+button to go to it, and anything else that turns out to be there already says so.
 
 A site can answer with a WAF challenge instead of the page caco asked for. The
 error then names the site and the WAF. Retrying may not help, but your browser will

@@ -109,7 +109,7 @@ fn shortcut_section(ui: &mut egui::Ui, title: &str, shortcuts: &[(&[&str], &str)
                     if index > 0 {
                         ui.colored_label(theme::TEXT_MUTED, egui::RichText::new("or").size(11.0));
                     }
-                    theme::key_cap(ui, key);
+                    theme::key_cap(ui, &key.replace("Ctrl", theme::COMMAND_KEY));
                 }
             });
             ui.colored_label(theme::TEXT_SECONDARY, *what);

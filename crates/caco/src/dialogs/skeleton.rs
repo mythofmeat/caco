@@ -425,7 +425,10 @@ impl<'a> Primary<'a> {
             None => {
                 let pressed =
                     ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter));
-                response.on_hover_text("Ctrl+Enter").clicked() || pressed
+                response
+                    .on_hover_text(format!("{}+Enter", theme::COMMAND_KEY))
+                    .clicked()
+                    || pressed
             }
         }
     }

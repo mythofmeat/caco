@@ -129,7 +129,7 @@ fn keyboard(ui: &egui::Ui, state: &mut SearchState) -> Option<SearchPanelAction>
     if ui.ctx().egui_wants_keyboard_input() {
         return None;
     }
-    let pressed = |key| ui.input(|i| i.key_pressed(key));
+    let pressed = |key| crate::panels::plain_key(ui, key);
     let last = state.results.len().saturating_sub(1);
     let from = state.selected_row.unwrap_or(0);
     let to = if pressed(egui::Key::ArrowDown) || pressed(egui::Key::J) {

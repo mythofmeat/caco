@@ -475,6 +475,13 @@ pub fn solid_scrollbar(ui: &mut egui::Ui) {
     widgets.active.bg_fill = lift(SCROLL_HANDLE);
 }
 
+/// What the key that goes with most shortcuts is called on this machine.
+pub const COMMAND_KEY: &str = if cfg!(target_os = "macos") {
+    "Cmd"
+} else {
+    "Ctrl"
+};
+
 /// A key on the keyboard, as a little cap with its name on it.
 pub fn key_cap(ui: &mut egui::Ui, key: &str) {
     egui::Frame::new()
@@ -754,7 +761,7 @@ pub fn apply_doom_theme(ctx: &egui::Context) {
     visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0_f32, CONTROL_BORDER);
 
     // Widget styles — hovered
-    visuals.widgets.hovered.bg_fill = BG_SIDEBAR;
+    visuals.widgets.hovered.bg_fill = BG_LIGHT;
     visuals.widgets.hovered.weak_bg_fill = CONTROL_FILL_HOVER;
     visuals.widgets.hovered.fg_stroke.color = TEXT_PRIMARY;
     visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0_f32, TEXT_ACCENT);

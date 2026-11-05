@@ -313,6 +313,12 @@ pub fn reveal(ui: &egui::Ui, stretch: egui::Rect, is_first_row: bool, view_top: 
     }
 }
 
+/// Whether a key was pressed on its own, and if so take it. Ctrl+D is somebody's habit for
+/// something else, and shouldn't ask to delete a WAD.
+pub fn plain_key(ui: &egui::Ui, key: egui::Key) -> bool {
+    ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, key))
+}
+
 /// How the library's two layouts differ to the arrow keys.
 #[derive(Clone, Copy)]
 pub struct LibraryShape {
@@ -333,7 +339,7 @@ pub fn library_keys(
         return None;
     }
     let LibraryShape { columns, page } = shape;
-    let pressed = |key| ui.input(|i| i.key_pressed(key));
+    let pressed = |key| plain_key(ui, key);
 
     if pressed(egui::Key::J) || pressed(egui::Key::ArrowDown) {
         state.select_down(columns);
@@ -361,9 +367,10 @@ pub fn library_keys(
     if pressed(egui::Key::End) {
         state.select_last();
     }
-    if ui.input(|i| i.modifiers.shift && i.key_pressed(egui::Key::G)) {
+    // Shift first, since a key asked for without it is taken with it held as well.
+    if ui.input_mut(|i| i.consume_key(egui::Modifiers::SHIFT, egui::Key::G)) {
         state.select_last();
-    } else if ui.input(|i| !i.modifiers.shift && i.key_pressed(egui::Key::G)) {
+    } else if pressed(egui::Key::G) {
         state.handle_g_press();
     }
     // Back out of whatever is narrowing the list first, and only then of the selection.
@@ -382,26 +389,27 @@ pub fn library_keys(
 /// Returns an action if a key was pressed while a WAD is selected.
 pub fn handle_action_keys(ui: &egui::Ui, selected_wad_id: Option<i64>) -> Option<ActionRequest> {
     let wad_id = selected_wad_id?;
+    let pressed = |key| plain_key(ui, key);
 
-    if ui.input(|i| i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::P)) {
+    if pressed(egui::Key::Enter) || pressed(egui::Key::P) {
         return Some(ActionRequest::Play(wad_id));
     }
-    if ui.input(|i| i.key_pressed(egui::Key::E)) {
+    if pressed(egui::Key::E) {
         return Some(ActionRequest::Edit(wad_id));
     }
-    if ui.input(|i| i.key_pressed(egui::Key::D) || i.key_pressed(egui::Key::Delete)) {
+    if pressed(egui::Key::D) || pressed(egui::Key::Delete) {
         return Some(ActionRequest::Delete(wad_id));
     }
-    if ui.input(|i| i.key_pressed(egui::Key::S)) {
+    if pressed(egui::Key::S) {
         return Some(ActionRequest::Sessions(wad_id));
     }
-    if ui.input(|i| i.key_pressed(egui::Key::M)) {
+    if pressed(egui::Key::M) {
         return Some(ActionRequest::MapStats(wad_id));
     }
-    if ui.input(|i| i.key_pressed(egui::Key::F)) {
+    if pressed(egui::Key::F) {
         return Some(ActionRequest::WadData(wad_id));
     }
-    if ui.input(|i| i.key_pressed(egui::Key::I)) {
+    if pressed(egui::Key::I) {
         return Some(ActionRequest::ToggleDetails);
     }
     None

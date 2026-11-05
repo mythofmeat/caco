@@ -55,6 +55,28 @@ fn every_colour_is_a_token_in_the_theme() {
     assert_eq!(hits, Vec::<String>::new(), "name these in theme.rs");
 }
 
+/// Accent means act, or where you are. It got used for table headers, section headings, dialog
+/// titles and a file name in a question, and then it meant nothing. These are the places that
+/// are one of those two: a new one should be as well.
+#[test]
+fn accent_is_only_used_for_what_to_do_and_where_you_are() {
+    let hits = lines_containing(
+        &["TEXT_ACCENT"],
+        &[
+            "theme.rs",
+            // The selection's ring.
+            "panels/wad_grid.rs",
+            // The year in the banner, the page pill on hover, the chosen year and the ring.
+            "panels/cacowards.rs",
+            // The tab you are on.
+            "dialogs/skeleton.rs",
+            // The name of the app, which is where you are in the widest sense.
+            "app/sidebar.rs",
+        ],
+    );
+    assert_eq!(hits, Vec::<String>::new(), "is this something to act on?");
+}
+
 /// A table in a dialog has a minimum height unless told otherwise, and spills out of the
 /// window once it has enough rows.
 #[test]

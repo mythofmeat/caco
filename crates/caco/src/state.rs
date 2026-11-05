@@ -855,6 +855,11 @@ impl AppState {
 
                 let same_list = self.loaded_query == query;
                 self.selected_wad_id = self.selection_after_reload(&wads, same_list);
+                // Wherever the view was scrolled to meant something in the old list. In a new
+                // one it left the selection off the screen, or left no list on it at all.
+                if !same_list {
+                    self.reveal_selection = true;
+                }
                 self.loaded_query = query;
                 self.wads = wads;
             }

@@ -89,6 +89,15 @@ fn render_drop_hint(ctx: &egui::Context, dialog_open: bool) {
     );
 }
 
+/// Whether this was pressed with Ctrl or Cmd held, and if so take it, so that nothing drawn after
+/// this acts on the plain key as well.
+///
+/// By what the key's own event says rather than by `InputState::modifiers`, which is how things
+/// stood at the end of the frame: a quick enough press has Ctrl up by then, and did nothing.
+fn command_key(ctx: &egui::Context, key: egui::Key) -> bool {
+    ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, key))
+}
+
 /// Whether `text` was typed this frame with nothing there to type it into, and if so take it,
 /// or it would land in the field it is about to put the keyboard in. Goes by what was typed
 /// rather than which key, since `?` and `/` are different keys on different keyboards.
@@ -974,6 +983,7 @@ impl CacoApp {
                 match caco_core::db::cacowards::unlink_wad(&self.conn, pk) {
                     Ok(_) => {
                         self.state.cacowards.needs_reload = true;
+                        self.state.details = None;
                         self.state.notification =
                             Some(Notification::info("Cacoward link cleared".to_string()));
                     }
@@ -1481,26 +1491,24 @@ impl eframe::App for CacoApp {
             if ctx.input(|i| i.key_pressed(egui::Key::F5)) {
                 self.state.needs_reload = true;
             }
-            if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Q)) {
+            if command_key(ctx, egui::Key::Q) {
                 quit = true;
             }
             if ctx.input(|i| i.key_pressed(egui::Key::F1)) || typed_alone(ctx, "?") {
                 self.dispatch_action(ActionRequest::Help);
             }
-            if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::F))
-                || typed_alone(ctx, "/")
-            {
+            if command_key(ctx, egui::Key::F) || typed_alone(ctx, "/") {
                 self.focus_search(ctx);
             }
             for (key, view) in VIEW_KEYS {
-                if ctx.input(|i| i.modifiers.command && i.key_pressed(key)) {
+                if command_key(ctx, key) {
                     self.state.show_view(view);
                 }
             }
             // Ctrl+R — reload config from disk. Already-cached state (e.g. window
             // size chosen at startup) does not refresh; subsequent reads pick up
             // new values.
-            if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::R)) {
+            if command_key(ctx, egui::Key::R) {
                 caco_core::config::reload_config();
                 self.state.notification = Some(Notification::info(
                     "Settings reloaded from disk.".to_string(),

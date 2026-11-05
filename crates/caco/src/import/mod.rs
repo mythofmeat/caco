@@ -73,23 +73,20 @@ pub fn render(ui: &mut egui::Ui, state: &mut ImportState) -> Option<ImportAction
 
     // Number key shortcuts for source switching (only when nothing focused)
     if !ui.ctx().egui_wants_keyboard_input() {
-        ui.input(|i| {
-            for (idx, key) in [
-                egui::Key::Num1,
-                egui::Key::Num2,
-                egui::Key::Num3,
-                egui::Key::Num4,
-                egui::Key::Num5,
-            ]
-            .iter()
-            .enumerate()
-            {
-                // Not with Ctrl held, which is what goes to a view: this one, on Ctrl+2.
-                if i.modifiers.is_none() && i.key_pressed(*key) {
-                    state.active_source = idx;
-                }
+        for (idx, key) in [
+            egui::Key::Num1,
+            egui::Key::Num2,
+            egui::Key::Num3,
+            egui::Key::Num4,
+            egui::Key::Num5,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if crate::panels::plain_key(ui, key) {
+                state.active_source = idx;
             }
-        });
+        }
     }
 
     action

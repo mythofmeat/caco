@@ -128,7 +128,7 @@ fn entry_keys(
     if state.has_dialog() || ui.ctx().egui_wants_keyboard_input() {
         return None;
     }
-    let pressed = |key| ui.input(|i| i.key_pressed(key));
+    let pressed = |key| crate::panels::plain_key(ui, key);
 
     if pressed(egui::Key::Escape) {
         state.cacowards.selected_entry_pk = None;

@@ -287,6 +287,7 @@ pub(super) fn render_active_dialog(
                         state.notification = Some(Notification::error(format!("Link failed: {e}")));
                     } else {
                         state.cacowards.needs_reload = true;
+                        state.details = None;
                         state.notification =
                             Some(Notification::info("Linked to library WAD".to_string()));
                     }

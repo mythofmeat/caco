@@ -1038,8 +1038,11 @@ fn shoot_every_surface() {
     s.settle(1, Duration::ZERO);
 
     // And a field that had the keyboard when a dialog opened lets go of it, or what is typed
-    // goes to the app behind. Help has no fields of its own to take it.
+    // goes to the app behind. Help has no fields of its own to take it. The filter is only there
+    // with something in the library to filter, which CI's has nothing in at this point.
+    let to_filter = s.add_lost_wad();
     s.harness.state_mut().set_view(ViewMode::Library);
+    s.harness.key_press(egui::Key::F5);
     s.settle(2, Duration::ZERO);
     s.harness
         .key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::F);
@@ -1055,6 +1058,9 @@ fn shoot_every_surface() {
         Some(""),
         "what was typed in a dialog reached the filter behind it"
     );
+    s.purge_wad(to_filter);
+    s.harness.key_press(egui::Key::F5);
+    s.settle(2, Duration::ZERO);
 
     // The version picker only exists once a remote has answered, and that is
     // asked on demand, so opening the dialog alone never reaches it.
@@ -1604,6 +1610,41 @@ fn shoot_every_surface() {
             );
         }
     });
+
+    // A WAD's menu, which has a submenu of statuses. Needs a right click on a card, which only
+    // a library with one in it has, and the shot before this one has added one. The card's
+    // own Play turns up under the pointer as well, as it does for a person.
+    s.shot_view_after("05-wad-menu", ViewMode::Library, |s| {
+        let Some(card) = s
+            .harness
+            .query_all_by_role(egui::accesskit::Role::Button)
+            .find(|node| {
+                node.accesskit_node().label().is_some_and(|label| {
+                    ["Unplayed", "In Progress", "Completed", "Abandoned"]
+                        .iter()
+                        .any(|word| label.ends_with(&format!(", {word}")))
+                })
+            })
+            .map(|node| node.rect().center())
+        else {
+            return;
+        };
+        let pos = egui::pos2(card.x, card.y);
+        s.harness.hover_at(pos);
+        s.settle(2, Duration::ZERO);
+        for pressed in [true, false] {
+            s.harness.event(egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Secondary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            s.settle(1, Duration::ZERO);
+        }
+        s.harness.get_by_label("Delete").rect();
+    });
+    s.harness.key_press(egui::Key::Escape);
+    s.settle(2, Duration::ZERO);
 
     // Only a WAD arriving with no way back brings up the offer.
     let manual = s.add_manual_wad_with_file("The Evil Reborn", 152000);

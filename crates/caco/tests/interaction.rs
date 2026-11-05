@@ -810,3 +810,56 @@ fn the_stars_for_a_rating_go_across_in_the_panel_and_in_edit() {
     assert!(app.query_by_label("Save Changes").is_some());
     in_a_row(&app);
 }
+
+/// Ctrl+D is somebody's habit for something else, and shouldn't ask to delete a WAD.
+#[test]
+fn the_librarys_letters_mean_nothing_with_ctrl_held() {
+    let db_path = library("ctrl-letters", 3);
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+    let first = app.state().selected_wad_title().unwrap().to_string();
+
+    for key in [egui::Key::D, egui::Key::S, egui::Key::E, egui::Key::J] {
+        app.key_press_modifiers(egui::Modifiers::COMMAND, key);
+        settle(&mut app);
+    }
+
+    assert!(app.query_by_role(Role::Window).is_none());
+    assert_eq!(app.state().selected_wad_title().unwrap(), first);
+}
+
+/// Seen with a real keyboard under X11: a quick enough press has Ctrl up again by the end of
+/// the frame, with the key's own event the only thing still saying it was held.
+#[test]
+fn a_view_key_works_however_quickly_ctrl_was_let_go() {
+    let db_path = library("quick-ctrl", 1);
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+
+    app.input_mut().events.push(egui::Event::Key {
+        key: egui::Key::Num2,
+        physical_key: Some(egui::Key::Num2),
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::COMMAND,
+    });
+    settle(&mut app);
+
+    assert!(app.query_by_label("Search idgames").is_some());
+}
+
+#[test]
+fn a_new_list_comes_back_to_the_selection_wherever_the_view_was_scrolled_to() {
+    let db_path = library("filter-scroll", 60);
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+    press(&mut app, egui::Key::End);
+    press(&mut app, egui::Key::Home);
+    for _ in 0..20 {
+        press(&mut app, egui::Key::J);
+    }
+
+    type_text(&mut app, "/");
+    type_text(&mut app, "WAD");
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    settle(&mut app);
+
+    assert_selection_is_on_screen(&app, DEFAULT_WINDOW);
+}
