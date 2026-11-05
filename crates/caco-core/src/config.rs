@@ -1222,7 +1222,6 @@ pub fn find_wad_data_dir(key: &str, title: &str) -> Option<PathBuf> {
 /// [`find_wad_data_dir`] under an explicit root. Blank `title` for any folder with that key.
 pub fn find_data_dir_in(root: &Path, key: &str, title: &str) -> Option<PathBuf> {
     let prefix = format!("{key}_");
-    let exact = format!("{prefix}{}", sanitize_dirname(title));
     let mut candidates: Vec<PathBuf> = fs::read_dir(root)
         .ok()?
         .flatten()
@@ -1237,11 +1236,21 @@ pub fn find_data_dir_in(root: &Path, key: &str, title: &str) -> Option<PathBuf> 
         .collect();
     // The same answer every time, since `read_dir` comes in no particular order.
     candidates.sort();
-    candidates
-        .iter()
-        .find(|path| path.file_name().and_then(|name| name.to_str()) == Some(exact.as_str()))
-        .cloned()
-        .or_else(|| candidates.into_iter().next())
+    choose_data_dir(&candidates, title).cloned()
+}
+
+/// Which of the folders with one key belongs to the WAD with this title: the one named for
+/// it if there is one, or else the first. Sorted, by the caller, so that it stays the first.
+pub fn choose_data_dir<'a>(dirs: &'a [PathBuf], title: &str) -> Option<&'a PathBuf> {
+    let exact = sanitize_dirname(title);
+    dirs.iter()
+        .find(|dir| {
+            dir.file_name()
+                .and_then(|name| name.to_str())
+                .and_then(|name| name.split_once('_'))
+                .is_some_and(|(_, rest)| rest == exact)
+        })
+        .or_else(|| dirs.first())
 }
 
 /// Get the path to a sourceport config profile file.

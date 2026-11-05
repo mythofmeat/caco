@@ -220,7 +220,7 @@ fn measure_wad(
 ) -> crate::Result<WadPlanEntry> {
     let found = data_dirs
         .get(&wad.data_key)
-        .and_then(|dirs| data_dir_of(dirs, &wad.title));
+        .and_then(|dirs| config::choose_data_dir(dirs, &wad.title));
     let (data_dir, data_size) = match (opts.keep_data, found) {
         (false, Some(dir)) => (Some(dir.clone()), reclaimable_data_size(dir, opts)),
         _ => (None, 0),
@@ -599,19 +599,6 @@ fn data_dir_map(data_dir: &Path) -> HashMap<String, Vec<PathBuf>> {
         dirs.sort();
     }
     map
-}
-
-/// Which of the folders with its key is this WAD's: as [`config::find_data_dir_in`] picks.
-fn data_dir_of<'a>(dirs: &'a [PathBuf], title: &str) -> Option<&'a PathBuf> {
-    let exact = crate::utils::sanitize_dirname(title);
-    dirs.iter()
-        .find(|dir| {
-            dir.file_name()
-                .and_then(|name| name.to_str())
-                .and_then(|name| name.split_once('_'))
-                .is_some_and(|(_, rest)| rest == exact)
-        })
-        .or_else(|| dirs.first())
 }
 
 #[cfg(test)]

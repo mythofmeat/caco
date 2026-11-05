@@ -80,22 +80,16 @@ fn slug(hostname: &str) -> String {
     cleaned.trim_matches('-').to_string()
 }
 
-/// Eight hex digits from the operating system. Eight is plenty, since a clash needs two
-/// machines with the same name too.
+/// Eight hex digits the operating system seeded, which is what a `RandomState` is, for the
+/// price of no dependency. Eight is plenty, since a clash needs two machines with the same
+/// name too.
 fn random_hex() -> String {
-    let mut bytes = [0u8; 4];
-    let read = fs::File::open("/dev/urandom")
-        .and_then(|mut file| io::Read::read_exact(&mut file, &mut bytes));
-    if read.is_err() {
-        // Nothing without /dev/urandom runs caco today. The time is still far better
-        // than a fixed value here, because this only has to differ between machines.
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|elapsed| elapsed.subsec_nanos())
-            .unwrap_or_default();
-        bytes = now.to_le_bytes();
-    }
-    hex::encode(bytes)
+    use std::hash::{BuildHasher, Hasher};
+
+    let random = std::collections::hash_map::RandomState::new()
+        .build_hasher()
+        .finish();
+    format!("{:08x}", random as u32)
 }
 
 /// The host's name, wherever this system keeps it. Blank if nothing says.
