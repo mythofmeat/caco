@@ -67,20 +67,27 @@ pub fn include_at_risk_toggle(ui: &mut egui::Ui, on: &mut bool, manual_files: us
 }
 
 /// Put something between the app and a modal: dimmed, so that it reads as "the window is
-/// blocked" rather than as a stray floating panel, and taking the pointer, so that it is.
+/// blocked" rather than as a stray floating panel, and taking the pointer and the keyboard, so
+/// that it is.
 ///
 /// A window is only in front of the panels where it actually is, so without this a WAD behind
 /// Settings could be double-clicked and launched, and a card's tooltip could turn up on top of
-/// the dialog. In a layer of its own, after the panels' in the same `Order` and so in front of
-/// them, and an `Order` below the windows. Disabling the panels would do it too, but that fades
-/// them, and their backgrounds with them.
+/// the dialog. Being the modal layer is what does the same for the keyboard: Tab would go on
+/// past a dialog's controls to the sidebar, where Enter presses what it lands on, and a field
+/// that had focus when the dialog opened would go on taking what is typed.
+///
+/// In a layer of its own, after the panels' in the same `Order` and so in front of them, and an
+/// `Order` below the windows. Disabling the panels would do it too, but that fades them, and
+/// their backgrounds with them.
 pub fn modal_backdrop(ctx: &egui::Context) {
     let screen = ctx.content_rect();
-    egui::Area::new(egui::Id::unique("modal_backdrop"))
+    let area = egui::Area::new(egui::Id::unique("modal_backdrop"))
         .order(egui::Order::Background)
-        .fixed_pos(screen.min)
-        .show(ctx, |ui| {
-            ui.painter().rect_filled(screen, 0.0, crate::theme::SCRIM);
-            ui.allocate_response(screen.size(), egui::Sense::click_and_drag());
-        });
+        .fixed_pos(screen.min);
+    ctx.memory_mut(|m| m.set_modal_layer(area.layer()));
+    area.show(ctx, |ui| {
+        ui.painter().rect_filled(screen, 0.0, crate::theme::SCRIM);
+        // Not `click_and_drag()`, which can take focus: Tab would stop on the backdrop.
+        ui.allocate_response(screen.size(), egui::Sense::CLICK | egui::Sense::DRAG);
+    });
 }

@@ -16,6 +16,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
                 .desired_width(200.0)
                 .id(egui::Id::unique(FILTER_ID_SOURCE)),
         )
+        .accessible_name("Filter WADs")
         .on_hover_text(
             "Words look in titles, authors and descriptions. Also status:completed, tag:caco*, \
          author:skillsaw, year:2016, cacoward:2023 and ^status:abandoned.",

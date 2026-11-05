@@ -53,9 +53,10 @@ has to return. Nothing else in the crate opens a window. (`tests/ui_rules.rs`)
   The dismiss button is `Close` when there is nothing to lose, `Cancel` when there is, and the
   primary button sits to the right of it. A question that has to stay in view while the body
   scrolls goes above the buttons (`DialogFooter::above`).
-- **A dialog is modal**: a backdrop takes the pointer while it is open, so nothing back there
-  can be clicked, and no tooltip of its can turn up on top. The one exception is a question
-  nobody is waiting to answer, such as a download having landed, which asks from a corner.
+- **A dialog is modal**: a backdrop takes the pointer and the keyboard while it is open, so
+  nothing back there can be clicked or tabbed to, and no tooltip of its can turn up on top.
+  The one exception is a question nobody is waiting to answer, such as a download having
+  landed, which asks from a corner.
 - **A destructive action is asked about first, in the footer**: the question above the
   buttons, `Cancel` and the action in their usual places, and Escape backs out of the question
   rather than out of the dialog.

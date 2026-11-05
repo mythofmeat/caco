@@ -243,8 +243,12 @@ egui = "0.37"
 - **A dialog blocks the app by being in the way**: `dialogs::modal_backdrop` is a scrim in a
   layer of its own, in front of the panels and behind the windows, that takes the pointer.
   A window only stops clicks where it actually is, so without it a WAD behind Settings could
-  be double-clicked and launched. Not `ui.disable()`, which does the same and also fades
-  everything it covers, panels' backgrounds included, so the app behind turned grey.
+  be double-clicked and launched. It is egui's modal layer too, or Tab goes on past a dialog's
+  controls to the sidebar, and a field that had focus when the dialog opened goes on taking what
+  is typed. Not `ui.disable()`, which does all that and also fades everything it covers, panels'
+  backgrounds included, so the app behind turned grey. Its sense is `CLICK | DRAG` because
+  `click_and_drag()` can take focus, and Tab then stops on the backdrop. `screenshots.rs` presses
+  all of this for real.
 - **Inputs are named after their label**: `response.labelled_by(label.id)` ties
   a field to the label a sighted user reads (`dialogs::form_label`
   returns its `Response` for this), and `accessible_name` is for a control with

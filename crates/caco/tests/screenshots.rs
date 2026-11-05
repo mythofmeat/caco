@@ -1004,8 +1004,44 @@ fn shoot_every_surface() {
         s.harness.query_by_label("Playtime by month").is_none(),
         "a click went through a dialog to the app behind it"
     );
+
+    // Nor can the keyboard get there. Tab goes through everything that wants focus, which past
+    // the dialog's own controls would be the sidebar, where Enter presses what it lands on.
+    for press in 1..=12 {
+        s.harness.key_press(egui::Key::Tab);
+        s.settle(1, Duration::ZERO);
+        let ctx = &s.harness.ctx;
+        let focused = ctx
+            .memory(|m| m.focused())
+            .and_then(|id| ctx.read_response(id));
+        assert!(
+            focused
+                .as_ref()
+                .is_none_or(|widget| widget.layer_id.order != egui::Order::Background),
+            "Tab {press} went through a dialog to {focused:?}"
+        );
+    }
     s.harness.state_mut().close_dialog();
     s.settle(1, Duration::ZERO);
+
+    // And a field that had the keyboard when a dialog opened lets go of it, or what is typed
+    // goes to the app behind. Help has no fields of its own to take it.
+    s.harness.state_mut().set_view(ViewMode::Library);
+    s.settle(2, Duration::ZERO);
+    s.harness
+        .key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::F);
+    s.settle(2, Duration::ZERO);
+    s.harness.state_mut().dispatch_action(ActionRequest::Help);
+    s.settle(2, Duration::ZERO);
+    s.harness.event(egui::Event::Text("typed".to_string()));
+    s.settle(2, Duration::ZERO);
+    s.harness.state_mut().close_dialog();
+    s.settle(2, Duration::ZERO);
+    assert_eq!(
+        s.harness.get_by_label("Filter WADs").value().as_deref(),
+        Some(""),
+        "what was typed in a dialog reached the filter behind it"
+    );
 
     // The version picker only exists once a remote has answered, and that is
     // asked on demand, so opening the dialog alone never reaches it.
