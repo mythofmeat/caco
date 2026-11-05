@@ -1281,6 +1281,13 @@ impl eframe::App for CacoApp {
         // 6. Render layout
         let mut actions: Vec<ActionRequest> = Vec::new();
 
+        // A dialog is modal, which has to be made so: nothing stops a click reaching the app
+        // around a window otherwise, so a WAD behind Settings could be double-clicked and
+        // launched, and a card's tooltip could turn up on top of the dialog.
+        if self.state.has_dialog() {
+            ui.disable();
+        }
+
         // ── Left sidebar ──
         egui::Panel::left("sidebar_nav")
             .exact_size(200.0)

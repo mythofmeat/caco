@@ -961,6 +961,19 @@ fn shoot_every_surface() {
         s.shot_dialog("dlg-cacoward-link", ActionRequest::LinkCacoward(an_award)),
     );
 
+    // A dialog is modal: a real click on the sidebar around it goes nowhere. Stats would have
+    // something to show if it went anywhere.
+    s.harness.state_mut().dispatch_action(ActionRequest::Enrich);
+    s.settle(2, Duration::ZERO);
+    s.harness.get_by_label("Stats").click();
+    s.settle(2, Duration::ZERO);
+    assert!(
+        s.harness.query_by_label("Playtime by month").is_none(),
+        "a click went through a dialog to the app behind it"
+    );
+    s.harness.state_mut().close_dialog();
+    s.settle(1, Duration::ZERO);
+
     // The version picker only exists once a remote has answered, and that is
     // asked on demand, so opening the dialog alone never reaches it.
     record(
