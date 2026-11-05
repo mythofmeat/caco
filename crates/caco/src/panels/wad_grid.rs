@@ -1,17 +1,26 @@
 use egui::{CornerRadius, Rect, StrokeKind, Vec2};
 
-use crate::state::{ActionRequest, AppState};
+use caco_core::db::{Status, WadRecord};
+
+use crate::state::{ActionRequest, AppState, MapProgress};
 use crate::theme;
 
-/// Type alias to disambiguate from caco_core::db::sessions::WadStats.
-type StatsData = caco_core::wad_stats::WadStats;
-
-/// Card dimensions.
-const CARD_MIN_WIDTH: f32 = 190.0;
+/// Card dimensions. The minimum is what fits three across at the 800x400 window and five at the
+/// default one, with the whole of a row in view at either.
+const CARD_MIN_WIDTH: f32 = 176.0;
 const CARD_MAX_WIDTH: f32 = 260.0;
 const CARD_SPACING: f32 = 14.0;
-const CARD_ROUNDING: u8 = 12;
+const CARD_ROUNDING: u8 = 10;
 const THUMB_ASPECT: f32 = 0.75; // height = width * aspect (4:3)
+/// Title, author and the row with the status in it, and the gaps around them.
+const CARD_BODY_HEIGHT: f32 = 76.0;
+const CARD_PADDING: f32 = 10.0;
+const PROGRESS_HEIGHT: f32 = 4.0;
+
+/// Five stars at this size take about this much.
+const STARS_WIDTH: f32 = 60.0;
+/// A star and a number do.
+const SHORT_RATING_WIDTH: f32 = 26.0;
 
 /// Calculate responsive card width.
 fn card_width(available_width: f32) -> f32 {
@@ -72,19 +81,15 @@ pub fn render(
             action = super::handle_action_keys(ui, state.selected_wad_id);
         }
 
-        let thumb_width = card_w;
-        let thumb_height = thumb_width * THUMB_ASPECT;
-        let text_height = ui.text_style_height(&egui::TextStyle::Body);
-        // Card body: title + author + footer (status + stars + playtime) + progress bar space
-        let progress_bar_height = 6.0; // thin progress bar + spacing
-        let body_height = 12.0 + text_height * 2.0 + 8.0 + 20.0 + 12.0 + progress_bar_height;
-        let card_height = thumb_height + body_height;
+        let thumb_height = (card_w * THUMB_ASPECT).round();
+        let card_size = Vec2::new(card_w, thumb_height + CARD_BODY_HEIGHT);
 
         let wad_count = state.wads.len();
         let rows = wad_count.div_ceil(columns);
 
         for row in 0..rows {
             ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = CARD_SPACING;
                 for col in 0..columns {
                     let idx = row * columns + col;
                     if idx >= wad_count {
@@ -93,12 +98,9 @@ pub fn render(
 
                     let wad = &state.wads[idx];
                     let wad_id = wad.id;
-                    let is_selected = state.selected_row == idx;
-                    let stats = state.stats_map.get(&wad_id);
 
                     // Allocate card space
-                    let (rect, response) = ui
-                        .allocate_exact_size(Vec2::new(card_w, card_height), egui::Sense::click());
+                    let (rect, response) = ui.allocate_exact_size(card_size, egui::Sense::click());
 
                     // Virtualization: skip painting + event handling for cards
                     // entirely outside the scroll viewport. Layout (scrollbar
@@ -125,175 +127,18 @@ pub fn render(
                         action = Some(a);
                     }
 
-                    let painter = ui.painter_at(rect);
-                    let rounding = CornerRadius::same(CARD_ROUNDING);
-
-                    // Card background
-                    let bg = theme::BG_MEDIUM;
-                    painter.rect_filled(rect, rounding, bg);
-
-                    // Border painted at the end of the card body — see the
-                    // matching block below the progress bar.
-
-                    // Thumbnail area
-                    let thumb_rect =
-                        Rect::from_min_size(rect.min, Vec2::new(thumb_width, thumb_height));
-
-                    // Clip thumbnail to card's top rounding
-                    let thumb_rounding = CornerRadius {
-                        nw: CARD_ROUNDING,
-                        ne: CARD_ROUNDING,
-                        sw: 0,
-                        se: 0,
-                    };
-
-                    theme::paint_thumbnail(
-                        &painter,
-                        thumb_rect,
-                        thumb_rounding,
-                        thumbnails.and_then(|tm| tm.get(wad_id)),
-                    );
-
-                    // Card body
-                    let body_x = rect.min.x + 14.0;
-                    let body_top = thumb_rect.max.y + 10.0;
-
-                    // Title
-                    let title = caco_core::utils::truncate(&wad.title, 26, "..");
-                    painter.text(
-                        egui::pos2(body_x, body_top),
-                        egui::Align2::LEFT_TOP,
-                        &title,
-                        egui::FontId::proportional(14.0),
-                        theme::TEXT_PRIMARY,
-                    );
-
-                    // Author
-                    let author = wad.author.as_deref().unwrap_or("");
-                    let author = caco_core::utils::truncate(author, 28, "..");
-                    painter.text(
-                        egui::pos2(body_x, body_top + text_height + 2.0),
-                        egui::Align2::LEFT_TOP,
-                        &author,
-                        egui::FontId::proportional(12.0),
-                        theme::TEXT_SECONDARY,
-                    );
-
-                    // Footer row: status badge + stars + playtime
-                    let footer_y = body_top + text_height * 2.0 + 10.0;
-
-                    // Status, and how many times over if it has been finished more than
-                    // once. The word is the mark: it used to be said twice, by a check mark
-                    // over the picture too.
-                    let times_beaten = stats.map_or(0, |s| s.times_beaten);
-                    let replays =
-                        if wad.status == caco_core::db::Status::Completed && times_beaten > 1 {
-                            format!(" \u{00d7}{times_beaten}")
+                    let card = Card {
+                        wad,
+                        stats: state.stats_map.get(&wad_id),
+                        progress: if wad.status == Status::InProgress {
+                            state.map_progress(wad)
                         } else {
-                            String::new()
-                        };
-                    let badge = theme::paint_status_pill(
-                        &painter,
-                        body_x,
-                        footer_y + 9.0,
-                        theme::status_style(wad.status),
-                        &replays,
-                    );
-                    let badge_width = badge.width();
-
-                    // Stars (right of status badge)
-                    let stars = theme::rating_stars(wad.rating);
-                    if !stars.is_empty() {
-                        painter.text(
-                            egui::pos2(body_x + badge_width + 8.0, footer_y + 2.0),
-                            egui::Align2::LEFT_TOP,
-                            &stars,
-                            egui::FontId::proportional(11.0),
-                            theme::TEXT_ACCENT,
-                        );
-                    }
-
-                    // Playtime right-aligned
-                    if let Some(s) = stats
-                        && s.playtime > 0
-                    {
-                        let playtime_str = caco_core::player::format_duration(s.playtime);
-                        painter.text(
-                            egui::pos2(rect.right() - 14.0, footer_y + 2.0),
-                            egui::Align2::RIGHT_TOP,
-                            &playtime_str,
-                            egui::FontId::proportional(11.0),
-                            theme::TEXT_MUTED,
-                        );
-                    }
-
-                    // Progress bar for in-progress WADs.
-                    //
-                    // Sourced from `state.analyses_map` (the single source of
-                    // truth shared with the auto-completion verdict). When no
-                    // fresh analysis is cached the bar is hidden — better than
-                    // the old `wad_stats.maps.len()` fallback, which always
-                    // showed 100% because levelstat snapshots only record maps
-                    // the player has exited.
-                    if wad.status == caco_core::db::Status::InProgress
-                        && let Some(analysis) = state.analyses_map.get(&wad_id)
-                        && analysis.required_maps > 0
-                        && let Some(ref snapshot_json) = wad.stats_snapshot
-                        && let Ok(wad_stats) = serde_json::from_str::<StatsData>(snapshot_json)
-                    {
-                        use caco_core::wad_analysis::MapClassification;
-                        use std::collections::HashSet;
-                        let required: HashSet<&str> = analysis
-                            .maps
-                            .iter()
-                            .filter(|m| m.classification == MapClassification::Required)
-                            .map(|m| m.lump.as_str())
-                            .collect();
-                        let played = wad_stats
-                            .maps
-                            .iter()
-                            .filter(|m| m.total_exits >= 1 && required.contains(m.lump.as_str()))
-                            .count();
-                        let total = analysis.required_maps;
-                        let pct = (played as f32 / total as f32).clamp(0.0, 1.0);
-
-                        let bar_y = footer_y + 22.0;
-                        let bar_h = 4.0;
-                        let bar_x = body_x;
-                        let bar_w = rect.right() - 14.0 - bar_x;
-                        let bar_rect =
-                            Rect::from_min_size(egui::pos2(bar_x, bar_y), Vec2::new(bar_w, bar_h));
-                        painter.rect_filled(bar_rect, 2.0, theme::BG_LIGHT);
-                        if pct > 0.0 {
-                            let fill_rect =
-                                Rect::from_min_size(bar_rect.min, Vec2::new(bar_w * pct, bar_h));
-                            painter.rect_filled(
-                                fill_rect,
-                                2.0,
-                                theme::status_color(caco_core::db::Status::InProgress),
-                            );
-                        }
-                    }
-
-                    // Border last — painted inside the rect so the parent
-                    // scroll area doesn't clip the outer pixels, and on
-                    // top of the thumbnail so the ring doesn't get
-                    // hidden by the image.
-                    if is_selected {
-                        painter.rect_stroke(
-                            rect,
-                            rounding,
-                            egui::Stroke::new(2.0_f32, theme::TEXT_ACCENT),
-                            StrokeKind::Inside,
-                        );
-                    } else if response.hovered() {
-                        painter.rect_stroke(
-                            rect,
-                            rounding,
-                            egui::Stroke::new(1.0_f32, theme::BORDER_MED),
-                            StrokeKind::Inside,
-                        );
-                    }
+                            None
+                        },
+                        picture: thumbnails.and_then(|tm| tm.get(wad_id)),
+                        selected: state.selected_row == idx,
+                    };
+                    card.paint(ui, rect, thumb_height, &response);
                 }
             });
 
@@ -303,4 +148,220 @@ pub fn render(
     });
 
     action
+}
+
+/// What one card shows.
+struct Card<'a> {
+    wad: &'a WadRecord,
+    stats: Option<&'a caco_core::db::sessions::WadStats>,
+    progress: Option<MapProgress>,
+    picture: Option<&'a egui::TextureHandle>,
+    selected: bool,
+}
+
+impl Card<'_> {
+    fn paint(&self, ui: &egui::Ui, rect: Rect, thumb_height: f32, response: &egui::Response) {
+        let painter = ui.painter_at(rect);
+        let rounding = CornerRadius::same(CARD_ROUNDING);
+        let word = theme::status_display(self.wad.status);
+
+        // A painted card is pixels otherwise, and says nothing to a screen reader.
+        let name = format!("{}, {word}", self.wad.title);
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
+        let hover = self.hover_text();
+        response.clone().on_hover_text(hover);
+
+        painter.rect_filled(rect, rounding, theme::BG_MEDIUM);
+
+        let thumb = Rect::from_min_size(rect.min, Vec2::new(rect.width(), thumb_height));
+        let thumb_rounding = CornerRadius {
+            nw: CARD_ROUNDING,
+            ne: CARD_ROUNDING,
+            sw: 0,
+            se: 0,
+        };
+        theme::paint_thumbnail(&painter, thumb, thumb_rounding, self.picture);
+
+        // Along the bottom of the picture, where it costs a card no height.
+        if let Some(progress) = &self.progress {
+            let bar = Rect::from_min_max(
+                egui::pos2(thumb.min.x, thumb.max.y - PROGRESS_HEIGHT),
+                thumb.max,
+            );
+            painter.rect_filled(bar, 0.0, theme::BG_DARK);
+            let fill = Rect::from_min_size(
+                bar.min,
+                Vec2::new(bar.width() * progress.fraction(), PROGRESS_HEIGHT),
+            );
+            painter.rect_filled(fill, 0.0, theme::status_color(Status::InProgress));
+        }
+
+        // Body
+        let left = rect.min.x + CARD_PADDING;
+        let right = rect.max.x - CARD_PADDING;
+        let width = right - left;
+        let top = thumb.max.y + 8.0;
+
+        theme::paint_truncated(
+            &painter,
+            egui::pos2(left, top),
+            &self.wad.title,
+            egui::FontId::proportional(14.0),
+            theme::TEXT_PRIMARY,
+            width,
+        );
+        theme::paint_truncated(
+            &painter,
+            egui::pos2(left, top + 19.0),
+            self.wad.author.as_deref().unwrap_or(""),
+            egui::FontId::proportional(12.0),
+            theme::TEXT_SECONDARY,
+            width,
+        );
+
+        self.paint_footer(ui, &painter, left, right, rect.max.y - 18.0);
+
+        // Border last — painted inside the rect so the parent scroll area doesn't clip the
+        // outer pixels, and on top of the thumbnail so the ring doesn't get hidden by the
+        // image.
+        if self.selected {
+            painter.rect_stroke(
+                rect,
+                rounding,
+                egui::Stroke::new(2.0_f32, theme::TEXT_ACCENT),
+                StrokeKind::Inside,
+            );
+        } else if response.hovered() {
+            painter.rect_stroke(
+                rect,
+                rounding,
+                egui::Stroke::new(1.0_f32, theme::BORDER_MED),
+                StrokeKind::Inside,
+            );
+        }
+    }
+
+    /// The row along the bottom: status, rating and playtime, or as much of that as fits, in
+    /// the order of what matters. The word is the mark for having finished it: there used
+    /// to be a check mark over the picture as well.
+    fn paint_footer(
+        &self,
+        ui: &egui::Ui,
+        painter: &egui::Painter,
+        left: f32,
+        right: f32,
+        center_y: f32,
+    ) {
+        let style = theme::status_style(self.wad.status);
+        let extra = replays(self.wad.status, self.stats.map_or(0, |s| s.times_beaten));
+        let pill = theme::paint_status_pill(painter, left, center_y, style, &extra);
+        let mut free = right - pill.max.x - 6.0;
+
+        let font = egui::FontId::proportional(11.0);
+        if let Some(stats) = self.stats.filter(|stats| stats.playtime > 0) {
+            let text = caco_core::player::format_duration(stats.playtime);
+            let width = ui
+                .painter()
+                .layout_no_wrap(text.clone(), font.clone(), theme::TEXT_MUTED)
+                .size()
+                .x;
+            if width <= free {
+                painter.text(
+                    egui::pos2(right, center_y),
+                    egui::Align2::RIGHT_CENTER,
+                    text,
+                    font.clone(),
+                    theme::TEXT_MUTED,
+                );
+                free -= width + 6.0;
+            }
+        }
+
+        let stars = match self.wad.rating {
+            Some(rating) if rating > 0 && free >= STARS_WIDTH => theme::rating_stars(Some(rating)),
+            Some(rating) if rating > 0 && free >= SHORT_RATING_WIDTH => {
+                format!("\u{2605} {rating}")
+            }
+            _ => return,
+        };
+        painter.text(
+            egui::pos2(pill.max.x + 6.0, center_y),
+            egui::Align2::LEFT_CENTER,
+            stars,
+            font,
+            theme::TEXT_ACCENT,
+        );
+    }
+
+    /// All of what a card might have had to leave out.
+    fn hover_text(&self) -> String {
+        let mut lines = vec![self.wad.title.clone()];
+        if let Some(author) = &self.wad.author {
+            lines.push(author.clone());
+        }
+        if let Some(progress) = &self.progress {
+            lines.push(progress.summary());
+        }
+        if let Some(stats) = self.stats {
+            match stats.times_beaten {
+                0 => {}
+                1 => lines.push("Finished once".to_string()),
+                n => lines.push(format!("Finished {n} times")),
+            }
+            if let Some(when) = stats
+                .last_played
+                .as_deref()
+                .and_then(crate::relative_time::parse_timestamp)
+            {
+                lines.push(format!(
+                    "Last played {}",
+                    crate::relative_time::relative_time(&when)
+                ));
+            }
+        }
+        lines.join("\n")
+    }
+}
+
+/// What goes after a status's word on a card: how many times over, for what has been finished
+/// more than once.
+fn replays(status: Status, times_beaten: i64) -> String {
+    if status == Status::Completed && times_beaten > 1 {
+        format!(" \u{00d7}{times_beaten}")
+    } else {
+        String::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What the two window sizes that matter get: 200 of the sidebar, and 20 of margin a side.
+    #[test]
+    fn cards_fit_three_across_at_the_smallest_window_and_five_at_the_default() {
+        let across = |window: f32| {
+            let available = window - 200.0 - 40.0;
+            let width = card_width(available);
+            ((available + CARD_SPACING) / (width + CARD_SPACING)).floor() as usize
+        };
+        assert_eq!(across(800.0), 3);
+        assert_eq!(across(1200.0), 5);
+    }
+
+    /// The whole of a row has to be in view at the smallest window, or it is a grid of tops.
+    #[test]
+    fn a_card_fits_in_what_the_smallest_window_leaves() {
+        let width = card_width(800.0 - 200.0 - 40.0);
+        let height = (width * THUMB_ASPECT).round() + CARD_BODY_HEIGHT;
+        // 400, less the top and status bars, a one-line banner and the row of filters.
+        assert!(height <= 400.0 - 38.0 - 30.0 - 60.0 - 40.0, "{height}");
+    }
+
+    #[test]
+    fn a_second_playthrough_shows_only_once_it_is_finished() {
+        assert_eq!(replays(Status::Completed, 1), "");
+        assert_eq!(replays(Status::Completed, 3), " \u{00d7}3");
+        assert_eq!(replays(Status::InProgress, 3), "");
+    }
 }

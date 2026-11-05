@@ -8,7 +8,83 @@ pub mod wad_table;
 use caco_core::db::Status;
 
 use crate::get::GetTarget;
-use crate::state::ActionRequest;
+use crate::state::{ActionRequest, ViewLayout};
+use crate::theme;
+
+/// Grid or list, in a right-to-left row. The same control wherever a view offers both.
+pub fn layout_toggle(ui: &mut egui::Ui, layout: &mut ViewLayout) {
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        let side = |ui: &mut egui::Ui, layout: &mut ViewLayout, option, label, corners| {
+            let active = *layout == option;
+            let text = egui::RichText::new(label).size(12.0).color(if active {
+                theme::TEXT_PRIMARY
+            } else {
+                theme::TEXT_SECONDARY
+            });
+            let button = egui::Button::new(text)
+                .fill(if active {
+                    theme::BORDER_MED
+                } else {
+                    theme::BG_LIGHT
+                })
+                .corner_radius(corners)
+                .selected(active);
+            if ui.add(button).clicked() {
+                *layout = option;
+            }
+        };
+        side(
+            ui,
+            layout,
+            ViewLayout::List,
+            "List",
+            egui::CornerRadius {
+                nw: 0,
+                ne: 6,
+                se: 6,
+                sw: 0,
+            },
+        );
+        side(
+            ui,
+            layout,
+            ViewLayout::Grid,
+            "Grid",
+            egui::CornerRadius {
+                nw: 6,
+                ne: 0,
+                se: 0,
+                sw: 6,
+            },
+        );
+    });
+}
+
+/// What the library shows when it has nothing to show: where to get a WAD from if it is
+/// empty, and that the filter is why if it isn't. Returns true if asked to go to Import.
+pub fn render_empty_library(ui: &mut egui::Ui, total_wads: usize) -> bool {
+    let mut import = false;
+    ui.add_space(24.0);
+    ui.vertical_centered(|ui| {
+        if total_wads > 0 {
+            ui.colored_label(theme::TEXT_SECONDARY, "No WADs match.");
+            return;
+        }
+        ui.colored_label(
+            theme::TEXT_PRIMARY,
+            egui::RichText::new("Your library is empty").size(16.0),
+        );
+        ui.add_space(4.0);
+        ui.colored_label(
+            theme::TEXT_SECONDARY,
+            "Find something on idgames or the Doom Wiki, paste a link, or add a file you have.",
+        );
+        ui.add_space(8.0);
+        import = ui.add(theme::primary_button("Import a WAD")).clicked();
+    });
+    import
+}
 
 /// Show a right-click context menu for a WAD with standard actions.
 /// Returns the chosen action, if any.

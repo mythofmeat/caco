@@ -4,6 +4,17 @@ use crate::relative_time;
 use crate::state::{ActionRequest, AppState};
 use crate::theme;
 
+const STATUS_COLUMN: f32 = 84.0;
+const RATING_COLUMN: f32 = 80.0;
+const PLAYTIME_COLUMN: f32 = 70.0;
+const LAST_PLAYED_COLUMN: f32 = 88.0;
+
+/// The same as the banner and the cards have.
+const MARGIN: f32 = 20.0;
+
+/// Below this the rating goes, to leave the title something to work with.
+const NARROW: f32 = 640.0;
+
 /// Render the WAD library table with virtual scrolling.
 /// Returns an action request if a keyboard shortcut was pressed.
 pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<ActionRequest> {
@@ -35,33 +46,50 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<ActionRequest> 
         action = super::handle_action_keys(ui, state.selected_wad_id);
     }
 
-    let available = ui.available_size();
     let text_height = ui.text_style_height(&egui::TextStyle::Body);
     let row_height = text_height + 6.0;
 
-    // Proportional column widths based on available space.
-    let base = (available.x - 50.0).max(0.0); // subtract fixed ID column
+    let mut table_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(
+                ui.available_rect_before_wrap()
+                    .shrink2(egui::vec2(MARGIN, 0.0)),
+            )
+            .layout(*ui.layout()),
+    );
+    let ui_outer = ui;
+    let ui = &mut table_ui;
 
-    TableBuilder::new(ui)
+    // Widths worked out from what there is, every frame, with the title taking the rest. They
+    // were a resizable table's before, which saved them from a frame when the panel had not
+    // settled, so that Last Played ended up off the edge of the window.
+    let width = ui.available_width();
+    let (author, rating) = if width < NARROW {
+        (0.22 * width, 0.0)
+    } else {
+        (0.2 * width, RATING_COLUMN)
+    };
+
+    let table = TableBuilder::new(ui)
         .striped(true)
-        .resizable(true)
         .sense(egui::Sense::click())
         .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-        .min_scrolled_height(available.y)
-        .column(Column::exact(50.0)) // ID
-        .column(Column::remainder().at_least(150.0)) // Title
-        .column(Column::initial(base * 0.18).at_least(80.0)) // Author
-        .column(Column::initial(base * 0.12).at_least(70.0)) // Status
-        .column(Column::initial(base * 0.10).at_least(60.0)) // Rating
-        .column(Column::initial(base * 0.10).at_least(60.0)) // Playtime
-        .column(Column::initial(base * 0.12).at_least(80.0)) // Last Played
+        // The view scrolls as a whole, with the banner over it.
+        .vscroll(false)
+        .column(Column::remainder().at_least(120.0).clip(true)) // Title
+        .column(Column::exact(author).clip(true)) // Author
+        .column(Column::exact(STATUS_COLUMN)) // Status
+        .column(Column::exact(rating)) // Rating
+        .column(Column::exact(PLAYTIME_COLUMN)) // Playtime
+        .column(Column::exact(LAST_PLAYED_COLUMN)); // Last Played
+
+    table
         .header(row_height + 2.0, |mut header| {
             for label in [
-                "ID",
                 "Title",
                 "Author",
                 "Status",
-                "Rating",
+                if rating > 0.0 { "Rating" } else { "" },
                 "Playtime",
                 "Last Played",
             ] {
@@ -82,11 +110,6 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<ActionRequest> 
                 let wad = &state.wads[idx];
                 let wad_id = wad.id;
                 let stats = state.stats_map.get(&wad_id);
-
-                // ID
-                row.col(|ui| {
-                    ui.label(wad_id.to_string());
-                });
 
                 // Title
                 row.col(|ui| {
@@ -109,7 +132,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<ActionRequest> 
                 // Rating
                 row.col(|ui| {
                     let stars = theme::rating_stars(wad.rating);
-                    if !stars.is_empty() {
+                    if rating > 0.0 && !stars.is_empty() {
                         ui.colored_label(theme::TEXT_ACCENT, stars);
                     }
                 });
@@ -139,6 +162,9 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<ActionRequest> 
                     state.selected_row = idx;
                     state.selected_wad_id = Some(wad_id);
                 }
+                if response.double_clicked() {
+                    action = Some(ActionRequest::Play(wad_id));
+                }
                 let wad = &state.wads[idx];
                 if let Some(a) =
                     super::wad_context_menu(&response, wad_id, wad.status, wad.is_lost())
@@ -147,6 +173,10 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<ActionRequest> 
                 }
             });
         });
+
+    // The table was laid out in a child, which the view scrolling around it has to be told of.
+    let used = table_ui.min_rect();
+    ui_outer.advance_cursor_after_rect(used);
 
     action
 }

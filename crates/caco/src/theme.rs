@@ -188,6 +188,28 @@ fn paint_pill(
     painter.galley(rect.min + PILL_PADDING, galley, style.color);
 }
 
+/// A line of text painted at `pos`, cut short with an ellipsis at `max_width`. Measured rather
+/// than cut at so many characters, since "WWWW" and "iiii" are not the same width.
+pub fn paint_truncated(
+    painter: &egui::Painter,
+    pos: egui::Pos2,
+    text: &str,
+    font: egui::FontId,
+    color: Color32,
+    max_width: f32,
+) {
+    let mut job = egui::text::LayoutJob::single_section(
+        text.to_string(),
+        egui::TextFormat {
+            font_id: font,
+            color,
+            ..Default::default()
+        },
+    );
+    job.wrap = egui::text::TextWrapping::truncate_at_width(max_width);
+    painter.galley(pos, painter.layout_job(job), color);
+}
+
 /// `amount` of the way from one colour to another.
 pub fn blend(from: Color32, to: Color32, amount: f32) -> Color32 {
     let channel = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * amount).round() as u8;

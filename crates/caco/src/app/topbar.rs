@@ -15,6 +15,9 @@ pub(super) fn render_topbar(ui: &mut egui::Ui, state: &mut AppState) {
         // anti-affordance the user sees on those views.
         if state.view_mode == ViewMode::Library {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                panels::layout_toggle(ui, &mut state.view_layout);
+                ui.add_space(4.0);
+
                 // Sort controls (right-aligned)
                 panels::sort_controls::render(ui, state);
 

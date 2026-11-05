@@ -1334,7 +1334,14 @@ impl eframe::App for CacoApp {
                                 render_section_header(ui, &mut self.state);
                                 ui.add_space(8.0);
 
-                                // WAD grid or table
+                                // WAD grid or table, or why there is neither
+                                if self.state.wads.is_empty() {
+                                    let total = self.state.total_wad_count;
+                                    if panels::render_empty_library(ui, total) {
+                                        self.state.view_mode = ViewMode::Import;
+                                    }
+                                    return;
+                                }
                                 let view_action = match self.state.view_layout {
                                     ViewLayout::List => {
                                         panels::wad_table::render(ui, &mut self.state)
