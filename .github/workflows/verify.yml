@@ -52,12 +52,25 @@ jobs:
         run: cargo test -p caco --test screenshots -- --ignored --nocapture
         env:
           CACO_SHOT_SIZE: 800x400
+      # The main surfaces against the images committed beside the test. A change here holds back
+      # a dependency update that would otherwise merge and release with nobody looking at it.
+      - if: ${{ !cancelled() }}
+        run: cargo test -p caco --test snapshots -- --ignored --nocapture
       # A failed run is when the shots are most wanted.
       - if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
         with:
           name: screenshots
           path: target/screenshots/
+      # What it looks like now and what differs, to look at and, if it is right, to commit.
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: snapshot-changes
+          path: |
+            crates/caco/tests/snapshots/*.new.png
+            crates/caco/tests/snapshots/*.diff.png
+          if-no-files-found: ignore
 
   homebrew:
     runs-on: macos-latest

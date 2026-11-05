@@ -109,6 +109,11 @@ impl ThumbnailManager {
         self.textures.get(&wad_id)
     }
 
+    /// How many requests have not been answered yet.
+    pub fn pending_count(&self) -> usize {
+        self.pending.len()
+    }
+
     /// Check if a WAD needs a thumbnail request (not loaded, pending, or failed).
     pub fn needs_request(&self, wad_id: i64) -> bool {
         !self.textures.contains_key(&wad_id)

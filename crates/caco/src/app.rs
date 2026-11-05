@@ -607,6 +607,18 @@ impl CacoApp {
         !self.state.gets.linking().is_empty()
     }
 
+    /// How many thumbnails are still on their way. Public for `tests/snapshots.rs`, which
+    /// must not compare a picture of a card whose thumbnail is about to arrive.
+    pub fn thumbnails_pending(&self) -> usize {
+        self.thumbnails.pending_count()
+    }
+
+    /// Clear the status bar. Public for `tests/snapshots.rs`: a notification goes away by
+    /// the clock, and a picture must not depend on how long a run took to get there.
+    pub fn dismiss_notification(&mut self) {
+        self.state.notification = None;
+    }
+
     /// Dispatch an action request (from detail panel buttons or table shortcuts).
     ///
     /// Public so `tests/screenshots.rs` can open any dialog the same way a
