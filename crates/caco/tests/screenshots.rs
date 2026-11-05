@@ -1464,14 +1464,28 @@ fn shoot_every_surface() {
     caco_core::config::save_config(&config).expect("save scratch config");
     caco_core::config::reload_config();
 
-    // The tool has to be reachable, and the list of tools fit, at the smallest window.
-    s.shot_view_after("05-manage-open", ViewMode::Library, |s| {
-        s.harness.get_by_label_contains("Manage").click();
-        s.settle(3, Duration::ZERO);
-        s.harness.get_by_label("Mirrors");
+    // The tools are in the sidebar, whatever the size of the window, and scrolled to if they
+    // have to be. Settings and Help are in reach without that.
+    s.shot_view_after("05-tools", ViewMode::Library, |s| {
+        for tool in [
+            "Storage",
+            "Mirrors",
+            "Sync",
+            "Enrich",
+            "IWADs",
+            "Sourceports",
+            "Profiles",
+        ] {
+            s.harness.get_by_label(tool);
+        }
+        for pinned in ["Settings", "Help"] {
+            let row = s.harness.get_by_label(pinned).rect();
+            assert!(
+                row.max.y <= shot_size().y,
+                "{pinned} is off the window: {row:?}"
+            );
+        }
     });
-    s.harness.get_by_label_contains("Manage").click();
-    s.settle(2, Duration::ZERO);
 
     // Only a WAD arriving with no way back brings up the offer.
     let manual = s.add_manual_wad_with_file("The Evil Reborn", 152000);

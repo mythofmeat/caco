@@ -129,11 +129,6 @@ pub enum EditResult {
 }
 
 impl EditDialogState {
-    /// Get the WAD title for breadcrumb display.
-    pub fn title(&self) -> &str {
-        &self.title_field
-    }
-
     /// Create a new edit dialog, loading current WAD values from the DB.
     pub fn new(conn: &Connection, wad_id: i64) -> Option<Self> {
         let mut wad = caco_core::db::wads::get_wad(conn, wad_id, true).ok()??;

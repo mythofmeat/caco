@@ -335,12 +335,29 @@ pub fn section_label(ui: &mut egui::Ui, text: &str) {
 }
 
 // ---------------------------------------------------------------------------
+// How much room there is
+// ---------------------------------------------------------------------------
+
+/// A window shorter than this has its banners collapsed to a line, so that what they are
+/// banners for gets the room. `main.rs` allows down to 400.
+pub const SHORT_WINDOW: f32 = 560.0;
+
+pub fn is_short_window(ctx: &egui::Context) -> bool {
+    ctx.content_rect().height() < SHORT_WINDOW
+}
+
+// ---------------------------------------------------------------------------
 // Sidebar helpers
 // ---------------------------------------------------------------------------
 
 /// Render a sidebar navigation item. Returns true if clicked.
 pub fn sidebar_nav_item(ui: &mut egui::Ui, label: &str, is_active: bool) -> bool {
-    let desired_size = egui::vec2(ui.available_width(), 36.0);
+    let height = if is_short_window(ui.ctx()) {
+        28.0
+    } else {
+        36.0
+    };
+    let desired_size = egui::vec2(ui.available_width(), height);
     let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
     name_row(&response, label);
 
@@ -387,12 +404,11 @@ fn name_row(response: &egui::Response, label: &str) {
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
 }
 
-/// Render a compact sidebar row for the management tools (Stats, Sourceports, …).
+/// Render a compact sidebar row for a tool.
 ///
-/// Same shape as [`sidebar_nav_item`] but shorter and quieter, because these
-/// open a dialog rather than switching what the main panel shows. Crucially it
-/// sizes to `ui.available_width()`, so ten of them stack inside the panel
-/// instead of running off its edge.
+/// Same shape as [`sidebar_nav_item`] but shorter and quieter, because these open a dialog
+/// rather than switching what the main panel shows. Crucially it sizes to
+/// `ui.available_width()`, so they stack inside the panel instead of running off its edge.
 pub fn sidebar_tool_item(ui: &mut egui::Ui, label: &str) -> egui::Response {
     let desired_size = egui::vec2(ui.available_width(), 26.0);
     let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
@@ -408,8 +424,12 @@ pub fn sidebar_tool_item(ui: &mut egui::Ui, label: &str) -> egui::Response {
         egui::pos2(rect.min.x + 20.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         label,
-        egui::FontId::proportional(12.5),
-        if is_hovered { TEXT_PRIMARY } else { TEXT_MUTED },
+        egui::FontId::proportional(13.0),
+        if is_hovered {
+            TEXT_PRIMARY
+        } else {
+            TEXT_SECONDARY
+        },
     );
 
     response

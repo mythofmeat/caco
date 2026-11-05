@@ -195,14 +195,17 @@ pub enum PlayState {
 // Sort definitions
 // ---------------------------------------------------------------------------
 
+/// The ways to sort the library, by the key `db::search_wads` knows them by. The first is the
+/// default: what you played last comes first, and a library that has never been played falls
+/// back to the order it was added in.
 pub const SORT_FIELDS: &[(&str, &str)] = &[
-    ("id", "ID"),
+    ("last_played", "Last Played"),
     ("title", "Title"),
     ("author", "Author"),
     ("playtime", "Playtime"),
-    ("last_played", "Last Played"),
     ("year", "Year"),
     ("rating", "Rating"),
+    ("created", "Date Added"),
     ("random", "Random"),
 ];
 
@@ -423,11 +426,11 @@ impl AppState {
             "grid" => ViewLayout::Grid,
             _ => ViewLayout::List,
         };
-        let sort_field_index = if persisted.sort_field_index < SORT_FIELDS.len() {
-            persisted.sort_field_index
-        } else {
-            0
-        };
+        let sort_field_index = persisted
+            .sort_field
+            .as_deref()
+            .and_then(|field| SORT_FIELDS.iter().position(|(key, _)| *key == field))
+            .unwrap_or(0);
 
         Self {
             view_mode: ViewMode::default(),
@@ -822,7 +825,8 @@ impl AppState {
                 ViewLayout::List => "list".to_string(),
                 ViewLayout::Grid => "grid".to_string(),
             },
-            sort_field_index: self.sort_field_index,
+            sort_field: Some(SORT_FIELDS[self.sort_field_index].0.to_string()),
+            sort_field_index: None,
             sort_desc: self.sort_desc,
             status_filters: self.status_filters.iter().cloned().collect(),
             status_filter: None,
