@@ -15,11 +15,9 @@ use caco_sources::mirror::{MirrorProbe, SyncReport, UploadReport};
 use rusqlite::Connection;
 
 use crate::dialogs::mirror_setup::{MirrorSetup, SetupAction};
+use crate::dialogs::{Dialog, FooterRow, Primary, count};
 use crate::state::MirrorBulk;
 use crate::theme;
-
-/// Height of the button row below the scrolling body, and the title bar above it.
-const CHROME: f32 = 90.0;
 
 pub enum MirrorsResult {
     Open,
@@ -223,35 +221,33 @@ impl MirrorsDialogState {
         };
 
         let mut result = MirrorsResult::Open;
-        crate::dialogs::modal_window(ctx, title, [640.0, 560.0])
-            .id(egui::Id::unique("mirrors_dialog"))
-            .show(ctx, |ui| {
-                let footer = match &self.page {
-                    Page::Setup(setup) => CHROME + setup.footer_extra(),
-                    _ => CHROME,
-                };
-                crate::dialogs::modal_body(ctx, ui, footer, |ui| {
-                    ui.set_min_width(ui.available_width());
-                    if let Some(error) = &self.error {
-                        ui.colored_label(theme::COLOR_ERROR, error);
-                    }
-                    match &mut self.page {
-                        Page::List => {}
-                        Page::Setup(setup) => setup.render(ctx, ui),
-                        Page::Fill(_) => {}
-                    }
-                    if matches!(self.page, Page::List) {
-                        self.render_list(ui, conn, report, bulk, &mut result);
-                    }
-                    if let Page::Fill(fill) = &self.page {
-                        render_fill(ui, fill, bulk);
-                    }
-                });
-
-                ui.add_space(6.0);
-                ui.separator();
-                ui.add_space(2.0);
-                self.render_footer(ui, conn, bulk, &mut result);
+        // Keyed, because the title is the page's and this is one window.
+        Dialog::new(title, [680.0, 580.0])
+            .keyed("Mirrors")
+            .show(ctx, |dialog| {
+                dialog
+                    .scroll(|ui| {
+                        if let Some(error) = &self.error {
+                            ui.colored_label(theme::COLOR_ERROR, error);
+                        }
+                        match &mut self.page {
+                            Page::List => {}
+                            Page::Setup(setup) => setup.render(ctx, ui),
+                            Page::Fill(_) => {}
+                        }
+                        if matches!(self.page, Page::List) {
+                            self.render_list(ui, conn, report, bulk, &mut result);
+                        }
+                        if let Page::Fill(fill) = &self.page {
+                            render_fill(ui, fill, bulk);
+                        }
+                    })
+                    .above(|ui| {
+                        if let Page::Setup(setup) = &self.page {
+                            setup.render_check_area(ui);
+                        }
+                    })
+                    .buttons(|row| self.render_footer(row, conn, bulk, &mut result))
             });
 
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -274,20 +270,34 @@ impl MirrorsDialogState {
 
     fn render_footer(
         &mut self,
-        ui: &mut egui::Ui,
+        row: &mut FooterRow<'_>,
         conn: &Connection,
         bulk: Option<&MirrorBulk>,
         result: &mut MirrorsResult,
     ) {
         match &mut self.page {
             Page::List => {
-                ui.horizontal(|ui| {
-                    if ui.button("Close").clicked() {
-                        *result = MirrorsResult::Closed;
+                row.left(|ui| {
+                    if ui.button("Add a Mirror").clicked() {
+                        let taken = self.other_names(None);
+                        self.page = Page::Setup(Box::new(MirrorSetup::new(taken)));
+                    }
+                    if !self.rows.is_empty()
+                        && ui
+                            .button("Read Them Again")
+                            .on_hover_text(
+                                "Ask each mirror what it holds now, as caco does when it starts",
+                            )
+                            .clicked()
+                    {
+                        *result = MirrorsResult::Sync;
                     }
                 });
+                if row.close() {
+                    *result = MirrorsResult::Closed;
+                }
             }
-            Page::Setup(setup) => match setup.render_footer(ui) {
+            Page::Setup(setup) => match setup.render_footer(row) {
                 SetupAction::None => {}
                 SetupAction::Cancel => {
                     if self.rows.is_empty() {
@@ -307,37 +317,30 @@ impl MirrorsDialogState {
             Page::Fill(fill) => {
                 let running = bulk.is_some_and(|bulk| bulk.mirror == fill.mirror);
                 let mirror = fill.mirror.clone();
-                let count = fill.titles.len();
-                let mut leave = false;
-                ui.horizontal(|ui| {
-                    if running {
+                let pending = fill.titles.len();
+                let leave;
+                if running {
+                    row.left(|ui| {
                         if let Some(bulk) = bulk
                             && ui.button("Stop").clicked()
                         {
                             bulk.stop();
                         }
-                    } else if count > 0
-                        && ui
-                            .add_enabled(
-                                bulk.is_none(),
-                                egui::Button::new(
-                                    egui::RichText::new(format!("Upload {count} to {mirror}"))
-                                        .strong(),
-                                ),
-                            )
-                            .clicked()
-                    {
-                        *result = MirrorsResult::UploadAll(mirror.clone());
+                    });
+                    leave = row.end(Some("Done"), None).dismissed;
+                } else if pending > 0 {
+                    // One at a time, since each rewrites the mirror's index.
+                    let upload = format!("Upload {pending} to {mirror}");
+                    let primary = Primary::new(&upload)
+                        .when(bulk.is_none(), "Waiting for the other upload to finish");
+                    let ended = row.end(Some("Not Now"), Some(primary));
+                    leave = ended.dismissed;
+                    if ended.primary {
+                        *result = MirrorsResult::UploadAll(mirror);
                     }
-                    let label = if running || count == 0 {
-                        "Done"
-                    } else {
-                        "Not Now"
-                    };
-                    if ui.button(label).clicked() {
-                        leave = true;
-                    }
-                });
+                } else {
+                    leave = row.end(Some("Done"), None).dismissed;
+                }
                 if leave {
                     self.page = Page::List;
                 }
@@ -358,20 +361,6 @@ impl MirrorsDialogState {
             "Your own stores of WAD files. caco looks here first for a WAD that isn't on this \
              machine, in this order.",
         );
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            if ui.button("Add a Mirror").clicked() {
-                let taken = self.other_names(None);
-                self.page = Page::Setup(Box::new(MirrorSetup::new(taken)));
-            }
-            if ui
-                .button("Read Them Again")
-                .on_hover_text("Ask each mirror what it holds now, as caco does when it starts")
-                .clicked()
-            {
-                *result = MirrorsResult::Sync;
-            }
-        });
         ui.add_space(8.0);
 
         if self.rows.is_empty() {
@@ -431,15 +420,12 @@ impl MirrorsDialogState {
                                     open_fill = Some(name.clone());
                                 }
                             } else if row.to_upload > 0
+                                && bulk.is_none()
                                 && ui
-                                    .add_enabled(
-                                        bulk.is_none(),
-                                        egui::Button::new(format!(
-                                            "Upload {} WAD{}",
-                                            row.to_upload,
-                                            if row.to_upload == 1 { "" } else { "s" }
-                                        )),
-                                    )
+                                    .button(format!(
+                                        "Upload {}",
+                                        count(row.to_upload, "WAD", "WADs")
+                                    ))
                                     .clicked()
                             {
                                 open_fill = Some(name.clone());
@@ -600,9 +586,8 @@ fn render_fill(ui: &mut egui::Ui, fill: &FillPage, bulk: Option<&MirrorBulk>) {
         ui.colored_label(
             theme::TEXT_PRIMARY,
             format!(
-                "Uploaded {} WAD{}{stopped}.",
-                report.uploaded,
-                if report.uploaded == 1 { "" } else { "s" }
+                "Uploaded {}{stopped}.",
+                count(report.uploaded, "WAD", "WADs")
             ),
         );
         for (title, why) in &report.failed {

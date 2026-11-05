@@ -25,7 +25,7 @@ use crate::get::GetTarget;
 use crate::message::Notification;
 use crate::state::{ActionRequest, ActiveDialog, AppState};
 
-use super::help::{render_about_dialog, render_help_dialog};
+use super::help::render_help_dialog;
 
 /// Render the currently-active dialog (if any) and handle its result.
 ///
@@ -56,6 +56,12 @@ pub(super) fn render_active_dialog(
                 EditResult::Modified => {
                     close_dialog = true;
                     state.invalidate_wad_views();
+                }
+                EditResult::Delete(wad_id) => {
+                    close_dialog = true;
+                    // Companions can have been changed on the way here.
+                    state.invalidate_wad_views();
+                    follow_up_action = Some(ActionRequest::Delete(wad_id));
                 }
                 EditResult::UploadToMirror { wad_id, mirror } => {
                     // Stay open: the upload runs on a worker thread, and the user
@@ -276,11 +282,6 @@ pub(super) fn render_active_dialog(
             },
             ActiveDialog::Help => {
                 if render_help_dialog(ctx) {
-                    close_dialog = true;
-                }
-            }
-            ActiveDialog::About => {
-                if render_about_dialog(ctx) {
                     close_dialog = true;
                 }
             }

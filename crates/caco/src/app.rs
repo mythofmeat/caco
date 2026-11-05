@@ -55,7 +55,7 @@ fn describe_outcome(outcome: &caco_sources::enrich_service::EnrichOutcome) -> St
         parts.push(format!("IWAD {iwad}"));
     }
     if outcome.zdoom_required == Some(true) {
-        parts.push("zdoom required".to_string());
+        parts.push("needs a ZDoom-family sourceport".to_string());
     }
     format!("{} → {}", outcome.title, parts.join(", "))
 }
@@ -291,13 +291,7 @@ impl CacoApp {
             );
 
             let message = outcome
-                .map(|installed| {
-                    format!(
-                        "Built {} — {}",
-                        installed.manifest.name,
-                        installed.binary_path().display()
-                    )
-                })
+                .map(|installed| format!("Built {}.", installed.manifest.name))
                 .map_err(|e| e.to_string());
             sender.send(AppMessage::SourceportBuildComplete(message));
         });
@@ -650,6 +644,9 @@ impl CacoApp {
             ActionRequest::Settings => {
                 let dialog = crate::dialogs::settings::SettingsDialogState::new();
                 self.state.active_dialog = Some(ActiveDialog::Settings(dialog));
+            }
+            ActionRequest::Help => {
+                self.state.active_dialog = Some(ActiveDialog::Help);
             }
             ActionRequest::Resources => {
                 let dialog = ResourcesDialogState::new(&self.conn);
@@ -1255,6 +1252,9 @@ impl eframe::App for CacoApp {
             }
             if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Q)) {
                 quit = true;
+            }
+            if ctx.input(|i| i.key_pressed(egui::Key::F1)) {
+                self.dispatch_action(ActionRequest::Help);
             }
             if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::F)) {
                 let id = egui::Id::unique(panels::filter_bar::FILTER_ID_SOURCE);

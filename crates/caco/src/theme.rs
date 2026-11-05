@@ -50,6 +50,20 @@ pub const COLOR_SECRET_FILL: Color32 = Color32::from_rgb(0x99, 0x44, 0x22);
 /// Over the app, behind a dialog.
 pub const SCRIM: Color32 = Color32::from_black_alpha(160);
 
+/// What goes around a dialog: see `dialogs::Dialog`.
+pub fn dialog_frame() -> egui::Frame {
+    egui::Frame::new()
+        .fill(BG_WINDOW)
+        .corner_radius(12)
+        .stroke(egui::Stroke::new(1.0_f32, BORDER_MED))
+        .shadow(egui::Shadow {
+            offset: [0, 8],
+            blur: 32,
+            spread: 0,
+            color: Color32::from_black_alpha(128),
+        })
+}
+
 // ---------------------------------------------------------------------------
 // Status: one colour and one word each, for everything that shows one. See docs/ui.md.
 // ---------------------------------------------------------------------------

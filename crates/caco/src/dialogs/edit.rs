@@ -6,6 +6,7 @@ use caco_core::db::wads::{self, WadUpdate};
 use rusqlite::Connection;
 
 use crate::dialogs::wad_file::WadFileSection;
+use crate::dialogs::{Dialog, Primary, form_label, tab_bar};
 use crate::theme;
 
 // ---------------------------------------------------------------------------
@@ -59,14 +60,6 @@ struct PendingOrphan {
     companion_id: i64,
     filename: String,
 }
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-/// Height of everything this dialog draws outside its scrolling tab: the header,
-/// the tab bar, the error banner when there is one, and the button row.
-const CHROME: f32 = 180.0;
 
 // ---------------------------------------------------------------------------
 // EditDialogState
@@ -130,6 +123,8 @@ pub enum EditResult {
         wad_id: i64,
         mirror: String,
     },
+    /// Ask whether to delete this WAD. Goes to the question every delete goes through.
+    Delete(i64),
     Open,
 }
 
@@ -219,193 +214,69 @@ impl EditDialogState {
 
         let mut result = EditResult::Open;
         let mut companion_action: Option<CompanionAction> = None;
+        let dismissed = if self.companions_modified {
+            EditResult::Modified
+        } else {
+            EditResult::Cancelled
+        };
 
-        crate::dialogs::modal_window(ctx, "edit_wad_dialog", [560.0, 580.0])
-            .title_bar(false)
-            .frame(
-                egui::Frame::new()
-                    .fill(theme::BG_WINDOW)
-                    .corner_radius(16)
-                    .stroke(egui::Stroke::new(1.0_f32, theme::BORDER_MED))
-                    .shadow(ctx.global_style().visuals.window_shadow),
-            )
-            .show(ctx, |ui| {
-                // ── Header with thumbnail + title ──
-                egui::Frame::new()
-                    .inner_margin(egui::Margin::symmetric(20, 14))
-                    .stroke(egui::Stroke::new(1.0_f32, theme::BORDER))
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.vertical(|ui| {
-                                ui.colored_label(
-                                    theme::TEXT_PRIMARY,
-                                    egui::RichText::new(&self.title_field).size(16.0).strong(),
-                                );
-                                let meta = format!(
-                                    "{}{}{}",
-                                    self.author,
-                                    if !self.year.is_empty() {
-                                        " \u{00b7} "
-                                    } else {
-                                        ""
-                                    },
-                                    self.year
-                                );
-                                if !meta.trim().is_empty() {
-                                    ui.colored_label(
-                                        theme::TEXT_SECONDARY,
-                                        egui::RichText::new(meta).size(12.0),
-                                    );
-                                }
-                            });
-
-                            // Close button (right aligned)
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    if ui
-                                        .add(
-                                            egui::Button::new(
-                                                egui::RichText::new("\u{00d7}")
-                                                    .size(18.0)
-                                                    .color(theme::TEXT_SECONDARY),
-                                            )
-                                            .frame(false),
-                                        )
-                                        .clicked()
-                                    {
-                                        result = if self.companions_modified {
-                                            EditResult::Modified
-                                        } else {
-                                            EditResult::Cancelled
-                                        };
-                                    }
-                                },
-                            );
-                        });
-                    });
-
-                // ── Tab bar ──
-                egui::Frame::new()
-                    .fill(theme::BG_SIDEBAR)
-                    .inner_margin(egui::Margin {
-                        left: 20,
-                        right: 20,
-                        top: 0,
-                        bottom: 0,
+        let about = match (self.author.is_empty(), self.year.is_empty()) {
+            (false, false) => format!("{} \u{00b7} {}", self.author, self.year),
+            (false, true) => self.author.clone(),
+            (true, false) => self.year.clone(),
+            (true, true) => "No author or year yet".to_string(),
+        };
+        // Keyed, because its title is what is being edited.
+        Dialog::new(self.title_field.clone(), [600.0, 620.0])
+            .keyed("Edit WAD")
+            .about(about)
+            .show(ctx, |dialog| {
+                dialog
+                    .pinned(|ui| {
+                        tab_bar(
+                            ui,
+                            &mut self.active_tab,
+                            &[
+                                (EditTab::Metadata, "Details"),
+                                (EditTab::Sourceport, "Sourceport"),
+                                (EditTab::Sources, "Sources"),
+                                (EditTab::Companions, "Companions"),
+                            ],
+                        );
                     })
-                    .stroke(egui::Stroke::new(1.0_f32, theme::BORDER))
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            render_edit_tab(
-                                ui,
-                                "Metadata",
-                                EditTab::Metadata,
-                                &mut self.active_tab,
-                            );
-                            render_edit_tab(
-                                ui,
-                                "Sourceport",
-                                EditTab::Sourceport,
-                                &mut self.active_tab,
-                            );
-                            render_edit_tab(ui, "Sources", EditTab::Sources, &mut self.active_tab);
-                            render_edit_tab(
-                                ui,
-                                "Companions",
-                                EditTab::Companions,
-                                &mut self.active_tab,
-                            );
-                        });
-                    });
-
-                // ── Error banner ──
-                if let Some(err) = &self.error_message {
-                    egui::Frame::new()
-                        .fill(theme::BG_ERROR)
-                        .inner_margin(egui::Margin::symmetric(20, 6))
-                        .show(ui, |ui| {
+                    .scroll(|ui| {
+                        ui.spacing_mut().item_spacing.y = 8.0;
+                        match self.active_tab {
+                            EditTab::Metadata => self.render_metadata_tab(ui),
+                            EditTab::Sourceport => self.render_sourceport_tab(ui),
+                            EditTab::Sources => self.render_sources_tab(ui),
+                            EditTab::Companions => {
+                                companion_action = self.render_companions_tab(ui);
+                            }
+                        }
+                    })
+                    .above(|ui| {
+                        if let Some(err) = &self.error_message {
                             ui.colored_label(theme::COLOR_ERROR, err);
-                        });
-                }
-
-                // ── Tab content ──
-                // Height comes from what is left after the header, tab bar, error
-                // banner and button row. Comfortable in a large window, and able to
-                // shrink in the 800x400 minimum, where a fixed height would push the
-                // buttons off the bottom.
-                let body_height = crate::dialogs::modal_body_height(ctx, CHROME).min(380.0);
-                egui::ScrollArea::vertical()
-                    .max_height(body_height)
-                    .show(ui, |ui| {
-                        egui::Frame::new()
-                            .inner_margin(egui::Margin::symmetric(20, 16))
-                            .show(ui, |ui| {
-                                ui.spacing_mut().item_spacing.y = 8.0;
-
-                                match self.active_tab {
-                                    EditTab::Metadata => self.render_metadata_tab(ui),
-                                    EditTab::Sourceport => self.render_sourceport_tab(ui),
-                                    EditTab::Sources => self.render_sources_tab(ui),
-                                    EditTab::Companions => {
-                                        companion_action = self.render_companions_tab(ui);
-                                    }
-                                }
-                            });
-                    });
-
-                // ── Footer ──
-                ui.add_space(4.0);
-                egui::Frame::new()
-                    .inner_margin(egui::Margin::symmetric(20, 10))
-                    .stroke(egui::Stroke::new(1.0_f32, theme::BORDER))
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            // Delete button (left)
+                        }
+                    })
+                    .buttons(|row| {
+                        row.left(|ui| {
                             if ui
-                                .add(
-                                    egui::Button::new(
-                                        egui::RichText::new("Delete WAD").color(theme::COLOR_ERROR),
-                                    )
-                                    .fill(theme::BG_ERROR),
-                                )
+                                .button(egui::RichText::new("Delete WAD").color(theme::COLOR_ERROR))
                                 .clicked()
                             {
-                                // TODO: confirm first, for now just close
+                                result = EditResult::Delete(self.wad_id);
                             }
-
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    // Save button
-                                    if ui.add(theme::primary_button("Save Changes")).clicked()
-                                        && self.save(conn).is_ok()
-                                    {
-                                        result = EditResult::Saved;
-                                    }
-
-                                    // Cancel button
-                                    if ui
-                                        .add(
-                                            egui::Button::new("Cancel")
-                                                .fill(theme::BG_LIGHT)
-                                                .stroke(egui::Stroke::new(
-                                                    1.0_f32,
-                                                    theme::BORDER_MED,
-                                                )),
-                                        )
-                                        .clicked()
-                                    {
-                                        result = if self.companions_modified {
-                                            EditResult::Modified
-                                        } else {
-                                            EditResult::Cancelled
-                                        };
-                                    }
-                                },
-                            );
                         });
-                    });
+                        let ended = row.end(Some("Cancel"), Some(Primary::new("Save Changes")));
+                        if ended.dismissed {
+                            result = dismissed;
+                        }
+                        if ended.primary && self.save(conn).is_ok() {
+                            result = EditResult::Saved;
+                        }
+                    })
             });
 
         // Escape closes
@@ -648,21 +519,21 @@ impl EditDialogState {
 
     fn render_sourceport_tab(&mut self, ui: &mut egui::Ui) {
         ui.columns(2, |cols| {
-            let label = form_label(&mut cols[0], "Sourceport Override");
+            let label = form_label(&mut cols[0], "Sourceport");
             cols[0]
                 .add(
                     egui::TextEdit::singleline(&mut self.sourceport)
                         .desired_width(f32::INFINITY)
-                        .hint_text("default")
+                        .hint_text("the default one")
                         .text_color(theme::TEXT_PRIMARY),
                 )
                 .labelled_by(label.id);
-            let label = form_label(&mut cols[1], "Compatibility Family");
+            let label = form_label(&mut cols[1], "Needs a sourceport like");
             cols[1]
                 .add(
                     egui::TextEdit::singleline(&mut self.sourceport_family)
                         .desired_width(f32::INFINITY)
-                        .hint_text("default")
+                        .hint_text("any")
                         .text_color(theme::TEXT_PRIMARY),
                 )
                 .labelled_by(label.id);
@@ -674,7 +545,7 @@ impl EditDialogState {
                 .add(
                     egui::TextEdit::singleline(&mut self.iwad)
                         .desired_width(f32::INFINITY)
-                        .hint_text("auto-detect")
+                        .hint_text("worked out from the file")
                         .text_color(theme::TEXT_PRIMARY),
                 )
                 .labelled_by(label.id);
@@ -690,12 +561,12 @@ impl EditDialogState {
                         .text_color(theme::TEXT_PRIMARY),
                 )
                 .labelled_by(label.id);
-            let label = form_label(&mut cols[1], "Config Profile");
+            let label = form_label(&mut cols[1], "Profile");
             cols[1]
                 .add(
                     egui::TextEdit::singleline(&mut self.config)
                         .desired_width(f32::INFINITY)
-                        .hint_text("default")
+                        .hint_text("none")
                         .text_color(theme::TEXT_PRIMARY),
                 )
                 .labelled_by(label.id);
@@ -709,7 +580,7 @@ impl EditDialogState {
                 .labelled_by(label.id);
         });
 
-        let label = form_label(ui, "Custom Args (JSON)");
+        let label = form_label(ui, "Launch arguments (JSON)");
         ui.add(
             egui::TextEdit::singleline(&mut self.args)
                 .desired_width(f32::INFINITY)
@@ -758,7 +629,7 @@ impl EditDialogState {
             );
             ui.colored_label(
                 theme::TEXT_SECONDARY,
-                "Delete the managed copy too, or keep it in the registry for later?",
+                "Delete caco's copy of it too, or keep it for later?",
             );
             ui.add_space(6.0);
             ui.horizontal(|ui| {
@@ -778,7 +649,8 @@ impl EditDialogState {
         if self.companions.is_empty() {
             ui.colored_label(
                 theme::TEXT_SECONDARY,
-                "No companion files linked to this WAD.",
+                "No companion files for this WAD. A companion is a file that loads with it, such \
+                 as a DeHackEd patch or a music pack.",
             );
             ui.add_space(8.0);
         } else {
@@ -806,13 +678,18 @@ impl EditDialogState {
                                             )
                                             .frame(false),
                                         )
+                                        .on_hover_text("Remove from this WAD")
                                         .clicked()
                                     {
                                         action = Some(CompanionAction::Remove(cid));
                                     }
 
                                     // Toggle
-                                    if ui.checkbox(&mut entry.enabled, "").changed() {
+                                    if ui
+                                        .checkbox(&mut entry.enabled, "")
+                                        .on_hover_text("Load it with this WAD")
+                                        .changed()
+                                    {
                                         action = Some(CompanionAction::Toggle(cid, entry.enabled));
                                     }
                                 },
@@ -1034,38 +911,6 @@ impl EditDialogState {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-fn form_label(ui: &mut egui::Ui, label: &str) -> egui::Response {
-    ui.colored_label(
-        theme::TEXT_SECONDARY,
-        egui::RichText::new(label).size(12.0).strong(),
-    )
-}
-
-fn render_edit_tab(ui: &mut egui::Ui, label: &str, tab: EditTab, active: &mut EditTab) {
-    let is_active = *active == tab;
-    let text_color = if is_active {
-        theme::TEXT_ACCENT
-    } else {
-        theme::TEXT_SECONDARY
-    };
-
-    let response = ui.add(
-        egui::Button::new(egui::RichText::new(label).size(13.0).color(text_color)).frame(false),
-    );
-
-    if is_active {
-        let rect = response.rect;
-        ui.painter().line_segment(
-            [rect.left_bottom(), rect.right_bottom()],
-            egui::Stroke::new(2.0_f32, theme::TEXT_ACCENT),
-        );
-    }
-
-    if response.clicked() {
-        *active = tab;
-    }
-}
 
 fn format_size(bytes: i64) -> String {
     if bytes < 1024 {

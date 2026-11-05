@@ -47,7 +47,7 @@ use caco_sources::idgames::sync::{
 };
 use caco_sources::idgames::{IdgamesClient, Index};
 use caco_sources::import_service::ImportResult;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 
 /// How long to leave worker threads to answer between rounds of frames.
 const WORKER_PAUSE: Duration = Duration::from_millis(80);
@@ -272,6 +272,7 @@ impl Shooter {
         self.settle(3, Duration::ZERO);
         // `settle` can end up skipping this: see there.
         self.harness.check_accessibility();
+        self.no_dead_way_out(name);
         let img = self
             .harness
             .render()
@@ -280,6 +281,20 @@ impl Shooter {
         img.save(&path)
             .unwrap_or_else(|e| panic!("save {name}: {e}"));
         println!("wrote {}", path.display());
+    }
+
+    /// Don't draw a control that can't act: a way out that does nothing is the worst of them.
+    /// See `docs/ui.md`. A button with a reason to wait, such as Finish on a form that is not
+    /// filled in, is not one of these.
+    fn no_dead_way_out(&self, name: &str) {
+        for label in ["Cancel", "Close", "Stop", "Stop Build", "Back", "Done"] {
+            for node in self.harness.query_all_by_label(label) {
+                assert!(
+                    !node.accesskit_node().is_disabled(),
+                    "{name} draws a disabled {label}"
+                );
+            }
+        }
     }
 
     /// Switch to a full-panel view and shoot it.
@@ -900,6 +915,28 @@ fn shoot_every_surface() {
     ] {
         record(name, s.shot_dialog(&format!("dlg-{name}"), action));
     }
+
+    // Help, which nothing could open until there was a way to, and the dialogs about one WAD,
+    // which take one to open. A WAD of their own, since the library can be empty.
+    record("help", s.shot_dialog("dlg-help", ActionRequest::Help));
+    let one_wad = s.add_manual_wad_with_file("A Wad to Open Dialogs On", 999_100);
+    for (name, action) in [
+        ("edit-details", ActionRequest::Edit(one_wad)),
+        ("delete", ActionRequest::Delete(one_wad)),
+        ("sessions", ActionRequest::Sessions(one_wad)),
+        ("map-stats", ActionRequest::MapStats(one_wad)),
+        ("saves-demos", ActionRequest::WadData(one_wad)),
+    ] {
+        record(name, s.shot_dialog(&format!("dlg-{name}"), action));
+    }
+    s.purge_wad(one_wad);
+
+    // Linking an award to a WAD by hand, with a filter that has an input to name.
+    let an_award = s.absent_cacoward("2025-winner-below-the-gaudy-goblin");
+    record(
+        "cacoward-link",
+        s.shot_dialog("dlg-cacoward-link", ActionRequest::LinkCacoward(an_award)),
+    );
 
     // The version picker only exists once a remote has answered, and that is
     // asked on demand, so opening the dialog alone never reaches it.

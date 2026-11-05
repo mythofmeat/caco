@@ -54,3 +54,13 @@ fn every_colour_is_a_token_in_the_theme() {
         .collect();
     assert_eq!(hits, Vec::<String>::new(), "name these in theme.rs");
 }
+
+/// A window opened anywhere else has its own idea of where the buttons go.
+#[test]
+fn only_the_dialog_skeleton_opens_a_window() {
+    let hits = lines_containing(
+        &["Window::new", ".title_bar(", "Modal::new"],
+        &["dialogs/skeleton.rs"],
+    );
+    assert_eq!(hits, Vec::<String>::new(), "use dialogs::Dialog");
+}

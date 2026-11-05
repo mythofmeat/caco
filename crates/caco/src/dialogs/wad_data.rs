@@ -1,10 +1,5 @@
-//! Per-WAD save, backup, and demo management.
-//!
-//! The GUI answer to `caco saves` and `caco demos`. Both commands operate on
-//! the same managed data directory, so they share one dialog here rather than
-//! two — the CLI only split them because a subcommand can't have tabs.
-//!
-//! Destructive actions stage a confirmation instead of acting on the click.
+//! Per-WAD save, backup, and demo management: all one dialog, since all of it is in the
+//! same folder. Destructive actions stage a confirmation instead of acting on the click.
 
 use std::path::PathBuf;
 
@@ -15,6 +10,7 @@ use caco_core::demos::{self, DemoFile};
 use caco_core::saves::{self, BackupInfo, SaveFile};
 use caco_core::utils::format_size;
 
+use crate::dialogs::{Dialog, Primary, StatusLine, count, tab_bar};
 use crate::theme;
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -30,11 +26,6 @@ enum Pending {
     RestoreBackup(usize),
     DeleteDemo(usize),
     CleanDemos,
-}
-
-struct StatusLine {
-    text: String,
-    is_error: bool,
 }
 
 pub struct WadDataDialogState {
@@ -98,22 +89,16 @@ impl WadDataDialogState {
     }
 
     fn set_error(&mut self, text: impl Into<String>) {
-        self.status = Some(StatusLine {
-            text: text.into(),
-            is_error: true,
-        });
+        self.status = Some(StatusLine::error(text));
     }
 
     fn set_info(&mut self, text: impl Into<String>) {
-        self.status = Some(StatusLine {
-            text: text.into(),
-            is_error: false,
-        });
+        self.status = Some(StatusLine::info(text));
     }
 
     fn backup_now(&mut self) {
         if !self.data_dir.is_dir() {
-            self.set_error(format!("No data directory for '{}'.", self.wad_title));
+            self.set_error(format!("'{}' has nothing to back up yet.", self.wad_title));
             return;
         }
         match saves::create_backup(&self.data_key, &self.wad_title, &self.data_dir) {
@@ -123,7 +108,7 @@ impl WadDataDialogState {
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_default();
                 self.reload();
-                self.set_info(format!("Backup created: {name}"));
+                self.set_info(format!("Backed up as {name}."));
             }
             Err(e) => self.set_error(e.to_string()),
         }
@@ -137,7 +122,10 @@ impl WadDataDialogState {
             Pending::CleanSaves => {
                 let deleted = saves::clean_save_files(&self.data_dir).len();
                 self.reload();
-                self.set_info(format!("Deleted {deleted} save file(s)."));
+                self.set_info(format!(
+                    "Deleted {}.",
+                    count(deleted, "save file", "save files")
+                ));
             }
             Pending::RestoreBackup(idx) => {
                 let Some(backup) = self.backups.get(idx) else {
@@ -145,9 +133,12 @@ impl WadDataDialogState {
                 };
                 let (path, name) = (backup.path.clone(), backup.name.clone());
                 match saves::restore_backup(&path, &self.data_dir) {
-                    Ok(count) => {
+                    Ok(restored) => {
                         self.reload();
-                        self.set_info(format!("Restored {count} file(s) from {name}."));
+                        self.set_info(format!(
+                            "Restored {} from {name}.",
+                            count(restored, "file", "files")
+                        ));
                     }
                     Err(e) => self.set_error(e.to_string()),
                 }
@@ -168,92 +159,90 @@ impl WadDataDialogState {
             Pending::CleanDemos => {
                 let deleted = demos::clean_demo_files(&self.data_dir).len();
                 self.reload();
-                self.set_info(format!("Deleted {deleted} demo file(s)."));
+                self.set_info(format!("Deleted {}.", count(deleted, "demo", "demos")));
             }
         }
     }
 
-    /// Human-readable description of what the pending action will do.
+    /// What the pending action is about to do, as a question.
     fn pending_prompt(&self) -> Option<String> {
         Some(match self.pending.as_ref()? {
             Pending::CleanSaves => format!(
-                "Delete {} save file(s) for '{}'? Back up first if you might want them back.",
-                self.saves.len(),
-                self.wad_title
+                "Delete {}? Back up first if you might want them back.",
+                count(self.saves.len(), "save file", "save files")
             ),
             Pending::RestoreBackup(idx) => format!(
-                "Restore from {}? This overwrites the current data directory.",
+                "Restore from {}? This replaces the saves there are now.",
                 self.backups
                     .get(*idx)
                     .map(|b| b.name.as_str())
                     .unwrap_or("backup")
             ),
             Pending::DeleteDemo(idx) => format!(
-                "Delete demo {}?",
+                "Delete {}?",
                 self.demos
                     .get(*idx)
                     .map(|d| d.name.as_str())
-                    .unwrap_or("file")
+                    .unwrap_or("this demo")
             ),
             Pending::CleanDemos => {
-                format!("Delete all {} demo file(s)?", self.demos.len())
+                format!("Delete {}?", count(self.demos.len(), "demo", "demos"))
             }
         })
     }
 
+    /// What going ahead with the pending action is called, on its button.
+    fn pending_verb(&self) -> &'static str {
+        match self.pending {
+            Some(Pending::RestoreBackup(_)) => "Restore",
+            _ => "Delete",
+        }
+    }
+
     pub fn render(&mut self, ctx: &egui::Context) -> WadDataResult {
         let mut result = WadDataResult::Open;
+        let tabs = [
+            (Tab::Saves, format!("Saves ({})", self.saves.len())),
+            (Tab::Backups, format!("Backups ({})", self.backups.len())),
+            (Tab::Demos, format!("Demos ({})", self.demos.len())),
+        ];
 
-        crate::dialogs::modal_window(ctx, "Saves & Demos", [720.0, 460.0]).show(ctx, |ui| {
-            ui.strong(&self.wad_title);
-            ui.colored_label(theme::TEXT_SECONDARY, self.data_dir.display().to_string());
-            ui.add_space(6.0);
-
-            ui.horizontal(|ui| {
-                ui.selectable_value(
-                    &mut self.tab,
-                    Tab::Saves,
-                    format!("Saves ({})", self.saves.len()),
-                );
-                ui.selectable_value(
-                    &mut self.tab,
-                    Tab::Backups,
-                    format!("Backups ({})", self.backups.len()),
-                );
-                ui.selectable_value(
-                    &mut self.tab,
-                    Tab::Demos,
-                    format!("Demos ({})", self.demos.len()),
-                );
+        Dialog::new("Saves & Demos", [720.0, 480.0])
+            .about(&self.wad_title)
+            .show(ctx, |dialog| {
+                dialog
+                    .pinned(|ui| tab_bar(ui, &mut self.tab, &tabs))
+                    .fill(|ui, height| match self.tab {
+                        Tab::Saves => self.render_saves(ui, height),
+                        Tab::Backups => self.render_backups(ui, height),
+                        Tab::Demos => self.render_demos(ui, height),
+                    })
+                    .above(|ui| {
+                        if let Some(prompt) = self.pending_prompt() {
+                            ui.colored_label(theme::COLOR_ERROR, prompt);
+                        }
+                        if let Some(status) = &self.status {
+                            status.show(ui);
+                        }
+                    })
+                    .buttons(|row| {
+                        if self.pending.is_some() {
+                            let verb = self.pending_verb();
+                            let ended = row.end(Some("Cancel"), Some(Primary::danger(verb)));
+                            if ended.dismissed {
+                                self.pending = None;
+                            }
+                            if ended.primary {
+                                self.run_pending();
+                            }
+                            return;
+                        }
+                        row.left(|ui| self.render_actions(ui, &mut result));
+                        if row.close() {
+                            result = WadDataResult::Closed;
+                        }
+                    })
             });
-            ui.add_space(6.0);
-
-            match self.tab {
-                Tab::Saves => self.render_saves(ui),
-                Tab::Backups => self.render_backups(ui),
-                Tab::Demos => self.render_demos(ui),
-            }
-
-            ui.add_space(4.0);
-            ui.separator();
-            ui.add_space(4.0);
-
-            if let Some(prompt) = self.pending_prompt() {
-                self.render_confirmation(ui, &prompt);
-            } else {
-                self.render_actions(ui, &mut result);
-            }
-
-            if let Some(status) = &self.status {
-                ui.add_space(4.0);
-                let color = if status.is_error {
-                    theme::COLOR_ERROR
-                } else {
-                    theme::TEXT_SECONDARY
-                };
-                ui.colored_label(color, &status.text);
-            }
-        });
 
         // Escape dismisses a pending confirmation before it closes the dialog.
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -267,83 +256,52 @@ impl WadDataDialogState {
         result
     }
 
-    fn render_confirmation(&mut self, ui: &mut egui::Ui, prompt: &str) {
-        ui.colored_label(theme::COLOR_ERROR, prompt);
-        ui.horizontal(|ui| {
-            if ui.button("Confirm").clicked() {
-                self.run_pending();
-            }
-            if ui.button("Cancel").clicked() {
-                self.pending = None;
-            }
-        });
-    }
-
+    /// What can be done on this tab, of which there is nothing to do to what isn't there.
     fn render_actions(&mut self, ui: &mut egui::Ui, result: &mut WadDataResult) {
-        ui.horizontal(|ui| {
-            match self.tab {
-                Tab::Saves => {
-                    if ui
-                        .button("Back Up Now")
-                        .on_hover_text("Zip the whole data directory into the backups folder")
-                        .clicked()
-                    {
-                        self.backup_now();
-                    }
-                    if ui
-                        .add_enabled(!self.saves.is_empty(), egui::Button::new("Delete Saves"))
-                        .clicked()
-                    {
-                        self.pending = Some(Pending::CleanSaves);
-                    }
+        match self.tab {
+            Tab::Saves => {
+                if ui
+                    .button("Back Up Now")
+                    .on_hover_text("Zip this WAD's saves and stats into the backups folder")
+                    .clicked()
+                {
+                    self.backup_now();
                 }
-                Tab::Backups => {
-                    let has_selection = self.selected_backup.is_some();
-                    if ui
-                        .add_enabled(has_selection, egui::Button::new("Restore Selected"))
-                        .clicked()
-                        && let Some(idx) = self.selected_backup
-                    {
-                        self.pending = Some(Pending::RestoreBackup(idx));
-                    }
+                if !self.saves.is_empty() && ui.button("Delete Saves").clicked() {
+                    self.pending = Some(Pending::CleanSaves);
                 }
-                Tab::Demos => {
-                    let has_selection = self.selected_demo.is_some();
-                    if ui
-                        .add_enabled(has_selection, egui::Button::new("Play"))
-                        .clicked()
-                        && let Some(demo) = self.selected_demo.and_then(|i| self.demos.get(i))
+            }
+            Tab::Backups => {
+                if let Some(idx) = self.selected_backup
+                    && ui.button("Restore Selected").clicked()
+                {
+                    self.pending = Some(Pending::RestoreBackup(idx));
+                }
+            }
+            Tab::Demos => {
+                if let Some(idx) = self.selected_demo {
+                    if ui.button("Play").clicked()
+                        && let Some(demo) = self.demos.get(idx)
                     {
                         *result = WadDataResult::PlayDemo {
                             wad_id: self.wad_id,
                             demo: demo.name.clone(),
                         };
                     }
-                    if ui
-                        .add_enabled(has_selection, egui::Button::new("Delete"))
-                        .clicked()
-                        && let Some(idx) = self.selected_demo
-                    {
+                    if ui.button("Delete").clicked() {
                         self.pending = Some(Pending::DeleteDemo(idx));
                     }
-                    if ui
-                        .add_enabled(!self.demos.is_empty(), egui::Button::new("Delete All"))
-                        .clicked()
-                    {
-                        self.pending = Some(Pending::CleanDemos);
-                    }
+                }
+                if !self.demos.is_empty() && ui.button("Delete All").clicked() {
+                    self.pending = Some(Pending::CleanDemos);
                 }
             }
-
-            if ui.button("Close").clicked() {
-                *result = WadDataResult::Closed;
-            }
-        });
+        }
     }
 
-    fn render_saves(&mut self, ui: &mut egui::Ui) {
+    fn render_saves(&mut self, ui: &mut egui::Ui, height: f32) {
         if self.saves.is_empty() {
-            ui.colored_label(theme::TEXT_SECONDARY, "No save files.");
+            ui.colored_label(theme::TEXT_SECONDARY, "No saves yet.");
             return;
         }
 
@@ -362,10 +320,10 @@ impl WadDataDialogState {
                 ]
             })
             .collect();
-        file_table(ui, ["File", "Size", "Modified"], &rows, None);
+        file_table(ui, height - 20.0, ["File", "Size", "Modified"], &rows, None);
     }
 
-    fn render_backups(&mut self, ui: &mut egui::Ui) {
+    fn render_backups(&mut self, ui: &mut egui::Ui, height: f32) {
         if self.backups.is_empty() {
             ui.colored_label(
                 theme::TEXT_SECONDARY,
@@ -387,17 +345,18 @@ impl WadDataDialogState {
             .collect();
         file_table(
             ui,
+            height,
             ["Backup", "Size", "Created"],
             &rows,
             Some(&mut self.selected_backup),
         );
     }
 
-    fn render_demos(&mut self, ui: &mut egui::Ui) {
+    fn render_demos(&mut self, ui: &mut egui::Ui, height: f32) {
         if self.demos.is_empty() {
             ui.colored_label(
                 theme::TEXT_SECONDARY,
-                "No demos. Record one by playing with demo recording enabled.",
+                "No demos yet. Record one by playing with demo recording turned on.",
             );
             return;
         }
@@ -415,6 +374,7 @@ impl WadDataDialogState {
             .collect();
         file_table(
             ui,
+            height,
             ["Demo", "Size", "Recorded"],
             &rows,
             Some(&mut self.selected_demo),
@@ -426,6 +386,7 @@ impl WadDataDialogState {
 /// clickable; passing `None` renders a read-only list.
 fn file_table(
     ui: &mut egui::Ui,
+    height: f32,
     headers: [&str; 3],
     rows: &[[String; 3]],
     selection: Option<&mut Option<usize>>,
@@ -436,13 +397,12 @@ fn file_table(
 
     TableBuilder::new(ui)
         .striped(true)
-        .resizable(true)
         .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
         .sense(egui::Sense::click())
-        .column(Column::remainder().at_least(180.0))
+        .column(Column::remainder().at_least(180.0).clip(true))
         .column(Column::initial(90.0).at_least(60.0))
         .column(Column::initial(160.0).at_least(100.0))
-        .max_scroll_height(280.0)
+        .max_scroll_height((height - row_height).max(60.0))
         .header(row_height + 2.0, |mut header| {
             for label in headers {
                 header.col(|ui| {

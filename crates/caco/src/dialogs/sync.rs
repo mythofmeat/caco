@@ -12,10 +12,8 @@ use rusqlite::Connection;
 use caco_core::config;
 use caco_core::sync::{self, MachineStatus, SyncReport, machine};
 
+use crate::dialogs::{Dialog, Primary};
 use crate::theme;
-
-/// What sits below the scrolling part: the button row and its gap.
-const FOOTER: f32 = 76.0;
 
 pub struct SyncDialogState {
     this_machine: Option<String>,
@@ -59,38 +57,35 @@ impl SyncDialogState {
     pub fn render(&mut self, ctx: &egui::Context, report: Option<&SyncReport>) -> SyncResult {
         let mut result = SyncResult::Open;
 
-        crate::dialogs::modal_window(ctx, "Sync", [600.0, 280.0]).show(ctx, |ui| {
-            // Shrinks to what it holds, which is not much for someone with two machines.
-            egui::ScrollArea::vertical()
-                .auto_shrink([false, true])
-                .max_height(crate::dialogs::modal_body_height(ctx, FOOTER))
-                .show(ui, |ui| {
+        Dialog::new("Sync", [620.0, 460.0]).show(ctx, |dialog| {
+            dialog
+                .scroll(|ui| {
                     ui.spacing_mut().item_spacing.y = 6.0;
                     self.intro(ui);
                     ui.add_space(8.0);
                     self.machines_table(ui);
                     ui.add_space(8.0);
                     self.status_lines(ui, report);
-                });
-
-            ui.add_space(8.0);
-            ui.separator();
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                if ui.button("Sync Now").clicked() {
-                    result = SyncResult::SyncNow;
-                }
-                if ui
-                    .button("Open Folder")
-                    .on_hover_text("Open the folder the logs are in")
-                    .clicked()
-                {
-                    self.open_failed = open::that(&self.log_dir).err().map(|e| e.to_string());
-                }
-                if ui.button("Close").clicked() {
-                    result = SyncResult::Closed;
-                }
-            });
+                })
+                .buttons(|row| {
+                    row.left(|ui| {
+                        if ui
+                            .button("Open Folder")
+                            .on_hover_text("Open the folder the logs are in")
+                            .clicked()
+                        {
+                            self.open_failed =
+                                open::that(&self.log_dir).err().map(|e| e.to_string());
+                        }
+                    });
+                    let ended = row.end(Some("Close"), Some(Primary::new("Sync Now")));
+                    if ended.dismissed {
+                        result = SyncResult::Closed;
+                    }
+                    if ended.primary {
+                        result = SyncResult::SyncNow;
+                    }
+                })
         });
 
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {

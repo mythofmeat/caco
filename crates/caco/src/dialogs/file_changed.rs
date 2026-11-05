@@ -11,6 +11,7 @@
 use caco_core::identity::ContentChange;
 use caco_core::player::PlayOptions;
 
+use crate::dialogs::{Dialog, Primary};
 use crate::theme;
 
 pub struct FileChangedDialogState {
@@ -41,49 +42,38 @@ impl FileChangedDialogState {
     pub fn render(&self, ctx: &egui::Context) -> FileChangedResult {
         let mut result = FileChangedResult::Open;
 
-        crate::dialogs::modal_window(ctx, "File Changed", [440.0, 230.0]).show(ctx, |ui| {
-            ui.spacing_mut().item_spacing.y = 8.0;
-
-            ui.colored_label(
-                theme::TEXT_PRIMARY,
-                egui::RichText::new(&self.wad_title).heading(),
-            );
-            ui.add_space(4.0);
-            ui.colored_label(theme::TEXT_SECONDARY, explanation(&self.change));
-            ui.colored_label(
-                theme::TEXT_SECONDARY,
-                "Saves and demos from before may not work with it.",
-            );
-            ui.label(
-                egui::RichText::new(format!(
-                    "played {}  \u{00b7}  now {}",
-                    short_hash(&self.change.played),
-                    short_hash(&self.change.current)
-                ))
-                .monospace()
-                .small()
-                .color(theme::TEXT_SECONDARY),
-            );
-
-            ui.add_space(8.0);
-            ui.separator();
-            ui.add_space(4.0);
-
-            ui.horizontal(|ui| {
-                if ui.button("Play Anyway").clicked() {
-                    result = FileChangedResult::PlayAnyway(
-                        self.wad_id,
-                        PlayOptions {
-                            accept_changed_file: true,
-                            ..self.opts
-                        },
-                    );
-                }
-                if ui.button("Cancel").clicked() {
-                    result = FileChangedResult::Cancelled;
-                }
+        Dialog::new("File Changed", [460.0, 200.0])
+            .about(&self.wad_title)
+            .show(ctx, |dialog| {
+                dialog
+                    .scroll(|ui| {
+                        ui.colored_label(theme::TEXT_SECONDARY, explanation(&self.change))
+                            .on_hover_text(format!(
+                                "Played {}, and now {}",
+                                short_hash(&self.change.played),
+                                short_hash(&self.change.current)
+                            ));
+                        ui.colored_label(
+                            theme::TEXT_SECONDARY,
+                            "Saves and demos from before may not work with it.",
+                        );
+                    })
+                    .buttons(|row| {
+                        let ended = row.end(Some("Cancel"), Some(Primary::new("Play Anyway")));
+                        if ended.dismissed {
+                            result = FileChangedResult::Cancelled;
+                        }
+                        if ended.primary {
+                            result = FileChangedResult::PlayAnyway(
+                                self.wad_id,
+                                PlayOptions {
+                                    accept_changed_file: true,
+                                    ..self.opts
+                                },
+                            );
+                        }
+                    })
             });
-        });
 
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             return FileChangedResult::Cancelled;

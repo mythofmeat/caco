@@ -118,7 +118,7 @@ impl WadFileSection {
             let others: Vec<String> = self
                 .same_as
                 .iter()
-                .map(|(id, title)| format!("{title} (#{id})"))
+                .map(|(_, title)| title.clone())
                 .collect();
             ui.colored_label(
                 theme::COLOR_WARNING,
@@ -130,7 +130,8 @@ impl WadFileSection {
             if matches!(self.location, Location::Here(_)) {
                 secondary(
                     ui,
-                    "Not hashed yet. caco hashes a new file at startup and before it is played.",
+                    "caco reads a new file when it starts, and before playing it, so there is \
+                     nothing to show about this one yet.",
                 );
             }
             return;

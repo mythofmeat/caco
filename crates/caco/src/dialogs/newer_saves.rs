@@ -8,13 +8,11 @@
 use caco_core::player::PlayOptions;
 use caco_core::sync::{NewerSaves, machine};
 
+use crate::dialogs::{Dialog, Primary};
 use crate::theme;
 
 /// How many saves to name, of however many there are.
 const SHOWN: usize = 4;
-
-/// What sits outside the scrolling part: the title bar, the WAD's title, the button row.
-const CHROME: f32 = 120.0;
 
 pub struct NewerSavesDialogState {
     wad_id: i64,
@@ -44,52 +42,43 @@ impl NewerSavesDialogState {
     pub fn render(&self, ctx: &egui::Context) -> NewerSavesResult {
         let mut result = NewerSavesResult::Open;
 
-        crate::dialogs::modal_window(ctx, "Newer Saves", [460.0, 250.0]).show(ctx, |ui| {
-            ui.spacing_mut().item_spacing.y = 8.0;
-            ui.colored_label(
-                theme::TEXT_PRIMARY,
-                egui::RichText::new(&self.wad_title).heading(),
-            );
-            ui.add_space(4.0);
-            // Shrinks to what it holds, since this is one question with a few file names.
-            egui::ScrollArea::vertical()
-                .auto_shrink([false, true])
-                .max_height(crate::dialogs::modal_body_height(ctx, CHROME))
-                .show(ui, |ui| {
-                    ui.colored_label(theme::TEXT_SECONDARY, explanation(&self.saves));
-                    ui.colored_label(
-                        theme::TEXT_SECONDARY,
-                        "If your sync hasn't finished, wait for it. Playing now carries on from \
-                         what is on this machine, and saving could overwrite the same slot.",
-                    );
-                    for line in file_lines(&self.saves.files) {
-                        ui.label(
-                            egui::RichText::new(line)
-                                .monospace()
-                                .small()
-                                .color(theme::TEXT_SECONDARY),
+        Dialog::new("Newer Saves", [480.0, 280.0])
+            .about(&self.wad_title)
+            .show(ctx, |dialog| {
+                dialog
+                    .scroll(|ui| {
+                        ui.colored_label(theme::TEXT_SECONDARY, explanation(&self.saves));
+                        ui.colored_label(
+                            theme::TEXT_SECONDARY,
+                            "If your sync hasn't finished, wait for it. Playing now carries on \
+                             from what is on this machine, and saving could overwrite the same \
+                             slot.",
                         );
-                    }
-                });
-
-            ui.add_space(8.0);
-            ui.separator();
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                if ui.button("Play Anyway").clicked() {
-                    result = NewerSavesResult::PlayAnyway(
-                        self.wad_id,
-                        PlayOptions {
-                            accept_newer_saves: true,
-                            ..self.opts
-                        },
-                    );
-                }
-                if ui.button("Cancel").clicked() {
-                    result = NewerSavesResult::Cancelled;
-                }
+                        for line in file_lines(&self.saves.files) {
+                            ui.label(
+                                egui::RichText::new(line)
+                                    .monospace()
+                                    .small()
+                                    .color(theme::TEXT_SECONDARY),
+                            );
+                        }
+                    })
+                    .buttons(|row| {
+                        let ended = row.end(Some("Cancel"), Some(Primary::new("Play Anyway")));
+                        if ended.dismissed {
+                            result = NewerSavesResult::Cancelled;
+                        }
+                        if ended.primary {
+                            result = NewerSavesResult::PlayAnyway(
+                                self.wad_id,
+                                PlayOptions {
+                                    accept_newer_saves: true,
+                                    ..self.opts
+                                },
+                            );
+                        }
+                    })
             });
-        });
 
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             return NewerSavesResult::Cancelled;

@@ -12,10 +12,9 @@
 //! against the host package manager before the user spends four minutes
 //! finding out that it will not.
 //!
-//! The log is not part of the scrolling body. It is reserved out of the
-//! window's height and pinned above the button row, because the output is the
-//! reason the dialog is open and anything that has to be scrolled into view
-//! during a four-minute compile may as well not be shown.
+//! The log is not part of the scrolling body. It is pinned above the button row, because
+//! the output is the reason the dialog is open and anything that has to be scrolled into
+//! view during a four-minute compile may as well not be shown.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -24,6 +23,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use caco_core::sourceports::{self, DoctorReport, PackageCheck, SourceportPaths, SourceportStatus};
 use caco_core::utils::format_size;
 
+use crate::dialogs::{Dialog, FooterRow, Primary};
 use crate::theme;
 
 /// A build the dialog is asking the app to start.
@@ -52,15 +52,6 @@ pub enum SourceportsResult {
 /// would grow the dialog's memory for the whole session with output nobody
 /// scrolls back to. A failure is always in the tail.
 const LOG_LIMIT: usize = 2000;
-
-/// Height of the Close row pinned below everything else.
-const FOOTER: f32 = 36.0;
-
-/// Height of the one-line "building X: step" / outcome row above the log.
-const STATUS_ROW: f32 = 24.0;
-
-/// Separator and spacing between the body and the log pane.
-const LOG_CHROME: f32 = 16.0;
 
 /// How much of the window the build log may claim.
 ///
@@ -249,63 +240,48 @@ impl SourceportsDialogState {
     pub fn render(&mut self, ctx: &egui::Context) -> SourceportsResult {
         let mut result = SourceportsResult::Open;
 
-        // What the log costs this frame, taken out of the body's budget rather
-        // than rendered after it inside the same scroll area. A compile is the
-        // whole reason this dialog is open, and output that has to be scrolled
-        // into view is output nobody watches — so the sourceport list and the details
-        // shrink and the log stays on screen from the first line to the last.
-        let showing_status = self.running.is_some() || self.outcome.is_some();
+        // The log's height, taken out of the body's by the footer it is pinned into. A
+        // compile is the whole reason this dialog is open, so the sourceport list and the
+        // details shrink and the log stays on screen from the first line to the last.
         let log_height = if self.log.is_empty() {
             0.0
         } else {
             log_pane_height(ctx)
         };
-        let reserved = FOOTER
-            + if showing_status { STATUS_ROW } else { 0.0 }
-            + if log_height > 0.0 {
-                log_height + LOG_CHROME
-            } else {
-                0.0
-            };
-        let body_height = crate::dialogs::modal_body_height(ctx, reserved);
 
-        crate::dialogs::modal_window(ctx, "Sourceports", [820.0, 620.0]).show(ctx, |ui| {
-            crate::dialogs::scroll_body(ui, body_height, |ui| {
-                if let Some(error) = &self.error {
-                    ui.colored_label(theme::COLOR_ERROR, error);
-                    ui.add_space(6.0);
-                }
+        Dialog::new("Sourceports", [820.0, 620.0]).show(ctx, |dialog| {
+            dialog
+                .scroll(|ui| {
+                    if let Some(error) = &self.error {
+                        ui.colored_label(theme::COLOR_ERROR, error);
+                        ui.add_space(6.0);
+                    }
 
-                // Dropped once there is output to read. It explains what the
-                // dialog is for, which stops being the question the moment a
-                // build is underway, and at the 800x400 minimum window it is
-                // two lines the sourceport list needs more.
-                if self.log.is_empty() {
-                    ui.colored_label(
-                        theme::TEXT_SECONDARY,
-                        "Builds a sourceport from source into caco's own prefix. Nothing is \
-                         installed system-wide, and the recipe travels with your library so \
-                         another machine can rebuild it.",
-                    );
-                    ui.add_space(8.0);
-                }
+                    // Dropped once there is output to read. It explains what the dialog is
+                    // for, which stops being the question the moment a build is underway, and
+                    // at the 800x400 minimum window it is two lines the list needs more.
+                    if self.log.is_empty() {
+                        ui.colored_label(
+                            theme::TEXT_SECONDARY,
+                            "caco can build these from their source code, for when your system \
+                             doesn't package them. They stay inside caco, so nothing else on \
+                             this machine changes.",
+                        );
+                        ui.add_space(8.0);
+                    }
 
-                ui.horizontal_top(|ui| {
-                    self.render_list(ui);
-                    ui.separator();
-                    ui.vertical(|ui| self.render_details(ui, &mut result));
-                });
-            });
-
-            self.render_log(ui, log_height);
-
-            ui.add_space(6.0);
-            if ui
-                .add_enabled(self.running.is_none(), egui::Button::new("Close"))
-                .clicked()
-            {
-                result = SourceportsResult::Closed;
-            }
+                    ui.horizontal_top(|ui| {
+                        self.render_list(ui);
+                        ui.separator();
+                        ui.vertical(|ui| self.render_details(ui, &mut result));
+                    });
+                })
+                .above(|ui| self.render_log(ui, log_height))
+                .buttons(|row| {
+                    if self.render_footer(row, &mut result) {
+                        result = SourceportsResult::Closed;
+                    }
+                })
         });
 
         // Escape must not close mid-build: the log would be lost with nowhere
@@ -315,6 +291,77 @@ impl SourceportsDialogState {
         }
 
         result
+    }
+
+    /// What can be done with the selected sourceport. During a build there is one thing to do
+    /// about it, and no way out. Returns true if Close was pressed.
+    fn render_footer(&mut self, row: &mut FooterRow<'_>, result: &mut SourceportsResult) -> bool {
+        if self.running.is_some() {
+            let ended = row.end(Some("Stop Build"), None);
+            if ended.dismissed {
+                self.cancel.store(true, Ordering::Relaxed);
+            }
+            return false;
+        }
+
+        let Some(sourceport) = self.selected_port().cloned() else {
+            return row.close();
+        };
+        let name = sourceport.recipe.name.clone();
+        let installed = sourceport.installed.clone();
+
+        if let Some(installed) = &installed {
+            row.left(|ui| {
+                if ui
+                    .button("Use as Default")
+                    .on_hover_text("caco launches WADs with this one, unless a WAD says otherwise")
+                    .clicked()
+                {
+                    match set_default_sourceport(&name) {
+                        Ok(()) => {
+                            self.modified = true;
+                            self.outcome =
+                                Some(Ok(format!("{name} is now the default sourceport.")));
+                        }
+                        Err(e) => self.outcome = Some(Err(e)),
+                    }
+                }
+                if ui
+                    .button("Remove")
+                    .on_hover_text("Deletes this build. You can build it again later.")
+                    .clicked()
+                {
+                    match sourceports::remove_installed(&installed.prefix) {
+                        Ok(()) => {
+                            self.modified = true;
+                            self.outcome = Some(Ok(format!("Removed {name}.")));
+                            self.reload();
+                        }
+                        Err(e) => self.outcome = Some(Err(e.to_string())),
+                    }
+                }
+            });
+        }
+
+        let verb = if installed.is_some() {
+            "Rebuild"
+        } else {
+            "Build"
+        };
+        let can_build = self.doctor.as_ref().is_none_or(DoctorReport::can_build);
+        let ended = row.end(
+            Some("Close"),
+            Some(Primary::new(verb).when(can_build, "Install the missing build tools first")),
+        );
+        if ended.primary {
+            let git_ref = self
+                .selected_refs
+                .get(&name)
+                .cloned()
+                .unwrap_or(sourceport.recipe.git_ref.clone());
+            *result = SourceportsResult::Start(self.start(name, git_ref));
+        }
+        ended.dismissed
     }
 
     fn render_list(&mut self, ui: &mut egui::Ui) {
@@ -341,7 +388,7 @@ impl SourceportsDialogState {
                     let (label, color) = match &p.installed {
                         None => ("not built", theme::TEXT_MUTED),
                         Some(_) if p.selected_ref_changed(selected_ref) => {
-                            ("version selected", theme::COLOR_WARNING)
+                            ("version picked", theme::COLOR_WARNING)
                         }
                         Some(_) if newer_release || p.update_available() => {
                             ("update available", theme::COLOR_WARNING)
@@ -372,7 +419,7 @@ impl SourceportsDialogState {
 
     fn render_details(&mut self, ui: &mut egui::Ui, result: &mut SourceportsResult) {
         let Some(sourceport) = self.selected_port().cloned() else {
-            ui.colored_label(theme::TEXT_SECONDARY, "No recipes.");
+            ui.colored_label(theme::TEXT_SECONDARY, "No sourceports to build.");
             return;
         };
 
@@ -383,7 +430,6 @@ impl SourceportsDialogState {
             .get(&name)
             .cloned()
             .unwrap_or_else(|| recipe_ref.clone());
-        let running_this = self.running.as_deref() == Some(name.as_str());
         let busy = self.running.is_some();
 
         ui.horizontal(|ui| {
@@ -418,17 +464,10 @@ impl SourceportsDialogState {
                         format_size(installed.size_bytes()),
                     ),
                 );
-                ui.colored_label(
-                    theme::TEXT_MUTED,
-                    installed.binary_path().display().to_string(),
-                );
                 if sourceport.selected_ref_changed(&selected_ref) {
                     ui.colored_label(
                         theme::COLOR_WARNING,
-                        format!(
-                            "Selected version is '{}' — rebuild to switch.",
-                            selected_ref
-                        ),
+                        format!("You've picked {}. Rebuild to switch to it.", selected_ref),
                     );
                 } else if sourceport.update_available() {
                     let remote = sourceport
@@ -440,7 +479,7 @@ impl SourceportsDialogState {
                         .collect::<String>();
                     ui.colored_label(
                         theme::COLOR_WARNING,
-                        format!("Upstream is at {remote} — rebuild to update."),
+                        format!("A newer version ({remote}) is out. Rebuild to update."),
                     );
                 }
             }
@@ -454,74 +493,11 @@ impl SourceportsDialogState {
         ui.add_space(8.0);
         self.render_doctor(ui);
         ui.add_space(8.0);
-
-        let can_build = self.doctor.as_ref().is_none_or(DoctorReport::can_build);
-        let installed = self.selected_port().and_then(|p| p.installed.clone());
-
-        ui.horizontal(|ui| {
-            let verb = if installed.is_some() {
-                "Rebuild"
-            } else {
-                "Build"
-            };
-            if ui
-                .add_enabled(!busy && can_build, egui::Button::new(verb))
-                .on_disabled_hover_text(if can_build {
-                    "A build is already running"
-                } else {
-                    "Install the missing build tools first"
-                })
-                .clicked()
-            {
-                let git_ref = self.selected_refs.get(&name).cloned().unwrap_or(recipe_ref);
-                *result = SourceportsResult::Start(self.start(name.clone(), git_ref));
-            }
-            if ui
-                .add_enabled(running_this, egui::Button::new("Cancel"))
-                .on_hover_text("Stops the running command; nothing already installed is removed")
-                .clicked()
-            {
-                self.cancel.store(true, Ordering::Relaxed);
-            }
-            ui.add_enabled(!busy, egui::Checkbox::new(&mut self.clean, "Clean"))
-                .on_hover_text(
-                    "Discard the checkout and build tree first — slower, always correct",
-                );
-        });
-
-        if let Some(installed) = installed {
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                if ui
-                    .add_enabled(!busy, egui::Button::new("Use as default sourceport"))
-                    .on_hover_text("Sets this sourceport as the one caco launches WADs with")
-                    .clicked()
-                {
-                    match set_default_sourceport(&name) {
-                        Ok(()) => {
-                            self.modified = true;
-                            self.outcome =
-                                Some(Ok(format!("{name} is now the default sourceport")));
-                        }
-                        Err(e) => self.outcome = Some(Err(e)),
-                    }
-                }
-                if ui
-                    .add_enabled(!busy, egui::Button::new("Remove"))
-                    .on_hover_text("Deletes the install prefix. The recipe stays.")
-                    .clicked()
-                {
-                    match sourceports::remove_installed(&installed.prefix) {
-                        Ok(()) => {
-                            self.modified = true;
-                            self.outcome = Some(Ok(format!("Removed {name}")));
-                            self.reload();
-                        }
-                        Err(e) => self.outcome = Some(Err(e.to_string())),
-                    }
-                }
-            });
-        }
+        ui.add_enabled(
+            !busy,
+            egui::Checkbox::new(&mut self.clean, "Build from scratch"),
+        )
+        .on_hover_text("Slower, but it can fix a build that keeps failing");
     }
 
     fn render_version_picker(
@@ -552,13 +528,13 @@ impl SourceportsDialogState {
                         ui.selectable_value(
                             &mut selected,
                             recipe_ref.clone(),
-                            format!("Recipe default — {recipe_ref}"),
+                            format!("Default: {recipe_ref}"),
                         );
                         if let Some(latest) = refs.latest_release() {
                             ui.selectable_value(
                                 &mut selected,
                                 latest.to_string(),
-                                format!("Latest release — {latest}"),
+                                format!("Latest release: {latest}"),
                             );
                         }
                         if !refs.releases.is_empty() {
@@ -591,7 +567,7 @@ impl SourceportsDialogState {
                 } else {
                     "Check versions"
                 })
-                .on_hover_text("Ask the git remote for release tags and branches")
+                .on_hover_text("See which releases and branches there are")
                 .clicked()
             {
                 check_clicked = true;
@@ -620,15 +596,12 @@ impl SourceportsDialogState {
                         if newer_release {
                             format!("New release available: {latest}")
                         } else {
-                            format!("Latest release tag: {latest}")
+                            format!("Latest release: {latest}")
                         },
                     );
                 }
                 None => {
-                    ui.colored_label(
-                        theme::TEXT_MUTED,
-                        "This remote does not advertise release tags.",
-                    );
+                    ui.colored_label(theme::TEXT_MUTED, "This project doesn't publish releases.");
                 }
             }
         }
@@ -659,7 +632,7 @@ impl SourceportsDialogState {
             ui.colored_label(
                 theme::COLOR_WARNING,
                 format!(
-                    "Not installed: {} — some may be optional.",
+                    "Not installed: {}. Some may be optional.",
                     report.missing_packages.join(", ")
                 ),
             );
@@ -676,7 +649,7 @@ impl SourceportsDialogState {
             });
         }
         if report.missing_tools.is_empty() && report.missing_packages.is_empty() {
-            ui.colored_label(theme::COLOR_SUCCESS, "All dependencies present.");
+            ui.colored_label(theme::COLOR_SUCCESS, "Everything it needs is installed.");
         }
     }
 
@@ -709,7 +682,6 @@ impl SourceportsDialogState {
             return;
         }
         ui.add_space(4.0);
-        ui.separator();
         // `auto_shrink` off so the pane is its reserved size from the first
         // line onward: a log that grows the window as output arrives makes
         // every control below it move while the user is reading.

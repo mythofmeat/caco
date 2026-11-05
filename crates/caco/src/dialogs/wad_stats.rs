@@ -9,6 +9,7 @@ use chrono::Utc;
 use egui_extras::{Column, TableBuilder};
 use rusqlite::Connection;
 
+use crate::dialogs::{Dialog, FooterRow, Primary, count, form_label, scroll_body};
 use crate::theme;
 use crate::workers::{FileDialogReceiver, FileDialogRequest, spawn_file_dialog};
 
@@ -130,7 +131,7 @@ impl WadStatsDialogState {
                 .and_then(|s| caco_core::wad_stats::stats_from_json(s).ok());
             self.entries.push(Entry {
                 kind: EntryKind::Live,
-                label: "Current (live)".to_string(),
+                label: "Current playthrough".to_string(),
                 raw_date: String::new(),
                 notes: String::new(),
                 stats,
@@ -170,6 +171,7 @@ impl WadStatsDialogState {
 
     pub fn render(&mut self, ctx: &egui::Context, conn: &Connection) -> WadStatsResult {
         let mut result = WadStatsResult::Open;
+        let mut closed = false;
 
         // Drain file pickers from previous frames.
         if self.drain_import_picker(conn) {
@@ -177,120 +179,61 @@ impl WadStatsDialogState {
         }
         self.drain_export_picker();
 
-        // Use egui's built-in title-bar close button via `.open(&mut bool)`.
-        // This sidesteps every layout issue a custom in-body Close button
-        // introduces: the title bar owns its own space, so the content area
-        // stays exactly as egui auto-sizes it — no dead space, no ballooning.
-        let mut open = true;
-
-        crate::dialogs::modal_window(
-            ctx,
-            format!("Map Stats \u{2014} {}", self.wad_title),
-            [940.0, 540.0],
-        )
-        .id(egui::Id::unique("wad_stats_dialog"))
-        .open(&mut open)
-        .show(ctx, |ui| {
-            if let Some(err) = self.error.clone() {
-                ui.horizontal(|ui| {
-                    ui.colored_label(theme::COLOR_ERROR, &err);
-                    if ui.small_button("\u{2715}").clicked() {
-                        self.error = None;
-                    }
-                });
-                ui.add_space(4.0);
-            }
-
-            let avail = ui.available_size();
-            let left_width = (avail.x * 0.36).clamp(260.0, 340.0);
-
-            ui.horizontal_top(|ui| {
-                ui.allocate_ui_with_layout(
-                    egui::vec2(left_width, avail.y),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| {
-                        self.render_left_pane(ui, conn, &mut result);
-                    },
-                );
-
-                ui.separator();
-
-                ui.allocate_ui_with_layout(
-                    egui::vec2(ui.available_width(), avail.y),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| {
-                        self.render_right_pane(ui, ctx, conn, &mut result);
-                    },
-                );
+        Dialog::new("Map Stats", [960.0, 620.0])
+            .about(&self.wad_title)
+            .show(ctx, |dialog| {
+                dialog
+                    .fill(|ui, height| {
+                        let left_width = (ui.available_width() * 0.32).clamp(220.0, 300.0);
+                        ui.horizontal_top(|ui| {
+                            ui.vertical(|ui| {
+                                ui.set_width(left_width);
+                                ui.set_height(height);
+                                self.render_left_pane(ui, height);
+                            });
+                            ui.separator();
+                            ui.vertical(|ui| {
+                                ui.set_height(height);
+                                self.render_right_pane(ui, height);
+                            });
+                        });
+                    })
+                    .above(|ui| self.render_notes(ui))
+                    .buttons(|row| {
+                        if self.render_footer(ctx, row, conn, &mut result) {
+                            closed = true;
+                        }
+                    })
             });
-        });
 
-        if !open || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        if closed {
             return WadStatsResult::Closed;
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            // Backing out of something being asked or edited is not leaving.
+            if self.confirm_delete.is_some() {
+                self.confirm_delete = None;
+            } else if self.edit.is_some() {
+                self.edit = None;
+            } else {
+                return WadStatsResult::Closed;
+            }
         }
 
         result
     }
 
-    fn render_left_pane(
-        &mut self,
-        ui: &mut egui::Ui,
-        conn: &Connection,
-        result: &mut WadStatsResult,
-    ) {
-        theme::section_label(ui, &format!("Completions · {}", self.completion_count()));
-
-        egui::ScrollArea::vertical()
-            .id_salt("completions_list")
-            .max_height(ui.available_height() - 96.0)
-            .show(ui, |ui| {
-                for idx in 0..self.entries.len() {
-                    self.render_entry_row(ui, idx);
-                }
-            });
-
-        ui.add_space(8.0);
-
-        // Snapshot selection-dependent data up-front so the button row can
-        // freely borrow `self` mutably.
-        let (is_completion, del_id) = match self.entries.get(self.selected_index).map(|e| &e.kind) {
-            Some(EntryKind::Completion(id)) => (true, Some(*id)),
-            _ => (false, None),
-        };
-        let editing = self.edit.is_some();
-        let pending = self.confirm_delete;
-        let armed = pending.is_some() && pending == del_id;
-
-        ui.horizontal(|ui| {
-            if ui.button("+ Add beaten").clicked() {
-                self.handle_add();
-            }
-            if ui
-                .add_enabled(is_completion && !editing, egui::Button::new("Edit"))
-                .clicked()
-            {
-                self.begin_edit();
-            }
-            let label = if armed { "Confirm?" } else { "Delete" };
-            let btn = egui::Button::new(egui::RichText::new(label).color(if armed {
-                theme::COLOR_ERROR
-            } else {
-                theme::TEXT_PRIMARY
-            }));
-            if ui.add_enabled(del_id.is_some() && !editing, btn).clicked()
-                && let Some(id) = del_id
-            {
-                if armed {
-                    self.handle_delete(conn, id, result);
-                } else {
-                    self.confirm_delete = Some(id);
-                }
+    fn render_left_pane(&mut self, ui: &mut egui::Ui, height: f32) {
+        ui.colored_label(
+            theme::TEXT_SECONDARY,
+            count(self.completion_count(), "time finished", "times finished"),
+        );
+        ui.add_space(4.0);
+        scroll_body(ui, height - 24.0, |ui| {
+            for idx in 0..self.entries.len() {
+                self.render_entry_row(ui, idx);
             }
         });
-        ui.colored_label(
-            theme::TEXT_MUTED,
-            egui::RichText::new("Actions target the selected entry.").small(),
-        );
     }
 
     fn render_entry_row(&mut self, ui: &mut egui::Ui, idx: usize) {
@@ -322,42 +265,26 @@ impl WadStatsDialogState {
                                 );
                             }
                             EntryKind::Completion(_) => {
-                                let date_display = if entry.raw_date.len() >= 16 {
-                                    &entry.raw_date[..16]
-                                } else {
-                                    &entry.raw_date
-                                };
-                                ui.label(egui::RichText::new(date_display).strong());
+                                ui.label(
+                                    egui::RichText::new(display_date(&entry.raw_date)).strong(),
+                                );
                             }
                         }
 
-                        let note_text = if entry.notes.is_empty() {
-                            "\u{2014}".to_string()
-                        } else {
-                            format!("\u{201c}{}\u{201d}", entry.notes)
-                        };
-                        if !matches!(entry.kind, EntryKind::Live) {
+                        if !entry.notes.is_empty() {
                             ui.colored_label(
                                 theme::TEXT_SECONDARY,
-                                egui::RichText::new(note_text).small(),
+                                egui::RichText::new(format!("\u{201c}{}\u{201d}", entry.notes))
+                                    .small(),
                             );
                         }
 
-                        ui.horizontal(|ui| {
-                            if entry.stats.is_some() {
-                                ui.colored_label(theme::TEXT_ACCENT, "\u{25cf}");
-                                ui.colored_label(
-                                    theme::TEXT_SECONDARY,
-                                    egui::RichText::new("stats").small(),
-                                );
-                            } else {
-                                ui.colored_label(theme::TEXT_MUTED, "\u{00b7}");
-                                ui.colored_label(
-                                    theme::TEXT_MUTED,
-                                    egui::RichText::new("no stats").small(),
-                                );
-                            }
-                        });
+                        let (word, color) = if entry.stats.is_some() {
+                            ("Has map stats", theme::TEXT_SECONDARY)
+                        } else {
+                            ("No map stats", theme::TEXT_MUTED)
+                        };
+                        ui.colored_label(color, egui::RichText::new(word).small());
                     },
                 );
             })
@@ -373,24 +300,17 @@ impl WadStatsDialogState {
         ui.add_space(4.0);
     }
 
-    fn render_right_pane(
-        &mut self,
-        ui: &mut egui::Ui,
-        ctx: &egui::Context,
-        conn: &Connection,
-        result: &mut WadStatsResult,
-    ) {
+    fn render_right_pane(&mut self, ui: &mut egui::Ui, height: f32) {
         if self.entries.is_empty() {
             ui.colored_label(
                 theme::TEXT_SECONDARY,
-                "No stats available. Use \u{201c}+ Add beaten\u{201d} to record a completion.",
+                "Nothing yet. Add a completion to record a time you finished this WAD.",
             );
             return;
         }
 
-        // During an add-draft, suppress the stats table and per-entry
-        // actions — no entry has been created yet, so showing the
-        // previously-selected entry's stats would be misleading.
+        // During an add-draft, suppress the stats table: no entry has been created yet, so
+        // showing the previously-selected entry's stats would be misleading.
         let is_draft = matches!(
             &self.edit,
             Some(EditBuffer {
@@ -400,7 +320,7 @@ impl WadStatsDialogState {
         );
 
         if self.edit.is_some() {
-            self.render_edit_panel(ui, conn, result);
+            self.render_edit_panel(ui);
             ui.add_space(8.0);
         } else {
             self.render_selected_header(ui);
@@ -409,69 +329,13 @@ impl WadStatsDialogState {
 
         if is_draft {
             ui.colored_label(
-                theme::TEXT_MUTED,
-                egui::RichText::new(
-                    "Stats can be attached after saving — use Import for the new entry.",
-                )
-                .small(),
+                theme::TEXT_SECONDARY,
+                egui::RichText::new("You can import map stats for it once it is saved.").small(),
             );
             return;
         }
 
-        self.render_stats_table(ui);
-
-        ui.add_space(8.0);
-        ui.separator();
-
-        // Per-entry stats actions.
-        ui.horizontal(|ui| {
-            ui.colored_label(
-                theme::TEXT_MUTED,
-                egui::RichText::new("Stats for selected").small().strong(),
-            );
-            ui.add_space(8.0);
-
-            let import_busy = self.pending_import.is_some();
-            if ui
-                .add_enabled(!import_busy, egui::Button::new("Import\u{2026}"))
-                .clicked()
-                && let Some(target) = self.current_import_target()
-            {
-                self.pending_import = Some((target, spawn_import_picker(ctx)));
-            }
-
-            let selected_stats = self
-                .entries
-                .get(self.selected_index)
-                .and_then(|e| e.stats.clone());
-            let export_busy = self.pending_export.is_some();
-            if ui
-                .add_enabled(
-                    selected_stats.is_some() && !export_busy,
-                    egui::Button::new("Export\u{2026}"),
-                )
-                .clicked()
-                && let Some(stats) = selected_stats
-            {
-                let rx = spawn_export_picker(ctx, &stats);
-                self.pending_export = Some((stats, rx));
-            }
-
-            let can_clear = matches!(
-                self.entries.get(self.selected_index).map(|e| &e.kind),
-                Some(EntryKind::Completion(_))
-            ) && self
-                .entries
-                .get(self.selected_index)
-                .and_then(|e| e.stats.as_ref())
-                .is_some();
-            if ui
-                .add_enabled(can_clear, egui::Button::new("Clear"))
-                .clicked()
-            {
-                self.handle_clear(conn, result);
-            }
-        });
+        self.render_stats_table(ui, height);
     }
 
     fn render_selected_header(&self, ui: &mut egui::Ui) {
@@ -484,36 +348,17 @@ impl WadStatsDialogState {
                     theme::status_color(caco_core::db::Status::InProgress),
                     egui::RichText::new(&entry.label).strong(),
                 );
-                if let Some(s) = &entry.stats {
-                    ui.add_space(8.0);
-                    ui.colored_label(
-                        theme::TEXT_SECONDARY,
-                        egui::RichText::new(format_name(&s.format)).small(),
-                    );
-                }
             }
             EntryKind::Completion(_) => {
-                ui.label(egui::RichText::new(&entry.raw_date).strong());
+                ui.label(egui::RichText::new(display_date(&entry.raw_date)).strong());
                 if !entry.notes.is_empty() {
                     ui.colored_label(theme::TEXT_SECONDARY, format!("\u{00b7} {}", entry.notes));
-                }
-                if let Some(s) = &entry.stats {
-                    ui.add_space(8.0);
-                    ui.colored_label(
-                        theme::TEXT_SECONDARY,
-                        egui::RichText::new(format_name(&s.format)).small(),
-                    );
                 }
             }
         });
     }
 
-    fn render_edit_panel(
-        &mut self,
-        ui: &mut egui::Ui,
-        conn: &Connection,
-        result: &mut WadStatsResult,
-    ) {
+    fn render_edit_panel(&mut self, ui: &mut egui::Ui) {
         let Some(buf) = self.edit.as_mut() else {
             return;
         };
@@ -537,50 +382,121 @@ impl WadStatsDialogState {
                     .num_columns(2)
                     .spacing([10.0, 6.0])
                     .show(ui, |ui| {
-                        ui.colored_label(theme::TEXT_MUTED, "Date");
-                        ui.text_edit_singleline(&mut buf.date);
+                        let label = form_label(ui, "Date");
+                        ui.text_edit_singleline(&mut buf.date).labelled_by(label.id);
                         ui.end_row();
-                        ui.colored_label(theme::TEXT_MUTED, "Notes");
-                        ui.text_edit_singleline(&mut buf.notes);
+                        let label = form_label(ui, "Notes");
+                        ui.text_edit_singleline(&mut buf.notes)
+                            .labelled_by(label.id);
                         ui.end_row();
                     });
             });
+    }
 
-        ui.add_space(6.0);
-        let save_clicked;
-        let cancel_clicked;
-        {
-            let resp = ui.horizontal(|ui| {
-                let save = ui.button("Save").clicked();
-                let cancel = ui.button("Cancel").clicked();
-                (save, cancel)
-            });
-            (save_clicked, cancel_clicked) = resp.inner;
+    /// What has gone wrong, and what is being asked.
+    fn render_notes(&mut self, ui: &mut egui::Ui) {
+        if let Some(error) = &self.error {
+            ui.colored_label(theme::COLOR_ERROR, error);
         }
-
-        if cancel_clicked {
-            self.edit = None;
-        } else if save_clicked {
-            self.handle_save(conn, result);
+        if self.confirm_delete.is_some() {
+            ui.colored_label(
+                theme::COLOR_ERROR,
+                "Delete this completion and its map stats?",
+            );
         }
     }
 
-    fn render_stats_table(&self, ui: &mut egui::Ui) {
+    /// What can be done to the selected entry, of which nothing is offered that couldn't be
+    /// done to it. Returns true if Close was pressed.
+    fn render_footer(
+        &mut self,
+        ctx: &egui::Context,
+        row: &mut FooterRow<'_>,
+        conn: &Connection,
+        result: &mut WadStatsResult,
+    ) -> bool {
+        if self.edit.is_some() {
+            let ended = row.end(Some("Cancel"), Some(Primary::new("Save")));
+            if ended.dismissed {
+                self.edit = None;
+            }
+            if ended.primary {
+                self.handle_save(conn, result);
+            }
+            return false;
+        }
+        if let Some(id) = self.confirm_delete {
+            let ended = row.end(Some("Cancel"), Some(Primary::danger("Delete")));
+            if ended.dismissed {
+                self.confirm_delete = None;
+            }
+            if ended.primary {
+                self.handle_delete(conn, id, result);
+            }
+            return false;
+        }
+
+        let completion = match self.entries.get(self.selected_index).map(|e| &e.kind) {
+            Some(EntryKind::Completion(id)) => Some(*id),
+            _ => None,
+        };
+        let selected_stats = self
+            .entries
+            .get(self.selected_index)
+            .and_then(|e| e.stats.clone());
+
+        row.left(|ui| {
+            if ui.button("Add Completion").clicked() {
+                self.handle_add();
+            }
+            if let Some(id) = completion {
+                if ui.button("Edit").clicked() {
+                    self.begin_edit();
+                }
+                if ui.button("Delete").clicked() {
+                    self.confirm_delete = Some(id);
+                }
+            }
+            if ui
+                .add_enabled(
+                    self.pending_import.is_none(),
+                    egui::Button::new("Import Stats\u{2026}"),
+                )
+                .on_hover_text("From a stats.txt or levelstat.txt")
+                .clicked()
+                && let Some(target) = self.current_import_target()
+            {
+                self.pending_import = Some((target, spawn_import_picker(ctx)));
+            }
+            if let Some(stats) = &selected_stats {
+                if ui
+                    .add_enabled(
+                        self.pending_export.is_none(),
+                        egui::Button::new("Export Stats\u{2026}"),
+                    )
+                    .clicked()
+                {
+                    let rx = spawn_export_picker(ctx, stats);
+                    self.pending_export = Some((stats.clone(), rx));
+                }
+                if completion.is_some() && ui.button("Clear Stats").clicked() {
+                    self.handle_clear(conn, result);
+                }
+            }
+        });
+        row.close()
+    }
+
+    fn render_stats_table(&self, ui: &mut egui::Ui, height: f32) {
         let Some(entry) = self.entries.get(self.selected_index) else {
             return;
         };
         let Some(stats) = &entry.stats else {
-            ui.add_space(20.0);
-            ui.vertical_centered(|ui| {
-                ui.colored_label(
-                    theme::TEXT_SECONDARY,
-                    "No stats attached to this entry yet.",
-                );
-                ui.colored_label(
-                    theme::TEXT_MUTED,
-                    egui::RichText::new("Import a stats.txt / levelstat.txt file below.").small(),
-                );
-            });
+            ui.colored_label(
+                theme::TEXT_SECONDARY,
+                "No map stats for this one yet. They appear once you've finished a map, or you \
+                 can import some.",
+            );
             return;
         };
 
@@ -597,10 +513,10 @@ impl WadStatsDialogState {
             ui.colored_label(
                 theme::TEXT_MUTED,
                 egui::RichText::new(
-                    "No structural map analysis cached for this WAD yet — counters reflect played maps only. Re-analysis runs in the background after the dialog opens; reopen to refresh.",
+                    "caco hasn't worked out this WAD's list of maps yet, so this only shows the \
+                     ones you've finished. Open this again in a moment for the rest.",
                 )
-                .small()
-                .italics(),
+                .small(),
             );
             ui.add_space(4.0);
         }
@@ -610,8 +526,8 @@ impl WadStatsDialogState {
 
         let table = TableBuilder::new(ui)
             .striped(true)
-            .resizable(true)
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+            .max_scroll_height((height - row_height * 2.0 - 40.0).max(60.0))
             .column(Column::initial(70.0).at_least(50.0))
             .column(Column::initial(75.0).at_least(60.0))
             .column(Column::initial(50.0).at_least(40.0))
@@ -624,7 +540,7 @@ impl WadStatsDialogState {
         let stats_format = stats.format.clone();
         table
             .header(row_height + 2.0, |mut header| {
-                for label in ["Map", "Class", "Skill", "Time", "Kills", "Items", "Secrets"] {
+                for label in ["Map", "Kind", "Skill", "Time", "Kills", "Items", "Secrets"] {
                     header.col(|ui| {
                         ui.strong(label);
                     });
@@ -912,12 +828,16 @@ fn format_map_time(m: &caco_core::wad_stats::MapStats, format: &str) -> String {
     }
 }
 
-fn format_name(format: &str) -> &str {
-    match format {
-        "stats_txt" => "stats.txt",
-        "levelstat_txt" => "levelstat.txt",
-        _ => format,
-    }
+/// "2026-03-15 13:00", in this machine's time. As it is stored if it can't be read, since
+/// a date is a text field here.
+fn display_date(raw: &str) -> String {
+    chrono::DateTime::parse_from_rfc3339(raw)
+        .map(|at| {
+            at.with_timezone(&chrono::Local)
+                .format("%Y-%m-%d %H:%M")
+                .to_string()
+        })
+        .unwrap_or_else(|_| raw.to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -983,7 +903,7 @@ fn class_label(c: RowClass) -> &'static str {
     match c {
         RowClass::Required => "Required",
         RowClass::Secret => "Secret",
-        RowClass::Terminal => "Terminal",
+        RowClass::Terminal => "Credits",
         RowClass::Played => "Played",
     }
 }
@@ -1035,24 +955,35 @@ fn format_summary(
                     RowClass::Played => {}
                 }
             }
-            let mut summary = format!(
-                "Format: {}  |  Required: {req_done}/{req_total}",
-                format_name(&stats.format)
-            );
+            let mut summary = format!("Required maps: {req_done} of {req_total}");
             if sec_total > 0 {
-                summary.push_str(&format!("  |  Secret: {sec_done}/{sec_total}"));
+                summary.push_str(&format!("  \u{00b7}  Secret: {sec_done} of {sec_total}"));
             }
             if term_total > 0 {
-                summary.push_str(&format!("  |  Terminal: {term_done}/{term_total}"));
+                summary.push_str(&format!("  \u{00b7}  Credits: {term_done} of {term_total}"));
             }
-            summary.push_str(&format!("  |  Total time: {}", stats.total_time_display()));
+            summary.push_str(&format!(
+                "  \u{00b7}  Total time: {}",
+                stats.total_time_display()
+            ));
             summary
         }
         None => format!(
-            "Format: {}  |  Maps played: {}  |  Total time: {}",
-            format_name(&stats.format),
+            "Maps finished: {}  \u{00b7}  Total time: {}",
             stats.played_maps().len(),
             stats.total_time_display(),
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_date_that_cannot_be_read_is_shown_as_it_is() {
+        assert_eq!(display_date("yesterday"), "yesterday");
+        assert_eq!(display_date("2026-06-24 06:30:53"), "2026-06-24 06:30:53");
+        assert!(display_date("2026-06-24T12:30:53+00:00").starts_with("2026-06-2"));
     }
 }

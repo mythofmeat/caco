@@ -84,6 +84,7 @@ pub enum ActionRequest {
     /// trash and the companion registry all live in there.
     Storage(StorageTab),
     Settings,
+    Help,
     Resources,
     Profiles,
     Collections,
@@ -183,7 +184,6 @@ pub enum ActiveDialog {
     CacowardLink(CacowardLinkDialogState),
     Settings(SettingsDialogState),
     Help,
-    About,
 }
 
 pub enum PlayState {

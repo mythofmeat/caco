@@ -9,6 +9,7 @@ use rusqlite::Connection;
 
 use caco_core::db::{self, WadRecord};
 
+use crate::dialogs::{FooterRow, Primary, StatusLine, count, scroll_body};
 use crate::theme;
 
 /// A destructive action awaiting confirmation.
@@ -16,14 +17,8 @@ enum Pending {
     PurgeAll,
 }
 
-struct StatusLine {
-    text: String,
-    is_error: bool,
-}
-
-/// Height of everything this tab draws outside its scrolling list: the count
-/// line, the separator, the Restore/Purge row and the status line.
-const FURNITURE: f32 = 100.0;
+/// What the line above the list takes from the tab's height.
+const SUMMARY: f32 = 24.0;
 
 pub struct TrashDialogState {
     wads: Vec<WadRecord>,
@@ -55,17 +50,11 @@ impl TrashDialogState {
     }
 
     fn set_error(&mut self, text: impl Into<String>) {
-        self.status = Some(StatusLine {
-            text: text.into(),
-            is_error: true,
-        });
+        self.status = Some(StatusLine::error(text));
     }
 
     fn set_info(&mut self, text: impl Into<String>) {
-        self.status = Some(StatusLine {
-            text: text.into(),
-            is_error: false,
-        });
+        self.status = Some(StatusLine::info(text));
     }
 
     fn restore(&mut self, conn: &Connection, idx: usize) {
@@ -90,10 +79,13 @@ impl TrashDialogState {
         };
         match pending {
             Pending::PurgeAll => match db::purge_all_deleted(conn) {
-                Ok(count) => {
+                Ok(deleted) => {
                     self.modified = true;
                     self.reload(conn);
-                    self.set_info(format!("Permanently deleted {count} WAD(s)."));
+                    self.set_info(format!(
+                        "Permanently deleted {}.",
+                        crate::dialogs::count(deleted, "WAD", "WADs")
+                    ));
                 }
                 Err(e) => self.set_error(e.to_string()),
             },
@@ -103,56 +95,53 @@ impl TrashDialogState {
     fn pending_prompt(&self) -> Option<String> {
         Some(match self.pending.as_ref()? {
             Pending::PurgeAll => format!(
-                "Permanently delete all {} trashed WAD(s)? Play history and completions go too.",
-                self.wads.len()
+                "Permanently delete {}? Their play history goes too.",
+                count(self.wads.len(), "WAD", "WADs")
             ),
         })
     }
 
-    /// Render the Trash tab inside `avail` points of vertical space.
-    pub fn render_body(&mut self, ui: &mut egui::Ui, conn: &Connection, avail: f32) {
+    /// The Trash tab: what has been deleted and can still come back.
+    pub fn render_body(&mut self, ui: &mut egui::Ui, height: f32) {
         if self.wads.is_empty() {
-            ui.colored_label(theme::TEXT_SECONDARY, "Trash is empty.");
-        } else {
-            ui.colored_label(
-                theme::TEXT_SECONDARY,
-                format!(
-                    "{} deleted WAD{} — the rows are kept until purged.",
-                    self.wads.len(),
-                    if self.wads.len() == 1 { "" } else { "s" }
-                ),
-            );
-            ui.add_space(4.0);
-            self.render_list(ui, avail - FURNITURE);
+            ui.colored_label(theme::TEXT_SECONDARY, "The Trash is empty.");
+            return;
         }
-
+        ui.colored_label(
+            theme::TEXT_SECONDARY,
+            format!(
+                "{}, which you can restore with their play history.",
+                count(self.wads.len(), "WAD", "WADs")
+            ),
+        );
         ui.add_space(4.0);
-        ui.separator();
-        ui.add_space(4.0);
+        self.render_list(ui, height - SUMMARY);
+    }
 
+    /// What is being asked, and how the last thing went.
+    pub fn render_notes(&self, ui: &mut egui::Ui) {
         if let Some(prompt) = self.pending_prompt() {
             ui.colored_label(theme::COLOR_ERROR, prompt);
-            ui.horizontal(|ui| {
-                if ui.button("Delete Permanently").clicked() {
-                    self.run_pending(conn);
-                }
-                if ui.button("Cancel").clicked() {
-                    self.pending = None;
-                }
-            });
-        } else {
-            self.render_actions(ui, conn);
         }
-
         if let Some(status) = &self.status {
-            ui.add_space(4.0);
-            let color = if status.is_error {
-                theme::COLOR_ERROR
-            } else {
-                theme::TEXT_SECONDARY
-            };
-            ui.colored_label(color, &status.text);
+            status.show(ui);
         }
+    }
+
+    /// Restore or delete what is selected, or the lot. True if Close was pressed.
+    pub fn render_footer(&mut self, row: &mut FooterRow<'_>, conn: &Connection) -> bool {
+        if self.pending.is_some() {
+            let ended = row.end(Some("Cancel"), Some(Primary::danger("Delete Permanently")));
+            if ended.dismissed {
+                self.pending = None;
+            }
+            if ended.primary {
+                self.run_pending(conn);
+            }
+            return false;
+        }
+        row.left(|ui| self.render_actions(ui, conn));
+        row.close()
     }
 
     /// Escape. Backs out of a staged confirmation before it closes Storage.
@@ -169,13 +158,13 @@ impl TrashDialogState {
             .wads
             .iter()
             .enumerate()
-            .map(|(idx, wad)| {
-                let author = wad.author.as_deref().unwrap_or("unknown");
-                (idx, format!("{}  ·  {}  ·  {}", wad.id, wad.title, author))
+            .map(|(idx, wad)| match &wad.author {
+                Some(author) => (idx, format!("{}  \u{00b7}  {author}", wad.title)),
+                None => (idx, wad.title.clone()),
             })
             .collect();
 
-        crate::dialogs::scroll_body(ui, height, |ui| {
+        scroll_body(ui, height, |ui| {
             for (idx, label) in rows {
                 if ui
                     .selectable_label(self.selected == Some(idx), label)
@@ -188,31 +177,19 @@ impl TrashDialogState {
     }
 
     fn render_actions(&mut self, ui: &mut egui::Ui, conn: &Connection) {
-        ui.horizontal(|ui| {
-            let has_selection = self.selected.is_some();
-
-            if ui
-                .add_enabled(has_selection, egui::Button::new("Restore"))
-                .clicked()
-                && let Some(idx) = self.selected
-            {
+        if self.wads.is_empty() {
+            return;
+        }
+        if let Some(idx) = self.selected {
+            if ui.button("Restore").clicked() {
                 self.restore(conn, idx);
             }
-
             if ui
-                .add_enabled(
-                    has_selection,
-                    egui::Button::new(
-                        egui::RichText::new("Delete Permanently").color(theme::COLOR_ERROR),
-                    ),
-                )
-                .on_hover_text("Also deletes this WAD's play history and completions")
+                .button(egui::RichText::new("Delete Permanently").color(theme::COLOR_ERROR))
+                .on_hover_text("Its play history goes too")
                 .clicked()
-                && let Some(idx) = self.selected
+                && let Some(wad) = self.wads.get(idx)
             {
-                let Some(wad) = self.wads.get(idx) else {
-                    return;
-                };
                 let (id, title) = (wad.id, wad.title.clone());
                 match db::delete_wad(conn, id, true) {
                     Ok(_) => {
@@ -223,13 +200,9 @@ impl TrashDialogState {
                     Err(e) => self.set_error(e.to_string()),
                 }
             }
-
-            if ui
-                .add_enabled(!self.wads.is_empty(), egui::Button::new("Empty Trash"))
-                .clicked()
-            {
-                self.pending = Some(Pending::PurgeAll);
-            }
-        });
+        }
+        if ui.button("Empty Trash").clicked() {
+            self.pending = Some(Pending::PurgeAll);
+        }
     }
 }
