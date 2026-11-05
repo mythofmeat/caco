@@ -2452,10 +2452,34 @@ fn test_what_happens_after_upgrading_beats_what_was_there() {
     );
 }
 
+/// Every machine runs the same migrations, so what one rewrites is nobody's edit, and if it
+/// were logged it could overwrite what someone really did on a machine that had not got to
+/// it yet. Migration 39 is one that rewrites rows, and the triggers are in place, as they
+/// are on any library from here on.
 #[test]
 fn test_a_migration_is_not_anyones_edit() {
-    let conn = old_library();
+    let conn = db::open_memory().unwrap();
+    db::init_db(&conn).unwrap();
+    conn.execute(
+        "INSERT INTO wads (title, source_type, source_id) VALUES ('X', 'idgames', '5')",
+        [],
+    )
+    .unwrap();
+    conn.execute_batch(
+        "DELETE FROM sync_outbox;
+         DELETE FROM schema_migrations WHERE version >= 39;",
+    )
+    .unwrap();
+
     upgrade(&conn);
+
+    let filled_in: String = conn
+        .query_row("SELECT idgames_id FROM wads", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(
+        filled_in, "5",
+        "the migration has to have rewritten something"
+    );
     let logged: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM sync_outbox WHERE as_of = 0",
