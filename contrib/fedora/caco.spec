@@ -5,7 +5,7 @@
 %global debug_package %{nil}
 
 Name:           caco
-Version:        4.3.0
+Version:        4.4.0
 Release:        1%{?dist}
 Summary:        Doom WAD library manager
 License:        MIT
