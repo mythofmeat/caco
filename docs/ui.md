@@ -109,7 +109,9 @@ has to return. Nothing else in the crate opens a window. (`tests/ui_rules.rs`)
   bottom, so a key pressed in one thing is still there for the next unless it is consumed. Enter in
   the filter used to launch what was selected, Escape closing a dialog deselected the WAD behind it,
   and Ctrl+2 went to Import and then to its second tab. Whatever a dialog was open for takes every
-  key that frame. (`tests/interaction.rs`)
+  key that frame. A menu is the other way round: it reads its keys after the view has drawn, so
+  while one is open no view takes any (`panels::keyboard_is_free`), or Escape leaves it open and
+  Enter plays the WAD under it. (`tests/interaction.rs`)
 - **Moving with the keyboard stays on the screen**, and clicking does not scroll, since what was
   clicked on is already being looked at. (`tests/interaction.rs`)
 - **Inputs are named after their label**: see `CLAUDE.md`.

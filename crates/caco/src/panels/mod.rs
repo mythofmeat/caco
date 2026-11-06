@@ -313,6 +313,14 @@ pub fn reveal(ui: &egui::Ui, stretch: egui::Rect, is_first_row: bool, view_top: 
     }
 }
 
+/// Whether a view's keys are its own this frame: not while something is being typed, and not
+/// while a menu is open. egui's menus read Escape, the arrows and Enter as pressed, later in the
+/// frame than the view, and a key the view has taken never reaches them: Escape left a WAD's
+/// menu open and deselected the WAD behind it, and Enter in the menu played the WAD.
+pub fn keyboard_is_free(ui: &egui::Ui) -> bool {
+    !ui.ctx().egui_wants_keyboard_input() && !egui::Popup::is_any_open(ui.ctx())
+}
+
 /// Whether a key was pressed on its own, and if so take it. Ctrl+D is somebody's habit for
 /// something else, and shouldn't ask to delete a WAD.
 pub fn plain_key(ui: &egui::Ui, key: egui::Key) -> bool {
@@ -329,13 +337,13 @@ pub struct LibraryShape {
 }
 
 /// The keys for the library, which both of its layouts share. Nothing happens with a dialog
-/// open or while something is being typed.
+/// open, while something is being typed or while a menu is open (`keyboard_is_free`).
 pub fn library_keys(
     ui: &egui::Ui,
     state: &mut AppState,
     shape: LibraryShape,
 ) -> Option<ActionRequest> {
-    if state.has_dialog() || ui.ctx().egui_wants_keyboard_input() {
+    if state.has_dialog() || !keyboard_is_free(ui) {
         return None;
     }
     let LibraryShape { columns, page } = shape;

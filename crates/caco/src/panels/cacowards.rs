@@ -125,7 +125,7 @@ fn entry_keys(
     entries: &[(CacowardRecord, EffectiveStatus)],
     categories: &[&str],
 ) -> Option<ActionRequest> {
-    if state.has_dialog() || ui.ctx().egui_wants_keyboard_input() {
+    if state.has_dialog() || !crate::panels::keyboard_is_free(ui) {
         return None;
     }
     let pressed = |key| crate::panels::plain_key(ui, key);

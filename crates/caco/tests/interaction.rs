@@ -863,3 +863,56 @@ fn a_new_list_comes_back_to_the_selection_wherever_the_view_was_scrolled_to() {
 
     assert_selection_is_on_screen(&app, DEFAULT_WINDOW);
 }
+
+/// Right-click on a card, low down, away from the Play that turns up in the middle of it.
+fn open_menu_on(app: &mut Harness, card: &str) {
+    let rect = app.get_by_label(card).rect();
+    let pos = egui::pos2(rect.center().x, rect.max.y - 8.0);
+    app.hover_at(pos);
+    settle(app);
+    // Pressed and let go in one frame, as kittest's own clicks are. A frame is a quarter of a
+    // second to it, so a few between the two make it a long press rather than a click.
+    for pressed in [true, false] {
+        app.event(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+    settle(app);
+}
+
+/// Only the menu has a Delete: the panel beside the library doesn't.
+fn menu_is_open(app: &Harness) -> bool {
+    app.query_all_by_label("Delete").count() > 0
+}
+
+/// An open menu has the keys. The library took them first, from a menu that reads them later in
+/// the frame, so Escape left a WAD's menu open and deselected the WAD behind it, the arrows
+/// moved the selection, and Enter played it. Seen in a screenshot, of a menu still open over
+/// the next WAD after the first was deleted.
+#[test]
+fn a_menu_that_is_open_has_the_keys() {
+    let db_path = library("menu-keys", 3);
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+    let selected = app.state().selected_wad_title().unwrap().to_string();
+
+    open_menu_on(&mut app, &format!("{selected}, Unplayed"));
+    assert!(menu_is_open(&app), "the menu did not open");
+    press(&mut app, egui::Key::ArrowDown);
+    press(&mut app, egui::Key::Escape);
+    assert!(!menu_is_open(&app), "Escape left the menu open");
+    assert_eq!(app.state().selected_wad_title(), Some(selected.as_str()));
+
+    open_menu_on(&mut app, &format!("{selected}, Unplayed"));
+    assert!(menu_is_open(&app), "the menu did not open again");
+    press(&mut app, egui::Key::Enter);
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    settle(&mut app);
+    assert!(
+        app.query_by_role_and_label(Role::Window, "WAD Unavailable")
+            .is_none(),
+        "Enter in the menu played the WAD"
+    );
+}

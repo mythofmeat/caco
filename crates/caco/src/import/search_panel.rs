@@ -126,7 +126,7 @@ pub fn render(
 /// Up and down through the results, and Enter to import, while nothing is being typed. Marks
 /// the selection to be brought into view.
 fn keyboard(ui: &egui::Ui, state: &mut SearchState) -> Option<SearchPanelAction> {
-    if ui.ctx().egui_wants_keyboard_input() {
+    if !crate::panels::keyboard_is_free(ui) {
         return None;
     }
     let pressed = |key| crate::panels::plain_key(ui, key);

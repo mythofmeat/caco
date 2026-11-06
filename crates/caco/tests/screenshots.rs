@@ -1632,6 +1632,8 @@ fn shoot_every_surface() {
         let pos = egui::pos2(card.x, card.y);
         s.harness.hover_at(pos);
         s.settle(2, Duration::ZERO);
+        // Pressed and let go in one frame, as kittest's own clicks are: a frame is a quarter of
+        // a second to it, and workers can make `settle` run several, which is a long press.
         for pressed in [true, false] {
             s.harness.event(egui::Event::PointerButton {
                 pos,
@@ -1639,8 +1641,8 @@ fn shoot_every_surface() {
                 pressed,
                 modifiers: egui::Modifiers::NONE,
             });
-            s.settle(1, Duration::ZERO);
         }
+        s.settle(2, Duration::ZERO);
         s.harness.get_by_label("Delete").rect();
     });
     s.harness.key_press(egui::Key::Escape);
