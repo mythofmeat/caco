@@ -224,7 +224,7 @@ impl CompanionsDialogState {
             .header(row_height + 2.0, |mut header| {
                 for label in ["File", "Size", "Used by"] {
                     header.col(|ui| {
-                        ui.strong(label);
+                        ui.label(theme::column_header(label));
                     });
                 }
             })

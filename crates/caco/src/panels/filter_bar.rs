@@ -6,14 +6,26 @@ use crate::theme;
 /// ID source for the filter TextEdit (shared with app.rs for Ctrl+F focus).
 pub const FILTER_ID_SOURCE: &str = "filter_input";
 
+const MIN_WIDTH: f32 = 90.0;
+const MAX_WIDTH: f32 = 320.0;
+const CLEAR_BUTTON_WIDTH: f32 = 24.0;
+
 /// Render the filter/search bar.
 pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
+    // Whatever the rest of the bar leaves, within reason. It is added last in a right-to-left
+    // row, so what is available is what is left, and leaving a little keeps it off the title.
+    let clear_room = if state.filter.input.is_empty() {
+        0.0
+    } else {
+        CLEAR_BUTTON_WIDTH
+    };
+    let width = (ui.available_width() - clear_room - 12.0).clamp(MIN_WIDTH, MAX_WIDTH);
     let response = ui
         .add(
             egui::TextEdit::singleline(&mut state.filter.input)
                 .hint_text("Filter WADs...")
                 .text_color(theme::TEXT_PRIMARY)
-                .desired_width(200.0)
+                .desired_width(width)
                 .id(egui::Id::unique(FILTER_ID_SOURCE)),
         )
         .accessible_name("Filter WADs")
@@ -37,9 +49,16 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
         }
     }
 
-    // Escape while focused: clear filter text
+    // Enter finishes typing, and that is all it does. Taken for the reason below: it used to go
+    // on to launch whatever happened to be selected.
+    if response.lost_focus() {
+        ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+    }
+
+    // Escape while focused: clear filter text. And take the key, or the library, drawn after
+    // this and with the keyboard free again, would go on to act on it too.
     if response.lost_focus()
-        && ui.input(|i| i.key_pressed(egui::Key::Escape))
+        && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
         && !state.filter.input.is_empty()
     {
         state.filter.clear(Instant::now());

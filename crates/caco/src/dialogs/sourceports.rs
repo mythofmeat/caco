@@ -407,7 +407,7 @@ impl SourceportsDialogState {
                 ));
                 ui.horizontal(|ui| {
                     ui.add_space(4.0);
-                    ui.colored_label(color, egui::RichText::new(label).size(10.0));
+                    ui.colored_label(color, egui::RichText::new(label).small());
                 });
                 if response.clicked() {
                     self.select(&name);
@@ -692,7 +692,7 @@ impl SourceportsDialogState {
             .stick_to_bottom(true)
             .show(ui, |ui| {
                 for line in &self.log {
-                    ui.label(egui::RichText::new(line).monospace().size(10.0));
+                    ui.label(egui::RichText::new(line).monospace().size(11.0));
                 }
             });
     }

@@ -5,9 +5,10 @@ use caco_core::db::{Status, WadRecord};
 use crate::state::{ActionRequest, AppState, MapProgress};
 use crate::theme;
 
-/// Card dimensions. The minimum is what fits three across at the 800x400 window and five at the
-/// default one, with the whole of a row in view at either.
-const CARD_MIN_WIDTH: f32 = 176.0;
+/// Card dimensions. The minimum is what fits three across at the 800x400 window, five at the
+/// default one, and four there with the panel about the selected WAD beside them, with the whole
+/// of a row in view at any of them.
+const CARD_MIN_WIDTH: f32 = 160.0;
 const CARD_MAX_WIDTH: f32 = 260.0;
 const CARD_SPACING: f32 = 14.0;
 const CARD_ROUNDING: u8 = 10;
@@ -17,9 +18,7 @@ const CARD_BODY_HEIGHT: f32 = 76.0;
 const CARD_PADDING: f32 = 10.0;
 const PROGRESS_HEIGHT: f32 = 4.0;
 
-/// Five stars at this size take about this much.
-const STARS_WIDTH: f32 = 60.0;
-/// A star and a number do.
+/// A star and a number at this size take about this much.
 const SHORT_RATING_WIDTH: f32 = 26.0;
 
 /// Calculate responsive card width.
@@ -33,10 +32,13 @@ fn card_width(available_width: f32) -> f32 {
 
 /// Render the WAD library as a grid of cards.
 /// Returns an action request if a keyboard shortcut was pressed.
+///
+/// `view_top` is where what scrolls with it starts, above the grid.
 pub fn render(
     ui: &mut egui::Ui,
     state: &mut AppState,
     thumbnails: Option<&crate::thumbnails::ThumbnailManager>,
+    view_top: f32,
 ) -> Option<ActionRequest> {
     // Add horizontal margin
     let margin = egui::Margin::symmetric(20, 0);
@@ -49,40 +51,21 @@ pub fn render(
             .floor()
             .max(1.0) as usize;
 
-        // Handle keyboard shortcuts
-        if !state.has_dialog() && !ui.ctx().egui_wants_keyboard_input() {
-            if ui.input(|i| i.key_pressed(egui::Key::J) || i.key_pressed(egui::Key::ArrowDown)) {
-                state.select_down_grid(columns);
-            }
-            if ui.input(|i| i.key_pressed(egui::Key::K) || i.key_pressed(egui::Key::ArrowUp)) {
-                state.select_up_grid(columns);
-            }
-            if ui.input(|i| i.key_pressed(egui::Key::H) || i.key_pressed(egui::Key::ArrowLeft)) {
-                state.select_left(columns);
-            }
-            if ui.input(|i| i.key_pressed(egui::Key::L) || i.key_pressed(egui::Key::ArrowRight)) {
-                state.select_right(columns);
-            }
-            if ui.input(|i| i.key_pressed(egui::Key::Home)) {
-                state.select_first();
-            }
-            if ui.input(|i| i.key_pressed(egui::Key::End)) {
-                state.select_last();
-            }
-            if ui.input(|i| i.modifiers.shift && i.key_pressed(egui::Key::G)) {
-                state.select_last();
-            } else if ui.input(|i| !i.modifiers.shift && i.key_pressed(egui::Key::G)) {
-                state.handle_g_press();
-            }
-            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                state.selected_wad_id = None;
-            }
-
-            action = super::handle_action_keys(ui, state.selected_wad_id);
-        }
-
         let thumb_height = (card_w * THUMB_ASPECT).round();
         let card_size = Vec2::new(card_w, thumb_height + CARD_BODY_HEIGHT);
+
+        // Rows on the screen, for how far a page is.
+        let rows_in_view = (ui.clip_rect().height() / (card_size.y + CARD_SPACING))
+            .floor()
+            .max(1.0) as usize;
+        action = super::library_keys(
+            ui,
+            state,
+            super::LibraryShape {
+                columns,
+                page: rows_in_view * columns,
+            },
+        );
 
         let wad_count = state.wads.len();
         let rows = wad_count.div_ceil(columns);
@@ -99,8 +82,17 @@ pub fn render(
                     let wad = &state.wads[idx];
                     let wad_id = wad.id;
 
+                    let selected = state.selected_wad_id == Some(wad_id);
+
                     // Allocate card space
                     let (rect, response) = ui.allocate_exact_size(card_size, egui::Sense::click());
+
+                    // Before the virtualization below, since off the screen is the point.
+                    if selected && state.reveal_selection {
+                        state.reveal_selection = false;
+                        let with_gap = rect.expand2(Vec2::new(0.0, CARD_SPACING));
+                        super::reveal(ui, with_gap, row == 0, view_top);
+                    }
 
                     // Virtualization: skip painting + event handling for cards
                     // entirely outside the scroll viewport. Layout (scrollbar
@@ -111,24 +103,25 @@ pub fn render(
                         continue;
                     }
 
-                    // Handle clicks
-                    if response.clicked() || response.secondary_clicked() {
-                        state.selected_row = idx;
-                        state.selected_wad_id = Some(wad_id);
-                    }
                     if response.double_clicked() {
                         action = Some(ActionRequest::Play(wad_id));
                     }
 
                     // Context menu on right-click
-                    if let Some(a) =
-                        super::wad_context_menu(&response, wad_id, wad.status, wad.is_lost())
-                    {
+                    if let Some(a) = super::wad_context_menu(&response, wad) {
                         action = Some(a);
                     }
 
+                    // What the card is most for, on the card, once there is a reason to look:
+                    // the pointer on it, or the keyboard, unless the panel beside the library is
+                    // already offering the same.
+                    let details_showing = state.details_showing();
+                    let offer_play = !state.is_playing()
+                        && (response.contains_pointer() || (selected && !details_showing));
+
                     let card = Card {
                         wad,
+                        details_showing,
                         stats: state.stats_map.get(&wad_id),
                         progress: if wad.status == Status::InProgress {
                             state.map_progress(wad)
@@ -136,9 +129,17 @@ pub fn render(
                             None
                         },
                         picture: thumbnails.and_then(|tm| tm.get(wad_id)),
-                        selected: state.selected_row == idx,
+                        selected,
                     };
                     card.paint(ui, rect, thumb_height, &response);
+
+                    if offer_play && play_button(ui, rect, thumb_height) {
+                        action = Some(ActionRequest::Play(wad_id));
+                    }
+
+                    if response.clicked() || response.secondary_clicked() {
+                        state.select_wad(wad_id);
+                    }
                 }
             });
 
@@ -150,9 +151,22 @@ pub fn render(
     action
 }
 
+/// Play, at the corner of a card's picture. True if it was pressed.
+fn play_button(ui: &mut egui::Ui, card: Rect, thumb_height: f32) -> bool {
+    let picture = Rect::from_min_size(card.min, Vec2::new(card.width(), thumb_height));
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(picture.shrink(8.0))
+            .layout(egui::Layout::bottom_up(egui::Align::Max)),
+    );
+    child.add(theme::small_primary_button("Play")).clicked()
+}
+
 /// What one card shows.
 struct Card<'a> {
     wad: &'a WadRecord,
+    /// Whether the panel beside the library is already saying what a tooltip would.
+    details_showing: bool,
     stats: Option<&'a caco_core::db::sessions::WadStats>,
     progress: Option<MapProgress>,
     picture: Option<&'a egui::TextureHandle>,
@@ -168,9 +182,11 @@ impl Card<'_> {
         // A painted card is pixels otherwise, and says nothing to a screen reader.
         let name = format!("{}, {word}", self.wad.title);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
-        response.clone().on_hover_ui(|ui| {
-            ui.label(self.hover_text());
-        });
+        if !self.details_showing {
+            response.clone().on_hover_ui(|ui| {
+                ui.label(self.hover_text());
+            });
+        }
 
         painter.rect_filled(rect, rounding, theme::BG_MEDIUM);
 
@@ -278,20 +294,19 @@ impl Card<'_> {
             }
         }
 
-        let stars = match self.wad.rating {
-            Some(rating) if rating > 0 && free >= STARS_WIDTH => theme::rating_stars(Some(rating)),
-            Some(rating) if rating > 0 && free >= SHORT_RATING_WIDTH => {
-                format!("\u{2605} {rating}")
-            }
-            _ => return,
-        };
-        painter.text(
-            egui::pos2(pill.max.x + 6.0, center_y),
-            egui::Align2::LEFT_CENTER,
-            stars,
-            font,
-            theme::TEXT_ACCENT,
-        );
+        // One form, whatever the room: a row of cards with stars on some and a number on others
+        // reads as two different things.
+        if let Some(rating) = self.wad.rating.filter(|rating| *rating > 0)
+            && free >= SHORT_RATING_WIDTH
+        {
+            painter.text(
+                egui::pos2(pill.max.x + 6.0, center_y),
+                egui::Align2::LEFT_CENTER,
+                format!("\u{2605} {rating}"),
+                font,
+                theme::GOLD,
+            );
+        }
     }
 
     /// All of what a card might have had to leave out.
@@ -348,6 +363,7 @@ mod tests {
         };
         assert_eq!(across(800.0), 3);
         assert_eq!(across(1200.0), 5);
+        assert_eq!(across(1200.0 - super::super::wad_details::PANEL_WIDTH), 4);
     }
 
     /// The whole of a row has to be in view at the smallest window, or it is a grid of tops.

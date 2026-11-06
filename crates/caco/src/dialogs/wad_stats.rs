@@ -226,7 +226,10 @@ impl WadStatsDialogState {
     fn render_left_pane(&mut self, ui: &mut egui::Ui, height: f32) {
         ui.colored_label(
             theme::TEXT_SECONDARY,
-            count(self.completion_count(), "time finished", "times finished"),
+            match self.completion_count() {
+                0 => "Not finished yet".to_string(),
+                n => count(n, "time finished", "times finished"),
+            },
         );
         ui.add_space(4.0);
         scroll_body(ui, height - 24.0, |ui| {
@@ -369,14 +372,11 @@ impl WadStatsDialogState {
         };
         egui::Frame::new()
             .fill(theme::BG_MEDIUM)
-            .stroke(egui::Stroke::new(1.0_f32, theme::TEXT_ACCENT))
+            .stroke(egui::Stroke::new(1.0_f32, theme::CONTROL_BORDER))
             .corner_radius(4)
             .inner_margin(egui::Margin::symmetric(12, 10))
             .show(ui, |ui| {
-                ui.colored_label(
-                    theme::TEXT_ACCENT,
-                    egui::RichText::new(header).small().strong(),
-                );
+                theme::section_heading(ui, header);
                 ui.add_space(4.0);
                 egui::Grid::new("wad_stats_edit_grid")
                     .num_columns(2)
@@ -542,7 +542,7 @@ impl WadStatsDialogState {
             .header(row_height + 2.0, |mut header| {
                 for label in ["Map", "Kind", "Skill", "Time", "Kills", "Items", "Secrets"] {
                     header.col(|ui| {
-                        ui.strong(label);
+                        ui.label(theme::column_header(label));
                     });
                 }
             })

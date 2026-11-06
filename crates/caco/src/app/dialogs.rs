@@ -2,6 +2,7 @@
 
 use rusqlite::Connection;
 
+use crate::dialogs::Dialog;
 use crate::dialogs::cacoward_link::CacowardLinkResult;
 use crate::dialogs::collections::CollectionsResult;
 use crate::dialogs::delete::DeleteResult;
@@ -22,8 +23,10 @@ use crate::dialogs::sync::SyncResult;
 use crate::dialogs::wad_data::WadDataResult;
 use crate::dialogs::wad_stats::WadStatsResult;
 use crate::get::GetTarget;
-use crate::message::Notification;
+use crate::message::{NoticeAction, Notification};
+use crate::panels;
 use crate::state::{ActionRequest, ActiveDialog, AppState};
+use crate::thumbnails::ThumbnailManager;
 
 use super::help::render_help_dialog;
 
@@ -35,12 +38,23 @@ pub(super) fn render_active_dialog(
     state: &mut AppState,
     conn: &Connection,
     ctx: &egui::Context,
+    thumbnails: &ThumbnailManager,
 ) -> Option<ActionRequest> {
     let mut close_dialog = false;
     let mut follow_up_action = None;
+    if let Some(ActiveDialog::Details(wad_id)) = state.active_dialog {
+        crate::dialogs::modal_backdrop(ctx);
+        let (closed, action) = render_details_dialog(state, ctx, thumbnails, wad_id);
+        if closed || action.is_some() {
+            state.active_dialog = None;
+        }
+        return action;
+    }
     if let Some(dialog) = &mut state.active_dialog {
         crate::dialogs::modal_backdrop(ctx);
         match dialog {
+            // Dealt with above, as it reads the rest of the state.
+            ActiveDialog::Details(_) => {}
             ActiveDialog::Edit(edit_state) => match edit_state.render(ctx, conn) {
                 EditResult::Saved => {
                     close_dialog = true;
@@ -70,8 +84,13 @@ pub(super) fn render_active_dialog(
             ActiveDialog::Delete(delete_state) => match delete_state.render(ctx, conn) {
                 DeleteResult::Confirmed => {
                     close_dialog = true;
+                    let notice = Notification::info(format!(
+                        "Moved {} to the Trash.",
+                        delete_state.wad_title
+                    ))
+                    .with_action(NoticeAction::UndoDelete(delete_state.wad_id));
                     state.invalidate_wad_views();
-                    state.notification = Some(Notification::info("WAD deleted".to_string()));
+                    state.notification = Some(notice);
                 }
                 DeleteResult::Error(msg) => {
                     close_dialog = true;
@@ -268,6 +287,7 @@ pub(super) fn render_active_dialog(
                         state.notification = Some(Notification::error(format!("Link failed: {e}")));
                     } else {
                         state.cacowards.needs_reload = true;
+                        state.details = None;
                         state.notification =
                             Some(Notification::info("Linked to library WAD".to_string()));
                     }
@@ -302,6 +322,36 @@ pub(super) fn render_active_dialog(
         state.active_dialog = None;
     }
     follow_up_action
+}
+
+/// Everything about a WAD, for a window with no room for it beside the library. Pressing anything
+/// in it closes it, since what it opens is another dialog, or the game.
+fn render_details_dialog(
+    state: &AppState,
+    ctx: &egui::Context,
+    thumbnails: &ThumbnailManager,
+    wad_id: i64,
+) -> (bool, Option<ActionRequest>) {
+    let Some(wad) = state.wads.iter().find(|wad| wad.id == wad_id) else {
+        return (true, None);
+    };
+    let mut closed = false;
+    let mut action = None;
+    let mut dialog = Dialog::new(wad.title.clone(), [480.0, 620.0]).keyed("Details");
+    if let Some(byline) = panels::wad_details::byline(wad) {
+        dialog = dialog.about(byline);
+    }
+    dialog.show(ctx, |dialog| {
+        dialog
+            .scroll(|ui| {
+                action = panels::wad_details::render_dialog_contents(ui, wad, state, thumbnails);
+            })
+            .buttons(|row| {
+                closed = row.close();
+            })
+    });
+    let escaped = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+    (closed || escaped, action)
 }
 
 /// Invalidate every view that holds its own copy of a linked WAD record.

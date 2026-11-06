@@ -17,6 +17,12 @@ pub struct GuiState {
     pub sort_field_index: Option<usize>,
     #[serde(default = "default_true")]
     pub sort_desc: bool,
+    /// Whether the Cacowards leave out what has been finished.
+    #[serde(default)]
+    pub cacowards_hide_finished: bool,
+    /// Whether the panel about the selected WAD is open, for a window with room for it.
+    #[serde(default = "default_true")]
+    pub details_open: bool,
     /// Multi-select status filters (empty = all).
     #[serde(default)]
     pub status_filters: Vec<String>,
@@ -37,6 +43,8 @@ impl Default for GuiState {
             sort_field: None,
             sort_field_index: None,
             sort_desc: true,
+            cacowards_hide_finished: false,
+            details_open: true,
             status_filters: Vec::new(),
             status_filter: None,
         }

@@ -68,6 +68,30 @@ pub enum ViewLayout {
 
 pub enum ActionRequest {
     Play(i64),
+    /// Change a WAD's status, in passing.
+    SetStatus(i64, caco_core::db::Status),
+    /// Change a WAD's rating, in passing, or take it away.
+    SetRating(i64, Option<i32>),
+    /// Show everything about a WAD: beside the library if there is room, and in a dialog if not.
+    ShowDetails(i64),
+    /// Show or hide what is known about the selected WAD.
+    ToggleDetails,
+    /// Show the library with this in the filter.
+    FilterLibrary(String),
+    /// Show only the WADs with this status.
+    FilterStatus(caco_core::db::Status),
+    /// Show all of the library.
+    ClearFilters,
+    /// Go to a view.
+    ShowView(ViewMode),
+    /// Show a year's Cacowards.
+    ShowCacowards(i64),
+    /// Put a WAD just deleted back in the library.
+    UndoDelete(i64),
+    /// Go to a WAD in the library, whatever is being filtered for.
+    ShowWad(i64),
+    /// Open Collections on a new one, with what is in the filter.
+    SaveFilterAsCollection,
     /// Play a WAD the launch stopped to ask about, once the user has been told and
     /// chose to go ahead.
     PlayWith(i64, caco_core::player::PlayOptions),
@@ -156,6 +180,8 @@ pub enum ActionRequest {
 // ---------------------------------------------------------------------------
 
 pub enum ActiveDialog {
+    /// Everything about a WAD, for a window with no room for it beside the library.
+    Details(i64),
     Edit(Box<EditDialogState>),
     Delete(DeleteDialogState),
     Sessions(SessionsDialogState),
@@ -188,7 +214,12 @@ pub enum ActiveDialog {
 
 pub enum PlayState {
     Idle,
-    Playing { wad_id: i64, wad_title: String },
+    Playing {
+        wad_id: i64,
+        wad_title: String,
+        /// Its file wasn't here, and it is still on its way.
+        downloading: bool,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -240,9 +271,24 @@ pub struct AppState {
     /// completion verdict uses.
     pub analyses_map: HashMap<i64, WadAnalysis>,
 
-    // Selection
+    /// Which WAD is chosen. The only record of it: where that is in the list is worked out
+    /// when it is wanted, since a second copy is how Escape once left a card highlighted with
+    /// nothing selected, and every key that acts on the selection doing nothing.
     pub selected_wad_id: Option<i64>,
-    pub selected_row: usize,
+    /// Nothing is selected because that was asked for, so a reload should not pick something.
+    pub selection_dismissed: bool,
+    /// The selection moved somewhere that may be off the screen, and the next frame should
+    /// bring it into view. Not set by a click, which is already looking at it.
+    pub reveal_selection: bool,
+    /// The query the list was last loaded with, to tell a selection that went because the
+    /// list is now a different list from one that went because it was deleted.
+    pub loaded_query: Option<String>,
+    /// Whether the panel about the selected WAD is showing, where a window has room for it.
+    pub details_open: bool,
+    /// What that panel shows that isn't in `wads`.
+    pub details: Option<WadDetails>,
+    /// Whether this window has room for that panel, as of the last frame.
+    pub wide_window: bool,
 
     // UI flags
     pub view_layout: ViewLayout,
@@ -263,6 +309,10 @@ pub struct AppState {
     // Sidebar status counts (status → count)
     pub status_counts: HashMap<String, usize>,
     pub total_wad_count: usize,
+
+    /// How far along a library with nothing in it is. Read when it is found to be empty, since
+    /// nobody else wants it.
+    pub setup: crate::panels::Setup,
 
     // Sidebar collections (cached for display)
     pub sidebar_collections: Vec<CollectionRecord>,
@@ -297,6 +347,15 @@ pub struct AppState {
 
     /// Files being fetched by the user in their browser, and what has landed for them.
     pub gets: Gets,
+
+    /// Built sourceports with something newer upstream, until Sourceports has been opened.
+    pub sourceport_updates: Vec<String>,
+}
+
+/// What the details of a WAD show that the list of WADs doesn't load, read once per selection.
+pub struct WadDetails {
+    pub wad_id: i64,
+    pub awards: Vec<CacowardRecord>,
 }
 
 /// How far through a WAD's maps a playthrough has got.
@@ -397,6 +456,18 @@ pub struct CacowardsState {
 
     /// A list to go through, or posters to look at.
     pub layout: ViewLayout,
+
+    /// Leave out what has been finished, or can't be: a year as a list of what is left to do.
+    pub hide_finished: bool,
+
+    /// The selected entry moved with the keyboard, and should be brought into view.
+    pub reveal_entry: bool,
+
+    /// The selected year moved with the keyboard, and its chip should be brought into view.
+    pub reveal_year: bool,
+
+    /// Entries with an import under way, so that they say so and can't be asked for twice.
+    pub importing: HashSet<i64>,
 }
 
 impl Default for CacowardsState {
@@ -411,11 +482,35 @@ impl Default for CacowardsState {
             // something to render the moment the user clicks the nav item.
             needs_reload: true,
             layout: ViewLayout::List,
+            hide_finished: false,
+            reveal_entry: false,
+            reveal_year: false,
+            importing: HashSet::new(),
         }
     }
 }
 
 impl CacowardsState {
+    /// Go to a year, without carrying over which entry was selected in the last one.
+    pub fn choose_year(&mut self, year: i64) {
+        self.selected_year = Some(year);
+        self.selected_entry_pk = None;
+    }
+
+    /// Go `step` years along the strip: newest first, so further along is older.
+    pub fn step_year(&mut self, step: isize) {
+        let years = self.years();
+        let Some(at) = self
+            .selected_year
+            .and_then(|year| years.iter().position(|y| *y == year))
+        else {
+            return;
+        };
+        let to = at.saturating_add_signed(step).min(years.len() - 1);
+        self.choose_year(years[to]);
+        self.reveal_year = true;
+    }
+
     /// Distinct years present in the loaded entries, newest first.
     pub fn years(&self) -> Vec<i64> {
         let mut years: Vec<i64> = self.all_entries.iter().map(|(r, _)| r.year).collect();
@@ -487,7 +582,12 @@ impl AppState {
             stats_map: HashMap::new(),
             analyses_map: HashMap::new(),
             selected_wad_id: None,
-            selected_row: 0,
+            selection_dismissed: false,
+            reveal_selection: false,
+            loaded_query: None,
+            details_open: persisted.details_open,
+            details: None,
+            wide_window: true,
             notification: None,
             needs_reload: true,
             active_dialog: None,
@@ -497,10 +597,12 @@ impl AppState {
             last_g_press: None,
             status_counts: HashMap::new(),
             total_wad_count: 0,
+            setup: crate::panels::Setup::default(),
             sidebar_collections: Vec::new(),
             active_collection: None,
             cacowards: CacowardsState {
                 layout: cacowards_layout,
+                hide_finished: persisted.cacowards_hide_finished,
                 ..CacowardsState::default()
             },
             stats: StatsState::default(),
@@ -510,6 +612,7 @@ impl AppState {
             mirror_report: None,
             sync_report: None,
             gets: Gets::default(),
+            sourceport_updates: Vec::new(),
         }
     }
 
@@ -536,6 +639,46 @@ impl AppState {
         matches!(self.play_state, PlayState::Playing { .. })
     }
 
+    /// The WAD running now, if one is.
+    pub fn playing_wad(&self) -> Option<i64> {
+        match self.play_state {
+            PlayState::Playing { wad_id, .. } => Some(wad_id),
+            PlayState::Idle => None,
+        }
+    }
+
+    /// Whether anything is narrowing down what the library shows.
+    pub fn is_filtered(&self) -> bool {
+        !self.status_filters.is_empty() || !self.filter.applied.is_empty()
+    }
+
+    /// Whether the panel about the selected WAD is on the screen.
+    pub fn details_showing(&self) -> bool {
+        self.view_mode == ViewMode::Library
+            && self.details_open
+            && self.wide_window
+            && self.total_wad_count > 0
+    }
+
+    /// Which WAD the details on the screen are about, if any are.
+    pub fn details_wanted(&self) -> Option<i64> {
+        match self.active_dialog {
+            Some(ActiveDialog::Details(wad_id)) => Some(wad_id),
+            _ => self.selected_wad_id.filter(|_| self.details_showing()),
+        }
+    }
+
+    /// Read what the details of `wad_id` need, unless that is what is already there.
+    pub fn load_details(&mut self, conn: &Connection, wad_id: i64) {
+        if self.details.as_ref().is_some_and(|d| d.wad_id == wad_id) {
+            return;
+        }
+        self.details = Some(WadDetails {
+            wad_id,
+            awards: caco_core::db::cacowards::cacowards_for_wad(conn, wad_id).unwrap_or_default(),
+        });
+    }
+
     /// Mark every projection derived from WAD rows or play history stale.
     ///
     /// Library, Cacowards and Stats deliberately keep independent snapshots
@@ -543,6 +686,7 @@ impl AppState {
     /// must invalidate all three: linked Cacoward cards embed `WadRecord`s,
     /// while Stats aggregates statuses, sessions and completions.
     pub fn invalidate_wad_views(&mut self) {
+        self.details = None;
         self.needs_reload = true;
         self.cacowards.needs_reload = true;
         self.stats.needs_reload = true;
@@ -709,23 +853,14 @@ impl AppState {
                 self.analyses_map =
                     caco_core::db::get_analyses_batch(conn, &ids).unwrap_or_default();
 
-                // Preserve selection if still valid
-                if let Some(sel_id) = self.selected_wad_id {
-                    if let Some(pos) = wads.iter().position(|w| w.id == sel_id) {
-                        self.selected_row = pos;
-                    } else {
-                        self.selected_wad_id = None;
-                        self.selected_row = 0;
-                    }
-                } else {
-                    self.selected_row = 0;
+                let same_list = self.loaded_query == query;
+                self.selected_wad_id = self.selection_after_reload(&wads, same_list);
+                // Wherever the view was scrolled to meant something in the old list. In a new
+                // one it left the selection off the screen, or left no list on it at all.
+                if !same_list {
+                    self.reveal_selection = true;
                 }
-
-                // Auto-select first if nothing selected
-                if self.selected_wad_id.is_none() {
-                    self.selected_wad_id = wads.first().map(|w| w.id);
-                }
-
+                self.loaded_query = query;
                 self.wads = wads;
             }
             Err(e) => {
@@ -735,6 +870,15 @@ impl AppState {
 
         // Refresh sidebar counts and collections
         self.refresh_status_counts(conn);
+        if self.total_wad_count == 0 {
+            self.setup = crate::panels::Setup {
+                sourceport: Some(caco_core::config::load_config().sourceport.clone())
+                    .filter(|name| !name.is_empty()),
+                iwads: caco_core::db::iwads::get_all_iwads(conn)
+                    .map(|iwads| iwads.len())
+                    .unwrap_or(0),
+            };
+        }
         self.refresh_collections(conn);
 
         self.needs_reload = false;
@@ -808,36 +952,75 @@ impl AppState {
         }
     }
 
-    /// Move selection up by one row.
-    pub fn select_prev(&mut self) {
-        if !self.wads.is_empty() && self.selected_row > 0 {
-            self.selected_row -= 1;
-            self.selected_wad_id = Some(self.wads[self.selected_row].id);
+    /// What should be selected once `wads` replaces the list.
+    ///
+    /// What was selected, if it is still there. Then, if the same list lost it, which means it
+    /// was deleted or filtered out by a status it no longer has, whatever is now in its place:
+    /// the next thing to look at, rather than a jump to the top. A different list starts at
+    /// the top, as does a list nothing was selected in, unless that was asked for.
+    fn selection_after_reload(&self, wads: &[WadRecord], same_list: bool) -> Option<i64> {
+        if let Some(id) = self.selected_wad_id
+            && wads.iter().any(|wad| wad.id == id)
+        {
+            return Some(id);
+        }
+        if self.selection_dismissed && self.selected_wad_id.is_none() {
+            return None;
+        }
+        let place = self
+            .selected_index()
+            .filter(|_| same_list)
+            .unwrap_or(0)
+            .min(wads.len().saturating_sub(1));
+        wads.get(place).map(|wad| wad.id)
+    }
+
+    /// Where the selected WAD is in the list.
+    pub fn selected_index(&self) -> Option<usize> {
+        let id = self.selected_wad_id?;
+        self.wads.iter().position(|wad| wad.id == id)
+    }
+
+    /// Select what was clicked on.
+    pub fn select_wad(&mut self, wad_id: i64) {
+        self.selected_wad_id = Some(wad_id);
+        self.selection_dismissed = false;
+    }
+
+    /// Nothing selected, and it stays that way until something is asked for.
+    pub fn deselect(&mut self) {
+        self.selected_wad_id = None;
+        self.selection_dismissed = true;
+    }
+
+    /// Select the WAD at `index` and bring it into view.
+    fn select_index(&mut self, index: usize) {
+        if let Some(wad) = self.wads.get(index) {
+            self.selected_wad_id = Some(wad.id);
+            self.selection_dismissed = false;
+            self.reveal_selection = true;
         }
     }
 
-    /// Move selection down by one row.
-    pub fn select_next(&mut self) {
-        if !self.wads.is_empty() && self.selected_row + 1 < self.wads.len() {
-            self.selected_row += 1;
-            self.selected_wad_id = Some(self.wads[self.selected_row].id);
-        }
+    /// Move the selection by `step` places, stopping at the ends. With nothing selected, any
+    /// move starts from the first.
+    pub fn move_selection(&mut self, step: isize) {
+        let Some(from) = self.selected_index() else {
+            self.select_first();
+            return;
+        };
+        let last = self.wads.len().saturating_sub(1);
+        self.select_index(from.saturating_add_signed(step).min(last));
     }
 
     /// Jump selection to the first WAD.
     pub fn select_first(&mut self) {
-        if !self.wads.is_empty() {
-            self.selected_row = 0;
-            self.selected_wad_id = Some(self.wads[0].id);
-        }
+        self.select_index(0);
     }
 
     /// Jump selection to the last WAD.
     pub fn select_last(&mut self) {
-        if !self.wads.is_empty() {
-            self.selected_row = self.wads.len() - 1;
-            self.selected_wad_id = Some(self.wads[self.selected_row].id);
-        }
+        self.select_index(self.wads.len().saturating_sub(1));
     }
 
     /// Handle a 'g' keypress for vim-style gg (jump to top).
@@ -856,50 +1039,76 @@ impl AppState {
         }
     }
 
-    /// Move selection left by one position (grid mode).
-    pub fn select_left(&mut self, columns: usize) {
-        if columns == 0 || self.wads.is_empty() {
-            return;
-        }
-        let col = self.selected_row % columns;
-        if col > 0 {
-            self.selected_row -= 1;
-            self.selected_wad_id = Some(self.wads[self.selected_row].id);
+    /// Move up a row of `columns`, staying put in the top one.
+    pub fn select_up(&mut self, columns: usize) {
+        match self.selected_index() {
+            Some(from) if from >= columns => self.select_index(from - columns),
+            Some(_) => {}
+            None => self.select_first(),
         }
     }
 
-    /// Move selection right by one position (grid mode).
-    pub fn select_right(&mut self, columns: usize) {
-        if columns == 0 || self.wads.is_empty() {
+    /// Move down a row of `columns`. A last row that stops short of this column still counts,
+    /// or the last few WADs could only be reached from the column they happen to be in.
+    pub fn select_down(&mut self, columns: usize) {
+        let Some(from) = self.selected_index() else {
+            self.select_first();
             return;
-        }
-        let col = self.selected_row % columns;
-        if col + 1 < columns && self.selected_row + 1 < self.wads.len() {
-            self.selected_row += 1;
-            self.selected_wad_id = Some(self.wads[self.selected_row].id);
+        };
+        let last = self.wads.len().saturating_sub(1);
+        if from + columns <= last {
+            self.select_index(from + columns);
+        } else if from / columns < last / columns {
+            self.select_index(last);
         }
     }
 
-    /// Move selection up by one row in grid mode.
-    pub fn select_up_grid(&mut self, columns: usize) {
-        if columns == 0 || self.wads.is_empty() {
-            return;
-        }
-        if self.selected_row >= columns {
-            self.selected_row -= columns;
-            self.selected_wad_id = Some(self.wads[self.selected_row].id);
-        }
+    /// Go to a WAD in the library. Whatever is being filtered for is dropped, since it could
+    /// be what is hiding it, and a list with what was asked for missing is worse than a
+    /// filter to type again.
+    pub fn show_wad(&mut self, wad_id: i64) {
+        self.show_view(ViewMode::Library);
+        self.clear_filters();
+        self.select_wad(wad_id);
+        self.reveal_selection = true;
     }
 
-    /// Move selection down by one row in grid mode.
-    pub fn select_down_grid(&mut self, columns: usize) {
-        if columns == 0 || self.wads.is_empty() {
-            return;
+    /// Show only what has this status.
+    pub fn filter_by_status(&mut self, status: caco_core::db::Status) {
+        self.show_view(ViewMode::Library);
+        self.clear_filters();
+        self.status_filters.insert(status.as_str().to_string());
+    }
+
+    /// Show the whole library.
+    pub fn clear_filters(&mut self) {
+        self.active_collection = None;
+        self.status_filters.clear();
+        self.filter.set_both(String::new());
+        self.needs_reload = true;
+    }
+
+    /// Show the library with `query` in its filter, as if it had been typed.
+    pub fn filter_library(&mut self, query: String) {
+        self.show_view(ViewMode::Library);
+        self.active_collection = None;
+        self.filter.input = query;
+        self.filter.mark_changed(Instant::now());
+    }
+
+    /// Go to a view, the way its entry in the sidebar does. Leaving the library leaves a
+    /// collection too, and each view asks for what it shows to be read again, because a
+    /// figure that predates the session you just finished is worse than a brief wait.
+    pub fn show_view(&mut self, mode: ViewMode) {
+        let library = mode == ViewMode::Library;
+        if self.clear_active_collection() || (library && self.wads.is_empty()) {
+            self.needs_reload = true;
         }
-        let new_row = self.selected_row + columns;
-        if new_row < self.wads.len() {
-            self.selected_row = new_row;
-            self.selected_wad_id = Some(self.wads[self.selected_row].id);
+        self.view_mode = mode;
+        match mode {
+            ViewMode::Cacowards => self.cacowards.needs_reload = true,
+            ViewMode::Stats => self.stats.needs_reload = true,
+            ViewMode::Library | ViewMode::Import => {}
         }
     }
 
@@ -911,6 +1120,8 @@ impl AppState {
             sort_field: Some(SORT_FIELDS[self.sort_field_index].0.to_string()),
             sort_field_index: None,
             sort_desc: self.sort_desc,
+            details_open: self.details_open,
+            cacowards_hide_finished: self.cacowards.hide_finished,
             status_filters: self.status_filters.iter().cloned().collect(),
             status_filter: None,
         }
@@ -926,6 +1137,141 @@ mod tests {
         caco_core::db::init_db(&conn).unwrap();
         let state = AppState::new(PathBuf::from("test-library.db"));
         (conn, state)
+    }
+
+    /// Five WADs, first selected, read back as they would be from the database.
+    fn five_wads() -> (Connection, AppState) {
+        let (conn, mut state) = setup();
+        for title in ["A", "B", "C", "D", "E"] {
+            caco_core::db::wads::add_wad(
+                &conn,
+                &caco_core::db::wads::NewWad::new(title, caco_core::db::models::SourceType::Local),
+            )
+            .unwrap();
+        }
+        // `AppState::new` starts from whatever this machine last had on the screen.
+        state.status_filters.clear();
+        state.sort_desc = true;
+        state.sort_field_index = SORT_FIELDS.iter().position(|(k, _)| *k == "title").unwrap();
+        state.reload(&conn);
+        (conn, state)
+    }
+
+    fn selected_title(state: &AppState) -> Option<&str> {
+        let id = state.selected_wad_id?;
+        state
+            .wads
+            .iter()
+            .find(|wad| wad.id == id)
+            .map(|wad| wad.title.as_str())
+    }
+
+    #[test]
+    fn the_first_load_selects_the_first_wad() {
+        let (_conn, state) = five_wads();
+        assert_eq!(selected_title(&state), Some("A"));
+    }
+
+    /// The bug this replaced: the highlight came from one field and the keys went by another,
+    /// so after Escape a card still looked selected and Enter did nothing.
+    #[test]
+    fn nothing_is_selected_after_it_was_dismissed_until_something_is_asked_for() {
+        let (conn, mut state) = five_wads();
+        state.deselect();
+        assert_eq!(state.selected_index(), None);
+
+        // A sync finishing does this, and it should not put the selection back.
+        state.reload(&conn);
+        assert_eq!(state.selected_wad_id, None);
+
+        // Any move starts again from the first.
+        state.move_selection(1);
+        assert_eq!(selected_title(&state), Some("A"));
+        assert!(!state.selection_dismissed);
+    }
+
+    #[test]
+    fn a_deleted_wad_leaves_the_selection_on_whatever_took_its_place() {
+        let (conn, mut state) = five_wads();
+        state.move_selection(2);
+        assert_eq!(selected_title(&state), Some("C"));
+        let id = state.selected_wad_id.unwrap();
+        caco_core::db::wads::delete_wad(&conn, id, false).unwrap();
+
+        state.reload(&conn);
+
+        assert_eq!(selected_title(&state), Some("D"));
+    }
+
+    #[test]
+    fn deleting_the_last_wad_selects_the_new_last_one() {
+        let (conn, mut state) = five_wads();
+        state.select_last();
+        let id = state.selected_wad_id.unwrap();
+        caco_core::db::wads::delete_wad(&conn, id, false).unwrap();
+
+        state.reload(&conn);
+
+        assert_eq!(selected_title(&state), Some("D"));
+    }
+
+    #[test]
+    fn a_different_list_starts_at_the_top() {
+        let (conn, mut state) = five_wads();
+        state.select_last();
+        state.filter.set_both("title:B , title:C".to_string());
+
+        state.reload(&conn);
+
+        assert_eq!(selected_title(&state), Some("B"));
+    }
+
+    #[test]
+    fn moving_in_a_list_stops_at_the_ends() {
+        let (_conn, mut state) = five_wads();
+        state.move_selection(-1);
+        assert_eq!(selected_title(&state), Some("A"));
+        state.move_selection(3);
+        assert_eq!(selected_title(&state), Some("D"));
+        state.move_selection(100);
+        assert_eq!(selected_title(&state), Some("E"));
+        state.move_selection(-100);
+        assert_eq!(selected_title(&state), Some("A"));
+    }
+
+    #[test]
+    fn moving_with_the_keyboard_brings_the_selection_into_view_and_clicking_does_not() {
+        let (_conn, mut state) = five_wads();
+        state.reveal_selection = false;
+        let second = state.wads[1].id;
+
+        state.select_wad(second);
+        assert!(!state.reveal_selection);
+
+        state.move_selection(1);
+        assert!(state.reveal_selection);
+    }
+
+    /// A grid of two columns: A B / C D / E.
+    #[test]
+    fn moving_down_a_grid_reaches_a_last_row_that_stops_short() {
+        let (_conn, mut state) = five_wads();
+        state.select_down(2);
+        assert_eq!(selected_title(&state), Some("C"));
+        // From D there is nothing directly below, but E is still the next row down.
+        state.move_selection(1);
+        assert_eq!(selected_title(&state), Some("D"));
+        state.select_down(2);
+        assert_eq!(selected_title(&state), Some("E"));
+        // And from the last row there is nowhere to go.
+        state.select_down(2);
+        assert_eq!(selected_title(&state), Some("E"));
+        state.select_up(2);
+        assert_eq!(selected_title(&state), Some("C"));
+        state.select_up(2);
+        assert_eq!(selected_title(&state), Some("A"));
+        state.select_up(2);
+        assert_eq!(selected_title(&state), Some("A"));
     }
 
     #[test]
@@ -959,6 +1305,42 @@ mod tests {
         assert!(state.needs_reload);
         assert!(state.cacowards.needs_reload);
         assert!(state.stats.needs_reload);
+    }
+
+    #[test]
+    fn going_along_the_years_stops_at_the_ends_and_forgets_the_selected_entry() {
+        let (conn, mut state) = setup();
+        let add = |year: i64| {
+            caco_core::db::upsert_cacoward(
+                &conn,
+                &caco_core::db::NewCacoward {
+                    key: format!("{year}-winner-a"),
+                    year,
+                    category: "winner".to_string(),
+                    page_order: 1,
+                    wad_title: "A".to_string(),
+                    supported: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+        };
+        let first = add(2024);
+        add(2023);
+        state.reload_cacowards(&conn);
+        assert_eq!(state.cacowards.selected_year, Some(2024), "newest first");
+
+        state.cacowards.selected_entry_pk = Some(first);
+        state.cacowards.step_year(1);
+        assert_eq!(state.cacowards.selected_year, Some(2023));
+        assert_eq!(state.cacowards.selected_entry_pk, None);
+        assert!(state.cacowards.reveal_year);
+
+        state.cacowards.step_year(1);
+        assert_eq!(state.cacowards.selected_year, Some(2023), "the oldest");
+        state.cacowards.step_year(-1);
+        state.cacowards.step_year(-1);
+        assert_eq!(state.cacowards.selected_year, Some(2024), "the newest");
     }
 
     #[test]

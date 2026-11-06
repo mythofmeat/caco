@@ -33,6 +33,21 @@ pub use skeleton::{
     dialog_table, form_label, scroll_body, tab_bar,
 };
 
+/// A path as a person would write it: under their home folder, a `~`.
+pub fn short_path(path: &str) -> String {
+    match dirs::home_dir() {
+        Some(home) => path_under_home(path, &home),
+        None => path.to_string(),
+    }
+}
+
+fn path_under_home(path: &str, home: &std::path::Path) -> String {
+    match std::path::Path::new(path).strip_prefix(home) {
+        Ok(rest) => format!("~/{}", rest.display()),
+        Err(_) => path.to_string(),
+    }
+}
+
 /// The opt-in that lets a bulk delete touch manually added files.
 ///
 /// Cache and Clean both delete `wads.cached_path` files, and both know which
@@ -90,4 +105,27 @@ pub fn modal_backdrop(ctx: &egui::Context) {
         // Not `click_and_drag()`, which can take focus: Tab would stop on the backdrop.
         ui.allocate_response(screen.size(), egui::Sense::CLICK | egui::Sense::DRAG);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_path_under_home_starts_with_a_tilde_and_nothing_else_changes() {
+        let home = std::path::Path::new("/home/someone");
+        assert_eq!(
+            path_under_home("/home/someone/.cache/caco/wads/be2.zip", home),
+            "~/.cache/caco/wads/be2.zip"
+        );
+        assert_eq!(
+            path_under_home("/mnt/nas/be2.zip", home),
+            "/mnt/nas/be2.zip"
+        );
+        // Not a path under it, just a name that starts the same.
+        assert_eq!(
+            path_under_home("/home/someone-else/be2.zip", home),
+            "/home/someone-else/be2.zip"
+        );
+    }
 }

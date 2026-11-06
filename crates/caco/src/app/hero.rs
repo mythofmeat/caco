@@ -23,11 +23,17 @@ pub(super) fn render_now_playing_hero(
     state: &AppState,
     thumbnails: &ThumbnailManager,
 ) -> Option<ActionRequest> {
-    let (wad_id, title, is_active) = match &state.play_state {
-        PlayState::Playing { wad_id, wad_title } => (*wad_id, wad_title.clone(), true),
+    let (wad_id, title, is_active, downloading) = match &state.play_state {
+        PlayState::Playing {
+            wad_id,
+            wad_title,
+            downloading,
+        } => (*wad_id, wad_title.clone(), true, *downloading),
+        // Searching for something, it would only push the answer down the page.
+        PlayState::Idle if !state.filter.applied.is_empty() => return None,
         PlayState::Idle => {
             let wad = continue_playing(&state.wads, &state.stats_map)?;
-            (wad.id, wad.title.clone(), false)
+            (wad.id, wad.title.clone(), false, false)
         }
     };
     let wad = state.wads.iter().find(|wad| wad.id == wad_id);
@@ -38,10 +44,10 @@ pub(super) fn render_now_playing_hero(
         .filter(|stats| stats.playtime > 0)
         .map(|stats| caco_core::player::format_duration(stats.playtime));
     let progress = wad.and_then(|wad| state.map_progress(wad));
-    let heading = if is_active {
-        "NOW PLAYING"
-    } else {
-        "CONTINUE PLAYING"
+    let heading = match (is_active, downloading) {
+        (true, true) => "DOWNLOADING",
+        (true, false) => "NOW PLAYING",
+        (false, _) => "CONTINUE PLAYING",
     };
 
     let short = theme::is_short_window(ui.ctx());
@@ -108,9 +114,7 @@ pub(super) fn render_now_playing_hero(
     if banner.double_clicked() && !is_active {
         action = Some(ActionRequest::Play(wad_id));
     }
-    let status = wad.map_or(Status::Unplayed, |wad| wad.status);
-    let lost = wad.is_some_and(WadRecord::is_lost);
-    if let Some(picked) = panels::wad_context_menu(&banner, wad_id, status, lost) {
+    if let Some(picked) = wad.and_then(|wad| panels::wad_context_menu(&banner, wad)) {
         action = Some(picked);
     }
 
@@ -171,7 +175,7 @@ fn full_details(
         ui.add_space(2.0);
         ui.horizontal(|ui| {
             let (bar, _) = ui.allocate_exact_size(egui::vec2(160.0, 5.0), egui::Sense::hover());
-            paint_progress_bar(ui.painter(), bar, progress);
+            theme::paint_progress(ui.painter(), bar, progress.fraction());
             ui.colored_label(
                 theme::TEXT_SECONDARY,
                 egui::RichText::new(progress.summary()).size(11.0),
@@ -238,16 +242,6 @@ fn playtime_block(ui: &mut egui::Ui, playtime: &str, short: bool) {
         caption,
         theme::TEXT_MUTED,
     );
-}
-
-fn paint_progress_bar(painter: &egui::Painter, bar: egui::Rect, progress: &MapProgress) {
-    painter.rect_filled(bar, 2.0, theme::BORDER_MED);
-    let fraction = progress.fraction();
-    if fraction > 0.0 {
-        let fill =
-            egui::Rect::from_min_size(bar.min, egui::vec2(bar.width() * fraction, bar.height()));
-        painter.rect_filled(fill, 2.0, theme::status_color(Status::InProgress));
-    }
 }
 
 #[cfg(test)]

@@ -13,8 +13,8 @@ use crate::dialogs::sessions::SessionsDialogState;
 use crate::dialogs::wad_stats::WadStatsDialogState;
 use crate::get::{GetOutcome, GetTarget, PageOpener};
 use crate::import;
-use crate::import::state::SearchSourceData;
-use crate::message::{AppMessage, EnrichReport, Notification};
+use crate::import::state::{FormKind, ImportOrigin, SearchSourceData};
+use crate::message::{AppMessage, EnrichReport, NoticeAction, Notification};
 use crate::panels;
 use crate::persist;
 use crate::state::{ActionRequest, ActiveDialog, AppState, PlayState, ViewLayout, ViewMode};
@@ -58,6 +58,64 @@ fn describe_outcome(outcome: &caco_sources::enrich_service::EnrichOutcome) -> St
         parts.push("needs a ZDoom-family sourceport".to_string());
     }
     format!("{} → {}", outcome.title, parts.join(", "))
+}
+
+/// Which key goes to which view, with Ctrl or Cmd held, in the order the sidebar has them.
+const VIEW_KEYS: [(egui::Key, ViewMode); 4] = [
+    (egui::Key::Num1, ViewMode::Library),
+    (egui::Key::Num2, ViewMode::Import),
+    (egui::Key::Num3, ViewMode::Cacowards),
+    (egui::Key::Num4, ViewMode::Stats),
+];
+
+/// Say what will happen to a file being dragged over the window. Nothing to go on otherwise, and
+/// nothing to say with a dialog open, since a file dropped then goes nowhere.
+fn render_drop_hint(ctx: &egui::Context, dialog_open: bool) {
+    if dialog_open || ctx.input(|i| i.raw.hovered_files.is_empty()) {
+        return;
+    }
+    let screen = ctx.content_rect();
+    let painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Foreground,
+        egui::Id::unique("drop-hint"),
+    ));
+    painter.rect_filled(screen, 0.0, theme::SCRIM);
+    painter.text(
+        screen.center(),
+        egui::Align2::CENTER_CENTER,
+        "Drop to import",
+        egui::FontId::proportional(20.0),
+        theme::TEXT_PRIMARY,
+    );
+}
+
+/// Whether this was pressed with Ctrl or Cmd held, and if so take it, so that nothing drawn after
+/// this acts on the plain key as well.
+///
+/// By what the key's own event says rather than by `InputState::modifiers`, which is how things
+/// stood at the end of the frame: a quick enough press has Ctrl up by then, and did nothing.
+fn command_key(ctx: &egui::Context, key: egui::Key) -> bool {
+    ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, key))
+}
+
+/// Whether `text` was typed this frame with nothing there to type it into, and if so take it,
+/// or it would land in the field it is about to put the keyboard in. Goes by what was typed
+/// rather than which key, since `?` and `/` are different keys on different keyboards.
+fn typed_alone(ctx: &egui::Context, text: &str) -> bool {
+    if ctx.egui_wants_keyboard_input() {
+        return false;
+    }
+    ctx.input_mut(|i| {
+        let typed = i
+            .events
+            .iter()
+            .any(|event| matches!(event, egui::Event::Text(t) if t == text));
+        if typed {
+            i.events
+                .retain(|event| !matches!(event, egui::Event::Text(t) if t == text));
+        }
+        typed
+    })
 }
 
 pub struct CacoApp {
@@ -187,22 +245,26 @@ impl CacoApp {
 
         match action {
             import::ImportAction::Search(source, query) => {
-                import::workers::spawn_search(sender, source, query);
+                import::workers::spawn_search(sender, db_path, source, query);
             }
             import::ImportAction::Newest => {
-                import::workers::spawn_newest(sender);
+                import::workers::spawn_newest(sender, db_path);
             }
+            import::ImportAction::ShowWad(wad_id) => self.state.show_wad(wad_id),
             import::ImportAction::UpdateIndex => {
                 self.spawn_idgames_index(true);
             }
-            import::ImportAction::ImportSearchResult(_, entry) => match entry.source_data {
-                SearchSourceData::Idgames { target, .. } => {
-                    import::workers::spawn_import_idgames(sender, db_path, target);
+            import::ImportAction::ImportSearchResult(source, entry) => {
+                self.state.import.search_state_mut(source).importing = Some(entry.key());
+                match entry.source_data {
+                    SearchSourceData::Idgames { target, .. } => {
+                        import::workers::spawn_import_idgames(sender, db_path, target);
+                    }
+                    SearchSourceData::Doomwiki { .. } => {
+                        import::workers::spawn_import_doomwiki(sender, db_path, entry.title);
+                    }
                 }
-                SearchSourceData::Doomwiki { .. } => {
-                    import::workers::spawn_import_doomwiki(sender, db_path, entry.title);
-                }
-            },
+            }
             import::ImportAction::ImportForm(kind, values) => {
                 import::workers::spawn_import_form(sender, db_path, kind, values);
             }
@@ -320,7 +382,10 @@ impl CacoApp {
     /// fetch opens the link dialog, one that has changed since the WAD was
     /// last played asks before launching, and anything else is a toast.
     fn spawn_play(&mut self, wad_id: i64, opts: caco_core::player::PlayOptions) {
-        if self.state.is_playing() {
+        if let PlayState::Playing { wad_title, .. } = &self.state.play_state {
+            self.state.notification = Some(Notification::warning(format!(
+                "{wad_title} is still running. Close it first."
+            )));
             return;
         }
 
@@ -336,6 +401,7 @@ impl CacoApp {
         self.state.play_state = PlayState::Playing {
             wad_id,
             wad_title: title,
+            downloading: false,
         };
 
         // Spawn play worker in a background thread
@@ -360,6 +426,7 @@ impl CacoApp {
                     title: String,
                     saves: caco_core::sync::NewerSaves,
                 },
+                NoSourceport,
             }
             impl From<String> for PlayError {
                 fn from(s: String) -> Self {
@@ -387,10 +454,7 @@ impl CacoApp {
                     if !wad.retrievability().is_automatic() {
                         return Err(PlayError::Unavailable(None));
                     }
-                    sender.send(AppMessage::Notify(Notification::info(format!(
-                        "Downloading {}...",
-                        wad.title
-                    ))));
+                    sender.send(AppMessage::PlayDownloading(true));
                     let config = caco_core::config::load_config();
                     caco_sources::wad_fetch::fetch_missing_file(
                         &conn,
@@ -400,6 +464,7 @@ impl CacoApp {
                         config.download_mirror,
                     )
                     .map_err(|e| PlayError::Unavailable(Some(e.to_string())))?;
+                    sender.send(AppMessage::PlayDownloading(false));
                 }
 
                 caco_core::player::play(&conn, wad_id, opts).map_err(|e| match e {
@@ -411,6 +476,7 @@ impl CacoApp {
                     caco_core::Error::NewerSavesElsewhere { title, saves } => {
                         PlayError::NewerSaves { title, saves }
                     }
+                    caco_core::Error::NoSourceport => PlayError::NoSourceport,
                     e => PlayError::Message(e.to_string()),
                 })
             })();
@@ -423,6 +489,12 @@ impl CacoApp {
                 Err(PlayError::Unavailable(reason)) => {
                     sender.send(AppMessage::PlayUnavailable { wad_id, reason })
                 }
+                Err(PlayError::NoSourceport) => sender.send(AppMessage::PlayNeedsSetup {
+                    text: "Nothing to play it with: caco couldn't find a sourceport on this \
+                           machine."
+                        .to_string(),
+                    fix: NoticeAction::OpenSettings,
+                }),
                 Err(PlayError::Changed { title, change }) => {
                     sender.send(AppMessage::PlayFileChanged {
                         wad_id,
@@ -558,12 +630,7 @@ impl CacoApp {
     /// Public for `tests/screenshots.rs`, which walks every view the way the
     /// sidebar does rather than poking `view_mode` and getting a stale page.
     pub fn set_view(&mut self, mode: ViewMode) {
-        self.state.view_mode = mode;
-        match mode {
-            ViewMode::Cacowards => self.state.cacowards.needs_reload = true,
-            ViewMode::Stats => self.state.stats.needs_reload = true,
-            ViewMode::Library | ViewMode::Import => {}
-        }
+        self.state.show_view(mode);
     }
 
     /// Hand pages to this instead of a browser. Public for `tests/screenshots.rs`,
@@ -606,10 +673,126 @@ impl CacoApp {
         self.thumbnails.pending_count()
     }
 
+    /// The WAD selected in the library. Public for `tests/interaction.rs`, which presses keys
+    /// and has to see where the selection went.
+    pub fn selected_wad_title(&self) -> Option<&str> {
+        let index = self.state.selected_index()?;
+        Some(&self.state.wads[index].title)
+    }
+
     /// Clear the status bar. Public for `tests/snapshots.rs`: a notification goes away by
     /// the clock, and a picture must not depend on how long a run took to get there.
     pub fn dismiss_notification(&mut self) {
         self.state.notification = None;
+    }
+
+    /// A file dropped on the window goes to Import, ready to go, unless a dialog is open, which
+    /// is the one thing that has to be dealt with first.
+    fn take_dropped_file(&mut self, ctx: &egui::Context) {
+        let dropped = ctx.input(|i| i.raw.dropped_files.clone());
+        let Some(first) = dropped.first() else {
+            return;
+        };
+        if self.state.has_dialog() {
+            return;
+        }
+        self.state.import.local_form.set_path(first.path());
+        self.state.import.show_form(FormKind::Local);
+        self.state.show_view(ViewMode::Import);
+        if dropped.len() > 1 {
+            self.state.notification = Some(Notification::warning(
+                "One file at a time: this is the first of them.".to_string(),
+            ));
+        }
+    }
+
+    /// An import has finished, wherever it was started from.
+    fn import_finished(
+        &mut self,
+        origin: ImportOrigin,
+        result: Result<caco_sources::import_service::ImportResult, String>,
+    ) {
+        let import = &mut self.state.import;
+        match origin {
+            ImportOrigin::Form(kind) => {
+                let form = import.form_mut(kind);
+                form.is_submitting = false;
+                if result.as_ref().is_ok_and(|ir| !ir.is_duplicate) {
+                    form.reset();
+                }
+            }
+            ImportOrigin::Search(source) => {
+                let wad = result
+                    .as_ref()
+                    .ok()
+                    .and_then(|ir| ir.wad_id.or(ir.duplicate_id));
+                import.search_state_mut(source).import_finished(wad);
+            }
+            ImportOrigin::Cacoward(pk) => {
+                self.state.cacowards.importing.remove(&pk);
+            }
+        }
+
+        let ir = match result {
+            Ok(ir) => ir,
+            Err(e) => {
+                self.state.notification = Some(Notification::error(format!("Import failed: {e}")));
+                return;
+            }
+        };
+        // A duplicate Cacoward import can still link the existing WAD to the award row, so
+        // every successful result may have changed a cached projection.
+        self.state.invalidate_wad_views();
+        if let Some(wad_id) = ir.wad_id {
+            self.state.mirror_offers.push_back(wad_id);
+        }
+        let (text, wad) = if ir.is_duplicate {
+            // Nothing went wrong: it is there, which is what was wanted.
+            let title = ir.duplicate_title.unwrap_or_else(|| "unknown".to_string());
+            (
+                format!("Already in your library, as {title}."),
+                ir.duplicate_id,
+            )
+        } else {
+            let title = ir
+                .wad_id
+                .and_then(|id| caco_core::db::get_wad(&self.conn, id, false).ok().flatten())
+                .map_or_else(|| "it".to_string(), |wad| wad.title);
+            (format!("Imported {title}."), ir.wad_id)
+        };
+        let notice = Notification::info(text);
+        self.state.notification = Some(match wad {
+            Some(id) => notice.with_action(NoticeAction::ShowWad(id)),
+            None => notice,
+        });
+    }
+
+    /// Write something about a WAD that was changed in passing, and show it everywhere.
+    fn update_wad(&mut self, wad_id: i64, update: &caco_core::db::WadUpdate) {
+        match caco_core::db::update_wad(&self.conn, wad_id, update) {
+            Ok(_) => self.state.invalidate_wad_views(),
+            Err(e) => {
+                self.state.notification =
+                    Some(Notification::error(format!("Could not save that: {e}")));
+            }
+        }
+    }
+
+    /// Put the keyboard in the box that searches what is on the screen. In the library that is
+    /// the filter. Import has one of its own per source that searches, and the rest of its
+    /// sources and views have nothing to search, so there this goes to the library's.
+    fn focus_search(&mut self, ctx: &egui::Context) {
+        let field = match self.state.view_mode {
+            ViewMode::Import if self.state.import.active_search().is_some() => {
+                import::search_panel::SEARCH_ID_SOURCE
+            }
+            ViewMode::Library => panels::filter_bar::FILTER_ID_SOURCE,
+            _ => {
+                self.state.show_view(ViewMode::Library);
+                panels::filter_bar::FILTER_ID_SOURCE
+            }
+        };
+        ctx.memory_mut(|m| m.request_focus(egui::Id::unique(field)));
     }
 
     /// Dispatch an action request (from detail panel buttons or table shortcuts).
@@ -618,6 +801,63 @@ impl CacoApp {
     /// click does, instead of reconstructing dialog state by hand.
     pub fn dispatch_action(&mut self, action: ActionRequest) {
         match action {
+            ActionRequest::SetStatus(wad_id, status) => {
+                let update = caco_core::db::WadUpdate::new().set_status(status);
+                self.update_wad(wad_id, &update);
+            }
+            ActionRequest::SetRating(wad_id, rating) => {
+                let update =
+                    caco_core::db::WadUpdate::new().set_int("rating", rating.map(i64::from));
+                self.update_wad(wad_id, &update);
+            }
+            ActionRequest::ShowDetails(wad_id) => {
+                self.state.select_wad(wad_id);
+                if self.state.wide_window {
+                    self.state.details_open = true;
+                } else {
+                    self.state.active_dialog = Some(ActiveDialog::Details(wad_id));
+                }
+            }
+            ActionRequest::ToggleDetails => {
+                if self.state.wide_window {
+                    self.state.details_open = !self.state.details_open;
+                } else if let Some(wad_id) = self.state.selected_wad_id {
+                    self.state.active_dialog = Some(ActiveDialog::Details(wad_id));
+                }
+            }
+            ActionRequest::FilterLibrary(query) => {
+                self.state.filter_library(query);
+            }
+            ActionRequest::FilterStatus(status) => self.state.filter_by_status(status),
+            ActionRequest::ClearFilters => self.state.clear_filters(),
+            ActionRequest::ShowView(mode) => self.state.show_view(mode),
+            ActionRequest::ShowCacowards(year) => {
+                self.state.show_view(ViewMode::Cacowards);
+                self.state.cacowards.selected_year = Some(year);
+            }
+            ActionRequest::UndoDelete(wad_id) => {
+                match caco_core::db::wads::restore_wad(&self.conn, wad_id) {
+                    Ok(_) => {
+                        self.state.invalidate_wad_views();
+                        self.state.select_wad(wad_id);
+                        self.state.reveal_selection = true;
+                    }
+                    Err(e) => {
+                        self.state.notification =
+                            Some(Notification::error(format!("Could not put it back: {e}")));
+                    }
+                }
+            }
+            ActionRequest::ShowWad(wad_id) => self.state.show_wad(wad_id),
+            ActionRequest::SaveFilterAsCollection => {
+                let dialog = CollectionsDialogState::new_adding(
+                    &self.conn,
+                    &self.state.filter.applied,
+                    crate::state::SORT_FIELDS[self.state.sort_field_index].0,
+                    self.state.sort_desc,
+                );
+                self.state.active_dialog = Some(ActiveDialog::Collections(dialog));
+            }
             ActionRequest::Edit(wad_id) => {
                 if let Some(dialog) = EditDialogState::new(&self.conn, wad_id) {
                     self.state.active_dialog = Some(ActiveDialog::Edit(Box::new(dialog)));
@@ -664,6 +904,8 @@ impl CacoApp {
                 self.spawn_enrich(*request);
             }
             ActionRequest::Sourceports => {
+                // It says which of them have an update, so nothing else need.
+                self.state.sourceport_updates.clear();
                 let dialog = crate::dialogs::sourceports::SourceportsDialogState::new();
                 self.state.active_dialog = Some(ActiveDialog::Sourceports(Box::new(dialog)));
             }
@@ -720,13 +962,15 @@ impl CacoApp {
                 });
             }
             ActionRequest::ImportCacoward(pk) => {
-                import::workers::spawn_import_cacoward(
-                    self.bg.sender(),
-                    self.state.db_path.clone(),
-                    pk,
-                );
-                self.state.notification =
-                    Some(Notification::info("Importing Cacoward entry…".to_string()));
+                // Its button becomes a spinner, so this can only be asked for again by a key
+                // or a double click, which should not start another.
+                if self.state.cacowards.importing.insert(pk) {
+                    import::workers::spawn_import_cacoward(
+                        self.bg.sender(),
+                        self.state.db_path.clone(),
+                        pk,
+                    );
+                }
             }
             ActionRequest::LinkCacoward(pk) => {
                 if let Some(dialog) =
@@ -739,6 +983,7 @@ impl CacoApp {
                 match caco_core::db::cacowards::unlink_wad(&self.conn, pk) {
                     Ok(_) => {
                         self.state.cacowards.needs_reload = true;
+                        self.state.details = None;
                         self.state.notification =
                             Some(Notification::info("Cacoward link cleared".to_string()));
                     }
@@ -859,6 +1104,15 @@ impl eframe::App for CacoApp {
             match msg {
                 AppMessage::Notify(notif) => {
                     self.state.notification = Some(notif);
+                }
+                AppMessage::PlayDownloading(now) => {
+                    if let PlayState::Playing { downloading, .. } = &mut self.state.play_state {
+                        *downloading = now;
+                    }
+                }
+                AppMessage::PlayNeedsSetup { text, fix } => {
+                    self.state.play_state = PlayState::Idle;
+                    self.state.notification = Some(Notification::error(text).with_action(fix));
                 }
                 AppMessage::PlayUnavailable { wad_id, reason } => {
                     self.state.play_state = PlayState::Idle;
@@ -1106,14 +1360,18 @@ impl eframe::App for CacoApp {
                     // Informational only — never interrupts, and never starts
                     // a build the user did not ask for.
                     let text = match names.as_slice() {
-                        [one] => format!("{one} has an update. Rebuild it from Sourceports."),
+                        [one] => format!("{one} has an update."),
                         many => format!(
-                            "{} sourceports have updates ({}). Rebuild from Sourceports.",
+                            "{} sourceports have updates: {}.",
                             many.len(),
                             many.join(", ")
                         ),
                     };
-                    self.state.notification = Some(Notification::info(text));
+                    self.state.notification =
+                        Some(Notification::info(text).with_action(NoticeAction::OpenSourceports));
+                    // A notification goes, and this is still true until something is done
+                    // about it, so the sidebar goes on saying so.
+                    self.state.sourceport_updates = names;
                 }
                 AppMessage::SearchComplete(source, outcome) => {
                     let search = self.state.import.search_state_mut(source);
@@ -1139,7 +1397,10 @@ impl eframe::App for CacoApp {
                         }
                         // What is on the table may now be out of date.
                         if run.report.changed() && self.state.import.idgames.showing_newest {
-                            import::workers::spawn_newest(self.bg.sender());
+                            import::workers::spawn_newest(
+                                self.bg.sender(),
+                                self.state.db_path.clone(),
+                            );
                         }
                         if let Some(notification) = idgames_index::notification(run) {
                             self.state.notification = Some(notification);
@@ -1163,55 +1424,17 @@ impl eframe::App for CacoApp {
                         self.state.analyses_map.insert(wad_id, analysis);
                     }
                 }
-                AppMessage::ImportComplete(result) => {
-                    // Reset only the active form's submitting state
-                    let active = self.state.import.active_source;
-                    match active {
-                        2 => self.state.import.doomworld.is_submitting = false,
-                        3 => self.state.import.url_form.is_submitting = false,
-                        4 => self.state.import.local_form.is_submitting = false,
-                        _ => {}
-                    }
-
-                    match result {
-                        Ok(ir) => {
-                            // A duplicate Cacoward import can still link the
-                            // existing WAD to the award row, so every successful
-                            // result may have changed a cached projection.
-                            self.state.invalidate_wad_views();
-                            if let Some(wad_id) = ir.wad_id {
-                                self.state.mirror_offers.push_back(wad_id);
-                            }
-                            if ir.is_duplicate {
-                                let title =
-                                    ir.duplicate_title.unwrap_or_else(|| "unknown".to_string());
-                                self.state.notification = Some(Notification::warning(format!(
-                                    "Already in your library, as {title}."
-                                )));
-                            } else {
-                                self.state.notification = Some(Notification::info(
-                                    "WAD imported successfully".to_string(),
-                                ));
-                                // Reset only the active form on success
-                                match active {
-                                    2 => self.state.import.doomworld.reset(),
-                                    3 => self.state.import.url_form.reset(),
-                                    4 => self.state.import.local_form.reset(),
-                                    _ => {}
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            self.state.notification =
-                                Some(Notification::error(format!("Import failed: {e}")));
-                        }
-                    }
+                AppMessage::ImportComplete(origin, result) => {
+                    self.import_finished(origin, result);
                 }
             }
         }
 
         // 2. Check filter debounce
         self.state.check_filter_debounce(ctx, &self.conn);
+
+        self.state.wide_window = panels::wad_details::fits(ctx);
+        self.take_dropped_file(ctx);
 
         // 3. Reload data if needed (defer when on Import view)
         if self.state.needs_reload && self.state.view_mode == ViewMode::Library {
@@ -1230,8 +1453,24 @@ impl eframe::App for CacoApp {
 
         // 4. Render active dialog (modal, overlays everything)
         self.state.open_next_mirror_offer(&self.conn);
-        if let Some(action) = render_active_dialog(&mut self.state, &self.conn, ctx) {
+        if let Some(wad_id) = self.state.details_wanted() {
+            self.state.load_details(&self.conn, wad_id);
+        }
+        let dialog_was_open = self.state.has_dialog();
+        if let Some(action) =
+            render_active_dialog(&mut self.state, &self.conn, ctx, &self.thumbnails)
+        {
             self.dispatch_action(action);
+        }
+        // What was pressed was for the dialog, even if that closed it: the panels are drawn
+        // after this, and Escape closing Edit also deselected the WAD behind it, and Enter
+        // in the last field of a dialog that closes on it would play it.
+        if dialog_was_open {
+            ctx.input_mut(|i| {
+                i.events.retain(|event| {
+                    !matches!(event, egui::Event::Key { .. } | egui::Event::Text(_))
+                });
+            });
         }
 
         // A landed file is asked about whatever else is open, and however it is answered
@@ -1252,20 +1491,24 @@ impl eframe::App for CacoApp {
             if ctx.input(|i| i.key_pressed(egui::Key::F5)) {
                 self.state.needs_reload = true;
             }
-            if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Q)) {
+            if command_key(ctx, egui::Key::Q) {
                 quit = true;
             }
-            if ctx.input(|i| i.key_pressed(egui::Key::F1)) {
+            if ctx.input(|i| i.key_pressed(egui::Key::F1)) || typed_alone(ctx, "?") {
                 self.dispatch_action(ActionRequest::Help);
             }
-            if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::F)) {
-                let id = egui::Id::unique(panels::filter_bar::FILTER_ID_SOURCE);
-                ctx.memory_mut(|m| m.request_focus(id));
+            if command_key(ctx, egui::Key::F) || typed_alone(ctx, "/") {
+                self.focus_search(ctx);
+            }
+            for (key, view) in VIEW_KEYS {
+                if command_key(ctx, key) {
+                    self.state.show_view(view);
+                }
             }
             // Ctrl+R — reload config from disk. Already-cached state (e.g. window
             // size chosen at startup) does not refresh; subsequent reads pick up
             // new values.
-            if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::R)) {
+            if command_key(ctx, egui::Key::R) {
                 caco_core::config::reload_config();
                 self.state.notification = Some(Notification::info(
                     "Settings reloaded from disk.".to_string(),
@@ -1299,7 +1542,7 @@ impl eframe::App for CacoApp {
                     .stroke(egui::Stroke::new(1.0_f32, theme::BORDER)),
             )
             .show(ui, |ui| {
-                render_topbar(ui, &mut self.state);
+                render_topbar(ui, &mut self.state, &mut actions);
             });
 
         // ── Bottom status bar ──
@@ -1311,8 +1554,28 @@ impl eframe::App for CacoApp {
                     .stroke(egui::Stroke::new(1.0_f32, theme::BORDER)),
             )
             .show(ui, |ui| {
-                render_status_bar(ui, &mut self.state);
+                render_status_bar(ui, &mut self.state, &mut actions);
             });
+
+        // ── What is known about the selected WAD, beside the library ──
+        if self.state.details_showing() {
+            egui::Panel::right("wad_details")
+                .exact_size(panels::wad_details::PANEL_WIDTH)
+                .resizable(false)
+                .frame(
+                    egui::Frame::new()
+                        .fill(theme::BG_SIDEBAR)
+                        .inner_margin(0.0)
+                        .stroke(egui::Stroke::new(1.0_f32, theme::BORDER)),
+                )
+                .show(ui, |ui| {
+                    if let Some(a) =
+                        panels::wad_details::render_panel(ui, &self.state, &self.thumbnails)
+                    {
+                        actions.push(a);
+                    }
+                });
+        }
 
         // ── Central panel (main content) ──
         egui::CentralPanel::default()
@@ -1324,6 +1587,7 @@ impl eframe::App for CacoApp {
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
                                 ui.set_min_width(ui.available_width());
+                                let view_top = ui.cursor().top();
 
                                 // Now-playing hero
                                 if let Some(a) =
@@ -1333,26 +1597,30 @@ impl eframe::App for CacoApp {
                                 }
 
                                 // Section header with view toggle
-                                ui.add_space(4.0);
-                                render_section_header(ui, &mut self.state);
-                                ui.add_space(8.0);
+                                if self.state.total_wad_count > 0 {
+                                    ui.add_space(4.0);
+                                    render_section_header(ui, &mut self.state, &mut actions);
+                                    ui.add_space(8.0);
+                                }
 
                                 // WAD grid or table, or why there is neither
                                 if self.state.wads.is_empty() {
-                                    let total = self.state.total_wad_count;
-                                    if panels::render_empty_library(ui, total) {
-                                        self.state.view_mode = ViewMode::Import;
-                                    }
+                                    actions.extend(panels::render_empty_library(
+                                        ui,
+                                        self.state.total_wad_count,
+                                        &self.state.setup,
+                                    ));
                                     return;
                                 }
                                 let view_action = match self.state.view_layout {
                                     ViewLayout::List => {
-                                        panels::wad_table::render(ui, &mut self.state)
+                                        panels::wad_table::render(ui, &mut self.state, view_top)
                                     }
                                     ViewLayout::Grid => panels::wad_grid::render(
                                         ui,
                                         &mut self.state,
                                         Some(&self.thumbnails),
+                                        view_top,
                                     ),
                                 };
                                 if let Some(a) = view_action {
@@ -1377,7 +1645,7 @@ impl eframe::App for CacoApp {
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
                                 ui.set_min_width(ui.available_width());
-                                panels::stats::render(ui, &self.state);
+                                actions.extend(panels::stats::render(ui, &self.state));
                             });
                     }
                     ViewMode::Cacowards => {
@@ -1465,6 +1733,8 @@ impl eframe::App for CacoApp {
                 self.thumbnails.request(key, None, &hint, &sender);
             }
         }
+
+        render_drop_hint(ctx, self.state.has_dialog());
 
         // 8. Dispatch action requests
         for action in actions {

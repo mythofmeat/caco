@@ -226,7 +226,7 @@ impl ResourcesDialogState {
             .header(row_height + 2.0, |mut header| {
                 for label in ["Game", "Version", "Title"] {
                     header.col(|ui| {
-                        ui.strong(label);
+                        ui.label(theme::column_header(label));
                     });
                 }
             })
@@ -285,7 +285,7 @@ impl ResourcesDialogState {
             .header(row_height + 2.0, |mut header| {
                 for label in ["Name", "Version", "Title"] {
                     header.col(|ui| {
-                        ui.strong(label);
+                        ui.label(theme::column_header(label));
                     });
                 }
             })

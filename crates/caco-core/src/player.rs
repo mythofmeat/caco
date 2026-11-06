@@ -308,9 +308,7 @@ fn build_launch(
     );
 
     if sourceport.is_empty() {
-        return Err(crate::Error::Config(
-            "No sourceport specified and no default configured".to_string(),
-        ));
+        return Err(crate::Error::NoSourceport);
     }
 
     let sourceport = config::resolve_sourceport(&sourceport);

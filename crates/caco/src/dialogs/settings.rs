@@ -233,12 +233,7 @@ impl SettingsDialogState {
 
     fn section_header(ui: &mut egui::Ui, title: &str) {
         ui.add_space(10.0);
-        ui.colored_label(
-            theme::TEXT_ACCENT,
-            egui::RichText::new(title.to_ascii_uppercase())
-                .size(11.0)
-                .strong(),
-        );
+        theme::section_heading(ui, title);
         ui.separator();
         ui.add_space(2.0);
     }

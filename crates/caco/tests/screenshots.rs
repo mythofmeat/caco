@@ -35,7 +35,9 @@ use std::time::Duration;
 
 use caco::dialogs::storage::StorageTab;
 use caco::get::GetTarget;
-use caco::import::state::{SearchResultEntry, SearchResults, SearchSource, SearchSourceData};
+use caco::import::state::{
+    ImportOrigin, SearchResultEntry, SearchResults, SearchSource, SearchSourceData,
+};
 use caco::message::{AppMessage, EnrichReport, IdgamesIndexRun};
 use caco::state::{ActionRequest, ViewMode};
 use caco_core::sourceports::RemoteRefs;
@@ -616,6 +618,13 @@ impl Shooter {
         self.settle(2, Duration::ZERO);
     }
 
+    /// Edit in the mirrors tool, not the one for the WAD in the panel behind it.
+    fn mirrors_edit_button(&self) -> egui_kittest::Node<'_> {
+        self.harness
+            .get_by_role_and_label(egui::accesskit::Role::Window, "Mirrors")
+            .get_by_label("Edit")
+    }
+
     /// Open the mirrors tool on a kind's page, through the buttons a person would use.
     fn open_wizard_on(&mut self, kind: &str) {
         self.harness
@@ -682,13 +691,16 @@ impl Shooter {
     /// import worker posts.
     fn post_import_of(&mut self, wad_id: i64) {
         let tx = self.harness.state_mut().background_sender();
-        tx.send(AppMessage::ImportComplete(Ok(ImportResult {
-            wad_id: Some(wad_id),
-            is_duplicate: false,
-            duplicate_id: None,
-            duplicate_title: None,
-            error: None,
-        })));
+        tx.send(AppMessage::ImportComplete(
+            ImportOrigin::Cacoward(0),
+            Ok(ImportResult {
+                wad_id: Some(wad_id),
+                is_duplicate: false,
+                duplicate_id: None,
+                duplicate_title: None,
+                error: None,
+            }),
+        ));
         self.settle(2, WORKER_PAUSE);
     }
 
@@ -821,7 +833,7 @@ fn shoot_every_surface() {
         s.harness.get_all_by_label("Laocoön").next().unwrap();
     });
     s.shot_view_after("04-import-idgames-search", ViewMode::Import, |s| {
-        s.type_into("Search:", "Laocoon");
+        s.type_into("Search idgames", "Laocoon");
         s.harness.key_press(egui::Key::Enter);
         s.wait_for("the search", |s| {
             s.harness.query_by_label("1 result").is_some()
@@ -830,12 +842,12 @@ fn shoot_every_surface() {
         assert!(s.harness.query_by_label("Newest on idgames").is_none());
     });
     s.shot_view_after("04-import-idgames-same-name", ViewMode::Import, |s| {
-        s.harness.get_by_label("Search:").focus();
+        s.harness.get_by_label("Search idgames").focus();
         s.settle(1, Duration::ZERO);
         // Replacing what the last shot typed, as a person selecting it would.
         s.harness
             .key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
-        s.harness.get_by_label("Search:").type_text("castle");
+        s.harness.get_by_label("Search idgames").type_text("castle");
         s.settle(1, Duration::ZERO);
         s.harness.key_press(egui::Key::Enter);
         s.wait_for("the search", |s| {
@@ -888,6 +900,7 @@ fn shoot_every_surface() {
             SearchSource::Idgames,
             Ok(SearchResults {
                 entries: vec![SearchResultEntry {
+                    in_library: None,
                     title: "sunlust".to_string(),
                     author: None,
                     description: None,
@@ -1025,8 +1038,11 @@ fn shoot_every_surface() {
     s.settle(1, Duration::ZERO);
 
     // And a field that had the keyboard when a dialog opened lets go of it, or what is typed
-    // goes to the app behind. Help has no fields of its own to take it.
+    // goes to the app behind. Help has no fields of its own to take it. The filter is only there
+    // with something in the library to filter, which CI's has nothing in at this point.
+    let to_filter = s.add_lost_wad();
     s.harness.state_mut().set_view(ViewMode::Library);
+    s.harness.key_press(egui::Key::F5);
     s.settle(2, Duration::ZERO);
     s.harness
         .key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::F);
@@ -1042,6 +1058,9 @@ fn shoot_every_surface() {
         Some(""),
         "what was typed in a dialog reached the filter behind it"
     );
+    s.purge_wad(to_filter);
+    s.harness.key_press(egui::Key::F5);
+    s.settle(2, Duration::ZERO);
 
     // The version picker only exists once a remote has answered, and that is
     // asked on demand, so opening the dialog alone never reaches it.
@@ -1442,7 +1461,7 @@ fn shoot_every_surface() {
                 s.harness.query_by_label_contains("1 file").is_some()
             });
             s.harness.get_by_label("Add a Mirror");
-            s.harness.get_by_label("Edit");
+            s.mirrors_edit_button();
         }),
     );
 
@@ -1450,7 +1469,7 @@ fn shoot_every_surface() {
     record(
         "mirrors-edit",
         s.shot_dialog_after("dlg-mirrors-edit", ActionRequest::Mirrors, |s| {
-            s.harness.get_by_label("Edit").click_accesskit();
+            s.mirrors_edit_button().click_accesskit();
             s.settle(3, Duration::ZERO);
             assert_eq!(
                 s.harness.get_by_label("Folder").value().as_deref(),
@@ -1592,6 +1611,43 @@ fn shoot_every_surface() {
         }
     });
 
+    // A WAD's menu, which has a submenu of statuses. Needs a right click on a card, which only
+    // a library with one in it has, and the shot before this one has added one. The card's
+    // own Play turns up under the pointer as well, as it does for a person.
+    s.shot_view_after("05-wad-menu", ViewMode::Library, |s| {
+        let Some(card) = s
+            .harness
+            .query_all_by_role(egui::accesskit::Role::Button)
+            .find(|node| {
+                node.accesskit_node().label().is_some_and(|label| {
+                    ["Unplayed", "In Progress", "Completed", "Abandoned"]
+                        .iter()
+                        .any(|word| label.ends_with(&format!(", {word}")))
+                })
+            })
+            .map(|node| node.rect().center())
+        else {
+            return;
+        };
+        let pos = egui::pos2(card.x, card.y);
+        s.harness.hover_at(pos);
+        s.settle(2, Duration::ZERO);
+        // Pressed and let go in one frame, as kittest's own clicks are: a frame is a quarter of
+        // a second to it, and workers can make `settle` run several, which is a long press.
+        for pressed in [true, false] {
+            s.harness.event(egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Secondary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        s.settle(2, Duration::ZERO);
+        s.harness.get_by_label("Delete").rect();
+    });
+    s.harness.key_press(egui::Key::Escape);
+    s.settle(2, Duration::ZERO);
+
     // Only a WAD arriving with no way back brings up the offer.
     let manual = s.add_manual_wad_with_file("The Evil Reborn", 152000);
     record(
@@ -1678,9 +1734,14 @@ fn shoot_every_surface() {
         .state_mut()
         .dispatch_action(ActionRequest::Play(gotten));
     s.wait_for("the link dialog", |s| {
-        s.harness.query_by_label("Get in Browser").is_some()
+        s.harness
+            .query_by_role_and_label(egui::accesskit::Role::Window, "WAD Unavailable")
+            .is_some()
     });
-    s.harness.get_by_label("Get in Browser").click_accesskit();
+    s.harness
+        .get_by_role_and_label(egui::accesskit::Role::Window, "WAD Unavailable")
+        .get_by_label("Get in Browser")
+        .click_accesskit();
     assert_eq!(s.wait_for_page(&opened), page);
     s.settle(2, Duration::ZERO);
     let waiting = "Waiting for download: Purgatory...";
