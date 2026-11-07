@@ -267,11 +267,46 @@ fn write_stats_mod(pk3_path: &Path) -> crate::Result<()> {
 }
 
 // ---------------------------------------------------------------------------
-// Launch args
+// The log
 // ---------------------------------------------------------------------------
 
-/// Name of the log file written by ZDoom's `+logfile` command.
-pub const LOG_FILENAME: &str = "caco_stats.log";
+/// What `+logfile` is given: a name rather than a path, and with no `.` in it, because what it
+/// means depends on the build. Older zdoom-family sourceports open what they are given. uzdoom
+/// since August 2026 (UZDoom 48094ed and 2a44a21) writes `log-<name>.txt` in its working
+/// directory instead, with every `.` and `:` in the name turned into `-`, so a path comes out
+/// as `log-/home/…` and fails to open, which it reports only on its own console. Every uzdoom
+/// session lost its map exits that way until caco ran the sourceport from the WAD's data
+/// folder, where both spellings land, and looked for either: [`log_paths`].
+pub const LOG_NAME: &str = "caco_stats";
+
+/// Where the log was while `+logfile` was given a path, removed at launch with the others so
+/// that nothing left from then can be read as a session's.
+const LEGACY_LOG_FILENAME: &str = "caco_stats.log";
+
+/// The files `+logfile` [`LOG_NAME`] can leave in `data_dir`: uzdoom's spelling, then every
+/// other build's.
+pub fn log_paths(data_dir: &Path) -> [PathBuf; 2] {
+    [
+        data_dir.join(format!("log-{LOG_NAME}.txt")),
+        data_dir.join(LOG_NAME),
+    ]
+}
+
+/// Remove every log a session could leave, so the next one's is the only one there. A
+/// sourceport opens it to write, but one that dies before it does would otherwise leave the
+/// last session's to be read again.
+pub fn clear_logs(data_dir: &Path) {
+    for path in log_paths(data_dir)
+        .into_iter()
+        .chain([data_dir.join(LEGACY_LOG_FILENAME)])
+    {
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => tracing::warn!("could not remove {path:?}: {e}"),
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Log parsing
@@ -521,6 +556,17 @@ fn min_positive_f64(a: f64, b: f64) -> f64 {
 // Post-play collection
 // ---------------------------------------------------------------------------
 
+/// What reading a zdoom-family session's log came to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogOutcome {
+    /// The sourceport left no log, so nothing it did was reported.
+    Missing,
+    /// The log reported no map exits.
+    NoExits,
+    /// The log's exits are in `stats.txt`.
+    Recorded,
+}
+
 /// After a zdoom-family sourceport exits, parse the log and write
 /// a `stats.txt` file in the data directory.
 ///
@@ -529,21 +575,20 @@ fn min_positive_f64(a: f64, b: f64) -> f64 {
 /// like dsda-doom's cumulative `stats.txt`, while incrementing exit counts
 /// for maps completed in this ZDoom session.
 ///
-/// Returns `true` if stats were successfully written.
-pub fn collect_zdoom_stats(data_dir: &Path) -> bool {
-    let log_path = data_dir.join(LOG_FILENAME);
-    if !log_path.exists() {
-        return false;
-    }
-
-    let text = match std::fs::read_to_string(&log_path) {
-        Ok(t) => t,
-        Err(_) => return false,
+/// Fails only when the log was there and could not be read, or `stats.txt`
+/// could not be written.
+pub fn collect_zdoom_stats(data_dir: &Path) -> std::io::Result<LogOutcome> {
+    let Some(log_path) = log_paths(data_dir).into_iter().find(|p| p.is_file()) else {
+        return Ok(LogOutcome::Missing);
     };
+
+    // Lossy, because one byte that is not UTF-8 in a map's name would otherwise throw away
+    // every exit in the session.
+    let text = String::from_utf8_lossy(&std::fs::read(&log_path)?).into_owned();
 
     let entries = parse_log(&text);
     if entries.is_empty() {
-        return false;
+        return Ok(LogOutcome::NoExits);
     }
 
     let new_stats = entries_to_wad_stats(&entries);
@@ -559,10 +604,7 @@ pub fn collect_zdoom_stats(data_dir: &Path) -> bool {
     };
 
     let merged = merge_session_stats(existing, new_stats);
-    let output = wad_stats::format_stats(&merged);
-    if std::fs::write(&stats_path, &output).is_err() {
-        return false;
-    }
+    std::fs::write(&stats_path, wad_stats::format_stats(&merged))?;
 
     // Retire the old generated levelstat.txt so stale periodic snapshots from
     // previous Caco versions do not keep getting merged into live progress.
@@ -570,7 +612,170 @@ pub fn collect_zdoom_stats(data_dir: &Path) -> bool {
         let _ = std::fs::remove_file(&legacy_levelstat_path);
     }
 
-    true
+    Ok(LogOutcome::Recorded)
+}
+
+// ---------------------------------------------------------------------------
+// Save games
+// ---------------------------------------------------------------------------
+
+/// Add to `stats.txt` the maps the newest zdoom-family save game in `data_dir` says were
+/// finished and `stats.txt` has no exit for. Returns those maps, in the order the save has
+/// them.
+///
+/// A `.zds` save carries the engine's own account of the game so far: `globals.json` has a
+/// `statistics.levels` entry for each map left (`STAT_ChangeLevel`), with its kills, items,
+/// secrets and time, and `servercvars.skill`. So it is a second witness to what the log
+/// reports, and the only one when there is no log, which is how the uzdoom sessions that
+/// [`LOG_NAME`] describes can still be counted. It only fills gaps: a map with an exit is left
+/// alone, because the log is the better witness, counting every exit where a save only says a
+/// map was left at least once, and this runs again around every session.
+///
+/// Only the newest save modified at or after `since` is read. It is where the player is now,
+/// and an older one may belong to an earlier game: a new playthrough puts `stats.txt` aside
+/// and leaves the saves, so the caller passes when the playthrough started. The save's
+/// current map is skipped even if listed, since `printstats` and `stat statistics` record a
+/// map's results before it is left. Leaving a map in a hub records it too, as it does the
+/// reporter's exit.
+pub fn backfill_from_saves(
+    data_dir: &Path,
+    since: Option<SystemTime>,
+) -> std::io::Result<Vec<String>> {
+    let Some(save) = newest_save(data_dir, since) else {
+        return Ok(Vec::new());
+    };
+    let Some(finished) = read_zds_finished_maps(&save) else {
+        return Ok(Vec::new());
+    };
+
+    let stats_path = data_dir.join("stats.txt");
+    let existing = if stats_path.exists() {
+        Some(wad_stats::parse_stats_file(&stats_path).map_err(std::io::Error::other)?)
+    } else {
+        None
+    };
+    let has_exit = |lump: &str| {
+        existing.as_ref().is_some_and(|stats| {
+            stats
+                .maps
+                .iter()
+                .any(|m| m.lump.eq_ignore_ascii_case(lump) && m.total_exits > 0)
+        })
+    };
+
+    let missing: Vec<MapStats> = finished
+        .into_iter()
+        .filter(|m| !has_exit(&m.lump))
+        .collect();
+    if missing.is_empty() {
+        return Ok(Vec::new());
+    }
+    let added = missing.iter().map(|m| m.lump.clone()).collect();
+
+    let merged = merge_session_stats(
+        existing,
+        WadStats {
+            format: "stats_txt".to_string(),
+            maps: missing,
+            version: 1,
+            header_total_kills: 0,
+        },
+    );
+    std::fs::write(&stats_path, wad_stats::format_stats(&merged))?;
+    Ok(added)
+}
+
+/// The most recently written `.zds` in `dir` at or after `since`.
+fn newest_save(dir: &Path, since: Option<SystemTime>) -> Option<PathBuf> {
+    std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .filter(|entry| {
+            entry
+                .path()
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("zds"))
+        })
+        .filter_map(|entry| {
+            let modified = entry.metadata().ok()?.modified().ok()?;
+            Some((modified, entry.path()))
+        })
+        .filter(|(modified, _)| since.is_none_or(|since| *modified >= since))
+        .max_by_key(|(modified, _)| *modified)
+        .map(|(_, path)| path)
+}
+
+/// The maps a `.zds` save says were left, other than the one it was saved on, as one exit
+/// each. `None` when it is not a save this can read.
+fn read_zds_finished_maps(path: &Path) -> Option<Vec<MapStats>> {
+    let file = std::fs::File::open(path).ok()?;
+    let mut zip = zip::ZipArchive::new(file).ok()?;
+    let read_json = |zip: &mut zip::ZipArchive<std::fs::File>, name: &str| {
+        let mut text = String::new();
+        zip.by_name(name).ok()?.read_to_string(&mut text).ok()?;
+        serde_json::from_str::<serde_json::Value>(&text).ok()
+    };
+    let globals = read_json(&mut zip, "globals.json")?;
+    let current = read_json(&mut zip, "info.json")
+        .and_then(|info| info.get("Current Map")?.as_str().map(str::to_string));
+    Some(finished_maps(&globals, current.as_deref()))
+}
+
+/// [`read_zds_finished_maps`] over a save's `globals.json`, already parsed.
+fn finished_maps(globals: &serde_json::Value, current: Option<&str>) -> Vec<MapStats> {
+    let int = |level: &serde_json::Value, key: &str| {
+        level
+            .get(key)
+            .and_then(serde_json::Value::as_i64)
+            .and_then(|n| i32::try_from(n).ok())
+    };
+    // The skill cvar counts from 0 and `best_skill` from 1. Unknown is 4, as for every
+    // source that does not say.
+    let best_skill = globals
+        .pointer("/servercvars/skill")
+        .and_then(|skill| match skill {
+            serde_json::Value::String(text) => text.trim().parse::<i32>().ok(),
+            other => other.as_i64().and_then(|n| i32::try_from(n).ok()),
+        })
+        .filter(|skill| (0..=4).contains(skill))
+        .map_or(4, |skill| skill + 1);
+
+    let Some(levels) = globals
+        .pointer("/statistics/levels")
+        .and_then(serde_json::Value::as_array)
+    else {
+        return Vec::new();
+    };
+    levels
+        .iter()
+        .filter_map(|level| {
+            // As the engine spells it, which is how the reporter's exits spell it too.
+            let lump = level.get("levelname")?.as_str()?.trim().to_string();
+            if lump.is_empty() || current.is_some_and(|map| map.eq_ignore_ascii_case(&lump)) {
+                return None;
+            }
+            let time = int(level, "leveltime").filter(|tics| *tics >= 0);
+            Some(MapStats {
+                lump,
+                kills: int(level, "killcount").unwrap_or(0),
+                total_kills: int(level, "totalkills").unwrap_or(-1),
+                items: int(level, "itemcount").unwrap_or(0),
+                total_items: int(level, "totalitems").unwrap_or(-1),
+                secrets: int(level, "secretcount").unwrap_or(0),
+                total_secrets: int(level, "totalsecrets").unwrap_or(-1),
+                best_skill,
+                best_time: time.unwrap_or(-1),
+                total_exits: 1,
+                time_secs: time.map_or(-1.0, |tics| f64::from(tics) / TICS_PER_SECOND),
+                total_time_secs: -1.0,
+                episode: 0,
+                map_num: 0,
+                best_max_time: -1,
+                best_nm_time: -1,
+                cumulative_kills: 0,
+            })
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -1071,14 +1276,20 @@ mod tests {
     #[test]
     fn test_collect_zdoom_stats_no_log() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(!collect_zdoom_stats(dir.path()));
+        assert_eq!(
+            collect_zdoom_stats(dir.path()).unwrap(),
+            LogOutcome::Missing
+        );
     }
 
     #[test]
     fn test_collect_zdoom_stats_empty_log() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join(LOG_FILENAME), "no stats\n").unwrap();
-        assert!(!collect_zdoom_stats(dir.path()));
+        std::fs::write(&log_paths(dir.path())[1], "no stats\n").unwrap();
+        assert_eq!(
+            collect_zdoom_stats(dir.path()).unwrap(),
+            LogOutcome::NoExits
+        );
     }
 
     #[test]
@@ -1086,9 +1297,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let log = "CACOSTATS|EXIT|MAP01|3|3500|50/100|10/20|3/5\n\
                     CACOSTATS|EXIT|MAP02|3|7000|80/80|15/15|2/2\n";
-        std::fs::write(dir.path().join(LOG_FILENAME), log).unwrap();
+        std::fs::write(&log_paths(dir.path())[1], log).unwrap();
 
-        assert!(collect_zdoom_stats(dir.path()));
+        assert_eq!(
+            collect_zdoom_stats(dir.path()).unwrap(),
+            LogOutcome::Recorded
+        );
 
         let stats_path = dir.path().join("stats.txt");
         assert!(stats_path.exists());
@@ -1111,9 +1325,12 @@ mod tests {
         let log = "CACOSTATS|EXIT|MAP04|3|7000|80/80|15/15|2/2\n\
                    CACOSTATS|MAP05|3|140|2/80|0/15|0/2\n\
                    CACOSTATS|LIVE|MAP05|3|175|3/80|0/15|0/2\n";
-        std::fs::write(dir.path().join(LOG_FILENAME), log).unwrap();
+        std::fs::write(&log_paths(dir.path())[1], log).unwrap();
 
-        assert!(collect_zdoom_stats(dir.path()));
+        assert_eq!(
+            collect_zdoom_stats(dir.path()).unwrap(),
+            LogOutcome::Recorded
+        );
 
         let content = std::fs::read_to_string(dir.path().join("stats.txt")).unwrap();
         let stats = wad_stats::parse_stats_text(&content).unwrap();
@@ -1130,14 +1347,20 @@ mod tests {
         // Session 1: play MAP01 and MAP02
         let log1 = "CACOSTATS|EXIT|MAP01|3|3500|50/100|10/20|3/5\n\
                      CACOSTATS|EXIT|MAP02|3|7000|80/80|15/15|2/2\n";
-        std::fs::write(dir.path().join(LOG_FILENAME), log1).unwrap();
-        assert!(collect_zdoom_stats(dir.path()));
+        std::fs::write(&log_paths(dir.path())[1], log1).unwrap();
+        assert_eq!(
+            collect_zdoom_stats(dir.path()).unwrap(),
+            LogOutcome::Recorded
+        );
 
         // Session 2: play MAP03 (and replay MAP01 with better stats)
         let log2 = "CACOSTATS|EXIT|MAP01|3|2000|60/100|12/20|4/5\n\
                      CACOSTATS|EXIT|MAP03|3|5000|40/40|20/20|1/1\n";
-        std::fs::write(dir.path().join(LOG_FILENAME), log2).unwrap();
-        assert!(collect_zdoom_stats(dir.path()));
+        std::fs::write(&log_paths(dir.path())[1], log2).unwrap();
+        assert_eq!(
+            collect_zdoom_stats(dir.path()).unwrap(),
+            LogOutcome::Recorded
+        );
 
         // Verify all 3 maps are present
         let content = std::fs::read_to_string(dir.path().join("stats.txt")).unwrap();
@@ -1166,14 +1389,20 @@ mod tests {
                     CACOSTATS|EXIT|MAP02|3|3600|60/100|11/20|3/5\n\
                     CACOSTATS|EXIT|MAP03|3|3700|70/100|12/20|3/5\n\
                     CACOSTATS|EXIT|MAP04|3|3800|80/100|13/20|3/5\n";
-        std::fs::write(dir.path().join(LOG_FILENAME), log1).unwrap();
-        assert!(collect_zdoom_stats(dir.path()));
+        std::fs::write(&log_paths(dir.path())[1], log1).unwrap();
+        assert_eq!(
+            collect_zdoom_stats(dir.path()).unwrap(),
+            LogOutcome::Recorded
+        );
         let before_text = std::fs::read_to_string(dir.path().join("stats.txt")).unwrap();
         let before = wad_stats::parse_stats_text(&before_text).unwrap();
 
         let log2 = "CACOSTATS|EXIT|MAP05|3|3900|90/100|14/20|3/5\n";
-        std::fs::write(dir.path().join(LOG_FILENAME), log2).unwrap();
-        assert!(collect_zdoom_stats(dir.path()));
+        std::fs::write(&log_paths(dir.path())[1], log2).unwrap();
+        assert_eq!(
+            collect_zdoom_stats(dir.path()).unwrap(),
+            LogOutcome::Recorded
+        );
         let after_text = std::fs::read_to_string(dir.path().join("stats.txt")).unwrap();
         let after = wad_stats::parse_stats_text(&after_text).unwrap();
 
@@ -1191,8 +1420,11 @@ mod tests {
         .unwrap();
 
         let log = "CACOSTATS|EXIT|MAP02|3|3500|20/20|2/2|1/1\n";
-        std::fs::write(dir.path().join(LOG_FILENAME), log).unwrap();
-        assert!(collect_zdoom_stats(dir.path()));
+        std::fs::write(&log_paths(dir.path())[1], log).unwrap();
+        assert_eq!(
+            collect_zdoom_stats(dir.path()).unwrap(),
+            LogOutcome::Recorded
+        );
 
         assert!(dir.path().join("stats.txt").exists());
         assert!(!dir.path().join("levelstat.txt").exists());
@@ -1490,5 +1722,243 @@ mod tests {
         for lump in ["zscript.zs", "MAPINFO", "CVARINFO"] {
             assert!(archive.index_for_name(lump).is_some(), "missing {lump}");
         }
+    }
+
+    #[test]
+    fn test_uzdooms_spelling_of_the_log_is_read() {
+        // What `+logfile caco_stats` leaves behind in uzdoom since August 2026.
+        let dir = tempfile::tempdir().unwrap();
+        let [uzdoom, _] = log_paths(dir.path());
+        assert_eq!(uzdoom, dir.path().join("log-caco_stats.txt"));
+        std::fs::write(&uzdoom, "CACOSTATS|EXIT|MAP01|3|3500|50/100|10/20|3/5\n").unwrap();
+
+        assert_eq!(
+            collect_zdoom_stats(dir.path()).unwrap(),
+            LogOutcome::Recorded
+        );
+        let stats = wad_stats::parse_stats_file(&dir.path().join("stats.txt")).unwrap();
+        assert_eq!(stats.maps.len(), 1);
+        assert_eq!(stats.maps[0].lump, "MAP01");
+    }
+
+    #[test]
+    fn test_a_log_that_is_not_all_utf8_still_counts() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut log = b"MAP01 - \xb3 caf\xe9\n".to_vec();
+        log.extend_from_slice(b"CACOSTATS|EXIT|MAP01|3|3500|50/100|10/20|3/5\n");
+        std::fs::write(&log_paths(dir.path())[1], log).unwrap();
+
+        assert_eq!(
+            collect_zdoom_stats(dir.path()).unwrap(),
+            LogOutcome::Recorded
+        );
+    }
+
+    #[test]
+    fn test_clearing_the_logs_leaves_none_to_be_read_again() {
+        let dir = tempfile::tempdir().unwrap();
+        for path in log_paths(dir.path())
+            .into_iter()
+            .chain([dir.path().join(LEGACY_LOG_FILENAME)])
+        {
+            std::fs::write(&path, "CACOSTATS|EXIT|MAP01|3|3500|50/100|10/20|3/5\n").unwrap();
+        }
+        let save = dir.path().join("quick00.zds");
+        std::fs::write(&save, "a save").unwrap();
+
+        clear_logs(dir.path());
+        clear_logs(dir.path());
+
+        assert_eq!(
+            collect_zdoom_stats(dir.path()).unwrap(),
+            LogOutcome::Missing
+        );
+        assert!(!dir.path().join(LEGACY_LOG_FILENAME).exists());
+        assert!(save.exists(), "only logs go");
+    }
+
+    /// `globals.json` as uzdoom 67bdb4b writes it, cut down to what is read, from a real
+    /// save on MAP03 after finishing MAP01 and MAP02 at skill 3 (Ultra-Violence).
+    fn globals(levels: &[(&str, i32)]) -> serde_json::Value {
+        let levels: Vec<serde_json::Value> = levels
+            .iter()
+            .map(|(name, tics)| {
+                serde_json::json!({
+                    "totalkills": 145, "killcount": 140,
+                    "totalitems": 64, "itemcount": 36,
+                    "totalsecrets": 3, "secretcount": 0,
+                    "leveltime": tics, "levelname": name,
+                })
+            })
+            .collect();
+        serde_json::json!({
+            "servercvars": {"fraglimit": "0", "skill": "3", "sv_cheats": "false"},
+            "ticrate": 35,
+            "leveltime": 57,
+            "statistics": {"startlevel": "map01", "levels": levels},
+            "visited": ["MAP01", "MAP02"],
+        })
+    }
+
+    fn write_save(path: &Path, current: &str, globals: &serde_json::Value, age_secs: u64) {
+        let file = std::fs::File::create(path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        zip.start_file("info.json", options).unwrap();
+        let info = serde_json::json!({"Engine": "UZDOOM", "Current Map": current});
+        zip.write_all(info.to_string().as_bytes()).unwrap();
+        zip.start_file("globals.json", options).unwrap();
+        zip.write_all(globals.to_string().as_bytes()).unwrap();
+        zip.start_file("map03.map.json", options).unwrap();
+        zip.write_all(b"{}").unwrap();
+        zip.finish().unwrap();
+        let when = SystemTime::now() - std::time::Duration::from_secs(age_secs);
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(when)
+            .unwrap();
+    }
+
+    fn stats_in(dir: &Path) -> WadStats {
+        wad_stats::parse_stats_file(&dir.join("stats.txt")).unwrap()
+    }
+
+    #[test]
+    fn test_a_save_fills_in_the_maps_nothing_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        write_save(
+            &dir.path().join("auto01.zds"),
+            "MAP03",
+            &globals(&[("MAP01", 16660), ("MAP02", 22710)]),
+            0,
+        );
+
+        let added = backfill_from_saves(dir.path(), None).unwrap();
+
+        assert_eq!(added, ["MAP01", "MAP02"]);
+        let stats = stats_in(dir.path());
+        assert_eq!(stats.maps.len(), 2);
+        let map01 = &stats.maps[0];
+        assert_eq!(map01.lump, "MAP01");
+        assert_eq!(map01.total_exits, 1);
+        assert_eq!(map01.best_skill, 4, "skill 3 counts from 0");
+        assert_eq!(map01.best_time, 16660, "tics, as the log has them");
+        assert_eq!((map01.kills, map01.total_kills), (140, 145));
+        assert_eq!((map01.items, map01.total_items), (36, 64));
+        assert_eq!((map01.secrets, map01.total_secrets), (0, 3));
+        // And the session machinery reads it as maps played.
+        let played = wad_stats::compute_stats_delta(None, &stats).maps_played;
+        assert_eq!(played.len(), 2);
+    }
+
+    #[test]
+    fn test_a_save_leaves_maps_the_log_reported_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        // MAP01 finished in two sessions.
+        for log in [
+            "CACOSTATS|EXIT|MAP01|3|9100|145/145|64/64|3/3\n",
+            "CACOSTATS|EXIT|MAP01|3|9000|145/145|64/64|3/3\n",
+        ] {
+            std::fs::write(&log_paths(dir.path())[0], log).unwrap();
+            collect_zdoom_stats(dir.path()).unwrap();
+        }
+        write_save(
+            &dir.path().join("quick00.zds"),
+            "MAP03",
+            &globals(&[("MAP01", 16660), ("MAP02", 22710)]),
+            0,
+        );
+
+        assert_eq!(backfill_from_saves(dir.path(), None).unwrap(), ["MAP02"]);
+        assert!(
+            backfill_from_saves(dir.path(), None).unwrap().is_empty(),
+            "a second look finds nothing new"
+        );
+
+        let stats = stats_in(dir.path());
+        let map01 = stats.maps.iter().find(|m| m.lump == "MAP01").unwrap();
+        assert_eq!(map01.total_exits, 2, "the log's count stands");
+        assert_eq!(map01.best_time, 9000);
+        assert_eq!(map01.secrets, 3);
+        let map02 = stats.maps.iter().find(|m| m.lump == "MAP02").unwrap();
+        assert_eq!(map02.total_exits, 1);
+    }
+
+    #[test]
+    fn test_only_the_newest_save_since_the_playthrough_began_counts() {
+        let dir = tempfile::tempdir().unwrap();
+        // An earlier game, before the playthrough started an hour ago.
+        write_save(
+            &dir.path().join("quick07.zds"),
+            "MAP09",
+            &globals(&[("MAP01", 100), ("MAP08", 100)]),
+            7200,
+        );
+        let since = SystemTime::now() - std::time::Duration::from_secs(3600);
+        assert!(
+            backfill_from_saves(dir.path(), Some(since))
+                .unwrap()
+                .is_empty()
+        );
+        assert!(!dir.path().join("stats.txt").exists(), "nothing to write");
+
+        // This game: an older save further on than the newest one, which is where the
+        // player is now.
+        write_save(
+            &dir.path().join("quick01.zds"),
+            "MAP03",
+            &globals(&[("MAP01", 100), ("MAP02", 100)]),
+            600,
+        );
+        write_save(
+            &dir.path().join("quick02.zds"),
+            "MAP02",
+            &globals(&[("MAP01", 100)]),
+            60,
+        );
+        assert_eq!(
+            backfill_from_saves(dir.path(), Some(since)).unwrap(),
+            ["MAP01"]
+        );
+    }
+
+    #[test]
+    fn test_the_map_a_save_was_made_on_is_not_finished() {
+        // `printstats` stores the current map's results before it has been left.
+        let dir = tempfile::tempdir().unwrap();
+        write_save(
+            &dir.path().join("quick00.zds"),
+            "MAP02",
+            &globals(&[("MAP01", 100), ("MAP02", 100)]),
+            0,
+        );
+        assert_eq!(backfill_from_saves(dir.path(), None).unwrap(), ["MAP01"]);
+    }
+
+    #[test]
+    fn test_what_is_not_a_readable_save_is_passed_over() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(backfill_from_saves(dir.path(), None).unwrap().is_empty());
+        std::fs::write(dir.path().join("quick00.zds"), "not a zip").unwrap();
+        assert!(backfill_from_saves(dir.path(), None).unwrap().is_empty());
+
+        let no_statistics = serde_json::json!({"servercvars": {"skill": "2"}});
+        write_save(&dir.path().join("quick01.zds"), "MAP01", &no_statistics, 0);
+        assert!(backfill_from_saves(dir.path(), None).unwrap().is_empty());
+        assert!(!dir.path().join("stats.txt").exists());
+    }
+
+    #[test]
+    fn test_a_save_with_no_skill_is_counted_at_the_unknown_skill() {
+        let mut globals = globals(&[("MAP01", 16660)]);
+        let maps = finished_maps(&globals, Some("MAP02"));
+        assert!((maps[0].time_secs - 476.0).abs() < 1e-9);
+
+        globals["servercvars"] = serde_json::json!({});
+        let maps = finished_maps(&globals, Some("MAP02"));
+        assert_eq!(maps.len(), 1);
+        assert_eq!(maps[0].best_skill, 4);
     }
 }

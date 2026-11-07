@@ -29,6 +29,7 @@ mod help;
 mod hero;
 mod idgames_index;
 mod mirrors;
+mod play;
 mod section_header;
 mod sidebar;
 mod status_bar;
@@ -1285,22 +1286,8 @@ impl eframe::App for CacoApp {
                                 Some(Notification::error(format!("Play failed: {err}")));
                         }
                         Ok(pr) => {
-                            if pr.crashed() {
-                                self.state.notification = Some(Notification::warning(format!(
-                                    "Sourceport crashed (exit code {})",
-                                    pr.exit_code.unwrap_or(-1)
-                                )));
-                            } else if pr.auto_complete
-                                == caco_core::player::AutoCompleteResult::Completed
-                            {
-                                self.state.notification = Some(Notification::info(
-                                    "All maps completed! Marked as finished.".to_string(),
-                                ));
-                            } else if let Some(dur) = pr.duration {
-                                self.state.notification = Some(Notification::info(format!(
-                                    "Played for {}",
-                                    caco_core::player::format_duration(dur)
-                                )));
+                            if let Some(notification) = play::play_notification(&pr) {
+                                self.state.notification = Some(notification);
                             }
                         }
                     }

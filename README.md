@@ -96,7 +96,12 @@ Launch `caco` (or pick it from your application menu), then:
    required IWAD and complevel from the WAD file itself.
 
 Play time, sessions, and per-map stats are recorded automatically once you quit
-the sourceport.
+the sourceport. dsda-doom and its relatives keep per-map stats themselves; for the
+zdoom family caco loads a small mod that writes each map you finish to a log, and
+for Helion it reads the sourceport's own level stats. A zdoom-family save game
+remembers which maps of that game were finished too, so caco reads your latest one
+around every session and counts whatever nothing else did. If uzdoom leaves no log,
+the status bar says so rather than leaving progress quietly uncounted.
 
 ## The Interface
 

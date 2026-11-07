@@ -40,8 +40,8 @@ pub fn config_dir() -> PathBuf {
 }
 
 pub fn config_file() -> PathBuf {
-    if let Ok(p) = std::env::var("CACO_CONFIG") {
-        return PathBuf::from(p);
+    if let Some(p) = env_path("CACO_CONFIG") {
+        return p;
     }
     config_dir().join("config.toml")
 }
@@ -57,8 +57,8 @@ pub fn config_file() -> PathBuf {
 /// Caco carries no layout migrations, so anyone who had both a set
 /// `XDG_DATA_HOME` and an existing library moves the directory by hand once.
 pub fn default_data_dir() -> PathBuf {
-    if let Ok(p) = std::env::var("CACO_HOME") {
-        return PathBuf::from(p);
+    if let Some(p) = env_path("CACO_HOME") {
+        return p;
     }
     dirs::data_dir()
         .unwrap_or_else(|| home_dir().join(".local/share"))
@@ -66,8 +66,8 @@ pub fn default_data_dir() -> PathBuf {
 }
 
 pub fn default_db_path() -> PathBuf {
-    if let Ok(p) = std::env::var("CACO_DB_PATH") {
-        return PathBuf::from(p);
+    if let Some(p) = env_path("CACO_DB_PATH") {
+        return p;
     }
     default_data_dir().join("library.db")
 }
@@ -80,8 +80,8 @@ pub fn default_db_path() -> PathBuf {
 /// [`default_data_dir`] so the data dir stays small enough to copy between
 /// machines — see the split documented in README's Data Locations table.
 pub fn cache_home() -> PathBuf {
-    if let Ok(p) = std::env::var("CACO_CACHE_HOME") {
-        return PathBuf::from(p);
+    if let Some(p) = env_path("CACO_CACHE_HOME") {
+        return p;
     }
     dirs::cache_dir()
         .unwrap_or_else(|| home_dir().join(".cache"))
@@ -89,8 +89,8 @@ pub fn cache_home() -> PathBuf {
 }
 
 pub fn default_cache_dir() -> PathBuf {
-    if let Ok(p) = std::env::var("CACO_CACHE_DIR") {
-        return PathBuf::from(p);
+    if let Some(p) = env_path("CACO_CACHE_DIR") {
+        return p;
     }
     cache_home().join("wads")
 }
@@ -108,8 +108,8 @@ pub fn thumbnail_cache_dir() -> PathBuf {
 }
 
 pub fn default_data_subdir() -> PathBuf {
-    if let Ok(p) = std::env::var("CACO_DATA_DIR") {
-        return PathBuf::from(p);
+    if let Some(p) = env_path("CACO_DATA_DIR") {
+        return p;
     }
     default_data_dir().join("data")
 }
@@ -209,15 +209,14 @@ pub fn cacoward_data_dir() -> PathBuf {
 /// switch, though beside that directory rather than in it: a `CACO_HOME` can be a real
 /// library in a git repository as easily as a scratch one.
 pub fn mirror_token_file() -> PathBuf {
-    if let Ok(p) = std::env::var("CACO_TOKEN_FILE") {
-        return PathBuf::from(p);
+    if let Some(p) = env_path("CACO_TOKEN_FILE") {
+        return p;
     }
-    if let Ok(home) = std::env::var("CACO_HOME") {
-        let home = PathBuf::from(home);
-        if let Some(name) = home.file_name() {
-            let beside = format!("{}.mirror-tokens.toml", name.to_string_lossy());
-            return home.with_file_name(beside);
-        }
+    if let Some(home) = env_path("CACO_HOME")
+        && let Some(name) = home.file_name()
+    {
+        let beside = format!("{}.mirror-tokens.toml", name.to_string_lossy());
+        return home.with_file_name(beside);
     }
     dirs::preference_dir()
         .unwrap_or_else(|| home_dir().join(".config"))
@@ -230,16 +229,15 @@ pub fn mirror_token_file() -> PathBuf {
 /// one, by putting it beside themselves rather than in them, since either of those can be
 /// a real library that gets synced.
 fn machine_local_file(override_var: &str, name: &str) -> PathBuf {
-    if let Ok(p) = std::env::var(override_var) {
-        return PathBuf::from(p);
+    if let Some(p) = env_path(override_var) {
+        return p;
     }
     for var in ["CACO_HOME", "CACO_CONFIG"] {
-        if let Ok(value) = std::env::var(var) {
-            let value = PathBuf::from(value);
-            if let Some(base) = value.file_name() {
-                let beside = format!("{}.{name}", base.to_string_lossy());
-                return value.with_file_name(beside);
-            }
+        if let Some(value) = env_path(var)
+            && let Some(base) = value.file_name()
+        {
+            let beside = format!("{}.{name}", base.to_string_lossy());
+            return value.with_file_name(beside);
         }
     }
     dirs::preference_dir()
@@ -272,14 +270,14 @@ pub fn sync_dir_for(db_path: &Path) -> PathBuf {
     if db_path != get_db_path() {
         return beside;
     }
-    if let Ok(p) = std::env::var("CACO_SYNC_DIR") {
-        return PathBuf::from(p);
+    if let Some(p) = env_path("CACO_SYNC_DIR") {
+        return p;
     }
     let cfg = load_config();
     if cfg.sync_dir.is_empty() {
         beside
     } else {
-        expand_tilde(&cfg.sync_dir)
+        configured_dir(&cfg.sync_dir)
     }
 }
 
@@ -291,8 +289,8 @@ pub fn sync_dir_for(db_path: &Path) -> PathBuf {
 /// someone else's catalogue. `CACO_IDGAMES_INDEX` overrides just this, as `CACO_CACHE_DIR`
 /// does the WAD cache.
 pub fn idgames_index_path() -> PathBuf {
-    if let Ok(p) = std::env::var("CACO_IDGAMES_INDEX") {
-        return PathBuf::from(p);
+    if let Some(p) = env_path("CACO_IDGAMES_INDEX") {
+        return p;
     }
     cache_home().join("idgames-index.db")
 }
@@ -881,29 +879,29 @@ fn write_config_files(config: &Config, path: &Path, machine_path: &Path) -> crat
 
 /// Get the database file path. Env var `CACO_DB_PATH` takes precedence over config.
 pub fn get_db_path() -> PathBuf {
-    if let Ok(p) = std::env::var("CACO_DB_PATH") {
-        return PathBuf::from(p);
+    if let Some(p) = env_path("CACO_DB_PATH") {
+        return p;
     }
     let cfg = load_config();
     let p = &cfg.db_path;
     if p.is_empty() {
         default_db_path()
     } else {
-        expand_tilde(p)
+        configured_dir(p)
     }
 }
 
 /// Get the WAD cache directory. Env var `CACO_CACHE_DIR` takes precedence over config.
 pub fn get_cache_dir() -> PathBuf {
-    if let Ok(p) = std::env::var("CACO_CACHE_DIR") {
-        return PathBuf::from(p);
+    if let Some(p) = env_path("CACO_CACHE_DIR") {
+        return p;
     }
     let cfg = load_config();
     let p = &cfg.cache_dir;
     if p.is_empty() {
         default_cache_dir()
     } else {
-        expand_tilde(p)
+        configured_dir(p)
     }
 }
 
@@ -980,7 +978,7 @@ pub fn get_iwad_dir() -> PathBuf {
     if p.is_empty() {
         iwad_dir()
     } else {
-        expand_tilde(p)
+        configured_dir(p)
     }
 }
 
@@ -995,22 +993,22 @@ pub fn get_iwad_dirs() -> Vec<PathBuf> {
     cfg.iwad_dirs
         .iter()
         .filter(|d| !d.is_empty())
-        .map(|d| expand_tilde(d))
+        .map(|d| configured_dir(d))
         .collect()
 }
 
 /// Get the base directory for per-WAD data directories.
 /// Env var `CACO_DATA_DIR` takes precedence over config.
 pub fn get_data_dir() -> PathBuf {
-    if let Ok(p) = std::env::var("CACO_DATA_DIR") {
-        return PathBuf::from(p);
+    if let Some(p) = env_path("CACO_DATA_DIR") {
+        return p;
     }
     let cfg = load_config();
     let p = &cfg.data_dir;
     if p.is_empty() {
         default_data_subdir()
     } else {
-        expand_tilde(p)
+        configured_dir(p)
     }
 }
 
@@ -1021,7 +1019,7 @@ pub fn get_profile_dir() -> PathBuf {
     if p.is_empty() {
         profile_dir()
     } else {
-        expand_tilde(p)
+        configured_dir(p)
     }
 }
 
@@ -1063,7 +1061,7 @@ fn downloads_dir_from(config: &Config) -> PathBuf {
     if set.is_empty() {
         default_downloads_dir()
     } else {
-        expand_tilde(set)
+        configured_dir(set)
     }
 }
 
@@ -1375,6 +1373,24 @@ pub fn resolve_iwad_path(name: &str, db_resolved: Option<&str>) -> String {
 // ---------------------------------------------------------------------------
 
 /// Expand leading `~` to the user's home directory.
+/// A path from the environment, made absolute against the directory caco was started in,
+/// which is what it meant there. Every directory caco works in is absolute, because a
+/// sourceport is run from a WAD's data folder (`player::build_launch`), where a relative
+/// path handed on to it would mean somewhere else.
+fn env_path(var: &str) -> Option<PathBuf> {
+    std::env::var_os(var).map(|p| anchored(PathBuf::from(p)))
+}
+
+/// A directory from `config.toml`, absolute for the reason [`env_path`]'s are.
+fn configured_dir(p: &str) -> PathBuf {
+    anchored(expand_tilde(p))
+}
+
+/// `path` against caco's own working directory, or as it was if there is none to be had.
+fn anchored(path: PathBuf) -> PathBuf {
+    std::path::absolute(&path).unwrap_or(path)
+}
+
 fn expand_tilde(p: &str) -> PathBuf {
     if let Some(rest) = p.strip_prefix("~/") {
         home_dir().join(rest)
@@ -1432,6 +1448,25 @@ mod tests {
             migration_backup_dir(Path::new("/mnt/games/caco.db")),
             Path::new("/mnt/games/backups")
         );
+    }
+
+    #[test]
+    fn test_directories_from_the_environment_and_the_config_are_absolute() {
+        // A variable no other test reads, since tests share the process's environment.
+        const VAR: &str = "CACO_TEST_ENV_PATH_IS_ABSOLUTE";
+        let here = std::env::current_dir().unwrap();
+
+        // SAFETY: test-only env mutation of a variable nothing else reads.
+        unsafe { std::env::set_var(VAR, "scratch/library") };
+        assert_eq!(env_path(VAR), Some(here.join("scratch/library")));
+        unsafe { std::env::set_var(VAR, "/elsewhere/library") };
+        assert_eq!(env_path(VAR), Some(PathBuf::from("/elsewhere/library")));
+        unsafe { std::env::remove_var(VAR) };
+        assert_eq!(env_path(VAR), None);
+
+        assert_eq!(configured_dir("wads"), here.join("wads"));
+        assert_eq!(configured_dir("~/wads"), home_dir().join("wads"));
+        assert_eq!(configured_dir("/srv/wads"), PathBuf::from("/srv/wads"));
     }
 
     #[test]
