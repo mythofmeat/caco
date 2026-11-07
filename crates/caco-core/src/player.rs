@@ -55,6 +55,19 @@ pub struct PlayResult {
     pub duration: Option<i64>,
     pub exit_code: Option<i32>,
     pub auto_complete: AutoCompleteResult,
+    pub stats: StatsReport,
+}
+
+/// What became of a session's map exits where they had to be read back from what a
+/// sourceport left behind, which is worth telling the user about: see [`stats_watcher`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StatsReport {
+    /// The sourceport, by name, when it was asked to log map exits and left no log, so
+    /// this session's are known only as far as a save game says. An upgrade that changed
+    /// `+logfile` did that to every uzdoom session, and nothing said so.
+    pub log_missing_from: Option<String>,
+    /// Maps counted as finished on a save game's word, because nothing else had said so.
+    pub from_saves: Vec<String>,
 }
 
 impl PlayResult {
@@ -481,15 +494,18 @@ fn build_launch(
     // map exits the user did not just make, and absorbing those would inflate
     // progress and could auto-complete the WAD from a recording.
     if matches!(mode, LaunchMode::Play(_)) {
-        // For zdoom-family sourceports, set up logfile for stats collection
+        // For zdoom-family sourceports, the stats reporter's exits go to a log. uzdoom
+        // writes one only in its working directory, under a name it makes from what it is
+        // given (see `stats_watcher::LOG_NAME`), so the sourceport runs from the data dir
+        // and is given a name. The paths caco builds are absolute (`config::env_path`), so
+        // the working directory changes nothing else it is given.
         if is_zdoom
             && config::get_auto_stats()
             && let Some(ref data_dir) = wad_data_dir
         {
-            let log_path = data_dir.join(stats_watcher::LOG_FILENAME);
-            // Avoid parsing stale lines if the sourceport appends to an existing log.
-            let _ = std::fs::remove_file(&log_path);
-            cmd.args(["+logfile", &log_path.to_string_lossy()]);
+            stats_watcher::clear_logs(data_dir);
+            cmd.current_dir(data_dir);
+            cmd.args(["+logfile", stats_watcher::LOG_NAME]);
         }
 
         // For helion, enable the native global levelstat file
@@ -611,6 +627,21 @@ pub fn play(conn: &Connection, wad_id: i64, opts: PlayOptions) -> crate::Result<
         is_helion,
     } = build_launch(conn, wad_id, LaunchMode::Play(opts))?;
     let wad = db::get_wad(conn, wad_id, false)?.ok_or(crate::Error::WadNotFound(wad_id))?;
+    let zdoom_stats_dir = wad_data_dir
+        .as_deref()
+        .filter(|_| is_zdoom && config::get_auto_stats());
+    let mut stats = StatsReport::default();
+
+    // Maps a save game says were finished and nothing reported, from sessions whose log
+    // was lost or that never went through caco: before the baseline below, so they are not
+    // taken for this session's. Only saves made since the playthrough began, since a new
+    // one leaves the last one's saves where they were.
+    if let Some(data_dir) = zdoom_stats_dir {
+        let since = db::get_active_playthrough(conn, wad_id)?
+            .and_then(|pt| sync::clock::wall_ms_of(&pt.started_at))
+            .map(|ms| std::time::UNIX_EPOCH + std::time::Duration::from_millis(ms));
+        stats.from_saves = backfill_from_saves(data_dir, since);
+    }
 
     // Absorb any on-disk stats progress the DB doesn't yet know about
     // (e.g. from an orphaned session where caco exited before the
@@ -658,12 +689,20 @@ pub fn play(conn: &Connection, wad_id: i64, opts: PlayOptions) -> crate::Result<
     // End session
     db::end_session(conn, session_id, None, status.code())?;
 
-    // For zdoom-family sourceports, parse the log and write managed stats.txt
-    if is_zdoom
-        && config::get_auto_stats()
-        && let Some(ref data_dir) = wad_data_dir
-    {
-        stats_watcher::collect_zdoom_stats(data_dir);
+    // For zdoom-family sourceports, parse the log and write managed stats.txt, then fill in
+    // from a save made this session whatever the log did not say.
+    if let Some(data_dir) = zdoom_stats_dir {
+        match stats_watcher::collect_zdoom_stats(data_dir) {
+            Ok(stats_watcher::LogOutcome::Missing) => {
+                tracing::warn!("{sourceport} left no stats log in {data_dir:?}");
+                stats.log_missing_from = Some(sourceport_name(&sourceport));
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!("could not record the stats log in {data_dir:?}: {e}"),
+        }
+        stats
+            .from_saves
+            .extend(backfill_from_saves(data_dir, Some(session_start)));
     }
 
     // For helion, consume the global levelstat file into managed stats.txt
@@ -714,7 +753,24 @@ pub fn play(conn: &Connection, wad_id: i64, opts: PlayOptions) -> crate::Result<
         duration: Some(elapsed),
         exit_code: status.code(),
         auto_complete,
+        stats,
     })
+}
+
+/// [`stats_watcher::backfill_from_saves`], for a launch, which a failure must not stop.
+fn backfill_from_saves(data_dir: &Path, since: Option<std::time::SystemTime>) -> Vec<String> {
+    stats_watcher::backfill_from_saves(data_dir, since).unwrap_or_else(|e| {
+        tracing::warn!("could not fill in stats from the saves in {data_dir:?}: {e}");
+        Vec::new()
+    })
+}
+
+/// A sourceport as the user knows it: `uzdoom`, not where it was built.
+fn sourceport_name(sourceport: &str) -> String {
+    Path::new(sourceport).file_stem().map_or_else(
+        || sourceport.to_string(),
+        |s| s.to_string_lossy().into_owned(),
+    )
 }
 
 /// Play back a recorded demo for a WAD.
@@ -1135,6 +1191,7 @@ mod tests {
                 duration: Some(60),
                 exit_code: Some(1),
                 auto_complete: AutoCompleteResult::Unknown,
+                stats: StatsReport::default(),
             }
             .crashed()
         );
@@ -1143,6 +1200,7 @@ mod tests {
                 duration: Some(60),
                 exit_code: Some(0),
                 auto_complete: AutoCompleteResult::Unknown,
+                stats: StatsReport::default(),
             }
             .crashed()
         );
@@ -1151,6 +1209,7 @@ mod tests {
                 duration: Some(60),
                 exit_code: None,
                 auto_complete: AutoCompleteResult::Unknown,
+                stats: StatsReport::default(),
             }
             .crashed()
         );
