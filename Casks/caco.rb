@@ -4,8 +4,8 @@
 # The release workflow's `cask` job rewrites version and sha256 after it has
 # uploaded the zip, so this file always names the newest published release.
 cask "caco" do
-  version "4.4.0"
-  sha256 "8edeee648258a5e929d4708092dfa989147c809107e54be93a06c72aab69cbf9"
+  version "4.4.1"
+  sha256 "4e9207e25e53505ddb6d6704a0d0a2bdf7e280af0bb7f9f4e175413c35916735"
 
   url "https://github.com/mythofmeat/caco/releases/download/v#{version}/caco-#{version}-macos-arm64.zip"
   name "Caco"
