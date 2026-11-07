@@ -273,26 +273,6 @@ fn write_stats_mod(pk3_path: &Path) -> crate::Result<()> {
 /// Name of the log file written by ZDoom's `+logfile` command.
 pub const LOG_FILENAME: &str = "caco_stats.log";
 
-/// Return extra args to inject for zdoom-family stats collection.
-///
-/// Returns `["-file", "<pk3_path>", "+logfile", "<log_path>"]` on success,
-/// or an empty vec if the mod can't be created.
-pub fn get_zdoom_stats_args(data_dir: &Path) -> Vec<String> {
-    let pk3_path = match ensure_stats_mod() {
-        Ok(p) => p,
-        Err(_) => return Vec::new(),
-    };
-
-    let log_path = data_dir.join(LOG_FILENAME);
-
-    vec![
-        "-file".to_string(),
-        pk3_path.to_string_lossy().into_owned(),
-        "+logfile".to_string(),
-        log_path.to_string_lossy().into_owned(),
-    ]
-}
-
 // ---------------------------------------------------------------------------
 // Log parsing
 // ---------------------------------------------------------------------------
@@ -301,7 +281,6 @@ pub fn get_zdoom_stats_args(data_dir: &Path) -> Vec<String> {
 #[derive(Debug, Clone)]
 struct MapLogEntry {
     lump: String,
-    #[allow(dead_code)]
     skill: i32,
     time_tics: i32,
     kills: i32,
