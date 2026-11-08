@@ -10,6 +10,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use super::versions::{ReleaseNumber, Version};
 use crate::error::Error;
 
 /// The built-in recipe set, compiled into the binary.
@@ -70,9 +71,14 @@ pub struct SourceportRecipe {
     #[serde(skip)]
     pub name: String,
     pub repo: String,
-    /// Branch, tag or commit to check out.
-    #[serde(rename = "ref")]
-    pub git_ref: String,
+    /// A branch or tag to build unless someone picks another. Without one it is the latest
+    /// release, which is what nearly everyone wants, and the picker offers the rest.
+    #[serde(rename = "ref", default, skip_serializing_if = "Option::is_none")]
+    pub pinned_ref: Option<String>,
+    /// The first of this project's own releases, for one that has an older project's tags in
+    /// its history. Version numbers before it are not offered: see [`super::versions`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_release: Option<ReleaseNumber>,
     /// Subdirectory holding the cmake root, when it is not the repo root.
     #[serde(default)]
     pub source_subdir: Option<String>,
@@ -89,16 +95,19 @@ pub struct SourceportRecipe {
 }
 
 impl SourceportRecipe {
-    /// Directory name for this recipe's install prefix.
-    ///
-    /// Refs can contain path separators (`origin/master`), so they cannot be
-    /// used as a path component unchanged.
-    pub fn ref_slug(&self) -> String {
-        slugify_ref(&self.git_ref)
+    /// What to build when nobody has picked anything.
+    pub fn default_version(&self) -> Version {
+        match &self.pinned_ref {
+            Some(name) => Version::Named(name.clone()),
+            None => Version::LatestRelease,
+        }
     }
 }
 
 /// Make a git ref safe to use as a single path component.
+///
+/// Refs can contain path separators (`origin/master`), so they cannot be used
+/// as one unchanged.
 pub fn slugify_ref(git_ref: &str) -> String {
     let slug: String = git_ref
         .chars()
@@ -237,6 +246,50 @@ mod tests {
     }
 
     #[test]
+    fn builtin_recipes_build_the_latest_release_unless_someone_picks_another() {
+        for recipe in builtin_recipes() {
+            assert_eq!(
+                recipe.default_version(),
+                Version::LatestRelease,
+                "{} pins a ref",
+                recipe.name
+            );
+        }
+    }
+
+    #[test]
+    fn uzdoom_leaves_out_the_releases_of_what_it_forked() {
+        let uzdoom = builtin_recipes()
+            .into_iter()
+            .find(|r| r.name == "uzdoom")
+            .expect("uzdoom recipe");
+        let first = uzdoom.first_release.as_ref();
+        assert!(crate::sourceports::versions::is_release("5.0.3", first));
+        assert!(!crate::sourceports::versions::is_release("2.8.1", first));
+        assert!(!crate::sourceports::versions::is_release("g4.14.2", first));
+    }
+
+    #[test]
+    fn a_first_release_that_is_not_a_version_number_names_its_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("bad.toml"),
+            r#"
+[uzdoom]
+repo = "https://github.com/UZDoom/uzdoom"
+first_release = "trunk"
+binary = "uzdoom"
+[uzdoom.build]
+system = "cmake"
+"#,
+        )
+        .unwrap();
+        let err = load_recipes(dir.path()).unwrap_err().to_string();
+        assert!(err.contains("bad.toml"), "got: {err}");
+        assert!(err.contains("not a version number"), "got: {err}");
+    }
+
+    #[test]
     fn nyan_doom_builds_from_its_subdir() {
         let nyan = builtin_recipes()
             .into_iter()
@@ -292,7 +345,7 @@ args = ["-DCMAKE_BUILD_TYPE=Release", "-DINSTALL_PK3_PATH=bin"]
 
         let recipes = load_recipes(dir.path()).unwrap();
         let uzdoom = recipes.iter().find(|r| r.name == "uzdoom").unwrap();
-        assert_eq!(uzdoom.git_ref, "v1.0.0");
+        assert_eq!(uzdoom.default_version(), Version::Named("v1.0.0".into()));
         // Overriding one recipe must not drop the others.
         assert!(recipes.iter().any(|r| r.name == "nyan-doom"));
     }

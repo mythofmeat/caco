@@ -771,13 +771,19 @@ requiring a global install undercuts the point of a portable library. The
 and caco launches it from there without anything being installed
 system-wide. A managed build wins over a same-named binary on `PATH`.
 
-Use **Check versions** in that dialog to lazily ask the sourceport's git remote for
-its tags (treated as releases) and branches. Nothing is fetched when the dialog
-opens. Once checked, **Build from** can target the latest release, a specific
-release, or a development branch such as `main`, `master`, or `trunk`; the
-choice applies to that build and does not rewrite the recipe. Caco also
-performs a lightweight, throttled startup check for new commits on the ref
-already being tracked, as controlled by `sourceport_update_check_days`.
+Each sourceport builds its **latest release** unless you pick another
+**Version**: the development branch (`trunk` for uzdoom, `master` for
+nyan-doom, whichever the project's repository says), or an older release. The
+dialog asks the repository which versions there are when it shows a sourceport,
+with one `git ls-remote` that downloads nothing. A release is a tag that is a
+version number, after a name if it has one (`5.0.3`, `v1.6.2`, `woof_15.2.0`).
+Release candidates, prereleases like uzdoom's `x-testing` and every other branch
+are not offered. The choice applies to that build and does not rewrite the recipe.
+
+What you picked decides what counts as an update. A build of the latest release
+is updated by the next release, and rebuilding builds it and removes the one it
+replaces. A build of the development branch is updated by new commits on it. An
+older release is one you chose to stay on, so it never reports an update.
 
 What travels between machines is the **recipe**, not the binary: a few
 hundred bytes of TOML that rebuild the sourceport on whatever machine and OS it
@@ -800,7 +806,8 @@ flags or attach patches, drop a file in `sourceports/` inside the data directory
 # <data dir>/sourceports/mine.toml
 [uzdoom]
 repo = "https://github.com/UZDoom/uzdoom"
-ref = "v1.0.0"                        # a branch or tag, not a bare commit
+ref = "5.0.2"                         # optional: build this branch or tag by default
+first_release = "4.14.3"              # optional: older version tags are another project's
 binary = "uzdoom"
 patches = ["uzdoom-tweak.patch"]      # relative to this directory
 
@@ -816,6 +823,11 @@ fedora = ["gcc-c++", "cmake", "ninja-build", "openal-soft-devel", "sdl2-compat-d
 brew = ["cmake", "ninja", "openal-soft", "sdl2-compat", "webp", "bzip2", "libvpx", "glib"]
 ```
 
+Without `ref` a recipe builds its latest release, or its development branch if
+it has never made one. `first_release` is for a project whose history carries an
+older project's tags: uzdoom's has ZDoom's `2.8.1` and GZDoom's `g4.14.2`, which
+would otherwise be offered as uzdoom releases and build no uzdoom.
+
 `-DINSTALL_PK3_PATH=bin` on uzdoom is load-bearing. Its default install puts
 the pk3s in `share/games/uzdoom` while the binary looks beside itself, so a
 stock build succeeds and then aborts at launch with `Cannot find uzdoom.pk3`.
@@ -827,11 +839,12 @@ profiles quietly stop applying.
 
 #### Update checks
 
-Since a recipe usually tracks a branch, "is there a new version" means "does
-the remote ref still point at the commit we built". At startup caco asks each
-built sourceport's remote exactly that, with one `git ls-remote` each — no
-objects are fetched — and shows a notification if any has moved. The
-**Sourceports** dialog marks them `update available`; rebuilding is always your call.
+At startup caco asks each built sourceport's repository whether there is
+something newer than what you built, by the rules above: a newer release for a
+build of the latest release, new commits for a build of a branch, and nothing
+for an older release you chose. It is one `git ls-remote` each, which fetches no
+objects, and a notification if anything is newer. The **Sourceports** dialog
+marks them `update available`; rebuilding is always your call.
 
 The answer is cached and checked at most once a day, so most launches do no
 network at all. Set `sourceport_update_check_days = 0` (or the Settings field) to

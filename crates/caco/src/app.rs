@@ -202,7 +202,8 @@ impl CacoApp {
         self.bg.sender()
     }
 
-    /// Ask each built sourceport's remote whether its ref has moved.
+    /// Ask each built sourceport's repository whether there is something newer
+    /// to build: a newer release, or new commits on its branch.
     ///
     /// Fire-and-forget on a worker thread: one `git ls-remote` per installed
     /// sourceport, throttled to `sourceport_update_check_days` and answered from cache in
@@ -321,25 +322,25 @@ impl CacoApp {
         let sender = self.bg.sender();
         let crate::dialogs::sourceports::SourceportBuildRequest {
             sourceport,
-            git_ref,
+            version,
             clean,
             cancel,
         } = request;
 
         std::thread::spawn(move || {
             let paths = SourceportPaths::from_config();
-            let mut recipe = match sourceports::find_recipe(&paths.recipe_dir, &sourceport) {
+            let recipe = match sourceports::find_recipe(&paths.recipe_dir, &sourceport) {
                 Ok(r) => r,
                 Err(e) => {
                     sender.send(AppMessage::SourceportBuildComplete(Err(e.to_string())));
                     return;
                 }
             };
-            recipe.git_ref = git_ref;
 
             let opts = BuildOptions { jobs: None, clean };
             let outcome = sourceports::build::install(
                 &recipe,
+                &version,
                 &paths,
                 &opts,
                 &mut |progress| match progress {
@@ -360,15 +361,19 @@ impl CacoApp {
         });
     }
 
-    /// Discover selectable releases and branches without blocking the UI.
+    /// Ask a sourceport's repository which versions it has, without blocking the UI.
     fn spawn_sourceport_version_check(
         &self,
         request: crate::dialogs::sourceports::SourceportVersionsRequest,
     ) {
+        use caco_core::sourceports::{self, SourceportPaths};
+
         let sender = self.bg.sender();
         std::thread::spawn(move || {
-            let outcome =
-                caco_core::sourceports::remote_refs(&request.repo).map_err(|e| e.to_string());
+            let paths = SourceportPaths::from_config();
+            let outcome = sourceports::find_recipe(&paths.recipe_dir, &request.sourceport)
+                .and_then(|recipe| sourceports::remote_versions(&recipe))
+                .map_err(|e| e.to_string());
             sender.send(AppMessage::SourceportVersionsLoaded {
                 sourceport: request.sourceport,
                 outcome,

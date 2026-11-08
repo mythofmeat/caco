@@ -618,6 +618,7 @@ dependencies = [
  "serde_json",
  "shlex",
  "tempfile",
+ "toml",
 ]
 
 [[package]]

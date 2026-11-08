@@ -12,8 +12,11 @@ use std::sync::mpsc;
 
 use crate::error::Error;
 
-use super::manifest::{InstalledSourceport, SourceportManifest, write_manifest};
-use super::recipe::SourceportRecipe;
+use super::manifest::{
+    InstalledSourceport, SourceportManifest, find_installed, remove_installed, write_manifest,
+};
+use super::recipe::{SourceportRecipe, slugify_ref};
+use super::versions::{Target, Version, remote_versions};
 
 /// Filesystem roots a build reads and writes.
 ///
@@ -52,9 +55,10 @@ impl SourceportPaths {
         self.src_root.join(format!("{name}.build"))
     }
 
-    /// Install prefix for a recipe at its current ref.
-    pub fn prefix(&self, recipe: &SourceportRecipe) -> PathBuf {
-        self.prefix_root.join(&recipe.name).join(recipe.ref_slug())
+    /// Install prefix for one version of a sourceport, by the name it goes by: `5.0.3`,
+    /// `trunk`.
+    pub fn prefix(&self, name: &str, version: &str) -> PathBuf {
+        self.prefix_root.join(name).join(slugify_ref(version))
     }
 }
 
@@ -105,35 +109,46 @@ const ERROR_TAIL_LINES: usize = 25;
 // Command construction
 // ---------------------------------------------------------------------------
 
-/// `git clone` for a fresh checkout.
+/// `git init` for a checkout that is not there yet.
 ///
-/// Shallow: the full uzdoom history is 221M and no part of caco reads it.
-/// `--branch` accepts a branch or a tag but not a bare commit SHA, which is
-/// the one ref form a recipe cannot use.
-pub fn clone_args(recipe: &SourceportRecipe, dest: &Path) -> Vec<String> {
+/// Not `git clone`, whose `--branch` takes a short name and prefers a branch to
+/// a tag of the same name, where `git fetch` prefers the tag. A first build and
+/// a rebuild of uzdoom's `4.14.3` could be different code that way. Every build
+/// fetches a full refname into whatever checkout there is instead, a new one
+/// included. The initial branch is named so that git has no hint to print.
+pub fn init_args(dest: &Path) -> Vec<String> {
     vec![
-        "clone".into(),
-        "--depth".into(),
-        "1".into(),
-        "--recurse-submodules".into(),
-        "--shallow-submodules".into(),
-        "--branch".into(),
-        recipe.git_ref.clone(),
-        recipe.repo.clone(),
+        "init".into(),
+        "--quiet".into(),
+        "--initial-branch=build".into(),
         dest.display().to_string(),
     ]
 }
 
-/// `git fetch` to move an existing checkout to the recipe's ref.
-pub fn fetch_args(recipe: &SourceportRecipe) -> Vec<String> {
+/// Point the checkout at the recipe's repository, every build, so a recipe
+/// changed to a fork builds the fork. `origin` rather than the URL on the fetch
+/// line, because a submodule with a relative URL is found from it.
+pub fn origin_args(recipe: &SourceportRecipe) -> Vec<String> {
+    vec![
+        "config".into(),
+        "remote.origin.url".into(),
+        recipe.repo.clone(),
+    ]
+}
+
+/// `git fetch` for the one commit a build needs.
+///
+/// Shallow: the full uzdoom history is 221M and no part of caco reads it. By
+/// full refname, so a tag and a branch of the same name cannot be confused, and
+/// a tag that later moves (`x-testing` does every day) does not need `--force`,
+/// since nothing local is updated.
+pub fn fetch_args(target: &Target) -> Vec<String> {
     vec![
         "fetch".into(),
         "--depth".into(),
         "1".into(),
-        "--tags".into(),
-        "--force".into(),
         "origin".into(),
-        recipe.git_ref.clone(),
+        target.refname.clone(),
     ]
 }
 
@@ -208,12 +223,19 @@ pub fn install_args(build_dir: &Path) -> Vec<String> {
 // Driver
 // ---------------------------------------------------------------------------
 
-/// Build `recipe` and install it into its prefix.
+/// Build `version` of `recipe` and install it into its prefix.
+///
+/// What `version` means is asked of the repository first, so the latest release
+/// is the latest when the build starts rather than when a list was last read.
 ///
 /// The install prefix is not touched until the compile has succeeded, so a
-/// failed rebuild leaves the previously working sourceport in place.
+/// failed rebuild leaves the previously working sourceport in place. An update
+/// to the latest release replaces the release it updates, once it works: each
+/// release has a prefix of its own, and a uzdoom left behind by every update
+/// would be 100M a time that nothing lists.
 pub fn install(
     recipe: &SourceportRecipe,
+    version: &Version,
     paths: &SourceportPaths,
     opts: &BuildOptions,
     progress: &mut dyn FnMut(BuildProgress<'_>),
@@ -221,9 +243,25 @@ pub fn install(
 ) -> crate::Result<InstalledSourceport> {
     require_tools(recipe)?;
 
+    progress(BuildProgress::Step(BuildStep::Fetch));
+    let target = resolve_target(recipe, version)?;
+    progress(BuildProgress::Line(&format!(
+        "{} {} is at {}",
+        recipe.name,
+        target.name,
+        target.commit.get(..9).unwrap_or(&target.commit)
+    )));
+
     let checkout = paths.checkout_dir(&recipe.name);
     let build_dir = paths.build_dir(&recipe.name);
-    let prefix = paths.prefix(recipe);
+    let prefix = paths.prefix(&recipe.name, &target.name);
+    // Found before building, since afterwards the newest install is this one.
+    let superseded = find_installed(&paths.prefix_root, &recipe.name).filter(|previous| {
+        target.follows_releases
+            && previous.prefix != prefix
+            && Version::of(&previous.manifest, recipe.first_release.as_ref())
+                == Version::LatestRelease
+    });
 
     if opts.clean {
         let _ = std::fs::remove_dir_all(&checkout);
@@ -231,43 +269,25 @@ pub fn install(
     }
 
     // --- fetch ---
-    progress(BuildProgress::Step(BuildStep::Fetch));
     std::fs::create_dir_all(&paths.src_root)?;
-    if checkout.join(".git").is_dir() {
-        git(
-            recipe,
-            BuildStep::Fetch,
-            &checkout,
-            fetch_args(recipe),
-            progress,
-            cancel,
-        )?;
-        git(
-            recipe,
-            BuildStep::Fetch,
-            &checkout,
-            reset_args(),
-            progress,
-            cancel,
-        )?;
-        git(
-            recipe,
-            BuildStep::Fetch,
-            &checkout,
-            submodule_args(),
-            progress,
-            cancel,
-        )?;
-    } else {
+    if !checkout.join(".git").is_dir() {
         let _ = std::fs::remove_dir_all(&checkout);
         git(
             recipe,
             BuildStep::Fetch,
             &paths.src_root,
-            clone_args(recipe, &checkout),
+            init_args(&checkout),
             progress,
             cancel,
         )?;
+    }
+    for args in [
+        origin_args(recipe),
+        fetch_args(&target),
+        reset_args(),
+        submodule_args(),
+    ] {
+        git(recipe, BuildStep::Fetch, &checkout, args, progress, cancel)?;
     }
 
     // --- patch ---
@@ -332,8 +352,9 @@ pub fn install(
     let manifest = SourceportManifest {
         name: recipe.name.clone(),
         repo: recipe.repo.clone(),
-        git_ref: recipe.git_ref.clone(),
+        git_ref: target.name.clone(),
         commit,
+        follows_releases: Some(target.follows_releases),
         binary: recipe.binary.clone(),
         built_at: chrono::Local::now().to_rfc3339(),
     };
@@ -354,7 +375,31 @@ pub fn install(
             ),
         });
     }
+    if let Some(previous) = superseded {
+        // A failure leaves a build nothing launches, which is what there was before.
+        let _ = remove_installed(&previous.prefix);
+    }
     Ok(installed)
+}
+
+/// Ask the repository what `version` is now.
+fn resolve_target(recipe: &SourceportRecipe, version: &Version) -> crate::Result<Target> {
+    let fetch_failed = |detail: String| Error::PortBuild {
+        sourceport: recipe.name.clone(),
+        step: BuildStep::Fetch.label(),
+        detail,
+    };
+    let versions = remote_versions(recipe).map_err(|e| fetch_failed(e.to_string()))?;
+    versions.resolve(version).ok_or_else(|| {
+        fetch_failed(match version {
+            Version::LatestRelease => {
+                "the repository has no releases and does not say which branch it is \
+                 developed on"
+                    .to_string()
+            }
+            Version::Named(name) => format!("the repository has no branch or tag called {name}"),
+        })
+    })
 }
 
 /// The tools a recipe needs before anything is downloaded.
@@ -418,7 +463,11 @@ fn git(
     cancel: &dyn Fn() -> bool,
 ) -> crate::Result<()> {
     let mut cmd = Command::new("git");
-    cmd.args(args).current_dir(cwd);
+    // stdin is not where git asks for a login: it opens the terminal caco was
+    // started from, if there is one, and the build would wait on it.
+    cmd.args(args)
+        .current_dir(cwd)
+        .env("GIT_TERMINAL_PROMPT", "0");
     run(recipe, step, cmd, progress, cancel)
 }
 
@@ -545,15 +594,26 @@ mod tests {
         }
     }
 
+    fn target(refname: &str) -> Target {
+        Target {
+            name: refname.rsplit('/').next().unwrap().to_string(),
+            refname: refname.to_string(),
+            commit: "7910df7102033fd7754a317f3254f24101135926".to_string(),
+            follows_releases: false,
+        }
+    }
+
     #[test]
-    fn prefix_is_namespaced_by_name_and_ref() {
+    fn prefix_is_namespaced_by_name_and_version() {
         let dir = tempfile::tempdir().unwrap();
         let p = paths(dir.path());
-        let mut r = recipe("uzdoom");
-        r.git_ref = "origin/master".into();
         assert_eq!(
-            p.prefix(&r),
+            p.prefix("uzdoom", "origin/master"),
             p.prefix_root.join("uzdoom").join("origin-master")
+        );
+        assert_eq!(
+            p.prefix("uzdoom", "5.0.3"),
+            p.prefix_root.join("uzdoom").join("5.0.3")
         );
     }
 
@@ -565,13 +625,33 @@ mod tests {
     }
 
     #[test]
-    fn clone_is_shallow_and_pinned_to_the_ref() {
-        let dir = tempfile::tempdir().unwrap();
-        let r = recipe("nyan-doom");
-        let args = clone_args(&r, &dir.path().join("nyan-doom"));
+    fn fetch_is_shallow_and_by_full_refname() {
+        // A short name would be the branch to `git clone` and the tag to `git fetch`.
+        let args = fetch_args(&target("refs/tags/4.14.3"));
         assert!(args.windows(2).any(|w| w == ["--depth", "1"]));
-        assert!(args.windows(2).any(|w| w == ["--branch", "master"]));
-        assert!(args.contains(&r.repo));
+        assert_eq!(args.last().map(String::as_str), Some("refs/tags/4.14.3"));
+        assert!(
+            !args.contains(&"--tags".to_string()),
+            "that fetches every tag"
+        );
+    }
+
+    #[test]
+    fn the_checkout_is_pointed_at_the_recipes_repository() {
+        let r = recipe("nyan-doom");
+        assert_eq!(
+            origin_args(&r),
+            ["config", "remote.origin.url", r.repo.as_str()]
+        );
+    }
+
+    #[test]
+    fn a_new_checkout_is_initialised_rather_than_cloned() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("uzdoom");
+        let args = init_args(&dest);
+        assert_eq!(args[0], "init");
+        assert_eq!(args.last(), Some(&dest.display().to_string()));
     }
 
     #[test]
@@ -583,7 +663,7 @@ mod tests {
             &r,
             &p.checkout_dir("nyan-doom"),
             &p.build_dir("nyan-doom"),
-            &p.prefix(&r),
+            &p.prefix("nyan-doom", "master"),
         );
 
         let src = args[args.iter().position(|a| a == "-S").unwrap() + 1].clone();
@@ -599,7 +679,7 @@ mod tests {
             &r,
             &p.checkout_dir("uzdoom"),
             &p.build_dir("uzdoom"),
-            &p.prefix(&r),
+            &p.prefix("uzdoom", "trunk"),
         );
 
         let src = args[args.iter().position(|a| a == "-S").unwrap() + 1].clone();
@@ -611,7 +691,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let p = paths(dir.path());
         let r = recipe("uzdoom");
-        let prefix = p.prefix(&r);
+        let prefix = p.prefix("uzdoom", "trunk");
         let args = configure_args(
             &r,
             &p.checkout_dir("uzdoom"),
@@ -635,7 +715,7 @@ mod tests {
             &r,
             &p.checkout_dir("uzdoom"),
             &p.build_dir("uzdoom"),
-            &p.prefix(&r),
+            &p.prefix("uzdoom", "trunk"),
         );
 
         let last = args

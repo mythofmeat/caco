@@ -1,26 +1,29 @@
-//! Notice when an installed sourceport has fallen behind its recipe's ref.
+//! Notice when an installed sourceport has something newer to build.
 //!
-//! A recipe usually tracks a branch, so "is there a new version" is really
-//! "does the remote ref still point at the commit we built". `git ls-remote`
-//! answers that in one round trip without fetching an object, which is what
-//! makes this cheap enough to run at startup.
+//! What is newer depends on what it was built as ([`Version::of`]): a newer
+//! release for one that follows releases, and new commits for one built from a
+//! branch. An older release chosen on purpose has nothing newer, since its tag
+//! stays where it is. All three come down to one question, whether the commit
+//! rebuilding it would check out is the one it was built from, and `git
+//! ls-remote` answers that in one round trip without fetching an object, which
+//! is what makes this cheap enough to run at startup.
 //!
 //! The answer is cached and throttled, for two reasons: a sourceport that updates
 //! weekly does not need to be asked about on every launch, and a machine
 //! with no network must not pay a DNS timeout per sourceport before the window
 //! appears. The cache lives in the sourceports cache directory — it is a fact about
-//! a remote, so losing it costs one more round trip.
+//! a repository, so losing it costs one more round trip.
 
-use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 
 use super::build::SourceportPaths;
-use super::manifest::list_installed;
+use super::manifest::{SourceportManifest, list_installed};
+use super::recipe::load_recipes;
+use super::versions::{Target, Version, remote_versions};
 
 /// Filename of the check cache, inside the prefix root.
 ///
@@ -28,60 +31,51 @@ use super::manifest::list_installed;
 /// descends into directories that carry a manifest.
 const CACHE_NAME: &str = "update-check.toml";
 
-/// Where one installed sourceport stands against its remote.
+/// What rebuilding a build as it was built would bring that it does not have.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Update {
+    /// A newer release, for a build that follows them.
+    Release(String),
+    /// New commits on the branch it was built from.
+    Commits,
+}
+
+/// What rebuilding `manifest`'s build would bring, if what that checks out now
+/// is `commit`, and is `release` for a build that follows releases.
+///
+/// A release is its name, so the same release again is nothing new even if its
+/// tag has been moved since. Anything else is its commit, and a build whose
+/// commit git would not name (`"unknown"`) is never behind: it would light up on
+/// every launch with a rebuild that could not clear it.
+pub fn update_to(
+    manifest: &SourceportManifest,
+    commit: &str,
+    release: Option<&str>,
+) -> Option<Update> {
+    match release {
+        Some(release) => {
+            (release != manifest.git_ref).then(|| Update::Release(release.to_string()))
+        }
+        None => {
+            (manifest.commit != "unknown" && manifest.commit != commit).then_some(Update::Commits)
+        }
+    }
+}
+
+/// Where one installed sourceport stands against its repository.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpdateStatus {
     pub name: String,
     pub git_ref: String,
-    /// Commit the installed build was made from.
-    pub installed_commit: String,
-    /// Commit the ref points at now, or `None` if the remote could not be
-    /// reached and nothing was cached.
-    pub remote_commit: Option<String>,
-}
-
-/// Branches and release tags advertised by a sourceport's remote.
-///
-/// This is deliberately not populated by [`status`](super::status): listing
-/// every ref can be noticeably slower than rendering the Sourceports dialog. The
-/// frontend asks for it only when the user clicks "Check versions".
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct RemoteRefs {
-    pub branches: Vec<String>,
-    /// Tags in version-like descending order, so the first item is the best
-    /// generic-git approximation of "latest release".
-    pub releases: Vec<String>,
-}
-
-impl RemoteRefs {
-    pub fn latest_release(&self) -> Option<&str> {
-        self.releases.first().map(String::as_str)
-    }
-
-    /// The latest release when `git_ref` is an older advertised release.
-    ///
-    /// A branch is deliberately not treated as an old release. Branch users
-    /// track commits through [`check_updates`]; release users track new tags
-    /// through the version list.
-    pub fn newer_release_than(&self, git_ref: &str) -> Option<&str> {
-        if !self.releases.iter().any(|release| release == git_ref) {
-            return None;
-        }
-        self.latest_release().filter(|latest| *latest != git_ref)
-    }
+    /// What a rebuild would bring: `None` if nothing, or if the repository
+    /// could not be reached and nothing was cached.
+    pub update: Option<Update>,
 }
 
 impl UpdateStatus {
     /// Whether a rebuild would get something new.
-    ///
-    /// A build whose commit was never resolved (`"unknown"`, from a checkout
-    /// git would not answer for) is not reported as behind: it would light up
-    /// on every launch with a rebuild that could not clear it.
     pub fn is_behind(&self) -> bool {
-        match &self.remote_commit {
-            Some(remote) => self.installed_commit != "unknown" && remote != &self.installed_commit,
-            None => false,
-        }
+        self.update.is_some()
     }
 }
 
@@ -90,14 +84,34 @@ impl UpdateStatus {
 pub struct CachedCheck {
     /// RFC 3339 timestamp of the check.
     pub checked_at: String,
+    /// The commit rebuilding would check out, as of the check.
     pub remote_commit: String,
+    /// The release that commit is, for a build that follows releases, so that
+    /// what is new can be named without asking again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release: Option<String>,
+}
+
+impl CachedCheck {
+    fn of(target: &Target, now: DateTime<Local>) -> Self {
+        Self {
+            checked_at: now.to_rfc3339(),
+            remote_commit: target.commit.clone(),
+            release: target.follows_releases.then(|| target.name.clone()),
+        }
+    }
+
+    /// What rebuilding `manifest`'s build would have brought, as of this check.
+    pub fn update_for(&self, manifest: &SourceportManifest) -> Option<Update> {
+        update_to(manifest, &self.remote_commit, self.release.as_deref())
+    }
 }
 
 /// Remote state as of the last check.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateCache {
     #[serde(default)]
-    pub sourceports: BTreeMap<String, CachedCheck>,
+    pub sourceports: std::collections::BTreeMap<String, CachedCheck>,
 }
 
 pub fn cache_path(prefix_root: &Path) -> PathBuf {
@@ -138,199 +152,63 @@ pub fn is_due(cache: &UpdateCache, name: &str, now: DateTime<Local>, interval_da
     now.signed_duration_since(checked).num_days() >= interval_days
 }
 
-/// Ask a remote what `git_ref` points at, without fetching any objects.
-pub fn remote_commit(repo: &str, git_ref: &str) -> crate::Result<String> {
-    let output = Command::new("git")
-        .args(["ls-remote", repo, git_ref])
-        .output()
-        .map_err(|e| crate::error::Error::Config(format!("git ls-remote failed: {e}")))?;
-    if !output.status.success() {
-        return Err(crate::error::Error::Config(format!(
-            "git ls-remote {repo} {git_ref}: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        )));
-    }
-    parse_ls_remote(&String::from_utf8_lossy(&output.stdout), git_ref)
-        .ok_or_else(|| crate::error::Error::Config(format!("remote has no ref '{git_ref}'")))
-}
-
-/// Lazily list the branches and tags a sourceport can be built from.
-///
-/// This uses git rather than a hosting-provider API, so custom recipes on
-/// GitLab, Codeberg or a private server get the same version picker as GitHub
-/// recipes. In that provider-neutral model, a release is a git tag.
-pub fn remote_refs(repo: &str) -> crate::Result<RemoteRefs> {
-    let output = Command::new("git")
-        .args(["ls-remote", "--heads", "--tags", repo])
-        .output()
-        .map_err(|e| crate::error::Error::Config(format!("git ls-remote failed: {e}")))?;
-    if !output.status.success() {
-        return Err(crate::error::Error::Config(format!(
-            "git ls-remote {repo}: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        )));
-    }
-    Ok(parse_remote_refs(&String::from_utf8_lossy(&output.stdout)))
-}
-
-fn parse_remote_refs(stdout: &str) -> RemoteRefs {
-    let mut branches = BTreeSet::new();
-    let mut releases = BTreeSet::new();
-    for line in stdout.lines() {
-        let Some((_, full_ref)) = line.split_once('\t') else {
-            continue;
-        };
-        if let Some(name) = full_ref.strip_prefix("refs/heads/") {
-            branches.insert(name.to_string());
-        } else if let Some(name) = full_ref.strip_prefix("refs/tags/") {
-            // Annotated tags appear twice; their peeled commit ends in ^{}.
-            releases.insert(name.trim_end_matches("^{}").to_string());
-        }
-    }
-    let mut releases: Vec<_> = releases.into_iter().collect();
-    releases.sort_by(|a, b| versionish_cmp(b, a));
-    RemoteRefs {
-        branches: branches.into_iter().collect(),
-        releases,
-    }
-}
-
-/// Compare names in the way people expect version tags to sort: numeric runs
-/// compare numerically, while everything else remains deterministic. This
-/// handles `v4.14.3` without imposing semver rules on projects that tag as
-/// `release-2026-08` or use some other convention.
-fn versionish_cmp(a: &str, b: &str) -> Ordering {
-    let mut left = a.as_bytes().iter().copied().peekable();
-    let mut right = b.as_bytes().iter().copied().peekable();
-    loop {
-        match (left.peek().copied(), right.peek().copied()) {
-            (Some(x), Some(y)) if x.is_ascii_digit() && y.is_ascii_digit() => {
-                let mut ln = Vec::new();
-                let mut rn = Vec::new();
-                while left.peek().is_some_and(u8::is_ascii_digit) {
-                    ln.push(left.next().unwrap());
-                }
-                while right.peek().is_some_and(u8::is_ascii_digit) {
-                    rn.push(right.next().unwrap());
-                }
-                let ltrim = ln.iter().position(|c| *c != b'0').unwrap_or(ln.len());
-                let rtrim = rn.iter().position(|c| *c != b'0').unwrap_or(rn.len());
-                let lnum = &ln[ltrim..];
-                let rnum = &rn[rtrim..];
-                match lnum.len().cmp(&rnum.len()).then_with(|| lnum.cmp(rnum)) {
-                    Ordering::Equal => {}
-                    other => return other,
-                }
-            }
-            (Some(x), Some(y)) => {
-                left.next();
-                right.next();
-                match x.to_ascii_lowercase().cmp(&y.to_ascii_lowercase()) {
-                    Ordering::Equal => {}
-                    other => return other,
-                }
-            }
-            (None, None) => return Ordering::Equal,
-            (None, Some(_)) => return Ordering::Less,
-            (Some(_), None) => return Ordering::Greater,
-        }
-    }
-}
-
-/// Pick the commit for `git_ref` out of `git ls-remote` output.
-///
-/// An annotated tag yields two lines: the tag object and, suffixed `^{}`, the
-/// commit it points at. The second is what a checkout resolves `HEAD` to, so
-/// it is the one to compare a manifest against. `ls-remote` also matches a
-/// pattern against the tail of a refname, so `master` can bring back
-/// `refs/heads/topic/master` too — exact refnames are tried first.
-fn parse_ls_remote(stdout: &str, git_ref: &str) -> Option<String> {
-    let rows: Vec<(&str, &str)> = stdout
-        .lines()
-        .filter_map(|line| line.split_once('\t'))
-        .map(|(sha, name)| (sha.trim(), name.trim()))
-        .filter(|(sha, _)| !sha.is_empty())
-        .collect();
-
-    for wanted in [
-        format!("refs/tags/{git_ref}^{{}}"),
-        format!("refs/heads/{git_ref}"),
-        format!("refs/tags/{git_ref}"),
-        git_ref.to_string(),
-    ] {
-        if let Some((sha, _)) = rows.iter().find(|(_, name)| *name == wanted) {
-            return Some((*sha).to_string());
-        }
-    }
-    // Unambiguous single match: take it.
-    if rows.len() == 1 {
-        return Some(rows[0].0.to_string());
-    }
-    None
-}
-
-/// Check every installed sourceport against its recipe's remote.
+/// Check every installed sourceport against its recipe's repository.
 ///
 /// Returns a status per installed sourceport, in name order — the caller decides
 /// what to do with the ones that are behind. Sourceports whose check is not yet due
 /// are answered from the cache, so this is free on most launches.
 ///
-/// A remote that cannot be reached is not an error: the sourceport keeps whatever
-/// the cache last knew, or reports `None`, and the next run tries again.
+/// A repository that cannot be reached is not an error, and nor is a build
+/// whose branch or tag has gone from it: the sourceport keeps whatever the cache
+/// last knew, or reports `None`, and the next run tries again. So does one
+/// whose recipe has gone, since there is nothing to rebuild it from.
 pub fn check_updates(
     paths: &SourceportPaths,
     interval_days: i64,
     now: DateTime<Local>,
 ) -> Vec<UpdateStatus> {
     let mut cache = load_cache(&paths.prefix_root);
+    // A recipe file that will not parse is the Sourceports dialog's to report.
+    let recipes = load_recipes(&paths.recipe_dir).unwrap_or_default();
     let mut changed = false;
     let mut statuses = Vec::new();
     let mut seen = BTreeSet::new();
 
     for installed in list_installed(&paths.prefix_root) {
         let name = installed.manifest.name.clone();
-        // Several refs may be installed side by side. list_installed is
+        // Several versions may be installed side by side. list_installed is
         // newest-first, and that is also the build managed_binary launches,
-        // so only check that active install. Track the ref it was actually
-        // built from: a release chosen in the UI must not be compared to the
-        // recipe's development branch and reported as perpetually behind.
+        // so only check that one, against what it was built as: a release
+        // chosen to stay on must not be compared with the latest one and
+        // reported as behind for good.
         if !installed.is_usable() || !seen.insert(name.clone()) {
             continue;
         }
-        let repo = installed.manifest.repo.clone();
-        let git_ref = installed.manifest.git_ref.clone();
 
-        let remote = if is_due(&cache, &name, now, interval_days) {
-            match remote_commit(&repo, &git_ref) {
-                Ok(commit) => {
-                    cache.sourceports.insert(
-                        name.clone(),
-                        CachedCheck {
-                            checked_at: now.to_rfc3339(),
-                            remote_commit: commit.clone(),
-                        },
-                    );
-                    changed = true;
-                    Some(commit)
-                }
-                // Offline, or the ref is gone. Fall back to what we knew.
-                Err(_) => cache
-                    .sourceports
-                    .get(&name)
-                    .map(|c| c.remote_commit.clone()),
+        let recipe = recipes.iter().find(|recipe| recipe.name == name);
+        let checked = match recipe {
+            Some(recipe) if is_due(&cache, &name, now, interval_days) => {
+                let version = Version::of(&installed.manifest, recipe.first_release.as_ref());
+                remote_versions(recipe)
+                    .ok()
+                    .and_then(|versions| versions.resolve(&version))
+                    .map(|target| CachedCheck::of(&target, now))
             }
-        } else {
-            cache
-                .sourceports
-                .get(&name)
-                .map(|c| c.remote_commit.clone())
+            _ => None,
         };
+        if let Some(checked) = checked {
+            cache.sourceports.insert(name.clone(), checked);
+            changed = true;
+        }
+        let update = cache
+            .sourceports
+            .get(&name)
+            .and_then(|check| check.update_for(&installed.manifest));
 
         statuses.push(UpdateStatus {
             name,
-            git_ref,
-            installed_commit: installed.manifest.commit.clone(),
-            remote_commit: remote,
+            git_ref: installed.manifest.git_ref.clone(),
+            update,
         });
     }
 
@@ -341,7 +219,7 @@ pub fn check_updates(
     statuses
 }
 
-/// Forget the cached check for a sourceport, so the next run asks the remote again.
+/// Forget the cached check for a sourceport, so the next run asks the repository again.
 ///
 /// Called after a build: the freshly recorded commit is the answer, and
 /// leaving a stale entry would keep the update badge lit until the interval
@@ -371,6 +249,7 @@ mod tests {
             CachedCheck {
                 checked_at: checked_at.to_string(),
                 remote_commit: commit.to_string(),
+                release: None,
             },
         );
         cache
@@ -400,6 +279,7 @@ mod tests {
                 repo: "https://example.invalid/x".to_string(),
                 git_ref: git_ref.to_string(),
                 commit: commit.to_string(),
+                follows_releases: None,
                 binary: name.to_string(),
                 built_at: built_at.to_string(),
             },
@@ -407,76 +287,6 @@ mod tests {
         .unwrap();
         std::fs::create_dir_all(prefix.join("bin")).unwrap();
         std::fs::write(prefix.join("bin").join(name), b"x").unwrap();
-    }
-
-    // -- ls-remote parsing -------------------------------------------------
-
-    #[test]
-    fn a_branch_resolves_to_its_head() {
-        let out = "abc123\trefs/heads/master\n";
-        assert_eq!(parse_ls_remote(out, "master").as_deref(), Some("abc123"));
-    }
-
-    #[test]
-    fn an_annotated_tag_resolves_to_the_commit_not_the_tag_object() {
-        // The tag object's own sha would never equal a manifest commit, so
-        // taking the first line would report every tagged build as behind.
-        let out = "tagobj\trefs/tags/v1.0.0\ncommitsha\trefs/tags/v1.0.0^{}\n";
-        assert_eq!(parse_ls_remote(out, "v1.0.0").as_deref(), Some("commitsha"));
-    }
-
-    #[test]
-    fn an_exact_refname_beats_a_tail_match() {
-        // `ls-remote master` also matches refs/heads/topic/master.
-        let out = "wrong\trefs/heads/topic/master\nright\trefs/heads/master\n";
-        assert_eq!(parse_ls_remote(out, "master").as_deref(), Some("right"));
-    }
-
-    #[test]
-    fn an_ambiguous_match_resolves_to_nothing() {
-        let out = "a\trefs/heads/topic/master\nb\trefs/heads/other/master\n";
-        assert_eq!(parse_ls_remote(out, "master"), None);
-    }
-
-    #[test]
-    fn a_lone_match_is_taken_even_without_an_exact_refname() {
-        let out = "onlysha\trefs/heads/topic/master\n";
-        assert_eq!(parse_ls_remote(out, "master").as_deref(), Some("onlysha"));
-    }
-
-    #[test]
-    fn empty_output_resolves_to_nothing() {
-        assert_eq!(parse_ls_remote("", "master"), None);
-    }
-
-    #[test]
-    fn remote_refs_separate_branches_and_deduplicate_annotated_tags() {
-        let refs = parse_remote_refs(
-            "a\trefs/heads/main\n\
-             b\trefs/heads/release/4.0\n\
-             c\trefs/tags/v4.9.0\n\
-             d\trefs/tags/v4.10.0\n\
-             e\trefs/tags/v4.10.0^{}\n",
-        );
-        assert_eq!(refs.branches, vec!["main", "release/4.0"]);
-        assert_eq!(refs.releases, vec!["v4.10.0", "v4.9.0"]);
-        assert_eq!(refs.latest_release(), Some("v4.10.0"));
-        assert_eq!(refs.newer_release_than("v4.9.0"), Some("v4.10.0"));
-        assert_eq!(refs.newer_release_than("v4.10.0"), None);
-        assert_eq!(refs.newer_release_than("main"), None);
-    }
-
-    #[test]
-    fn release_sorting_accepts_non_semver_tags() {
-        let refs = parse_remote_refs(
-            "a\trefs/tags/release-2025-12\n\
-             b\trefs/tags/release-2026-2\n\
-             c\trefs/tags/release-2026-10\n",
-        );
-        assert_eq!(
-            refs.releases,
-            vec!["release-2026-10", "release-2026-2", "release-2025-12"]
-        );
     }
 
     // -- throttling --------------------------------------------------------
@@ -511,49 +321,58 @@ mod tests {
         assert!(is_due(&cache, "uzdoom", now(), 1));
     }
 
-    // -- status ------------------------------------------------------------
+    // -- what is new --------------------------------------------------------
 
-    #[test]
-    fn a_differing_remote_commit_is_behind() {
-        let status = UpdateStatus {
+    fn built(git_ref: &str, commit: &str) -> SourceportManifest {
+        SourceportManifest {
             name: "uzdoom".into(),
-            git_ref: "master".into(),
-            installed_commit: "aaa".into(),
-            remote_commit: Some("bbb".into()),
-        };
-        assert!(status.is_behind());
+            repo: "https://example.invalid/x".into(),
+            git_ref: git_ref.into(),
+            commit: commit.into(),
+            follows_releases: None,
+            binary: "uzdoom".into(),
+            built_at: "2026-01-01T00:00:00+00:00".into(),
+        }
     }
 
     #[test]
-    fn a_matching_remote_commit_is_not_behind() {
-        let status = UpdateStatus {
-            name: "uzdoom".into(),
-            git_ref: "master".into(),
-            installed_commit: "aaa".into(),
-            remote_commit: Some("aaa".into()),
-        };
-        assert!(!status.is_behind());
+    fn a_branch_that_has_moved_has_new_commits() {
+        assert_eq!(
+            update_to(&built("trunk", "aaa"), "bbb", None),
+            Some(Update::Commits)
+        );
+        assert_eq!(update_to(&built("trunk", "aaa"), "aaa", None), None);
+    }
+
+    #[test]
+    fn a_newer_release_is_named() {
+        assert_eq!(
+            update_to(&built("5.0.2", "aaa"), "bbb", Some("5.0.3")),
+            Some(Update::Release("5.0.3".into()))
+        );
+    }
+
+    #[test]
+    fn the_same_release_again_is_nothing_new_even_at_another_commit() {
+        // A moved tag is not a release anybody would be told was out.
+        assert_eq!(
+            update_to(&built("5.0.3", "aaa"), "bbb", Some("5.0.3")),
+            None
+        );
     }
 
     #[test]
     fn an_unresolvable_build_is_never_reported_as_behind() {
         // Otherwise it lights up every launch and no rebuild clears it.
-        let status = UpdateStatus {
-            name: "uzdoom".into(),
-            git_ref: "master".into(),
-            installed_commit: "unknown".into(),
-            remote_commit: Some("bbb".into()),
-        };
-        assert!(!status.is_behind());
+        assert_eq!(update_to(&built("trunk", "unknown"), "bbb", None), None);
     }
 
     #[test]
-    fn an_unreachable_remote_is_not_behind() {
+    fn an_unreachable_repository_is_not_behind() {
         let status = UpdateStatus {
             name: "uzdoom".into(),
-            git_ref: "master".into(),
-            installed_commit: "aaa".into(),
-            remote_commit: None,
+            git_ref: "trunk".into(),
+            update: None,
         };
         assert!(!status.is_behind());
     }
@@ -569,6 +388,20 @@ mod tests {
             load_cache(dir.path()).sourceports.get("uzdoom"),
             cache.sourceports.get("uzdoom")
         );
+    }
+
+    #[test]
+    fn a_cache_from_before_releases_were_named_still_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            cache_path(dir.path()),
+            "[sourceports.uzdoom]\nchecked_at = \"2026-08-10T06:00:00+00:00\"\n\
+             remote_commit = \"abc\"\n",
+        )
+        .unwrap();
+        let cache = load_cache(dir.path());
+        assert_eq!(cache.sourceports["uzdoom"].remote_commit, "abc");
+        assert_eq!(cache.sourceports["uzdoom"].release, None);
     }
 
     #[test]
@@ -596,6 +429,7 @@ mod tests {
             CachedCheck {
                 checked_at: "2026-08-10T06:00:00+00:00".to_string(),
                 remote_commit: "def".to_string(),
+                release: None,
             },
         );
         save_cache(dir.path(), &cache).unwrap();
@@ -629,8 +463,40 @@ mod tests {
 
         let statuses = check_updates(&p, 1, now());
         assert_eq!(statuses.len(), 1);
-        assert_eq!(statuses[0].remote_commit.as_deref(), Some("bbb"));
+        assert_eq!(statuses[0].update, Some(Update::Commits));
         assert!(statuses[0].is_behind());
+    }
+
+    #[test]
+    fn a_repository_that_cannot_be_reached_keeps_what_the_cache_knew() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = paths(dir.path());
+        install(dir.path(), "uzdoom", "aaa");
+        // A repository on this machine that is not there, so asking fails at once and
+        // nothing leaves it.
+        std::fs::create_dir_all(&p.recipe_dir).unwrap();
+        std::fs::write(
+            p.recipe_dir.join("gone.toml"),
+            format!(
+                "[uzdoom]\nrepo = {:?}\nbinary = \"uzdoom\"\n[uzdoom.build]\nsystem = \"cmake\"\n",
+                dir.path().join("no-such-repository").display().to_string()
+            ),
+        )
+        .unwrap();
+        // Due: checked a month ago.
+        save_cache(
+            &p.prefix_root,
+            &cache_with("uzdoom", "2026-07-10T12:00:00+00:00", "bbb"),
+        )
+        .unwrap();
+
+        let statuses = check_updates(&p, 1, now());
+        assert_eq!(statuses[0].update, Some(Update::Commits));
+        assert_eq!(
+            load_cache(&p.prefix_root).sourceports["uzdoom"].checked_at,
+            "2026-07-10T12:00:00+00:00",
+            "a failed check is not a check"
+        );
     }
 
     #[test]
@@ -643,7 +509,7 @@ mod tests {
         // this hang or error if a lookup were attempted.
         let statuses = check_updates(&p, 0, now());
         assert_eq!(statuses.len(), 1);
-        assert_eq!(statuses[0].remote_commit, None);
+        assert_eq!(statuses[0].update, None);
         assert!(!statuses[0].is_behind());
     }
 
@@ -669,6 +535,5 @@ mod tests {
         let statuses = check_updates(&p, 0, now());
         assert_eq!(statuses.len(), 1);
         assert_eq!(statuses[0].git_ref, "4.14.3");
-        assert_eq!(statuses[0].installed_commit, "new");
     }
 }
