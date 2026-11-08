@@ -83,16 +83,6 @@ impl UpdateStatus {
             None => false,
         }
     }
-
-    /// Short form of the remote commit, for display.
-    pub fn short_remote(&self) -> String {
-        self.remote_commit
-            .as_deref()
-            .unwrap_or("unknown")
-            .chars()
-            .take(9)
-            .collect()
-    }
 }
 
 /// What a previous check found, per sourceport.
