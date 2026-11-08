@@ -118,7 +118,7 @@ pub enum ActionRequest {
     Sourceports,
     /// Build a sourceport the sourceports dialog has selected, on a worker thread.
     StartSourceportBuild(Box<crate::dialogs::sourceports::SourceportBuildRequest>),
-    /// Lazily discover a sourceport's release tags and branches.
+    /// Ask a sourceport's repository for its releases and development branch.
     CheckSourceportVersions(crate::dialogs::sourceports::SourceportVersionsRequest),
     /// Run an enrichment the dialog has configured, on a worker thread.
     StartEnrich(Box<crate::dialogs::enrich::EnrichRequest>),

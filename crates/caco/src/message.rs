@@ -256,14 +256,15 @@ pub enum AppMessage {
     /// The build finished: `Ok` carries the message to show, `Err` the
     /// failure with the tail of the output that produced it.
     SourceportBuildComplete(Result<String, String>),
-    /// Result of an explicit, on-demand branch/tag lookup from the Sourceports dialog.
+    /// Which versions a sourceport's repository has, asked when the Sourceports
+    /// dialog first shows it.
     SourceportVersionsLoaded {
         sourceport: String,
-        outcome: Result<caco_core::sourceports::RemoteRefs, String>,
+        outcome: Result<caco_core::sourceports::RemoteVersions, String>,
     },
-    /// Names of built sourceports whose remote has moved past the installed
-    /// commit. Only sent when the list is non-empty — a startup check that
-    /// finds nothing says nothing.
+    /// Names of built sourceports with something newer to build: a newer
+    /// release, or new commits on their branch. Only sent when the list is
+    /// non-empty — a startup check that finds nothing says nothing.
     SourceportUpdatesAvailable(Vec<String>),
     SearchComplete(SearchSource, Result<SearchResults, String>),
     /// The newest uploads on idgames, for the table on the Import view.

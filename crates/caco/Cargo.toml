@@ -34,3 +34,5 @@ egui_kittest = { version = "0.37", features = ["wgpu", "snapshot", "eframe"] }
 tempfile.workspace = true
 # Writes the listing of the screenshot harness's copy of idgames.
 flate2.workspace = true
+# Writes the screenshot harness's recipes, which point at repositories on disk.
+toml.workspace = true

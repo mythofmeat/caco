@@ -3,10 +3,12 @@
 # A file dropped in the recipe directory (see
 # `config::sourceport_recipe_dir`) is merged over this set by name, so a user
 # can pin a ref, add build args or attach patches without patching the binary.
+#
+# None of these names a ref: each builds its latest release unless someone picks
+# another, and the development branch is whatever the repository's HEAD says.
 
 [nyan-doom]
 repo = "https://github.com/andrikpowell/nyan-doom"
-ref = "master"
 # The cmake root is not the repo root for this project.
 source_subdir = "prboom2"
 binary = "nyan-doom"
@@ -40,9 +42,10 @@ brew = [
 
 [uzdoom]
 repo = "https://github.com/UZDoom/uzdoom"
-# Not "master" — uzdoom's default branch is trunk, and the per-version
-# branches (4.14.3, 2.6, ...) are what tags would be elsewhere.
-ref = "trunk"
+# UZDoom is a fork of GZDoom, and the history it carries has ZDoom's release
+# tags back to 1.0.0 (and a stray 4.10.0), none of which builds a uzdoom.
+# GZDoom's own are g-prefixed, and fall below this too.
+first_release = "4.14.3"
 binary = "uzdoom"
 
 [uzdoom.build]

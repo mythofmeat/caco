@@ -110,6 +110,12 @@ pub enum Error {
 
     #[error("build of '{0}' was cancelled")]
     PortBuildCancelled(String),
+
+    /// A sourceport's git repository would not say what is in it: offline, a repository that
+    /// is not there, or no git. Says only what git did, since where it was asking from is
+    /// the caller's to put around it.
+    #[error("{0}")]
+    SourceportRemote(String),
 }
 
 fn last_seen_suffix(last_seen: &Option<PathBuf>) -> String {

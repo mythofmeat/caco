@@ -18,11 +18,16 @@ pub const MANIFEST_NAME: &str = "caco-sourceport.toml";
 pub struct SourceportManifest {
     pub name: String,
     pub repo: String,
-    /// The ref as the recipe asked for it — a branch name is not reproducible.
+    /// The branch or tag it was built from — a branch name is not reproducible.
     #[serde(rename = "ref")]
     pub git_ref: String,
     /// The commit that ref actually resolved to, which is.
     pub commit: String,
+    /// Whether it was built as the latest release, so that a newer one is an update to it.
+    /// `None` in a build from before this was written down: see
+    /// [`super::versions::Version::of`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub follows_releases: Option<bool>,
     /// Executable name inside `bin/`.
     pub binary: String,
     /// RFC 3339 timestamp of the successful install.
@@ -151,9 +156,27 @@ mod tests {
             repo: "https://example.invalid/x".to_string(),
             git_ref: "master".to_string(),
             commit: "abc123".to_string(),
+            follows_releases: None,
             binary: name.to_string(),
             built_at: built_at.to_string(),
         }
+    }
+
+    #[test]
+    fn a_manifest_from_before_follows_releases_still_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(MANIFEST_NAME),
+            "name = \"uzdoom\"\nrepo = \"x\"\nref = \"trunk\"\ncommit = \"abc\"\n\
+             binary = \"uzdoom\"\nbuilt_at = \"2026-01-01T00:00:00+00:00\"\n",
+        )
+        .unwrap();
+        assert_eq!(read_manifest(dir.path()).unwrap().follows_releases, None);
+
+        let mut written = manifest("uzdoom", "2026-01-01T00:00:00+00:00");
+        written.follows_releases = Some(false);
+        write_manifest(dir.path(), &written).unwrap();
+        assert_eq!(read_manifest(dir.path()), Some(written));
     }
 
     /// Build a prefix root under a tempdir. Nothing here may reach real paths.

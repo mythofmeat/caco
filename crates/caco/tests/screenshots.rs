@@ -40,7 +40,6 @@ use caco::import::state::{
 };
 use caco::message::{AppMessage, EnrichReport, IdgamesIndexRun};
 use caco::state::{ActionRequest, ViewMode};
-use caco_core::sourceports::RemoteRefs;
 use caco_sources::SourceError;
 use caco_sources::enrich_service::WikiBlocked;
 use caco_sources::http::WafKind;
@@ -141,6 +140,7 @@ fn scratch_home() -> PathBuf {
     caco_core::config::reload_config();
 
     put_sourceport_on_path(&home);
+    point_sourceports_at_repositories_on_disk(&home);
     home
 }
 
@@ -223,6 +223,95 @@ fn put_sourceport_on_path(home: &Path) {
     std::fs::write(bin.join("nyan-doom"), "").expect("create scratch sourceport");
     let path = std::env::var("PATH").unwrap_or_default();
     unsafe { std::env::set_var("PATH", format!("{}:{path}", bin.display())) };
+}
+
+/// What the scratch repository for each built-in sourceport is like: its development branch,
+/// and tags of every kind a real one has, of which the picker should offer the releases.
+const SOURCEPORT_REPOSITORIES: &[(&str, &str, &[&str])] = &[
+    (
+        "nyan-doom",
+        "master",
+        &["v1.5.4", "v1.6.0", "v1.6.1", "v1.6.2"],
+    ),
+    (
+        "uzdoom",
+        "trunk",
+        &[
+            "2.8.1",
+            "g4.14.2",
+            "4.14.3",
+            "5.0.0-rc.1",
+            "5.0.0",
+            "5.0.1",
+            "5.0.2",
+            "5.0.3",
+            "x-testing",
+        ],
+    ),
+];
+
+/// Opening Sourceports asks each sourceport's repository which versions it has, and a shot
+/// must not depend on what a project did today, or ask GitHub at all. So each built-in recipe
+/// is overridden here with one whose repository is a real one on disk, which `git ls-remote`
+/// answers the way it answers for GitHub.
+fn point_sourceports_at_repositories_on_disk(home: &Path) {
+    let repositories = home.join("sourceport-repositories");
+    let _ = std::fs::remove_dir_all(&repositories);
+    std::fs::create_dir_all(&repositories).expect("create scratch repositories");
+
+    let mut recipes = std::collections::BTreeMap::new();
+    for mut recipe in caco_core::sourceports::builtin_recipes() {
+        let (_, development, tags) = SOURCEPORT_REPOSITORIES
+            .iter()
+            .find(|(name, ..)| *name == recipe.name)
+            .unwrap_or_else(|| panic!("no scratch repository for {}", recipe.name));
+        let repository = repositories.join(&recipe.name);
+        git(
+            &repositories,
+            &[
+                "init",
+                "--quiet",
+                &format!("--initial-branch={development}"),
+                &recipe.name,
+            ],
+        );
+        git(
+            &repository,
+            &["commit", "--quiet", "--allow-empty", "-m", "start"],
+        );
+        for tag in *tags {
+            git(&repository, &["tag", "-a", "-m", tag, tag]);
+        }
+        git(&repository, &["branch", "someones-work-in-progress"]);
+        recipe.repo = repository.display().to_string();
+        recipes.insert(recipe.name.clone(), recipe);
+    }
+
+    let recipe_dir = home.join("sourceports");
+    std::fs::create_dir_all(&recipe_dir).expect("create scratch recipe dir");
+    std::fs::write(
+        recipe_dir.join("screenshots.toml"),
+        toml::to_string(&recipes).expect("write scratch recipes"),
+    )
+    .expect("save scratch recipes");
+}
+
+/// Run git with nobody's settings, so that a developer's signing setup cannot stop a commit.
+fn git(cwd: &Path, args: &[&str]) {
+    let status = std::process::Command::new("git")
+        .args([
+            "-c",
+            "user.name=caco",
+            "-c",
+            "user.email=caco@example.invalid",
+        ])
+        .args(args)
+        .current_dir(cwd)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .status()
+        .expect("run git");
+    assert!(status.success(), "git {args:?} failed in {}", cwd.display());
 }
 
 struct Shooter {
@@ -1062,22 +1151,58 @@ fn shoot_every_surface() {
     s.harness.key_press(egui::Key::F5);
     s.settle(2, Duration::ZERO);
 
-    // The version picker only exists once a remote has answered, and that is
-    // asked on demand, so opening the dialog alone never reaches it.
+    // Which versions there are is asked when a sourceport is shown, of a repository on disk
+    // here (see `point_sourceports_at_repositories_on_disk`), and the picker is shot open on
+    // uzdoom, whose repository has every kind of tag that should not be in it.
     record(
         "sourceports-version-picker",
         s.shot_dialog_after(
             "dlg-sourceports-version-picker",
             ActionRequest::Sourceports,
             |s| {
-                let tx = s.harness.state_mut().background_sender();
-                tx.send(AppMessage::SourceportVersionsLoaded {
-                    sourceport: "nyan-doom".to_string(),
-                    outcome: Ok(RemoteRefs {
-                        branches: vec!["master".to_string()],
-                        releases: vec!["v1.2.3".to_string(), "v1.2.2".to_string()],
-                    }),
+                s.harness
+                    .get_by_role_and_label(egui::accesskit::Role::Window, "Sourceports")
+                    .get_by_label("uzdoom")
+                    .click();
+                // Asked in the frame that showed uzdoom, so the spinner is up until the
+                // repository has answered. What this machine has built decides what the picker
+                // says it is on, so that is not what is waited for.
+                s.settle(1, Duration::ZERO);
+                s.wait_for("uzdoom's versions", |s| {
+                    s.harness
+                        .query_by_label(caco::dialogs::sourceports::CHECKING_VERSIONS)
+                        .is_none()
                 });
+                assert!(
+                    s.harness
+                        .query_by_label_contains("Couldn't check which versions")
+                        .is_none(),
+                    "asking the repository on disk failed"
+                );
+                s.harness
+                    .get_by_role_and_label(egui::accesskit::Role::ComboBox, "Version")
+                    .click();
+                s.settle(2, Duration::ZERO);
+                for offered in [
+                    "Latest release (5.0.3)",
+                    "trunk (development)",
+                    "5.0.2",
+                    "4.14.3",
+                ] {
+                    s.harness.get_by_label(offered);
+                }
+                for left_out in [
+                    "x-testing",
+                    "5.0.0-rc.1",
+                    "g4.14.2",
+                    "2.8.1",
+                    "someones-work-in-progress",
+                ] {
+                    assert!(
+                        s.harness.query_by_label(left_out).is_none(),
+                        "the picker offers {left_out}"
+                    );
+                }
             },
         ),
     );

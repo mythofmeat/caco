@@ -16,11 +16,14 @@
 //! the output is the reason the dialog is open and anything that has to be scrolled into
 //! view during a four-minute compile may as well not be shown.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use caco_core::sourceports::{self, DoctorReport, PackageCheck, SourceportPaths, SourceportStatus};
+use caco_core::sourceports::{
+    self, DoctorReport, PackageCheck, RemoteVersions, SourceportPaths, SourceportStatus, Update,
+    Version,
+};
 use caco_core::utils::format_size;
 
 use crate::dialogs::{Dialog, FooterRow, Primary};
@@ -29,14 +32,15 @@ use crate::theme;
 /// A build the dialog is asking the app to start.
 pub struct SourceportBuildRequest {
     pub sourceport: String,
-    pub git_ref: String,
+    pub version: Version,
     pub clean: bool,
     pub cancel: Arc<AtomicBool>,
 }
 
+/// Asking a sourceport's repository which versions it has, which the dialog does the first
+/// time it shows one. By name, as a build is, and the worker reads the recipe.
 pub struct SourceportVersionsRequest {
     pub sourceport: String,
-    pub repo: String,
 }
 
 pub enum SourceportsResult {
@@ -63,26 +67,96 @@ fn log_pane_height(ctx: &egui::Context) -> f32 {
     (ctx.content_rect().height() * 0.35).clamp(90.0, 300.0)
 }
 
+/// What the spinner beside the version picker is called, while the repository is asked.
+pub const CHECKING_VERSIONS: &str = "Checking which versions there are";
+
 /// Continue from the active install when the dialog opens. The recipe is only
 /// the fallback for a sourceport that has not been built yet.
-fn initial_selected_ref(sourceport: &SourceportStatus) -> String {
+fn initial_version(sourceport: &SourceportStatus) -> Version {
     sourceport
-        .installed
-        .as_ref()
-        .map(|installed| installed.manifest.git_ref.clone())
-        .unwrap_or_else(|| sourceport.recipe.git_ref.clone())
+        .installed_version()
+        .unwrap_or_else(|| sourceport.recipe.default_version())
+}
+
+/// What a version is called in the picker.
+fn version_label(version: &Version, versions: Option<&RemoteVersions>) -> String {
+    let development = versions.and_then(RemoteVersions::development);
+    match version {
+        Version::LatestRelease => match versions.and_then(RemoteVersions::latest_release) {
+            Some(tag) => format!("Latest release ({tag})"),
+            None => "Latest release".to_string(),
+        },
+        Version::Named(name) if development == Some(name.as_str()) => {
+            format!("{name} (development)")
+        }
+        Version::Named(name) => name.clone(),
+    }
+}
+
+/// What the picker offers: the latest release and the development branch, then whatever is
+/// built or chosen already if it is neither, so that it can be gone back to; and the older
+/// releases, newest first, apart from those. Nothing else: a repository's other branches are
+/// its developers' work in progress, and its other tags are candidates, CI's, and history.
+fn picker_options(
+    choice: &Version,
+    installed: Option<&Version>,
+    versions: Option<&RemoteVersions>,
+) -> (Vec<Version>, Vec<Version>) {
+    let older: Vec<Version> = versions
+        .map(|versions| {
+            versions
+                .older_releases()
+                .iter()
+                .map(|tag| Version::Named(tag.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut main = Vec::new();
+    if versions.is_none_or(|versions| versions.latest_release().is_some()) {
+        main.push(Version::LatestRelease);
+    }
+    if let Some(development) = versions.and_then(RemoteVersions::development) {
+        main.push(Version::Named(development.to_string()));
+    }
+    for already in installed.into_iter().chain([choice]) {
+        if !main.contains(already) && !older.contains(already) {
+            main.push(already.clone());
+        }
+    }
+    (main, older)
+}
+
+/// What to say when the version picked is not the one built.
+fn switch_message(choice: &Version, versions: Option<&RemoteVersions>) -> String {
+    let to = match choice {
+        Version::LatestRelease => versions
+            .and_then(RemoteVersions::latest_release)
+            .map_or_else(|| "the latest release".to_string(), str::to_string),
+        Version::Named(name) => name.clone(),
+    };
+    format!("Rebuild to switch to {to}.")
+}
+
+/// What to say when rebuilding would bring something new.
+fn update_message(update: &Update, built_from: &str) -> String {
+    match update {
+        Update::Release(tag) => format!("{tag} is out. Rebuild to update."),
+        Update::Commits => format!("There are new changes on {built_from}. Rebuild to get them."),
+    }
 }
 
 pub struct SourceportsDialogState {
     sourceports: Vec<SourceportStatus>,
     selected: Option<String>,
-    /// Build ref selected per sourceport. Kept in dialog state only: choosing a
-    /// one-off older version must not rewrite a user's recipe.
-    selected_refs: BTreeMap<String, String>,
-    /// Remote refs are intentionally absent until "Check versions" is used.
-    remote_refs: BTreeMap<String, sourceports::RemoteRefs>,
-    checking_versions: Option<String>,
-    version_error: Option<(String, String)>,
+    /// Version picked per sourceport. Kept in dialog state only: picking an
+    /// older version must not rewrite anybody's recipe.
+    choices: BTreeMap<String, Version>,
+    /// What each sourceport's repository has, asked the first time the
+    /// sourceport is shown, since until then "Latest release" has no number.
+    versions: BTreeMap<String, RemoteVersions>,
+    checking_versions: BTreeSet<String>,
+    /// Why asking failed, until the user asks again.
+    version_errors: BTreeMap<String, String>,
     /// Cached pre-flight for the selected sourceport. Re-run on selection change
     /// rather than per frame — it shells out to the package manager.
     doctor: Option<DoctorReport>,
@@ -100,13 +174,21 @@ pub struct SourceportsDialogState {
 
 impl SourceportsDialogState {
     pub fn new() -> Self {
-        let mut state = Self {
+        let mut state = Self::empty();
+        state.reload();
+        state
+    }
+
+    /// Nothing loaded: what the tests start from, since [`Self::reload`] reads the real
+    /// sourceport directories.
+    fn empty() -> Self {
+        Self {
             sourceports: Vec::new(),
             selected: None,
-            selected_refs: BTreeMap::new(),
-            remote_refs: BTreeMap::new(),
-            checking_versions: None,
-            version_error: None,
+            choices: BTreeMap::new(),
+            versions: BTreeMap::new(),
+            checking_versions: BTreeSet::new(),
+            version_errors: BTreeMap::new(),
             doctor: None,
             clean: false,
             running: None,
@@ -116,9 +198,7 @@ impl SourceportsDialogState {
             cancel: Arc::new(AtomicBool::new(false)),
             error: None,
             modified: false,
-        };
-        state.reload();
-        state
+        }
     }
 
     fn reload(&mut self) {
@@ -126,9 +206,9 @@ impl SourceportsDialogState {
             Ok(sourceports) => {
                 self.sourceports = sourceports;
                 for sourceport in &self.sourceports {
-                    self.selected_refs
+                    self.choices
                         .entry(sourceport.recipe.name.clone())
-                        .or_insert_with(|| initial_selected_ref(sourceport));
+                        .or_insert_with(|| initial_version(sourceport));
                 }
                 self.error = None;
             }
@@ -190,37 +270,52 @@ impl SourceportsDialogState {
         self.reload();
     }
 
-    /// Called when the on-demand remote ref lookup finishes.
-    pub fn versions_loaded(
-        &mut self,
-        sourceport: String,
-        outcome: Result<sourceports::RemoteRefs, String>,
-    ) {
-        if self.checking_versions.as_deref() == Some(&sourceport) {
-            self.checking_versions = None;
-        }
+    /// Called when asking a repository which versions it has finishes.
+    pub fn versions_loaded(&mut self, sourceport: String, outcome: Result<RemoteVersions, String>) {
+        self.checking_versions.remove(&sourceport);
         match outcome {
-            Ok(refs) => {
-                self.remote_refs.insert(sourceport.clone(), refs);
-                if self
-                    .version_error
-                    .as_ref()
-                    .is_some_and(|(name, _)| name == &sourceport)
+            Ok(versions) => {
+                // A project that has never made a release is built from its development
+                // branch, and the picker should say so rather than offer a release that
+                // is not there.
+                if let Some(choice) = self.choices.get_mut(&sourceport)
+                    && *choice == Version::LatestRelease
+                    && versions.latest_release().is_none()
+                    && let Some(development) = versions.development()
                 {
-                    self.version_error = None;
+                    *choice = Version::Named(development.to_string());
                 }
+                self.version_errors.remove(&sourceport);
+                self.versions.insert(sourceport, versions);
             }
-            Err(error) => self.version_error = Some((sourceport, error)),
+            Err(error) => {
+                self.version_errors.insert(sourceport, error);
+            }
         }
     }
 
-    fn check_versions(&mut self, sourceport: String, repo: String) -> SourceportVersionsRequest {
-        self.checking_versions = Some(sourceport.clone());
-        self.version_error = None;
-        SourceportVersionsRequest { sourceport, repo }
+    /// Ask about the sourceport on show, once, if nobody has yet and the last try did
+    /// not fail: a failure waits for Try Again, rather than asking every frame.
+    fn next_version_check(&mut self) -> Option<SourceportVersionsRequest> {
+        let sourceport = self.selected_port()?.recipe.name.clone();
+        if self.versions.contains_key(&sourceport)
+            || self.checking_versions.contains(&sourceport)
+            || self.version_errors.contains_key(&sourceport)
+        {
+            return None;
+        }
+        self.checking_versions.insert(sourceport.clone());
+        Some(SourceportVersionsRequest { sourceport })
     }
 
-    fn start(&mut self, sourceport: String, git_ref: String) -> SourceportBuildRequest {
+    fn choice(&self, sourceport: &SourceportStatus) -> Version {
+        self.choices
+            .get(&sourceport.recipe.name)
+            .cloned()
+            .unwrap_or_else(|| initial_version(sourceport))
+    }
+
+    fn start(&mut self, sourceport: String, version: Version) -> SourceportBuildRequest {
         // A fresh flag per run: reusing a cancelled one would abort instantly.
         self.cancel = Arc::new(AtomicBool::new(false));
         self.running = Some(sourceport.clone());
@@ -229,7 +324,7 @@ impl SourceportsDialogState {
         self.step = None;
         SourceportBuildRequest {
             sourceport,
-            git_ref,
+            version,
             clean: self.clean,
             cancel: Arc::clone(&self.cancel),
         }
@@ -273,7 +368,7 @@ impl SourceportsDialogState {
                     ui.horizontal_top(|ui| {
                         self.render_list(ui);
                         ui.separator();
-                        ui.vertical(|ui| self.render_details(ui, &mut result));
+                        ui.vertical(|ui| self.render_details(ui));
                     });
                 })
                 .above(|ui| self.render_log(ui, log_height))
@@ -288,6 +383,14 @@ impl SourceportsDialogState {
         // to report a failure.
         if self.running.is_none() && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             return SourceportsResult::Closed;
+        }
+
+        // Last, so that it never takes the place of what was pressed this frame: only the
+        // request that is sent is marked as asked.
+        if matches!(result, SourceportsResult::Open)
+            && let Some(request) = self.next_version_check()
+        {
+            result = SourceportsResult::CheckVersions(request);
         }
 
         result
@@ -354,12 +457,8 @@ impl SourceportsDialogState {
             Some(Primary::new(verb).when(can_build, "Install the missing build tools first")),
         );
         if ended.primary {
-            let git_ref = self
-                .selected_refs
-                .get(&name)
-                .cloned()
-                .unwrap_or(sourceport.recipe.git_ref.clone());
-            *result = SourceportsResult::Start(self.start(name, git_ref));
+            let version = self.choice(&sourceport);
+            *result = SourceportsResult::Start(self.start(name, version));
         }
         ended.dismissed
     }
@@ -372,25 +471,15 @@ impl SourceportsDialogState {
                 .sourceports
                 .iter()
                 .map(|p| {
-                    let selected_ref = self
-                        .selected_refs
-                        .get(&p.recipe.name)
-                        .map(String::as_str)
-                        .unwrap_or(&p.recipe.git_ref);
-                    let newer_release = p.installed.as_ref().is_some_and(|installed| {
-                        self.remote_refs
-                            .get(&p.recipe.name)
-                            .and_then(|refs| refs.newer_release_than(&installed.manifest.git_ref))
-                            .is_some()
-                    });
-                    // A rebuild can switch the selected ref, advance to a new
-                    // release tag, or pick up commits on the current branch.
+                    let versions = self.versions.get(&p.recipe.name);
+                    // A rebuild can switch to the version picked, or bring a newer release or
+                    // new commits to the one built.
                     let (label, color) = match &p.installed {
                         None => ("not built", theme::TEXT_MUTED),
-                        Some(_) if p.selected_ref_changed(selected_ref) => {
+                        Some(_) if p.switches_version(&self.choice(p)) => {
                             ("version picked", theme::COLOR_WARNING)
                         }
-                        Some(_) if newer_release || p.update_available() => {
+                        Some(_) if p.update(versions).is_some() => {
                             ("update available", theme::COLOR_WARNING)
                         }
                         Some(_) => ("installed", theme::COLOR_SUCCESS),
@@ -417,27 +506,20 @@ impl SourceportsDialogState {
         });
     }
 
-    fn render_details(&mut self, ui: &mut egui::Ui, result: &mut SourceportsResult) {
+    fn render_details(&mut self, ui: &mut egui::Ui) {
         let Some(sourceport) = self.selected_port().cloned() else {
             ui.colored_label(theme::TEXT_SECONDARY, "No sourceports to build.");
             return;
         };
 
         let name = sourceport.recipe.name.clone();
-        let recipe_ref = sourceport.recipe.git_ref.clone();
-        let selected_ref = self
-            .selected_refs
-            .get(&name)
-            .cloned()
-            .unwrap_or_else(|| recipe_ref.clone());
+        let choice = self.choice(&sourceport);
+        let versions = self.versions.get(&name);
         let busy = self.running.is_some();
 
         ui.horizontal(|ui| {
             ui.strong(&name);
-            ui.colored_label(
-                theme::TEXT_MUTED,
-                format!("{} @ {}", sourceport.recipe.repo, selected_ref),
-            );
+            ui.colored_label(theme::TEXT_MUTED, &sourceport.recipe.repo);
         });
         ui.add_space(4.0);
 
@@ -464,22 +546,12 @@ impl SourceportsDialogState {
                         format_size(installed.size_bytes()),
                     ),
                 );
-                if sourceport.selected_ref_changed(&selected_ref) {
+                if sourceport.switches_version(&choice) {
+                    ui.colored_label(theme::COLOR_WARNING, switch_message(&choice, versions));
+                } else if let Some(update) = sourceport.update(versions) {
                     ui.colored_label(
                         theme::COLOR_WARNING,
-                        format!("You've picked {}. Rebuild to switch to it.", selected_ref),
-                    );
-                } else if sourceport.update_available() {
-                    let remote = sourceport
-                        .remote_commit
-                        .as_deref()
-                        .unwrap_or_default()
-                        .chars()
-                        .take(9)
-                        .collect::<String>();
-                    ui.colored_label(
-                        theme::COLOR_WARNING,
-                        format!("A newer version ({remote}) is out. Rebuild to update."),
+                        update_message(&update, &installed.manifest.git_ref),
                     );
                 }
             }
@@ -489,7 +561,7 @@ impl SourceportsDialogState {
         }
 
         ui.add_space(8.0);
-        self.render_version_picker(ui, &sourceport, result);
+        self.render_version_picker(ui, &sourceport);
         ui.add_space(8.0);
         self.render_doctor(ui);
         ui.add_space(8.0);
@@ -500,119 +572,60 @@ impl SourceportsDialogState {
         .on_hover_text("Slower, but it can fix a build that keeps failing");
     }
 
-    fn render_version_picker(
-        &mut self,
-        ui: &mut egui::Ui,
-        sourceport: &SourceportStatus,
-        result: &mut SourceportsResult,
-    ) {
+    fn render_version_picker(&mut self, ui: &mut egui::Ui, sourceport: &SourceportStatus) {
         let name = &sourceport.recipe.name;
-        let recipe_ref = &sourceport.recipe.git_ref;
-        let mut selected = self
-            .selected_refs
-            .get(name)
-            .cloned()
-            .unwrap_or_else(|| recipe_ref.clone());
-        let refs = self.remote_refs.get(name).cloned();
-        let checking = self.checking_versions.as_deref() == Some(name);
-        let has_refs = refs.is_some();
-        let mut check_clicked = false;
+        let mut choice = self.choice(sourceport);
+        let installed = sourceport.installed_version();
+        let versions = self.versions.get(name);
+        let (main, older) = picker_options(&choice, installed.as_ref(), versions);
 
         ui.horizontal(|ui| {
-            let label = ui.label("Build from");
-            if let Some(refs) = &refs {
-                egui::ComboBox::from_id_salt(("sourceport-build-ref", name))
-                    .selected_text(selected.as_str())
-                    .width(210.0)
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            &mut selected,
-                            recipe_ref.clone(),
-                            format!("Default: {recipe_ref}"),
-                        );
-                        if let Some(latest) = refs.latest_release() {
-                            ui.selectable_value(
-                                &mut selected,
-                                latest.to_string(),
-                                format!("Latest release: {latest}"),
-                            );
+            let label = ui.label("Version");
+            egui::ComboBox::from_id_salt(("sourceport-version", name))
+                .selected_text(version_label(&choice, versions))
+                .width(230.0)
+                .show_ui(ui, |ui| {
+                    for version in &main {
+                        let text = version_label(version, versions);
+                        ui.selectable_value(&mut choice, version.clone(), text);
+                    }
+                    if !older.is_empty() {
+                        ui.separator();
+                        theme::section_heading(ui, "Older releases");
+                        for version in &older {
+                            let text = version_label(version, versions);
+                            ui.selectable_value(&mut choice, version.clone(), text);
                         }
-                        if !refs.releases.is_empty() {
-                            ui.separator();
-                            ui.label(egui::RichText::new("Releases").small().strong());
-                            for release in &refs.releases {
-                                ui.selectable_value(&mut selected, release.clone(), release);
-                            }
-                        }
-                        if !refs.branches.is_empty() {
-                            ui.separator();
-                            ui.label(egui::RichText::new("Branches").small().strong());
-                            for branch in &refs.branches {
-                                ui.selectable_value(&mut selected, branch.clone(), branch);
-                            }
-                        }
-                    })
-                    .response
-                    .labelled_by(label.id);
-            } else {
-                ui.monospace(selected.as_str());
-            }
-
-            if checking {
-                ui.spinner();
-                ui.colored_label(theme::TEXT_MUTED, "Checking…");
-            } else if ui
-                .small_button(if has_refs {
-                    "Refresh"
-                } else {
-                    "Check versions"
+                    }
                 })
-                .on_hover_text("See which releases and branches there are")
-                .clicked()
-            {
-                check_clicked = true;
+                .response
+                .labelled_by(label.id);
+            if self.checking_versions.contains(name) {
+                // Named, so that a screen reader hears why the picker has no numbers yet.
+                ui.spinner().widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::accesskit::Role::ProgressIndicator,
+                        true,
+                        CHECKING_VERSIONS,
+                    )
+                });
             }
         });
-        self.selected_refs.insert(name.clone(), selected);
-        if check_clicked {
-            *result = SourceportsResult::CheckVersions(
-                self.check_versions(name.clone(), sourceport.recipe.repo.clone()),
-            );
-        }
 
-        if let Some(refs) = &refs {
-            match refs.latest_release() {
-                Some(latest) => {
-                    let newer_release = sourceport.installed.as_ref().is_some_and(|installed| {
-                        refs.newer_release_than(&installed.manifest.git_ref)
-                            .is_some()
-                    });
-                    ui.colored_label(
-                        if newer_release {
-                            theme::COLOR_WARNING
-                        } else {
-                            theme::TEXT_MUTED
-                        },
-                        if newer_release {
-                            format!("New release available: {latest}")
-                        } else {
-                            format!("Latest release: {latest}")
-                        },
-                    );
-                }
-                None => {
-                    ui.colored_label(theme::TEXT_MUTED, "This project doesn't publish releases.");
-                }
+        if let Some(error) = self.version_errors.get(name) {
+            let mut try_again = false;
+            ui.horizontal_wrapped(|ui| {
+                ui.colored_label(
+                    theme::COLOR_ERROR,
+                    format!("Couldn't check which versions there are: {error}"),
+                );
+                try_again = ui.small_button("Try Again").clicked();
+            });
+            if try_again {
+                self.version_errors.remove(name);
             }
         }
-        if let Some((error_port, error)) = &self.version_error
-            && error_port == name
-        {
-            ui.colored_label(
-                theme::COLOR_ERROR,
-                format!("Could not check versions: {error}"),
-            );
-        }
+        self.choices.insert(name.clone(), choice);
     }
 
     fn render_doctor(&self, ui: &mut egui::Ui) {
@@ -725,17 +738,32 @@ mod tests {
 
     use super::*;
 
-    fn sourceport_status(installed_ref: Option<&str>) -> SourceportStatus {
+    const UZDOOM: &str = "\
+ref: refs/heads/trunk\tHEAD
+1111111111111111111111111111111111111111\trefs/heads/trunk
+4444444444444444444444444444444444444444\trefs/heads/4.14
+5005005005005005005005005005005005005005\trefs/tags/5.0.0
+5025025025025025025025025025025025025025\trefs/tags/5.0.2
+5035035035035035035035035035035035035035\trefs/tags/5.0.3
+9999999999999999999999999999999999999999\trefs/tags/x-testing
+";
+
+    fn uzdoom_versions() -> RemoteVersions {
+        RemoteVersions::parse(UZDOOM, None)
+    }
+
+    fn sourceport_status(installed: Option<(&str, Option<bool>)>) -> SourceportStatus {
         let recipe = sourceports::builtin_recipes()
             .into_iter()
-            .find(|recipe| recipe.name == "nyan-doom")
+            .find(|recipe| recipe.name == "uzdoom")
             .unwrap();
-        let installed = installed_ref.map(|git_ref| InstalledSourceport {
+        let installed = installed.map(|(git_ref, follows_releases)| InstalledSourceport {
             manifest: SourceportManifest {
                 name: recipe.name.clone(),
                 repo: recipe.repo.clone(),
                 git_ref: git_ref.to_string(),
                 commit: "deadbeef".into(),
+                follows_releases,
                 binary: recipe.binary.clone(),
                 built_at: "2026-01-01T00:00:00+00:00".into(),
             },
@@ -744,20 +772,133 @@ mod tests {
         SourceportStatus {
             recipe,
             installed,
-            remote_commit: None,
+            last_check: None,
         }
     }
 
-    #[test]
-    fn an_installed_release_stays_selected_instead_of_the_recipe_branch() {
-        let status = sourceport_status(Some("v1.2.3"));
-        assert_eq!(status.recipe.git_ref, "master");
-        assert_eq!(initial_selected_ref(&status), "v1.2.3");
+    fn dialog_showing(sourceport: SourceportStatus) -> SourceportsDialogState {
+        let mut dialog = SourceportsDialogState::empty();
+        dialog.selected = Some(sourceport.recipe.name.clone());
+        dialog.sourceports = vec![sourceport];
+        dialog
     }
 
     #[test]
-    fn an_unbuilt_sourceport_starts_from_the_recipe() {
-        let status = sourceport_status(None);
-        assert_eq!(initial_selected_ref(&status), "master");
+    fn an_unbuilt_sourceport_starts_from_the_latest_release() {
+        assert_eq!(
+            initial_version(&sourceport_status(None)),
+            Version::LatestRelease
+        );
+    }
+
+    #[test]
+    fn the_dialog_picks_up_where_the_build_left_off() {
+        let older = sourceport_status(Some(("5.0.2", Some(false))));
+        assert_eq!(initial_version(&older), Version::Named("5.0.2".into()));
+        let trunk = sourceport_status(Some(("trunk", None)));
+        assert_eq!(initial_version(&trunk), Version::Named("trunk".into()));
+        // Built before caco wrote down what a build follows, from a release.
+        let release = sourceport_status(Some(("5.0.3", None)));
+        assert_eq!(initial_version(&release), Version::LatestRelease);
+    }
+
+    #[test]
+    fn the_picker_offers_releases_and_the_development_branch_and_nothing_else() {
+        let versions = uzdoom_versions();
+        let (main, older) = picker_options(&Version::LatestRelease, None, Some(&versions));
+        assert_eq!(
+            main,
+            [Version::LatestRelease, Version::Named("trunk".into())]
+        );
+        assert_eq!(
+            older,
+            [
+                Version::Named("5.0.2".into()),
+                Version::Named("5.0.0".into())
+            ]
+        );
+        let labels: Vec<String> = main
+            .iter()
+            .chain(&older)
+            .map(|version| version_label(version, Some(&versions)))
+            .collect();
+        assert_eq!(
+            labels,
+            [
+                "Latest release (5.0.3)",
+                "trunk (development)",
+                "5.0.2",
+                "5.0.0"
+            ]
+        );
+    }
+
+    #[test]
+    fn what_is_built_stays_in_the_picker_when_it_is_none_of_those() {
+        let versions = uzdoom_versions();
+        let built = Version::Named("4.14".into());
+        let (main, _) = picker_options(&Version::LatestRelease, Some(&built), Some(&versions));
+        assert!(main.contains(&built), "nothing to go back to: {main:?}");
+    }
+
+    #[test]
+    fn before_the_repository_answers_the_picker_has_the_latest_release() {
+        let (main, older) = picker_options(&Version::LatestRelease, None, None);
+        assert_eq!(main, [Version::LatestRelease]);
+        assert!(older.is_empty());
+        assert_eq!(
+            version_label(&Version::LatestRelease, None),
+            "Latest release"
+        );
+    }
+
+    #[test]
+    fn a_project_without_releases_is_shown_as_its_development_branch() {
+        let mut dialog = dialog_showing(sourceport_status(None));
+        dialog
+            .choices
+            .insert("uzdoom".into(), Version::LatestRelease);
+        let versions =
+            RemoteVersions::parse("ref: refs/heads/main\tHEAD\nabc\trefs/heads/main\n", None);
+        dialog.versions_loaded("uzdoom".into(), Ok(versions.clone()));
+        assert_eq!(dialog.choices["uzdoom"], Version::Named("main".into()));
+        let (main, _) = picker_options(&dialog.choices["uzdoom"], None, Some(&versions));
+        assert_eq!(main, [Version::Named("main".into())]);
+    }
+
+    #[test]
+    fn the_repository_is_asked_once_and_again_only_after_try_again() {
+        let mut dialog = dialog_showing(sourceport_status(None));
+        assert!(dialog.next_version_check().is_some());
+        assert!(dialog.next_version_check().is_none(), "asked while asking");
+
+        dialog.versions_loaded("uzdoom".into(), Err("offline".into()));
+        assert!(dialog.next_version_check().is_none(), "asked every frame");
+        dialog.version_errors.remove("uzdoom");
+        assert!(dialog.next_version_check().is_some());
+
+        dialog.versions_loaded("uzdoom".into(), Ok(uzdoom_versions()));
+        assert!(dialog.next_version_check().is_none());
+    }
+
+    #[test]
+    fn the_messages_name_what_a_rebuild_would_bring() {
+        let versions = uzdoom_versions();
+        assert_eq!(
+            switch_message(&Version::LatestRelease, Some(&versions)),
+            "Rebuild to switch to 5.0.3."
+        );
+        assert_eq!(
+            switch_message(&Version::LatestRelease, None),
+            "Rebuild to switch to the latest release."
+        );
+        assert_eq!(
+            update_message(&Update::Release("5.0.4".into()), "5.0.3"),
+            "5.0.4 is out. Rebuild to update."
+        );
+        assert_eq!(
+            update_message(&Update::Commits, "trunk"),
+            "There are new changes on trunk. Rebuild to get them."
+        );
     }
 }

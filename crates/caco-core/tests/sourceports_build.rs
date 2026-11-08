@@ -33,6 +33,7 @@ fn nyan_doom_builds_and_installs() {
     let mut steps = Vec::new();
     let installed = build::install(
         &recipe,
+        &recipe.default_version(),
         &paths,
         &BuildOptions::default(),
         &mut |p| match p {
@@ -99,6 +100,7 @@ fn uzdoom_installs_its_pk3s_beside_the_binary() {
 
     let installed = build::install(
         &recipe,
+        &recipe.default_version(),
         &paths,
         &BuildOptions::default(),
         &mut |p| {
@@ -140,6 +142,7 @@ fn cancel_stops_a_build_in_flight() {
     let flag = AtomicBool::new(false);
     let err = build::install(
         &recipe,
+        &recipe.default_version(),
         &paths,
         &BuildOptions::default(),
         &mut |p| {
@@ -158,6 +161,115 @@ fn cancel_stops_a_build_in_flight() {
     );
     // A cancelled build must not leave a prefix a launch would resolve to.
     assert!(caco_core::sourceports::find_installed(&paths.prefix_root, "nyan-doom").is_none());
+}
+
+/// Run git in `cwd` with nobody's settings, so a developer's signing setup
+/// cannot stop a commit.
+fn git(cwd: &std::path::Path, args: &[&str]) {
+    let status = std::process::Command::new("git")
+        .args([
+            "-c",
+            "user.name=caco",
+            "-c",
+            "user.email=caco@example.invalid",
+        ])
+        .args(args)
+        .current_dir(cwd)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .status()
+        .expect("run git");
+    assert!(status.success(), "git {args:?} failed");
+}
+
+/// Commit a version of the fake sourceport, whose "binary" says what it is.
+fn commit_version(repo: &std::path::Path, says: &str) {
+    std::fs::write(repo.join("fake-doom"), format!("#!/bin/sh\necho {says}\n")).unwrap();
+    git(repo, &["add", "."]);
+    git(repo, &["commit", "--quiet", "-m", says]);
+}
+
+fn installed_says(installed: &caco_core::sourceports::InstalledSourceport) -> String {
+    std::fs::read_to_string(installed.binary_path()).unwrap()
+}
+
+/// Everything a build does with versions, on a sourceport small enough to build
+/// in a second from a repository on disk: what the latest release is, that an
+/// update to it replaces the release it updates, and that a name which is both
+/// a tag and a branch builds the tag, in a new checkout as in an old one. uzdoom
+/// has a `4.14.3` of each, and `git clone --branch` used to take the branch.
+#[test]
+#[ignore = "runs git and cmake"]
+fn versions_resolve_and_an_update_replaces_the_release_it_updates() {
+    use caco_core::sourceports::{Version, list_installed};
+
+    let dir = tempfile::tempdir().unwrap();
+    let paths = sandbox(dir.path());
+    let repo = dir.path().join("fake-doom");
+    std::fs::create_dir_all(&repo).unwrap();
+    git(&repo, &["init", "--quiet", "--initial-branch=trunk"]);
+    std::fs::write(
+        repo.join("CMakeLists.txt"),
+        "cmake_minimum_required(VERSION 3.10)\nproject(fake NONE)\n\
+         install(PROGRAMS fake-doom DESTINATION bin)\n",
+    )
+    .unwrap();
+    commit_version(&repo, "release 1.0");
+    git(&repo, &["tag", "-a", "-m", "1.0", "1.0"]);
+    commit_version(&repo, "work on trunk");
+    // A branch with the same name as the release, somewhere else.
+    git(&repo, &["branch", "1.0"]);
+
+    let recipe = recipe::parse_recipes(&format!(
+        "[fake-doom]\nrepo = {:?}\nbinary = \"fake-doom\"\n[fake-doom.build]\nsystem = \"cmake\"\n",
+        repo.display().to_string()
+    ))
+    .unwrap()
+    .remove(0);
+    let build = |version: &Version, clean: bool| {
+        build::install(
+            &recipe,
+            version,
+            &paths,
+            &BuildOptions { jobs: None, clean },
+            &mut |p| {
+                if let BuildProgress::Line(l) = p {
+                    eprintln!("   {l}");
+                }
+            },
+            &|| false,
+        )
+        .expect("build failed")
+    };
+
+    let first = build(&Version::LatestRelease, false);
+    assert_eq!(first.manifest.git_ref, "1.0");
+    assert_eq!(first.manifest.follows_releases, Some(true));
+    assert!(installed_says(&first).contains("release 1.0"));
+
+    commit_version(&repo, "release 2.0");
+    git(&repo, &["tag", "2.0"]);
+    let update = build(&Version::LatestRelease, false);
+    assert_eq!(update.manifest.git_ref, "2.0");
+    assert!(installed_says(&update).contains("release 2.0"));
+    assert!(
+        !first.prefix.exists(),
+        "the release it updated is still there"
+    );
+
+    // In a new checkout, where this used to be a clone of the branch.
+    let older = build(&Version::Named("1.0".into()), true);
+    assert!(
+        installed_says(&older).contains("release 1.0"),
+        "built the branch"
+    );
+    assert_eq!(older.manifest.follows_releases, Some(false));
+    // Going back to an older release is a choice, not an update: what it was on stays.
+    assert!(update.prefix.exists());
+    assert_eq!(list_installed(&paths.prefix_root).len(), 2);
+
+    let trunk = build(&Version::Named("trunk".into()), false);
+    assert!(installed_says(&trunk).contains("release 2.0"));
 }
 
 /// Print what this machine is missing for every built-in recipe.
@@ -180,20 +292,39 @@ fn doctor_report_for_this_machine() {
     }
 }
 
-/// Resolve every built-in recipe's ref against its real remote.
+/// Ask every built-in recipe's real repository what there is to build.
 ///
-/// Catches the failure that is otherwise invisible until someone tries to
-/// build: a recipe pinned to a branch the project does not have. uzdoom's
-/// default branch is `trunk`, not `master`, and only a live lookup says so.
+/// Catches what is otherwise invisible until someone presses Build: a project
+/// that changes how it tags releases, starts a new kind of tag that reads as a
+/// version, or stops saying which branch it is developed on.
 #[test]
 #[ignore = "hits the network"]
-fn every_builtin_ref_exists_on_its_remote() {
+fn every_builtin_recipe_has_a_latest_release_and_a_development_branch() {
+    use caco_core::sourceports::{Version, remote_versions, versions::is_release};
+
     for recipe in recipe::builtin_recipes() {
-        let commit = caco_core::sourceports::update::remote_commit(&recipe.repo, &recipe.git_ref)
-            .unwrap_or_else(|e| panic!("{} @ {}: {e}", recipe.name, recipe.git_ref));
-        eprintln!("{} @ {} -> {commit}", recipe.name, recipe.git_ref);
-        assert_eq!(commit.len(), 40, "not a sha: {commit}");
-        assert!(commit.chars().all(|c| c.is_ascii_hexdigit()));
+        let versions = remote_versions(&recipe).unwrap_or_else(|e| panic!("{}: {e}", recipe.name));
+        let latest = versions
+            .resolve(&Version::LatestRelease)
+            .unwrap_or_else(|| panic!("{} has no latest release", recipe.name));
+        eprintln!(
+            "{}: latest {} at {}, development {:?}, older {:?}",
+            recipe.name,
+            latest.name,
+            latest.commit,
+            versions.development(),
+            versions.older_releases()
+        );
+        assert!(latest.follows_releases, "{} has no releases", recipe.name);
+        assert_eq!(latest.commit.len(), 40, "not a sha: {}", latest.commit);
+        assert!(
+            versions.development().is_some(),
+            "{} does not say where it is developed",
+            recipe.name
+        );
+        for release in versions.older_releases() {
+            assert!(is_release(release, recipe.first_release.as_ref()));
+        }
     }
 }
 
