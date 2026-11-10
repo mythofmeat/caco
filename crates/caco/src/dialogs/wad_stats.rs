@@ -15,7 +15,7 @@ use crate::workers::{FileDialogReceiver, FileDialogRequest, spawn_file_dialog};
 
 type StatsData = caco_core::wad_stats::WadStats;
 type AnalysisData = caco_core::wad_analysis::WadAnalysis;
-use caco_core::wad_analysis::MapClassification;
+use caco_core::wad_analysis::{MapClassification, map_order};
 
 /// A stats-carrying entry shown in the left pane.
 #[derive(Clone)]
@@ -869,7 +869,7 @@ fn build_table_rows<'a>(analysis: Option<&AnalysisData>, stats: &'a StatsData) -
     let stats_by_lump: std::collections::HashMap<&str, &caco_core::wad_stats::MapStats> =
         stats.maps.iter().map(|m| (m.lump.as_str(), m)).collect();
 
-    match analysis {
+    let mut rows: Vec<MapRow<'a>> = match analysis {
         Some(a) => a
             .maps
             .iter()
@@ -896,7 +896,11 @@ fn build_table_rows<'a>(analysis: Option<&AnalysisData>, stats: &'a StatsData) -
                 stats: Some(m),
             })
             .collect(),
-    }
+    };
+    // Neither source is in an order to read. An analysis has its maps as the file had them,
+    // and a PK3 has them as they were zipped: Purgatory's table began MAP22, MAP16, MAP15.
+    rows.sort_by(|a, b| map_order(&a.lump, &b.lump));
+    rows
 }
 
 fn class_label(c: RowClass) -> &'static str {
@@ -985,5 +989,81 @@ mod tests {
         assert_eq!(display_date("yesterday"), "yesterday");
         assert_eq!(display_date("2026-06-24 06:30:53"), "2026-06-24 06:30:53");
         assert!(display_date("2026-06-24T12:30:53+00:00").starts_with("2026-06-2"));
+    }
+
+    fn analysis_of(maps: &[(&str, MapClassification)]) -> AnalysisData {
+        AnalysisData {
+            version: caco_core::wad_analysis::ANALYSIS_VERSION,
+            maps: maps
+                .iter()
+                .map(|(lump, classification)| caco_core::wad_analysis::MapInfo {
+                    lump: lump.to_string(),
+                    classification: *classification,
+                })
+                .collect(),
+            total_maps: maps.len(),
+            required_maps: 0,
+            secret_maps: Vec::new(),
+            terminal_map: None,
+            has_umapinfo: true,
+        }
+    }
+
+    /// Stats with an exit on each of `lumps`, in the order given.
+    fn stats_of(lumps: &[&str]) -> StatsData {
+        let maps: Vec<serde_json::Value> = lumps
+            .iter()
+            .map(|lump| serde_json::json!({ "lump": lump, "best_skill": 4, "total_exits": 1 }))
+            .collect();
+        serde_json::from_value(serde_json::json!({ "format": "stats_txt", "maps": maps }))
+            .expect("stats")
+    }
+
+    fn lumps<'a>(rows: &'a [MapRow<'_>]) -> Vec<&'a str> {
+        rows.iter().map(|row| row.lump.as_str()).collect()
+    }
+
+    #[test]
+    fn maps_are_listed_in_order_whatever_order_the_file_had_them_in() {
+        use MapClassification::{OptionalCredits, OptionalSecret, Required, Unreachable};
+
+        // As a PK3's maps come out of its zip, which is how Purgatory's were listed.
+        let analysis = analysis_of(&[
+            ("MAP22", Required),
+            ("MAP16", Required),
+            ("MAP02", Required),
+            ("MAP34", OptionalCredits),
+            ("MAP01", Required),
+            ("MAP31", OptionalSecret),
+            ("MAP35", Unreachable),
+            ("MAP10", Required),
+        ]);
+        let stats = stats_of(&["MAP02", "MAP01"]);
+
+        let rows = build_table_rows(Some(&analysis), &stats);
+
+        assert_eq!(
+            lumps(&rows),
+            [
+                "MAP01", "MAP02", "MAP10", "MAP16", "MAP22", "MAP31", "MAP34"
+            ]
+        );
+        // Each row still has its own kind and its own stats after the move.
+        assert!(matches!(rows[5].class, RowClass::Secret));
+        assert!(matches!(rows[6].class, RowClass::Terminal));
+        let played: Vec<&str> = rows
+            .iter()
+            .filter_map(|row| row.stats.map(|stats| stats.lump.as_str()))
+            .collect();
+        assert_eq!(played, ["MAP01", "MAP02"]);
+    }
+
+    #[test]
+    fn maps_are_listed_in_order_with_only_the_stats_to_go_by() {
+        let stats = stats_of(&["MAP10", "MAP100", "MAP02"]);
+
+        let rows = build_table_rows(None, &stats);
+
+        assert_eq!(lumps(&rows), ["MAP02", "MAP10", "MAP100"]);
     }
 }
