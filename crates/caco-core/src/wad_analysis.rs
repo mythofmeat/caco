@@ -13,6 +13,7 @@
 //! detection we add is brittle. Instead we lean on a single robust signal:
 //! a playable map has monsters, a credits map does not.
 
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::LazyLock;
 
@@ -1029,8 +1030,56 @@ fn parse_mapinfo_to_edges(
 }
 
 // ---------------------------------------------------------------------------
-// Sorting helper
+// Sorting helpers
 // ---------------------------------------------------------------------------
+
+/// The order to list a WAD's maps in for a person to read. Numbers go by value wherever
+/// they are in a name, so MAP02 comes before MAP10, E1M8 before E2M1 and MAP99 before
+/// MAP100, and a name with something after its number (`MAP18GZ`) comes straight after the
+/// map it goes with.
+///
+/// Neither list a view has is in this order. [`WadAnalysis::maps`] is in the order the file
+/// had them, which for a PK3 is the order its maps were zipped in (Purgatory's starts MAP22,
+/// MAP16, MAP15), and stats are in the order they were merged in. It is not
+/// `map_sort_key` either: that knows standard names only, and is how the first map is
+/// found.
+pub fn map_order(a: &str, b: &str) -> Ordering {
+    let (mut left, mut right) = (a, b);
+    loop {
+        let (l, r) = (leading_run(left), leading_run(right));
+        if l.is_empty() || r.is_empty() {
+            // The shorter name first, and names that differ only in case or in leading
+            // zeros still have an order, so the same maps always list the same way.
+            return l.len().cmp(&r.len()).then_with(|| a.cmp(b));
+        }
+        let by_run = if is_number(l) && is_number(r) {
+            // By length once the zeros are off, so a number of any size can be compared.
+            let (l, r) = (l.trim_start_matches('0'), r.trim_start_matches('0'));
+            l.len().cmp(&r.len()).then_with(|| l.cmp(r))
+        } else {
+            let upper = |c: char| c.to_ascii_uppercase();
+            l.chars().map(upper).cmp(r.chars().map(upper))
+        };
+        if by_run != Ordering::Equal {
+            return by_run;
+        }
+        left = &left[l.len()..];
+        right = &right[r.len()..];
+    }
+}
+
+/// The digits a name starts with, or everything before its first digit.
+fn leading_run(name: &str) -> &str {
+    let digits = is_number(name);
+    let end = name
+        .find(|c: char| c.is_ascii_digit() != digits)
+        .unwrap_or(name.len());
+    &name[..end]
+}
+
+fn is_number(run: &str) -> bool {
+    run.starts_with(|c: char| c.is_ascii_digit())
+}
 
 /// Generate a sort key for map names so MAP02 sorts before MAP10.
 fn map_sort_key(name: &str) -> (u32, u32) {
@@ -1851,6 +1900,56 @@ map MAP31 "S"
         assert!(map_sort_key("MAP09") < map_sort_key("MAP10"));
         assert!(map_sort_key("E1M1") < map_sort_key("E1M8"));
         assert!(map_sort_key("E1M8") < map_sort_key("E2M1"));
+    }
+
+    fn in_map_order(mut names: Vec<&str>) -> Vec<&str> {
+        names.sort_by(|a, b| map_order(a, b));
+        names
+    }
+
+    #[test]
+    fn test_map_order_goes_by_the_number_and_not_the_text() {
+        assert_eq!(
+            in_map_order(vec!["MAP10", "MAP100", "MAP02", "MAP99", "MAP01"]),
+            ["MAP01", "MAP02", "MAP10", "MAP99", "MAP100"]
+        );
+        // E1M10 is a name UMAPINFO allows, and as text it is before E1M2.
+        assert_eq!(
+            in_map_order(vec!["E2M1", "E1M10", "E1M8", "E1M2"]),
+            ["E1M2", "E1M8", "E1M10", "E2M1"]
+        );
+    }
+
+    #[test]
+    fn test_map_order_puts_a_variant_after_the_map_it_goes_with() {
+        assert_eq!(
+            in_map_order(vec!["MAP19", "MAP18GZ", "MAP18", "MAP17"]),
+            ["MAP17", "MAP18", "MAP18GZ", "MAP19"]
+        );
+    }
+
+    #[test]
+    fn test_map_order_takes_names_that_are_not_a_map_number() {
+        // What a zdoom log can name, for the table of stats with no analysis to go by.
+        assert_eq!(
+            in_map_order(vec!["TITLEMAP", "LEVEL10", "level2", "HUB", "LEVEL1"]),
+            ["HUB", "LEVEL1", "level2", "LEVEL10", "TITLEMAP"]
+        );
+        // A number of any length, which a PK3's file names are free to have.
+        assert_eq!(
+            map_order("MAP99999999999999999999998", "MAP99999999999999999999999"),
+            Ordering::Less
+        );
+    }
+
+    #[test]
+    fn test_map_order_never_calls_two_names_equal() {
+        // Or which of them came first would be up to the order they arrived in.
+        for (a, b) in [("MAP01", "MAP1"), ("map01", "MAP01"), ("MAP01", "MAP01A")] {
+            assert_ne!(map_order(a, b), Ordering::Equal, "{a} and {b}");
+            assert_eq!(map_order(a, b), map_order(b, a).reverse(), "{a} and {b}");
+        }
+        assert_eq!(map_order("MAP01", "MAP01"), Ordering::Equal);
     }
 
     #[test]
