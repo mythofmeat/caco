@@ -526,7 +526,7 @@ pub fn analyze_path(wad_path: &std::path::Path) -> Option<WadAnalysis> {
 /// Analyze a WAD file to enumerate maps and classify them.
 ///
 /// Returns `None` if the data is not a valid WAD or contains no maps.
-pub fn analyze_wad(wad_data: &[u8]) -> Option<WadAnalysis> {
+fn analyze_wad(wad_data: &[u8]) -> Option<WadAnalysis> {
     let directory = parse_wad_directory(wad_data);
     if directory.is_empty() {
         return None;
@@ -603,7 +603,7 @@ pub fn analyze_wad(wad_data: &[u8]) -> Option<WadAnalysis> {
 // ---------------------------------------------------------------------------
 
 /// Analyze a PK3 file (ZDoom ZIP archive).
-pub fn analyze_pk3(pk3_path: &std::path::Path) -> Option<WadAnalysis> {
+fn analyze_pk3(pk3_path: &std::path::Path) -> Option<WadAnalysis> {
     use std::io::Read;
 
     let file = std::fs::File::open(pk3_path).ok()?;
