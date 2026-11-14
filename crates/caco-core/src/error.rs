@@ -77,6 +77,12 @@ pub enum Error {
         saves: crate::sync::NewerSaves,
     },
 
+    /// A zip that only wraps what plays could not be unpacked for the sourceport. Its own
+    /// variant rather than handing over the zip instead, since that is what played a `.pk3`
+    /// in a zip as the IWAD alone.
+    #[error("could not unpack '{title}' for the sourceport: {source}")]
+    WadFileUnpack { title: String, source: io::Error },
+
     #[error("invalid WAD format: {0}")]
     InvalidWadFormat(String),
 

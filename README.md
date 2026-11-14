@@ -595,6 +595,7 @@ machine, or see [Several Machines](#several-machines) to keep it on more than on
 | Path | Contents |
 |------|----------|
 | `wads/` | Cached WAD files, re-downloaded on demand |
+| `unpacked/` | What a zip holds, unpacked for the sourceport: see below |
 | `thumbnails/` | Thumbnail cache, re-extracted from TITLEPIC |
 | `sourceports/` | Built sourceport prefixes, rebuilt from the recipe |
 | `sourceports-src/` | Sourceport checkouts and build trees |
@@ -609,6 +610,14 @@ That is what makes copying the data directory to another machine actually carry
 your library: see `retrievable:` under Queries. A file that did not make the trip
 shows up as not on this machine, with where it was last seen, rather than as
 cached.
+
+A WAD's file is kept as it came, often a zip holding the WAD and a text file, but a
+sourceport is never handed the zip. uzdoom only loads a `.wad` at a zip's root, so a
+`.pk3` in one played as the IWAD alone, and nyan-doom misses a WAD in a folder inside
+one. So a zip that holds only what plays and text beside it is unpacked into `unpacked/`
+the first time it is played, and the files in it are what the sourceport loads. The copy
+is kept for as long as the zip is on this machine, and goes when caco next starts or
+plays a zip after the zip has gone.
 
 `library.db` also records what each WAD file is: its size, SHA-256 and SHA-1, the
 same for every WAD, PK3 or DEH inside a zip, and what each play session loaded.

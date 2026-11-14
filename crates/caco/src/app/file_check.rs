@@ -38,8 +38,15 @@ pub(super) fn spawn(sender: BackgroundSender, db_path: PathBuf) {
         match caco_core::identity::check_library(&conn) {
             Ok(hashed) if hashed > 0 => sender.send(AppMessage::FilesIdentified),
             Ok(_) => {}
-            Err(e) => sender.send(could_not_check(e)),
+            Err(e) => {
+                sender.send(could_not_check(e));
+                return;
+            }
         }
+        // Once both answers are in, since what was unpacked for a launch is kept by the
+        // content of a file that is here. Launching a zip tidies too, but a library might
+        // not launch another for a long time.
+        caco_core::unpack::tidy(&conn);
     });
 }
 

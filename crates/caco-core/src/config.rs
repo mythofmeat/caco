@@ -107,6 +107,16 @@ pub fn thumbnail_cache_dir() -> PathBuf {
     cache_home().join("thumbnails")
 }
 
+/// Where a zip that only wraps what plays is unpacked for a sourceport: see
+/// [`crate::unpack`].
+///
+/// Cache side, as everything in it comes out of a WAD file caco keeps anyway,
+/// and beside the WAD cache rather than in it, which holds the files rows point
+/// at and nothing else.
+pub fn unpacked_dir() -> PathBuf {
+    cache_home().join("unpacked")
+}
+
 pub fn default_data_subdir() -> PathBuf {
     if let Some(p) = env_path("CACO_DATA_DIR") {
         return p;
