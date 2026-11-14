@@ -108,7 +108,7 @@ pub struct Identified {
 // ---------------------------------------------------------------------------
 
 /// Read size per chunk. Large enough that hashing, not syscalls, is the cost.
-const READ_CHUNK: usize = 64 * 1024;
+pub(crate) const READ_CHUNK: usize = 64 * 1024;
 
 /// A zip's local-file-header signature, which a zip starts with unless it is
 /// a self-extractor (taken whole, as any other file is).
@@ -116,12 +116,12 @@ const ZIP_MAGIC: [u8; 4] = *b"PK\x03\x04";
 
 /// More loadable files than this and an archive is not looked into at all: no
 /// WAD ships that many, and the rows would be noise.
-const MAX_INNER_FILES: usize = 1024;
+pub(crate) const MAX_INNER_FILES: usize = 1024;
 
 /// Ceiling on one entry's decompressed size, so a zip bomb costs a bounded read
 /// rather than an unbounded one. Far above any real WAD, the largest of which
 /// run to a few hundred megabytes.
-const MAX_INNER_BYTES: u64 = 4 << 30;
+pub(crate) const MAX_INNER_BYTES: u64 = 4 << 30;
 
 /// Hash a file and, when it is a zip, the loadable files inside it.
 ///
@@ -163,7 +163,7 @@ pub fn hash_file(path: &Path) -> io::Result<Hashes> {
 }
 
 /// Hash everything `reader` yields.
-fn hash_reader(mut reader: impl Read) -> io::Result<Hashes> {
+pub(crate) fn hash_reader(mut reader: impl Read) -> io::Result<Hashes> {
     let mut sha256 = Sha256::new();
     let mut sha1 = Sha1::new();
     let mut size = 0u64;
@@ -202,39 +202,54 @@ struct Inside {
 /// games the same, so the zip is taken whole instead.
 fn look_inside<R: Read + Seek>(reader: R) -> Option<Inside> {
     let mut archive = ZipArchive::new(reader).ok()?;
-    let names: Vec<(usize, String)> = zip_entry_names(&archive)
-        .filter(|(_, name)| !is_junk(name))
-        .map(|(index, name)| (index, name.into_owned()))
-        .collect();
+    let container = {
+        let names: Vec<_> = zip_entry_names(&archive)
+            .map(|(_, name)| name)
+            .filter(|name| !is_junk(name))
+            .collect();
+        is_container(names.iter().map(|name| name.as_ref()))
+    };
 
-    let loadable: Vec<&(usize, String)> =
-        names.iter().filter(|(_, name)| is_loadable(name)).collect();
+    let loadable = loadable_entries(&archive);
     if loadable.len() > MAX_INNER_FILES {
         return None;
     }
 
     let mut inner = Vec::with_capacity(loadable.len());
     for (index, name) in loadable {
-        let entry = archive.by_index(*index).ok()?;
+        let entry = archive.by_index(index).ok()?;
         let hashes = hash_reader(entry.take(MAX_INNER_BYTES)).ok()?;
         if hashes.size >= MAX_INNER_BYTES {
             return None;
         }
-        inner.push(InnerFile {
-            path: name.clone(),
-            hashes,
-        });
+        inner.push(InnerFile { path: name, hashes });
     }
 
-    let container = is_container(names.iter().map(|(_, name)| name.as_str()));
     Some(Inside { inner, container })
+}
+
+/// A zip's loadable files, wherever they sit, as `(index, name)` in archive order.
+///
+/// The one spelling of which files in a zip are hashed into its content, which
+/// [`crate::unpack`] shares, so that what a launch unpacks is what that hash
+/// was taken over.
+pub(crate) fn loadable_entries<R: Read + Seek>(archive: &ZipArchive<R>) -> Vec<(usize, String)> {
+    zip_entry_names(archive)
+        .filter(|(_, name)| !is_junk(name) && is_loadable(name))
+        .map(|(index, name)| (index, name.into_owned()))
+        .collect()
 }
 
 /// The content hash of a container's loadable files: the one file's own hash,
 /// so that a zip and the WAD extracted from it agree, or a digest of all of
 /// theirs, which does not depend on the order the zip lists them in.
 fn content_of(files: &[InnerFile]) -> String {
-    let mut hashes: Vec<&str> = files.iter().map(|f| f.hashes.sha256.as_str()).collect();
+    content_digest(files.iter().map(|f| f.hashes.sha256.as_str()))
+}
+
+/// [`content_of`] over the files' SHA-256 hashes alone, for what has only those.
+pub(crate) fn content_digest<'a>(hashes: impl IntoIterator<Item = &'a str>) -> String {
+    let mut hashes: Vec<&str> = hashes.into_iter().collect();
     hashes.sort_unstable();
     // The same file twice is still the one file.
     hashes.dedup();
@@ -374,7 +389,7 @@ fn has_extension_in(name: &str, extensions: &[&str]) -> bool {
 
 /// The last component of an archive path. Zips made on Windows sometimes
 /// separate with backslashes.
-fn base_name(name: &str) -> &str {
+pub(crate) fn base_name(name: &str) -> &str {
     name.rsplit(['/', '\\']).next().unwrap_or(name)
 }
 

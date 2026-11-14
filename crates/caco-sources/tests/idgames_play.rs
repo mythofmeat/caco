@@ -153,12 +153,13 @@ fn a_wad_on_idgames_is_found_imported_and_played_with_nothing_but_a_copy_of_the_
 
     let played = player::play(&conn, id, PlayOptions::default()).unwrap();
     assert_eq!(played.exit_code, Some(0));
+    // Handed the WAD in the zip, unpacked, and never the zip.
     let args = fs::read_to_string(&args_file).unwrap();
     assert!(
-        args.lines()
-            .any(|arg| arg.ends_with("sunlust.wad") || arg.ends_with("sunlust.zip")),
+        args.lines().any(|arg| arg.ends_with("sunlust.wad")),
         "{args}"
     );
+    assert!(!args.contains("sunlust.zip"), "{args}");
 
     // The launch hashed it, and went by the WAD inside the zip.
     let wad = row(id);

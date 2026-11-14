@@ -25,6 +25,7 @@ pub mod sourceports;
 pub mod stats_watcher;
 pub mod sync;
 pub mod titlepic;
+pub mod unpack;
 pub mod utils;
 pub mod wad_analysis;
 pub mod wad_stats;

@@ -17,6 +17,7 @@ use crate::presence;
 use crate::sourceports;
 use crate::stats_watcher;
 use crate::sync;
+use crate::unpack;
 use crate::wad_stats;
 use crate::zdoom_detect;
 
@@ -299,6 +300,10 @@ fn build_launch(
         refuse_newer_saves(conn, &wad, opts)?;
     }
 
+    // What the sourceport is handed as the WAD. Before anything is persisted or
+    // created, since it can fail as the refusals do.
+    let loaded = loaded_files(conn, &wad, &wad_path, identity.as_ref())?;
+
     // Auto-detect zdoom_required if not already set. This remains metadata only:
     // the visible compatibility family field is the launch constraint, so a
     // blank family means "use the default sourceport".
@@ -451,21 +456,8 @@ fn build_launch(
     // Load enabled companions from DB
     if let Ok(companions) = db::get_companions_for_wad(conn, wad_id) {
         for comp in companions {
-            if !comp.enabled {
-                continue;
-            }
-            let comp_path = Path::new(&comp.path);
-            if !comp_path.exists() {
-                continue;
-            }
-            if crate::companion_service::is_deh_bex(comp_path) {
-                if sourceports::uses_deh_flag(&sourceport) {
-                    deh_args.extend(["-deh".to_string(), comp.path]);
-                } else {
-                    file_args.push(comp.path);
-                }
-            } else {
-                file_args.push(comp.path);
+            if comp.enabled && Path::new(&comp.path).exists() {
+                push_loaded(comp.path, &sourceport, &mut file_args, &mut deh_args);
             }
         }
     }
@@ -480,15 +472,26 @@ fn build_launch(
         file_args.push(pk3_path.to_string_lossy().into_owned());
     }
 
+    // The WAD's own files last, and its patches after any companion's.
+    for file in loaded {
+        push_loaded(
+            file.to_string_lossy().into_owned(),
+            &sourceport,
+            &mut file_args,
+            &mut deh_args,
+        );
+    }
+
     // Add DEH args before -file
     if !deh_args.is_empty() {
         cmd.args(&deh_args);
     }
 
-    // Add -file with id24 resources + companions + stats mod + main WAD
-    file_args.push(wad_path.to_string_lossy().into_owned());
-    cmd.arg("-file");
-    cmd.args(&file_args);
+    // Add -file with id24 resources + companions + stats mod + the WAD's files
+    if !file_args.is_empty() {
+        cmd.arg("-file");
+        cmd.args(&file_args);
+    }
 
     // Stats collection is deliberately skipped during playback: a demo replays
     // map exits the user did not just make, and absorbing those would inflate
@@ -533,6 +536,48 @@ fn build_launch(
         is_zdoom,
         is_helion,
     })
+}
+
+/// The files a launch hands the sourceport as the WAD: its file, or the files a
+/// zip only wraps, unpacked, since no sourceport can be relied on to look inside
+/// one (see [`crate::unpack`]). A file caco could not hash goes as it is, as
+/// every file did before.
+fn loaded_files(
+    conn: &Connection,
+    wad: &db::WadRecord,
+    wad_path: &Path,
+    identity: Option<&identity::FileIdentity>,
+) -> crate::Result<Vec<PathBuf>> {
+    let Some(identity) = identity.filter(|identity| identity.is_container()) else {
+        return Ok(vec![wad_path.to_path_buf()]);
+    };
+    // First, so that what WADs whose files have gone left behind makes room.
+    unpack::tidy(conn);
+    let root = config::unpacked_dir();
+    unpack::unpack(wad_path, &identity.content_sha256, &root).map_err(|source| {
+        crate::Error::WadFileUnpack {
+            title: wad.title.clone(),
+            source,
+        }
+    })
+}
+
+/// Put a file the sourceport loads on its command line: a DEH or BEX patch
+/// after `-deh` for a sourceport that takes one there, anything else after
+/// `-file`.
+fn push_loaded(
+    path: String,
+    sourceport: &str,
+    file_args: &mut Vec<String>,
+    deh_args: &mut Vec<String>,
+) {
+    if crate::companion_service::is_deh_bex(Path::new(&path))
+        && sourceports::uses_deh_flag(sourceport)
+    {
+        deh_args.extend(["-deh".to_string(), path]);
+    } else {
+        file_args.push(path);
+    }
 }
 
 /// Stop a launch whose file plays differently from the one the WAD was last
