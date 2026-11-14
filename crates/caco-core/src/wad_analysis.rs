@@ -1,8 +1,9 @@
 //! WAD analysis module for automated completion detection.
 //!
 //! Two pure layers:
-//! - `analyze_wad` / `analyze_pk3` build a directed map graph from the WAD's
-//!   ZMAPINFO/UMAPINFO/MAPINFO/vanilla edges, walk the main path, then peel
+//! - `analyze_path` gathers the maps of whatever a launch loads for a WAD's
+//!   file, builds a directed map graph from their
+//!   ZMAPINFO/UMAPINFO/MAPINFO/vanilla edges, walks the main path, then peels
 //!   trailing zero-monster maps off the tail as `OptionalCredits`.
 //! - `completion_detect::check_completion` intersects the Required set with
 //!   the player's exit stats. The classifier never sees stats.
@@ -15,12 +16,18 @@
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::fs::File;
+use std::io::{Cursor, Read, Seek};
+use std::path::Path;
 use std::sync::LazyLock;
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use zip::ZipArchive;
 
-use crate::utils::{parse_wad_directory, zip_entry_names};
+use crate::companion_service::is_deh_bex;
+use crate::utils::{MAX_ZIP_ENTRY_SIZE, parse_wad_directory, zip_entry_names};
+use crate::{identity, unpack};
 
 // ---------------------------------------------------------------------------
 // Map name patterns
@@ -29,10 +36,9 @@ use crate::utils::{parse_wad_directory, zip_entry_names};
 static DOOM1_MAP_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^E(\d)M(\d)$").unwrap());
 static DOOM2_MAP_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^MAP([1-9]\d{2}|\d{2})$").unwrap());
-/// Playable map names. Accepts standard `MAPxx` / `ExMy` plus alphanumeric
-/// suffixes (e.g. `MAP18GZ` referenced from ZMAPINFO).
-static PLAYABLE_MAP_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(MAP\d{2,}[A-Z0-9]*|E\dM\d[A-Z0-9]*)$").unwrap());
+
+/// The lump a map starts with, in the original format and in UDMF.
+const FIRST_MAP_LUMPS: &[&str] = &["THINGS", "TEXTMAP"];
 
 /// Lumps that belong to a map definition (appear after the map marker).
 const MAP_LUMPS: &[&str] = &[
@@ -42,7 +48,7 @@ const MAP_LUMPS: &[&str] = &[
 
 /// Analysis format version. Bump this whenever detection logic changes
 /// so that stale cached analyses are automatically invalidated and re-run.
-pub const ANALYSIS_VERSION: u32 = 11;
+pub const ANALYSIS_VERSION: u32 = 12;
 
 /// Tail maps with fewer than this many monster things are peeled off as
 /// `OptionalCredits`. Threshold is "more than one" so a single decorative
@@ -334,9 +340,11 @@ fn add_vanilla_edges(graph: &mut MapGraph, map_set: &HashSet<&str>, is_doom1: bo
 /// Walk the graph and assign a classification to each map.
 ///
 /// Algorithm:
-/// 1. Roots = the canonical start (lowest-keyed playable map) plus every
-///    `episode` entry point. A multi-episode WAD has no single linear path
-///    through all maps, so each episode's first map is walked independently.
+/// 1. Roots = the canonical start (the lowest map with a standard name, where
+///    a new game begins) plus every `episode` entry point. A multi-episode WAD
+///    has no single linear path through all maps, so each episode's first map
+///    is walked independently. A WAD whose maps all have names of its own
+///    starts where its episodes do, and with none of those, at its first map.
 /// 2. From each root, walk the main path, preferring normal edges, falling
 ///    back to secret edges only when no normal edge exists ("forced secret =
 ///    true ending"). A node already claimed by an earlier walk stops the walk.
@@ -358,10 +366,13 @@ fn classify_maps(
         return;
     }
 
-    // Find the canonical start: lowest-keyed playable map.
-    let mut sorted: Vec<&str> = infos.iter().map(|m| m.lump.as_str()).collect();
-    sorted.sort_by_key(|l| map_sort_key(l));
-    let start = sorted[0].to_string();
+    // The canonical start: the lowest map with a standard name.
+    let start = infos
+        .iter()
+        .map(|m| m.lump.as_str())
+        .filter(|lump| is_map_marker(lump))
+        .min_by_key(|lump| map_sort_key(lump))
+        .map(str::to_string);
 
     // Pre-fill all as Unreachable; we'll upgrade as we walk.
     for m in infos.iter_mut() {
@@ -376,11 +387,21 @@ fn classify_maps(
     // Roots: canonical start first, then each episode entry point that exists
     // as a playable map. Order matters — the start owns shared tails; episode
     // walks pick up only the maps the start didn't already claim.
-    let mut roots: Vec<String> = vec![start];
+    let mut roots: Vec<String> = start.into_iter().collect();
     for r in episode_roots {
         if by_lump.contains_key(r) && !roots.contains(r) {
             roots.push(r.clone());
         }
+    }
+    // With neither, the first map in order is the start, so that the WAD still
+    // has a map to finish.
+    if roots.is_empty()
+        && let Some(first) = infos
+            .iter()
+            .map(|m| m.lump.as_str())
+            .min_by(|a, b| map_order(a, b))
+    {
+        roots.push(first.to_string());
     }
 
     // 1. Main-path walk from every root. `visited` is shared across roots so a
@@ -499,239 +520,304 @@ fn finalize(maps: Vec<MapInfo>, has_structured_flow: bool) -> WadAnalysis {
 }
 
 // ---------------------------------------------------------------------------
-// Public: WAD analysis
+// Public: analysis of a WAD's file
 // ---------------------------------------------------------------------------
 
-/// Analyze whatever's at `wad_path` — `.pk3` archives go through
-/// [`analyze_pk3`]; everything else is loaded as raw WAD bytes (via
-/// [`crate::utils::load_wad_data`], which transparently unwraps a `.zip`
-/// that contains a single `.wad`) and fed to [`analyze_wad`].
+/// Analyze what a launch hands the sourceport for the file at `wad_path`.
+///
+/// Goes by what the file is, not what it is called, as a launch does. A zip
+/// that only wraps loadable files ([`identity::is_container_archive`]) is never
+/// handed over itself: [`crate::unpack`] gives the sourceport the files inside,
+/// so those are what is analyzed, together and in the order they load. Any
+/// other zip is a resource archive played whole, whatever its extension, and
+/// anything else is a WAD. A container used to be searched for a `.wad` and
+/// nothing else, so The Warrens: Burrow of the Were, a `.pk3` in a zip, had no
+/// analysis, and finishing it finished nothing.
 ///
 /// Centralises the dispatch so `player.rs`, the GUI's lazy re-analysis
 /// worker, and the diagnostic harness in `completion_detect.rs` agree on
 /// what "analyze the file" means.
-pub fn analyze_path(wad_path: &std::path::Path) -> Option<WadAnalysis> {
-    let is_pk3 = wad_path
-        .extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case("pk3"));
-    if is_pk3 {
-        analyze_pk3(wad_path)
+pub fn analyze_path(wad_path: &Path) -> Option<WadAnalysis> {
+    let mut file = File::open(wad_path).ok()?;
+    let mut magic = [0u8; 4];
+    let is_zip = file.read_exact(&mut magic).is_ok() && magic == identity::ZIP_MAGIC;
+    file.rewind().ok()?;
+    let gathered = if is_zip {
+        let mut archive = ZipArchive::new(file).ok()?;
+        if identity::is_container_archive(&archive) {
+            gather_container(&mut archive)?
+        } else {
+            gather_archive(&mut archive)?
+        }
     } else {
-        let wad_data = crate::utils::load_wad_data(wad_path)?;
-        analyze_wad(&wad_data)
+        let mut data = Vec::new();
+        file.read_to_end(&mut data).ok()?;
+        gather_wad(&data)?
+    };
+    gathered.classify()
+}
+
+/// What the files a launch loads say about their maps, before any of it is
+/// classified.
+///
+/// Several files gather into one as a sourceport reads them, in load order: a
+/// later file's map replaces an earlier one's of the same name, and its
+/// MAPINFO is read after theirs.
+#[derive(Default)]
+struct Gathered {
+    /// Each map once, where it was first found.
+    maps: Vec<String>,
+    /// How many monsters each map has, from the last file to have it.
+    monsters: HashMap<String, usize>,
+    sources: Vec<(FlowSource, HashMap<String, MapinfoEdge>)>,
+    episode_roots: Vec<String>,
+    /// MAPINFO read from a resource archive, the only kind whose flow is
+    /// checked for hubs.
+    archive_mapinfo: Option<HashMap<String, crate::mapinfo::MapinfoEntry>>,
+    /// Whether any structured map flow was found (UMAPINFO/MAPINFO/ZMAPINFO).
+    has_structured: bool,
+}
+
+impl Gathered {
+    fn add_map(&mut self, name: String, monsters: usize) {
+        if self.monsters.insert(name.clone(), monsters).is_none() {
+            self.maps.push(name);
+        }
+    }
+
+    /// `later` read after what is here, as a sourceport reads a file loaded
+    /// after the others.
+    fn extend(&mut self, later: Gathered) {
+        let Gathered {
+            maps,
+            mut monsters,
+            sources,
+            episode_roots,
+            archive_mapinfo,
+            has_structured,
+        } = later;
+        for name in maps {
+            let count = monsters.remove(&name).unwrap_or(0);
+            self.add_map(name, count);
+        }
+        self.sources.extend(sources);
+        self.episode_roots.extend(episode_roots);
+        if let Some(mapinfo) = archive_mapinfo {
+            self.archive_mapinfo.get_or_insert_default().extend(mapinfo);
+        }
+        self.has_structured |= has_structured;
+    }
+
+    /// Classify the maps. `None` when there is no map a game is played on.
+    fn classify(self) -> Option<WadAnalysis> {
+        let mut infos: Vec<MapInfo> = self
+            .maps
+            .into_iter()
+            .filter(|lump| is_playable(lump))
+            .map(|lump| MapInfo {
+                lump,
+                classification: MapClassification::Unreachable,
+            })
+            .collect();
+        if infos.is_empty() {
+            return None;
+        }
+        let lumps: Vec<String> = infos.iter().map(|m| m.lump.clone()).collect();
+
+        if self
+            .archive_mapinfo
+            .as_ref()
+            .is_some_and(|mapinfo| detect_hub_structure(mapinfo, &lumps))
+        {
+            classify_hub(&mut infos);
+            return Some(finalize(infos, self.has_structured));
+        }
+
+        let map_set: HashSet<&str> = lumps.iter().map(String::as_str).collect();
+        let is_doom1 = lumps
+            .iter()
+            .find(|lump| is_map_marker(lump))
+            .is_some_and(|lump| DOOM1_MAP_RE.is_match(lump));
+        let graph = build_graph(&map_set, is_doom1, &self.sources);
+        classify_maps(&graph, &mut infos, &self.monsters, &self.episode_roots);
+        Some(finalize(infos, self.has_structured))
     }
 }
 
-/// Analyze a WAD file to enumerate maps and classify them.
-///
-/// Returns `None` if the data is not a valid WAD or contains no maps.
-fn analyze_wad(wad_data: &[u8]) -> Option<WadAnalysis> {
+/// Whether a map is one a game is played on. Any name a map has counts, since
+/// a ZDoom WAD can name its own (The Warrens' only map is BTW01), and whether
+/// the game ever reaches one is for its flow to say. The title screen's map is
+/// the one that is never played.
+fn is_playable(lump: &str) -> bool {
+    !lump.eq_ignore_ascii_case("TITLEMAP")
+}
+
+/// What a WAD holds: its maps, and the flow its MAPINFO lumps give them.
+/// `None` for what is not a WAD.
+fn gather_wad(wad_data: &[u8]) -> Option<Gathered> {
     let directory = parse_wad_directory(wad_data);
     if directory.is_empty() {
         return None;
     }
 
-    let map_ranges = find_map_ranges(&directory);
-    if map_ranges.is_empty() {
-        return None;
+    let mut gathered = Gathered::default();
+    for (name, start_idx, end_idx) in find_map_ranges(&directory) {
+        let count = count_monsters_in_range(wad_data, &directory, start_idx, end_idx);
+        gathered.add_map(name, count);
     }
 
-    // Per-map monster count + bare map info skeleton
-    let mut infos: Vec<MapInfo> = Vec::with_capacity(map_ranges.len());
-    let mut monsters: HashMap<String, usize> = HashMap::new();
-    for (name, start_idx, end_idx) in &map_ranges {
-        let count = count_monsters_in_range(wad_data, &directory, *start_idx, *end_idx);
-        monsters.insert(name.clone(), count);
-        infos.push(MapInfo {
-            lump: name.clone(),
-            classification: MapClassification::Unreachable,
-        });
-    }
-
-    // Filter to playable map names. Anything else (TITLEMAP, etc.) is
-    // ignored for classification purposes.
-    let mut infos: Vec<MapInfo> = infos
-        .into_iter()
-        .filter(|m| PLAYABLE_MAP_RE.is_match(&m.lump))
-        .collect();
-    if infos.is_empty() {
-        return None;
-    }
-
-    let lumps: Vec<String> = infos.iter().map(|m| m.lump.clone()).collect();
-    let map_set: HashSet<&str> = lumps.iter().map(|s| s.as_str()).collect();
-    let is_doom1 = lumps.first().is_some_and(|m| DOOM1_MAP_RE.is_match(m));
-
-    // Collect flow sources from the WAD.
-    let mut sources: Vec<(FlowSource, HashMap<String, MapinfoEdge>)> = Vec::new();
-    let mut episode_roots: Vec<String> = Vec::new();
-    let mut has_structured = false;
-
-    if let Some(text) = read_lump_text(wad_data, &directory, "ZMAPINFO") {
+    // An include in a WAD names another lump.
+    let mapinfo = |lump: &str| {
+        let text = read_lump_text(wad_data, &directory, lump)?;
+        let mut read = |name: &str| read_lump_text(wad_data, &directory, &name.to_uppercase());
+        Some(crate::mapinfo::expand_includes(&text, &mut read))
+    };
+    if let Some(text) = mapinfo("ZMAPINFO") {
         let entries = parse_mapinfo_to_edges(&crate::mapinfo::parse_mapinfo(&text));
         if !entries.is_empty() {
-            has_structured = true;
-            sources.push((FlowSource::Zmapinfo, entries));
+            gathered.has_structured = true;
+            gathered.sources.push((FlowSource::Zmapinfo, entries));
         }
-        episode_roots.extend(crate::mapinfo::parse_episode_starts(&text));
+        gathered
+            .episode_roots
+            .extend(crate::mapinfo::parse_episode_starts(&text));
     }
     if let Some(text) = read_lump_text(wad_data, &directory, "UMAPINFO") {
         let entries = parse_umapinfo_to_edges(&parse_umapinfo(&text));
         if !entries.is_empty() {
-            has_structured = true;
-            sources.push((FlowSource::Umapinfo, entries));
+            gathered.has_structured = true;
+            gathered.sources.push((FlowSource::Umapinfo, entries));
         }
     }
-    if let Some(text) = read_lump_text(wad_data, &directory, "MAPINFO") {
+    if let Some(text) = mapinfo("MAPINFO") {
         let entries = parse_mapinfo_to_edges(&crate::mapinfo::parse_mapinfo(&text));
         if !entries.is_empty() {
-            has_structured = true;
-            sources.push((FlowSource::Mapinfo, entries));
+            gathered.has_structured = true;
+            gathered.sources.push((FlowSource::Mapinfo, entries));
         }
-        episode_roots.extend(crate::mapinfo::parse_episode_starts(&text));
+        gathered
+            .episode_roots
+            .extend(crate::mapinfo::parse_episode_starts(&text));
     }
 
-    let graph = build_graph(&map_set, is_doom1, &sources);
-    classify_maps(&graph, &mut infos, &monsters, &episode_roots);
-
-    Some(finalize(infos, has_structured))
+    Some(gathered)
 }
 
-// ---------------------------------------------------------------------------
-// Public: PK3 analysis
-// ---------------------------------------------------------------------------
-
-/// Analyze a PK3 file (ZDoom ZIP archive).
-fn analyze_pk3(pk3_path: &std::path::Path) -> Option<WadAnalysis> {
-    use std::io::Read;
-
-    let file = std::fs::File::open(pk3_path).ok()?;
-    let mut archive = zip::ZipArchive::new(file).ok()?;
-
-    // --- Step 1: Discover maps and count monsters ---
-    let mut infos: Vec<MapInfo> = Vec::new();
-    let mut monsters: HashMap<String, usize> = HashMap::new();
-
-    // Try maps/ directory first (one map per WAD)
-    let map_wads: Vec<(usize, String)> = zip_entry_names(&archive)
-        .filter(|(_, name)| {
-            let lower = name.to_lowercase();
-            lower.starts_with("maps/") && lower.ends_with(".wad")
-        })
-        .map(|(i, name)| (i, name.into_owned()))
+/// What a resource archive (a PK3, or any zip played whole) holds, as ZDoom
+/// reads one: a map per WAD under `maps/`, named after its file, the MAPINFO at
+/// its root, and then each WAD at its root as if it had been loaded after it.
+///
+/// `None` when an entry it needs cannot be read, rather than an analysis short
+/// of a map, which could have the WAD finished early.
+fn gather_archive<R: Read + Seek>(archive: &mut ZipArchive<R>) -> Option<Gathered> {
+    let names: Vec<(usize, String)> = zip_entry_names(archive)
+        .map(|(index, name)| (index, name.into_owned()))
         .collect();
+    let mut gathered = Gathered::default();
 
-    if !map_wads.is_empty() {
-        for (index, entry_name) in &map_wads {
-            let mut entry = archive.by_index(*index).ok()?;
-            let mut data = Vec::new();
-            entry.read_to_end(&mut data).ok()?;
-
-            let stem = std::path::Path::new(entry_name)
-                .file_stem()
-                .and_then(|s| s.to_str())?
-                .to_uppercase();
-
-            let count = count_monsters_in_map_wad(&data);
-            monsters.insert(stem.clone(), count);
-            infos.push(MapInfo {
-                lump: stem,
-                classification: MapClassification::Unreachable,
-            });
+    for (index, name) in &names {
+        let lower = name.to_lowercase();
+        if !(lower.starts_with("maps/") && lower.ends_with(".wad")) {
+            continue;
         }
-    } else {
-        // Fallback: scan root-level WAD files for embedded maps
-        let root_wads: Vec<usize> = zip_entry_names(&archive)
-            .filter(|(_, name)| !name.contains('/') && name.to_lowercase().ends_with(".wad"))
-            .map(|(i, _)| i)
-            .collect();
+        let data = read_entry(archive, *index)?;
+        let stem = Path::new(name).file_stem()?.to_str()?.to_uppercase();
+        gathered.add_map(stem, count_monsters_in_map_wad(&data));
+    }
 
-        for index in root_wads {
-            let mut entry = archive.by_index(index).ok()?;
-            let mut data = Vec::new();
-            entry.read_to_end(&mut data).ok()?;
+    let mut mapinfo_text = String::new();
+    for (index, name) in &names {
+        let lower = name.to_lowercase();
+        if !name.contains('/') && (lower.starts_with("mapinfo") || lower.starts_with("zmapinfo")) {
+            let text = read_entry(archive, *index)?;
+            mapinfo_text.push('\n');
+            mapinfo_text.push_str(&String::from_utf8_lossy(&text));
+        }
+    }
+    if !mapinfo_text.is_empty() {
+        // An include in an archive names an entry by its path, or a lump at the root
+        // by its name, which is its file name up to the first dot.
+        let mut read = |wanted: &str| {
+            let wanted = wanted.replace('\\', "/");
+            let (index, _) = names.iter().find(|(_, name)| {
+                name.eq_ignore_ascii_case(&wanted)
+                    || (!name.contains('/')
+                        && name
+                            .split('.')
+                            .next()
+                            .is_some_and(|lump| lump.eq_ignore_ascii_case(&wanted)))
+            })?;
+            let text = read_entry(archive, *index)?;
+            Some(String::from_utf8_lossy(&text).into_owned())
+        };
+        let text = crate::mapinfo::expand_includes(&mapinfo_text, &mut read);
+        let mapinfo = crate::mapinfo::parse_mapinfo(&text);
+        let entries = parse_mapinfo_to_edges(&mapinfo);
+        if !entries.is_empty() {
+            // ZMAPINFO and MAPINFO are not told apart here, since mapinfo.rs reads
+            // both: the archive's is a Mapinfo source.
+            gathered.sources.push((FlowSource::Mapinfo, entries));
+        }
+        gathered
+            .episode_roots
+            .extend(crate::mapinfo::parse_episode_starts(&text));
+        gathered.archive_mapinfo = Some(mapinfo);
+        gathered.has_structured = true;
+    }
 
-            let directory = parse_wad_directory(&data);
-            let ranges = find_map_ranges(&directory);
-            for (name, start, end) in &ranges {
-                let count = count_monsters_in_range(&data, &directory, *start, *end);
-                let upper = name.to_uppercase();
-                monsters.insert(upper.clone(), count);
-                infos.push(MapInfo {
-                    lump: upper,
-                    classification: MapClassification::Unreachable,
-                });
-            }
+    let mut root_wads: Vec<&(usize, String)> = names
+        .iter()
+        .filter(|(_, name)| !name.contains('/') && name.to_lowercase().ends_with(".wad"))
+        .collect();
+    root_wads.sort_by_cached_key(|(_, name)| unpack::load_order(name));
+    for (index, _) in root_wads {
+        let data = read_entry(archive, *index)?;
+        if let Some(wad) = gather_wad(&data) {
+            gathered.extend(wad);
         }
     }
 
-    // Filter to playable map names
-    infos.retain(|m| PLAYABLE_MAP_RE.is_match(&m.lump));
-    if infos.is_empty() {
+    Some(gathered)
+}
+
+/// What a container hands the sourceport, which is each of its loadable files,
+/// in the order [`crate::unpack`] loads them. Patches hold no maps.
+fn gather_container<R: Read + Seek>(archive: &mut ZipArchive<R>) -> Option<Gathered> {
+    let mut files = identity::loadable_entries(archive);
+    files.sort_by_cached_key(|(_, name)| unpack::load_order(name));
+
+    let mut gathered = Gathered::default();
+    for (index, name) in files {
+        if is_deh_bex(Path::new(&name)) {
+            continue;
+        }
+        let data = read_entry(archive, index)?;
+        let found = if data.starts_with(&identity::ZIP_MAGIC) {
+            gather_archive(&mut ZipArchive::new(Cursor::new(data)).ok()?)
+        } else {
+            gather_wad(&data)
+        };
+        if let Some(found) = found {
+            gathered.extend(found);
+        }
+    }
+    Some(gathered)
+}
+
+/// A zip entry's bytes, or `None` for one that cannot be read or is larger
+/// than any WAD.
+fn read_entry<R: Read + Seek>(archive: &mut ZipArchive<R>, index: usize) -> Option<Vec<u8>> {
+    let entry = archive.by_index(index).ok()?;
+    if entry.size() > MAX_ZIP_ENTRY_SIZE {
         return None;
     }
-
-    // --- Step 2: Read and parse MAPINFO/ZMAPINFO ---
-    let mut mapinfo_text = String::new();
-    let mapinfos: Vec<usize> = zip_entry_names(&archive)
-        .filter(|(_, name)| {
-            let lower = name.to_lowercase();
-            !name.contains('/') && (lower.starts_with("mapinfo") || lower.starts_with("zmapinfo"))
-        })
-        .map(|(i, _)| i)
-        .collect();
-    for index in mapinfos {
-        if let Ok(mut entry) = archive.by_index(index) {
-            let mut text = String::new();
-            if entry.read_to_string(&mut text).is_ok() {
-                mapinfo_text.push('\n');
-                mapinfo_text.push_str(&text);
-            }
-        }
-    }
-
-    let mapinfo = if !mapinfo_text.is_empty() {
-        Some(crate::mapinfo::parse_mapinfo(&mapinfo_text))
-    } else {
-        None
-    };
-    let has_structured = mapinfo.is_some();
-
-    // --- Step 3: Hub detection (PK3-specific) ---
-    let lumps: Vec<String> = infos.iter().map(|m| m.lump.clone()).collect();
-    let is_hub = mapinfo
-        .as_ref()
-        .is_some_and(|mi| detect_hub_structure(mi, &lumps));
-
-    if is_hub {
-        classify_hub(&mut infos);
-        return Some(finalize(infos, has_structured));
-    }
-
-    // --- Step 4: Build graph + classify (linear/branching path) ---
-    let map_set: HashSet<&str> = lumps.iter().map(|s| s.as_str()).collect();
-    let is_doom1 = lumps.first().is_some_and(|m| DOOM1_MAP_RE.is_match(m));
-
-    let mut sources: Vec<(FlowSource, HashMap<String, MapinfoEdge>)> = Vec::new();
-    if let Some(ref mi) = mapinfo {
-        let entries = parse_mapinfo_to_edges(mi);
-        if !entries.is_empty() {
-            // For PK3 we don't distinguish ZMAPINFO from MAPINFO at this layer;
-            // mapinfo.rs already reads both. Treat as Mapinfo priority.
-            sources.push((FlowSource::Mapinfo, entries));
-        }
-    }
-
-    // PK3 maps may also have UMAPINFO embedded inside one of the WAD files.
-    // Skip that lookup for now — MAPINFO/ZMAPINFO is the standard for PK3s.
-
-    let episode_roots = crate::mapinfo::parse_episode_starts(&mapinfo_text);
-
-    let graph = build_graph(&map_set, is_doom1, &sources);
-    classify_maps(&graph, &mut infos, &monsters, &episode_roots);
-
-    Some(finalize(infos, has_structured))
+    let mut data = Vec::with_capacity(entry.size() as usize);
+    // The size is what the zip says, which a damaged one can get wrong.
+    entry
+        .take(MAX_ZIP_ENTRY_SIZE + 1)
+        .read_to_end(&mut data)
+        .ok()?;
+    (data.len() as u64 <= MAX_ZIP_ENTRY_SIZE).then_some(data)
 }
 
 // ---------------------------------------------------------------------------
@@ -752,7 +838,7 @@ fn detect_hub_structure(
 
     let mut target_counts: HashMap<&str, usize> = HashMap::new();
     for (name, entry) in mapinfo {
-        if !PLAYABLE_MAP_RE.is_match(name) {
+        if !is_playable(name) {
             continue;
         }
         if let Some(ref next) = entry.next {
@@ -760,10 +846,7 @@ fn detect_hub_structure(
         }
     }
 
-    let playable_count = playable_maps
-        .iter()
-        .filter(|m| PLAYABLE_MAP_RE.is_match(m))
-        .count();
+    let playable_count = playable_maps.len();
     if playable_count == 0 {
         return false;
     }
@@ -794,21 +877,22 @@ fn detect_hub_structure(
 ///
 /// A lump is a map marker if either:
 /// - Its name matches a standard pattern (MAP01, E1M1), OR
-/// - It is immediately followed by a map-defining lump (THINGS, LINEDEFS,
-///   TEXTMAP, etc.) AND its name plausibly looks like a map (matches
-///   `PLAYABLE_MAP_RE`).
+/// - The lump after it is the one a map starts with, THINGS or TEXTMAP,
+///   whatever its own name.
 ///
-/// The second rule catches ZDoom-style alternate maps like MAP18GZ that are
-/// referenced from ZMAPINFO under arbitrary lump names. The PLAYABLE_MAP_RE
-/// guard prevents random zero-size lumps that happen to precede LINEDEFS
-/// from being misidentified.
+/// The second rule is how ZDoom finds a map, and catches the names ZDoom maps
+/// have: ZMAPINFO's alternates (MAP18GZ) and a WAD's own (BTW01). It asks for
+/// a map's first lump and not any of them, because SCRIPTS, BEHAVIOR and
+/// DIALOGUE can also stand on their own, after a lump that is no map.
 fn find_map_ranges(directory: &[(String, u32, u32)]) -> Vec<(String, usize, usize)> {
     let mut ranges = Vec::new();
     let mut i = 0;
     while i < directory.len() {
         let name = &directory[i].0;
-        let next_is_map_lump = directory.get(i + 1).is_some_and(|(n, _, _)| is_map_lump(n));
-        let is_marker = is_map_marker(name) || (next_is_map_lump && PLAYABLE_MAP_RE.is_match(name));
+        let starts_a_map = directory
+            .get(i + 1)
+            .is_some_and(|(n, _, _)| FIRST_MAP_LUMPS.contains(&n.as_str()));
+        let is_marker = is_map_marker(name) || starts_a_map;
         if is_marker {
             let start = i;
             i += 1;
@@ -1169,6 +1253,10 @@ mod tests {
             ));
         }
         text.into_bytes()
+    }
+
+    fn analyze_wad(wad_data: &[u8]) -> Option<WadAnalysis> {
+        gather_wad(wad_data)?.classify()
     }
 
     fn classify_of(a: &WadAnalysis, lump: &str) -> MapClassification {
@@ -2032,7 +2120,189 @@ MAP MAP03
         let path = dir.path().join("cp437.pk3");
         std::fs::write(&path, pk3).unwrap();
 
-        let a = analyze_pk3(&path).expect("the WAD's maps are found");
+        let a = analyze_path(&path).expect("the WAD's maps are found");
         assert_eq!(classify_of(&a, "MAP01"), MapClassification::Required);
+    }
+
+    // -----------------------------------------------------------------------
+    // What a launch loads
+    // -----------------------------------------------------------------------
+
+    /// A zip of `entries`, in that order.
+    fn zip_of(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        use std::io::Write;
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        for (name, data) in entries {
+            writer
+                .start_file(*name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            writer.write_all(data).unwrap();
+        }
+        writer.finish().unwrap().into_inner()
+    }
+
+    /// A WAD of one map, `name`, with `imps` imps in it, as a PK3's `maps/` holds one.
+    fn map_wad(name: &str, imps: usize) -> Vec<u8> {
+        build_wad(&[(name, &[]), ("THINGS", &playable_things(imps))])
+    }
+
+    /// `bytes`, as a file called `name`, analyzed as a launch loads it.
+    fn analyze_file(name: &str, bytes: &[u8]) -> Option<WadAnalysis> {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(name);
+        std::fs::write(&path, bytes).unwrap();
+        analyze_path(&path)
+    }
+
+    fn classified(a: &WadAnalysis) -> Vec<(&str, MapClassification)> {
+        a.maps
+            .iter()
+            .map(|m| (m.lump.as_str(), m.classification))
+            .collect()
+    }
+
+    /// The Warrens: Burrow of the Were's PK3, cut down to what decides its maps: one named
+    /// BTW01 and a title map, and a ZMAPINFO of nothing but includes, as 1.4.3 has them.
+    fn warrens_pk3() -> Vec<u8> {
+        let maps = b"DefaultMap\n{\n\tEvenLighting\n}\n\n\
+            Map TITLEMAP \"The Warrens\"\n{\n}\n\n\
+            Map BTW01 \"Burrow of The Were\"\n{\n\tLevelNum = 666\n\tNext = \"MAP01\"\n\tNoIntermission\n}\n";
+        let episodes =
+            b"clearepisodes\n\nEpisode\tBTW01 \n{\n\tname = \"Burrow of the Were\"\n}\n\n\
+            Episode MAP01\n{\n\tname = \"Doom II: Hell on Earth\"\n}\n";
+        zip_of(&[
+            (
+                "ZMAPINFO",
+                b"include \"mapinfo/Maps\"\ninclude \"mapinfo/Episodes\"\n",
+            ),
+            ("mapinfo/Maps", maps),
+            ("mapinfo/Episodes", episodes),
+            ("maps/BTW01.wad", &map_wad("BTW01", 150)),
+            // A title map can have monsters of its own to look at.
+            ("maps/TITLEMAP.wad", &map_wad("TITLEMAP", 9)),
+        ])
+    }
+
+    #[test]
+    fn test_a_pk3_in_a_zip_is_analyzed_as_the_pk3() {
+        // The Warrens as it comes: a zip that only wraps its PK3, which a launch unpacks. Its
+        // analysis used to look in the zip for a `.wad`, find none, and give up, so finishing
+        // BTW01 finished nothing.
+        let zip = zip_of(&[
+            ("README.txt", b"read me"),
+            ("BurrowOfTheWere_1.4.3.pk3", &warrens_pk3()),
+            ("CREDITS.txt", b"thanks"),
+        ]);
+
+        let a = analyze_file("TheWarrensBOTW_1.4.3.zip", &zip).expect("the PK3's maps are found");
+
+        assert_eq!(classified(&a), [("BTW01", MapClassification::Required)]);
+        assert!(a.has_umapinfo);
+    }
+
+    #[test]
+    fn test_a_zip_played_whole_is_a_pk3_whatever_it_is_called() {
+        let pk3 = warrens_pk3();
+
+        let as_pk3 = analyze_file("warrens.pk3", &pk3).unwrap();
+        let as_zip = analyze_file("warrens.zip", &pk3).unwrap();
+
+        assert_eq!(classified(&as_pk3), classified(&as_zip));
+    }
+
+    #[test]
+    fn test_maps_with_names_of_their_own_start_where_the_episodes_say() {
+        // AAAA comes first by name, and nothing leads to it. The game starts at START, which
+        // only the included file says.
+        let pk3 = zip_of(&[
+            (
+                "ZMAPINFO",
+                b"include \"mapinfo/episodes\"\nmap START \"Start\"\n{\n\tnext = \"FINALE\"\n}\n",
+            ),
+            ("MapInfo/Episodes", b"clearepisodes\nepisode START\n{\n}\n"),
+            ("maps/AAAA.wad", &map_wad("AAAA", 5)),
+            ("maps/START.wad", &map_wad("START", 5)),
+            ("maps/FINALE.wad", &map_wad("FINALE", 5)),
+        ]);
+
+        let a = analyze_file("game.pk3", &pk3).unwrap();
+
+        assert_eq!(classify_of(&a, "START"), MapClassification::Required);
+        assert_eq!(classify_of(&a, "FINALE"), MapClassification::Required);
+        assert_eq!(classify_of(&a, "AAAA"), MapClassification::Unreachable);
+    }
+
+    #[test]
+    fn test_a_map_with_a_name_of_its_own_is_one_to_finish_once_play_reaches_it() {
+        // MAP02 leads to a map the WAD named itself, and on to MAP03. ARENA used to be no map,
+        // which left MAP02 the last, and the WAD finished two maps early.
+        let zmapinfo = b"map MAP02 \"Two\"\n{\n\tnext = \"ARENA\"\n}\n\
+            map ARENA \"Arena\"\n{\n\tnext = \"MAP03\"\n}\n";
+        let things = playable_things(5);
+        let wad = build_wad(&[
+            ("MAP01", &[]),
+            ("THINGS", &things),
+            ("MAP02", &[]),
+            ("THINGS", &things),
+            ("ARENA", &[]),
+            ("THINGS", &things),
+            ("MAP03", &[]),
+            ("THINGS", &things),
+            ("ZMAPINFO", zmapinfo),
+        ]);
+
+        let a = analyze_wad(&wad).unwrap();
+
+        for lump in ["MAP01", "MAP02", "ARENA", "MAP03"] {
+            assert_eq!(classify_of(&a, lump), MapClassification::Required, "{lump}");
+        }
+    }
+
+    #[test]
+    fn test_only_a_lump_before_a_maps_first_lump_is_a_map() {
+        // SCRIPTS and BEHAVIOR can stand on their own, so a lump before one is no map.
+        let things = playable_things(5);
+        let wad = build_wad(&[
+            ("MAP01", &[]),
+            ("THINGS", &things),
+            ("LOADACS", b"lib"),
+            ("SCRIPTS", b"#library \"lib\""),
+            ("BEHAVIOR", b"ACS\0"),
+            ("TITLEMAP", &[]),
+            ("THINGS", &things),
+        ]);
+
+        let a = analyze_wad(&wad).unwrap();
+
+        assert_eq!(classified(&a), [("MAP01", MapClassification::Required)]);
+    }
+
+    #[test]
+    fn test_a_containers_files_are_analyzed_together_in_the_order_they_load() {
+        // The first to load ends on an empty MAP02, and the second replaces it with a real one.
+        // They are zipped the other way round, and a launch loads them by name.
+        let things = playable_things(5);
+        let first = build_wad(&[
+            ("MAP01", &[]),
+            ("THINGS", &things),
+            ("MAP02", &[]),
+            ("THINGS", &[]),
+        ]);
+        let second = map_wad("MAP02", 5);
+        let zip = zip_of(&[
+            ("pack/b.wad", &second),
+            ("pack/A.wad", &first),
+            ("pack/readme.txt", b"read me"),
+        ]);
+
+        let a = analyze_file("pack.zip", &zip).unwrap();
+
+        assert_eq!(
+            classified(&a),
+            [
+                ("MAP01", MapClassification::Required),
+                ("MAP02", MapClassification::Required),
+            ]
+        );
     }
 }

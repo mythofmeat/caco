@@ -865,6 +865,8 @@ Per-map stat tracking (which feeds completion detection and progress bars) works
 - **zdoom** — caco injects a small ZScript reporter PK3 plus `+logfile`, then converts the log into a managed `stats.txt` after each session.
 - **helion** — caco passes `-levelstat` and consumes Helion's global `levelstat.txt` (from `~/.config/Helion`) into the WAD's managed `stats.txt` after each session.
 
+A WAD is finished once every map on its way to the end has an exit. caco reads the maps from what the sourceport is given (the WAD, the PK3, or the files a zip wraps), including maps a ZDoom WAD names itself, and follows MAPINFO (with its `include`s), UMAPINFO and the usual map order to the end, so secret and credits maps stay optional.
+
 ## Development
 
 ```bash

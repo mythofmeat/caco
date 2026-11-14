@@ -161,14 +161,21 @@ fn listing<R: Read + Seek>(archive: &mut ZipArchive<R>) -> io::Result<Vec<Listed
             size,
         });
     }
-    files.sort_by_cached_key(|file| {
-        (
-            is_deh_bex(&file.relative),
-            identity::base_name(&file.name).to_lowercase(),
-            file.name.clone(),
-        )
-    });
+    files.sort_by_cached_key(|file| load_order(&file.name));
     Ok(files)
+}
+
+/// Where a file in a zip comes in the order a launch loads them: by file name,
+/// ignoring case, wherever in the zip it sits, then DEH and BEX patches the
+/// same way, which is the order nyan-doom loads a zip's files itself.
+/// [`crate::wad_analysis`] reads a container's files in this order too, so a
+/// map two of them have is the one the sourceport plays.
+pub(crate) fn load_order(name: &str) -> (bool, String, String) {
+    (
+        is_deh_bex(Path::new(name)),
+        identity::base_name(name).to_lowercase(),
+        name.to_string(),
+    )
 }
 
 /// An entry's name as a path that stays inside the folder it is unpacked into,

@@ -112,7 +112,7 @@ pub(crate) const READ_CHUNK: usize = 64 * 1024;
 
 /// A zip's local-file-header signature, which a zip starts with unless it is
 /// a self-extractor (taken whole, as any other file is).
-const ZIP_MAGIC: [u8; 4] = *b"PK\x03\x04";
+pub(crate) const ZIP_MAGIC: [u8; 4] = *b"PK\x03\x04";
 
 /// More loadable files than this and an archive is not looked into at all: no
 /// WAD ships that many, and the rows would be noise.
@@ -202,13 +202,7 @@ struct Inside {
 /// games the same, so the zip is taken whole instead.
 fn look_inside<R: Read + Seek>(reader: R) -> Option<Inside> {
     let mut archive = ZipArchive::new(reader).ok()?;
-    let container = {
-        let names: Vec<_> = zip_entry_names(&archive)
-            .map(|(_, name)| name)
-            .filter(|name| !is_junk(name))
-            .collect();
-        is_container(names.iter().map(|name| name.as_ref()))
-    };
+    let container = is_container_archive(&archive);
 
     let loadable = loadable_entries(&archive);
     if loadable.len() > MAX_INNER_FILES {
@@ -226,6 +220,16 @@ fn look_inside<R: Read + Seek>(reader: R) -> Option<Inside> {
     }
 
     Some(Inside { inner, container })
+}
+
+/// Whether a zip only wraps loadable files, and so is never handed to a sourceport
+/// itself: see [`is_container`].
+pub(crate) fn is_container_archive<R: Read + Seek>(archive: &ZipArchive<R>) -> bool {
+    let names: Vec<_> = zip_entry_names(archive)
+        .map(|(_, name)| name)
+        .filter(|name| !is_junk(name))
+        .collect();
+    is_container(names.iter().map(|name| name.as_ref()))
 }
 
 /// A zip's loadable files, wherever they sit, as `(index, name)` in archive order.

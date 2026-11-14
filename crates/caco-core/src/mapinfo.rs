@@ -36,6 +36,15 @@ static ENDGAME_RE: LazyLock<Regex> = LazyLock::new(|| {
 static EPISODE_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)^\s*episode\s+(\w+)").unwrap());
 
+/// `include "<name>"`, which reads another lump's MAPINFO in where it stands.
+static INCLUDE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?i)^\s*include\s+"([^"]+)""#).unwrap());
+
+/// How much text [`expand_includes`] puts together before it stops following
+/// includes: far more MAPINFO than any WAD has, and a bound on one whose files
+/// include each other many times over.
+const MAX_EXPANDED_BYTES: usize = 4 << 20;
+
 /// Whether a `next = <value>` target names a game/episode ender rather than a
 /// real map. ZDoom's end specials (`EndPic`, `EndGameC`, `EndTitle`, …) all
 /// start with `End`; a value like `next = endpic, CREDIT` means "this map ends
@@ -136,6 +145,47 @@ pub fn parse_episode_starts(text: &str) -> Vec<String> {
         }
     }
     starts
+}
+
+/// `text` with each `include "<name>"` replaced by what `read` gives for that
+/// name, includes and all, as ZDoom reads it. A MAPINFO can be nothing but
+/// includes: The Warrens' ZMAPINFO is seven, and its maps and episodes are in
+/// `mapinfo/Maps` and `mapinfo/Episodes`.
+///
+/// An include `read` has nothing for is left out, and so is one of a file
+/// already being read, which would never end. What comes back has no block
+/// comments, which [`parse_mapinfo`] and [`parse_episode_starts`] take out
+/// anyway, so that an include inside one is not followed.
+pub fn expand_includes(text: &str, read: &mut dyn FnMut(&str) -> Option<String>) -> String {
+    let mut out = String::with_capacity(text.len());
+    expand_into(text, read, &mut Vec::new(), &mut out);
+    out
+}
+
+fn expand_into(
+    text: &str,
+    read: &mut dyn FnMut(&str) -> Option<String>,
+    reading: &mut Vec<String>,
+    out: &mut String,
+) {
+    for line in strip_block_comments(text).lines() {
+        let Some(caps) = INCLUDE_RE.captures(strip_line_comment(line)) else {
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        };
+        // ZDoom's names are not case-sensitive, and a zip made on Windows can
+        // separate with backslashes.
+        let name = caps[1].replace('\\', "/").to_lowercase();
+        if out.len() > MAX_EXPANDED_BYTES || reading.contains(&name) {
+            continue;
+        }
+        if let Some(included) = read(&caps[1]) {
+            reading.push(name);
+            expand_into(&included, read, reading, out);
+            reading.pop();
+        }
+    }
 }
 
 /// Parse a block `{ ... }` starting from the header line.
@@ -496,5 +546,56 @@ map MAP02 "Second"
         let entries = parse_mapinfo(text);
         assert_eq!(entries["MAP01"].next.as_deref(), Some("INTERMAP"));
         assert_eq!(entries["MAP02"].next.as_deref(), Some("HUBMAP"));
+    }
+
+    /// A reader over named files, which answers names in any case, as ZDoom's lookup does.
+    fn files<'a>(named: &'a [(&'a str, &'a str)]) -> impl FnMut(&str) -> Option<String> + 'a {
+        |wanted| {
+            named
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(wanted))
+                .map(|(_, text)| text.to_string())
+        }
+    }
+
+    #[test]
+    fn test_includes_are_read_where_they_stand() {
+        // The Warrens' ZMAPINFO, which has nothing of its own.
+        let zmapinfo = "include \"mapinfo/Maps\"\ninclude \"mapinfo/Episodes\"\n";
+        let maps = "Map BTW01 \"Burrow of The Were\"\n{\n\tNext = \"MAP01\"\n}\n";
+        let episodes = "clearepisodes\n\nEpisode\tBTW01 \n{\n\tname = \"Burrow\"\n}\n";
+        let named = [("mapinfo/maps", maps), ("MAPINFO/Episodes", episodes)];
+        let mut read = files(&named);
+
+        let text = expand_includes(zmapinfo, &mut read);
+
+        assert_eq!(parse_mapinfo(&text)["BTW01"].next.as_deref(), Some("MAP01"));
+        assert_eq!(parse_episode_starts(&text), ["BTW01"]);
+    }
+
+    #[test]
+    fn test_includes_that_are_commented_out_or_missing_are_left_out() {
+        let text = "// include \"a\"\n/* include \"a\" */\ninclude \"gone\"\nmap MAP01 {\n}\n";
+        let named = [("a", "map MAP02 {\n}\n")];
+        let mut read = files(&named);
+
+        let entries = parse_mapinfo(&expand_includes(text, &mut read));
+
+        assert!(entries.contains_key("MAP01"));
+        assert!(!entries.contains_key("MAP02"));
+    }
+
+    #[test]
+    fn test_includes_that_go_round_in_a_circle_end() {
+        let named = [
+            ("a", "include \"B\"\nmap MAP01 {\n}\n"),
+            ("b", "include \"a\"\ninclude \"b\"\nmap MAP02 {\n}\n"),
+        ];
+        let mut read = files(&named);
+
+        let entries = parse_mapinfo(&expand_includes("include \"a\"\n", &mut read));
+
+        assert!(entries.contains_key("MAP01"));
+        assert!(entries.contains_key("MAP02"));
     }
 }
