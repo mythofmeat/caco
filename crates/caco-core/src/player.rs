@@ -1824,6 +1824,49 @@ mod tests {
     }
 
     #[test]
+    fn test_finishing_the_map_of_a_pk3_in_a_zip_completes_it() {
+        // The Warrens: Burrow of the Were, finished and left in progress: the session recorded
+        // BTW01's exit, and the check after it could not analyze a PK3 in a zip.
+        use crate::db;
+        use std::io::Write;
+        let (conn, wad_id) = fresh_db_with_wad();
+        let zip = |entries: &[(&str, &[u8])]| {
+            let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+            for (name, data) in entries {
+                writer
+                    .start_file(*name, zip::write::SimpleFileOptions::default())
+                    .unwrap();
+                writer.write_all(data).unwrap();
+            }
+            writer.finish().unwrap().into_inner()
+        };
+        let map = |name| test_wad(&[(name, &[]), ("THINGS", &[])]);
+        let pk3 = zip(&[
+            ("maps/BTW01.wad", &map("BTW01")),
+            ("maps/TITLEMAP.wad", &map("TITLEMAP")),
+        ]);
+        let dir = tempfile::tempdir().unwrap();
+        let wad_path = dir.path().join("TheWarrensBOTW_1.4.3.zip");
+        std::fs::write(
+            &wad_path,
+            zip(&[
+                ("README.txt", b"read me"),
+                ("BurrowOfTheWere_1.4.3.pk3", &pk3),
+            ]),
+        )
+        .unwrap();
+        db::start_playthrough(&conn, wad_id).unwrap();
+
+        // What that session's stats said, as uzdoom's log gave them.
+        let stats = r#"{"format":"stats_txt","maps":[{"lump":"BTW01","kills":145,"total_kills":150,"items":116,"total_items":128,"secrets":7,"total_secrets":13,"episode":0,"map_num":0,"best_skill":4,"best_time":113410,"best_max_time":-1,"best_nm_time":-1,"total_exits":1,"cumulative_kills":0,"time_secs":-1.0,"total_time_secs":-1.0},{"lump":"TITLEMAP","kills":0,"total_kills":0,"items":0,"total_items":9,"secrets":0,"total_secrets":0,"episode":0,"map_num":0,"best_skill":3,"best_time":1050,"best_max_time":-1,"best_nm_time":-1,"total_exits":1,"cumulative_kills":0,"time_secs":-1.0,"total_time_secs":-1.0}],"version":1,"header_total_kills":0}"#;
+        let result = check_auto_completion(&conn, wad_id, &wad_path, Some(stats));
+
+        assert_eq!(result, AutoCompleteResult::Completed);
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        assert_eq!(wad.status, db::Status::Completed);
+    }
+
+    #[test]
     fn test_reconcile_stats_with_promotes_on_fresh_exit() {
         use crate::db;
         let (conn, wad_id) = fresh_db_with_wad();
