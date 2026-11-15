@@ -35,7 +35,7 @@ toml = "1.2"
 
 # Database
 # `functions`: the mirror match compares WAD source URLs by Rust's rules, in SQL.
-rusqlite = { version = "0.41", features = ["bundled", "functions"] }
+rusqlite = { version = "0.43", features = ["bundled", "functions"] }
 
 # Date/time
 chrono = { version = "0.4", features = ["serde"] }
