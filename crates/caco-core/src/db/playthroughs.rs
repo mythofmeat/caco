@@ -1,10 +1,6 @@
-use std::collections::HashMap;
-
 use chrono::Utc;
 use rusqlite::Connection;
 
-use super::connection::batch_query_i64;
-use super::models::Status;
 use crate::Result;
 
 // ---------------------------------------------------------------------------
@@ -133,83 +129,6 @@ pub fn get_playthroughs(conn: &Connection, wad_id: i64) -> Result<Vec<Playthroug
     Ok(rows)
 }
 
-/// Get a single playthrough by ID.
-pub fn get_playthrough(conn: &Connection, id: i64) -> Result<Option<PlaythroughRecord>> {
-    let mut stmt = conn.prepare("SELECT * FROM playthroughs WHERE id = ?1")?;
-    match stmt.query_row([id], PlaythroughRecord::from_row) {
-        Ok(pt) => Ok(Some(pt)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(e.into()),
-    }
-}
-
-/// Delete a playthrough. Returns true if deleted.
-pub fn delete_playthrough(conn: &Connection, id: i64) -> Result<bool> {
-    let count = conn.execute("DELETE FROM playthroughs WHERE id = ?1", [id])?;
-    Ok(count > 0)
-}
-
-/// Get or create an active playthrough for a WAD.
-///
-/// If an active playthrough exists, returns its ID. Otherwise starts a new one.
-pub fn ensure_playthrough(conn: &Connection, wad_id: i64) -> Result<i64> {
-    if let Some(pt) = get_active_playthrough(conn, wad_id)? {
-        return Ok(pt.id);
-    }
-    start_playthrough(conn, wad_id)
-}
-
-/// Count completed playthroughs for a WAD.
-pub fn get_times_completed(conn: &Connection, wad_id: i64) -> Result<i64> {
-    let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM playthroughs WHERE wad_id = ?1 AND completed_at IS NOT NULL",
-        [wad_id],
-        |row| row.get(0),
-    )?;
-    Ok(count)
-}
-
-/// Count completed playthroughs for multiple WADs efficiently.
-pub fn get_times_completed_batch(conn: &Connection, wad_ids: &[i64]) -> Result<HashMap<i64, i64>> {
-    let result = batch_query_i64(
-        conn,
-        wad_ids,
-        "SELECT wad_id, COUNT(*) as times_completed \
-         FROM playthroughs WHERE completed_at IS NOT NULL \
-         AND wad_id IN ({placeholders}) GROUP BY wad_id",
-        "times_completed",
-    )?;
-    Ok(wad_ids
-        .iter()
-        .map(|&id| (id, *result.get(&id).unwrap_or(&0)))
-        .collect())
-}
-
-/// Derive the status from playthrough records.
-pub fn derive_status(conn: &Connection, wad_id: i64) -> Result<Status> {
-    let total: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM playthroughs WHERE wad_id = ?1",
-        [wad_id],
-        |row| row.get(0),
-    )?;
-
-    if total == 0 {
-        return Ok(Status::Unplayed);
-    }
-
-    let active: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM playthroughs WHERE wad_id = ?1 AND completed_at IS NULL",
-        [wad_id],
-        |row| row.get(0),
-    )?;
-
-    if active > 0 {
-        return Ok(Status::InProgress);
-    }
-
-    Ok(Status::Completed)
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -218,15 +137,20 @@ pub fn derive_status(conn: &Connection, wad_id: i64) -> Result<Status> {
 mod tests {
     use super::*;
     use crate::db::connection::open_memory;
-    use crate::db::models::SourceType;
+    use crate::db::models::{SourceType, Status};
     use crate::db::schema::init_db;
-    use crate::db::sessions::start_session;
     use crate::db::wads::{NewWad, add_wad, get_wad};
 
     fn setup() -> Connection {
         let conn = open_memory().unwrap();
         init_db(&conn).unwrap();
         conn
+    }
+
+    fn only_playthrough(conn: &Connection, wad_id: i64) -> PlaythroughRecord {
+        let mut all = get_playthroughs(conn, wad_id).unwrap();
+        assert_eq!(all.len(), 1);
+        all.remove(0)
     }
 
     fn add_test_wad(conn: &Connection) -> i64 {
@@ -245,7 +169,7 @@ mod tests {
         let pt_id = start_playthrough(&conn, wad_id).unwrap();
         assert!(pt_id > 0);
 
-        let pt = get_playthrough(&conn, pt_id).unwrap().unwrap();
+        let pt = only_playthrough(&conn, wad_id);
         assert_eq!(pt.wad_id, wad_id);
         assert!(pt.completed_at.is_none());
 
@@ -264,7 +188,7 @@ mod tests {
             complete_playthrough(&conn, pt_id, Some("{\"stats\":1}"), Some("GG")).unwrap();
         assert!(completed);
 
-        let pt = get_playthrough(&conn, pt_id).unwrap().unwrap();
+        let pt = only_playthrough(&conn, wad_id);
         assert!(pt.completed_at.is_some());
         assert_eq!(pt.stats_snapshot.as_deref(), Some("{\"stats\":1}"));
         assert_eq!(pt.notes.as_deref(), Some("GG"));
@@ -327,110 +251,5 @@ mod tests {
         // Most recent first
         assert!(pts[0].is_active());
         assert!(!pts[1].is_active());
-    }
-
-    #[test]
-    fn test_delete_playthrough() {
-        let conn = setup();
-        let wad_id = add_test_wad(&conn);
-        let pt_id = start_playthrough(&conn, wad_id).unwrap();
-
-        assert!(delete_playthrough(&conn, pt_id).unwrap());
-        assert!(get_playthrough(&conn, pt_id).unwrap().is_none());
-        assert!(!delete_playthrough(&conn, pt_id).unwrap());
-    }
-
-    #[test]
-    fn test_ensure_playthrough() {
-        let conn = setup();
-        let wad_id = add_test_wad(&conn);
-
-        // First call creates a new playthrough
-        let pt1 = ensure_playthrough(&conn, wad_id).unwrap();
-        // Second call returns the same one
-        let pt2 = ensure_playthrough(&conn, wad_id).unwrap();
-        assert_eq!(pt1, pt2);
-
-        // Complete it, then ensure creates a new one
-        complete_playthrough(&conn, pt1, None, None).unwrap();
-        let pt3 = ensure_playthrough(&conn, wad_id).unwrap();
-        assert_ne!(pt1, pt3);
-    }
-
-    #[test]
-    fn test_times_completed() {
-        let conn = setup();
-        let wad_id = add_test_wad(&conn);
-
-        assert_eq!(get_times_completed(&conn, wad_id).unwrap(), 0);
-
-        let pt1 = start_playthrough(&conn, wad_id).unwrap();
-        complete_playthrough(&conn, pt1, None, None).unwrap();
-        assert_eq!(get_times_completed(&conn, wad_id).unwrap(), 1);
-
-        let pt2 = start_playthrough(&conn, wad_id).unwrap();
-        complete_playthrough(&conn, pt2, None, None).unwrap();
-        assert_eq!(get_times_completed(&conn, wad_id).unwrap(), 2);
-    }
-
-    #[test]
-    fn test_times_completed_batch() {
-        let conn = setup();
-        let id1 = add_test_wad(&conn);
-        let id2 = add_test_wad(&conn);
-
-        let pt = start_playthrough(&conn, id1).unwrap();
-        complete_playthrough(&conn, pt, None, None).unwrap();
-
-        let batch = get_times_completed_batch(&conn, &[id1, id2]).unwrap();
-        assert_eq!(batch[&id1], 1);
-        assert_eq!(batch[&id2], 0);
-    }
-
-    #[test]
-    fn test_derive_status() {
-        let conn = setup();
-        let wad_id = add_test_wad(&conn);
-
-        // No playthroughs → unplayed
-        assert_eq!(derive_status(&conn, wad_id).unwrap(), Status::Unplayed);
-
-        // Active playthrough → in-progress
-        let pt = start_playthrough(&conn, wad_id).unwrap();
-        assert_eq!(derive_status(&conn, wad_id).unwrap(), Status::InProgress);
-
-        // Completed → completed
-        complete_playthrough(&conn, pt, None, None).unwrap();
-        assert_eq!(derive_status(&conn, wad_id).unwrap(), Status::Completed);
-
-        // New active playthrough → in-progress again
-        start_playthrough(&conn, wad_id).unwrap();
-        assert_eq!(derive_status(&conn, wad_id).unwrap(), Status::InProgress);
-    }
-
-    #[test]
-    fn test_session_links_to_playthrough() {
-        let conn = setup();
-        let wad_id = add_test_wad(&conn);
-        let pt_id = start_playthrough(&conn, wad_id).unwrap();
-
-        // Start a session — playthrough_id column exists on sessions table
-        let session_id = start_session(&conn, wad_id, None, None).unwrap();
-
-        // We can manually link it
-        conn.execute(
-            "UPDATE sessions SET playthrough_id = ?1 WHERE id = ?2",
-            rusqlite::params![pt_id, session_id],
-        )
-        .unwrap();
-
-        let linked: i64 = conn
-            .query_row(
-                "SELECT playthrough_id FROM sessions WHERE id = ?1",
-                [session_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(linked, pt_id);
     }
 }
