@@ -180,6 +180,11 @@ static MIGRATIONS: &[Migration] = &[
     (43, "add_mirror_files", migrate_add_mirror_files),
     (44, "drop_dead_columns", migrate_drop_dead_columns),
     (45, "add_sync", migrate_add_sync),
+    (
+        46,
+        "end_playthroughs_and_name_them_from_completions",
+        migrate_end_playthroughs,
+    ),
 ];
 
 // ---------------------------------------------------------------------------
@@ -231,6 +236,7 @@ pub fn init_db(conn: &Connection) -> Result<()> {
     // Post-migration indexes
     conn.execute_batch(POST_MIGRATION_INDEXES)?;
 
+    crate::sync::capture::log_pending_baseline(conn)?;
     crate::sync::capture::install(conn)?;
 
     Ok(())
@@ -981,8 +987,9 @@ fn migrate_drop_dead_columns(conn: &Connection) -> Result<()> {
 /// they should, and a WAD on both that its source names is rightly one WAD.
 ///
 /// A WAD keeps the folder it has: `data_key` is its rowid, which is what the folder is
-/// called. Everything is logged as it stands here, in the same transaction, so a crash
-/// cannot leave a library with rows its log will never mention.
+/// called. Everything is logged as it stands once every migration has run, and this says
+/// so in the same transaction, so a crash cannot leave a library with rows its log will
+/// never mention: see `capture::log_pending_baseline`.
 fn migrate_add_sync(conn: &Connection) -> Result<()> {
     use sha2::{Digest, Sha256};
 
@@ -1082,7 +1089,37 @@ fn migrate_add_sync(conn: &Connection) -> Result<()> {
          CREATE UNIQUE INDEX IF NOT EXISTS idx_playthroughs_uid ON playthroughs(uid);",
     )?;
 
-    crate::sync::capture::log_existing_rows(conn)
+    crate::sync::capture::plan_baseline(conn)
+}
+
+/// A playthrough ends when it is finished and when the WAD is started again, which after
+/// giving up on it is not a finish, so `completed_at` was the wrong name for when it
+/// ended. Whether it was finished is a completion naming it, since times beaten is counted
+/// from `wad_completions` alone (#84). The log goes on calling the column `completed_at`,
+/// since a name in the log is for ever.
+///
+/// Nothing is rewritten here. What finishing a WAD by hand used to leave undone is put
+/// right by `playthroughs::reconcile` as an edit, which is logged, so that a library rebuilt
+/// from the logs comes out the same.
+fn migrate_end_playthroughs(conn: &Connection) -> Result<()> {
+    if !has_column(conn, "playthroughs", "ended_at")? {
+        conn.execute_batch(
+            "ALTER TABLE playthroughs RENAME COLUMN completed_at TO ended_at;
+             DROP INDEX IF EXISTS idx_playthroughs_completed;
+             CREATE INDEX IF NOT EXISTS idx_playthroughs_ended ON playthroughs(wad_id, ended_at);",
+        )?;
+    }
+    add_column_if_missing(
+        conn,
+        "wad_completions",
+        "playthrough_id",
+        "INTEGER REFERENCES playthroughs(id)",
+    )?;
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_wad_completions_playthrough \
+         ON wad_completions(playthrough_id);",
+    )?;
+    Ok(())
 }
 
 fn migrate_consolidate_status(conn: &Connection) -> Result<()> {

@@ -331,7 +331,12 @@ fn test_a_new_machine_gets_the_whole_library_from_the_logs() {
             [playthrough, session],
         )
         .unwrap();
-    db::complete_playthrough(&desktop.conn, playthrough, None, Some("done")).unwrap();
+    db::update_wad(
+        &desktop.conn,
+        a,
+        &WadUpdate::new().set_status(Status::Completed),
+    )
+    .unwrap();
     db::add_tag(&desktop.conn, a, "x").unwrap();
     db::create_collection(&desktop.conn, "todo", "status:u", Some("title"), false).unwrap();
     desktop.sync();
@@ -791,7 +796,7 @@ fn test_a_wad_imported_again_after_a_purge_is_a_wad_again() {
 
 /// Its sessions happened all the same.
 #[test]
-fn test_deleting_a_playthrough_leaves_its_sessions() {
+fn test_deleting_a_playthrough_leaves_its_sessions_and_its_completion() {
     let world = World::new();
     let a = world.machine("a");
     let wad = a.add("X");
@@ -803,6 +808,12 @@ fn test_deleting_a_playthrough_leaves_its_sessions() {
             [playthrough, session],
         )
         .unwrap();
+    db::update_wad(
+        &a.conn,
+        wad,
+        &WadUpdate::new().set_status(Status::Completed),
+    )
+    .unwrap();
     a.sync();
     let uid: String = a
         .conn
@@ -828,6 +839,109 @@ fn test_deleting_a_playthrough_leaves_its_sessions() {
     assert_eq!(report.merge.waiting, 0);
     assert_eq!(b.count("playthroughs"), 0);
     assert_eq!(b.count("sessions"), 1);
+    let named: Option<i64> = b
+        .conn
+        .query_row("SELECT playthrough_id FROM wad_completions", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(named, None);
+}
+
+// ---------------------------------------------------------------------------
+// What finishing a WAD by hand left undone (#84)
+// ---------------------------------------------------------------------------
+
+/// What a build from before #84 leaves when a WAD is finished by hand: the WAD completed, a
+/// completion naming no playthrough, and the playthrough still open.
+fn finish_by_hand_the_old_way(machine: &Machine, wad: i64, at: &str) {
+    machine
+        .conn
+        .execute("UPDATE wads SET status = 'completed' WHERE id = ?1", [wad])
+        .unwrap();
+    db::add_wad_completion(&machine.conn, wad, Some("{}"), None, Some(at)).unwrap();
+}
+
+/// The playthroughs of a WAD, by title, as `(ended_at, uid of the completion naming it)`.
+fn playthroughs_of(machine: &Machine, title: &str) -> Vec<(Option<String>, Option<String>)> {
+    let mut statement = machine
+        .conn
+        .prepare(
+            "SELECT p.ended_at, \
+                 (SELECT c.uid FROM wad_completions c WHERE c.playthrough_id = p.id) \
+             FROM playthroughs p JOIN wads w ON w.id = p.wad_id \
+             WHERE w.title = ?1 ORDER BY p.started_at",
+        )
+        .unwrap();
+    statement
+        .query_map([title], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap()
+}
+
+/// An older build on another machine goes on leaving that after the upgrade. Whoever hears
+/// of it ends the playthrough, and everyone agrees, a library rebuilt from the logs too.
+#[test]
+fn test_a_wad_finished_by_hand_on_an_older_build_is_put_right_everywhere() {
+    let world = World::new();
+    let old = world.machine("old");
+    let here = world.machine("here");
+    let wad = old.add("X");
+    db::start_playthrough(&old.conn, wad).unwrap();
+    finish_by_hand_the_old_way(&old, wad, "2099-01-01 00:00:00");
+    // What an older build writes out, and all it does.
+    log::write_outbox(&old.conn, &world.log_dir(), "old").unwrap();
+
+    let report = here.sync();
+    assert!(
+        report.written > 0,
+        "putting it right is an edit, and logged"
+    );
+    let put_right = playthroughs_of(&here, "X");
+    assert_eq!(put_right.len(), 1);
+    assert_eq!(put_right[0].0.as_deref(), Some("2099-01-01 00:00:00"));
+    assert!(put_right[0].1.is_some(), "the completion names it");
+    let here_id = here.wad_named("X").id;
+    assert!(
+        db::get_active_playthrough(&here.conn, here_id)
+            .unwrap()
+            .is_none()
+    );
+
+    settle(&[&old, &here]);
+    assert_same_library(&[&old, &here]);
+    assert_eq!(playthroughs_of(&old, "X"), put_right);
+
+    let rebuilt = world.machine("rebuilt");
+    settle(&[&rebuilt, &here]);
+    assert_same_library(&[&old, &here, &rebuilt]);
+}
+
+/// The author's library, upgrading: Cybernights, finished by hand with its playthrough
+/// open, can be started again, and a machine built from the logs has it the same.
+#[test]
+fn test_upgrading_ends_what_a_finish_by_hand_left_open() {
+    let world = World::new();
+    let conn = old_library();
+    conn.execute_batch(
+        "UPDATE wads SET status = 'completed' WHERE id = 101;
+         INSERT INTO wad_completions (wad_id, completed_at) VALUES (101, '2026-11-17 12:41:07');",
+    )
+    .unwrap();
+    upgrade(&conn);
+    let upgraded = world.machine_with("old", conn);
+    upgraded.sync();
+
+    let ended = playthroughs_of(&upgraded, "My House");
+    assert_eq!(ended.len(), 1);
+    assert_eq!(ended[0].0.as_deref(), Some("2026-11-17 12:41:07"));
+    assert!(ended[0].1.is_some());
+    db::start_over(&upgraded.conn, 101).unwrap();
+
+    let new = world.machine("new");
+    settle(&[&upgraded, &new]);
+    assert_same_library(&[&upgraded, &new]);
 }
 
 #[test]
@@ -1099,9 +1213,9 @@ fn random_step(random: &mut Random, machine: &Machine, wad: Option<i64>) {
             }
         }
         18 => {
-            if let Some(active) = db::get_active_playthrough(conn, wad).unwrap() {
-                db::complete_playthrough(conn, active.id, None, Some(word)).unwrap();
-            }
+            // Refused while the WAD is in progress, which is fine: so is Start New
+            // Playthrough.
+            let _ = db::start_over(conn, wad);
         }
         19 => {
             let session: Option<i64> = conn
@@ -1240,7 +1354,7 @@ fn test_a_log_from_version_1_replays_for_ever() {
 
     let playthroughs = db::get_playthroughs(&here.conn, wad.id).unwrap();
     assert_eq!(playthroughs.len(), 1);
-    assert!(playthroughs[0].completed_at.is_some());
+    assert!(playthroughs[0].ended_at.is_some());
 
     let link: i64 = here
         .conn
@@ -2284,9 +2398,32 @@ fn test_a_collection_can_go_and_come_back() {
 // A library from before the log
 // ---------------------------------------------------------------------------
 
-/// Take a library back to before this existed, as an old binary would have left it.
+/// Take a library back to before this existed, as an old binary would have left it: from
+/// any version since, so that a real library can be taken back too.
 fn rewind_to_before_sync(conn: &Connection) {
+    let applied = |version: i64| -> bool {
+        conn.query_row(
+            "SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = ?1)",
+            [version],
+            |row| row.get(0),
+        )
+        .unwrap()
+    };
     capture::uninstall(conn).unwrap();
+    if applied(46) {
+        conn.execute_batch(
+            "DROP INDEX idx_wad_completions_playthrough;
+             ALTER TABLE wad_completions DROP COLUMN playthrough_id;
+             DROP INDEX idx_playthroughs_ended;
+             ALTER TABLE playthroughs RENAME COLUMN ended_at TO completed_at;
+             CREATE INDEX idx_playthroughs_completed ON playthroughs(wad_id, completed_at);
+             DELETE FROM schema_migrations WHERE version = 46;",
+        )
+        .unwrap();
+    }
+    if !applied(45) {
+        return;
+    }
     conn.execute_batch(
         "DROP INDEX idx_wads_uid; DROP INDEX idx_sessions_uid;
          DROP INDEX idx_wad_completions_uid; DROP INDEX idx_playthroughs_uid;

@@ -52,8 +52,7 @@ pub use models::{
     Retrievability, STATUS_SHORTCUTS, SourceType, Status, WAD_COLUMNS, WadRecord,
 };
 pub use playthroughs::{
-    PlaythroughRecord, complete_playthrough, get_active_playthrough, get_playthroughs,
-    start_playthrough,
+    PlaythroughRecord, get_active_playthrough, get_playthroughs, start_over, start_playthrough,
 };
 pub use query::{compose_and, find_duplicate, normalize_status, parse_query, search_wads};
 pub use schema::init_db;

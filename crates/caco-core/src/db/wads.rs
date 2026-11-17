@@ -258,7 +258,9 @@ pub fn get_wad(conn: &Connection, wad_id: i64, include_deleted: bool) -> Result<
 
 /// Update a WAD's fields. Returns `true` if updated.
 ///
-/// Setting status to completed records a completion, when it was not already.
+/// Setting status to completed, when it was not already, records a completion and ends the
+/// playthrough it finished: see [`super::playthroughs::record_completion`]. It is the only
+/// way a WAD comes to be completed, by hand or by detection.
 pub fn update_wad(conn: &Connection, wad_id: i64, update: &WadUpdate) -> Result<bool> {
     update.validate()?;
     if update.is_empty() {
@@ -325,18 +327,7 @@ fn update_wad_body(
     let updated = count > 0;
 
     if updated && is_transition_to_completed {
-        let snapshot: Option<String> = tx
-            .query_row(
-                "SELECT stats_snapshot FROM wads WHERE id = ?1",
-                [wad_id],
-                |row| row.get(0),
-            )
-            .ok()
-            .flatten();
-        tx.execute(
-            "INSERT INTO wad_completions (wad_id, stats_snapshot) VALUES (?1, ?2)",
-            rusqlite::params![wad_id, snapshot],
-        )?;
+        super::playthroughs::record_completion(tx, wad_id)?;
     }
 
     Ok(updated)

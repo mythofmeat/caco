@@ -25,6 +25,11 @@ pub enum Error {
     #[error("WAD not found: id {0}")]
     WadNotFound(i64),
 
+    /// Starting a WAD again while it is being played, which would end its playthrough
+    /// partway.
+    #[error("'{0}' is still in progress")]
+    StillInProgress(String),
+
     #[error("invalid field: {0}")]
     InvalidField(String),
 
