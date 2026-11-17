@@ -26,6 +26,7 @@ use serde::{Deserialize, Serialize};
 use zip::ZipArchive;
 
 use crate::companion_service::is_deh_bex;
+use crate::mapinfo::MapinfoEntry;
 use crate::utils::{MAX_ZIP_ENTRY_SIZE, parse_wad_directory, zip_entry_names};
 use crate::{identity, unpack};
 
@@ -48,7 +49,7 @@ const MAP_LUMPS: &[&str] = &[
 
 /// Analysis format version. Bump this whenever detection logic changes
 /// so that stale cached analyses are automatically invalidated and re-run.
-pub const ANALYSIS_VERSION: u32 = 12;
+pub const ANALYSIS_VERSION: u32 = 14;
 
 /// Tail maps with fewer than this many monster things are peeled off as
 /// `OptionalCredits`. Threshold is "more than one" so a single decorative
@@ -96,6 +97,10 @@ pub enum MapClassification {
     /// Terminal credits/stopper map. Reaching its predecessor on the main path
     /// proves completion; the stopper itself does not need to be "exited".
     OptionalCredits,
+    /// Reached from the episode menu, on a route that joins another partway:
+    /// After Doom's bonus maps. Another way into an ending already counted, so
+    /// optional.
+    OptionalBonus,
     /// Lump exists but no incoming edge in any flow. Not part of completion.
     Unreachable,
 }
@@ -176,9 +181,9 @@ impl FlowSource {
 fn build_graph(
     map_set: &HashSet<&str>,
     is_doom1: bool,
-    sources: &[(FlowSource, HashMap<String, MapinfoEdge>)],
+    sources: &[(FlowSource, HashMap<String, MapinfoEntry>)],
 ) -> MapGraph {
-    let mut by_priority: Vec<&(FlowSource, HashMap<String, MapinfoEdge>)> =
+    let mut by_priority: Vec<&(FlowSource, HashMap<String, MapinfoEntry>)> =
         sources.iter().collect();
     by_priority.sort_by_key(|(s, _)| s.priority());
 
@@ -202,7 +207,7 @@ fn build_graph(
             }
 
             let normal_self_loop = edge.next.as_deref() == Some(lump.as_str());
-            let secret_self_loop = edge.secret_next.as_deref() == Some(lump.as_str());
+            let secret_self_loop = edge.secretnext.as_deref() == Some(lump.as_str());
 
             if let Some(ref nx) = edge.next {
                 if normal_self_loop {
@@ -213,7 +218,7 @@ fn build_graph(
                     graph.edges_normal.remove(lump.as_str());
                 }
             }
-            if let Some(ref sx) = edge.secret_next {
+            if let Some(ref sx) = edge.secretnext {
                 if secret_self_loop {
                     graph.edges_secret.remove(lump.as_str());
                 } else if map_set.contains(sx.as_str()) {
@@ -223,11 +228,11 @@ fn build_graph(
                 }
             }
             // Stopper if explicit endgame, or if `next = self` and the only
-            // alternative (secret_next) is absent or also self-looping.
+            // alternative (secretnext) is absent or also self-looping.
             // `next = self` paired with a real `nextsecret = OTHER` is NOT a
             // stopper — the secret edge is the path forward.
             let stops_here = edge.has_endgame
-                || (normal_self_loop && (secret_self_loop || edge.secret_next.is_none()));
+                || (normal_self_loop && (secret_self_loop || edge.secretnext.is_none()));
             if stops_here {
                 graph.has_endgame.insert(lump.clone());
                 // The normal exit ends the episode; drop any normal edge
@@ -240,7 +245,7 @@ fn build_graph(
                 // Doom II MAP15 -> MAP31 the map name implies) is not a real
                 // branch once the episode ends here, so drop it.
                 let has_explicit_secret = edge
-                    .secret_next
+                    .secretnext
                     .as_deref()
                     .is_some_and(|sx| !secret_self_loop && map_set.contains(sx));
                 if !has_explicit_secret {
@@ -251,14 +256,6 @@ fn build_graph(
     }
 
     graph
-}
-
-/// Unified edge representation across all flow sources.
-#[derive(Debug, Default, Clone)]
-struct MapinfoEdge {
-    next: Option<String>,
-    secret_next: Option<String>,
-    has_endgame: bool,
 }
 
 /// Add vanilla map-flow edges based on map naming conventions.
@@ -345,16 +342,20 @@ fn add_vanilla_edges(graph: &mut MapGraph, map_set: &HashSet<&str>, is_doom1: bo
 ///    has no single linear path through all maps, so each episode's first map
 ///    is walked independently. A WAD whose maps all have names of its own
 ///    starts where its episodes do, and with none of those, at its first map.
-/// 2. From each root, walk the main path, preferring normal edges, falling
-///    back to secret edges only when no normal edge exists ("forced secret =
-///    true ending"). A node already claimed by an earlier walk stops the walk.
-/// 3. **Tail peel** (per walk): starting from the end, demote each map to
-///    `OptionalCredits` while its monster count is below the playable
+/// 2. From each root, in that order, walk the main path, preferring normal
+///    edges, falling back to secret edges only when no normal edge exists
+///    ("forced secret = true ending"). A node already claimed by an earlier
+///    walk stops the walk, and where it stopped decides what the walk was
+///    ([`WalkEnd`]): an episode of its own, whose maps are `Required`, or
+///    another way into an ending already counted, whose maps are
+///    `OptionalBonus`.
+/// 3. **Tail peel** (per required walk): starting from the end, demote each
+///    map to `OptionalCredits` while its monster count is below the playable
 ///    threshold. The deepest map with real monsters is the playable terminus.
 ///    A walk's *first* map (a root) is never peeled — we always require at
 ///    least one Required map so an empty/test WAD doesn't auto-complete.
-/// 4. Walk secret branches off main-path nodes; mark visited nodes as
-///    `OptionalSecret`.
+/// 4. Walk secret branches off every walked node; mark what they reach off
+///    the required path as `OptionalSecret`.
 /// 5. Anything still unmarked is `Unreachable`.
 fn classify_maps(
     graph: &MapGraph,
@@ -404,20 +405,30 @@ fn classify_maps(
         roots.push(first.to_string());
     }
 
-    // 1. Main-path walk from every root. `visited` is shared across roots so a
-    //    walk that merges into an already-claimed chain stops cleanly.
-    let mut visited: HashSet<String> = HashSet::new();
+    // 1. Main-path walk from every root. A map belongs to the first walk to
+    //    reach it, so a walk that runs into an earlier one stops there.
+    let mut claimed_by: HashMap<String, usize> = HashMap::new();
+    // Each walk's maps in the order it reached them, and whether they are
+    // required. A root an earlier walk already reached walks nothing.
+    let mut walks: Vec<(Vec<String>, bool)> = Vec::new();
     for root in &roots {
+        let this = walks.len();
         let mut walk_order: Vec<String> = Vec::new();
+        let mut end = WalkEnd::OwnEnding;
         let mut current = Some(root.clone());
         while let Some(node) = current {
-            if !visited.insert(node.clone()) {
-                break; // cycle or already claimed by an earlier root
+            if let Some(&earlier) = claimed_by.get(&node) {
+                end = if earlier == this {
+                    WalkEnd::OwnEnding // came back round on itself
+                } else if walks[earlier].0.first() == Some(&node) {
+                    WalkEnd::IntoStartOf(earlier)
+                } else {
+                    WalkEnd::Joins
+                };
+                break;
             }
+            claimed_by.insert(node.clone(), this);
             walk_order.push(node.clone());
-            if let Some(&idx) = by_lump.get(node.as_str()) {
-                infos[idx].classification = MapClassification::Required;
-            }
             if graph.has_endgame.contains(&node) {
                 break;
             }
@@ -427,29 +438,54 @@ fn classify_maps(
                 (None, None) => None,
             };
         }
+        let required = match end {
+            WalkEnd::OwnEnding => true,
+            WalkEnd::IntoStartOf(earlier) => walks[earlier].1,
+            WalkEnd::Joins => false,
+        };
+        walks.push((walk_order, required));
+    }
 
+    let mut classify = |lump: &str, classification: MapClassification| {
+        if let Some(&idx) = by_lump.get(lump) {
+            infos[idx].classification = classification;
+        }
+    };
+
+    for (walk_order, required) in &walks {
+        if !required {
+            for lump in walk_order {
+                classify(lump, MapClassification::OptionalBonus);
+            }
+            continue;
+        }
+        for lump in walk_order {
+            classify(lump, MapClassification::Required);
+        }
         // 2. Tail peel this walk: walk back from the end demoting low-monster
         //    maps to OptionalCredits. Stop at the first map that has real
         //    monsters — that's the playable terminus. Never peel index 0 (the
         //    root) so a tiny/empty WAD still has at least one Required map.
-        for i in (1..walk_order.len()).rev() {
-            let lump = &walk_order[i];
-            let count = monsters.get(lump).copied().unwrap_or(0);
-            if count >= MIN_MONSTERS_FOR_PLAYABLE {
+        for lump in walk_order.iter().skip(1).rev() {
+            if monsters.get(lump).copied().unwrap_or(0) >= MIN_MONSTERS_FOR_PLAYABLE {
                 break;
             }
-            if let Some(&idx) = by_lump.get(lump.as_str()) {
-                infos[idx].classification = MapClassification::OptionalCredits;
-            }
+            classify(lump, MapClassification::OptionalCredits);
         }
     }
 
-    // 3. Secret branches off any main-path node.
-    let main_path: HashSet<String> = visited;
+    // 3. Secret branches off any walked node. A branch stops at the required
+    //    path, and a bonus map it reaches is a secret one: that the episode
+    //    menu also leads there doesn't make it any less of one.
+    let required_path: HashSet<&String> = walks
+        .iter()
+        .filter(|(_, required)| *required)
+        .flat_map(|(walk_order, _)| walk_order)
+        .collect();
     let mut sec_queue: VecDeque<String> = VecDeque::new();
-    for node in &main_path {
+    for node in claimed_by.keys() {
         if let Some(sx) = graph.edges_secret.get(node)
-            && !main_path.contains(sx)
+            && !required_path.contains(sx)
         {
             sec_queue.push_back(sx.clone());
         }
@@ -460,21 +496,43 @@ fn classify_maps(
             continue;
         }
         if let Some(&idx) = by_lump.get(node.as_str())
-            && infos[idx].classification == MapClassification::Unreachable
+            && matches!(
+                infos[idx].classification,
+                MapClassification::Unreachable | MapClassification::OptionalBonus
+            )
         {
             infos[idx].classification = MapClassification::OptionalSecret;
         }
-        if let Some(nx) = graph.edges_normal.get(&node)
-            && !main_path.contains(nx)
-        {
-            sec_queue.push_back(nx.clone());
-        }
-        if let Some(sx) = graph.edges_secret.get(&node)
-            && !main_path.contains(sx)
-        {
-            sec_queue.push_back(sx.clone());
+        for next in [graph.edges_normal.get(&node), graph.edges_secret.get(&node)] {
+            if let Some(nx) = next
+                && !required_path.contains(nx)
+            {
+                sec_queue.push_back(nx.clone());
+            }
         }
     }
+}
+
+/// How a walk from one root ended, which decides whether its maps are needed
+/// to finish the WAD.
+///
+/// An `episode` entry in MAPINFO is a way into the game from the episode menu,
+/// and nothing more is promised: Eisberg's tiers are each an arc with an ending
+/// of its own, where After Doom lists every map, two of them bonus maps whose
+/// `next` rejoins the main route a map later. Finishing a WAD is reaching each
+/// of its endings, so a walk that joins another partway adds no ending to
+/// reach, and its maps are optional.
+enum WalkEnd {
+    /// An ending, a map with nowhere to go, or back on itself: an episode of
+    /// its own.
+    OwnEnding,
+    /// Into the first map of an earlier walk, as a prologue leads into an
+    /// episode, so as needed as that walk is. The earlier walk only went first
+    /// because its episode is declared first.
+    IntoStartOf(usize),
+    /// Into an earlier walk partway: another way into an ending already
+    /// counted.
+    Joins,
 }
 
 /// Apply hub-WAD classification: every playable map becomes Required.
@@ -569,11 +627,11 @@ struct Gathered {
     maps: Vec<String>,
     /// How many monsters each map has, from the last file to have it.
     monsters: HashMap<String, usize>,
-    sources: Vec<(FlowSource, HashMap<String, MapinfoEdge>)>,
+    sources: Vec<(FlowSource, HashMap<String, MapinfoEntry>)>,
     episode_roots: Vec<String>,
     /// MAPINFO read from a resource archive, the only kind whose flow is
     /// checked for hubs.
-    archive_mapinfo: Option<HashMap<String, crate::mapinfo::MapinfoEntry>>,
+    archive_mapinfo: Option<HashMap<String, MapinfoEntry>>,
     /// Whether any structured map flow was found (UMAPINFO/MAPINFO/ZMAPINFO).
     has_structured: bool,
 }
@@ -670,34 +728,28 @@ fn gather_wad(wad_data: &[u8]) -> Option<Gathered> {
     let mapinfo = |lump: &str| {
         let text = read_lump_text(wad_data, &directory, lump)?;
         let mut read = |name: &str| read_lump_text(wad_data, &directory, &name.to_uppercase());
-        Some(crate::mapinfo::expand_includes(&text, &mut read))
+        Some(crate::mapinfo::parse_mapinfo(&text, &mut read))
     };
-    if let Some(text) = mapinfo("ZMAPINFO") {
-        let entries = parse_mapinfo_to_edges(&crate::mapinfo::parse_mapinfo(&text));
-        if !entries.is_empty() {
+    if let Some(mapinfo) = mapinfo("ZMAPINFO") {
+        if !mapinfo.maps.is_empty() {
             gathered.has_structured = true;
-            gathered.sources.push((FlowSource::Zmapinfo, entries));
+            gathered.sources.push((FlowSource::Zmapinfo, mapinfo.maps));
         }
-        gathered
-            .episode_roots
-            .extend(crate::mapinfo::parse_episode_starts(&text));
+        gathered.episode_roots.extend(mapinfo.episodes);
     }
     if let Some(text) = read_lump_text(wad_data, &directory, "UMAPINFO") {
-        let entries = parse_umapinfo_to_edges(&parse_umapinfo(&text));
+        let entries = crate::mapinfo::parse_umapinfo(&text);
         if !entries.is_empty() {
             gathered.has_structured = true;
             gathered.sources.push((FlowSource::Umapinfo, entries));
         }
     }
-    if let Some(text) = mapinfo("MAPINFO") {
-        let entries = parse_mapinfo_to_edges(&crate::mapinfo::parse_mapinfo(&text));
-        if !entries.is_empty() {
+    if let Some(mapinfo) = mapinfo("MAPINFO") {
+        if !mapinfo.maps.is_empty() {
             gathered.has_structured = true;
-            gathered.sources.push((FlowSource::Mapinfo, entries));
+            gathered.sources.push((FlowSource::Mapinfo, mapinfo.maps));
         }
-        gathered
-            .episode_roots
-            .extend(crate::mapinfo::parse_episode_starts(&text));
+        gathered.episode_roots.extend(mapinfo.episodes);
     }
 
     Some(gathered)
@@ -750,18 +802,16 @@ fn gather_archive<R: Read + Seek>(archive: &mut ZipArchive<R>) -> Option<Gathere
             let text = read_entry(archive, *index)?;
             Some(String::from_utf8_lossy(&text).into_owned())
         };
-        let text = crate::mapinfo::expand_includes(&mapinfo_text, &mut read);
-        let mapinfo = crate::mapinfo::parse_mapinfo(&text);
-        let entries = parse_mapinfo_to_edges(&mapinfo);
-        if !entries.is_empty() {
+        let mapinfo = crate::mapinfo::parse_mapinfo(&mapinfo_text, &mut read);
+        if !mapinfo.maps.is_empty() {
             // ZMAPINFO and MAPINFO are not told apart here, since mapinfo.rs reads
             // both: the archive's is a Mapinfo source.
-            gathered.sources.push((FlowSource::Mapinfo, entries));
+            gathered
+                .sources
+                .push((FlowSource::Mapinfo, mapinfo.maps.clone()));
         }
-        gathered
-            .episode_roots
-            .extend(crate::mapinfo::parse_episode_starts(&text));
-        gathered.archive_mapinfo = Some(mapinfo);
+        gathered.episode_roots.extend(mapinfo.episodes);
+        gathered.archive_mapinfo = Some(mapinfo.maps);
         gathered.has_structured = true;
     }
 
@@ -830,10 +880,7 @@ fn read_entry<R: Read + Seek>(archive: &mut ZipArchive<R>, index: usize) -> Opti
 /// - A single `next` target receives more than half of all map entries
 ///   (single dominant hub), OR
 /// - Multiple "mini-hub" targets (3+ incoming) collectively cover >50%.
-fn detect_hub_structure(
-    mapinfo: &HashMap<String, crate::mapinfo::MapinfoEntry>,
-    playable_maps: &[String],
-) -> bool {
+fn detect_hub_structure(mapinfo: &HashMap<String, MapinfoEntry>, playable_maps: &[String]) -> bool {
     let playable_set: HashSet<&str> = playable_maps.iter().map(|s| s.as_str()).collect();
 
     let mut target_counts: HashMap<&str, usize> = HashMap::new();
@@ -1023,94 +1070,6 @@ fn count_udmf_monsters(textmap_data: &[u8]) -> usize {
         }
     }
     n
-}
-
-// ---------------------------------------------------------------------------
-// UMAPINFO parsing
-// ---------------------------------------------------------------------------
-
-/// Parsed UMAPINFO entry (subset used for flow analysis).
-#[derive(Debug, Clone, Default)]
-struct UmapinfoEntry {
-    next: Option<String>,
-    nextsecret: Option<String>,
-    has_endgame: bool,
-}
-
-/// Parse UMAPINFO text into map entries.
-fn parse_umapinfo(text: &str) -> HashMap<String, UmapinfoEntry> {
-    static MAP_HEADER_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?i)^\s*MAP\s+(\S+)").unwrap());
-    static NEXT_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r#"(?i)^\s*next\s*=\s*"?(\w+)"?"#).unwrap());
-    static NEXTSECRET_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r#"(?i)^\s*nextsecret\s*=\s*"?(\w+)"?"#).unwrap());
-    static ENDGAME_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?i)^\s*(endgame|endpic|endcast|endbunny)\s*=").unwrap());
-
-    let mut entries = HashMap::new();
-    let mut current_map: Option<String> = None;
-    let mut current_entry = UmapinfoEntry::default();
-
-    for line in text.lines() {
-        if let Some(caps) = MAP_HEADER_RE.captures(line) {
-            if let Some(map_name) = current_map.take() {
-                entries.insert(map_name, current_entry);
-                current_entry = UmapinfoEntry::default();
-            }
-            current_map = Some(caps[1].to_uppercase());
-            continue;
-        }
-        if current_map.is_some() {
-            if let Some(caps) = NEXT_RE.captures(line) {
-                current_entry.next = Some(caps[1].to_uppercase());
-            } else if let Some(caps) = NEXTSECRET_RE.captures(line) {
-                current_entry.nextsecret = Some(caps[1].to_uppercase());
-            } else if ENDGAME_RE.is_match(line) {
-                current_entry.has_endgame = true;
-            }
-        }
-    }
-    if let Some(map_name) = current_map {
-        entries.insert(map_name, current_entry);
-    }
-    entries
-}
-
-// ---------------------------------------------------------------------------
-// Flow source adapters
-// ---------------------------------------------------------------------------
-
-fn parse_umapinfo_to_edges(umi: &HashMap<String, UmapinfoEntry>) -> HashMap<String, MapinfoEdge> {
-    let mut out = HashMap::new();
-    for (name, e) in umi {
-        out.insert(
-            name.clone(),
-            MapinfoEdge {
-                next: e.next.clone(),
-                secret_next: e.nextsecret.clone(),
-                has_endgame: e.has_endgame,
-            },
-        );
-    }
-    out
-}
-
-fn parse_mapinfo_to_edges(
-    mi: &HashMap<String, crate::mapinfo::MapinfoEntry>,
-) -> HashMap<String, MapinfoEdge> {
-    let mut out = HashMap::new();
-    for (name, e) in mi {
-        out.insert(
-            name.clone(),
-            MapinfoEdge {
-                next: e.next.clone(),
-                secret_next: e.secretnext.clone(),
-                has_endgame: e.has_endgame,
-            },
-        );
-    }
-    out
 }
 
 // ---------------------------------------------------------------------------
@@ -1313,34 +1272,6 @@ thing // 42
 }
 "#;
         assert_eq!(count_udmf_monsters(textmap), 1);
-    }
-
-    // -----------------------------------------------------------------------
-    // UMAPINFO parsing
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn test_parse_umapinfo_basic() {
-        let text = r#"
-MAP MAP01
-{
-    next = "MAP02"
-    nextsecret = "MAP31"
-}
-"#;
-        let entries = parse_umapinfo(text);
-        let map01 = &entries["MAP01"];
-        assert_eq!(map01.next, Some("MAP02".to_string()));
-        assert_eq!(map01.nextsecret, Some("MAP31".to_string()));
-    }
-
-    #[test]
-    fn test_parse_umapinfo_endgame_variants() {
-        for kw in &["endgame", "endpic", "endcast", "endbunny"] {
-            let text = format!("MAP MAP30\n{{\n    {} = true\n}}", kw);
-            let entries = parse_umapinfo(&text);
-            assert!(entries["MAP30"].has_endgame, "failed for {kw}");
-        }
     }
 
     // -----------------------------------------------------------------------
@@ -1968,6 +1899,294 @@ map MAP31 "S"
         assert_eq!(classify_of(&a, "MAP15"), MapClassification::Required);
         assert_eq!(classify_of(&a, "MAP31"), MapClassification::OptionalSecret);
         assert!(a.secret_maps.contains(&"MAP31".to_string()));
+    }
+
+    /// The analysis of a WAD with these maps, each with this many monsters,
+    /// and this MAPINFO.
+    fn analyze_with_mapinfo(maps: &[(&str, usize)], mapinfo: &str) -> WadAnalysis {
+        let things: Vec<Vec<u8>> = maps.iter().map(|&(_, n)| playable_things(n)).collect();
+        let mut lumps: Vec<(&str, &[u8])> = Vec::new();
+        for (&(name, _), things) in maps.iter().zip(&things) {
+            lumps.push((name, &[]));
+            lumps.push(("THINGS", things));
+        }
+        lumps.push(("MAPINFO", mapinfo.as_bytes()));
+        analyze_wad(&build_wad(&lumps)).unwrap()
+    }
+
+    #[test]
+    fn test_an_episode_that_rejoins_the_route_partway_is_a_bonus() {
+        // After Doom, as v7.6 has it: every map is on the episode menu, and two of them are
+        // bonus maps whose `next` rejoins the route a map later. Each episode used to be walked
+        // as one to finish, so both were required, and finishing the WAD finished nothing.
+        let mapinfo = r#"
+map MAP33 "A"
+{
+    next = "map34"
+}
+map MAP34 "B"
+{
+    next = "map35"
+}
+map MAP35 "C"
+{
+    next = "map36"
+}
+map MAP36 "D"
+{
+    next = "map38"
+}
+map MAP37 "Bonus"
+{
+    next = "map38"
+}
+map MAP38 "E"
+{
+    next = "map39"
+}
+map MAP39 "F"
+{
+    next = "map41"
+}
+map MAP39B "Bonus"
+{
+    next = "map41"
+}
+map MAP40 "CAST"
+{
+    next = "EndGameC"
+}
+map MAP41 "G"
+{
+    next = "map40"
+}
+episode map33
+{
+    name = "A"
+}
+episode map34
+{
+    name = "B"
+}
+episode map35
+{
+    name = "C"
+}
+episode map36
+{
+    name = "D"
+}
+episode map37
+{
+    name = "Bonus (BONUS MAP)"
+}
+episode map38
+{
+    name = "E"
+}
+episode map39
+{
+    name = "F"
+}
+episode map39b
+{
+    name = "Bonus (BONUS MAP)"
+}
+episode map41
+{
+    name = "G"
+}
+"#;
+        let maps = [
+            ("MAP33", 9),
+            ("MAP34", 9),
+            ("MAP35", 9),
+            ("MAP36", 9),
+            ("MAP37", 9),
+            ("MAP38", 9),
+            ("MAP39", 9),
+            ("MAP39B", 9),
+            ("MAP40", 0),
+            ("MAP41", 9),
+        ];
+
+        let a = analyze_with_mapinfo(&maps, mapinfo);
+
+        assert_eq!(
+            classified(&a),
+            [
+                ("MAP33", MapClassification::Required),
+                ("MAP34", MapClassification::Required),
+                ("MAP35", MapClassification::Required),
+                ("MAP36", MapClassification::Required),
+                ("MAP37", MapClassification::OptionalBonus),
+                ("MAP38", MapClassification::Required),
+                ("MAP39", MapClassification::Required),
+                ("MAP39B", MapClassification::OptionalBonus),
+                ("MAP40", MapClassification::OptionalCredits),
+                ("MAP41", MapClassification::Required),
+            ]
+        );
+        assert!(a.secret_maps.is_empty(), "a bonus map is not a secret one");
+    }
+
+    #[test]
+    fn test_an_episode_leading_into_one_declared_before_it_is_still_required() {
+        // The second episode runs on into the third, which is declared first and so walked
+        // first. Running into the start of an earlier walk is a prologue, not a shortcut.
+        let mapinfo = r#"
+map MAP01 "A"
+{
+    next = "MAP02"
+}
+map MAP02 "B"
+{
+    next = "EndGameC"
+}
+map MAP03 "C"
+{
+    next = "MAP04"
+}
+map MAP04 "D"
+{
+    next = "MAP05"
+}
+map MAP05 "E"
+{
+    next = "MAP06"
+}
+map MAP06 "F"
+{
+    next = "EndGameC"
+}
+episode MAP01
+{
+    name = "One"
+}
+episode MAP05
+{
+    name = "Three"
+}
+episode MAP03
+{
+    name = "Two"
+}
+"#;
+        let maps: Vec<(String, usize)> = (1..=6).map(|n| (format!("MAP{n:02}"), 9)).collect();
+        let maps: Vec<(&str, usize)> = maps.iter().map(|(m, n)| (m.as_str(), *n)).collect();
+
+        let a = analyze_with_mapinfo(&maps, mapinfo);
+
+        assert_eq!(a.required_maps, 6, "{:?}", classified(&a));
+    }
+
+    #[test]
+    fn test_a_bonus_map_joining_a_later_episode_leaves_that_episode_required() {
+        let mapinfo = r#"
+map MAP01 "A"
+{
+    next = "MAP02"
+}
+map MAP02 "B"
+{
+    next = "EndGameC"
+}
+map MAP03 "C"
+{
+    next = "MAP04"
+}
+map MAP04 "D"
+{
+    next = "MAP05"
+}
+map MAP05 "E"
+{
+    next = "EndGameC"
+}
+map MAP06 "Bonus"
+{
+    next = "MAP04"
+}
+episode MAP01
+{
+    name = "One"
+}
+episode MAP03
+{
+    name = "Two"
+}
+episode MAP06
+{
+    name = "Bonus"
+}
+"#;
+        let maps: Vec<(String, usize)> = (1..=6).map(|n| (format!("MAP{n:02}"), 9)).collect();
+        let maps: Vec<(&str, usize)> = maps.iter().map(|(m, n)| (m.as_str(), *n)).collect();
+
+        let a = analyze_with_mapinfo(&maps, mapinfo);
+
+        for lump in ["MAP01", "MAP02", "MAP03", "MAP04", "MAP05"] {
+            assert_eq!(classify_of(&a, lump), MapClassification::Required, "{lump}");
+        }
+        assert_eq!(classify_of(&a, "MAP06"), MapClassification::OptionalBonus);
+    }
+
+    #[test]
+    fn test_a_secret_map_on_the_episode_menu_is_still_a_secret() {
+        // MAP31 is where MAP15's secret exit goes, and the episode menu offers it too.
+        let mapinfo = r#"
+map MAP14 "A"
+{
+    next = "MAP15"
+}
+map MAP15 "B"
+{
+    next = "MAP16"
+    secretnext = "MAP31"
+}
+map MAP16 "C"
+{
+    next = "EndGameC"
+}
+map MAP31 "Secret"
+{
+    next = "MAP16"
+}
+episode MAP14
+{
+    name = "Main"
+}
+episode MAP31
+{
+    name = "Secret"
+}
+"#;
+        let maps = [("MAP14", 9), ("MAP15", 9), ("MAP16", 9), ("MAP31", 9)];
+
+        let a = analyze_with_mapinfo(&maps, mapinfo);
+
+        assert_eq!(classify_of(&a, "MAP31"), MapClassification::OptionalSecret);
+        assert_eq!(a.secret_maps, ["MAP31"]);
+        assert_eq!(a.required_maps, 3);
+    }
+
+    #[test]
+    fn test_a_mapinfo_in_the_older_format_is_followed() {
+        // Triangulum goes on from MAP30 to MAP33 and MAP34, in a MAPINFO with no
+        // braces. None of it used to be read, so MAP30 ended the game by the map
+        // order, MAP33 and MAP34 were unreachable, and the WAD was finished two
+        // maps early.
+        let mapinfo = "map MAP29 \"Divine wind\"\r\nnext MAP30\r\n\
+                       map MAP30 \"Shielding aura\"\r\ncluster 1\r\nnext MAP33\r\n\
+                       map MAP33 \"Ghorrock\"\r\nnext MAP34\r\n\
+                       map MAP34 \"Attack on Titan\"\r\nnext EndGameC\r\n";
+        let maps = [("MAP29", 9), ("MAP30", 9), ("MAP33", 9), ("MAP34", 9)];
+
+        let a = analyze_with_mapinfo(&maps, mapinfo);
+
+        for lump in ["MAP29", "MAP30", "MAP33", "MAP34"] {
+            assert_eq!(classify_of(&a, lump), MapClassification::Required, "{lump}");
+        }
     }
 
     #[test]

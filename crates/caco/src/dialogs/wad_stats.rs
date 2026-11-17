@@ -853,6 +853,7 @@ fn display_date(raw: &str) -> String {
 enum RowClass {
     Required,
     Secret,
+    Bonus,
     Terminal,
     /// Fallback when no `WadAnalysis` exists yet — we can't classify, so
     /// just label the row as a "played" map.
@@ -877,6 +878,7 @@ fn build_table_rows<'a>(analysis: Option<&AnalysisData>, stats: &'a StatsData) -
                 let class = match m.classification {
                     MapClassification::Required => RowClass::Required,
                     MapClassification::OptionalSecret => RowClass::Secret,
+                    MapClassification::OptionalBonus => RowClass::Bonus,
                     MapClassification::OptionalCredits => RowClass::Terminal,
                     MapClassification::Unreachable => return None,
                 };
@@ -907,6 +909,7 @@ fn class_label(c: RowClass) -> &'static str {
     match c {
         RowClass::Required => "Required",
         RowClass::Secret => "Secret",
+        RowClass::Bonus => "Bonus",
         RowClass::Terminal => "Credits",
         RowClass::Played => "Played",
     }
@@ -915,7 +918,8 @@ fn class_label(c: RowClass) -> &'static str {
 fn class_color(c: RowClass) -> egui::Color32 {
     match c {
         RowClass::Required => theme::TEXT_PRIMARY,
-        RowClass::Secret => theme::GOLD,
+        // Both are extras, off the way to the end.
+        RowClass::Secret | RowClass::Bonus => theme::GOLD,
         RowClass::Terminal => theme::TEXT_SECONDARY,
         RowClass::Played => theme::TEXT_SECONDARY,
     }
@@ -939,6 +943,8 @@ fn format_summary(
             let mut req_done = 0usize;
             let mut sec_total = 0usize;
             let mut sec_done = 0usize;
+            let mut bonus_total = 0usize;
+            let mut bonus_done = 0usize;
             let mut term_total = 0usize;
             let mut term_done = 0usize;
             for r in rows {
@@ -952,6 +958,10 @@ fn format_summary(
                         sec_total += 1;
                         sec_done += done;
                     }
+                    RowClass::Bonus => {
+                        bonus_total += 1;
+                        bonus_done += done;
+                    }
                     RowClass::Terminal => {
                         term_total += 1;
                         term_done += done;
@@ -962,6 +972,9 @@ fn format_summary(
             let mut summary = format!("Required maps: {req_done} of {req_total}");
             if sec_total > 0 {
                 summary.push_str(&format!("  \u{00b7}  Secret: {sec_done} of {sec_total}"));
+            }
+            if bonus_total > 0 {
+                summary.push_str(&format!("  \u{00b7}  Bonus: {bonus_done} of {bonus_total}"));
             }
             if term_total > 0 {
                 summary.push_str(&format!("  \u{00b7}  Credits: {term_done} of {term_total}"));
