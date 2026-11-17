@@ -24,7 +24,9 @@
 //!
 //! [`run`] writes out the outbox, and then merges. In that order, because a local write
 //! has to be compared against what arrives by a clock it does not have until it is
-//! written out. It runs on a worker at startup, and every so often after that: see
+//! written out. Then it ends any playthrough a completed WAD still has open, which is
+//! what an older build leaves when a WAD is finished by hand (#84), and writes that out
+//! too. It runs on a worker at startup, and every so often after that: see
 //! `caco::app::sync`.
 //!
 //! Moving the logs is left to whatever moves the rest of the data dir, so caco talks to
@@ -125,6 +127,18 @@ pub fn run(conn: &Connection, paths: &SyncPaths) -> SyncReport {
     match merge::merge(conn, &merge_paths) {
         Ok(merge) => report.merge = merge,
         Err(e) => report.read_error = Some(e.to_string()),
+    }
+    // What an older build, or two machines at once, left half done, and what this one did
+    // before it knew better. After the merge, which is what brings those in, and written
+    // out now rather than next time, so that a pass after which nothing is wrong is the
+    // last one with anything to say.
+    match crate::db::playthroughs::reconcile(conn) {
+        Ok(0) => {}
+        Ok(_) => match log::write_outbox(conn, &paths.log_dir, &paths.machine) {
+            Ok(written) => report.written += written,
+            Err(e) => report.write_error = Some(e.to_string()),
+        },
+        Err(e) => tracing::warn!("could not put the playthroughs right: {e}"),
     }
     report
 }

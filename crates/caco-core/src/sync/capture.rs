@@ -167,6 +167,13 @@ impl Field {
         field
     }
 
+    /// A field whose column has been renamed since the log first had it, and which the log
+    /// goes on calling by its old name, since a name in the log is for ever.
+    const fn in_column(mut self, column: &'static str) -> Self {
+        self.column = column;
+        self
+    }
+
     const fn role(mut self, role: Role) -> Self {
         self.role = role;
         self
@@ -308,12 +315,13 @@ pub static ENTITIES: &[Entity] = &[
         table: "playthroughs",
         shape: Shape::Row,
         key: Key::Column("uid"),
-        as_of: "COALESCE(t.completed_at, t.started_at)",
+        as_of: "COALESCE(t.ended_at, t.started_at)",
         baseline_where: "1",
         fields: &[
             Field::owner("wad", "wad_id", WAD),
             Field::text("started_at").required(),
-            Field::text("completed_at"),
+            // When it ended, which it was called when only a finish ended one.
+            Field::text("completed_at").in_column("ended_at"),
             Field::text("stats_snapshot"),
             Field::text("notes"),
             Field::text("created_at").role(Role::Assigned),
@@ -352,6 +360,7 @@ pub static ENTITIES: &[Entity] = &[
             Field::text("completed_at"),
             Field::text("stats_snapshot"),
             Field::text("notes"),
+            Field::reference("playthrough", "playthrough_id", PLAYTHROUGH),
         ],
     },
     Entity {
@@ -900,13 +909,51 @@ pub(crate) fn uninstall(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// What `sync_state` says while the rows a library had when it got a log are still to be
+/// logged.
+const BASELINE_PENDING: &str = "baseline_pending";
+
+/// Say that the rows already here are to be logged, which [`log_pending_baseline`] does
+/// once every migration has run. In the transaction that gives a library its log, so the
+/// two cannot come apart.
+pub(crate) fn plan_baseline(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO sync_state (key, value) VALUES (?1, '1')",
+        [BASELINE_PENDING],
+    )?;
+    Ok(())
+}
+
+/// Log every row that is already here, if the library has just got a log.
+///
+/// After every migration rather than in the one that gives a library its log, because
+/// rows are logged as [`ENTITIES`] describes their tables, which is as the latest
+/// migration leaves them: a library upgraded from before the log would otherwise be asked
+/// for columns a later migration has yet to add. Until it has happened `sync_state` says
+/// so, so a crash in between leaves it for next time rather than undone.
+pub(crate) fn log_pending_baseline(conn: &Connection) -> Result<()> {
+    let pending: bool = conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM sync_state WHERE key = ?1)",
+        [BASELINE_PENDING],
+        |row| row.get(0),
+    )?;
+    if !pending {
+        return Ok(());
+    }
+    crate::db::with_transaction(conn, |tx| {
+        log_existing_rows(tx)?;
+        tx.execute("DELETE FROM sync_state WHERE key = ?1", [BASELINE_PENDING])?;
+        Ok(())
+    })
+}
+
 /// Log every row that is already here, when a library first gets a log.
 ///
 /// As an `add` at the time the row last changed, which is what makes this safe on two
 /// machines that each have a copy of the same library. They log the same rows with the
 /// same uids and it comes to nothing, and where they differ the more recent edit wins,
 /// and everything after this beats all of it.
-pub(crate) fn log_existing_rows(conn: &Connection) -> Result<()> {
+fn log_existing_rows(conn: &Connection) -> Result<()> {
     for entity in ENTITIES {
         let table = entity.table;
         let kind = entity.kind;

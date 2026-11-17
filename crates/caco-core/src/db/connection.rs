@@ -138,44 +138,6 @@ fn itertools_placeholders(n: usize) -> String {
     s
 }
 
-/// Generic batch query helper for aggregation queries.
-///
-/// `query_template` should contain `{placeholders}` which will be replaced.
-/// Each row must have columns `wad_id` and the column named by `result_column`.
-pub fn batch_query_i64(
-    conn: &Connection,
-    wad_ids: &[i64],
-    query_template: &str,
-    result_column: &str,
-) -> Result<HashMap<i64, i64>> {
-    if wad_ids.is_empty() {
-        return Ok(HashMap::new());
-    }
-
-    let mut result = HashMap::new();
-
-    for chunk in wad_ids.chunks(SQLITE_MAX_VARS) {
-        let placeholders = itertools_placeholders(chunk.len());
-        let sql = query_template.replace("{placeholders}", &placeholders);
-        let mut stmt = conn.prepare(&sql)?;
-        let params: Vec<&dyn rusqlite::types::ToSql> = chunk
-            .iter()
-            .map(|id| id as &dyn rusqlite::types::ToSql)
-            .collect();
-        let rows = stmt.query_map(params.as_slice(), |row| {
-            let wad_id: i64 = row.get("wad_id")?;
-            let val: i64 = row.get(result_column)?;
-            Ok((wad_id, val))
-        })?;
-        for row in rows {
-            let (wad_id, val) = row?;
-            result.insert(wad_id, val);
-        }
-    }
-
-    Ok(result)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

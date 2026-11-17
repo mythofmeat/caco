@@ -34,8 +34,8 @@ pub use companions::{
     set_companion_enabled, unlink_companion_from_wad, would_be_orphan,
 };
 pub use connection::{
-    SQLITE_MAX_VARS, attach_tags, batch_query_i64, fetch_tags, fetch_tags_batch, open_connection,
-    open_memory, with_transaction,
+    SQLITE_MAX_VARS, attach_tags, fetch_tags, fetch_tags_batch, open_connection, open_memory,
+    with_transaction,
 };
 pub use id24::{
     Id24Record, KNOWN_ID24_FILENAMES, KNOWN_ID24_WADS, add_id24, get_all_id24, get_id24,
@@ -52,9 +52,7 @@ pub use models::{
     Retrievability, STATUS_SHORTCUTS, SourceType, Status, WAD_COLUMNS, WadRecord,
 };
 pub use playthroughs::{
-    PlaythroughRecord, complete_playthrough, delete_playthrough, derive_status, ensure_playthrough,
-    get_active_playthrough, get_playthrough, get_playthroughs, get_times_completed,
-    get_times_completed_batch, start_playthrough,
+    PlaythroughRecord, get_active_playthrough, get_playthroughs, start_over, start_playthrough,
 };
 pub use query::{compose_and, find_duplicate, normalize_status, parse_query, search_wads};
 pub use schema::init_db;

@@ -604,13 +604,22 @@ fn apply_row(
     }
 
     if event.op == Op::Delete {
-        // Its sessions happened all the same, and the column is not one that cascades.
-        if entity.kind == "playthrough" {
-            tx.execute(
-                "UPDATE sessions SET playthrough_id = NULL WHERE playthrough_id = \
-                 (SELECT id FROM playthroughs WHERE uid = ?1)",
-                [&event.key],
-            )?;
+        // What referred to it happened all the same, a playthrough's sessions and the
+        // completion that ended it, and a reference is not a column that cascades.
+        for referrer in capture::ENTITIES {
+            for field in referrer.fields {
+                if matches!(field.role, Role::Ref(parent) if parent.kind == entity.kind) {
+                    tx.execute(
+                        &format!(
+                            "UPDATE {referrer} SET {column} = NULL WHERE {column} = \
+                             (SELECT id FROM {table} WHERE {key_column} = ?1)",
+                            referrer = referrer.table,
+                            column = field.column,
+                        ),
+                        [&event.key],
+                    )?;
+                }
+            }
         }
         tx.execute(
             &format!("DELETE FROM {table} WHERE {key_column} = ?1"),

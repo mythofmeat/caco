@@ -213,27 +213,12 @@ fn detect_and_persist_zdoom_required_if_missing(
     Ok(())
 }
 
-/// Start a new playthrough for a completed/abandoned WAD.
-///
-/// Creates a new playthrough record, sets status to in-progress,
-/// and clears the live stats snapshot so progress tracks fresh.
-/// The prior playthrough's stats are preserved on its own record.
+/// Start a finished or abandoned WAD again: see [`db::start_over`], which ends any
+/// playthrough it still has open, starts another, and clears the live stats snapshot so
+/// progress tracks fresh. The prior playthrough's stats are preserved on its own record.
 pub fn start_new_playthrough(conn: &Connection, wad_id: i64) -> crate::Result<i64> {
     let wad = db::get_wad(conn, wad_id, false)?.ok_or(crate::Error::WadNotFound(wad_id))?;
-
-    // Guard: must not already have an active playthrough
-    if db::get_active_playthrough(conn, wad_id)?.is_some() {
-        return Err(crate::Error::Config(
-            "WAD already has an active playthrough".to_string(),
-        ));
-    }
-
-    // Start new playthrough (sets status → in-progress)
-    let pt_id = db::start_playthrough(conn, wad_id)?;
-
-    // Clear live stats snapshot so auto-completion tracks fresh
-    let update = db::WadUpdate::new().set_text("stats_snapshot", None);
-    db::update_wad(conn, wad_id, &update)?;
+    let pt_id = db::start_over(conn, wad_id)?;
 
     // Clearing the DB snapshot alone is not enough: every stats read path
     // prefers the on-disk stats files, so reconcile_stats would absorb the
@@ -1091,11 +1076,11 @@ fn check_auto_completion(
     // Run completion check
     match completion_detect::check_completion(&analysis, &stats) {
         CompletionVerdict::Complete => {
-            // Auto-complete the active playthrough
-            if let Ok(Some(pt)) = db::get_active_playthrough(conn, wad_id)
-                && let Err(e) = db::complete_playthrough(conn, pt.id, Some(&stats_str), None)
-            {
-                tracing::warn!("failed to auto-complete playthrough {}: {e}", pt.id);
+            // As the user would say it, so that both leave the same records: a completion,
+            // and the playthrough it finished ended.
+            let update = db::WadUpdate::new().set_status(db::Status::Completed);
+            if let Err(e) = db::update_wad(conn, wad_id, &update) {
+                tracing::warn!("failed to mark wad {wad_id} completed: {e}");
             }
             AutoCompleteResult::Completed
         }
@@ -1111,18 +1096,28 @@ fn check_auto_completion(
 /// Returns `Some(pt_id)` when a new playthrough was created, so the caller
 /// can attach the current session to it. Returns `None` when a playthrough
 /// already existed (status is also patched if it drifted to a non-active
-/// state while a playthrough was still open).
+/// state while a playthrough was still open, which is how an abandoned WAD
+/// is taken up again).
+///
+/// A completed WAD is left as it is. Playing it again is not starting it
+/// again, which is Start New Playthrough's to do, since that puts its stats
+/// aside: a playthrough started here would begin with every map already
+/// exited, and the check after the session would count the WAD finished
+/// again.
 fn ensure_in_progress(conn: &Connection, wad_id: i64) -> crate::Result<Option<i64>> {
+    let Some(wad) = db::get_wad(conn, wad_id, false)? else {
+        return Ok(None);
+    };
+    if wad.status == db::Status::Completed {
+        return Ok(None);
+    }
     match db::get_active_playthrough(conn, wad_id)? {
         None => {
             let pt_id = db::start_playthrough(conn, wad_id)?;
             Ok(Some(pt_id))
         }
         Some(_) => {
-            if let Some(w) = db::get_wad(conn, wad_id, false)?
-                && w.status != db::Status::InProgress
-                && w.status != db::Status::Completed
-            {
+            if wad.status != db::Status::InProgress {
                 let now = chrono::Utc::now().to_rfc3339();
                 conn.execute(
                     "UPDATE wads SET status = 'in-progress', updated_at = ?1 WHERE id = ?2",
@@ -1501,8 +1496,13 @@ mod tests {
             db::WadUpdate::new().set_text("stats_snapshot", Some(r#"{"maps":{}}"#.to_string()));
         db::update_wad(&conn, wad_id, &update).unwrap();
 
-        // Complete the playthrough
-        db::complete_playthrough(&conn, pt_id, Some(r#"{"maps":{}}"#), None).unwrap();
+        // Finish it
+        db::update_wad(
+            &conn,
+            wad_id,
+            &db::WadUpdate::new().set_status(db::Status::Completed),
+        )
+        .unwrap();
 
         // Verify WAD is completed with a snapshot
         let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
@@ -1755,12 +1755,13 @@ mod tests {
         use crate::db;
         let (conn, wad_id) = fresh_db_with_wad();
         let pt_id = db::start_playthrough(&conn, wad_id).unwrap();
-        db::complete_playthrough(&conn, pt_id, None, None).unwrap();
-        // Re-open a playthrough (simulating a post-completion replay) but
-        // leave the wad status at completed. ensure_in_progress must not
-        // demote a completed WAD.
+        let completed = db::WadUpdate::new().set_status(db::Status::Completed);
+        db::update_wad(&conn, wad_id, &completed).unwrap();
+        // Re-open a playthrough (what a WAD finished by hand was left with before #84)
+        // but leave the wad status at completed. ensure_in_progress must not demote a
+        // completed WAD.
         conn.execute(
-            "UPDATE playthroughs SET completed_at = NULL WHERE id = ?1",
+            "UPDATE playthroughs SET ended_at = NULL WHERE id = ?1",
             rusqlite::params![pt_id],
         )
         .unwrap();
@@ -1769,6 +1770,40 @@ mod tests {
 
         let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
         assert_eq!(wad.status, db::Status::Completed);
+    }
+
+    #[test]
+    fn test_playing_a_finished_wad_again_does_not_finish_it_again() {
+        // Exiting a map of a finished WAD once started a playthrough with every map
+        // already exited, and the check after the session counted it beaten again.
+        use crate::db;
+        let (conn, wad_id) = fresh_db_with_wad();
+        db::start_playthrough(&conn, wad_id).unwrap();
+        let completed = db::WadUpdate::new().set_status(db::Status::Completed);
+        db::update_wad(&conn, wad_id, &completed).unwrap();
+
+        assert_eq!(ensure_in_progress(&conn, wad_id).unwrap(), None);
+
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        assert_eq!(wad.status, db::Status::Completed);
+        assert!(db::get_active_playthrough(&conn, wad_id).unwrap().is_none());
+        assert_eq!(db::get_wad_completions(&conn, wad_id).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_ensure_in_progress_takes_up_an_abandoned_wad_where_it_was_left() {
+        use crate::db;
+        let (conn, wad_id) = fresh_db_with_wad();
+        let pt_id = db::start_playthrough(&conn, wad_id).unwrap();
+        let abandoned = db::WadUpdate::new().set_status(db::Status::Abandoned);
+        db::update_wad(&conn, wad_id, &abandoned).unwrap();
+
+        assert_eq!(ensure_in_progress(&conn, wad_id).unwrap(), None);
+
+        let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        assert_eq!(wad.status, db::Status::InProgress);
+        let active = db::get_active_playthrough(&conn, wad_id).unwrap().unwrap();
+        assert_eq!(active.id, pt_id);
     }
 
     /// Minimal stats.txt snapshot with one map at the given exit count.
