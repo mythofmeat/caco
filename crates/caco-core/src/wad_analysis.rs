@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use zip::ZipArchive;
 
 use crate::companion_service::is_deh_bex;
-use crate::mapinfo::MapinfoEntry;
+use crate::mapinfo::{Episodes, MapinfoEntry};
 use crate::utils::{MAX_ZIP_ENTRY_SIZE, parse_wad_directory, zip_entry_names};
 use crate::{dehacked, identity, unpack};
 
@@ -51,7 +51,15 @@ const MAP_LUMPS: &[&str] = &[
 
 /// Analysis format version. Bump this whenever detection logic changes
 /// so that stale cached analyses are automatically invalidated and re-run.
-pub const ANALYSIS_VERSION: u32 = 15;
+pub const ANALYSIS_VERSION: u32 = 16;
+
+/// The episodes on the menu of a game whose maps have Doom's names, in the
+/// order it lists them, before any MAPINFO changes it. Both sourceports caco
+/// builds put them there: nyan-doom adds E1M1 to E3M1, and E4M1 for The
+/// Ultimate Doom when a PWAD has one (`dsda/episode.c`), and uzdoom's own
+/// MAPINFO for the game declares all four (`mapinfo/doom1.txt`). Neither has a
+/// fifth. Doom II's one episode starts at MAP01, where a new game does anyway.
+const DOOM1_EPISODES: &[&str] = &["E1M1", "E2M1", "E3M1", "E4M1"];
 
 /// Tail maps with fewer than this many monster things are peeled off as
 /// `OptionalCredits`. Threshold is "more than one" so a single decorative
@@ -313,11 +321,11 @@ fn add_vanilla_edges(graph: &mut MapGraph, map_set: &HashSet<&str>, is_doom1: bo
 ///
 /// Algorithm:
 /// 1. Roots = the canonical start (the lowest map with a standard name other
-///    than map zero, where a new game begins) plus every `episode` entry point.
-///    A multi-episode WAD has no single linear path through all maps, so each
-///    episode's first map is walked independently. A WAD whose maps all have
-///    names of its own starts where its episodes do, and with none of those, at
-///    its first map.
+///    than map zero, where a new game begins) plus every episode on the menu,
+///    in the order it lists them. A multi-episode WAD has no single linear path
+///    through all maps, so each episode's first map is walked independently. A
+///    WAD whose maps all have names of its own starts where its episodes do,
+///    and with none of those, at its first map.
 /// 2. From each root, in that order, walk the main path, preferring normal
 ///    edges, falling back to secret edges only when no normal edge exists
 ///    ("forced secret = true ending"). A node already claimed by an earlier
@@ -337,7 +345,7 @@ fn classify_maps(
     graph: &MapGraph,
     infos: &mut [MapInfo],
     monsters: &HashMap<String, usize>,
-    episode_roots: &[String],
+    episodes: &[String],
 ) {
     if infos.is_empty() {
         return;
@@ -366,11 +374,11 @@ fn classify_maps(
         .map(|(i, m)| (m.lump.clone(), i))
         .collect();
 
-    // Roots: canonical start first, then each episode entry point that exists
-    // as a playable map. Order matters — the start owns shared tails; episode
-    // walks pick up only the maps the start didn't already claim.
+    // Roots: canonical start first, then each episode on the menu that is a
+    // playable map, in the menu's order. Order matters — the start owns shared
+    // tails; episode walks pick up only the maps the start didn't already claim.
     let mut roots: Vec<String> = start.into_iter().collect();
-    for r in episode_roots {
+    for r in episodes {
         if by_lump.contains_key(r) && !roots.contains(r) {
             roots.push(r.clone());
         }
@@ -612,7 +620,8 @@ struct Gathered {
     /// DEHACKED patches, in the order they are applied.
     patches: Vec<String>,
     sources: Vec<(FlowSource, HashMap<String, MapinfoEntry>)>,
-    episode_roots: Vec<String>,
+    /// What the MAPINFO read so far does to the episode menu.
+    episodes: Episodes,
     /// MAPINFO read from a resource archive, the only kind whose flow is
     /// checked for hubs.
     archive_mapinfo: Option<HashMap<String, MapinfoEntry>>,
@@ -635,7 +644,7 @@ impl Gathered {
             mut things,
             patches,
             sources,
-            episode_roots,
+            episodes,
             archive_mapinfo,
             has_structured,
         } = later;
@@ -645,7 +654,7 @@ impl Gathered {
         }
         self.patches.extend(patches);
         self.sources.extend(sources);
-        self.episode_roots.extend(episode_roots);
+        self.episodes.then(episodes);
         if let Some(mapinfo) = archive_mapinfo {
             self.archive_mapinfo.get_or_insert_default().extend(mapinfo);
         }
@@ -683,13 +692,16 @@ impl Gathered {
             .find(|lump| is_map_marker(lump))
             .is_some_and(|lump| DOOM1_MAP_RE.is_match(lump));
         let graph = build_graph(&map_set, is_doom1, &self.sources);
+        let episodes = self
+            .episodes
+            .menu(if is_doom1 { DOOM1_EPISODES } else { &[] });
         let monster_numbers = dehacked::monster_numbers(&self.patches);
         let monsters: HashMap<String, usize> = self
             .things
             .iter()
             .map(|(map, things)| (map.clone(), count_monsters(things, &monster_numbers)))
             .collect();
-        classify_maps(&graph, &mut infos, &monsters, &self.episode_roots);
+        classify_maps(&graph, &mut infos, &monsters, &episodes);
         Some(finalize(infos, self.has_structured))
     }
 }
@@ -720,7 +732,8 @@ fn gather_wad(wad_data: &[u8]) -> Option<Gathered> {
         .patches
         .extend(lump_texts(wad_data, &directory, "DEHACKED"));
 
-    // An include in a WAD names another lump.
+    // An include in a WAD names another lump. Each of these lumps is for a
+    // sourceport of its own, so their episodes go alongside each other's.
     let mapinfo = |lump: &str| {
         let text = read_lump_text(wad_data, &directory, lump)?;
         let mut read = |name: &str| read_lump_text(wad_data, &directory, &name.to_uppercase());
@@ -731,7 +744,7 @@ fn gather_wad(wad_data: &[u8]) -> Option<Gathered> {
             gathered.has_structured = true;
             gathered.sources.push((FlowSource::Zmapinfo, mapinfo.maps));
         }
-        gathered.episode_roots.extend(mapinfo.episodes);
+        gathered.episodes.alongside(mapinfo.episodes);
     }
     if let Some(text) = read_lump_text(wad_data, &directory, "UMAPINFO") {
         let umapinfo = crate::mapinfo::parse_umapinfo(&text);
@@ -739,14 +752,14 @@ fn gather_wad(wad_data: &[u8]) -> Option<Gathered> {
             gathered.has_structured = true;
             gathered.sources.push((FlowSource::Umapinfo, umapinfo.maps));
         }
-        gathered.episode_roots.extend(umapinfo.episodes);
+        gathered.episodes.alongside(umapinfo.episodes);
     }
     if let Some(mapinfo) = mapinfo("MAPINFO") {
         if !mapinfo.maps.is_empty() {
             gathered.has_structured = true;
             gathered.sources.push((FlowSource::Mapinfo, mapinfo.maps));
         }
-        gathered.episode_roots.extend(mapinfo.episodes);
+        gathered.episodes.alongside(mapinfo.episodes);
     }
 
     Some(gathered)
@@ -823,7 +836,7 @@ fn gather_archive<R: Read + Seek>(archive: &mut ZipArchive<R>) -> Option<Gathere
                 .sources
                 .push((FlowSource::Mapinfo, mapinfo.maps.clone()));
         }
-        gathered.episode_roots.extend(mapinfo.episodes);
+        gathered.episodes = mapinfo.episodes;
         gathered.archive_mapinfo = Some(mapinfo.maps);
         gathered.has_structured = true;
     }
@@ -2339,6 +2352,146 @@ episode MAP31
         for lump in ["MAP29", "MAP30", "MAP33", "MAP34"] {
             assert_eq!(classify_of(&a, lump), MapClassification::Required, "{lump}");
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // The game's own episodes (#85)
+    // -----------------------------------------------------------------------
+
+    /// A WAD that replaces each of `episodes`, ExM1 to ExM8, with 20 imps on every map, and
+    /// has the `other` lumps after them.
+    fn doom1_wad(episodes: &[u32], other: &[(&str, &[u8])]) -> Vec<u8> {
+        let things = playable_things(20);
+        let names = episode_maps(episodes);
+        let mut lumps: Vec<(&str, &[u8])> = Vec::new();
+        for name in &names {
+            lumps.push((name, &[]));
+            lumps.push(("THINGS", &things));
+        }
+        lumps.extend_from_slice(other);
+        build_wad(&lumps)
+    }
+
+    /// The maps of an analysis classified as `classification`.
+    fn maps_classified(a: &WadAnalysis, classification: MapClassification) -> Vec<&str> {
+        a.maps
+            .iter()
+            .filter(|m| m.classification == classification)
+            .map(|m| m.lump.as_str())
+            .collect()
+    }
+
+    /// ExM1 to ExM8 of each of `episodes`.
+    fn episode_maps(episodes: &[u32]) -> Vec<String> {
+        episodes
+            .iter()
+            .flat_map(|e| (1..=8).map(move |m| format!("E{e}M{m}")))
+            .collect()
+    }
+
+    #[test]
+    fn test_a_doom1_wad_with_no_mapinfo_has_every_episode_it_replaces_to_finish() {
+        // The game puts E1M1 to E4M1 on the menu. The walk from E1M1 stops at E1M8, as the game
+        // does, and nothing else reached E2M1, so E2 to E4 were unreachable, and the WAD was
+        // finished after E1M8.
+        let a = analyze_wad(&doom1_wad(&[1, 2, 3, 4], &[])).unwrap();
+
+        assert_eq!(
+            maps_classified(&a, MapClassification::Required),
+            episode_maps(&[1, 2, 3, 4])
+        );
+    }
+
+    #[test]
+    fn test_a_mapinfo_that_clears_the_menu_takes_the_games_episodes_off_it() {
+        let zmapinfo = b"clearepisodes\nepisode E1M1 { }\nepisode E3M1 { }\n";
+        let umapinfo = b"MAP E1M1 { episode = clear episode = \"M_EPI1\" }\n";
+
+        let by_zmapinfo =
+            analyze_wad(&doom1_wad(&[1, 2, 3, 4], &[("ZMAPINFO", zmapinfo)])).unwrap();
+        let by_umapinfo =
+            analyze_wad(&doom1_wad(&[1, 2, 3, 4], &[("UMAPINFO", umapinfo)])).unwrap();
+
+        assert_eq!(
+            maps_classified(&by_zmapinfo, MapClassification::Required),
+            episode_maps(&[1, 3])
+        );
+        assert_eq!(
+            maps_classified(&by_zmapinfo, MapClassification::Unreachable),
+            episode_maps(&[2, 4])
+        );
+        assert_eq!(
+            maps_classified(&by_umapinfo, MapClassification::Required),
+            episode_maps(&[1])
+        );
+    }
+
+    #[test]
+    fn test_an_episode_a_mapinfo_removes_is_not_one_to_finish() {
+        let mapinfo = b"episode E4M1\n{\n    remove\n}\n";
+
+        let a = analyze_wad(&doom1_wad(&[1, 2, 3, 4], &[("MAPINFO", mapinfo)])).unwrap();
+
+        assert_eq!(
+            maps_classified(&a, MapClassification::Unreachable),
+            episode_maps(&[4])
+        );
+    }
+
+    #[test]
+    fn test_one_lumps_clear_does_not_take_away_the_episodes_another_lump_adds() {
+        // Each is for a sourceport of its own. Read one after the other, the UMAPINFO's clear
+        // took E3 away.
+        let zmapinfo = b"clearepisodes\nepisode E1M1 { }\nepisode E3M1 { }\n";
+        let umapinfo = b"MAP E1M1 { episode = clear episode = \"M_EPI1\" }\n";
+
+        let a = analyze_wad(&doom1_wad(
+            &[1, 2, 3, 4],
+            &[("ZMAPINFO", zmapinfo), ("UMAPINFO", umapinfo)],
+        ))
+        .unwrap();
+
+        assert_eq!(
+            maps_classified(&a, MapClassification::Required),
+            episode_maps(&[1, 3])
+        );
+    }
+
+    #[test]
+    fn test_the_games_episodes_come_before_the_ones_a_mapinfo_adds() {
+        // As the menu lists them, so E3 is the episode, and the map that joins it partway is
+        // the bonus. Walked the other way round, E3M1 to E3M4 were the bonus.
+        let mapinfo =
+            b"episode BONUS { name = \"Bonus\" }\nmap BONUS \"Bonus\" { next = \"E3M5\" }\n";
+        let things = playable_things(20);
+
+        let a = analyze_wad(&doom1_wad(
+            &[1, 2, 3],
+            &[("BONUS", &[]), ("THINGS", &things), ("MAPINFO", mapinfo)],
+        ))
+        .unwrap();
+
+        assert_eq!(
+            maps_classified(&a, MapClassification::Required),
+            episode_maps(&[1, 2, 3])
+        );
+        assert_eq!(classify_of(&a, "BONUS"), MapClassification::OptionalBonus);
+    }
+
+    #[test]
+    fn test_a_later_files_mapinfo_clears_the_menu_for_an_earlier_files_maps() {
+        // A launch loads them in this order, and a sourceport reads their MAPINFO in it, so the
+        // clear takes away the episode the first one put on the menu as well as the game's.
+        let maps = doom1_wad(&[1, 2, 3], &[("ZMAPINFO", b"episode E2M1 { }\n")]);
+        let menu = build_wad(&[("ZMAPINFO", b"clearepisodes\nepisode E1M1 { }\n")]);
+        let zip = zip_of(&[("pack/a.wad", &maps), ("pack/b.wad", &menu)]);
+
+        let a = analyze_file("pack.zip", &zip).unwrap();
+
+        assert_eq!(
+            maps_classified(&a, MapClassification::Required),
+            episode_maps(&[1])
+        );
     }
 
     #[test]

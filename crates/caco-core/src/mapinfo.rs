@@ -1,8 +1,8 @@
 //! MAPINFO, ZMAPINFO and UMAPINFO, read for map flow.
 //!
 //! Reads what completion detection needs: each map's `next` and secret exit,
-//! whether it ends the game, the `defaultmap` they inherit, and where the
-//! episode menu starts.
+//! whether it ends the game, the `defaultmap` they inherit, and what it does
+//! to the episode menu.
 //!
 //! Read as ZDoom reads them (`FScanner` and `FMapInfoParser`): as a stream of
 //! tokens, where a line break means nothing, except in the older format ZDoom
@@ -86,15 +86,112 @@ pub struct MapinfoEntry {
     pub has_endgame: bool,
 }
 
-/// What a MAPINFO or ZMAPINFO says about map flow.
+/// What a MAPINFO, ZMAPINFO or UMAPINFO says about map flow.
 #[derive(Debug, Default)]
 pub struct Mapinfo {
     /// Each map's definition, by its name in upper case.
     pub maps: HashMap<String, MapinfoEntry>,
-    /// The map each `episode` starts at, in upper case and in the order they
-    /// are declared. MAPINFO's `episode clear` is here as `CLEAR`: callers keep
-    /// the ones that are maps.
-    pub episodes: Vec<String>,
+    /// What it does to the episode menu.
+    pub episodes: Episodes,
+}
+
+/// What MAPINFO does to the episode menu, which is where a new game can start.
+///
+/// A sourceport's menu starts with the game's own episodes, and each MAPINFO it
+/// reads changes it as it is read, uzdoom's and nyan-doom's alike: a clear
+/// takes away every episode before it, the game's own among them, and an
+/// episode at a map already on the menu takes that one's place.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Episodes {
+    /// Whether every episode already on the menu is taken away: MAPINFO's
+    /// `clearepisodes`, UMAPINFO's `episode = clear`.
+    clears: bool,
+    /// Episodes already on the menu that are taken away, by the map each starts
+    /// at, as MAPINFO's `remove` does. None once `clears` has taken them all.
+    removes: Vec<String>,
+    /// The map each episode put on the menu starts at, in upper case and in
+    /// order.
+    starts: Vec<String>,
+}
+
+impl Episodes {
+    /// The menu once these changes are made to one with the game's own
+    /// episodes, `game`, on it: the map each episode starts at, in the order it
+    /// is listed.
+    pub fn menu(&self, game: &[&str]) -> Vec<String> {
+        let mut menu: Vec<String> = if self.clears {
+            Vec::new()
+        } else {
+            game.iter()
+                .filter(|map| !self.removes.iter().any(|removed| removed == *map))
+                .map(|map| map.to_string())
+                .collect()
+        };
+        for start in &self.starts {
+            if !menu.contains(start) {
+                menu.push(start.clone());
+            }
+        }
+        menu
+    }
+
+    /// These changes and then `later`'s, as a sourceport makes them, reading
+    /// one file after another.
+    pub fn then(&mut self, later: Episodes) {
+        if later.clears {
+            *self = later;
+            return;
+        }
+        for map in &later.removes {
+            self.remove(map);
+        }
+        for map in later.starts {
+            self.add(map);
+        }
+    }
+
+    /// These changes and `other`'s, each read by a sourceport of its own, as
+    /// the MAPINFO lumps of one WAD are: uzdoom reads the first of ZMAPINFO,
+    /// MAPINFO and UMAPINFO a WAD has, and nyan-doom only UMAPINFO. Neither
+    /// takes away what the other puts on the menu, then. But a WAD that clears
+    /// or removes the game's own episodes in one of them means them to go, even
+    /// though nyan-doom still shows them when only its ZMAPINFO says so.
+    pub fn alongside(&mut self, other: Episodes) {
+        if other.clears {
+            self.clears = true;
+            self.removes.clear();
+        }
+        if !self.clears {
+            for map in other.removes {
+                if !self.removes.contains(&map) {
+                    self.removes.push(map);
+                }
+            }
+        }
+        for map in other.starts {
+            self.add(map);
+        }
+    }
+
+    fn add(&mut self, map: String) {
+        if !self.starts.contains(&map) {
+            self.starts.push(map);
+        }
+    }
+
+    fn remove(&mut self, map: &str) {
+        self.starts.retain(|start| start != map);
+        if !self.clears && !self.removes.iter().any(|removed| removed == map) {
+            self.removes.push(map.to_string());
+        }
+    }
+
+    fn clear(&mut self) {
+        *self = Episodes {
+            clears: true,
+            ..Episodes::default()
+        };
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -123,8 +220,10 @@ pub fn parse_mapinfo(text: &str, read: &mut dyn FnMut(&str) -> Option<String>) -
 ///
 /// UMAPINFO has one format, braced, and none of MAPINFO's defaults or includes.
 /// An episode is a property of the map it starts at, `episode = "M_EPI1",
-/// "Name", "k"`, where MAPINFO declares one on its own. nyan-doom adds each to
-/// the menu as it reads it (`umapinfo.cpp`).
+/// "Name", "k"`, where MAPINFO declares one on its own. nyan-doom and uzdoom
+/// change the menu as they read each one (`umapinfo.cpp` in both), so
+/// `episode = clear` takes away the episodes declared before it, and not the
+/// ones after.
 pub fn parse_umapinfo(text: &str) -> Mapinfo {
     let mut sc = Scanner::new(text);
     let mut out = Mapinfo::default();
@@ -136,22 +235,19 @@ pub fn parse_umapinfo(text: &str) -> Mapinfo {
             break;
         };
         let mut entry = MapinfoEntry::default();
-        let mut starts_episode = false;
         if sc.peek(true).is_some_and(|l| l.token.is('{')) {
             sc.next(true);
             read_block(&mut sc, &mut |key, values| {
-                if key.eq_ignore_ascii_case("episode") {
-                    // `episode = clear` takes the menu's episodes away and adds none.
-                    starts_episode |= values
-                        .first()
-                        .is_some_and(|value| !value.eq_ignore_ascii_case("clear"));
-                } else {
+                if !key.eq_ignore_ascii_case("episode") {
                     apply_umapinfo(&mut entry, key, values);
+                } else if let Some(value) = values.first() {
+                    if value.eq_ignore_ascii_case("clear") {
+                        out.episodes.clear();
+                    } else {
+                        out.episodes.add(name.clone());
+                    }
                 }
             });
-        }
-        if starts_episode {
-            out.episodes.push(name.clone());
         }
         out.maps.insert(name, entry);
     }
@@ -200,15 +296,21 @@ impl Parser<'_> {
                 }
                 "episode" => {
                     let Some(name) = sc.next(false) else { break };
-                    if let Some(name) = name.token.text() {
-                        self.out.episodes.push(map_name(name));
-                    }
+                    let map = name.token.text().map(map_name);
                     // Which map a shareware game starts at instead.
                     if sc.peek(false).is_some_and(|l| l.token.is_word("teaser")) {
                         sc.next(false);
                         sc.next(false);
                     }
-                    skip_definition(&mut sc);
+                    let mut remove = false;
+                    read_properties(&mut sc, &mut |key, _| {
+                        remove |= key.eq_ignore_ascii_case("remove");
+                    });
+                    match map {
+                        Some(map) if remove => self.out.episodes.remove(&map),
+                        Some(map) => self.out.episodes.add(map),
+                        None => {}
+                    }
                 }
                 "include" => {
                     if let Some(name) = sc
@@ -218,7 +320,8 @@ impl Parser<'_> {
                         self.include(&name);
                     }
                 }
-                "clearepisodes" | "clearskills" => {}
+                "clearepisodes" => self.out.episodes.clear(),
+                "clearskills" => {}
                 _ if is_top_level(&lexeme.token) || keyword.eq_ignore_ascii_case("cluster") => {
                     skip_definition(&mut sc);
                 }
@@ -266,14 +369,20 @@ fn skip_title(sc: &mut Scanner, header_line: usize) {
     }
 }
 
-/// Read a definition's properties into `entry`: a braced block, or in the older
-/// format, a property to a line until the next top-level keyword.
+/// Read a map's definition, or the defaults for one, into `entry`.
 fn read_definition(sc: &mut Scanner, entry: &mut MapinfoEntry) {
+    read_properties(sc, &mut |key, values| apply_mapinfo(entry, key, values));
+}
+
+/// Read a definition's properties, each to `apply` as it is read: a braced
+/// block, or in the older format, a property to a line until the next top-level
+/// keyword.
+fn read_properties(sc: &mut Scanner, apply: &mut dyn FnMut(&str, &[&str])) {
     if sc.peek(false).is_some_and(|l| l.token.is('{')) {
         sc.next(false);
-        read_block(sc, &mut |key, values| apply_mapinfo(entry, key, values));
+        read_block(sc, apply);
     } else {
-        read_old_format(sc, entry);
+        read_old_format(sc, apply);
     }
 }
 
@@ -315,8 +424,8 @@ fn read_block(sc: &mut Scanner, apply: &mut dyn FnMut(&str, &[&str])) {
 }
 
 /// The older format: a property to a line, its values after it with no `=`,
-/// until the next top-level keyword.
-fn read_old_format(sc: &mut Scanner, entry: &mut MapinfoEntry) {
+/// until the next top-level keyword. Each goes to `apply` as it is read.
+fn read_old_format(sc: &mut Scanner, apply: &mut dyn FnMut(&str, &[&str])) {
     while let Some(first) = sc.peek(false) {
         if is_top_level(&first.token) || matches!(first.token, Token::Punct('{' | '}')) {
             return;
@@ -329,7 +438,7 @@ fn read_old_format(sc: &mut Scanner, entry: &mut MapinfoEntry) {
         }
         let values: Vec<&str> = values.iter().filter_map(Token::text).collect();
         if let Some(key) = first.token.text() {
-            apply_mapinfo(entry, key, &values);
+            apply(key, &values);
         }
     }
 }
@@ -817,18 +926,101 @@ episode MAP04
 {
     name = "Tier 2"
 }
-clearepisodes
-episode clear
 map MAP01 "A"
 {
     next = Map02
 }
 "#;
-        let starts = parse_mapinfo(text, &mut |_| None).episodes;
-        assert_eq!(starts, vec!["MAP01", "MAP04", "CLEAR"]);
+        let starts = episodes(text);
+        assert_eq!(starts.menu(&[]), ["MAP01", "MAP04"]);
         // `episode = "..."` (a per-map property) must not be captured.
-        let prop = parse_mapinfo("map MAP01 {\n  episode = \"foo\"\n}", &mut |_| None);
-        assert!(prop.episodes.is_empty());
+        assert_eq!(
+            episodes("map MAP01 {\n  episode = \"foo\"\n}"),
+            Episodes::default()
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // The episode menu
+    // -----------------------------------------------------------------------
+
+    /// The menu of a game whose maps have Doom's names, before any MAPINFO.
+    const DOOM: &[&str] = &["E1M1", "E2M1", "E3M1", "E4M1"];
+
+    /// What a MAPINFO with no includes does to the menu.
+    fn episodes(text: &str) -> Episodes {
+        parse_mapinfo(text, &mut |_| None).episodes
+    }
+
+    #[test]
+    fn test_episodes_go_after_the_games_own_or_in_place_of_one() {
+        // As uzdoom's menu has them: an episode at a map already on it replaces that one.
+        let menu = episodes("episode E5M1 { name = \"Five\" }\nepisode E2M1 { name = \"Two\" }\n");
+
+        assert_eq!(menu.menu(DOOM), ["E1M1", "E2M1", "E3M1", "E4M1", "E5M1"]);
+    }
+
+    #[test]
+    fn test_clearepisodes_takes_away_every_episode_before_it() {
+        // The game's own, and the ones the same MAPINFO declared above it. It used to be
+        // skipped, and a Doom 1 WAD whose MAPINFO cleared the menu had nothing to clear yet.
+        let menu =
+            episodes("episode E5M1 { }\nclearepisodes\nepisode E1M1 { }\nepisode E6M1 { }\n");
+
+        assert_eq!(menu.menu(DOOM), ["E1M1", "E6M1"]);
+    }
+
+    #[test]
+    fn test_an_episode_can_be_removed_and_put_back() {
+        // In either format, as uzdoom's `remove` does, which used to read as declaring it. Put
+        // back, it goes at the end.
+        let text = "episode E4M1 { remove }\n\
+                    episode E2M1\nremove\n\
+                    episode E2M1\nname \"Two again\"\n";
+
+        assert_eq!(episodes(text).menu(DOOM), ["E1M1", "E3M1", "E2M1"]);
+    }
+
+    #[test]
+    fn test_mapinfos_episode_clear_is_an_episode_at_a_map_called_clear() {
+        // UMAPINFO's spelling of a clear. uzdoom reads it in MAPINFO as any other episode.
+        assert_eq!(
+            episodes("episode clear\n").menu(DOOM),
+            ["E1M1", "E2M1", "E3M1", "E4M1", "CLEAR"]
+        );
+    }
+
+    #[test]
+    fn test_a_later_files_clear_takes_away_an_earlier_files_episodes() {
+        // A sourceport reads one file's MAPINFO after another's.
+        let earlier = || episodes("episode E5M1 { }\nepisode E3M1 { remove }\n");
+
+        let mut cleared = earlier();
+        cleared.then(episodes("clearepisodes\nepisode E1M1 { }\n"));
+        let mut changed = earlier();
+        changed.then(episodes(
+            "episode E5M1 { remove }\nepisode E6M1 { }\nepisode E2M1 { remove }\n",
+        ));
+
+        assert_eq!(cleared.menu(DOOM), ["E1M1"]);
+        assert_eq!(changed.menu(DOOM), ["E1M1", "E4M1", "E6M1"]);
+    }
+
+    #[test]
+    fn test_one_lumps_clear_takes_away_the_games_episodes_and_not_another_lumps() {
+        // uzdoom reads the ZMAPINFO and nyan-doom the UMAPINFO, so the episode only uzdoom
+        // has stays on the menu. Read one after the other, the UMAPINFO took it away.
+        let mut both = episodes("clearepisodes\nepisode MAP01 { }\nepisode MAP21 { }\n");
+        both.alongside(
+            parse_umapinfo("MAP MAP01 { episode = clear episode = \"M_EPI1\" }").episodes,
+        );
+        // A WAD that clears the game's episodes in one of them means them to go.
+        let mut cleared =
+            parse_umapinfo("MAP E1M1 { episode = clear episode = \"M_EPI1\" }").episodes;
+        cleared.alongside(episodes("episode E5M1 { }\nepisode E4M1 { remove }\n"));
+
+        assert_eq!(both.menu(&[]), ["MAP01", "MAP21"]);
+        assert_eq!(cleared.menu(DOOM), ["E1M1", "E5M1"]);
     }
 
     #[test]
@@ -879,7 +1071,8 @@ map MAP02 "Second"
         let mapinfo = parse_mapinfo(zmapinfo, &mut read);
 
         assert_eq!(mapinfo.maps["BTW01"].next.as_deref(), Some("MAP01"));
-        assert_eq!(mapinfo.episodes, ["BTW01"]);
+        // Its clear is read where the file is included, and takes away Doom II's.
+        assert_eq!(mapinfo.episodes.menu(&["MAP01"]), ["BTW01"]);
     }
 
     #[test]
@@ -1047,7 +1240,7 @@ map "WDI01" "The Manor"
 "#;
         let mapinfo = parse_mapinfo(text, &mut |_| None);
 
-        assert_eq!(mapinfo.episodes, ["WDI01", "WDIEXHUB"]);
+        assert_eq!(mapinfo.episodes.menu(&[]), ["WDI01", "WDIEXHUB"]);
         assert_eq!(flow(&mapinfo.maps, "WDI01"), (to("WDI02"), None, false));
     }
 
@@ -1205,13 +1398,24 @@ MAP MAP01
     #[test]
     fn test_umapinfo_episodes_start_at_the_map_that_declares_them() {
         let text = "MAP MAP00 { episode = \"M_EPI0\", \"Tutorial\", \"t\" next = \"MAP01\" }\n\
-                    MAP MAP01 { episode = clear }\n\
                     MAP MAP06 { levelname = \"Six\" episode = \"M_EPI2\" }\n\
                     MAP MAP07 { next = \"MAP08\" }\n";
 
         let umapinfo = parse_umapinfo(text);
 
-        assert_eq!(umapinfo.episodes, ["MAP00", "MAP06"]);
+        assert_eq!(umapinfo.episodes.menu(&[]), ["MAP00", "MAP06"]);
         assert_eq!(umapinfo.maps["MAP00"].next.as_deref(), Some("MAP01"));
+    }
+
+    #[test]
+    fn test_umapinfo_episode_clear_takes_away_the_episodes_before_it() {
+        // nyan-doom and uzdoom change the menu as they read each property, so the clear takes
+        // away the game's episodes and E1M1's, and not the one declared after it. It used to
+        // be dropped.
+        let text = "MAP E1M1 { episode = \"M_EPI1\" }\n\
+                    MAP E2M1 { episode = clear episode = \"M_EPI2\", \"Two\", \"t\" }\n\
+                    MAP E3M1 { episode = \"M_EPI3\" }\n";
+
+        assert_eq!(parse_umapinfo(text).episodes.menu(DOOM), ["E2M1", "E3M1"]);
     }
 }
