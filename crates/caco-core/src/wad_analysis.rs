@@ -26,6 +26,7 @@ use serde::{Deserialize, Serialize};
 use zip::ZipArchive;
 
 use crate::companion_service::is_deh_bex;
+use crate::mapinfo::MapinfoEntry;
 use crate::utils::{MAX_ZIP_ENTRY_SIZE, parse_wad_directory, zip_entry_names};
 use crate::{identity, unpack};
 
@@ -48,7 +49,7 @@ const MAP_LUMPS: &[&str] = &[
 
 /// Analysis format version. Bump this whenever detection logic changes
 /// so that stale cached analyses are automatically invalidated and re-run.
-pub const ANALYSIS_VERSION: u32 = 13;
+pub const ANALYSIS_VERSION: u32 = 14;
 
 /// Tail maps with fewer than this many monster things are peeled off as
 /// `OptionalCredits`. Threshold is "more than one" so a single decorative
@@ -180,9 +181,9 @@ impl FlowSource {
 fn build_graph(
     map_set: &HashSet<&str>,
     is_doom1: bool,
-    sources: &[(FlowSource, HashMap<String, MapinfoEdge>)],
+    sources: &[(FlowSource, HashMap<String, MapinfoEntry>)],
 ) -> MapGraph {
-    let mut by_priority: Vec<&(FlowSource, HashMap<String, MapinfoEdge>)> =
+    let mut by_priority: Vec<&(FlowSource, HashMap<String, MapinfoEntry>)> =
         sources.iter().collect();
     by_priority.sort_by_key(|(s, _)| s.priority());
 
@@ -206,7 +207,7 @@ fn build_graph(
             }
 
             let normal_self_loop = edge.next.as_deref() == Some(lump.as_str());
-            let secret_self_loop = edge.secret_next.as_deref() == Some(lump.as_str());
+            let secret_self_loop = edge.secretnext.as_deref() == Some(lump.as_str());
 
             if let Some(ref nx) = edge.next {
                 if normal_self_loop {
@@ -217,7 +218,7 @@ fn build_graph(
                     graph.edges_normal.remove(lump.as_str());
                 }
             }
-            if let Some(ref sx) = edge.secret_next {
+            if let Some(ref sx) = edge.secretnext {
                 if secret_self_loop {
                     graph.edges_secret.remove(lump.as_str());
                 } else if map_set.contains(sx.as_str()) {
@@ -227,11 +228,11 @@ fn build_graph(
                 }
             }
             // Stopper if explicit endgame, or if `next = self` and the only
-            // alternative (secret_next) is absent or also self-looping.
+            // alternative (secretnext) is absent or also self-looping.
             // `next = self` paired with a real `nextsecret = OTHER` is NOT a
             // stopper — the secret edge is the path forward.
             let stops_here = edge.has_endgame
-                || (normal_self_loop && (secret_self_loop || edge.secret_next.is_none()));
+                || (normal_self_loop && (secret_self_loop || edge.secretnext.is_none()));
             if stops_here {
                 graph.has_endgame.insert(lump.clone());
                 // The normal exit ends the episode; drop any normal edge
@@ -244,7 +245,7 @@ fn build_graph(
                 // Doom II MAP15 -> MAP31 the map name implies) is not a real
                 // branch once the episode ends here, so drop it.
                 let has_explicit_secret = edge
-                    .secret_next
+                    .secretnext
                     .as_deref()
                     .is_some_and(|sx| !secret_self_loop && map_set.contains(sx));
                 if !has_explicit_secret {
@@ -255,14 +256,6 @@ fn build_graph(
     }
 
     graph
-}
-
-/// Unified edge representation across all flow sources.
-#[derive(Debug, Default, Clone)]
-struct MapinfoEdge {
-    next: Option<String>,
-    secret_next: Option<String>,
-    has_endgame: bool,
 }
 
 /// Add vanilla map-flow edges based on map naming conventions.
@@ -634,11 +627,11 @@ struct Gathered {
     maps: Vec<String>,
     /// How many monsters each map has, from the last file to have it.
     monsters: HashMap<String, usize>,
-    sources: Vec<(FlowSource, HashMap<String, MapinfoEdge>)>,
+    sources: Vec<(FlowSource, HashMap<String, MapinfoEntry>)>,
     episode_roots: Vec<String>,
     /// MAPINFO read from a resource archive, the only kind whose flow is
     /// checked for hubs.
-    archive_mapinfo: Option<HashMap<String, crate::mapinfo::MapinfoEntry>>,
+    archive_mapinfo: Option<HashMap<String, MapinfoEntry>>,
     /// Whether any structured map flow was found (UMAPINFO/MAPINFO/ZMAPINFO).
     has_structured: bool,
 }
@@ -735,34 +728,28 @@ fn gather_wad(wad_data: &[u8]) -> Option<Gathered> {
     let mapinfo = |lump: &str| {
         let text = read_lump_text(wad_data, &directory, lump)?;
         let mut read = |name: &str| read_lump_text(wad_data, &directory, &name.to_uppercase());
-        Some(crate::mapinfo::expand_includes(&text, &mut read))
+        Some(crate::mapinfo::parse_mapinfo(&text, &mut read))
     };
-    if let Some(text) = mapinfo("ZMAPINFO") {
-        let entries = parse_mapinfo_to_edges(&crate::mapinfo::parse_mapinfo(&text));
-        if !entries.is_empty() {
+    if let Some(mapinfo) = mapinfo("ZMAPINFO") {
+        if !mapinfo.maps.is_empty() {
             gathered.has_structured = true;
-            gathered.sources.push((FlowSource::Zmapinfo, entries));
+            gathered.sources.push((FlowSource::Zmapinfo, mapinfo.maps));
         }
-        gathered
-            .episode_roots
-            .extend(crate::mapinfo::parse_episode_starts(&text));
+        gathered.episode_roots.extend(mapinfo.episodes);
     }
     if let Some(text) = read_lump_text(wad_data, &directory, "UMAPINFO") {
-        let entries = parse_umapinfo_to_edges(&parse_umapinfo(&text));
+        let entries = crate::mapinfo::parse_umapinfo(&text);
         if !entries.is_empty() {
             gathered.has_structured = true;
             gathered.sources.push((FlowSource::Umapinfo, entries));
         }
     }
-    if let Some(text) = mapinfo("MAPINFO") {
-        let entries = parse_mapinfo_to_edges(&crate::mapinfo::parse_mapinfo(&text));
-        if !entries.is_empty() {
+    if let Some(mapinfo) = mapinfo("MAPINFO") {
+        if !mapinfo.maps.is_empty() {
             gathered.has_structured = true;
-            gathered.sources.push((FlowSource::Mapinfo, entries));
+            gathered.sources.push((FlowSource::Mapinfo, mapinfo.maps));
         }
-        gathered
-            .episode_roots
-            .extend(crate::mapinfo::parse_episode_starts(&text));
+        gathered.episode_roots.extend(mapinfo.episodes);
     }
 
     Some(gathered)
@@ -815,18 +802,16 @@ fn gather_archive<R: Read + Seek>(archive: &mut ZipArchive<R>) -> Option<Gathere
             let text = read_entry(archive, *index)?;
             Some(String::from_utf8_lossy(&text).into_owned())
         };
-        let text = crate::mapinfo::expand_includes(&mapinfo_text, &mut read);
-        let mapinfo = crate::mapinfo::parse_mapinfo(&text);
-        let entries = parse_mapinfo_to_edges(&mapinfo);
-        if !entries.is_empty() {
+        let mapinfo = crate::mapinfo::parse_mapinfo(&mapinfo_text, &mut read);
+        if !mapinfo.maps.is_empty() {
             // ZMAPINFO and MAPINFO are not told apart here, since mapinfo.rs reads
             // both: the archive's is a Mapinfo source.
-            gathered.sources.push((FlowSource::Mapinfo, entries));
+            gathered
+                .sources
+                .push((FlowSource::Mapinfo, mapinfo.maps.clone()));
         }
-        gathered
-            .episode_roots
-            .extend(crate::mapinfo::parse_episode_starts(&text));
-        gathered.archive_mapinfo = Some(mapinfo);
+        gathered.episode_roots.extend(mapinfo.episodes);
+        gathered.archive_mapinfo = Some(mapinfo.maps);
         gathered.has_structured = true;
     }
 
@@ -895,10 +880,7 @@ fn read_entry<R: Read + Seek>(archive: &mut ZipArchive<R>, index: usize) -> Opti
 /// - A single `next` target receives more than half of all map entries
 ///   (single dominant hub), OR
 /// - Multiple "mini-hub" targets (3+ incoming) collectively cover >50%.
-fn detect_hub_structure(
-    mapinfo: &HashMap<String, crate::mapinfo::MapinfoEntry>,
-    playable_maps: &[String],
-) -> bool {
+fn detect_hub_structure(mapinfo: &HashMap<String, MapinfoEntry>, playable_maps: &[String]) -> bool {
     let playable_set: HashSet<&str> = playable_maps.iter().map(|s| s.as_str()).collect();
 
     let mut target_counts: HashMap<&str, usize> = HashMap::new();
@@ -1088,94 +1070,6 @@ fn count_udmf_monsters(textmap_data: &[u8]) -> usize {
         }
     }
     n
-}
-
-// ---------------------------------------------------------------------------
-// UMAPINFO parsing
-// ---------------------------------------------------------------------------
-
-/// Parsed UMAPINFO entry (subset used for flow analysis).
-#[derive(Debug, Clone, Default)]
-struct UmapinfoEntry {
-    next: Option<String>,
-    nextsecret: Option<String>,
-    has_endgame: bool,
-}
-
-/// Parse UMAPINFO text into map entries.
-fn parse_umapinfo(text: &str) -> HashMap<String, UmapinfoEntry> {
-    static MAP_HEADER_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?i)^\s*MAP\s+(\S+)").unwrap());
-    static NEXT_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r#"(?i)^\s*next\s*=\s*"?(\w+)"?"#).unwrap());
-    static NEXTSECRET_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r#"(?i)^\s*nextsecret\s*=\s*"?(\w+)"?"#).unwrap());
-    static ENDGAME_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?i)^\s*(endgame|endpic|endcast|endbunny)\s*=").unwrap());
-
-    let mut entries = HashMap::new();
-    let mut current_map: Option<String> = None;
-    let mut current_entry = UmapinfoEntry::default();
-
-    for line in text.lines() {
-        if let Some(caps) = MAP_HEADER_RE.captures(line) {
-            if let Some(map_name) = current_map.take() {
-                entries.insert(map_name, current_entry);
-                current_entry = UmapinfoEntry::default();
-            }
-            current_map = Some(caps[1].to_uppercase());
-            continue;
-        }
-        if current_map.is_some() {
-            if let Some(caps) = NEXT_RE.captures(line) {
-                current_entry.next = Some(caps[1].to_uppercase());
-            } else if let Some(caps) = NEXTSECRET_RE.captures(line) {
-                current_entry.nextsecret = Some(caps[1].to_uppercase());
-            } else if ENDGAME_RE.is_match(line) {
-                current_entry.has_endgame = true;
-            }
-        }
-    }
-    if let Some(map_name) = current_map {
-        entries.insert(map_name, current_entry);
-    }
-    entries
-}
-
-// ---------------------------------------------------------------------------
-// Flow source adapters
-// ---------------------------------------------------------------------------
-
-fn parse_umapinfo_to_edges(umi: &HashMap<String, UmapinfoEntry>) -> HashMap<String, MapinfoEdge> {
-    let mut out = HashMap::new();
-    for (name, e) in umi {
-        out.insert(
-            name.clone(),
-            MapinfoEdge {
-                next: e.next.clone(),
-                secret_next: e.nextsecret.clone(),
-                has_endgame: e.has_endgame,
-            },
-        );
-    }
-    out
-}
-
-fn parse_mapinfo_to_edges(
-    mi: &HashMap<String, crate::mapinfo::MapinfoEntry>,
-) -> HashMap<String, MapinfoEdge> {
-    let mut out = HashMap::new();
-    for (name, e) in mi {
-        out.insert(
-            name.clone(),
-            MapinfoEdge {
-                next: e.next.clone(),
-                secret_next: e.secretnext.clone(),
-                has_endgame: e.has_endgame,
-            },
-        );
-    }
-    out
 }
 
 // ---------------------------------------------------------------------------
@@ -1378,34 +1272,6 @@ thing // 42
 }
 "#;
         assert_eq!(count_udmf_monsters(textmap), 1);
-    }
-
-    // -----------------------------------------------------------------------
-    // UMAPINFO parsing
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn test_parse_umapinfo_basic() {
-        let text = r#"
-MAP MAP01
-{
-    next = "MAP02"
-    nextsecret = "MAP31"
-}
-"#;
-        let entries = parse_umapinfo(text);
-        let map01 = &entries["MAP01"];
-        assert_eq!(map01.next, Some("MAP02".to_string()));
-        assert_eq!(map01.nextsecret, Some("MAP31".to_string()));
-    }
-
-    #[test]
-    fn test_parse_umapinfo_endgame_variants() {
-        for kw in &["endgame", "endpic", "endcast", "endbunny"] {
-            let text = format!("MAP MAP30\n{{\n    {} = true\n}}", kw);
-            let entries = parse_umapinfo(&text);
-            assert!(entries["MAP30"].has_endgame, "failed for {kw}");
-        }
     }
 
     // -----------------------------------------------------------------------
@@ -2302,6 +2168,25 @@ episode MAP31
         assert_eq!(classify_of(&a, "MAP31"), MapClassification::OptionalSecret);
         assert_eq!(a.secret_maps, ["MAP31"]);
         assert_eq!(a.required_maps, 3);
+    }
+
+    #[test]
+    fn test_a_mapinfo_in_the_older_format_is_followed() {
+        // Triangulum goes on from MAP30 to MAP33 and MAP34, in a MAPINFO with no
+        // braces. None of it used to be read, so MAP30 ended the game by the map
+        // order, MAP33 and MAP34 were unreachable, and the WAD was finished two
+        // maps early.
+        let mapinfo = "map MAP29 \"Divine wind\"\r\nnext MAP30\r\n\
+                       map MAP30 \"Shielding aura\"\r\ncluster 1\r\nnext MAP33\r\n\
+                       map MAP33 \"Ghorrock\"\r\nnext MAP34\r\n\
+                       map MAP34 \"Attack on Titan\"\r\nnext EndGameC\r\n";
+        let maps = [("MAP29", 9), ("MAP30", 9), ("MAP33", 9), ("MAP34", 9)];
+
+        let a = analyze_with_mapinfo(&maps, mapinfo);
+
+        for lump in ["MAP29", "MAP30", "MAP33", "MAP34"] {
+            assert_eq!(classify_of(&a, lump), MapClassification::Required, "{lump}");
+        }
     }
 
     #[test]
