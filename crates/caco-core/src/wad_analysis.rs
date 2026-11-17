@@ -12,7 +12,9 @@
 //! sector death-exits, ACS exits, or any other "how does this map end"
 //! mechanism. WAD designers have too many ways to wire up an exit, and any
 //! detection we add is brittle. Instead we lean on a single robust signal:
-//! a playable map has monsters, a credits map does not.
+//! a playable map has monsters, a credits map does not. A monster is one of the
+//! original game's, or a thing a DEHACKED patch the launch loads makes one
+//! ([`crate::dehacked`]).
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -28,7 +30,7 @@ use zip::ZipArchive;
 use crate::companion_service::is_deh_bex;
 use crate::mapinfo::MapinfoEntry;
 use crate::utils::{MAX_ZIP_ENTRY_SIZE, parse_wad_directory, zip_entry_names};
-use crate::{identity, unpack};
+use crate::{dehacked, identity, unpack};
 
 // ---------------------------------------------------------------------------
 // Map name patterns
@@ -49,39 +51,12 @@ const MAP_LUMPS: &[&str] = &[
 
 /// Analysis format version. Bump this whenever detection logic changes
 /// so that stale cached analyses are automatically invalidated and re-run.
-pub const ANALYSIS_VERSION: u32 = 14;
+pub const ANALYSIS_VERSION: u32 = 15;
 
 /// Tail maps with fewer than this many monster things are peeled off as
 /// `OptionalCredits`. Threshold is "more than one" so a single decorative
 /// imp on a credits screen doesn't make the map count as playable.
 const MIN_MONSTERS_FOR_PLAYABLE: usize = 2;
-
-/// Doom thing types that count as monsters for the "is this map playable"
-/// heuristic. Editor numbers, not DEH mobjinfo slots. Boss Brain (88) is the
-/// Romero head — not strictly COUNTKILL, but it's the only target on an Icon
-/// of Sin map and we want those classified as playable.
-const MONSTER_THING_TYPES: &[u16] = &[
-    7,    // Spider Mastermind
-    9,    // Shotgun Guy
-    16,   // Cyberdemon
-    58,   // Spectre
-    64,   // Archvile
-    65,   // Heavy Weapon Dude
-    66,   // Revenant
-    67,   // Mancubus
-    68,   // Arachnotron
-    69,   // Hell Knight
-    71,   // Pain Elemental
-    72,   // Commander Keen
-    84,   // Wolfenstein SS
-    88,   // Boss Brain (Romero head)
-    3001, // Imp
-    3002, // Demon
-    3003, // Baron of Hell
-    3004, // Former Human
-    3005, // Cacodemon
-    3006, // Lost Soul
-];
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -337,11 +312,12 @@ fn add_vanilla_edges(graph: &mut MapGraph, map_set: &HashSet<&str>, is_doom1: bo
 /// Walk the graph and assign a classification to each map.
 ///
 /// Algorithm:
-/// 1. Roots = the canonical start (the lowest map with a standard name, where
-///    a new game begins) plus every `episode` entry point. A multi-episode WAD
-///    has no single linear path through all maps, so each episode's first map
-///    is walked independently. A WAD whose maps all have names of its own
-///    starts where its episodes do, and with none of those, at its first map.
+/// 1. Roots = the canonical start (the lowest map with a standard name other
+///    than map zero, where a new game begins) plus every `episode` entry point.
+///    A multi-episode WAD has no single linear path through all maps, so each
+///    episode's first map is walked independently. A WAD whose maps all have
+///    names of its own starts where its episodes do, and with none of those, at
+///    its first map.
 /// 2. From each root, in that order, walk the main path, preferring normal
 ///    edges, falling back to secret edges only when no normal edge exists
 ///    ("forced secret = true ending"). A node already claimed by an earlier
@@ -367,11 +343,16 @@ fn classify_maps(
         return;
     }
 
-    // The canonical start: the lowest map with a standard name.
+    // The canonical start: the lowest map with a standard name, other than map
+    // zero. A new game begins at MAP01 or ExM1, so a game reaches MAP00 only if a
+    // `next` or an episode leads there, or the player warps to it. Cybernights'
+    // MAP00 is a tutorial nothing leads to. As the start it had to be finished,
+    // though nobody starting from the menu ever plays it, so finishing the WAD
+    // recorded nothing.
     let start = infos
         .iter()
         .map(|m| m.lump.as_str())
-        .filter(|lump| is_map_marker(lump))
+        .filter(|lump| is_map_marker(lump) && map_sort_key(lump).1 != 0)
         .min_by_key(|lump| map_sort_key(lump))
         .map(str::to_string);
 
@@ -625,8 +606,11 @@ pub fn analyze_path(wad_path: &Path) -> Option<WadAnalysis> {
 struct Gathered {
     /// Each map once, where it was first found.
     maps: Vec<String>,
-    /// How many monsters each map has, from the last file to have it.
-    monsters: HashMap<String, usize>,
+    /// The type of each thing on each map, from the last file to have it.
+    /// Which are monsters is only known once every patch has been read.
+    things: HashMap<String, Vec<u16>>,
+    /// DEHACKED patches, in the order they are applied.
+    patches: Vec<String>,
     sources: Vec<(FlowSource, HashMap<String, MapinfoEntry>)>,
     episode_roots: Vec<String>,
     /// MAPINFO read from a resource archive, the only kind whose flow is
@@ -637,8 +621,8 @@ struct Gathered {
 }
 
 impl Gathered {
-    fn add_map(&mut self, name: String, monsters: usize) {
-        if self.monsters.insert(name.clone(), monsters).is_none() {
+    fn add_map(&mut self, name: String, things: Vec<u16>) {
+        if self.things.insert(name.clone(), things).is_none() {
             self.maps.push(name);
         }
     }
@@ -648,16 +632,18 @@ impl Gathered {
     fn extend(&mut self, later: Gathered) {
         let Gathered {
             maps,
-            mut monsters,
+            mut things,
+            patches,
             sources,
             episode_roots,
             archive_mapinfo,
             has_structured,
         } = later;
         for name in maps {
-            let count = monsters.remove(&name).unwrap_or(0);
-            self.add_map(name, count);
+            let on_map = things.remove(&name).unwrap_or_default();
+            self.add_map(name, on_map);
         }
+        self.patches.extend(patches);
         self.sources.extend(sources);
         self.episode_roots.extend(episode_roots);
         if let Some(mapinfo) = archive_mapinfo {
@@ -697,7 +683,13 @@ impl Gathered {
             .find(|lump| is_map_marker(lump))
             .is_some_and(|lump| DOOM1_MAP_RE.is_match(lump));
         let graph = build_graph(&map_set, is_doom1, &self.sources);
-        classify_maps(&graph, &mut infos, &self.monsters, &self.episode_roots);
+        let monster_numbers = dehacked::monster_numbers(&self.patches);
+        let monsters: HashMap<String, usize> = self
+            .things
+            .iter()
+            .map(|(map, things)| (map.clone(), count_monsters(things, &monster_numbers)))
+            .collect();
+        classify_maps(&graph, &mut infos, &monsters, &self.episode_roots);
         Some(finalize(infos, self.has_structured))
     }
 }
@@ -720,9 +712,13 @@ fn gather_wad(wad_data: &[u8]) -> Option<Gathered> {
 
     let mut gathered = Gathered::default();
     for (name, start_idx, end_idx) in find_map_ranges(&directory) {
-        let count = count_monsters_in_range(wad_data, &directory, start_idx, end_idx);
-        gathered.add_map(name, count);
+        let things = things_in_range(wad_data, &directory, start_idx, end_idx);
+        gathered.add_map(name, things);
     }
+    // Every DEHACKED a WAD has is applied, in the order they come.
+    gathered
+        .patches
+        .extend(lump_texts(wad_data, &directory, "DEHACKED"));
 
     // An include in a WAD names another lump.
     let mapinfo = |lump: &str| {
@@ -738,11 +734,12 @@ fn gather_wad(wad_data: &[u8]) -> Option<Gathered> {
         gathered.episode_roots.extend(mapinfo.episodes);
     }
     if let Some(text) = read_lump_text(wad_data, &directory, "UMAPINFO") {
-        let entries = crate::mapinfo::parse_umapinfo(&text);
-        if !entries.is_empty() {
+        let umapinfo = crate::mapinfo::parse_umapinfo(&text);
+        if !umapinfo.maps.is_empty() {
             gathered.has_structured = true;
-            gathered.sources.push((FlowSource::Umapinfo, entries));
+            gathered.sources.push((FlowSource::Umapinfo, umapinfo.maps));
         }
+        gathered.episode_roots.extend(umapinfo.episodes);
     }
     if let Some(mapinfo) = mapinfo("MAPINFO") {
         if !mapinfo.maps.is_empty() {
@@ -774,7 +771,23 @@ fn gather_archive<R: Read + Seek>(archive: &mut ZipArchive<R>) -> Option<Gathere
         }
         let data = read_entry(archive, *index)?;
         let stem = Path::new(name).file_stem()?.to_str()?.to_uppercase();
-        gathered.add_map(stem, count_monsters_in_map_wad(&data));
+        gathered.add_map(stem, things_in_map_wad(&data));
+    }
+
+    // A file at the root is a lump named for what comes before its first dot, and
+    // ZDoom applies every DEHACKED lump it loads.
+    for (index, name) in &names {
+        if !name.contains('/')
+            && name
+                .split('.')
+                .next()
+                .is_some_and(|lump| lump.eq_ignore_ascii_case("DEHACKED"))
+        {
+            let text = read_entry(archive, *index)?;
+            gathered
+                .patches
+                .push(String::from_utf8_lossy(&text).into_owned());
+        }
     }
 
     let mut mapinfo_text = String::new();
@@ -831,17 +844,21 @@ fn gather_archive<R: Read + Seek>(archive: &mut ZipArchive<R>) -> Option<Gathere
 }
 
 /// What a container hands the sourceport, which is each of its loadable files,
-/// in the order [`crate::unpack`] loads them. Patches hold no maps.
+/// in the order [`crate::unpack`] loads them. A patch holds no maps, only what
+/// the things on them are.
 fn gather_container<R: Read + Seek>(archive: &mut ZipArchive<R>) -> Option<Gathered> {
     let mut files = identity::loadable_entries(archive);
     files.sort_by_cached_key(|(_, name)| unpack::load_order(name));
 
     let mut gathered = Gathered::default();
     for (index, name) in files {
+        let data = read_entry(archive, index)?;
         if is_deh_bex(Path::new(&name)) {
+            gathered
+                .patches
+                .push(String::from_utf8_lossy(&data).into_owned());
             continue;
         }
-        let data = read_entry(archive, index)?;
         let found = if data.starts_with(&identity::ZIP_MAGIC) {
             gather_archive(&mut ZipArchive::new(Cursor::new(data)).ok()?)
         } else {
@@ -966,35 +983,41 @@ fn is_map_lump(name: &str) -> bool {
 // Monster counting
 // ---------------------------------------------------------------------------
 
-fn count_monsters_in_range(
+/// How many of `things` are monsters, by the numbers [`dehacked::monster_numbers`] gave.
+fn count_monsters(things: &[u16], monster_numbers: &HashSet<u16>) -> usize {
+    things
+        .iter()
+        .filter(|thing| monster_numbers.contains(thing))
+        .count()
+}
+
+/// The type of each thing on the map whose lumps are `directory[start_idx..end_idx]`.
+fn things_in_range(
     wad_data: &[u8],
     directory: &[(String, u32, u32)],
     start_idx: usize,
     end_idx: usize,
-) -> usize {
+) -> Vec<u16> {
     let map_lumps = &directory[start_idx..end_idx];
 
     if let Some(textmap) = find_lump_data(wad_data, map_lumps, "TEXTMAP") {
-        return count_udmf_monsters(&textmap);
+        return udmf_thing_types(&textmap);
     }
 
     if let Some(things) = find_lump_data(wad_data, map_lumps, "THINGS") {
-        return count_vanilla_monsters(&things);
+        return vanilla_thing_types(&things);
     }
 
-    0
+    Vec::new()
 }
 
-fn count_monsters_in_map_wad(wad_data: &[u8]) -> usize {
+/// The type of each thing on the first map of a WAD that holds one, as a PK3's
+/// `maps/` does.
+fn things_in_map_wad(wad_data: &[u8]) -> Vec<u16> {
     let directory = parse_wad_directory(wad_data);
-    if directory.is_empty() {
-        return 0;
-    }
-    let map_ranges = find_map_ranges(&directory);
-    if let Some((_, start, end)) = map_ranges.first() {
-        count_monsters_in_range(wad_data, &directory, *start, *end)
-    } else {
-        0
+    match find_map_ranges(&directory).first() {
+        Some((_, start, end)) => things_in_range(wad_data, &directory, *start, *end),
+        None => Vec::new(),
     }
 }
 
@@ -1020,38 +1043,37 @@ fn read_lump_text(
     directory: &[(String, u32, u32)],
     lump_name: &str,
 ) -> Option<String> {
-    for (name, offset, size) in directory {
-        if name == lump_name && *size > 0 {
-            let off = *offset as usize;
-            let sz = *size as usize;
-            if off + sz <= wad_data.len() {
-                return Some(String::from_utf8_lossy(&wad_data[off..off + sz]).to_string());
-            }
-        }
-    }
-    None
+    lump_texts(wad_data, directory, lump_name).next()
 }
 
-/// Count monster things in a vanilla/Boom THINGS lump.
-fn count_vanilla_monsters(things: &[u8]) -> usize {
-    let thing_size = 10;
-    let count = things.len() / thing_size;
-    let mut n = 0;
-    for i in 0..count {
-        let base = i * thing_size;
-        if base + 8 > things.len() {
-            break;
+/// The text of every lump called `lump_name`, in directory order.
+fn lump_texts<'a>(
+    wad_data: &'a [u8],
+    directory: &'a [(String, u32, u32)],
+    lump_name: &'a str,
+) -> impl Iterator<Item = String> + 'a {
+    directory.iter().filter_map(move |(name, offset, size)| {
+        if name != lump_name || *size == 0 {
+            return None;
         }
-        let thing_type = u16::from_le_bytes([things[base + 6], things[base + 7]]);
-        if MONSTER_THING_TYPES.contains(&thing_type) {
-            n += 1;
-        }
-    }
-    n
+        let data =
+            wad_data.get(*offset as usize..(*offset as usize).checked_add(*size as usize)?)?;
+        Some(String::from_utf8_lossy(data).into_owned())
+    })
 }
 
-/// Count monster things in a UDMF TEXTMAP lump.
-fn count_udmf_monsters(textmap_data: &[u8]) -> usize {
+/// The type of each thing in a vanilla/Boom THINGS lump.
+fn vanilla_thing_types(things: &[u8]) -> Vec<u16> {
+    let (things, _cut_short) = things.as_chunks::<10>();
+    things
+        .iter()
+        .map(|thing| u16::from_le_bytes([thing[6], thing[7]]))
+        .collect()
+}
+
+/// The type of each thing in a UDMF TEXTMAP lump that gives it one a THINGS
+/// lump could hold.
+fn udmf_thing_types(textmap_data: &[u8]) -> Vec<u16> {
     let text = String::from_utf8_lossy(textmap_data);
 
     static THING_BLOCK_RE: LazyLock<Regex> =
@@ -1059,17 +1081,10 @@ fn count_udmf_monsters(textmap_data: &[u8]) -> usize {
     static TYPE_RE: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"(?i)\btype\s*=\s*(\d+)").unwrap());
 
-    let mut n = 0;
-    for block in THING_BLOCK_RE.captures_iter(&text) {
-        let body = &block[1];
-        if let Some(caps) = TYPE_RE.captures(body)
-            && let Ok(t) = caps[1].parse::<u16>()
-            && MONSTER_THING_TYPES.contains(&t)
-        {
-            n += 1;
-        }
-    }
-    n
+    THING_BLOCK_RE
+        .captures_iter(&text)
+        .filter_map(|block| TYPE_RE.captures(&block[1])?[1].parse().ok())
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -1230,32 +1245,36 @@ mod tests {
     // Monster counting
     // -----------------------------------------------------------------------
 
+    /// How many monsters a map of `types` has, with no patch.
+    fn vanilla_monsters(types: &[u16]) -> usize {
+        count_monsters(types, &dehacked::monster_numbers(&[]))
+    }
+
     #[test]
     fn test_count_vanilla_monsters_basic() {
         // Three imps and a player start
         let things = build_things(&[3001, 3001, 3001, 1]);
-        assert_eq!(count_vanilla_monsters(&things), 3);
+        assert_eq!(vanilla_monsters(&vanilla_thing_types(&things)), 3);
     }
 
     #[test]
     fn test_count_vanilla_monsters_excludes_decorations() {
         // Player start, lamp, key — all non-monsters
         let things = build_things(&[1, 2028, 5]);
-        assert_eq!(count_vanilla_monsters(&things), 0);
+        assert_eq!(vanilla_monsters(&vanilla_thing_types(&things)), 0);
     }
 
     #[test]
-    fn test_count_vanilla_monsters_full_bestiary() {
-        // One of every monster type the heuristic knows about
-        let types: Vec<u16> = MONSTER_THING_TYPES.to_vec();
-        let things = build_things(&types);
-        assert_eq!(count_vanilla_monsters(&things), MONSTER_THING_TYPES.len());
+    fn test_a_things_lump_is_read_whole_things_at_a_time() {
+        let mut things = build_things(&[3001, 9, 1]);
+        things.extend_from_slice(&[0, 0, 0, 0, 0, 0, 0xB9]); // a thing cut short
+        assert_eq!(vanilla_thing_types(&things), [3001, 9, 1]);
     }
 
     #[test]
     fn test_count_udmf_monsters_basic() {
         let textmap = build_textmap_things(&[3001, 3001, 1, 2028]);
-        assert_eq!(count_udmf_monsters(&textmap), 2);
+        assert_eq!(vanilla_monsters(&udmf_thing_types(&textmap)), 2);
     }
 
     #[test]
@@ -1271,7 +1290,7 @@ thing // 42
   y = 0;
 }
 "#;
-        assert_eq!(count_udmf_monsters(textmap), 1);
+        assert_eq!(vanilla_monsters(&udmf_thing_types(textmap)), 1);
     }
 
     // -----------------------------------------------------------------------
@@ -1723,6 +1742,143 @@ MAP MAP31
         assert_eq!(classify_of(&a, "MAP15"), MapClassification::Required);
         assert_eq!(classify_of(&a, "MAP31"), MapClassification::OptionalSecret);
         assert_eq!(classify_of(&a, "MAP30"), MapClassification::Required);
+    }
+
+    // -----------------------------------------------------------------------
+    // Map zero
+    // -----------------------------------------------------------------------
+
+    /// Cybernights' shape: a MAP00 tutorial whose `next` is MAP01, two maps,
+    /// and an empty MAP03 that ends the game. Its UMAPINFO is `umapinfo`.
+    fn tutorial_wad(umapinfo: &[u8]) -> Vec<u8> {
+        let monsters = playable_things(5);
+        build_wad(&[
+            ("UMAPINFO", umapinfo),
+            ("MAP00", &[]),
+            ("THINGS", &monsters),
+            ("MAP01", &[]),
+            ("THINGS", &monsters),
+            ("MAP02", &[]),
+            ("THINGS", &monsters),
+            ("MAP03", &[]),
+            ("THINGS", &[]),
+        ])
+    }
+
+    #[test]
+    fn test_map_zero_is_not_where_a_new_game_starts() {
+        // Cybernights' MAP00 was the start, so finishing MAP01 to the end finished
+        // 28 maps of 29.
+        let umapinfo = b"MAP MAP00\n{\n  levelname = \"Tutorial\"\n  next = \"MAP01\"\n}\n\
+            MAP MAP03\n{\n  endgame = true\n}\n";
+
+        let a = analyze_wad(&tutorial_wad(umapinfo)).unwrap();
+
+        assert_eq!(
+            classified(&a),
+            [
+                ("MAP00", MapClassification::Unreachable),
+                ("MAP01", MapClassification::Required),
+                ("MAP02", MapClassification::Required),
+                ("MAP03", MapClassification::OptionalCredits),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_map_zero_on_the_episode_menu_is_one_to_finish() {
+        // UMAPINFO puts a map on the menu with `episode` in its own definition.
+        let umapinfo =
+            b"MAP MAP00\n{\n  episode = \"M_EPI0\", \"Tutorial\", \"t\"\n  next = \"MAP01\"\n}\n\
+            MAP MAP03\n{\n  endgame = true\n}\n";
+
+        let a = analyze_wad(&tutorial_wad(umapinfo)).unwrap();
+
+        assert_eq!(classify_of(&a, "MAP00"), MapClassification::Required);
+        assert_eq!(classify_of(&a, "MAP02"), MapClassification::Required);
+    }
+
+    #[test]
+    fn test_a_wad_of_only_map_zero_still_has_a_map_to_finish() {
+        let a = analyze_wad(&build_wad(&[
+            ("MAP00", &[]),
+            ("THINGS", &playable_things(5)),
+        ]))
+        .unwrap();
+
+        assert_eq!(classified(&a), [("MAP00", MapClassification::Required)]);
+    }
+
+    // -----------------------------------------------------------------------
+    // Monsters a DEHACKED patch makes
+    // -----------------------------------------------------------------------
+
+    /// What Cybernights' patch does for its last map: a thing nothing in the
+    /// original game has, given the number 9000 and a Cyberdemon's bits.
+    const CYBER_PATCH: &[u8] = b"Patch File for DeHackEd v3.0\n\n\
+        Thing 151 (Cyberdemon (Deh_Actor_150))\n\
+        ID # = 9000\n\
+        Hit points = 4000\n\
+        Bits = 4194310\n";
+
+    /// MAP01 of imps, then a last map of nothing but things numbered 9000.
+    fn boss_maps() -> [(&'static str, Vec<u8>); 4] {
+        [
+            ("MAP01", Vec::new()),
+            ("THINGS", playable_things(5)),
+            ("MAP02", Vec::new()),
+            ("THINGS", build_things(&[9000; 5])),
+        ]
+    }
+
+    fn wad_of(lumps: &[(&str, Vec<u8>)]) -> Vec<u8> {
+        let refs: Vec<(&str, &[u8])> = lumps.iter().map(|(n, d)| (*n, d.as_slice())).collect();
+        build_wad(&refs)
+    }
+
+    #[test]
+    fn test_a_last_map_of_monsters_a_patch_defines_is_not_the_credits() {
+        // Cybernights' MAP29 is ten of them, read as an empty map: the WAD was finished
+        // once MAP28 was.
+        let mut with_patch = boss_maps().to_vec();
+        with_patch.push(("DEHACKED", CYBER_PATCH.to_vec()));
+
+        let without = analyze_wad(&wad_of(&boss_maps())).unwrap();
+        let with = analyze_wad(&wad_of(&with_patch)).unwrap();
+
+        assert_eq!(
+            classify_of(&without, "MAP02"),
+            MapClassification::OptionalCredits
+        );
+        assert_eq!(classify_of(&with, "MAP02"), MapClassification::Required);
+    }
+
+    #[test]
+    fn test_a_patch_beside_a_wad_in_a_container_applies_to_it() {
+        // The patch loads last, as a launch loads it, and still counts.
+        let zip = zip_of(&[
+            ("boss.deh", CYBER_PATCH),
+            ("boss.wad", &wad_of(&boss_maps())),
+            ("boss.txt", b"read me"),
+        ]);
+
+        let a = analyze_file("boss.zip", &zip).unwrap();
+
+        assert_eq!(classify_of(&a, "MAP02"), MapClassification::Required);
+    }
+
+    #[test]
+    fn test_a_pk3s_dehacked_applies_to_its_maps() {
+        let [_, imps, _, bosses] = boss_maps();
+        let pk3 = zip_of(&[
+            ("DEHACKED.txt", CYBER_PATCH),
+            ("maps/MAP01.wad", &wad_of(&[("MAP01", Vec::new()), imps])),
+            ("maps/MAP02.wad", &wad_of(&[("MAP02", Vec::new()), bosses])),
+        ]);
+
+        let a = analyze_file("boss.pk3", &pk3).unwrap();
+
+        assert_eq!(classify_of(&a, "MAP02"), MapClassification::Required);
     }
 
     // -----------------------------------------------------------------------

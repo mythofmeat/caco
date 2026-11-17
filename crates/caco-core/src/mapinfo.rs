@@ -92,8 +92,8 @@ pub struct Mapinfo {
     /// Each map's definition, by its name in upper case.
     pub maps: HashMap<String, MapinfoEntry>,
     /// The map each `episode` starts at, in upper case and in the order they
-    /// are declared. `episode clear` is here as `CLEAR`: callers keep the ones
-    /// that are maps.
+    /// are declared. MAPINFO's `episode clear` is here as `CLEAR`: callers keep
+    /// the ones that are maps.
     pub episodes: Vec<String>,
 }
 
@@ -119,12 +119,15 @@ pub fn parse_mapinfo(text: &str, read: &mut dyn FnMut(&str) -> Option<String>) -
     parser.out
 }
 
-/// Parse UMAPINFO, by map name in upper case.
+/// Parse UMAPINFO.
 ///
 /// UMAPINFO has one format, braced, and none of MAPINFO's defaults or includes.
-pub fn parse_umapinfo(text: &str) -> HashMap<String, MapinfoEntry> {
+/// An episode is a property of the map it starts at, `episode = "M_EPI1",
+/// "Name", "k"`, where MAPINFO declares one on its own. nyan-doom adds each to
+/// the menu as it reads it (`umapinfo.cpp`).
+pub fn parse_umapinfo(text: &str) -> Mapinfo {
     let mut sc = Scanner::new(text);
-    let mut maps = HashMap::new();
+    let mut out = Mapinfo::default();
     while let Some(lexeme) = sc.next(true) {
         if !lexeme.token.is_word("map") {
             continue;
@@ -133,13 +136,26 @@ pub fn parse_umapinfo(text: &str) -> HashMap<String, MapinfoEntry> {
             break;
         };
         let mut entry = MapinfoEntry::default();
+        let mut starts_episode = false;
         if sc.peek(true).is_some_and(|l| l.token.is('{')) {
             sc.next(true);
-            read_block(&mut sc, &mut entry, apply_umapinfo);
+            read_block(&mut sc, &mut |key, values| {
+                if key.eq_ignore_ascii_case("episode") {
+                    // `episode = clear` takes the menu's episodes away and adds none.
+                    starts_episode |= values
+                        .first()
+                        .is_some_and(|value| !value.eq_ignore_ascii_case("clear"));
+                } else {
+                    apply_umapinfo(&mut entry, key, values);
+                }
+            });
         }
-        maps.insert(name, entry);
+        if starts_episode {
+            out.episodes.push(name.clone());
+        }
+        out.maps.insert(name, entry);
     }
-    maps
+    out
 }
 
 struct Parser<'r> {
@@ -255,19 +271,16 @@ fn skip_title(sc: &mut Scanner, header_line: usize) {
 fn read_definition(sc: &mut Scanner, entry: &mut MapinfoEntry) {
     if sc.peek(false).is_some_and(|l| l.token.is('{')) {
         sc.next(false);
-        read_block(sc, entry, apply_mapinfo);
+        read_block(sc, &mut |key, values| apply_mapinfo(entry, key, values));
     } else {
         read_old_format(sc, entry);
     }
 }
 
 /// Read a braced block's properties, whose `{` has been read, up to and over its
-/// `}`: `key`, or `key = value`, with more values after commas.
-fn read_block(
-    sc: &mut Scanner,
-    entry: &mut MapinfoEntry,
-    apply: fn(&mut MapinfoEntry, &str, &[&str]),
-) {
+/// `}`: `key`, or `key = value`, with more values after commas. Each goes to
+/// `apply` as it is read.
+fn read_block(sc: &mut Scanner, apply: &mut dyn FnMut(&str, &[&str])) {
     while let Some(lexeme) = sc.next(true) {
         let key = match &lexeme.token {
             Token::Punct('}') => return,
@@ -297,7 +310,7 @@ fn read_block(
             }
         }
         let values: Vec<&str> = values.iter().filter_map(Token::text).collect();
-        apply(entry, key, &values);
+        apply(key, &values);
     }
 }
 
@@ -1153,7 +1166,7 @@ MAP MAP01
     nextsecret = "MAP31"
 }
 "#;
-        let entries = parse_umapinfo(text);
+        let entries = parse_umapinfo(text).maps;
         let map01 = &entries["MAP01"];
         assert_eq!(map01.next, Some("MAP02".to_string()));
         assert_eq!(map01.secretnext, Some("MAP31".to_string()));
@@ -1163,7 +1176,7 @@ MAP MAP01
     fn test_parse_umapinfo_endgame_variants() {
         for kw in &["endgame", "endpic", "endcast", "endbunny"] {
             let text = format!("MAP MAP30\n{{\n    {} = true\n}}", kw);
-            let entries = parse_umapinfo(&text);
+            let entries = parse_umapinfo(&text).maps;
             assert!(entries["MAP30"].has_endgame, "failed for {kw}");
         }
     }
@@ -1174,7 +1187,7 @@ MAP MAP01
         // read as the end of the game, which would finish a WAD at that map.
         let text = "MAP MAP01\n{\n   levelname = \"Earthtone Base\"\n   endgame = false\n   endcast = false\n}\n";
 
-        assert!(!parse_umapinfo(text)["MAP01"].has_endgame);
+        assert!(!parse_umapinfo(text).maps["MAP01"].has_endgame);
     }
 
     #[test]
@@ -1182,10 +1195,23 @@ MAP MAP01
         let text = "// Episode 1\nMAP MAP01 { levelname = \"A\" next = \"MAP02\" nextsecret = \"MAP31\" }\n\
                     /* the secret */ MAP MAP31 { next = \"MAP02\" } MAP MAP02 { endpic = \"CREDIT\" }\n";
 
-        let entries = parse_umapinfo(text);
+        let entries = parse_umapinfo(text).maps;
 
         assert_eq!(flow(&entries, "MAP01"), (to("MAP02"), to("MAP31"), false));
         assert_eq!(flow(&entries, "MAP31"), (to("MAP02"), None, false));
         assert_eq!(flow(&entries, "MAP02"), (None, None, true));
+    }
+
+    #[test]
+    fn test_umapinfo_episodes_start_at_the_map_that_declares_them() {
+        let text = "MAP MAP00 { episode = \"M_EPI0\", \"Tutorial\", \"t\" next = \"MAP01\" }\n\
+                    MAP MAP01 { episode = clear }\n\
+                    MAP MAP06 { levelname = \"Six\" episode = \"M_EPI2\" }\n\
+                    MAP MAP07 { next = \"MAP08\" }\n";
+
+        let umapinfo = parse_umapinfo(text);
+
+        assert_eq!(umapinfo.episodes, ["MAP00", "MAP06"]);
+        assert_eq!(umapinfo.maps["MAP00"].next.as_deref(), Some("MAP01"));
     }
 }
