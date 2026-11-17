@@ -70,8 +70,8 @@ CACO_TEST_MIRROR_URL=http://127.0.0.1:38317/api/packages/tester/generic/doom-mir
 cargo test -p caco-sources --test idgames_live -- --ignored --nocapture
 
 # Everything sync does, on a copy of a real library: two copies upgrade and meet as one, a
-# third machine builds it from the logs, and every field that travels is compared. The
-# original is only read
+# third machine builds it from the logs, and every field that travels is compared. A copy
+# that already has a log is taken back to before it first. The original is only read
 CACO_TEST_LIBRARY=~/.local/share/caco/library.db \
     cargo test -p caco-core --lib -- --ignored --nocapture a_real_library
 

@@ -2896,7 +2896,9 @@ fn stress_seeds() -> u64 {
 }
 
 /// Everything above, on a real library: upgrade two copies of it, have them meet, and build
-/// a third machine from nothing but the logs. The original is only ever read.
+/// a third machine from nothing but the logs. The original is only ever read. A library that
+/// already has a log is taken back to before it first, or there would be nothing to upgrade
+/// and nothing in the logs.
 ///
 /// `CACO_TEST_LIBRARY=~/.local/share/caco/library.db cargo test -p caco-core --lib \
 ///     -- --ignored --nocapture a_real_library`
@@ -2916,7 +2918,9 @@ fn test_a_real_library_comes_through_all_of_it() {
         source
             .execute("VACUUM INTO ?1", [path.to_string_lossy()])
             .unwrap();
-        db::open_connection(&path).unwrap()
+        let conn = db::open_connection(&path).unwrap();
+        rewind_to_before_sync(&conn);
+        conn
     };
     let timed = |what: &str, step: &mut dyn FnMut()| {
         let start = std::time::Instant::now();
