@@ -57,6 +57,9 @@ pub struct PlayResult {
     pub exit_code: Option<i32>,
     pub auto_complete: AutoCompleteResult,
     pub stats: StatsReport,
+    /// The demos a session asked to record left, by file name: `None` when it wasn't asked
+    /// to, and empty when the sourceport wrote nothing, which is worth saying.
+    pub recorded: Option<Vec<String>>,
 }
 
 /// What became of a session's map exits where they had to be read back from what a
@@ -79,7 +82,7 @@ impl PlayResult {
 }
 
 /// How to launch a WAD with [`play`].
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PlayOptions {
     /// Launch even though the WAD's file plays differently from the one it was
     /// last played with. Without it, [`play`] fails with
@@ -88,32 +91,125 @@ pub struct PlayOptions {
     /// Launch even though another machine has newer saves for it. Without it, [`play`]
     /// fails with [`crate::Error::NewerSavesElsewhere`] so the user can be asked first.
     pub accept_newer_saves: bool,
+    /// Record a demo of the session into the WAD's demos folder, with what it was recorded
+    /// with beside it (see [`demos::record`]). A session like any other otherwise: it is
+    /// timed, its stats are read, and it is asked about first as any launch is.
+    pub record: bool,
+}
+
+/// How to play a demo back with [`play_demo`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DemoOptions {
+    /// Play it even though it can't be played as it was recorded, which will likely desync
+    /// it. Without it, [`play_demo`] fails with [`crate::Error::DemoDiffers`] so the user
+    /// can be asked first.
+    pub accept_differences: bool,
+}
+
+/// How a demo's playback went.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DemoResult {
+    /// The demo, by file name.
+    pub demo: String,
+    pub duration: i64,
+    pub exit_code: Option<i32>,
+}
+
+impl DemoResult {
+    /// True if the sourceport exited with a non-zero code.
+    pub fn crashed(&self) -> bool {
+        matches!(self.exit_code, Some(code) if code != 0)
+    }
 }
 
 /// What a launch is being built for.
 ///
-/// Playback needs byte-identical launch configuration to the session that
-/// recorded the demo — same complevel, same companion and id24 files, same
-/// load order — because any difference desyncs the playback. It does *not*
-/// want the session bookkeeping: watching a demo is not playtime, and the
-/// stats reporters would fabricate map exits the user never made.
+/// Playback needs the launch the demo was recorded with — same sourceport, complevel,
+/// files and load order — because any difference desyncs it, so a demo caco recorded is
+/// played from its record rather than from what the WAD is set to now. It does *not*
+/// want the session bookkeeping: watching a demo is not playtime, and the stats reporters
+/// would fabricate map exits the user never made.
 #[derive(Debug, Clone, Copy)]
 enum LaunchMode<'a> {
     Play(PlayOptions),
-    Playback(&'a Path),
+    Playback {
+        demo: &'a Path,
+        record: Option<&'a demos::DemoRecord>,
+        opts: DemoOptions,
+    },
+}
+
+impl LaunchMode<'_> {
+    /// Whether a `-record` already in the settings has to go: in playback, where a
+    /// sourceport given both would record over the demo, and when caco is recording, where
+    /// the first one given is the one a sourceport takes.
+    fn drops_recording_args(self) -> bool {
+        match self {
+            LaunchMode::Play(opts) => opts.record,
+            LaunchMode::Playback { .. } => true,
+        }
+    }
+}
+
+/// What a launch hands the sourceport, settled before any command is built: from the WAD's
+/// row and today's settings for a session, and from its record for a demo caco recorded.
+/// A demo's record is this, written down without the paths.
+#[derive(Debug, Clone)]
+struct LaunchPlan {
+    /// Resolved sourceport executable (path or bare name).
+    sourceport: String,
+    iwad: Option<PlannedIwad>,
+    complevel: Option<i32>,
+    /// The config profile, by name.
+    profile: String,
+    /// Every sourceport's arguments, then this one's.
+    args: Vec<String>,
+    /// The WAD's own arguments.
+    custom_args: Vec<String>,
+    /// Everything loaded after the IWAD, in load order: id24 resources, companions, the
+    /// stats reporter, then the WAD's own files.
+    files: Vec<PlannedFile>,
+}
+
+#[derive(Debug, Clone)]
+struct PlannedIwad {
+    /// What the settings call it, before it is looked for.
+    name: String,
+    /// Where it was found, or the name again if it wasn't.
+    path: String,
+}
+
+#[derive(Debug, Clone)]
+struct PlannedFile {
+    role: demos::FileRole,
+    /// Its file name, or an id24 WAD's name in the registry.
+    name: String,
+    path: PathBuf,
+    /// What its registry knows it by, where it has one.
+    md5: Option<String>,
+}
+
+/// Where a session is recording to, to find what it wrote once it is over.
+#[derive(Debug, Clone)]
+struct Recording {
+    dir: PathBuf,
+    /// The name the sourceport was given, which every file it writes starts with.
+    base: String,
+    /// The demos already there.
+    before: std::collections::HashSet<String>,
 }
 
 /// A launch command plus the context the caller needs once it has run.
 struct BuiltLaunch {
     cmd: Command,
-    /// Resolved sourceport executable (path or bare name).
-    sourceport: String,
+    plan: LaunchPlan,
     wad_path: PathBuf,
     /// What the sourceport will load, which the session records. `None` when
     /// the file could not be read to hash it.
     content_sha256: Option<String>,
     /// Managed data dir, when `manage_data_dirs` is on.
     data_dir: Option<PathBuf>,
+    recording: Option<Recording>,
     is_zdoom: bool,
     is_helion: bool,
 }
@@ -250,12 +346,53 @@ pub(crate) fn archive_stats_files(data_dir: &Path) {
     }
 }
 
+/// The sourceport a WAD launches with today, as the settings name it: its own choice, else
+/// one of the family it needs, else the default. Not resolved to a path.
+pub fn sourceport_for(wad: &db::WadRecord) -> String {
+    let cfg = config::load_config();
+    let zdoom_sourceport = config::get_zdoom_sourceport();
+    let installed_sourceports: Vec<(String, String)> = sourceports::detect_sourceports()
+        .into_iter()
+        .map(|(exe, _path, family)| (exe.to_string(), family.to_string()))
+        .collect();
+    select_sourceport(
+        wad.custom_sourceport.as_deref(),
+        wad.required_sourceport_family.as_deref(),
+        &cfg.sourceport,
+        &zdoom_sourceport,
+        &cfg.sourceport_preferences,
+        &installed_sourceports,
+    )
+}
+
+/// Whether Play and Record can record this WAD: whether caco knows how to record with the
+/// sourceport it launches with.
+pub fn can_record(wad: &db::WadRecord) -> bool {
+    sourceports::can_record(&sourceport_for(wad))
+}
+
+/// [`sourceport_for`], resolved to what gets run.
+fn resolved_sourceport_for(wad: &db::WadRecord) -> crate::Result<String> {
+    let sourceport = sourceport_for(wad);
+    if sourceport.is_empty() {
+        return Err(crate::Error::NoSourceport);
+    }
+    Ok(config::resolve_sourceport(&sourceport))
+}
+
+/// Where a WAD's data goes, whether or not caco manages it: where demos are.
+fn wad_data_dir(wad: &db::WadRecord) -> PathBuf {
+    config::find_wad_data_dir(&wad.data_key, &wad.title)
+        .unwrap_or_else(|| config::get_wad_data_dir(&wad.data_key, &wad.title))
+}
+
 /// Build the sourceport command for a WAD.
 ///
-/// Shared by [`play`] and [`play_demo`] so a demo is played back under exactly
-/// the configuration it was recorded under. Has side effects by design: it
-/// persists auto-detected IWAD and complevel values and creates the managed
-/// data, save, and config directories the sourceport expects to already exist.
+/// Shared by [`play`] and [`play_demo`], so a session, a recording and a playback are all
+/// one command builder: what differs is only where the [`LaunchPlan`] comes from. Has side
+/// effects by design: a session's plan persists auto-detected IWAD and complevel values, and
+/// the command creates the managed data, save, and config directories the sourceport expects
+/// to already exist.
 fn build_launch(
     conn: &Connection,
     wad_id: i64,
@@ -294,37 +431,80 @@ fn build_launch(
     // blank family means "use the default sourceport".
     detect_and_persist_zdoom_required_if_missing(conn, wad_id, wad.zdoom_required, &wad_path)?;
 
-    // Determine sourceport (user override > compatibility family > global default).
-    let cfg = config::load_config();
-    let zdoom_sourceport = config::get_zdoom_sourceport();
-    let installed_sourceports: Vec<(String, String)> = sourceports::detect_sourceports()
-        .into_iter()
-        .map(|(exe, _path, family)| (exe.to_string(), family.to_string()))
-        .collect();
-    let sourceport = select_sourceport(
-        wad.custom_sourceport.as_deref(),
-        wad.required_sourceport_family.as_deref(),
-        &cfg.sourceport,
-        &zdoom_sourceport,
-        &cfg.sourceport_preferences,
-        &installed_sourceports,
-    );
+    let plan = match mode {
+        LaunchMode::Playback {
+            record: Some(record),
+            opts,
+            ..
+        } => {
+            let (plan, differences) =
+                plan_from_record(conn, &wad, record, identity.as_ref(), &loaded)?;
+            if !differences.is_empty() && !opts.accept_differences {
+                return Err(crate::Error::DemoDiffers {
+                    title: wad.title,
+                    differences,
+                });
+            }
+            plan
+        }
+        _ => plan_from_row(conn, &wad, &wad_path, &loaded)?,
+    };
 
-    if sourceport.is_empty() {
-        return Err(crate::Error::NoSourceport);
+    // A session that records needs a sourceport that can, and somewhere to put what it
+    // writes, which is the demos folder whether or not caco manages the rest.
+    let recording = match mode {
+        LaunchMode::Play(opts) if opts.record => Some(prepare_recording(&wad, &plan.sourceport)?),
+        _ => None,
+    };
+
+    let data_dir = config::get_manage_data_dirs().then(|| wad_data_dir(&wad));
+    if let Some(data_dir) = &data_dir
+        && let Err(e) = std::fs::create_dir_all(data_dir)
+    {
+        tracing::warn!("failed to create WAD data dir {data_dir:?}: {e}");
     }
 
-    let sourceport = config::resolve_sourceport(&sourceport);
-    let mut cmd = Command::new(&sourceport);
+    let cmd = launch_command(
+        &plan,
+        &wad_path,
+        data_dir.as_deref(),
+        mode,
+        recording.as_ref(),
+    );
+    let is_zdoom = sourceports::family_name(&plan.sourceport) == Some("zdoom");
+    let is_helion = sourceports::family_name(&plan.sourceport) == Some("helion");
+
+    Ok(BuiltLaunch {
+        cmd,
+        plan,
+        wad_path,
+        content_sha256: identity.map(|identity| identity.content_sha256),
+        data_dir,
+        recording,
+        is_zdoom,
+        is_helion,
+    })
+}
+
+/// A session's launch: the WAD's row and today's settings, detecting and persisting the IWAD
+/// and complevel where neither has been set.
+fn plan_from_row(
+    conn: &Connection,
+    wad: &db::WadRecord,
+    wad_path: &Path,
+    loaded: &[PathBuf],
+) -> crate::Result<LaunchPlan> {
+    // Determine sourceport (user override > compatibility family > global default).
+    let sourceport = resolved_sourceport_for(wad)?;
 
     // Auto-detect IWAD if not explicitly set
     let mut custom_iwad = wad.custom_iwad.clone();
     if custom_iwad.is_none()
         && config::get_auto_detect_iwad()
-        && let Some(detected) = iwad_detect::detect_iwad(&wad_path)
+        && let Some(detected) = iwad_detect::detect_iwad(wad_path)
     {
         let update = db::WadUpdate::new().set_text("custom_iwad", Some(detected.to_string()));
-        db::update_wad(conn, wad_id, &update)?;
+        db::update_wad(conn, wad.id, &update)?;
         custom_iwad = Some(detected.to_string());
     }
 
@@ -332,59 +512,354 @@ fn build_launch(
     let mut complevel = wad.complevel;
     if complevel.is_none() && config::get_auto_detect_complevel() {
         // Try COMPLVL lump first (id24 signal)
-        if let Some(cl) = iwad_detect::detect_complvl(&wad_path) {
+        if let Some(cl) = iwad_detect::detect_complvl(wad_path) {
             let update = db::WadUpdate::new().set_int("complevel", Some(cl as i64));
-            db::update_wad(conn, wad_id, &update)?;
+            db::update_wad(conn, wad.id, &update)?;
             complevel = Some(cl);
-        } else if let Some(cl) = complevel_detect::detect_complevel(&wad_path) {
+        } else if let Some(cl) = complevel_detect::detect_complevel(wad_path) {
             let update = db::WadUpdate::new().set_int("complevel", Some(cl as i64));
-            db::update_wad(conn, wad_id, &update)?;
+            db::update_wad(conn, wad.id, &update)?;
             complevel = Some(cl);
         }
     }
 
-    // Add IWAD
-    let iwad_name = custom_iwad.clone().or_else(|| {
-        let iwad = config::get_iwad();
-        if iwad.is_empty() { None } else { Some(iwad) }
-    });
-    if let Some(ref iwad) = iwad_name {
-        let db_resolved = db::resolve_iwad_from_db(conn, iwad, None);
-        let resolved = config::resolve_iwad_path(iwad, db_resolved.as_deref());
-        cmd.args(["-iwad", &resolved]);
-    }
+    let iwad = custom_iwad
+        .or_else(|| {
+            let iwad = config::get_iwad();
+            if iwad.is_empty() { None } else { Some(iwad) }
+        })
+        .map(|name| PlannedIwad {
+            path: resolve_iwad(conn, &name),
+            name,
+        });
 
-    // Add default sourceport args from global config, then per-sourceport args
-    let mut default_args = config::get_sourceport_args();
-    default_args.extend(config::get_executable_args(&sourceport));
-    if !default_args.is_empty() {
-        cmd.args(&default_args);
-    }
+    // Default sourceport args from global config, then per-sourceport args
+    let mut args = config::get_sourceport_args();
+    args.extend(config::get_executable_args(&sourceport));
 
-    // Inject complevel flag if set and not already present in args
-    if let Some(cl) = complevel {
-        let all_args: Vec<String> = std::iter::once(sourceport.clone())
-            .chain(default_args.iter().cloned())
-            .collect();
-        if !all_args.iter().any(|a| a == "-complevel") {
-            let cl_args = sourceports::get_complevel_args(&sourceport, cl);
-            if !cl_args.is_empty() {
-                cmd.args(&cl_args);
+    // Per-WAD custom args (tolerant read: silently skip malformed data already stored)
+    let custom_args = wad
+        .custom_args
+        .as_deref()
+        .and_then(|args| serde_json::from_str::<Vec<String>>(args).ok())
+        .unwrap_or_default();
+
+    // id24 resources + companion files + stats mod + the WAD's files
+    let mut files = id24_files(conn, Some(wad_path));
+    if let Ok(companions) = db::get_companions_for_wad(conn, wad.id) {
+        for comp in companions {
+            if comp.enabled && Path::new(&comp.path).exists() {
+                files.push(PlannedFile {
+                    role: demos::FileRole::Companion,
+                    name: comp.filename,
+                    path: PathBuf::from(comp.path),
+                    md5: Some(comp.md5),
+                });
             }
         }
     }
-
-    // Add per-WAD custom args (tolerant read: silently skip malformed data already stored)
-    if let Some(ref custom_args) = wad.custom_args
-        && let Ok(args) = serde_json::from_str::<Vec<String>>(custom_args)
+    // For zdoom-family sourceports, the stats reporter PK3 mod
+    if sourceports::family_name(&sourceport) == Some("zdoom")
+        && config::get_auto_stats()
+        && let Ok(pk3_path) = stats_watcher::ensure_stats_mod()
     {
-        cmd.args(&args);
+        files.push(stats_reporter(pk3_path));
+    }
+    files.extend(wad_files(loaded));
+
+    Ok(LaunchPlan {
+        profile: wad
+            .custom_config
+            .clone()
+            .unwrap_or_else(|| "default".to_string()),
+        sourceport,
+        iwad,
+        complevel,
+        args,
+        custom_args,
+        files,
+    })
+}
+
+/// A demo's playback, from what it was recorded with, and what of that cannot be had here.
+/// Each difference is filled in from what the WAD would launch with now, which is what
+/// playing anyway plays: the sourceport it is set to for one that is not here, the WAD's
+/// file as it is, and nothing for a file that has gone.
+///
+/// Persists nothing: a demo's playback is not where a WAD's settings get decided.
+fn plan_from_record(
+    conn: &Connection,
+    wad: &db::WadRecord,
+    record: &demos::DemoRecord,
+    identity: Option<&identity::FileIdentity>,
+    loaded: &[PathBuf],
+) -> crate::Result<(LaunchPlan, Vec<demos::DemoDifference>)> {
+    use demos::DemoDifference;
+
+    let mut differences = Vec::new();
+
+    let sourceport = match recorded_sourceport(record) {
+        Some((sourceport, difference)) => {
+            differences.extend(difference);
+            sourceport
+        }
+        None => {
+            let instead = resolved_sourceport_for(wad)?;
+            differences.push(DemoDifference::SourceportMissing {
+                name: record.sourceport.clone(),
+                instead: sourceport_name(&instead),
+            });
+            instead
+        }
+    };
+
+    let iwad = record.iwad.as_ref().map(|recorded| {
+        let path = resolve_iwad(conn, &recorded.name);
+        if !Path::new(&path).is_file() {
+            differences.push(DemoDifference::IwadMissing {
+                name: recorded.name.clone(),
+            });
+        } else if let Some(sha256) = &recorded.sha256
+            && sha256_of(Path::new(&path)).is_some_and(|now| &now != sha256)
+        {
+            differences.push(DemoDifference::IwadChanged {
+                name: recorded.name.clone(),
+            });
+        }
+        PlannedIwad {
+            name: recorded.name.clone(),
+            path,
+        }
+    });
+
+    // A profile only matters to a sourceport given one, and one that has gone would be
+    // started again empty.
+    let takes_profile = !sourceports::get_config_args(&sourceport, "").is_empty();
+    if takes_profile && !config::get_profile_path(&sourceport, &record.profile).exists() {
+        differences.push(DemoDifference::ProfileMissing {
+            name: record.profile.clone(),
+        });
     }
 
+    let stats_mod = || stats_watcher::ensure_stats_mod().ok();
+    let (files, missing) = recorded_files(conn, record, identity, loaded, &stats_mod);
+    differences.extend(missing);
+
+    Ok((
+        LaunchPlan {
+            sourceport,
+            iwad,
+            complevel: record.complevel,
+            profile: record.profile.clone(),
+            args: record.args.clone(),
+            custom_args: record.custom_args.clone(),
+            files,
+        },
+        differences,
+    ))
+}
+
+/// The files a demo was recorded with, found here by their hashes, and which of them could not
+/// be found or are not the same. `stats_mod` is caco's stats reporter, which it writes when it is
+/// asked for, so a test hands it one.
+fn recorded_files(
+    conn: &Connection,
+    record: &demos::DemoRecord,
+    identity: Option<&identity::FileIdentity>,
+    loaded: &[PathBuf],
+    stats_mod: &dyn Fn() -> Option<PathBuf>,
+) -> (Vec<PlannedFile>, Vec<demos::DemoDifference>) {
+    use demos::{DemoDifference, FileRole};
+
+    let mut files = Vec::new();
+    let mut differences = Vec::new();
+    for file in &record.files {
+        let missing = || DemoDifference::FileMissing {
+            role: file.role,
+            name: file.name.clone(),
+        };
+        let changed = || DemoDifference::FileChanged {
+            role: file.role,
+            name: file.name.clone(),
+        };
+        match file.role {
+            FileRole::Wad => {
+                if let (Some(recorded), Some(identity)) = (&file.sha256, identity)
+                    && recorded != &identity.content_sha256
+                {
+                    differences.push(DemoDifference::WadChanged);
+                }
+                files.extend(wad_files(loaded));
+            }
+            FileRole::Companion => {
+                let found = file
+                    .md5
+                    .as_deref()
+                    .and_then(|md5| db::find_companion_by_md5(conn, md5).ok().flatten())
+                    .filter(|comp| Path::new(&comp.path).is_file());
+                match found {
+                    Some(comp) => files.push(PlannedFile {
+                        role: FileRole::Companion,
+                        name: comp.filename,
+                        path: PathBuf::from(comp.path),
+                        md5: Some(comp.md5),
+                    }),
+                    None => differences.push(missing()),
+                }
+            }
+            FileRole::Id24 => {
+                let found = db::get_id24(conn, &file.name)
+                    .ok()
+                    .flatten()
+                    .filter(|entry| Path::new(&entry.path).is_file());
+                let Some(entry) = found else {
+                    differences.push(missing());
+                    continue;
+                };
+                let same = match (&file.md5, &entry.md5, &file.sha256) {
+                    (Some(recorded), Some(now), _) => recorded.eq_ignore_ascii_case(now),
+                    (_, _, Some(recorded)) => {
+                        sha256_of(Path::new(&entry.path)).is_none_or(|now| &now == recorded)
+                    }
+                    _ => true,
+                };
+                if !same {
+                    differences.push(changed());
+                }
+                files.push(PlannedFile {
+                    role: FileRole::Id24,
+                    name: entry.name,
+                    path: PathBuf::from(entry.path),
+                    md5: entry.md5,
+                });
+            }
+            FileRole::StatsReporter => match stats_mod() {
+                Some(path) => {
+                    if let Some(recorded) = &file.sha256
+                        && sha256_of(&path).is_some_and(|now| &now != recorded)
+                    {
+                        differences.push(changed());
+                    }
+                    files.push(stats_reporter(path));
+                }
+                None => differences.push(missing()),
+            },
+        }
+    }
+    (files, differences)
+}
+
+/// The sourceport a demo was recorded with, if this machine has it, and what is different
+/// about the one it has. caco's own build of the same commit if there is one, since a newer
+/// build replaces the release it updates but an older one can still be there.
+fn recorded_sourceport(
+    record: &demos::DemoRecord,
+) -> Option<(String, Option<demos::DemoDifference>)> {
+    recorded_sourceport_with(
+        record,
+        &sourceports::managed_builds(&record.sourceport),
+        &|| config::which(&record.sourceport),
+    )
+}
+
+/// [`recorded_sourceport`], given caco's builds of it, newest first, and where it is on `PATH`.
+fn recorded_sourceport_with(
+    record: &demos::DemoRecord,
+    builds: &[sourceports::InstalledSourceport],
+    on_path: &dyn Fn() -> Option<String>,
+) -> Option<(String, Option<demos::DemoDifference>)> {
+    use demos::DemoDifference;
+
+    let name = &record.sourceport;
+    match &record.build {
+        Some(build) => {
+            if let Some(same) = builds.iter().find(|b| b.manifest.commit == build.commit) {
+                return Some((same.binary_path().display().to_string(), None));
+            }
+            let current = builds.first();
+            let sourceport = current
+                .map(|b| b.binary_path().display().to_string())
+                .or_else(on_path)?;
+            Some((
+                sourceport,
+                Some(DemoDifference::SourceportVersion {
+                    name: name.clone(),
+                    recorded: build.git_ref.clone(),
+                    current: current.map(|b| b.manifest.git_ref.clone()),
+                }),
+            ))
+        }
+        // One caco did not build, which is the one on PATH if it is still there, ahead of
+        // a build of caco's that `resolve_sourceport` would prefer.
+        None => match (on_path(), builds.first()) {
+            (Some(path), _) => Some((path, None)),
+            (None, Some(build)) => Some((
+                build.binary_path().display().to_string(),
+                Some(DemoDifference::SourceportNotBuilt {
+                    name: name.clone(),
+                    current: build.manifest.git_ref.clone(),
+                }),
+            )),
+            (None, None) => None,
+        },
+    }
+}
+
+/// Get ready for a session to record: the sourceport has to be one caco knows how to record
+/// with, and the demos folder has to be there.
+fn prepare_recording(wad: &db::WadRecord, sourceport: &str) -> crate::Result<Recording> {
+    if !sourceports::can_record(sourceport) {
+        return Err(crate::Error::CannotRecord {
+            sourceport: sourceport_name(sourceport),
+        });
+    }
+    let dir = demos::demos_dir(&wad_data_dir(wad));
+    std::fs::create_dir_all(&dir)?;
+    Ok(Recording {
+        base: demos::new_demo_base(&wad.title, chrono::Local::now()),
+        before: demos::names_in(&dir),
+        dir,
+    })
+}
+
+/// The command for a plan. Everything here is the same for a session, a recording and a
+/// playback, bar what is said last.
+fn launch_command(
+    plan: &LaunchPlan,
+    wad_path: &Path,
+    data_dir: Option<&Path>,
+    mode: LaunchMode<'_>,
+    recording: Option<&Recording>,
+) -> Command {
+    let sourceport = &plan.sourceport;
+    let mut cmd = Command::new(sourceport);
+    let arguments = |args: &[String]| {
+        if mode.drops_recording_args() {
+            without_recording(args)
+        } else {
+            args.to_vec()
+        }
+    };
+
+    if let Some(iwad) = &plan.iwad {
+        cmd.args(["-iwad", &iwad.path]);
+    }
+
+    let default_args = arguments(&plan.args);
+    cmd.args(&default_args);
+
+    // Inject complevel flag if set and not already present in args
+    if let Some(cl) = plan.complevel
+        && !default_args.iter().any(|a| a == "-complevel")
+    {
+        cmd.args(sourceports::get_complevel_args(sourceport, cl));
+    }
+
+    cmd.args(arguments(&plan.custom_args));
+
     // Inject managed config profile
-    let profile_name = wad.custom_config.as_deref().unwrap_or("default");
-    let profile_path = config::get_profile_path(&sourceport, profile_name);
-    let config_args = sourceports::get_config_args(&sourceport, &profile_path.to_string_lossy());
+    let profile_path = config::get_profile_path(sourceport, &plan.profile);
+    let config_args = sourceports::get_config_args(sourceport, &profile_path.to_string_lossy());
     if !config_args.is_empty() {
         if let Some(parent) = profile_path.parent()
             && let Err(e) = std::fs::create_dir_all(parent)
@@ -400,20 +875,14 @@ fn build_launch(
     }
 
     // Inject per-WAD data directory args
-    let mut wad_data_dir = None;
-    if config::get_manage_data_dirs() {
-        let data_dir = config::find_wad_data_dir(&wad.data_key, &wad.title)
-            .unwrap_or_else(|| config::get_wad_data_dir(&wad.data_key, &wad.title));
-        if let Err(e) = std::fs::create_dir_all(&data_dir) {
-            tracing::warn!("failed to create WAD data dir {data_dir:?}: {e}");
-        }
-        let iwad_for_data = iwad_name.as_deref();
+    if let Some(data_dir) = data_dir {
+        let iwad_for_data = plan.iwad.as_ref().map(|iwad| iwad.name.as_str());
         // For dsda-family sourceports, ensure the nested save directory exists
-        if let (Some(iw), Some(family)) = (iwad_for_data, sourceports::identify_family(&sourceport))
+        if let (Some(iw), Some(family)) = (iwad_for_data, sourceports::identify_family(sourceport))
             && family.name == "dsda"
         {
             let save_dir = sourceports::get_dsda_save_dir(
-                &sourceport,
+                sourceport,
                 &data_dir.to_string_lossy(),
                 iw,
                 &wad_path.to_string_lossy(),
@@ -422,61 +891,33 @@ fn build_launch(
                 tracing::warn!("failed to create dsda save dir {save_dir:?}: {e}");
             }
         }
-        let data_args = sourceports::get_data_dir_args(
-            &sourceport,
+        cmd.args(sourceports::get_data_dir_args(
+            sourceport,
             &data_dir.to_string_lossy(),
             iwad_for_data,
             Some(&wad_path.to_string_lossy()),
-        );
-        if !data_args.is_empty() {
-            cmd.args(&data_args);
-        }
-        wad_data_dir = Some(data_dir);
+        ));
     }
 
-    // Build -file list: id24 resources + companion files + stats mod + main WAD
-    let mut file_args: Vec<String> = get_id24_resource_args(conn, Some(&wad_path));
-    let mut deh_args: Vec<String> = Vec::new();
-
-    // Load enabled companions from DB
-    if let Ok(companions) = db::get_companions_for_wad(conn, wad_id) {
-        for comp in companions {
-            if comp.enabled && Path::new(&comp.path).exists() {
-                push_loaded(comp.path, &sourceport, &mut file_args, &mut deh_args);
-            }
-        }
-    }
-
-    // For zdoom-family sourceports, inject the stats reporter PK3 mod
-    let is_zdoom = sourceports::family_name(&sourceport) == Some("zdoom");
-    let is_helion = sourceports::family_name(&sourceport) == Some("helion");
-    if is_zdoom
-        && config::get_auto_stats()
-        && let Ok(pk3_path) = stats_watcher::ensure_stats_mod()
-    {
-        file_args.push(pk3_path.to_string_lossy().into_owned());
-    }
-
-    // The WAD's own files last, and its patches after any companion's.
-    for file in loaded {
+    // DEH args before -file, then -file with everything else in load order.
+    let mut file_args = Vec::new();
+    let mut deh_args = Vec::new();
+    for file in &plan.files {
         push_loaded(
-            file.to_string_lossy().into_owned(),
-            &sourceport,
+            file.path.to_string_lossy().into_owned(),
+            sourceport,
             &mut file_args,
             &mut deh_args,
         );
     }
-
-    // Add DEH args before -file
-    if !deh_args.is_empty() {
-        cmd.args(&deh_args);
-    }
-
-    // Add -file with id24 resources + companions + stats mod + the WAD's files
+    cmd.args(&deh_args);
     if !file_args.is_empty() {
         cmd.arg("-file");
         cmd.args(&file_args);
     }
+
+    let is_zdoom = sourceports::family_name(sourceport) == Some("zdoom");
+    let is_helion = sourceports::family_name(sourceport) == Some("helion");
 
     // Stats collection is deliberately skipped during playback: a demo replays
     // map exits the user did not just make, and absorbing those would inflate
@@ -489,7 +930,7 @@ fn build_launch(
         // the working directory changes nothing else it is given.
         if is_zdoom
             && config::get_auto_stats()
-            && let Some(ref data_dir) = wad_data_dir
+            && let Some(data_dir) = data_dir
         {
             stats_watcher::clear_logs(data_dir);
             cmd.current_dir(data_dir);
@@ -507,20 +948,159 @@ fn build_launch(
         }
     }
 
-    // Playback flag goes last so nothing layered above can shadow it.
-    if let LaunchMode::Playback(demo) = mode {
+    // Recording and playback go last so nothing layered above can shadow them.
+    if let Some(recording) = recording
+        && let Some(args) = sourceports::get_record_args(
+            sourceport,
+            &recording.dir.join(&recording.base).to_string_lossy(),
+        )
+    {
+        cmd.args(args);
+    }
+    if let LaunchMode::Playback { demo, .. } = mode {
         cmd.args(["-playdemo", &demo.to_string_lossy()]);
     }
 
-    Ok(BuiltLaunch {
-        cmd,
-        sourceport,
-        wad_path,
-        content_sha256: identity.map(|identity| identity.content_sha256),
-        data_dir: wad_data_dir,
-        is_zdoom,
-        is_helion,
+    cmd
+}
+
+/// Arguments without any `-record` and the name after it. Sourceports read their arguments
+/// without regard to case.
+fn without_recording(args: &[String]) -> Vec<String> {
+    let mut out = Vec::with_capacity(args.len());
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        if arg.eq_ignore_ascii_case("-record") {
+            iter.next();
+        } else {
+            out.push(arg.clone());
+        }
+    }
+    out
+}
+
+/// Where an IWAD by this name is, or the name again if it isn't anywhere caco knows.
+fn resolve_iwad(conn: &Connection, name: &str) -> String {
+    let db_resolved = db::resolve_iwad_from_db(conn, name, None);
+    config::resolve_iwad_path(name, db_resolved.as_deref())
+}
+
+fn stats_reporter(path: PathBuf) -> PlannedFile {
+    PlannedFile {
+        role: demos::FileRole::StatsReporter,
+        name: path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        path,
+        md5: None,
+    }
+}
+
+fn wad_files(loaded: &[PathBuf]) -> impl Iterator<Item = PlannedFile> + '_ {
+    loaded.iter().map(|path| PlannedFile {
+        role: demos::FileRole::Wad,
+        name: path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        path: path.clone(),
+        md5: None,
     })
+}
+
+fn sha256_of(path: &Path) -> Option<String> {
+    identity::hash_file(path).ok().map(|hashes| hashes.sha256)
+}
+
+/// What a demo was recorded with: the plan, with every file by its hash rather than where it
+/// was. The WAD's files are one entry, its content hash, which says the same of the WAD and of
+/// what its zip wraps.
+fn record_of(
+    plan: &LaunchPlan,
+    wad_path: &Path,
+    content_sha256: Option<&str>,
+    session: Option<String>,
+    recorded_at: String,
+) -> demos::DemoRecord {
+    use demos::FileRole;
+    use demos::record::{RecordedBuild, RecordedFile, RecordedIwad};
+
+    let mut files: Vec<RecordedFile> = Vec::new();
+    for file in &plan.files {
+        let recorded = match file.role {
+            FileRole::Wad if files.iter().any(|f| f.role == FileRole::Wad) => continue,
+            FileRole::Wad => RecordedFile {
+                role: FileRole::Wad,
+                name: wad_path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                sha256: content_sha256.map(str::to_string),
+                md5: None,
+            },
+            role => RecordedFile {
+                role,
+                name: file.name.clone(),
+                sha256: file.md5.is_none().then(|| sha256_of(&file.path)).flatten(),
+                md5: file.md5.clone(),
+            },
+        };
+        files.push(recorded);
+    }
+
+    demos::DemoRecord {
+        version: demos::record::RECORD_VERSION,
+        session,
+        recorded_at,
+        sourceport: sourceport_name(&plan.sourceport),
+        build: sourceports::managed_build_at(Path::new(&plan.sourceport)).map(|build| {
+            RecordedBuild {
+                git_ref: build.manifest.git_ref,
+                commit: build.manifest.commit,
+            }
+        }),
+        iwad: plan.iwad.as_ref().map(|iwad| RecordedIwad {
+            name: iwad.name.clone(),
+            sha256: sha256_of(Path::new(&iwad.path)),
+        }),
+        complevel: plan.complevel,
+        profile: plan.profile.clone(),
+        args: without_recording(&plan.args),
+        custom_args: without_recording(&plan.custom_args),
+        files,
+    }
+}
+
+/// Give what a session recorded its record, and say what it was called. A record that could
+/// not be written leaves a demo that plays back under today's settings, as every demo did
+/// before, which is no reason to fail the session.
+fn finish_recording(
+    conn: &Connection,
+    recording: &Recording,
+    session_id: i64,
+    record: impl Fn(Option<String>) -> demos::DemoRecord,
+) -> Vec<String> {
+    let session: Option<String> = conn
+        .query_row(
+            "SELECT uid FROM sessions WHERE id = ?1",
+            [session_id],
+            |row| row.get(0),
+        )
+        .ok()
+        .flatten();
+    let record = record(session);
+    demos::new_demos(&recording.dir, &recording.base, &recording.before)
+        .into_iter()
+        .map(|demo| {
+            if let Err(e) = demos::write_record(&demo, &record) {
+                tracing::warn!("could not write what {demo:?} was recorded with: {e}");
+            }
+            demo.file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        })
+        .collect()
 }
 
 /// The files a launch hands the sourceport as the WAD: its file, or the files a
@@ -649,13 +1229,15 @@ fn record_saves(conn: &Connection, wad: &db::WadRecord, data_dir: &Path, opts: P
 pub fn play(conn: &Connection, wad_id: i64, opts: PlayOptions) -> crate::Result<PlayResult> {
     let BuiltLaunch {
         mut cmd,
-        sourceport,
+        plan,
         wad_path,
         content_sha256,
         data_dir: wad_data_dir,
+        recording,
         is_zdoom,
         is_helion,
     } = build_launch(conn, wad_id, LaunchMode::Play(opts))?;
+    let sourceport = plan.sourceport.clone();
     let wad = db::get_wad(conn, wad_id, false)?.ok_or(crate::Error::WadNotFound(wad_id))?;
     let zdoom_stats_dir = wad_data_dir
         .as_deref()
@@ -687,6 +1269,7 @@ pub fn play(conn: &Connection, wad_id: i64, opts: PlayOptions) -> crate::Result<
 
     // Launch sourceport
     let session_start = std::time::SystemTime::now();
+    let recorded_at = chrono::Utc::now().to_rfc3339();
     cmd.stdin(std::process::Stdio::null());
     let mut child = cmd.spawn().map_err(|e| {
         crate::Error::FileNotFound(format!(
@@ -718,6 +1301,19 @@ pub fn play(conn: &Connection, wad_id: i64, opts: PlayOptions) -> crate::Result<
 
     // End session
     db::end_session(conn, session_id, None, status.code())?;
+
+    // What it recorded, with what it was recorded with beside it.
+    let recorded = recording.as_ref().map(|recording| {
+        finish_recording(conn, recording, session_id, |session| {
+            record_of(
+                &plan,
+                &wad_path,
+                content_sha256.as_deref(),
+                session,
+                recorded_at.clone(),
+            )
+        })
+    });
 
     // For zdoom-family sourceports, parse the log and write managed stats.txt, then fill in
     // from a save made this session whatever the log did not say.
@@ -784,6 +1380,7 @@ pub fn play(conn: &Connection, wad_id: i64, opts: PlayOptions) -> crate::Result<
         exit_code: status.code(),
         auto_complete,
         stats,
+        recorded,
     })
 }
 
@@ -803,44 +1400,57 @@ fn sourceport_name(sourceport: &str) -> String {
     )
 }
 
-/// Play back a recorded demo for a WAD.
+/// Play back a demo of a WAD.
 ///
-/// `demo` names a file in the WAD's demos directory, with or without the
-/// `.lmp` extension. Playback reuses the
-/// full launch configuration from [`build_launch`], so the complevel,
-/// companion files and id24 resources match the recording — a demo played
-/// back with a different file set desyncs.
+/// `demo` names a file in the WAD's demos directory, with or without the `.lmp`
+/// extension. A demo caco recorded is played with what it was recorded with, from its
+/// record, and refused with [`crate::Error::DemoDiffers`] where this machine cannot do
+/// that, unless `opts` says the user was told. One caco did not record has nothing to go
+/// by but what the WAD is set to now, less any `-record` in its arguments.
 ///
 /// No session is recorded and no stats are collected: watching a demo is not
 /// playtime.
-pub fn play_demo(conn: &Connection, wad_id: i64, demo: &str) -> crate::Result<PathBuf> {
+pub fn play_demo(
+    conn: &Connection,
+    wad_id: i64,
+    demo: &str,
+    opts: DemoOptions,
+) -> crate::Result<DemoResult> {
     let wad = db::get_wad(conn, wad_id, false)?.ok_or(crate::Error::WadNotFound(wad_id))?;
-    let data_dir = config::find_wad_data_dir(&wad.data_key, &wad.title)
-        .unwrap_or_else(|| config::get_wad_data_dir(&wad.data_key, &wad.title));
-    let demo_path = demos::resolve_demo_path(&data_dir, demo)?;
+    let demo_path = demos::resolve_demo_path(&wad_data_dir(&wad), demo)?;
+    let record = demos::read_record(&demo_path);
 
-    let mut built = build_launch(conn, wad_id, LaunchMode::Playback(&demo_path))?;
+    let mut built = build_launch(
+        conn,
+        wad_id,
+        LaunchMode::Playback {
+            demo: &demo_path,
+            record: record.as_ref(),
+            opts,
+        },
+    )?;
 
     built.cmd.stdin(std::process::Stdio::null());
+    let start = Instant::now();
     let status = built
         .cmd
         .spawn()
         .map_err(|e| {
             crate::Error::FileNotFound(format!(
                 "Failed to launch sourceport '{}': {e}",
-                built.sourceport
+                built.plan.sourceport
             ))
         })?
         .wait()?;
 
-    if !status.success() {
-        tracing::warn!(
-            "sourceport exited with code {} during demo playback",
-            status.code().unwrap_or(-1)
-        );
-    }
-
-    Ok(demo_path)
+    Ok(DemoResult {
+        demo: demo_path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| demo.to_string()),
+        duration: start.elapsed().as_secs() as i64,
+        exit_code: status.code(),
+    })
 }
 
 /// Format duration as human-readable string.
@@ -860,9 +1470,9 @@ pub fn format_duration(seconds: i64) -> String {
 
 // --- Internal helpers ---
 
-/// Get id24 resource WAD paths to prepend to the -file list.
-fn get_id24_resource_args(conn: &Connection, wad_path: Option<&Path>) -> Vec<String> {
-    let mut file_args = Vec::new();
+/// The id24 resource WADs an id24 WAD loads first, by their names in the registry.
+fn id24_files(conn: &Connection, wad_path: Option<&Path>) -> Vec<PlannedFile> {
+    let mut files = Vec::new();
 
     // Check for COMPLVL lump directly (id24 signal)
     let has_complvl = wad_path
@@ -871,33 +1481,34 @@ fn get_id24_resource_args(conn: &Connection, wad_path: Option<&Path>) -> Vec<Str
         .is_some();
 
     if !has_complvl {
-        return file_args;
+        return files;
     }
 
-    // Load id24res.wad for any id24 WAD
-    if let Ok(Some(id24res)) = db::get_id24(conn, "id24res")
-        && Path::new(&id24res.path).exists()
-    {
-        file_args.push(id24res.path);
-    }
-
-    // Check if this is id1.wad (Legacy of Rust)
+    // id24res.wad for any id24 WAD, and Legacy of Rust's own for id1.wad.
     let is_id1 = wad_path
         .and_then(|p| p.file_stem())
         .and_then(|s| s.to_str())
         .is_some_and(|s| s.eq_ignore_ascii_case("id1"));
+    let names: &[&str] = if is_id1 {
+        &["id24res", "id1-res", "id1-tex", "id1-weap", "id1-mus"]
+    } else {
+        &["id24res"]
+    };
 
-    if is_id1 {
-        for name in &["id1-res", "id1-tex", "id1-weap", "id1-mus"] {
-            if let Ok(Some(entry)) = db::get_id24(conn, name)
-                && Path::new(&entry.path).exists()
-            {
-                file_args.push(entry.path);
-            }
+    for name in names {
+        if let Ok(Some(entry)) = db::get_id24(conn, name)
+            && Path::new(&entry.path).exists()
+        {
+            files.push(PlannedFile {
+                role: demos::FileRole::Id24,
+                name: entry.name,
+                path: PathBuf::from(entry.path),
+                md5: entry.md5,
+            });
         }
     }
 
-    file_args
+    files
 }
 
 /// Find all stats files (stats.txt / levelstat.txt) in a WAD data directory.
@@ -1232,6 +1843,7 @@ mod tests {
                 exit_code: Some(1),
                 auto_complete: AutoCompleteResult::Unknown,
                 stats: StatsReport::default(),
+                recorded: None,
             }
             .crashed()
         );
@@ -1241,6 +1853,7 @@ mod tests {
                 exit_code: Some(0),
                 auto_complete: AutoCompleteResult::Unknown,
                 stats: StatsReport::default(),
+                recorded: None,
             }
             .crashed()
         );
@@ -1250,6 +1863,7 @@ mod tests {
                 exit_code: None,
                 auto_complete: AutoCompleteResult::Unknown,
                 stats: StatsReport::default(),
+                recorded: None,
             }
             .crashed()
         );
@@ -2064,5 +2678,360 @@ mod tests {
         let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
 
         assert!(refuse_changed_file(&conn, &wad, None, PlayOptions::default()).is_ok());
+    }
+
+    // --- Demos ---
+
+    fn args_of(cmd: &Command) -> Vec<String> {
+        cmd.get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    /// A plan for a sourceport that takes no config profile, so building its command
+    /// writes nothing.
+    fn chocolate_plan(files: Vec<PlannedFile>) -> LaunchPlan {
+        LaunchPlan {
+            sourceport: "/opt/bin/chocolate-doom".to_string(),
+            iwad: Some(PlannedIwad {
+                name: "doom2".to_string(),
+                path: "/iwads/doom2.wad".to_string(),
+            }),
+            complevel: None,
+            profile: "default".to_string(),
+            args: vec![
+                "-nomusic".to_string(),
+                "-RECORD".to_string(),
+                "old".to_string(),
+            ],
+            custom_args: vec!["-fast".to_string(), "-record".to_string(), "x".to_string()],
+            files,
+        }
+    }
+
+    fn planned(role: demos::FileRole, path: &Path, md5: Option<&str>) -> PlannedFile {
+        PlannedFile {
+            role,
+            name: path.file_name().unwrap().to_string_lossy().into_owned(),
+            path: path.to_path_buf(),
+            md5: md5.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn test_without_recording_drops_every_record_and_its_name() {
+        let args: Vec<String> = ["-fast", "-Record", "a", "-nomusic", "-record"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(without_recording(&args), ["-fast", "-nomusic"]);
+    }
+
+    #[test]
+    fn test_a_recording_is_told_where_last_and_any_other_record_is_dropped() {
+        let wad = Path::new("/wads/scythe.wad");
+        let plan = chocolate_plan(vec![planned(demos::FileRole::Wad, wad, None)]);
+        let recording = Recording {
+            dir: PathBuf::from("/data/demos"),
+            base: "scythe_20261118_090000".to_string(),
+            before: Default::default(),
+        };
+        let opts = PlayOptions {
+            record: true,
+            ..PlayOptions::default()
+        };
+        let cmd = launch_command(&plan, wad, None, LaunchMode::Play(opts), Some(&recording));
+        assert_eq!(
+            args_of(&cmd),
+            [
+                "-iwad",
+                "/iwads/doom2.wad",
+                "-nomusic",
+                "-fast",
+                "-file",
+                "/wads/scythe.wad",
+                "-record",
+                "/data/demos/scythe_20261118_090000",
+            ]
+        );
+
+        // A session that isn't recording leaves the user's own arguments alone.
+        let cmd = launch_command(
+            &plan,
+            wad,
+            None,
+            LaunchMode::Play(PlayOptions::default()),
+            None,
+        );
+        assert!(args_of(&cmd).contains(&"-RECORD".to_string()));
+    }
+
+    #[test]
+    fn test_playback_is_told_the_demo_last_and_records_nothing() {
+        let wad = Path::new("/wads/scythe.wad");
+        let plan = chocolate_plan(vec![planned(demos::FileRole::Wad, wad, None)]);
+        let demo = Path::new("/data/demos/run.lmp");
+        let mode = LaunchMode::Playback {
+            demo,
+            record: None,
+            opts: DemoOptions::default(),
+        };
+        let args = args_of(&launch_command(&plan, wad, None, mode, None));
+        assert!(
+            !args.iter().any(|a| a.eq_ignore_ascii_case("-record")),
+            "{args:?}"
+        );
+        assert_eq!(
+            &args[args.len() - 2..],
+            ["-playdemo", "/data/demos/run.lmp"]
+        );
+    }
+
+    #[test]
+    fn test_a_record_names_every_file_by_its_hash_and_the_wad_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let reporter = dir.path().join("caco-stats.pk3");
+        std::fs::write(&reporter, b"reporter").unwrap();
+        let iwad = dir.path().join("doom2.wad");
+        std::fs::write(&iwad, b"IWAD").unwrap();
+        let mut plan = chocolate_plan(vec![
+            planned(
+                demos::FileRole::Companion,
+                Path::new("/c/fix.deh"),
+                Some("cd"),
+            ),
+            planned(demos::FileRole::StatsReporter, &reporter, None),
+            planned(demos::FileRole::Wad, Path::new("/u/abc/map.wad"), None),
+            planned(demos::FileRole::Wad, Path::new("/u/abc/map.deh"), None),
+        ]);
+        plan.iwad = Some(PlannedIwad {
+            name: "doom2".to_string(),
+            path: iwad.display().to_string(),
+        });
+        plan.complevel = Some(9);
+
+        let record = record_of(
+            &plan,
+            Path::new("/wads/pack.zip"),
+            Some("content"),
+            Some("session-uid".to_string()),
+            "2026-11-18T09:00:00+00:00".to_string(),
+        );
+        assert_eq!(record.sourceport, "chocolate-doom");
+        assert_eq!(record.session.as_deref(), Some("session-uid"));
+        assert_eq!(record.complevel, Some(9));
+        assert_eq!(record.args, ["-nomusic"]);
+        assert_eq!(record.custom_args, ["-fast"]);
+        let iwad_record = record.iwad.unwrap();
+        assert_eq!(iwad_record.name, "doom2");
+        assert_eq!(iwad_record.sha256, sha256_of(&iwad));
+
+        let files: Vec<_> = record
+            .files
+            .iter()
+            .map(|f| (f.role, f.name.as_str(), f.md5.as_deref(), f.sha256.clone()))
+            .collect();
+        assert_eq!(
+            files,
+            [
+                (demos::FileRole::Companion, "fix.deh", Some("cd"), None),
+                (
+                    demos::FileRole::StatsReporter,
+                    "caco-stats.pk3",
+                    None,
+                    sha256_of(&reporter)
+                ),
+                (
+                    demos::FileRole::Wad,
+                    "pack.zip",
+                    None,
+                    Some("content".to_string())
+                ),
+            ]
+        );
+    }
+
+    fn record_with(files: Vec<demos::record::RecordedFile>) -> demos::DemoRecord {
+        demos::DemoRecord {
+            version: demos::record::RECORD_VERSION,
+            session: None,
+            recorded_at: "2026-11-18T09:00:00+00:00".to_string(),
+            sourceport: "nyan-doom".to_string(),
+            build: None,
+            iwad: None,
+            complevel: Some(9),
+            profile: "default".to_string(),
+            args: Vec::new(),
+            custom_args: Vec::new(),
+            files,
+        }
+    }
+
+    fn recorded(
+        role: demos::FileRole,
+        name: &str,
+        md5: Option<&str>,
+        sha256: Option<&str>,
+    ) -> demos::record::RecordedFile {
+        demos::record::RecordedFile {
+            role,
+            name: name.to_string(),
+            md5: md5.map(str::to_string),
+            sha256: sha256.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn test_a_recorded_file_is_found_by_its_hash_and_one_that_is_gone_is_said() {
+        use demos::{DemoDifference, FileRole};
+        let (conn, _) = fresh_db_with_wad();
+        let dir = tempfile::tempdir().unwrap();
+        let deh = dir.path().join("renamed.deh");
+        std::fs::write(&deh, b"Patch File for DeHackEd").unwrap();
+        db::add_companion(&conn, "aaaa", "renamed.deh", &deh.display().to_string(), 23).unwrap();
+        let reporter = dir.path().join("caco-stats.pk3");
+        std::fs::write(&reporter, b"reporter v2").unwrap();
+        let unpacked = vec![dir.path().join("map.wad")];
+
+        let record = record_with(vec![
+            recorded(FileRole::Companion, "fix.deh", Some("aaaa"), None),
+            recorded(FileRole::Companion, "gone.deh", Some("bbbb"), None),
+            recorded(FileRole::Id24, "id24res", Some("cccc"), None),
+            recorded(FileRole::StatsReporter, "caco-stats.pk3", None, Some("v1")),
+            recorded(FileRole::Wad, "map.wad", None, Some("old content")),
+        ]);
+        let reporter_path = reporter.clone();
+        let (files, differences) = recorded_files(
+            &conn,
+            &record,
+            Some(&file_playing("new content")),
+            &unpacked,
+            &move || Some(reporter_path.clone()),
+        );
+
+        assert_eq!(
+            files
+                .iter()
+                .map(|f| (f.role, f.path.clone()))
+                .collect::<Vec<_>>(),
+            [
+                (FileRole::Companion, deh),
+                (FileRole::StatsReporter, reporter),
+                (FileRole::Wad, unpacked[0].clone()),
+            ]
+        );
+        assert_eq!(
+            differences,
+            [
+                DemoDifference::FileMissing {
+                    role: FileRole::Companion,
+                    name: "gone.deh".to_string()
+                },
+                DemoDifference::FileMissing {
+                    role: FileRole::Id24,
+                    name: "id24res".to_string()
+                },
+                DemoDifference::FileChanged {
+                    role: FileRole::StatsReporter,
+                    name: "caco-stats.pk3".to_string()
+                },
+                DemoDifference::WadChanged,
+            ]
+        );
+
+        // The same content, and nothing gone, is no difference at all.
+        let record = record_with(vec![
+            recorded(FileRole::Companion, "fix.deh", Some("aaaa"), None),
+            recorded(FileRole::Wad, "map.wad", None, Some("same")),
+        ]);
+        let (_, differences) = recorded_files(
+            &conn,
+            &record,
+            Some(&file_playing("same")),
+            &unpacked,
+            &|| None,
+        );
+        assert!(differences.is_empty(), "{differences:?}");
+    }
+
+    fn built(name: &str, git_ref: &str, commit: &str) -> sourceports::InstalledSourceport {
+        sourceports::InstalledSourceport {
+            manifest: sourceports::SourceportManifest {
+                name: name.to_string(),
+                repo: "https://example.invalid/repo.git".to_string(),
+                git_ref: git_ref.to_string(),
+                commit: commit.to_string(),
+                follows_releases: Some(true),
+                binary: name.to_string(),
+                built_at: "2026-11-01T00:00:00+00:00".to_string(),
+            },
+            prefix: PathBuf::from(format!("/cache/sourceports/{name}/{git_ref}")),
+        }
+    }
+
+    #[test]
+    fn test_a_demo_plays_on_the_build_it_was_recorded_with_where_that_is_still_here() {
+        use demos::DemoDifference;
+        use demos::record::RecordedBuild;
+        let mut record = record_with(Vec::new());
+        record.sourceport = "uzdoom".to_string();
+        record.build = Some(RecordedBuild {
+            git_ref: "4.14.3".to_string(),
+            commit: "old".to_string(),
+        });
+        let newer = built("uzdoom", "4.15.0", "new");
+        let older = built("uzdoom", "4.14.3", "old");
+        let nowhere = || None;
+
+        let (path, difference) =
+            recorded_sourceport_with(&record, &[newer.clone(), older], &nowhere).unwrap();
+        assert_eq!(path, "/cache/sourceports/uzdoom/4.14.3/bin/uzdoom");
+        assert_eq!(difference, None);
+
+        let (path, difference) =
+            recorded_sourceport_with(&record, std::slice::from_ref(&newer), &nowhere).unwrap();
+        assert_eq!(path, "/cache/sourceports/uzdoom/4.15.0/bin/uzdoom");
+        assert_eq!(
+            difference,
+            Some(DemoDifference::SourceportVersion {
+                name: "uzdoom".to_string(),
+                recorded: "4.14.3".to_string(),
+                current: Some("4.15.0".to_string()),
+            })
+        );
+
+        let on_path = || Some("/usr/bin/uzdoom".to_string());
+        let (path, difference) = recorded_sourceport_with(&record, &[], &on_path).unwrap();
+        assert_eq!(path, "/usr/bin/uzdoom");
+        assert!(matches!(
+            difference,
+            Some(DemoDifference::SourceportVersion { current: None, .. })
+        ));
+        assert_eq!(recorded_sourceport_with(&record, &[], &nowhere), None);
+    }
+
+    #[test]
+    fn test_a_demo_recorded_with_the_system_sourceport_plays_on_it_before_caco_s_build() {
+        use demos::DemoDifference;
+        let mut record = record_with(Vec::new());
+        record.sourceport = "uzdoom".to_string();
+        let build = built("uzdoom", "4.15.0", "new");
+        let on_path = || Some("/usr/bin/uzdoom".to_string());
+        let nowhere = || None;
+
+        let (path, difference) =
+            recorded_sourceport_with(&record, std::slice::from_ref(&build), &on_path).unwrap();
+        assert_eq!((path.as_str(), difference), ("/usr/bin/uzdoom", None));
+
+        let (path, difference) =
+            recorded_sourceport_with(&record, std::slice::from_ref(&build), &nowhere).unwrap();
+        assert_eq!(path, "/cache/sourceports/uzdoom/4.15.0/bin/uzdoom");
+        assert_eq!(
+            difference,
+            Some(DemoDifference::SourceportNotBuilt {
+                name: "uzdoom".to_string(),
+                current: "4.15.0".to_string(),
+            })
+        );
     }
 }

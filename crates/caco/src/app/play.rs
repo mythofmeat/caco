@@ -71,6 +71,7 @@ mod tests {
                 required: 32,
             },
             stats,
+            recorded: None,
         }
     }
 

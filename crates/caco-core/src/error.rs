@@ -82,6 +82,19 @@ pub enum Error {
         saves: crate::sync::NewerSaves,
     },
 
+    /// A demo cannot be played back as it was recorded. Its own variant because the GUI
+    /// asks before launching, as it does for a changed file: each difference is likely to
+    /// desync it, and says what playing anyway would do instead.
+    #[error("'{title}' can't play this demo as it was recorded")]
+    DemoDiffers {
+        title: String,
+        differences: Vec<crate::demos::DemoDifference>,
+    },
+
+    /// Recording was asked of a sourceport caco does not know how to record with.
+    #[error("caco can't record demos with {sourceport}")]
+    CannotRecord { sourceport: String },
+
     /// A zip that only wraps what plays could not be unpacked for the sourceport. Its own
     /// variant rather than handing over the zip instead, since that is what played a `.pk3`
     /// in a zip as the IWAD alone.

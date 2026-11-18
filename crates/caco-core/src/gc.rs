@@ -24,11 +24,11 @@ use rusqlite::Connection;
 
 use crate::config;
 use crate::db::{self, Status, WadRecord};
-use crate::demos::DEMO_EXTENSION;
+use crate::demos;
 use crate::sourceports::ALL_SAVE_EXTENSIONS;
 
 /// What to leave alone during a run.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GcOptions {
     /// Skip data directories entirely.
     pub keep_data: bool,
@@ -36,12 +36,27 @@ pub struct GcOptions {
     pub keep_cache: bool,
     /// Preserve save files inside data dirs.
     pub keep_saves: bool,
-    /// Preserve demo files inside data dirs.
+    /// Preserve demo files inside data dirs, and what each was recorded with. On unless
+    /// turned off: a finished WAD's demo is the one most likely to be wanted later, it frees
+    /// next to nothing (a vanilla demo is about 8 KB a minute), and it can't be got back.
     pub keep_demos: bool,
     /// Skip companion files.
     pub keep_companions: bool,
     /// Only look for orphans; leave finished WADs alone.
     pub orphans_only: bool,
+}
+
+impl Default for GcOptions {
+    fn default() -> Self {
+        Self {
+            keep_data: false,
+            keep_cache: false,
+            keep_saves: false,
+            keep_demos: true,
+            keep_companions: false,
+            orphans_only: false,
+        }
+    }
 }
 
 impl GcOptions {
@@ -378,7 +393,7 @@ fn is_protected(path: &Path, opts: GcOptions) -> bool {
         .unwrap_or_default();
 
     (opts.keep_saves && ALL_SAVE_EXTENSIONS.contains(&ext.as_str()))
-        || (opts.keep_demos && ext == DEMO_EXTENSION)
+        || (opts.keep_demos && demos::is_demo_or_record(path))
 }
 
 /// Bytes in a data dir that a run with `opts` would actually delete.
@@ -418,6 +433,8 @@ fn clean_data_dir_selectively(data_dir: &Path, opts: GcOptions) -> u64 {
     }
 
     remove_empty_dirs(data_dir);
+    // And the folder itself, if nothing was kept: what removing it whole would have left.
+    let _ = fs::remove_dir(data_dir);
     freed
 }
 
@@ -680,13 +697,19 @@ mod tests {
     // -- data dir sizing / protection --
 
     #[test]
-    fn test_reclaimable_data_size_counts_everything_by_default() {
+    fn test_reclaimable_data_size_keeps_demos_and_their_records_by_default() {
         let dir = tempfile::tempdir().unwrap();
         write(&dir.path().join("doomsav0.dsg"), 10);
         write(&dir.path().join("demos/run.lmp"), 20);
+        write(&dir.path().join("demos/run.lmp.toml"), 7);
         write(&dir.path().join("stats.txt"), 5);
 
-        assert_eq!(reclaimable_data_size(dir.path(), GcOptions::default()), 35);
+        assert_eq!(reclaimable_data_size(dir.path(), GcOptions::default()), 15);
+        let everything = GcOptions {
+            keep_demos: false,
+            ..Default::default()
+        };
+        assert_eq!(reclaimable_data_size(dir.path(), everything), 42);
     }
 
     #[test]
@@ -698,6 +721,7 @@ mod tests {
 
         let opts = GcOptions {
             keep_saves: true,
+            keep_demos: false,
             ..Default::default()
         };
         assert_eq!(reclaimable_data_size(dir.path(), opts), 25);
@@ -734,12 +758,28 @@ mod tests {
     }
 
     #[test]
+    fn test_a_selective_clean_that_keeps_nothing_leaves_no_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let data_dir = dir.path().join("7_done");
+        write(&data_dir.join("stats.txt"), 5);
+        write(&data_dir.join("nested/levelstat.txt"), 5);
+
+        assert_eq!(
+            clean_data_dir_selectively(&data_dir, GcOptions::default()),
+            10
+        );
+        assert!(!data_dir.exists());
+    }
+
+    #[test]
     fn test_selective_clean_removes_emptied_subdirs() {
         let dir = tempfile::tempdir().unwrap();
         write(&dir.path().join("demos/run.lmp"), 20);
+        write(&dir.path().join("doomsav0.dsg"), 10);
 
         let opts = GcOptions {
             keep_saves: true,
+            keep_demos: false,
             ..Default::default()
         };
         clean_data_dir_selectively(dir.path(), opts);

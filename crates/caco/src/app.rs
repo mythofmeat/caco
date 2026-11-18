@@ -956,7 +956,7 @@ impl CacoApp {
                     let outcome = (|| -> Result<(), String> {
                         let conn = caco_core::db::open_connection(&db_path)
                             .map_err(|e| format!("DB open failed: {e}"))?;
-                        caco_core::player::play_demo(&conn, wad_id, &demo)
+                        caco_core::player::play_demo(&conn, wad_id, &demo, Default::default())
                             .map_err(|e| e.to_string())?;
                         Ok(())
                     })();
