@@ -15,6 +15,7 @@ use crate::dialogs::mirror_offer::MirrorOfferResult;
 use crate::dialogs::mirrors::MirrorsResult;
 use crate::dialogs::newer_saves::NewerSavesResult;
 use crate::dialogs::profiles::ProfilesResult;
+use crate::dialogs::record_demo::RecordDemoResult;
 use crate::dialogs::resources::ResourcesResult;
 use crate::dialogs::sessions::SessionsResult;
 use crate::dialogs::settings::SettingsResult;
@@ -283,6 +284,22 @@ pub(super) fn render_active_dialog(
                     close_dialog = true;
                 }
                 NewerSavesResult::Open => {}
+            },
+            ActiveDialog::RecordDemo(dialog) => match dialog.render(ctx) {
+                RecordDemoResult::Record { wad_id, start } => {
+                    close_dialog = true;
+                    follow_up_action = Some(ActionRequest::PlayWith(
+                        wad_id,
+                        caco_core::player::PlayOptions {
+                            record: Some(start),
+                            ..caco_core::player::PlayOptions::default()
+                        },
+                    ));
+                }
+                RecordDemoResult::Cancelled => {
+                    close_dialog = true;
+                }
+                RecordDemoResult::Open => {}
             },
             ActiveDialog::DemoDiffers(dialog) => match dialog.render(ctx) {
                 DemoDiffersResult::PlayAnyway { wad_id, demo, opts } => {

@@ -51,6 +51,12 @@ pub struct DemoRecord {
     /// The WAD's own arguments.
     #[serde(default)]
     pub custom_args: Vec<String>,
+    /// The maps it exited, from the stats of the session that recorded it. `None` where that
+    /// isn't known: the sourceport crashed or left no stats, or the session made several demos
+    /// and exited a map, which could have been in any of them ([`super::attribute_exits`]). An
+    /// older build reads a record without it, and one from before it has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exited: Option<Vec<String>>,
     /// Everything loaded after the IWAD, in the order it was.
     #[serde(default, rename = "file")]
     pub files: Vec<RecordedFile>,
@@ -290,6 +296,7 @@ mod tests {
             profile: "default".to_string(),
             args: vec!["-nomusic".to_string()],
             custom_args: vec!["-fast".to_string()],
+            exited: None,
             files: vec![
                 RecordedFile {
                     role: FileRole::Companion,
@@ -350,6 +357,23 @@ mod tests {
         let read = read_record(&demo).unwrap();
         assert_eq!(read.version, 7);
         assert_eq!(read.files, sample().files);
+    }
+
+    #[test]
+    fn test_what_a_demo_exited_is_kept_and_a_record_from_before_that_has_nothing_to_say() {
+        let dir = tempfile::tempdir().unwrap();
+        let demo = dir.path().join("run.lmp");
+        let finished = DemoRecord {
+            exited: Some(vec!["MAP07".to_string()]),
+            ..sample()
+        };
+        write_record(&demo, &finished).unwrap();
+        assert_eq!(read_record(&demo), Some(finished));
+
+        let before = toml::to_string(&sample()).unwrap();
+        assert!(!before.contains("exited"), "{before}");
+        std::fs::write(record_path(&demo), before).unwrap();
+        assert_eq!(read_record(&demo).unwrap().exited, None);
     }
 
     #[test]

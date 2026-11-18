@@ -920,18 +920,38 @@ fn a_menu_that_is_open_has_the_keys() {
 /// R plays the selected WAD and records it. A WAD with no file asks for one first, as Enter
 /// does, and Ctrl+R, which reads the mirrors again, does neither.
 #[test]
-fn r_plays_the_selected_wad_and_records_it() {
+fn r_asks_where_to_record_and_enter_records_there() {
     let db_path = library("record-key", 1);
+    {
+        // Something that can record, wherever this runs.
+        let conn = db::open_connection(&db_path).expect("open library");
+        let update =
+            db::WadUpdate::new().set_text("custom_sourceport", Some("nyan-doom".to_string()));
+        db::update_wad(&conn, 1, &update).expect("set sourceport");
+    }
     let mut app = open_app(&db_path, DEFAULT_WINDOW);
 
     app.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::R);
     settle(&mut app);
     assert!(
         app.query_by_role(Role::Window).is_none(),
-        "Ctrl+R played it"
+        "Ctrl+R opened something"
     );
 
     press(&mut app, egui::Key::R);
+    assert!(
+        app.query_by_role_and_label(Role::Window, "Record Demo")
+            .is_some(),
+        "R didn't ask where to record"
+    );
+    // Escape backs out, and nothing is launched.
+    press(&mut app, egui::Key::Escape);
+    assert!(app.query_by_role(Role::Window).is_none());
+
+    // Enter records where it says, which starts the launch like any other.
+    press(&mut app, egui::Key::R);
+    app.get_by_label("Record at UV");
+    press(&mut app, egui::Key::Enter);
     wait_until(&mut app, "the launch to ask for the file", |app| {
         app.query_by_role_and_label(Role::Window, "WAD Unavailable")
             .is_some()

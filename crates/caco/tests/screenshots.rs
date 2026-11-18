@@ -575,6 +575,7 @@ impl Shooter {
             profile: "default".to_string(),
             args: Vec::new(),
             custom_args: Vec::new(),
+            exited: None,
             files: vec![
                 RecordedFile {
                     role: FileRole::Companion,
@@ -649,6 +650,50 @@ impl Shooter {
         std::fs::write(dir.join("uzdoom-nightmare.lmp"), zdoom).expect("write ZDoom demo");
 
         (id, dir)
+    }
+
+    /// Have a WAD launch with `sourceport`, whatever this machine is set to.
+    fn set_sourceport(&self, id: i64, sourceport: &str) {
+        let conn = caco_core::db::open_connection(&self.home.join("library.db")).expect("open db");
+        let update = caco_core::db::WadUpdate::new()
+            .set_text("custom_sourceport", Some(sourceport.to_string()));
+        caco_core::db::update_wad(&conn, id, &update).expect("set its sourceport");
+    }
+
+    /// The maps caco would have read in [`Self::add_wad_with_demos`]'s WAD, MAP01 to MAP12 and
+    /// a secret MAP31, and its recorded demo of MAP07 played to the exit.
+    fn give_maps_and_a_finished_demo(&self, id: i64, demos_dir: &Path) {
+        use caco_core::wad_analysis::{ANALYSIS_VERSION, MapClassification, MapInfo, WadAnalysis};
+
+        let conn = caco_core::db::open_connection(&self.home.join("library.db")).expect("open db");
+        let mut maps: Vec<MapInfo> = (1..=12)
+            .map(|n| MapInfo {
+                lump: format!("MAP{n:02}"),
+                classification: MapClassification::Required,
+            })
+            .collect();
+        maps.push(MapInfo {
+            lump: "MAP31".to_string(),
+            classification: MapClassification::OptionalSecret,
+        });
+        let analysis = WadAnalysis {
+            version: ANALYSIS_VERSION,
+            total_maps: maps.len(),
+            required_maps: 12,
+            secret_maps: vec!["MAP31".to_string()],
+            terminal_map: None,
+            has_umapinfo: false,
+            maps,
+        };
+        caco_core::db::save_analysis(&conn, id, &analysis).expect("save its maps");
+
+        let demo = demos_dir.join("a-wad-with-demos_20261012_193000 uv.lmp");
+        let record = caco_core::demos::read_record(&demo).expect("its record");
+        let finished = caco_core::demos::DemoRecord {
+            exited: Some(vec!["MAP07".to_string()]),
+            ..record
+        };
+        caco_core::demos::write_record(&demo, &finished).expect("write its record");
     }
 
     /// Put an event in another machine's log, as if a sync tool had just brought it. Clocks
@@ -1500,6 +1545,46 @@ fn shoot_every_surface() {
                 s.harness
                     .get_by_label_contains("The WAD's file has changed");
                 s.harness.get_by_label_contains("fix.deh");
+            },
+        ),
+    );
+    // Record Demo, before caco has read the WAD's maps, and after, with what its demos did.
+    s.set_sourceport(with_demos, "nyan-doom");
+    record(
+        "record-demo-start",
+        s.shot_dialog_after(
+            "dlg-record-demo-start",
+            ActionRequest::RecordDemo(with_demos),
+            |s| {
+                s.harness.get_by_label("Record at UV");
+                s.harness
+                    .get_by_label_contains("caco hasn't read this WAD's maps yet");
+            },
+        ),
+    );
+    s.give_maps_and_a_finished_demo(with_demos, &demos_dir);
+    record(
+        "record-demo",
+        s.shot_dialog_after(
+            "dlg-record-demo",
+            ActionRequest::RecordDemo(with_demos),
+            |s| {
+                // The ZDoom demo of MAP01 says nothing of how it went, so MAP01 comes up next.
+                assert!(s.harness.query_all_by_label("Can't tell").next().is_some());
+                s.harness.get_by_label("Record MAP01 at UV");
+                // Down to MAP07, which the table keeps in view, and its demo that got to the exit.
+                for _ in 0..6 {
+                    s.harness.key_press(egui::Key::ArrowDown);
+                }
+                s.settle(3, Duration::ZERO);
+                s.harness.get_by_label("Record MAP07 at UV");
+                assert!(
+                    s.harness.query_all_by_label("UV").count() >= 2,
+                    "MAP07's finished demo isn't in view"
+                );
+                s.harness.get_by_label("HMP").click();
+                s.settle(2, Duration::ZERO);
+                s.harness.get_by_label("Record MAP07 at HMP");
             },
         ),
     );

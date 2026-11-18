@@ -57,9 +57,29 @@ pub struct PlayResult {
     pub exit_code: Option<i32>,
     pub auto_complete: AutoCompleteResult,
     pub stats: StatsReport,
-    /// The demos a session asked to record left, by file name: `None` when it wasn't asked
-    /// to, and empty when the sourceport wrote nothing, which is worth saying.
-    pub recorded: Option<Vec<String>>,
+    /// What a session asked to record left: `None` when it wasn't asked to.
+    pub recorded: Option<Recorded>,
+}
+
+/// What a session that recorded left behind.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Recorded {
+    /// The demos in the WAD's demos folder, in the order they were recorded. Empty when the
+    /// sourceport wrote nothing, which is worth saying.
+    pub demos: Vec<RecordedDemo>,
+    /// Attempts a dsda-family sourceport put in a `failed_demos` folder of its own instead,
+    /// which it does with "organize failed demos" on, for every attempt that didn't finish its
+    /// map. caco leaves them there, and doesn't list them.
+    pub set_aside: usize,
+}
+
+/// A demo a session recorded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordedDemo {
+    /// Its file name.
+    pub name: String,
+    /// The maps it exited, where that is known: see [`demos::DemoRecord::exited`].
+    pub exited: Option<Vec<String>>,
 }
 
 /// What became of a session's map exits where they had to be read back from what a
@@ -82,7 +102,7 @@ impl PlayResult {
 }
 
 /// How to launch a WAD with [`play`].
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PlayOptions {
     /// Launch even though the WAD's file plays differently from the one it was
     /// last played with. Without it, [`play`] fails with
@@ -91,10 +111,26 @@ pub struct PlayOptions {
     /// Launch even though another machine has newer saves for it. Without it, [`play`]
     /// fails with [`crate::Error::NewerSavesElsewhere`] so the user can be asked first.
     pub accept_newer_saves: bool,
-    /// Record a demo of the session into the WAD's demos folder, with what it was recorded
-    /// with beside it (see [`demos::record`]). A session like any other otherwise: it is
-    /// timed, its stats are read, and it is asked about first as any launch is.
-    pub record: bool,
+    /// Record a demo of the session, starting where this says, into the WAD's demos folder,
+    /// with what it was recorded with beside it (see [`demos::record`]). A session like any
+    /// other otherwise: it is timed, its stats are read, and it is asked about first as any
+    /// launch is.
+    pub record: Option<RecordStart>,
+}
+
+/// Where and how hard a recording starts. A demo always starts a new game, and nyan-doom will
+/// not record one without being told the skill.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordStart {
+    /// The map, by its lump name, or `None` for wherever a new game starts.
+    pub map: Option<String>,
+    /// 1 (I'm Too Young to Die) to 5 (Nightmare!), as `-skill` takes it.
+    pub skill: u8,
+}
+
+impl RecordStart {
+    /// Ultra-Violence, which is what demos are recorded at unless there is a reason not to.
+    pub const DEFAULT_SKILL: u8 = 4;
 }
 
 /// How to play a demo back with [`play_demo`].
@@ -131,7 +167,7 @@ impl DemoResult {
 /// would fabricate map exits the user never made.
 #[derive(Debug, Clone, Copy)]
 enum LaunchMode<'a> {
-    Play(PlayOptions),
+    Play(&'a PlayOptions),
     Playback {
         demo: &'a Path,
         record: Option<&'a demos::DemoRecord>,
@@ -140,12 +176,13 @@ enum LaunchMode<'a> {
 }
 
 impl LaunchMode<'_> {
-    /// Whether a `-record` already in the settings has to go: in playback, where a
-    /// sourceport given both would record over the demo, and when caco is recording, where
-    /// the first one given is the one a sourceport takes.
-    fn drops_recording_args(self) -> bool {
+    /// Whether what starts a game, already in the settings, has to go (see [`without_start`]):
+    /// in playback, where a `-record` would record over the demo and a `-warp` or `+map`
+    /// would skip or abandon it, and when caco is recording, where the start was chosen and
+    /// chocolate and uzdoom take the first of each flag they are given.
+    fn drops_start_args(self) -> bool {
         match self {
-            LaunchMode::Play(opts) => opts.record,
+            LaunchMode::Play(opts) => opts.record.is_some(),
             LaunchMode::Playback { .. } => true,
         }
     }
@@ -192,11 +229,18 @@ struct PlannedFile {
 /// Where a session is recording to, to find what it wrote once it is over.
 #[derive(Debug, Clone)]
 struct Recording {
+    /// What starts the game it records: `-skill`, and `-warp` or `+map`.
+    start_args: Vec<String>,
     dir: PathBuf,
     /// The name the sourceport was given, which every file it writes starts with.
     base: String,
     /// The demos already there.
     before: std::collections::HashSet<String>,
+    /// Where a dsda-family sourceport puts what it calls failed demos, when told to: a
+    /// `failed_demos` folder in its data dir (`dsda_FailedDemoName`).
+    set_aside: PathBuf,
+    /// What was there already.
+    before_set_aside: std::collections::HashSet<String>,
 }
 
 /// A launch command plus the context the caller needs once it has run.
@@ -373,7 +417,7 @@ pub fn sourceport_for(wad: &db::WadRecord) -> String {
     )
 }
 
-/// Whether Play and Record can record this WAD: whether caco knows how to record with the
+/// Whether Record Demo can record this WAD: whether caco knows how to record with the
 /// sourceport it launches with.
 pub fn can_record(wad: &db::WadRecord) -> bool {
     sourceports::can_record(&sourceport_for(wad))
@@ -461,7 +505,10 @@ fn build_launch(
     // A session that records needs a sourceport that can, and somewhere to put what it
     // writes, which is the demos folder whether or not caco manages the rest.
     let recording = match mode {
-        LaunchMode::Play(opts) if opts.record => Some(prepare_recording(&wad, &plan.sourceport)?),
+        LaunchMode::Play(PlayOptions {
+            record: Some(start),
+            ..
+        }) => Some(prepare_recording(&wad, &plan, start)?),
         _ => None,
     };
 
@@ -818,16 +865,47 @@ fn recorded_sourceport_with(
 }
 
 /// Get ready for a session to record: the sourceport has to be one caco knows how to record
-/// with, and the demos folder has to be there.
-fn prepare_recording(wad: &db::WadRecord, sourceport: &str) -> crate::Result<Recording> {
+/// with, able to start where it was asked to, and given what it needs to record at all, and
+/// the demos folder has to be there. Each is refused here rather than by the sourceport, which
+/// would say so only once it had opened, and in a window of its own.
+fn prepare_recording(
+    wad: &db::WadRecord,
+    plan: &LaunchPlan,
+    start: &RecordStart,
+) -> crate::Result<Recording> {
+    let sourceport = &plan.sourceport;
     if !sourceports::can_record(sourceport) {
         return Err(crate::Error::CannotRecord {
             sourceport: sourceport_name(sourceport),
         });
     }
-    let dir = demos::demos_dir(&wad_data_dir(wad));
+    let start_args = sourceports::get_start_args(sourceport, start.map.as_deref(), start.skill)
+        .ok_or_else(|| crate::Error::CannotStartAt {
+            sourceport: sourceport_name(sourceport),
+            map: start.map.clone().unwrap_or_default(),
+        })?;
+    let names_complevel = plan
+        .args
+        .iter()
+        .chain(&plan.custom_args)
+        .any(|a| a.eq_ignore_ascii_case("-complevel"));
+    if sourceports::records_need_complevel(sourceport)
+        && plan.complevel.is_none()
+        && !names_complevel
+    {
+        return Err(crate::Error::RecordNeedsComplevel {
+            title: wad.title.clone(),
+            sourceport: sourceport_name(sourceport),
+        });
+    }
+    let data_dir = wad_data_dir(wad);
+    let dir = demos::demos_dir(&data_dir);
     std::fs::create_dir_all(&dir)?;
+    let set_aside = data_dir.join("failed_demos");
     Ok(Recording {
+        before_set_aside: demos::names_in(&set_aside),
+        set_aside,
+        start_args,
         base: demos::new_demo_base(&wad.title, chrono::Local::now()),
         before: demos::names_in(&dir),
         dir,
@@ -846,8 +924,8 @@ fn launch_command(
     let sourceport = &plan.sourceport;
     let mut cmd = Command::new(sourceport);
     let arguments = |args: &[String]| {
-        if mode.drops_recording_args() {
-            without_recording(args)
+        if mode.drops_start_args() {
+            without_start(args)
         } else {
             args.to_vec()
         }
@@ -960,13 +1038,15 @@ fn launch_command(
         }
     }
 
-    // Recording and playback go last so nothing layered above can shadow them.
+    // Recording and playback go last so nothing layered above can shadow them, in a
+    // sourceport that takes the last of a flag.
     if let Some(recording) = recording
         && let Some(args) = sourceports::get_record_args(
             sourceport,
             &recording.dir.join(&recording.base).to_string_lossy(),
         )
     {
+        cmd.args(&recording.start_args);
         cmd.args(args);
     }
     if let LaunchMode::Playback { demo, .. } = mode {
@@ -976,15 +1056,23 @@ fn launch_command(
     cmd
 }
 
-/// Arguments without any `-record` and the name after it. Sourceports read their arguments
-/// without regard to case.
-fn without_recording(args: &[String]) -> Vec<String> {
+/// Arguments without what starts a game: `-record`, `-skill`, `-episode` and `+map` with what
+/// follows each, `-warp` with the numbers after it, and nyan-doom's `-uv` and `-nm`, which
+/// set the skill over a `-skill`. Sourceports read their arguments without regard to case.
+fn without_start(args: &[String]) -> Vec<String> {
     let mut out = Vec::with_capacity(args.len());
-    let mut iter = args.iter();
+    let mut iter = args.iter().peekable();
     while let Some(arg) = iter.next() {
-        if arg.eq_ignore_ascii_case("-record") {
+        let is = |flag: &str| arg.eq_ignore_ascii_case(flag);
+        if is("-record") || is("-skill") || is("-episode") || is("+map") {
             iter.next();
-        } else {
+        } else if is("-warp") {
+            for _ in 0..2 {
+                if iter.next_if(|a| a.parse::<i64>().is_ok()).is_none() {
+                    break;
+                }
+            }
+        } else if !(is("-uv") || is("-nm")) {
             out.push(arg.clone());
         }
     }
@@ -1078,21 +1166,23 @@ fn record_of(
         }),
         complevel: plan.complevel,
         profile: plan.profile.clone(),
-        args: without_recording(&plan.args),
-        custom_args: without_recording(&plan.custom_args),
+        args: without_start(&plan.args),
+        custom_args: without_start(&plan.custom_args),
+        exited: None,
         files,
     }
 }
 
-/// Give what a session recorded its record, and say what it was called. A record that could
-/// not be written leaves a demo that plays back under today's settings, as every demo did
-/// before, which is no reason to fail the session.
+/// Give what a session recorded its record, with the maps each demo exited where that can be
+/// told from `exits`, the maps the session exited, and say what it recorded. A record that could not be written leaves a demo that plays back under today's
+/// settings, as every demo did before, which is no reason to fail the session.
 fn finish_recording(
     conn: &Connection,
     recording: &Recording,
     session_id: i64,
+    exits: Option<&[String]>,
     record: impl Fn(Option<String>) -> demos::DemoRecord,
-) -> Vec<String> {
+) -> Recorded {
     let session: Option<String> = conn
         .query_row(
             "SELECT uid FROM sessions WHERE id = ?1",
@@ -1102,17 +1192,45 @@ fn finish_recording(
         .ok()
         .flatten();
     let record = record(session);
-    demos::new_demos(&recording.dir, &recording.base, &recording.before)
-        .into_iter()
-        .map(|demo| {
-            if let Err(e) = demos::write_record(&demo, &record) {
+    let found = demos::new_demos(&recording.dir, &recording.base, &recording.before);
+    let set_aside = demos::new_demos(
+        &recording.set_aside,
+        &recording.base,
+        &recording.before_set_aside,
+    )
+    .len();
+    // An attempt set aside is one more that could have made an exit.
+    let exited = exits.and_then(|exits| demos::attribute_exits(found.len() + set_aside, exits));
+    let demos = found
+        .iter()
+        .enumerate()
+        .map(|(i, demo)| {
+            let exited = exited.as_ref().map(|exited| exited[i].clone());
+            let record = demos::DemoRecord {
+                exited: exited.clone(),
+                ..record.clone()
+            };
+            if let Err(e) = demos::write_record(demo, &record) {
                 tracing::warn!("could not write what {demo:?} was recorded with: {e}");
             }
-            demo.file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default()
+            RecordedDemo {
+                name: demo
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                exited,
+            }
         })
-        .collect()
+        .collect();
+    Recorded { demos, set_aside }
+}
+
+/// The maps a session exited, from its stats before and after. `None` when there is nothing
+/// to go by.
+fn session_exits(before: Option<&str>, after: Option<&str>) -> Option<Vec<String>> {
+    let after = wad_stats::stats_from_json(after?).ok()?;
+    let before = before.and_then(|s| wad_stats::stats_from_json(s).ok());
+    Some(wad_stats::compute_stats_delta(before.as_ref(), &after).maps_played)
 }
 
 /// The files a launch hands the sourceport as the WAD: its file, or the files a
@@ -1169,7 +1287,7 @@ fn refuse_changed_file(
     conn: &Connection,
     wad: &db::WadRecord,
     current: Option<&identity::FileIdentity>,
-    opts: PlayOptions,
+    opts: &PlayOptions,
 ) -> crate::Result<()> {
     if opts.accept_changed_file {
         return Ok(());
@@ -1196,7 +1314,7 @@ fn refuse_changed_file(
 fn refuse_newer_saves(
     conn: &Connection,
     wad: &db::WadRecord,
-    opts: PlayOptions,
+    opts: &PlayOptions,
 ) -> crate::Result<()> {
     if opts.accept_newer_saves || !config::get_warn_newer_saves() || !config::get_manage_data_dirs()
     {
@@ -1225,7 +1343,7 @@ fn refuse_newer_saves(
 ///
 /// Failing here costs nothing but a question that should not have needed asking, so it
 /// does not fail the session that has just been played.
-fn record_saves(conn: &Connection, wad: &db::WadRecord, data_dir: &Path, opts: PlayOptions) {
+fn record_saves(conn: &Connection, wad: &db::WadRecord, data_dir: &Path, opts: &PlayOptions) {
     let recorded = sync::machine::this_machine()
         .map_err(crate::Error::from)
         .and_then(|machine| {
@@ -1248,7 +1366,7 @@ pub fn play(conn: &Connection, wad_id: i64, opts: PlayOptions) -> crate::Result<
         recording,
         is_zdoom,
         is_helion,
-    } = build_launch(conn, wad_id, LaunchMode::Play(opts))?;
+    } = build_launch(conn, wad_id, LaunchMode::Play(&opts))?;
     let sourceport = plan.sourceport.clone();
     let wad = db::get_wad(conn, wad_id, false)?.ok_or(crate::Error::WadNotFound(wad_id))?;
     let zdoom_stats_dir = wad_data_dir
@@ -1314,19 +1432,6 @@ pub fn play(conn: &Connection, wad_id: i64, opts: PlayOptions) -> crate::Result<
     // End session
     db::end_session(conn, session_id, None, status.code())?;
 
-    // What it recorded, with what it was recorded with beside it.
-    let recorded = recording.as_ref().map(|recording| {
-        finish_recording(conn, recording, session_id, |session| {
-            record_of(
-                &plan,
-                &wad_path,
-                content_sha256.as_deref(),
-                session,
-                recorded_at.clone(),
-            )
-        })
-    });
-
     // For zdoom-family sourceports, parse the log and write managed stats.txt, then fill in
     // from a save made this session whatever the log did not say.
     if let Some(data_dir) = zdoom_stats_dir {
@@ -1353,7 +1458,7 @@ pub fn play(conn: &Connection, wad_id: i64, opts: PlayOptions) -> crate::Result<
 
     // What the session did to this machine's saves.
     if let Some(ref data_dir) = wad_data_dir {
-        record_saves(conn, &wad, data_dir, opts);
+        record_saves(conn, &wad, data_dir, &opts);
     }
 
     // Auto-track stats
@@ -1379,6 +1484,25 @@ pub fn play(conn: &Connection, wad_id: i64, opts: PlayOptions) -> crate::Result<
             rusqlite::params![pt_id, session_id],
         )?;
     }
+
+    // What it recorded, with what it was recorded with beside it, and which maps each demo
+    // exited, where this session's stats can say. A crash can leave stats unwritten, and a
+    // missing log is a session's exits lost, so neither says a demo exited nothing.
+    let recorded = recording.as_ref().map(|recording| {
+        let crashed = status.code() != Some(0);
+        let exits = (!crashed && stats.log_missing_from.is_none())
+            .then(|| session_exits(stats_before.as_deref(), stats_after.as_deref()))
+            .flatten();
+        finish_recording(conn, recording, session_id, exits.as_deref(), |session| {
+            record_of(
+                &plan,
+                &wad_path,
+                content_sha256.as_deref(),
+                session,
+                recorded_at.clone(),
+            )
+        })
+    });
 
     // Auto-completion detection: check if all required maps have been beaten, on any
     // machine. The last map being beaten here finishes a WAD started on another.
@@ -2659,10 +2783,10 @@ mod tests {
         let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
         let ask = PlayOptions::default();
 
-        assert!(refuse_changed_file(&conn, &wad, Some(&file_playing("v2")), ask).is_ok());
+        assert!(refuse_changed_file(&conn, &wad, Some(&file_playing("v2")), &ask).is_ok());
 
         played(&conn, wad_id, "v1");
-        match refuse_changed_file(&conn, &wad, Some(&file_playing("v2")), ask) {
+        match refuse_changed_file(&conn, &wad, Some(&file_playing("v2")), &ask) {
             Err(crate::Error::WadFileChanged { title, change }) => {
                 assert_eq!(title, "Test WAD");
                 assert_eq!(change.played, "v1");
@@ -2671,13 +2795,13 @@ mod tests {
             }
             other => panic!("expected WadFileChanged, got {other:?}"),
         }
-        assert!(refuse_changed_file(&conn, &wad, Some(&file_playing("v1")), ask).is_ok());
+        assert!(refuse_changed_file(&conn, &wad, Some(&file_playing("v1")), &ask).is_ok());
 
         let accept = PlayOptions {
             accept_changed_file: true,
             ..PlayOptions::default()
         };
-        assert!(refuse_changed_file(&conn, &wad, Some(&file_playing("v2")), accept).is_ok());
+        assert!(refuse_changed_file(&conn, &wad, Some(&file_playing("v2")), &accept).is_ok());
     }
 
     /// A file caco could not hash launches as it did before identities: there
@@ -2689,7 +2813,7 @@ mod tests {
         played(&conn, wad_id, "v1");
         let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
 
-        assert!(refuse_changed_file(&conn, &wad, None, PlayOptions::default()).is_ok());
+        assert!(refuse_changed_file(&conn, &wad, None, &PlayOptions::default()).is_ok());
     }
 
     // --- Demos ---
@@ -2716,7 +2840,11 @@ mod tests {
                 "-RECORD".to_string(),
                 "old".to_string(),
             ],
-            custom_args: vec!["-fast".to_string(), "-record".to_string(), "x".to_string()],
+            custom_args: [
+                "-fast", "-record", "x", "-warp", "3", "-skill", "2", "+map", "MAP03",
+            ]
+            .map(str::to_string)
+            .to_vec(),
             files,
         }
     }
@@ -2731,28 +2859,62 @@ mod tests {
     }
 
     #[test]
-    fn test_without_recording_drops_every_record_and_its_name() {
-        let args: Vec<String> = ["-fast", "-Record", "a", "-nomusic", "-record"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        assert_eq!(without_recording(&args), ["-fast", "-nomusic"]);
+    fn test_without_start_drops_whatever_starts_a_game() {
+        let args = [
+            "-fast",
+            "-Record",
+            "a",
+            "-nomusic",
+            "-skill",
+            "3",
+            "-WARP",
+            "1",
+            "7",
+            "-uv",
+            "-warp",
+            "9",
+            "-file",
+            "x.wad",
+            "+map",
+            "MAP02",
+            "-NM",
+            "-episode",
+            "2",
+            "-warp",
+            "-nomonsters",
+            "-record",
+        ]
+        .map(str::to_string);
+        assert_eq!(
+            without_start(&args),
+            ["-fast", "-nomusic", "-file", "x.wad", "-nomonsters"]
+        );
     }
 
-    #[test]
-    fn test_a_recording_is_told_where_last_and_any_other_record_is_dropped() {
-        let wad = Path::new("/wads/scythe.wad");
-        let plan = chocolate_plan(vec![planned(demos::FileRole::Wad, wad, None)]);
-        let recording = Recording {
+    fn recording_at(start_args: &[&str]) -> Recording {
+        Recording {
+            start_args: start_args.iter().map(|a| a.to_string()).collect(),
             dir: PathBuf::from("/data/demos"),
             base: "scythe_20261118_090000".to_string(),
             before: Default::default(),
-        };
+            set_aside: PathBuf::from("/data/failed_demos"),
+            before_set_aside: Default::default(),
+        }
+    }
+
+    #[test]
+    fn test_a_recording_is_told_where_and_how_last_and_nothing_else_starts_a_game() {
+        let wad = Path::new("/wads/scythe.wad");
+        let plan = chocolate_plan(vec![planned(demos::FileRole::Wad, wad, None)]);
         let opts = PlayOptions {
-            record: true,
+            record: Some(RecordStart {
+                map: Some("MAP07".to_string()),
+                skill: 4,
+            }),
             ..PlayOptions::default()
         };
-        let cmd = launch_command(&plan, wad, None, LaunchMode::Play(opts), Some(&recording));
+        let recording = recording_at(&["-skill", "4", "-warp", "7"]);
+        let cmd = launch_command(&plan, wad, None, LaunchMode::Play(&opts), Some(&recording));
         assert_eq!(
             args_of(&cmd),
             [
@@ -2762,6 +2924,10 @@ mod tests {
                 "-fast",
                 "-file",
                 "/wads/scythe.wad",
+                "-skill",
+                "4",
+                "-warp",
+                "7",
                 "-record",
                 "/data/demos/scythe_20261118_090000",
             ]
@@ -2772,10 +2938,52 @@ mod tests {
             &plan,
             wad,
             None,
-            LaunchMode::Play(PlayOptions::default()),
+            LaunchMode::Play(&PlayOptions::default()),
             None,
         );
-        assert!(args_of(&cmd).contains(&"-RECORD".to_string()));
+        let args = args_of(&cmd);
+        assert!(args.contains(&"-RECORD".to_string()));
+        assert!(args.contains(&"+map".to_string()));
+    }
+
+    #[test]
+    fn test_a_recording_is_refused_what_the_sourceport_would_refuse() {
+        let (conn, wad_id) = fresh_db_with_wad();
+        let wad = crate::db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        let at = |map: Option<&str>| RecordStart {
+            map: map.map(str::to_string),
+            skill: 4,
+        };
+        let mut plan = chocolate_plan(Vec::new());
+        plan.sourceport = "/opt/bin/nyan-doom".to_string();
+
+        // nyan-doom stops with an error of its own without a complevel.
+        match prepare_recording(&wad, &plan, &at(Some("MAP07"))) {
+            Err(crate::Error::RecordNeedsComplevel { title, sourceport }) => {
+                assert_eq!(
+                    (title.as_str(), sourceport.as_str()),
+                    ("Test WAD", "nyan-doom")
+                );
+            }
+            other => panic!(
+                "expected RecordNeedsComplevel, got {:?}",
+                other.map(|r| r.start_args)
+            ),
+        }
+        // `-warp` names Doom's maps and nothing else.
+        plan.complevel = Some(9);
+        match prepare_recording(&wad, &plan, &at(Some("BTW01"))) {
+            Err(crate::Error::CannotStartAt { map, .. }) => assert_eq!(map, "BTW01"),
+            other => panic!(
+                "expected CannotStartAt, got {:?}",
+                other.map(|r| r.start_args)
+            ),
+        }
+        plan.sourceport = "/opt/bin/helion".to_string();
+        assert!(matches!(
+            prepare_recording(&wad, &plan, &at(None)),
+            Err(crate::Error::CannotRecord { .. })
+        ));
     }
 
     #[test]
@@ -2790,7 +2998,9 @@ mod tests {
         };
         let args = args_of(&launch_command(&plan, wad, None, mode, None));
         assert!(
-            !args.iter().any(|a| a.eq_ignore_ascii_case("-record")),
+            !args.iter().any(|a| ["-record", "-warp", "-skill", "+map"]
+                .iter()
+                .any(|flag| a.eq_ignore_ascii_case(flag))),
             "{args:?}"
         );
         assert_eq!(
@@ -2863,6 +3073,82 @@ mod tests {
         );
     }
 
+    /// A Doom 1.9 demo starting on MAP{map}.
+    fn demo_on(path: &Path, map: u8) {
+        let mut bytes = vec![109, 3, 1, map, 0, 0, 0, 0, 0, 1, 0, 0, 0];
+        bytes.extend([0; 140]);
+        bytes.push(0x80);
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    #[test]
+    fn test_each_demo_a_session_recorded_is_told_what_it_exited_where_that_is_known() {
+        let (conn, wad_id) = fresh_db_with_wad();
+        let session_id = crate::db::start_session(&conn, wad_id, Some("nyan-doom"), None).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let mut recording = recording_at(&["-skill", "4", "-warp", "7"]);
+        recording.dir = dir.path().join("demos");
+        recording.set_aside = dir.path().join("failed_demos");
+        std::fs::create_dir_all(&recording.dir).unwrap();
+        let exits = ["MAP07".to_string()];
+        let finish = |recording: &Recording, exits: Option<&[String]>| {
+            finish_recording(&conn, recording, session_id, exits, |_| {
+                record_with(Vec::new())
+            })
+        };
+
+        // One go, to the exit.
+        demo_on(&recording.dir.join("scythe_20261118_090000.lmp"), 7);
+        let recorded = finish(&recording, Some(&exits));
+        assert_eq!(recorded.set_aside, 0);
+        assert_eq!(recorded.demos[0].exited, Some(exits.to_vec()));
+        let on_disk = demos::read_record(&recording.dir.join("scythe_20261118_090000.lmp"));
+        assert_eq!(on_disk.unwrap().exited, Some(exits.to_vec()));
+
+        // Two, after a restart, and either could have been the one: unknown for both.
+        recording.before = demos::names_in(&recording.dir);
+        demo_on(&recording.dir.join("scythe_20261118_090000-00002.lmp"), 7);
+        demo_on(&recording.dir.join("scythe_20261118_090000-00003.lmp"), 7);
+        let recorded = finish(&recording, Some(&exits));
+        let names: Vec<_> = recorded.demos.iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "scythe_20261118_090000-00002.lmp",
+                "scythe_20261118_090000-00003.lmp"
+            ]
+        );
+        assert!(recorded.demos.iter().all(|d| d.exited.is_none()));
+        // With no exit, neither got there.
+        let recorded = finish(&recording, Some(&[]));
+        assert!(recorded.demos.iter().all(|d| d.exited == Some(Vec::new())));
+
+        // One kept and one nyan-doom put aside are two attempts as well.
+        std::fs::create_dir_all(&recording.set_aside).unwrap();
+        recording.before = demos::names_in(&recording.dir);
+        demo_on(&recording.dir.join("scythe_20261118_090000-00004.lmp"), 7);
+        demo_on(
+            &recording.set_aside.join("scythe_20261118_090000-00002.lmp"),
+            7,
+        );
+        let recorded = finish(&recording, Some(&exits));
+        assert_eq!(recorded.set_aside, 1);
+        assert_eq!(recorded.demos.len(), 1);
+        assert_eq!(recorded.demos[0].exited, None);
+    }
+
+    #[test]
+    fn test_a_session_exited_what_its_stats_say_it_did() {
+        let before = stats_json_one_map("MAP07", 2, 4);
+        let after = stats_json_one_map("MAP07", 3, 4);
+        assert_eq!(
+            session_exits(Some(&before), Some(&after)),
+            Some(vec!["MAP07".to_string()])
+        );
+        assert_eq!(session_exits(Some(&after), Some(&after)), Some(Vec::new()));
+        assert_eq!(session_exits(Some(&before), None), None);
+    }
+
     fn record_with(files: Vec<demos::record::RecordedFile>) -> demos::DemoRecord {
         demos::DemoRecord {
             version: demos::record::RECORD_VERSION,
@@ -2875,6 +3161,7 @@ mod tests {
             profile: "default".to_string(),
             args: Vec::new(),
             custom_args: Vec::new(),
+            exited: None,
             files,
         }
     }

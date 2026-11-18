@@ -249,10 +249,10 @@ fn main_button(ui: &mut egui::Ui, wad: &WadRecord, state: &AppState) -> Option<A
     let record = |ui: &mut egui::Ui| {
         (can_record
             && ui
-                .add_sized(wide, quiet("Play and Record"))
-                .on_hover_text("Records a demo of the session. Or press R")
+                .add_sized(wide, quiet("Record Demo"))
+                .on_hover_text("Pick a map and a skill, and play it recording a demo. Or press R")
                 .clicked())
-        .then_some(ActionRequest::PlayAndRecord(wad.id))
+        .then_some(ActionRequest::RecordDemo(wad.id))
     };
     match action {
         MainAction::Play => {

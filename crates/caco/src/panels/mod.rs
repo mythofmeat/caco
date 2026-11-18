@@ -237,8 +237,8 @@ pub fn wad_context_menu(response: &egui::Response, wad: &WadRecord) -> Option<Ac
             ui.close();
         }
         // Asked only while the menu is open, since it looks the sourceport up.
-        if caco_core::player::can_record(wad) && ui.button("Play and Record").clicked() {
-            action = Some(ActionRequest::PlayAndRecord(wad_id));
+        if caco_core::player::can_record(wad) && ui.button("Record Demo").clicked() {
+            action = Some(ActionRequest::RecordDemo(wad_id));
             ui.close();
         }
         if matches!(wad.status, Status::Completed | Status::Abandoned)
@@ -409,7 +409,7 @@ pub fn handle_action_keys(ui: &egui::Ui, selected_wad_id: Option<i64>) -> Option
     }
     // Plain R only: Ctrl+R reads the mirrors again.
     if pressed(egui::Key::R) {
-        return Some(ActionRequest::PlayAndRecord(wad_id));
+        return Some(ActionRequest::RecordDemo(wad_id));
     }
     if pressed(egui::Key::E) {
         return Some(ActionRequest::Edit(wad_id));

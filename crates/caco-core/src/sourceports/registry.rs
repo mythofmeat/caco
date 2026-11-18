@@ -18,8 +18,25 @@ pub struct SourceportFamily {
     /// here that records adds `.lmp` (chocolate's always, the rest when there is none). `None`
     /// where caco does not know how a family records, so Record is not offered for it.
     pub record_arg: Option<&'static str>,
+    /// How a new game is started on a map, at a skill, which recording needs: nyan-doom will not
+    /// record without a skill. `None` where caco does not know.
+    pub start: Option<Start>,
     /// Config file extension (e.g. "cfg" or "ini").
     pub config_ext: &'static str,
+}
+
+/// How a family is told which map and skill a new game starts on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Start {
+    /// `-skill 4 -warp 7` for MAP07, and `-warp 1 7` for E1M7: Doom's own flags, which name
+    /// only maps with Doom's own names. nyan-doom takes `-warp` as one number in a game with
+    /// MAPxx maps and as an episode and a map otherwise (`dsda_LegacyResolveWarp`), and the
+    /// last of each flag it is given. chocolate, woof and eternity take them from Doom itself,
+    /// though only nyan-doom's and uzdoom's sources have been read.
+    Warp,
+    /// `-skill 4 +map NAME`, which names any map uzdoom can find, and which it treats as
+    /// `-warp` (`D_DoomMain`'s `+map` hack).
+    MapCommand,
 }
 
 /// All known sourceport families.
@@ -39,6 +56,7 @@ pub static FAMILIES: &[SourceportFamily] = &[
         save_arg: Some("-save"),
         complevel_arg: Some("-complevel"),
         record_arg: Some("-record"),
+        start: Some(Start::Warp),
         config_ext: "cfg",
     },
     SourceportFamily {
@@ -48,6 +66,7 @@ pub static FAMILIES: &[SourceportFamily] = &[
         save_arg: Some("-savedir"),
         complevel_arg: None,
         record_arg: Some("-record"),
+        start: Some(Start::MapCommand),
         config_ext: "ini",
     },
     SourceportFamily {
@@ -57,6 +76,7 @@ pub static FAMILIES: &[SourceportFamily] = &[
         save_arg: Some("-savedir"),
         complevel_arg: None,
         record_arg: Some("-record"),
+        start: Some(Start::Warp),
         config_ext: "cfg",
     },
     SourceportFamily {
@@ -66,6 +86,7 @@ pub static FAMILIES: &[SourceportFamily] = &[
         save_arg: Some("-save"),
         complevel_arg: Some("-complevel"),
         record_arg: Some("-record"),
+        start: Some(Start::Warp),
         config_ext: "cfg",
     },
     SourceportFamily {
@@ -75,6 +96,7 @@ pub static FAMILIES: &[SourceportFamily] = &[
         save_arg: Some("-savedir"),
         complevel_arg: None,
         record_arg: Some("-record"),
+        start: Some(Start::Warp),
         config_ext: "cfg",
     },
     SourceportFamily {
@@ -84,6 +106,7 @@ pub static FAMILIES: &[SourceportFamily] = &[
         save_arg: Some("-savedir"),
         complevel_arg: None,
         record_arg: None,
+        start: None,
         config_ext: "ini",
     },
 ];
@@ -190,9 +213,59 @@ pub fn get_record_args(executable: &str, base: &str) -> Option<Vec<String>> {
     Some(vec![arg.to_string(), base.to_string()])
 }
 
-/// Whether caco can record a demo with this sourceport.
+/// Whether caco can record a demo with this sourceport: it has to know how to record, and how
+/// to start a game at a skill.
 pub fn can_record(executable: &str) -> bool {
-    identify_family(executable).is_some_and(|f| f.record_arg.is_some())
+    identify_family(executable).is_some_and(|f| f.record_arg.is_some() && f.start.is_some())
+}
+
+/// Whether this sourceport refuses to record without a complevel. dsda's does, in
+/// `dsda_InitDemoRecording`, unless the WAD's COMPLVL lump names one.
+pub fn records_need_complevel(executable: &str) -> bool {
+    family_name(executable) == Some("dsda")
+}
+
+/// Return CLI args that start a new game at `skill`, 1 (I'm Too Young to Die) to 5
+/// (Nightmare!), as every family here numbers them, on `map`, or wherever a new game starts
+/// when there is none. `None` when this sourceport can't be told to start there: a map
+/// without one of Doom's own names under `-warp`, a skill out of range, or a family caco
+/// does not know how to start.
+pub fn get_start_args(executable: &str, map: Option<&str>, skill: u8) -> Option<Vec<String>> {
+    let start = identify_family(executable)?.start?;
+    if !(1..=5).contains(&skill) {
+        return None;
+    }
+    let mut args = vec!["-skill".to_string(), skill.to_string()];
+    match (start, map) {
+        (_, None) => {}
+        (Start::Warp, Some(map)) => {
+            let (episode, number) = map_numbers(map)?;
+            args.push("-warp".to_string());
+            args.extend(episode.map(|e| e.to_string()));
+            args.push(number.to_string());
+        }
+        (Start::MapCommand, Some(map)) => {
+            args.extend(["+map".to_string(), map.trim().to_string()]);
+        }
+    }
+    Some(args)
+}
+
+/// A map's episode and number, from a name Doom itself gives maps: `E1M7` is `(Some(1), 7)`,
+/// and `MAP07` is `(None, 7)`.
+pub fn map_numbers(map: &str) -> Option<(Option<u8>, u8)> {
+    let map = map.trim().to_ascii_uppercase();
+    let b = map.as_bytes();
+    if b.len() == 4 && b[0] == b'E' && b[2] == b'M' {
+        let episode = (b[1] as char).to_digit(10)?;
+        let number = (b[3] as char).to_digit(10)?;
+        return (episode >= 1 && number >= 1).then_some((Some(episode as u8), number as u8));
+    }
+    let digits = map.strip_prefix("MAP")?;
+    if digits.len() != 2 || !digits.bytes().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    Some((None, digits.parse().ok()?))
 }
 
 /// Get the config file extension for a sourceport (e.g. "cfg" or "ini").
@@ -324,6 +397,55 @@ mod tests {
         assert!(!can_record("helion"));
         assert!(!can_record("unknown-sourceport"));
         assert_eq!(get_record_args("helion", "/d/demos/run"), None);
+    }
+
+    #[test]
+    fn a_game_starts_where_and_how_hard_it_was_asked_to() {
+        let args = |exe, map, skill| get_start_args(exe, map, skill).map(|a| a.join(" "));
+        assert_eq!(
+            args("/opt/nyan-doom", Some("MAP07"), 4).as_deref(),
+            Some("-skill 4 -warp 7")
+        );
+        assert_eq!(
+            args("nyan-doom", Some("e1m7"), 3).as_deref(),
+            Some("-skill 3 -warp 1 7")
+        );
+        assert_eq!(
+            args("nyan-doom", Some("MAP00"), 4).as_deref(),
+            Some("-skill 4 -warp 0")
+        );
+        assert_eq!(args("nyan-doom", None, 5).as_deref(), Some("-skill 5"));
+        assert_eq!(
+            args("chocolate-doom", Some("E4M1"), 2).as_deref(),
+            Some("-skill 2 -warp 4 1")
+        );
+        // Only uzdoom can be sent to a map by any other name.
+        assert_eq!(args("nyan-doom", Some("BTW01"), 4), None);
+        assert_eq!(args("nyan-doom", Some("MAP100"), 4), None);
+        assert_eq!(
+            args("uzdoom", Some("BTW01"), 4).as_deref(),
+            Some("-skill 4 +map BTW01")
+        );
+        assert_eq!(
+            args("uzdoom", Some("E1M7"), 1).as_deref(),
+            Some("-skill 1 +map E1M7")
+        );
+        // Nothing past Nightmare, which is where nyan-doom's custom skills begin.
+        assert_eq!(args("nyan-doom", Some("MAP01"), 0), None);
+        assert_eq!(args("nyan-doom", Some("MAP01"), 6), None);
+        assert_eq!(args("helion", Some("MAP01"), 4), None);
+        assert_eq!(args("unknown-sourceport", Some("MAP01"), 4), None);
+    }
+
+    #[test]
+    fn only_doom_names_have_numbers() {
+        assert_eq!(map_numbers("MAP32"), Some((None, 32)));
+        assert_eq!(map_numbers(" e2m9 "), Some((Some(2), 9)));
+        assert_eq!(map_numbers("E0M1"), None);
+        assert_eq!(map_numbers("E1M0"), None);
+        assert_eq!(map_numbers("MAP1"), None);
+        assert_eq!(map_numbers("MAPXY"), None);
+        assert_eq!(map_numbers("TITLEMAP"), None);
     }
 
     #[test]

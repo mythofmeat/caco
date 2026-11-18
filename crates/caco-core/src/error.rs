@@ -95,6 +95,18 @@ pub enum Error {
     #[error("caco can't record demos with {sourceport}")]
     CannotRecord { sourceport: String },
 
+    /// Recording was asked to start on a map the sourceport can't be sent to: one without
+    /// Doom's own name, for a sourceport that only takes `-warp`.
+    #[error("{sourceport} can't be told to start on {map}")]
+    CannotStartAt { sourceport: String, map: String },
+
+    /// The sourceport won't record without a complevel, and the WAD has none, which it would
+    /// otherwise say only after it had opened.
+    #[error(
+        "{sourceport} won't record a demo without a complevel, and {title} has none: set one in Edit"
+    )]
+    RecordNeedsComplevel { title: String, sourceport: String },
+
     /// A zip that only wraps what plays could not be unpacked for the sourceport. Its own
     /// variant rather than handing over the zip instead, since that is what played a `.pk3`
     /// in a zip as the IWAD alone.
