@@ -134,7 +134,7 @@ enum Launch {
 impl Launch {
     fn activity(&self) -> Activity {
         match self {
-            Launch::Play(opts) if opts.record => Activity::Recording,
+            Launch::Play(opts) if opts.record.is_some() => Activity::Recording,
             Launch::Play(_) => Activity::Playing,
             Launch::Demo { .. } => Activity::WatchingDemo,
         }
@@ -578,13 +578,13 @@ impl CacoApp {
         let db_path = self.state.db_path.clone();
         std::thread::spawn(move || {
             let message = match launch {
-                Launch::Play(opts) => session_ended(
-                    wad_id,
-                    opts,
-                    file_here(&db_path, wad_id, &sender).and_then(|conn| {
-                        caco_core::player::play(&conn, wad_id, opts).map_err(Failure::Refused)
-                    }),
-                ),
+                Launch::Play(opts) => {
+                    let outcome = file_here(&db_path, wad_id, &sender).and_then(|conn| {
+                        caco_core::player::play(&conn, wad_id, opts.clone())
+                            .map_err(Failure::Refused)
+                    });
+                    session_ended(wad_id, opts, outcome)
+                }
                 Launch::Demo { demo, opts } => demo_ended(
                     wad_id,
                     file_here(&db_path, wad_id, &sender).and_then(|conn| {
@@ -1097,7 +1097,10 @@ impl CacoApp {
             }
             ActionRequest::PlayAndRecord(wad_id) => {
                 let opts = caco_core::player::PlayOptions {
-                    record: true,
+                    record: Some(caco_core::player::RecordStart {
+                        map: None,
+                        skill: caco_core::player::RecordStart::DEFAULT_SKILL,
+                    }),
                     ..caco_core::player::PlayOptions::default()
                 };
                 self.spawn_launch(wad_id, Launch::Play(opts));

@@ -22,7 +22,7 @@ pub struct FileChangedDialogState {
     opts: PlayOptions,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum FileChangedResult {
     Open,
     PlayAnyway(i64, PlayOptions),
@@ -68,7 +68,7 @@ impl FileChangedDialogState {
                                 self.wad_id,
                                 PlayOptions {
                                     accept_changed_file: true,
-                                    ..self.opts
+                                    ..self.opts.clone()
                                 },
                             );
                         }

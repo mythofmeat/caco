@@ -22,7 +22,7 @@ pub struct NewerSavesDialogState {
     opts: PlayOptions,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum NewerSavesResult {
     Open,
     PlayAnyway(i64, PlayOptions),
@@ -73,7 +73,7 @@ impl NewerSavesDialogState {
                                 self.wad_id,
                                 PlayOptions {
                                     accept_newer_saves: true,
-                                    ..self.opts
+                                    ..self.opts.clone()
                                 },
                             );
                         }

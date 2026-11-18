@@ -71,7 +71,7 @@ impl LinkDialogState {
 
     /// How to play the WAD once it is linked.
     pub fn play_options(&self) -> caco_core::player::PlayOptions {
-        self.play_options
+        self.play_options.clone()
     }
 
     fn handle_picked_file(&mut self, conn: &Connection, path: &Path) -> LinkResult {

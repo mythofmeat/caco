@@ -82,7 +82,7 @@ impl PlayResult {
 }
 
 /// How to launch a WAD with [`play`].
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PlayOptions {
     /// Launch even though the WAD's file plays differently from the one it was
     /// last played with. Without it, [`play`] fails with
@@ -91,10 +91,26 @@ pub struct PlayOptions {
     /// Launch even though another machine has newer saves for it. Without it, [`play`]
     /// fails with [`crate::Error::NewerSavesElsewhere`] so the user can be asked first.
     pub accept_newer_saves: bool,
-    /// Record a demo of the session into the WAD's demos folder, with what it was recorded
-    /// with beside it (see [`demos::record`]). A session like any other otherwise: it is
-    /// timed, its stats are read, and it is asked about first as any launch is.
-    pub record: bool,
+    /// Record a demo of the session, starting where this says, into the WAD's demos folder,
+    /// with what it was recorded with beside it (see [`demos::record`]). A session like any
+    /// other otherwise: it is timed, its stats are read, and it is asked about first as any
+    /// launch is.
+    pub record: Option<RecordStart>,
+}
+
+/// Where and how hard a recording starts. A demo always starts a new game, and nyan-doom will
+/// not record one without being told the skill.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordStart {
+    /// The map, by its lump name, or `None` for wherever a new game starts.
+    pub map: Option<String>,
+    /// 1 (I'm Too Young to Die) to 5 (Nightmare!), as `-skill` takes it.
+    pub skill: u8,
+}
+
+impl RecordStart {
+    /// Ultra-Violence, which is what demos are recorded at unless there is a reason not to.
+    pub const DEFAULT_SKILL: u8 = 4;
 }
 
 /// How to play a demo back with [`play_demo`].
@@ -131,7 +147,7 @@ impl DemoResult {
 /// would fabricate map exits the user never made.
 #[derive(Debug, Clone, Copy)]
 enum LaunchMode<'a> {
-    Play(PlayOptions),
+    Play(&'a PlayOptions),
     Playback {
         demo: &'a Path,
         record: Option<&'a demos::DemoRecord>,
@@ -140,12 +156,13 @@ enum LaunchMode<'a> {
 }
 
 impl LaunchMode<'_> {
-    /// Whether a `-record` already in the settings has to go: in playback, where a
-    /// sourceport given both would record over the demo, and when caco is recording, where
-    /// the first one given is the one a sourceport takes.
-    fn drops_recording_args(self) -> bool {
+    /// Whether what starts a game, already in the settings, has to go (see [`without_start`]):
+    /// in playback, where a `-record` would record over the demo and a `-warp` or `+map`
+    /// would skip or abandon it, and when caco is recording, where the start was chosen and
+    /// chocolate and uzdoom take the first of each flag they are given.
+    fn drops_start_args(self) -> bool {
         match self {
-            LaunchMode::Play(opts) => opts.record,
+            LaunchMode::Play(opts) => opts.record.is_some(),
             LaunchMode::Playback { .. } => true,
         }
     }
@@ -192,6 +209,8 @@ struct PlannedFile {
 /// Where a session is recording to, to find what it wrote once it is over.
 #[derive(Debug, Clone)]
 struct Recording {
+    /// What starts the game it records: `-skill`, and `-warp` or `+map`.
+    start_args: Vec<String>,
     dir: PathBuf,
     /// The name the sourceport was given, which every file it writes starts with.
     base: String,
@@ -373,7 +392,7 @@ pub fn sourceport_for(wad: &db::WadRecord) -> String {
     )
 }
 
-/// Whether Play and Record can record this WAD: whether caco knows how to record with the
+/// Whether Record Demo can record this WAD: whether caco knows how to record with the
 /// sourceport it launches with.
 pub fn can_record(wad: &db::WadRecord) -> bool {
     sourceports::can_record(&sourceport_for(wad))
@@ -461,7 +480,10 @@ fn build_launch(
     // A session that records needs a sourceport that can, and somewhere to put what it
     // writes, which is the demos folder whether or not caco manages the rest.
     let recording = match mode {
-        LaunchMode::Play(opts) if opts.record => Some(prepare_recording(&wad, &plan.sourceport)?),
+        LaunchMode::Play(PlayOptions {
+            record: Some(start),
+            ..
+        }) => Some(prepare_recording(&wad, &plan, start)?),
         _ => None,
     };
 
@@ -818,16 +840,43 @@ fn recorded_sourceport_with(
 }
 
 /// Get ready for a session to record: the sourceport has to be one caco knows how to record
-/// with, and the demos folder has to be there.
-fn prepare_recording(wad: &db::WadRecord, sourceport: &str) -> crate::Result<Recording> {
+/// with, able to start where it was asked to, and given what it needs to record at all, and
+/// the demos folder has to be there. Each is refused here rather than by the sourceport, which
+/// would say so only once it had opened, and in a window of its own.
+fn prepare_recording(
+    wad: &db::WadRecord,
+    plan: &LaunchPlan,
+    start: &RecordStart,
+) -> crate::Result<Recording> {
+    let sourceport = &plan.sourceport;
     if !sourceports::can_record(sourceport) {
         return Err(crate::Error::CannotRecord {
+            sourceport: sourceport_name(sourceport),
+        });
+    }
+    let start_args = sourceports::get_start_args(sourceport, start.map.as_deref(), start.skill)
+        .ok_or_else(|| crate::Error::CannotStartAt {
+            sourceport: sourceport_name(sourceport),
+            map: start.map.clone().unwrap_or_default(),
+        })?;
+    let names_complevel = plan
+        .args
+        .iter()
+        .chain(&plan.custom_args)
+        .any(|a| a.eq_ignore_ascii_case("-complevel"));
+    if sourceports::records_need_complevel(sourceport)
+        && plan.complevel.is_none()
+        && !names_complevel
+    {
+        return Err(crate::Error::RecordNeedsComplevel {
+            title: wad.title.clone(),
             sourceport: sourceport_name(sourceport),
         });
     }
     let dir = demos::demos_dir(&wad_data_dir(wad));
     std::fs::create_dir_all(&dir)?;
     Ok(Recording {
+        start_args,
         base: demos::new_demo_base(&wad.title, chrono::Local::now()),
         before: demos::names_in(&dir),
         dir,
@@ -846,8 +895,8 @@ fn launch_command(
     let sourceport = &plan.sourceport;
     let mut cmd = Command::new(sourceport);
     let arguments = |args: &[String]| {
-        if mode.drops_recording_args() {
-            without_recording(args)
+        if mode.drops_start_args() {
+            without_start(args)
         } else {
             args.to_vec()
         }
@@ -960,13 +1009,15 @@ fn launch_command(
         }
     }
 
-    // Recording and playback go last so nothing layered above can shadow them.
+    // Recording and playback go last so nothing layered above can shadow them, in a
+    // sourceport that takes the last of a flag.
     if let Some(recording) = recording
         && let Some(args) = sourceports::get_record_args(
             sourceport,
             &recording.dir.join(&recording.base).to_string_lossy(),
         )
     {
+        cmd.args(&recording.start_args);
         cmd.args(args);
     }
     if let LaunchMode::Playback { demo, .. } = mode {
@@ -976,15 +1027,23 @@ fn launch_command(
     cmd
 }
 
-/// Arguments without any `-record` and the name after it. Sourceports read their arguments
-/// without regard to case.
-fn without_recording(args: &[String]) -> Vec<String> {
+/// Arguments without what starts a game: `-record`, `-skill`, `-episode` and `+map` with what
+/// follows each, `-warp` with the numbers after it, and nyan-doom's `-uv` and `-nm`, which
+/// set the skill over a `-skill`. Sourceports read their arguments without regard to case.
+fn without_start(args: &[String]) -> Vec<String> {
     let mut out = Vec::with_capacity(args.len());
-    let mut iter = args.iter();
+    let mut iter = args.iter().peekable();
     while let Some(arg) = iter.next() {
-        if arg.eq_ignore_ascii_case("-record") {
+        let is = |flag: &str| arg.eq_ignore_ascii_case(flag);
+        if is("-record") || is("-skill") || is("-episode") || is("+map") {
             iter.next();
-        } else {
+        } else if is("-warp") {
+            for _ in 0..2 {
+                if iter.next_if(|a| a.parse::<i64>().is_ok()).is_none() {
+                    break;
+                }
+            }
+        } else if !(is("-uv") || is("-nm")) {
             out.push(arg.clone());
         }
     }
@@ -1078,8 +1137,8 @@ fn record_of(
         }),
         complevel: plan.complevel,
         profile: plan.profile.clone(),
-        args: without_recording(&plan.args),
-        custom_args: without_recording(&plan.custom_args),
+        args: without_start(&plan.args),
+        custom_args: without_start(&plan.custom_args),
         files,
     }
 }
@@ -1169,7 +1228,7 @@ fn refuse_changed_file(
     conn: &Connection,
     wad: &db::WadRecord,
     current: Option<&identity::FileIdentity>,
-    opts: PlayOptions,
+    opts: &PlayOptions,
 ) -> crate::Result<()> {
     if opts.accept_changed_file {
         return Ok(());
@@ -1196,7 +1255,7 @@ fn refuse_changed_file(
 fn refuse_newer_saves(
     conn: &Connection,
     wad: &db::WadRecord,
-    opts: PlayOptions,
+    opts: &PlayOptions,
 ) -> crate::Result<()> {
     if opts.accept_newer_saves || !config::get_warn_newer_saves() || !config::get_manage_data_dirs()
     {
@@ -1225,7 +1284,7 @@ fn refuse_newer_saves(
 ///
 /// Failing here costs nothing but a question that should not have needed asking, so it
 /// does not fail the session that has just been played.
-fn record_saves(conn: &Connection, wad: &db::WadRecord, data_dir: &Path, opts: PlayOptions) {
+fn record_saves(conn: &Connection, wad: &db::WadRecord, data_dir: &Path, opts: &PlayOptions) {
     let recorded = sync::machine::this_machine()
         .map_err(crate::Error::from)
         .and_then(|machine| {
@@ -1248,7 +1307,7 @@ pub fn play(conn: &Connection, wad_id: i64, opts: PlayOptions) -> crate::Result<
         recording,
         is_zdoom,
         is_helion,
-    } = build_launch(conn, wad_id, LaunchMode::Play(opts))?;
+    } = build_launch(conn, wad_id, LaunchMode::Play(&opts))?;
     let sourceport = plan.sourceport.clone();
     let wad = db::get_wad(conn, wad_id, false)?.ok_or(crate::Error::WadNotFound(wad_id))?;
     let zdoom_stats_dir = wad_data_dir
@@ -1353,7 +1412,7 @@ pub fn play(conn: &Connection, wad_id: i64, opts: PlayOptions) -> crate::Result<
 
     // What the session did to this machine's saves.
     if let Some(ref data_dir) = wad_data_dir {
-        record_saves(conn, &wad, data_dir, opts);
+        record_saves(conn, &wad, data_dir, &opts);
     }
 
     // Auto-track stats
@@ -2659,10 +2718,10 @@ mod tests {
         let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
         let ask = PlayOptions::default();
 
-        assert!(refuse_changed_file(&conn, &wad, Some(&file_playing("v2")), ask).is_ok());
+        assert!(refuse_changed_file(&conn, &wad, Some(&file_playing("v2")), &ask).is_ok());
 
         played(&conn, wad_id, "v1");
-        match refuse_changed_file(&conn, &wad, Some(&file_playing("v2")), ask) {
+        match refuse_changed_file(&conn, &wad, Some(&file_playing("v2")), &ask) {
             Err(crate::Error::WadFileChanged { title, change }) => {
                 assert_eq!(title, "Test WAD");
                 assert_eq!(change.played, "v1");
@@ -2671,13 +2730,13 @@ mod tests {
             }
             other => panic!("expected WadFileChanged, got {other:?}"),
         }
-        assert!(refuse_changed_file(&conn, &wad, Some(&file_playing("v1")), ask).is_ok());
+        assert!(refuse_changed_file(&conn, &wad, Some(&file_playing("v1")), &ask).is_ok());
 
         let accept = PlayOptions {
             accept_changed_file: true,
             ..PlayOptions::default()
         };
-        assert!(refuse_changed_file(&conn, &wad, Some(&file_playing("v2")), accept).is_ok());
+        assert!(refuse_changed_file(&conn, &wad, Some(&file_playing("v2")), &accept).is_ok());
     }
 
     /// A file caco could not hash launches as it did before identities: there
@@ -2689,7 +2748,7 @@ mod tests {
         played(&conn, wad_id, "v1");
         let wad = db::get_wad(&conn, wad_id, false).unwrap().unwrap();
 
-        assert!(refuse_changed_file(&conn, &wad, None, PlayOptions::default()).is_ok());
+        assert!(refuse_changed_file(&conn, &wad, None, &PlayOptions::default()).is_ok());
     }
 
     // --- Demos ---
@@ -2716,7 +2775,11 @@ mod tests {
                 "-RECORD".to_string(),
                 "old".to_string(),
             ],
-            custom_args: vec!["-fast".to_string(), "-record".to_string(), "x".to_string()],
+            custom_args: [
+                "-fast", "-record", "x", "-warp", "3", "-skill", "2", "+map", "MAP03",
+            ]
+            .map(str::to_string)
+            .to_vec(),
             files,
         }
     }
@@ -2731,28 +2794,60 @@ mod tests {
     }
 
     #[test]
-    fn test_without_recording_drops_every_record_and_its_name() {
-        let args: Vec<String> = ["-fast", "-Record", "a", "-nomusic", "-record"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        assert_eq!(without_recording(&args), ["-fast", "-nomusic"]);
+    fn test_without_start_drops_whatever_starts_a_game() {
+        let args = [
+            "-fast",
+            "-Record",
+            "a",
+            "-nomusic",
+            "-skill",
+            "3",
+            "-WARP",
+            "1",
+            "7",
+            "-uv",
+            "-warp",
+            "9",
+            "-file",
+            "x.wad",
+            "+map",
+            "MAP02",
+            "-NM",
+            "-episode",
+            "2",
+            "-warp",
+            "-nomonsters",
+            "-record",
+        ]
+        .map(str::to_string);
+        assert_eq!(
+            without_start(&args),
+            ["-fast", "-nomusic", "-file", "x.wad", "-nomonsters"]
+        );
     }
 
-    #[test]
-    fn test_a_recording_is_told_where_last_and_any_other_record_is_dropped() {
-        let wad = Path::new("/wads/scythe.wad");
-        let plan = chocolate_plan(vec![planned(demos::FileRole::Wad, wad, None)]);
-        let recording = Recording {
+    fn recording_at(start_args: &[&str]) -> Recording {
+        Recording {
+            start_args: start_args.iter().map(|a| a.to_string()).collect(),
             dir: PathBuf::from("/data/demos"),
             base: "scythe_20261118_090000".to_string(),
             before: Default::default(),
-        };
+        }
+    }
+
+    #[test]
+    fn test_a_recording_is_told_where_and_how_last_and_nothing_else_starts_a_game() {
+        let wad = Path::new("/wads/scythe.wad");
+        let plan = chocolate_plan(vec![planned(demos::FileRole::Wad, wad, None)]);
         let opts = PlayOptions {
-            record: true,
+            record: Some(RecordStart {
+                map: Some("MAP07".to_string()),
+                skill: 4,
+            }),
             ..PlayOptions::default()
         };
-        let cmd = launch_command(&plan, wad, None, LaunchMode::Play(opts), Some(&recording));
+        let recording = recording_at(&["-skill", "4", "-warp", "7"]);
+        let cmd = launch_command(&plan, wad, None, LaunchMode::Play(&opts), Some(&recording));
         assert_eq!(
             args_of(&cmd),
             [
@@ -2762,6 +2857,10 @@ mod tests {
                 "-fast",
                 "-file",
                 "/wads/scythe.wad",
+                "-skill",
+                "4",
+                "-warp",
+                "7",
                 "-record",
                 "/data/demos/scythe_20261118_090000",
             ]
@@ -2772,10 +2871,52 @@ mod tests {
             &plan,
             wad,
             None,
-            LaunchMode::Play(PlayOptions::default()),
+            LaunchMode::Play(&PlayOptions::default()),
             None,
         );
-        assert!(args_of(&cmd).contains(&"-RECORD".to_string()));
+        let args = args_of(&cmd);
+        assert!(args.contains(&"-RECORD".to_string()));
+        assert!(args.contains(&"+map".to_string()));
+    }
+
+    #[test]
+    fn test_a_recording_is_refused_what_the_sourceport_would_refuse() {
+        let (conn, wad_id) = fresh_db_with_wad();
+        let wad = crate::db::get_wad(&conn, wad_id, false).unwrap().unwrap();
+        let at = |map: Option<&str>| RecordStart {
+            map: map.map(str::to_string),
+            skill: 4,
+        };
+        let mut plan = chocolate_plan(Vec::new());
+        plan.sourceport = "/opt/bin/nyan-doom".to_string();
+
+        // nyan-doom stops with an error of its own without a complevel.
+        match prepare_recording(&wad, &plan, &at(Some("MAP07"))) {
+            Err(crate::Error::RecordNeedsComplevel { title, sourceport }) => {
+                assert_eq!(
+                    (title.as_str(), sourceport.as_str()),
+                    ("Test WAD", "nyan-doom")
+                );
+            }
+            other => panic!(
+                "expected RecordNeedsComplevel, got {:?}",
+                other.map(|r| r.start_args)
+            ),
+        }
+        // `-warp` names Doom's maps and nothing else.
+        plan.complevel = Some(9);
+        match prepare_recording(&wad, &plan, &at(Some("BTW01"))) {
+            Err(crate::Error::CannotStartAt { map, .. }) => assert_eq!(map, "BTW01"),
+            other => panic!(
+                "expected CannotStartAt, got {:?}",
+                other.map(|r| r.start_args)
+            ),
+        }
+        plan.sourceport = "/opt/bin/helion".to_string();
+        assert!(matches!(
+            prepare_recording(&wad, &plan, &at(None)),
+            Err(crate::Error::CannotRecord { .. })
+        ));
     }
 
     #[test]
@@ -2790,7 +2931,9 @@ mod tests {
         };
         let args = args_of(&launch_command(&plan, wad, None, mode, None));
         assert!(
-            !args.iter().any(|a| a.eq_ignore_ascii_case("-record")),
+            !args.iter().any(|a| ["-record", "-warp", "-skill", "+map"]
+                .iter()
+                .any(|flag| a.eq_ignore_ascii_case(flag))),
             "{args:?}"
         );
         assert_eq!(
