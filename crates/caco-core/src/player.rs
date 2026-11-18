@@ -806,14 +806,14 @@ fn sourceport_name(sourceport: &str) -> String {
 /// Play back a recorded demo for a WAD.
 ///
 /// `demo` names a file in the WAD's demos directory, with or without the
-/// `.lmp` extension; `None` picks the most recent one. Playback reuses the
+/// `.lmp` extension. Playback reuses the
 /// full launch configuration from [`build_launch`], so the complevel,
 /// companion files and id24 resources match the recording — a demo played
 /// back with a different file set desyncs.
 ///
 /// No session is recorded and no stats are collected: watching a demo is not
 /// playtime.
-pub fn play_demo(conn: &Connection, wad_id: i64, demo: Option<&str>) -> crate::Result<PathBuf> {
+pub fn play_demo(conn: &Connection, wad_id: i64, demo: &str) -> crate::Result<PathBuf> {
     let wad = db::get_wad(conn, wad_id, false)?.ok_or(crate::Error::WadNotFound(wad_id))?;
     let data_dir = config::find_wad_data_dir(&wad.data_key, &wad.title)
         .unwrap_or_else(|| config::get_wad_data_dir(&wad.data_key, &wad.title));

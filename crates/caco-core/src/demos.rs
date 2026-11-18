@@ -13,7 +13,6 @@ pub const DEMO_EXTENSION: &str = ".lmp";
 pub struct DemoFile {
     pub path: PathBuf,
     pub name: String,
-    pub rel_path: String,
     pub size: u64,
     pub mtime_iso: String,
 }
@@ -60,11 +59,6 @@ pub fn find_demo_files(data_dir: &Path) -> Vec<DemoFile> {
                         .unwrap_or_default()
                         .to_string_lossy()
                         .into_owned(),
-                    rel_path: path
-                        .strip_prefix(data_dir)
-                        .unwrap_or(&path)
-                        .to_string_lossy()
-                        .into_owned(),
                     size: meta.len(),
                     mtime_iso: mtime,
                     path,
@@ -76,38 +70,22 @@ pub fn find_demo_files(data_dir: &Path) -> Vec<DemoFile> {
     demos
 }
 
-/// Resolve which demo to play back.
-///
-/// With a name, matches it verbatim and then with [`DEMO_EXTENSION`] appended,
-/// so `caco demos play --demo scythe_20250101_120000` works without the
-/// extension. Without one, picks the most recently modified demo — mtime
-/// rather than filename order, because a restored backup or a hand-copied
-/// demo need not sort chronologically the way generated names do.
-pub fn resolve_demo_path(data_dir: &Path, name: Option<&str>) -> crate::Result<PathBuf> {
+/// Resolve a demo in a WAD's demos directory by name: verbatim, and then with
+/// [`DEMO_EXTENSION`] appended.
+pub fn resolve_demo_path(data_dir: &Path, name: &str) -> crate::Result<PathBuf> {
     let demos_dir = get_demos_dir(data_dir);
-
-    if let Some(name) = name {
-        let exact = demos_dir.join(name);
-        if exact.is_file() {
-            return Ok(exact);
-        }
-        let with_ext = demos_dir.join(format!("{name}{DEMO_EXTENSION}"));
-        if with_ext.is_file() {
-            return Ok(with_ext);
-        }
-        return Err(crate::Error::FileNotFound(format!(
-            "Demo '{name}' not found in {}",
-            demos_dir.display()
-        )));
+    let exact = demos_dir.join(name);
+    if exact.is_file() {
+        return Ok(exact);
     }
-
-    find_demo_files(data_dir)
-        .into_iter()
-        .max_by(|a, b| a.mtime_iso.cmp(&b.mtime_iso))
-        .map(|d| d.path)
-        .ok_or_else(|| {
-            crate::Error::FileNotFound(format!("No demos found in {}", demos_dir.display()))
-        })
+    let with_ext = demos_dir.join(format!("{name}{DEMO_EXTENSION}"));
+    if with_ext.is_file() {
+        return Ok(with_ext);
+    }
+    Err(crate::Error::FileNotFound(format!(
+        "Demo '{name}' not found in {}",
+        demos_dir.display()
+    )))
 }
 
 /// Delete demo files from a WAD's demos directory.
@@ -175,8 +153,8 @@ mod tests {
         fs::write(demos_dir.join("run.lmp"), b"data").unwrap();
 
         // Both the bare name and the full filename resolve to the same file.
-        let bare = resolve_demo_path(dir.path(), Some("run")).unwrap();
-        let full = resolve_demo_path(dir.path(), Some("run.lmp")).unwrap();
+        let bare = resolve_demo_path(dir.path(), "run").unwrap();
+        let full = resolve_demo_path(dir.path(), "run.lmp").unwrap();
         assert_eq!(bare, demos_dir.join("run.lmp"));
         assert_eq!(bare, full);
     }
@@ -185,35 +163,6 @@ mod tests {
     fn test_resolve_demo_path_missing_name() {
         let dir = tempfile::tempdir().unwrap();
         fs::create_dir(dir.path().join("demos")).unwrap();
-        assert!(resolve_demo_path(dir.path(), Some("nope")).is_err());
-    }
-
-    #[test]
-    fn test_resolve_demo_path_picks_newest() {
-        use std::time::{Duration, SystemTime};
-
-        let dir = tempfile::tempdir().unwrap();
-        let demos_dir = dir.path().join("demos");
-        fs::create_dir(&demos_dir).unwrap();
-
-        // Name the newer demo so it sorts *first* alphabetically — picking by
-        // filename order would return the wrong one.
-        fs::write(demos_dir.join("aaa.lmp"), b"new").unwrap();
-        fs::write(demos_dir.join("zzz.lmp"), b"old").unwrap();
-
-        let old = SystemTime::now() - Duration::from_secs(3600);
-        fs::File::open(demos_dir.join("zzz.lmp"))
-            .unwrap()
-            .set_modified(old)
-            .unwrap();
-
-        let newest = resolve_demo_path(dir.path(), None).unwrap();
-        assert_eq!(newest, demos_dir.join("aaa.lmp"));
-    }
-
-    #[test]
-    fn test_resolve_demo_path_no_demos() {
-        let dir = tempfile::tempdir().unwrap();
-        assert!(resolve_demo_path(dir.path(), None).is_err());
+        assert!(resolve_demo_path(dir.path(), "nope").is_err());
     }
 }
