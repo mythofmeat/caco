@@ -262,8 +262,17 @@ fn read_doom(data: &[u8]) -> Option<DemoHeader> {
     }
 
     let in_game = data.get(p..p + players_stored)?;
-    let players = in_game[..4].iter().filter(|&&b| b != 0).count();
     p += players_stored;
+    // What a demo's header can hold, which is little enough to tell one from a file that
+    // only happens to start with a byte a demo could: each player is in or out, someone
+    // is playing, and the map is one there could be.
+    if !in_game[..4].iter().all(|&b| b <= 1) || !is_plausible(format, skill, episode, map) {
+        return None;
+    }
+    let players = in_game[..4].iter().filter(|&&b| b != 0).count();
+    if players == 0 {
+        return None;
+    }
 
     let bytes_per_tic = if longtics { 5 } else { 4 } + usize::from(dsda.is_some());
 
@@ -275,8 +284,10 @@ fn read_doom(data: &[u8]) -> Option<DemoHeader> {
             (Some(end_marker), Some(tics))
         }
         None => match find_marker(data, p, bytes_per_tic) {
-            Some((marker, steps)) if players > 0 => (Some(marker), Some((steps / players) as u32)),
-            Some((marker, _)) => (Some(marker), None),
+            Some((marker, steps)) => (Some(marker), Some((steps / players) as u32)),
+            // With no version byte, the end where the tics say it is is the only other sign
+            // this is a demo at all.
+            None if format == DemoFormat::Doom12 => return None,
             None => (None, None),
         },
     };
@@ -293,6 +304,19 @@ fn read_doom(data: &[u8]) -> Option<DemoHeader> {
         tics,
         footer: marker.and_then(|marker| read_footer(data, marker + 1)),
     })
+}
+
+/// Whether a header's numbers are ones a game could have started with. Before Boom there were
+/// five skills and four episodes of nine maps or a Doom 2 of up to 32, written as episode 1;
+/// Boom and later can start anywhere UMAPINFO can name, and dsda adds skills of its own.
+fn is_plausible(format: DemoFormat, skill: u8, episode: u8, map: u8) -> bool {
+    match format {
+        DemoFormat::Doom12 => skill <= 4 && (1..=4).contains(&episode) && (1..=9).contains(&map),
+        DemoFormat::Vanilla(_) => {
+            skill <= 4 && (1..=4).contains(&episode) && (1..=99).contains(&map)
+        }
+        _ => skill <= 7 && episode <= 9 && map <= 99,
+    }
 }
 
 /// Where the end marker is, and how many tics (of every player) come before it, stepping a
@@ -611,6 +635,38 @@ mod tests {
         assert_eq!(DemoHeader::read(b"PWAD\0\0\0\0"), None);
         assert_eq!(DemoHeader::read(&[150, 1, 2, 3]), None);
         assert_eq!(DemoHeader::read(&[255, 1, 2, 3]), None);
+    }
+
+    /// What uzdoom's own lumps that end in `.lmp` were read as before this was checked
+    /// against them: a font, a sprite, an ANIMATED table. Each starts with a byte a Doom 1.2
+    /// demo could, and none is one.
+    #[test]
+    fn test_a_lump_that_starts_like_a_doom_12_demo_is_not_one() {
+        // A patch three wide and eight high, its columns' offsets, and some pixels.
+        let mut patch = vec![3, 0, 8, 0, 0, 0, 0, 0];
+        patch.extend([20, 0, 0, 0, 31, 0, 0, 0, 42, 0, 0, 0]);
+        patch.extend([0, 8, 0, 1, 2, 3, 4, 5, 6, 7, 8, 0, 255]);
+        assert_eq!(DemoHeader::read(&patch), None);
+
+        // Skill, episode 78, map 85.
+        let mut animated = vec![0, 78, 85, 1, 1, 1, 1];
+        animated.extend([0u8; 40]);
+        assert_eq!(DemoHeader::read(&animated), None);
+
+        // A plausible start, but nothing ends where the tics say it should.
+        let mut unended = vec![2, 1, 3, 1, 0, 0, 0];
+        unended.extend([0u8; 10]);
+        assert_eq!(DemoHeader::read(&unended), None);
+    }
+
+    #[test]
+    fn test_a_header_with_nobody_playing_is_not_a_demo() {
+        let mut nobody = vanilla(109, 3, 1, 1, 1);
+        nobody[9] = 0;
+        assert_eq!(DemoHeader::read(&nobody), None);
+        let mut two = vanilla(109, 3, 1, 1, 0);
+        two[10] = 7;
+        assert_eq!(DemoHeader::read(&two), None);
     }
 
     /// What uzdoom's `G_BeginRecording` writes, up to the tics.
