@@ -24,6 +24,9 @@ pub struct LinkDialogState {
     /// Active file picker, if the user clicked "Link Local File". Polled
     /// each frame; resolves to `Some(path)` or `None` (cancelled).
     pending_picker: Option<FileDialogReceiver>,
+    /// How the launch that found the file missing was going to play it, which is how it
+    /// plays once there is a file: Play and Record still records.
+    play_options: caco_core::player::PlayOptions,
 }
 
 /// Result of showing the link dialog.
@@ -49,6 +52,7 @@ impl LinkDialogState {
             last_seen: wad.last_known_path.filter(|path| !path.is_empty()),
             error_message: None,
             pending_picker: None,
+            play_options: caco_core::player::PlayOptions::default(),
         })
     }
 
@@ -57,6 +61,17 @@ impl LinkDialogState {
     pub fn with_failure(mut self, failure: Option<String>) -> Self {
         self.error_message = failure;
         self
+    }
+
+    /// Play with these once the file is linked.
+    pub fn then_play_with(mut self, opts: caco_core::player::PlayOptions) -> Self {
+        self.play_options = opts;
+        self
+    }
+
+    /// How to play the WAD once it is linked.
+    pub fn play_options(&self) -> caco_core::player::PlayOptions {
+        self.play_options
     }
 
     fn handle_picked_file(&mut self, conn: &Connection, path: &Path) -> LinkResult {
@@ -421,6 +436,7 @@ mod tests {
             last_seen: None,
             error_message: None,
             pending_picker: None,
+            play_options: Default::default(),
         };
 
         let store = store();

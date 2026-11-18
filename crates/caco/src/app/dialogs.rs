@@ -6,6 +6,7 @@ use crate::dialogs::Dialog;
 use crate::dialogs::cacoward_link::CacowardLinkResult;
 use crate::dialogs::collections::CollectionsResult;
 use crate::dialogs::delete::DeleteResult;
+use crate::dialogs::demo_differs::DemoDiffersResult;
 use crate::dialogs::edit::EditResult;
 use crate::dialogs::enrich::EnrichResult;
 use crate::dialogs::file_changed::FileChangedResult;
@@ -105,6 +106,13 @@ pub(super) fn render_active_dialog(
                 SessionsResult::Closed => {
                     close_dialog = true;
                 }
+                SessionsResult::PlayDemo { wad_id, demo } => {
+                    follow_up_action = Some(ActionRequest::PlayDemo {
+                        wad_id,
+                        demo,
+                        opts: Default::default(),
+                    });
+                }
                 SessionsResult::Open => {}
             },
             ActiveDialog::Storage(storage_state) => match storage_state.render(ctx, conn) {
@@ -200,18 +208,23 @@ pub(super) fn render_active_dialog(
                 WadDataResult::PlayDemo { wad_id, demo } => {
                     // Stay open — playback runs on a worker thread and the
                     // user usually wants to pick another demo afterwards.
-                    follow_up_action = Some(ActionRequest::PlayDemo(wad_id, demo));
+                    follow_up_action = Some(ActionRequest::PlayDemo {
+                        wad_id,
+                        demo,
+                        opts: Default::default(),
+                    });
                 }
                 WadDataResult::Open => {}
             },
             ActiveDialog::Link(link_state) => match link_state.render(ctx, conn) {
                 LinkResult::Linked(wad_id) => {
+                    let opts = link_state.play_options();
                     close_dialog = true;
                     mark_linked(state);
                     state.mirror_offers.push_back(wad_id);
                     // Whatever a Get was waiting for has come another way.
                     state.gets.stop(GetTarget::Wad(wad_id));
-                    follow_up_action = Some(ActionRequest::Play(wad_id));
+                    follow_up_action = Some(ActionRequest::PlayWith(wad_id, opts));
                 }
                 LinkResult::Get(wad_id) => {
                     close_dialog = true;
@@ -270,6 +283,16 @@ pub(super) fn render_active_dialog(
                     close_dialog = true;
                 }
                 NewerSavesResult::Open => {}
+            },
+            ActiveDialog::DemoDiffers(dialog) => match dialog.render(ctx) {
+                DemoDiffersResult::PlayAnyway { wad_id, demo, opts } => {
+                    close_dialog = true;
+                    follow_up_action = Some(ActionRequest::PlayDemo { wad_id, demo, opts });
+                }
+                DemoDiffersResult::Cancelled => {
+                    close_dialog = true;
+                }
+                DemoDiffersResult::Open => {}
             },
             ActiveDialog::Sync(dialog) => match dialog.render(ctx, state.sync_report.as_ref()) {
                 SyncResult::SyncNow => {

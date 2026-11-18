@@ -236,6 +236,11 @@ pub fn wad_context_menu(response: &egui::Response, wad: &WadRecord) -> Option<Ac
             action = Some(ActionRequest::Play(wad_id));
             ui.close();
         }
+        // Asked only while the menu is open, since it looks the sourceport up.
+        if caco_core::player::can_record(wad) && ui.button("Play and Record").clicked() {
+            action = Some(ActionRequest::PlayAndRecord(wad_id));
+            ui.close();
+        }
         if matches!(wad.status, Status::Completed | Status::Abandoned)
             && ui.button("Start New Playthrough").clicked()
         {
@@ -393,7 +398,7 @@ pub fn library_keys(
     handle_action_keys(ui, state.selected_wad_id)
 }
 
-/// Handle shared action key shortcuts (Enter/P/E/D/S) for WAD views.
+/// Handle shared action key shortcuts (Enter/P/R/E/D/S) for WAD views.
 /// Returns an action if a key was pressed while a WAD is selected.
 pub fn handle_action_keys(ui: &egui::Ui, selected_wad_id: Option<i64>) -> Option<ActionRequest> {
     let wad_id = selected_wad_id?;
@@ -401,6 +406,10 @@ pub fn handle_action_keys(ui: &egui::Ui, selected_wad_id: Option<i64>) -> Option
 
     if pressed(egui::Key::Enter) || pressed(egui::Key::P) {
         return Some(ActionRequest::Play(wad_id));
+    }
+    // Plain R only: Ctrl+R reads the mirrors again.
+    if pressed(egui::Key::R) {
+        return Some(ActionRequest::PlayAndRecord(wad_id));
     }
     if pressed(egui::Key::E) {
         return Some(ActionRequest::Edit(wad_id));

@@ -150,7 +150,12 @@ fn the_rest(ui: &mut egui::Ui, wad: &WadRecord, state: &AppState) -> Option<Acti
     let mut action = None;
     let stats = state.stats_map.get(&wad.id);
     let progress = state.map_progress(wad);
-    facts(ui, stats, progress.as_ref());
+    let demos = state
+        .details
+        .as_ref()
+        .filter(|d| d.wad_id == wad.id)
+        .map_or(0, |d| d.demos);
+    facts(ui, stats, progress.as_ref(), demos);
 
     ui.add_space(2.0);
     pick(&mut action, tool_buttons(ui, wad.id));
@@ -237,17 +242,35 @@ fn main_button(ui: &mut egui::Ui, wad: &WadRecord, state: &AppState) -> Option<A
     let wide = egui::vec2(ui.available_width(), 28.0);
     let filled = |text: &str| theme::primary_button(text);
     let quiet = |text: &str| egui::Button::new(text);
+    let can_record = state
+        .details
+        .as_ref()
+        .is_some_and(|d| d.wad_id == wad.id && d.can_record);
+    let record = |ui: &mut egui::Ui| {
+        (can_record
+            && ui
+                .add_sized(wide, quiet("Play and Record"))
+                .on_hover_text("Records a demo of the session. Or press R")
+                .clicked())
+        .then_some(ActionRequest::PlayAndRecord(wad.id))
+    };
     match action {
-        MainAction::Play => ui
-            .add_sized(wide, filled("Play"))
-            .on_hover_text("Enter")
-            .clicked()
-            .then_some(ActionRequest::Play(wad.id)),
-        MainAction::DownloadAndPlay => ui
-            .add_sized(wide, filled("Download & Play"))
-            .on_hover_text("The file isn't on this machine yet, and caco can fetch it.")
-            .clicked()
-            .then_some(ActionRequest::Play(wad.id)),
+        MainAction::Play => {
+            let play = ui
+                .add_sized(wide, filled("Play"))
+                .on_hover_text("Enter")
+                .clicked()
+                .then_some(ActionRequest::Play(wad.id));
+            play.or(record(ui))
+        }
+        MainAction::DownloadAndPlay => {
+            let play = ui
+                .add_sized(wide, filled("Download & Play"))
+                .on_hover_text("The file isn't on this machine yet, and caco can fetch it.")
+                .clicked()
+                .then_some(ActionRequest::Play(wad.id));
+            play.or(record(ui))
+        }
         MainAction::GetInBrowser => {
             let mut action = ui
                 .add_sized(wide, filled("Get in Browser"))
@@ -383,7 +406,12 @@ fn fact(ui: &mut egui::Ui, label: &str, value: &str) {
     ui.end_row();
 }
 
-fn facts(ui: &mut egui::Ui, stats: Option<&WadStats>, progress: Option<&MapProgress>) {
+fn facts(
+    ui: &mut egui::Ui,
+    stats: Option<&WadStats>,
+    progress: Option<&MapProgress>,
+    demos: usize,
+) {
     if let Some(progress) = progress {
         ui.add_space(2.0);
         let (bar, _) =
@@ -395,7 +423,7 @@ fn facts(ui: &mut egui::Ui, stats: Option<&WadStats>, progress: Option<&MapProgr
         );
     }
 
-    let lines = played_lines(stats);
+    let lines = played_lines(stats, demos);
     if lines.is_empty() {
         return;
     }
@@ -408,11 +436,18 @@ fn facts(ui: &mut egui::Ui, stats: Option<&WadStats>, progress: Option<&MapProgr
 }
 
 /// What has happened with it so far, if anything has.
-fn played_lines(stats: Option<&WadStats>) -> Vec<(&'static str, String)> {
+fn played_lines(stats: Option<&WadStats>, demos: usize) -> Vec<(&'static str, String)> {
     let mut lines = Vec::new();
-    let Some(stats) = stats else {
-        return lines;
-    };
+    if let Some(stats) = stats {
+        session_lines(stats, &mut lines);
+    }
+    if demos > 0 {
+        lines.push(("Demos", demos.to_string()));
+    }
+    lines
+}
+
+fn session_lines(stats: &WadStats, lines: &mut Vec<(&'static str, String)>) {
     if stats.playtime > 0 {
         let played = caco_core::player::format_duration(stats.playtime);
         lines.push((
@@ -436,7 +471,6 @@ fn played_lines(stats: Option<&WadStats>) -> Vec<(&'static str, String)> {
         2 => lines.push(("Finished", "Twice".to_string())),
         n => lines.push(("Finished", format!("{n} times"))),
     }
-    lines
 }
 
 fn chip(ui: &mut egui::Ui, text: &str, color: egui::Color32, hint: &str) -> bool {
@@ -664,14 +698,14 @@ mod tests {
 
     #[test]
     fn a_wad_nothing_has_happened_to_has_nothing_to_say_about_it() {
-        assert_eq!(played_lines(None), Vec::new());
+        assert_eq!(played_lines(None, 0), Vec::new());
         let stats = WadStats {
             playtime: 0,
             last_played: None,
             session_count: 0,
             times_beaten: 0,
         };
-        assert_eq!(played_lines(Some(&stats)), Vec::new());
+        assert_eq!(played_lines(Some(&stats), 0), Vec::new());
     }
 
     #[test]
@@ -683,12 +717,17 @@ mod tests {
             times_beaten: 2,
         };
         assert_eq!(
-            played_lines(Some(&stats)),
+            played_lines(Some(&stats), 0),
             vec![
                 ("Played", "3h 0m, 2 sessions".to_string()),
                 ("Finished", "Twice".to_string()),
             ]
         );
+    }
+
+    #[test]
+    fn demos_are_counted_when_there_are_any() {
+        assert_eq!(played_lines(None, 2), vec![("Demos", "2".to_string())]);
     }
 
     #[test]

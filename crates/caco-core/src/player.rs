@@ -633,9 +633,13 @@ fn plan_from_record(
     });
 
     // A profile only matters to a sourceport given one, and one that has gone would be
-    // started again empty.
+    // started again empty. Not the default, which caco makes empty the first time a
+    // sourceport is launched, so a machine that never has would hear about it every time.
     let takes_profile = !sourceports::get_config_args(&sourceport, "").is_empty();
-    if takes_profile && !config::get_profile_path(&sourceport, &record.profile).exists() {
+    if takes_profile
+        && record.profile != "default"
+        && !config::get_profile_path(&sourceport, &record.profile).exists()
+    {
         differences.push(DemoDifference::ProfileMissing {
             name: record.profile.clone(),
         });

@@ -182,6 +182,47 @@ pub fn new_demo_base(title: &str, at: chrono::DateTime<chrono::Local>) -> String
     )
 }
 
+/// Whether a WAD's maps go by episode (E1M1) rather than number (MAP01), for reading the
+/// numbers in a demo's header, which are the same for Doom's first episode and Doom 2: by its
+/// maps when they have been read, else by its IWAD.
+pub fn uses_episode_names(maps: &[String], iwad: Option<&str>) -> bool {
+    let episode_map = |name: &str| {
+        let b = name.as_bytes();
+        b.len() == 4
+            && b[0].eq_ignore_ascii_case(&b'E')
+            && b[1].is_ascii_digit()
+            && b[2].eq_ignore_ascii_case(&b'M')
+            && b[3].is_ascii_digit()
+    };
+    if maps.iter().any(|m| episode_map(m)) {
+        return true;
+    }
+    if maps
+        .iter()
+        .any(|m| m.len() >= 5 && m[..3].eq_ignore_ascii_case("MAP"))
+    {
+        return false;
+    }
+    iwad.map(|iwad| iwad.trim().to_ascii_lowercase())
+        .is_some_and(|iwad| {
+            let stem = iwad.trim_end_matches(".wad");
+            let stem = stem.rsplit(['/', '\\']).next().unwrap_or(stem);
+            matches!(
+                stem,
+                "doom"
+                    | "doom1"
+                    | "doomu"
+                    | "udoom"
+                    | "ultimate"
+                    | "freedoom1"
+                    | "heretic"
+                    | "heretic1"
+                    | "chex"
+                    | "chex3"
+            )
+        })
+}
+
 /// The demo files in a folder, by name: what was there before a session, to tell what it wrote.
 pub fn names_in(dir: &Path) -> HashSet<String> {
     let Ok(entries) = fs::read_dir(dir) else {
@@ -480,6 +521,17 @@ mod tests {
         fs::write(&unnamed, &vanilla).unwrap();
         let added = add_demo_from_file(dir.path(), &unnamed).unwrap();
         assert_eq!(added, demos_dir(dir.path()).join("run.lmp"));
+    }
+
+    #[test]
+    fn test_episode_names_come_from_the_maps_and_then_the_iwad() {
+        let maps = |names: &[&str]| names.iter().map(|n| n.to_string()).collect::<Vec<_>>();
+        assert!(uses_episode_names(&maps(&["E1M1", "E1M2"]), Some("doom2")));
+        assert!(!uses_episode_names(&maps(&["MAP01"]), Some("doom")));
+        assert!(uses_episode_names(&[], Some("doom")));
+        assert!(uses_episode_names(&[], Some("/iwads/DOOM.WAD")));
+        assert!(!uses_episode_names(&[], Some("doom2")));
+        assert!(!uses_episode_names(&[], None));
     }
 
     #[test]

@@ -180,6 +180,8 @@ pub enum AppMessage {
     PlayUnavailable {
         wad_id: i64,
         reason: Option<String>,
+        /// How the launch was going to play it, which it still should once linked.
+        opts: caco_core::player::PlayOptions,
     },
     /// The WAD's file plays differently from the one it was last played with,
     /// so the launch stopped to ask. Opens the "File Changed" dialog.
@@ -197,6 +199,18 @@ pub enum AppMessage {
         title: String,
         saves: caco_core::sync::NewerSaves,
         opts: caco_core::player::PlayOptions,
+    },
+    /// A demo's playback ended, or could not start.
+    DemoFinished {
+        outcome: Result<caco_core::player::DemoResult, String>,
+    },
+    /// A demo can't be played back the way it was recorded, so the launch stopped to ask.
+    /// Opens the "Not As Recorded" dialog.
+    DemoDiffers {
+        wad_id: i64,
+        title: String,
+        demo: String,
+        differences: Vec<caco_core::demos::DemoDifference>,
     },
     /// A pass of the sync worker has something to report.
     SyncFinished(SyncRun),

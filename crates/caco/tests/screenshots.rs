@@ -523,6 +523,134 @@ impl Shooter {
         id
     }
 
+    /// A WAD with three demos: one caco recorded, against a file and a companion that have
+    /// both gone since, which a session in Sessions names; one a dsda-family sourceport
+    /// recorded somewhere else, which says so in its footer; and a ZDoom one. Returns the WAD
+    /// and the folder they are in.
+    fn add_wad_with_demos(&self) -> (i64, PathBuf) {
+        use caco_core::demos::record::{RecordedBuild, RecordedFile};
+        use caco_core::demos::{self, DemoRecord, FileRole};
+
+        let id = self.add_manual_wad_with_file("A Wad With Demos", 999_200);
+        let conn = caco_core::db::open_connection(&self.home.join("library.db")).expect("open db");
+        let wad = caco_core::db::get_wad(&conn, id, false)
+            .expect("read WAD")
+            .expect("the WAD");
+        conn.execute(
+            "INSERT INTO sessions (wad_id, started_at, ended_at, duration_seconds, sourceport) \
+             VALUES (?1, '2026-10-12T19:30:00+00:00', '2026-10-12T19:32:00+00:00', 120, \
+             '/usr/bin/nyan-doom')",
+            [id],
+        )
+        .expect("record the session that recorded it");
+        let session: String = conn
+            .query_row("SELECT uid FROM sessions WHERE wad_id = ?1", [id], |r| {
+                r.get(0)
+            })
+            .expect("its uid");
+
+        let dir = demos::demos_dir(&caco_core::config::get_wad_data_dir(
+            &wad.data_key,
+            &wad.title,
+        ));
+        std::fs::create_dir_all(&dir).expect("create demos dir");
+
+        // Doom 1.9, UV, MAP07, a minute and a half.
+        let mut vanilla = vec![109, 3, 1, 7, 0, 0, 0, 0, 0, 1, 0, 0, 0];
+        vanilla.extend(std::iter::repeat_n(0u8, 4 * 35 * 95));
+        vanilla.push(0x80);
+        let recorded = dir.join("a-wad-with-demos_20261012_193000.lmp");
+        std::fs::write(&recorded, &vanilla).expect("write recorded demo");
+        let record = DemoRecord {
+            version: demos::record::RECORD_VERSION,
+            session: Some(session),
+            recorded_at: "2026-10-12T19:30:00+00:00".to_string(),
+            sourceport: "nyan-doom".to_string(),
+            build: Some(RecordedBuild {
+                git_ref: "v1.2.1".to_string(),
+                commit: "1".repeat(40),
+            }),
+            iwad: None,
+            complevel: Some(2),
+            profile: "default".to_string(),
+            args: Vec::new(),
+            custom_args: Vec::new(),
+            files: vec![
+                RecordedFile {
+                    role: FileRole::Companion,
+                    name: "fix.deh".to_string(),
+                    sha256: None,
+                    md5: Some("0".repeat(32)),
+                },
+                RecordedFile {
+                    role: FileRole::Wad,
+                    name: "a-wad-with-demos.wad".to_string(),
+                    sha256: Some("0".repeat(64)),
+                    md5: None,
+                },
+            ],
+        };
+        demos::write_record(&recorded, &record).expect("write its record");
+
+        // PrBoom+ at complevel 9's format, HMP, MAP12, twenty seconds, with dsda's footer.
+        let mut boom = vec![211, 0x1d, b'B', b'o', b'o', b'm', 0xe6, 0, 2, 1, 12, 0, 0];
+        boom.extend([0u8; 64]);
+        let mut in_game = [0u8; 32];
+        in_game[0] = 1;
+        boom.extend(in_game);
+        boom.extend(std::iter::repeat_n(0u8, 4 * 35 * 20));
+        boom.push(0x80);
+        let lumps: [(&str, &str); 2] = [
+            ("PORTNAME", "dsda-doom 0.29.4"),
+            (
+                "CMDLINE",
+                "-iwad \"doom2.wad\" -file \"a-wad-with-demos.wad\" -complevel 9",
+            ),
+        ];
+        let mut body: Vec<u8> = Vec::new();
+        let mut directory: Vec<u8> = Vec::new();
+        for (name, text) in lumps {
+            directory.extend((12 + body.len() as u32).to_le_bytes());
+            directory.extend((text.len() as u32).to_le_bytes());
+            let mut lump = [0u8; 8];
+            lump[..name.len()].copy_from_slice(name.as_bytes());
+            directory.extend(lump);
+            body.extend(text.as_bytes());
+        }
+        boom.extend(b"PWAD");
+        boom.extend(2u32.to_le_bytes());
+        boom.extend((12 + body.len() as u32).to_le_bytes());
+        boom.extend(body);
+        boom.extend(directory);
+        std::fs::write(dir.join("map12-hmp-max.lmp"), boom).expect("write footed demo");
+
+        // A ZDoom demo, which says its map and skill but not its length.
+        let chunk = |id: &[u8; 4], body: &[u8]| {
+            let mut out = id.to_vec();
+            out.extend((body.len() as u32).to_be_bytes());
+            out.extend(body);
+            if body.len() % 2 == 1 {
+                out.push(0);
+            }
+            out
+        };
+        let mut header = 2u16.to_be_bytes().to_vec();
+        header.extend([2, 3]);
+        header.extend(b"MAP01\0");
+        header.extend([0, 0, 0, 0, 0]);
+        let mut chunks = chunk(b"ZDHD", &header);
+        chunks.extend(chunk(b"UINF", b"\0\\name\\Player\0"));
+        chunks.extend(chunk(b"VARS", b"\\skill\\4\0"));
+        chunks.extend(chunk(b"BODY", &[0x78, 0x9c]));
+        let mut zdoom = b"FORM".to_vec();
+        zdoom.extend((4 + chunks.len() as u32).to_be_bytes());
+        zdoom.extend(b"ZDEM");
+        zdoom.extend(chunks);
+        std::fs::write(dir.join("uzdoom-nightmare.lmp"), zdoom).expect("write ZDoom demo");
+
+        (id, dir)
+    }
+
     /// Put an event in another machine's log, as if a sync tool had just brought it. Clocks
     /// from long ago, so that nothing here depends on what else has happened.
     fn other_machine_says(
@@ -1268,6 +1396,92 @@ fn shoot_every_surface() {
         }),
     );
     s.purge_wad(changed);
+
+    // A WAD's demos: what each says about itself, renamed for real, the session that
+    // recorded one, and the question asked when it can't be played the way it was
+    // recorded, which only playback reaches.
+    let (with_demos, demos_dir) = s.add_wad_with_demos();
+    record(
+        "saves-demos-demos",
+        s.shot_dialog_after(
+            "dlg-saves-demos-demos",
+            ActionRequest::WadData(with_demos),
+            |s| {
+                s.harness.get_by_label("Demos (3)").click();
+                s.settle(3, Duration::ZERO);
+                s.harness.get_by_label("MAP07");
+                s.harness.get_by_label("Add From File");
+            },
+        ),
+    );
+    record(
+        "saves-demos-rename",
+        s.shot_dialog_after(
+            "dlg-saves-demos-rename",
+            ActionRequest::WadData(with_demos),
+            |s| {
+                s.harness.get_by_label("Demos (3)").click();
+                s.settle(2, Duration::ZERO);
+                s.harness.get_by_label("Rename").click();
+                s.settle(2, Duration::ZERO);
+                s.type_into("New name", " uv");
+            },
+        ),
+    );
+    record(
+        "saves-demos-renamed",
+        s.shot_dialog_after(
+            "dlg-saves-demos-renamed",
+            ActionRequest::WadData(with_demos),
+            |s| {
+                s.harness.get_by_label("Demos (3)").click();
+                s.settle(2, Duration::ZERO);
+                s.harness.get_by_label("Rename").click();
+                s.settle(2, Duration::ZERO);
+                s.type_into("New name", " uv");
+                s.harness.get_by_label("Rename").click();
+                s.settle(2, Duration::ZERO);
+                s.harness
+                    .get_by_label_contains("Renamed a-wad-with-demos_20261012_193000.lmp");
+            },
+        ),
+    );
+    let renamed = demos_dir.join("a-wad-with-demos_20261012_193000 uv.lmp");
+    assert!(renamed.is_file(), "Rename left no demo by the new name");
+    assert!(
+        caco_core::demos::read_record(&renamed).is_some(),
+        "Rename left the record behind"
+    );
+    record(
+        "sessions-demos",
+        s.shot_dialog_after(
+            "dlg-sessions-demos",
+            ActionRequest::Sessions(with_demos),
+            |s| {
+                s.harness.get_by_label("Play Demo");
+            },
+        ),
+    );
+    record(
+        "demo-differs",
+        s.shot_dialog_after(
+            "dlg-demo-differs",
+            ActionRequest::PlayDemo {
+                wad_id: with_demos,
+                demo: "a-wad-with-demos_20261012_193000 uv.lmp".to_string(),
+                opts: Default::default(),
+            },
+            |s| {
+                s.wait_for("playback to stop and ask", |s| {
+                    s.harness.query_by_label("Play Anyway").is_some()
+                });
+                s.harness
+                    .get_by_label_contains("The WAD's file has changed");
+                s.harness.get_by_label_contains("fix.deh");
+            },
+        ),
+    );
+    s.purge_wad(with_demos);
 
     // The Sync tool, on a machine that has only heard from itself, then with another
     // machine's log arrived the way a sync tool leaves it: a WAD, sessions, a session of a

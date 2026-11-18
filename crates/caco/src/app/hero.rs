@@ -9,7 +9,7 @@ use caco_core::db::{Status, WadRecord};
 use std::collections::HashMap;
 
 use crate::panels;
-use crate::state::{ActionRequest, AppState, MapProgress, PlayState};
+use crate::state::{ActionRequest, Activity, AppState, MapProgress, PlayState};
 use crate::theme;
 use crate::thumbnails::ThumbnailManager;
 
@@ -28,12 +28,13 @@ pub(super) fn render_now_playing_hero(
             wad_id,
             wad_title,
             downloading,
-        } => (*wad_id, wad_title.clone(), true, *downloading),
+            activity,
+        } => (*wad_id, wad_title.clone(), Some(activity), *downloading),
         // Searching for something, it would only push the answer down the page.
         PlayState::Idle if !state.filter.applied.is_empty() => return None,
         PlayState::Idle => {
             let wad = continue_playing(&state.wads, &state.stats_map)?;
-            (wad.id, wad.title.clone(), false, false)
+            (wad.id, wad.title.clone(), None, false)
         }
     };
     let wad = state.wads.iter().find(|wad| wad.id == wad_id);
@@ -45,10 +46,13 @@ pub(super) fn render_now_playing_hero(
         .map(|stats| caco_core::player::format_duration(stats.playtime));
     let progress = wad.and_then(|wad| state.map_progress(wad));
     let heading = match (is_active, downloading) {
-        (true, true) => "DOWNLOADING",
-        (true, false) => "NOW PLAYING",
-        (false, _) => "CONTINUE PLAYING",
+        (Some(_), true) => "DOWNLOADING",
+        (Some(Activity::Playing), false) => "NOW PLAYING",
+        (Some(Activity::Recording), false) => "RECORDING",
+        (Some(Activity::WatchingDemo(_)), false) => "WATCHING A DEMO",
+        (None, _) => "CONTINUE PLAYING",
     };
+    let is_active = is_active.is_some();
 
     let short = theme::is_short_window(ui.ctx());
     let (margin_y, thumb_size) = if short {

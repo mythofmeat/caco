@@ -916,3 +916,24 @@ fn a_menu_that_is_open_has_the_keys() {
         "Enter in the menu played the WAD"
     );
 }
+
+/// R plays the selected WAD and records it. A WAD with no file asks for one first, as Enter
+/// does, and Ctrl+R, which reads the mirrors again, does neither.
+#[test]
+fn r_plays_the_selected_wad_and_records_it() {
+    let db_path = library("record-key", 1);
+    let mut app = open_app(&db_path, DEFAULT_WINDOW);
+
+    app.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::R);
+    settle(&mut app);
+    assert!(
+        app.query_by_role(Role::Window).is_none(),
+        "Ctrl+R played it"
+    );
+
+    press(&mut app, egui::Key::R);
+    wait_until(&mut app, "the launch to ask for the file", |app| {
+        app.query_by_role_and_label(Role::Window, "WAD Unavailable")
+            .is_some()
+    });
+}
