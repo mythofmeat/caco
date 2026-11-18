@@ -34,6 +34,7 @@ fn render_left(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Action
     if let PlayState::Playing {
         wad_title,
         downloading,
+        activity,
         ..
     } = &state.play_state
     {
@@ -43,7 +44,7 @@ fn render_left(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Action
             ui.spinner();
             "Downloading"
         } else {
-            "Playing"
+            activity.doing()
         };
         ui.colored_label(
             theme::status_color(Status::InProgress),

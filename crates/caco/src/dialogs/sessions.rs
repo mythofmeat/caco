@@ -6,8 +6,11 @@ use crate::theme;
 
 /// State for the session history dialog.
 pub struct SessionsDialogState {
+    wad_id: i64,
     wad_title: String,
     sessions: Vec<SessionRow>,
+    /// Whether any session recorded a demo, which is when there is a column for them.
+    any_demos: bool,
 }
 
 struct SessionRow {
@@ -18,19 +21,33 @@ struct SessionRow {
     maps: String,
     status_text: String,
     crashed: bool,
+    /// The demos it recorded, by file name: more than one when a sourceport made one per
+    /// restart.
+    demos: Vec<String>,
 }
 
 /// Result of showing the sessions dialog.
 pub enum SessionsResult {
     Open,
     Closed,
+    /// Play back a demo a session recorded.
+    PlayDemo {
+        wad_id: i64,
+        demo: String,
+    },
 }
 
 impl SessionsDialogState {
     /// Create a new sessions dialog, loading session history from the DB.
     pub fn new(conn: &Connection, wad_id: i64) -> Option<Self> {
         let wad = caco_core::db::wads::get_wad(conn, wad_id, false).ok()??;
-        let sessions = caco_core::db::sessions::get_sessions(conn, wad_id).ok()?;
+        // A demo's record names the session that recorded it, by the uid every machine
+        // knows it by. A session that recorded one is shown however short it was.
+        let mut demos = caco_core::config::find_wad_data_dir(&wad.data_key, &wad.title)
+            .map(|dir| caco_core::demos::demos_by_session(&dir))
+            .unwrap_or_default();
+        let keep = demos.keys().cloned().collect();
+        let sessions = caco_core::db::sessions::get_sessions_keeping(conn, wad_id, &keep).ok()?;
 
         let rows: Vec<SessionRow> = sessions
             .iter()
@@ -79,12 +96,19 @@ impl SessionsDialogState {
                     maps,
                     status_text,
                     crashed,
+                    demos: s
+                        .uid
+                        .as_ref()
+                        .and_then(|uid| demos.remove(uid))
+                        .unwrap_or_default(),
                 }
             })
             .collect();
 
         Some(Self {
+            wad_id,
             wad_title: wad.title,
+            any_demos: rows.iter().any(|row| !row.demos.is_empty()),
             sessions: rows,
         })
     }
@@ -106,7 +130,14 @@ impl SessionsDialogState {
                              caco.",
                             );
                         },
-                        |ui, height| self.render_table(ui, height),
+                        |ui, height| {
+                            if let Some(demo) = self.render_table(ui, height) {
+                                result = SessionsResult::PlayDemo {
+                                    wad_id: self.wad_id,
+                                    demo,
+                                };
+                            }
+                        },
                     )
                     .buttons(|row| {
                         if row.close() {
@@ -122,7 +153,8 @@ impl SessionsDialogState {
         result
     }
 
-    fn render_table(&self, ui: &mut egui::Ui, height: f32) {
+    /// The sessions, one a row. Returns a demo to play back, if one of their buttons was pressed.
+    fn render_table(&self, ui: &mut egui::Ui, height: f32) -> Option<String> {
         ui.colored_label(
             theme::TEXT_SECONDARY,
             count(self.sessions.len(), "session", "sessions"),
@@ -131,16 +163,23 @@ impl SessionsDialogState {
 
         let text_height = ui.text_style_height(&egui::TextStyle::Body);
         let row_height = text_height + 6.0;
+        let mut play = None;
 
-        dialog_table(ui, height - 60.0)
+        let mut table = dialog_table(ui, height - 60.0)
             .column(Column::initial(90.0).at_least(70.0)) // Date
             .column(Column::initial(55.0).at_least(45.0)) // Time
             .column(Column::initial(75.0).at_least(50.0)) // Duration
             .column(Column::initial(100.0).at_least(60.0).clip(true)) // Sourceport
             .column(Column::remainder().at_least(100.0).clip(true)) // Maps
-            .column(Column::initial(80.0).at_least(50.0)) // Status
+            .column(Column::initial(80.0).at_least(50.0)); // Status
+        let mut headers = vec!["Date", "Time", "Duration", "Sourceport", "Maps", "Status"];
+        if self.any_demos {
+            table = table.column(Column::initial(90.0).at_least(80.0)); // Demo
+            headers.push("Demo");
+        }
+        table
             .header(row_height + 2.0, |mut header| {
-                for label in ["Date", "Time", "Duration", "Sourceport", "Maps", "Status"] {
+                for label in headers {
                     header.col(|ui| {
                         ui.label(theme::column_header(label));
                     });
@@ -174,8 +213,41 @@ impl SessionsDialogState {
                         };
                         ui.colored_label(color, &s.status_text);
                     });
+                    if self.any_demos {
+                        row.col(|ui| {
+                            if let Some(demo) = demo_button(ui, &s.demos) {
+                                play = Some(demo);
+                            }
+                        });
+                    }
                 });
             });
+        play
+    }
+}
+
+/// What plays back a session's demo: a button for one, and a menu of them for a session that
+/// recorded several. Returns the demo chosen.
+fn demo_button(ui: &mut egui::Ui, demos: &[String]) -> Option<String> {
+    match demos {
+        [] => None,
+        [one] => ui
+            .small_button("Play Demo")
+            .on_hover_text(one)
+            .clicked()
+            .then(|| one.clone()),
+        many => {
+            let mut chosen = None;
+            ui.menu_button(format!("{} Demos", many.len()), |ui| {
+                for demo in many {
+                    if ui.button(demo).clicked() {
+                        chosen = Some(demo.clone());
+                        ui.close();
+                    }
+                }
+            });
+            chosen
+        }
     }
 }
 

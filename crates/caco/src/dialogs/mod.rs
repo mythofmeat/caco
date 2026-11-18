@@ -5,6 +5,7 @@ pub mod cacoward_link;
 pub mod collections;
 pub mod companions;
 pub mod delete;
+pub mod demo_differs;
 pub mod edit;
 pub mod enrich;
 pub mod file_changed;

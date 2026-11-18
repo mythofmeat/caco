@@ -1,8 +1,15 @@
 //! Per-WAD save, backup, and demo management: all one dialog, since all of it is in the
-//! same folder. Destructive actions stage a confirmation instead of acting on the click.
+//! same folder. Destructive actions stage a confirmation instead of acting on the click, and a
+//! rename asks for the name in the same place.
+//!
+//! A demo is listed by what it says about itself (`caco_core::demos::header`) and by what caco
+//! recorded it with (`caco_core::demos::record`), not by its file: a file's time is whenever a
+//! sync tool last wrote it, and its name is whatever somebody called it.
 
 use std::path::PathBuf;
+use std::sync::mpsc;
 
+use caco_core::demos::export::{self, ExportPlan};
 use egui_extras::Column;
 use rusqlite::Connection;
 
@@ -10,8 +17,12 @@ use caco_core::demos::{self, DemoFile};
 use caco_core::saves::{self, BackupInfo, SaveFile};
 use caco_core::utils::format_size;
 
-use crate::dialogs::{Dialog, Primary, StatusLine, count, dialog_table, tab_bar};
+use crate::dialogs::{Dialog, Primary, StatusLine, count, dialog_table, form_label, tab_bar};
 use crate::theme;
+use crate::workers::{FileDialogReceiver, FileDialogRequest, spawn_file_dialog};
+
+/// What a column says when there is nothing to say.
+const NOTHING: &str = "\u{2014}";
 
 #[derive(PartialEq, Eq, Clone, Copy)]
 enum Tab {
@@ -20,12 +31,26 @@ enum Tab {
     Demos,
 }
 
-/// A destructive action awaiting confirmation.
+/// An action awaiting confirmation: a destructive one, or a rename awaiting its name.
 enum Pending {
     CleanSaves,
     RestoreBackup(usize),
     DeleteDemo(usize),
     CleanDemos,
+    RenameDemo {
+        idx: usize,
+        name: String,
+        /// The field has had focus given to it, which happens once.
+        focused: bool,
+    },
+    /// Which demos go in a zip, and whether the WAD's files go with them.
+    Export {
+        all: bool,
+        with_wads: bool,
+        /// What exporting them with the WAD's files would hold, to say what that costs and
+        /// what isn't here to go.
+        preview: ExportPlan,
+    },
 }
 
 pub struct WadDataDialogState {
@@ -41,6 +66,18 @@ pub struct WadDataDialogState {
     selected_demo: Option<usize>,
     pending: Option<Pending>,
     status: Option<StatusLine>,
+    /// Whether the WAD's maps go by episode, to read a demo's start map by.
+    episode_names: bool,
+    /// Add From File's picker, while it is open.
+    picker: Option<FileDialogReceiver>,
+    /// Add From File was pressed, and the picker opens once there is a context to open it with.
+    open_picker: bool,
+    /// An export, while the user picks where it goes.
+    export_picker: Option<(ExportPlan, FileDialogReceiver)>,
+    /// An export being written on a worker, which says how it went.
+    exporting: Option<mpsc::Receiver<Result<String, String>>>,
+    /// Export was pressed, and is asked about once there is a library to plan it with.
+    export_asked: bool,
 }
 
 pub enum WadDataResult {
@@ -60,6 +97,12 @@ impl WadDataDialogState {
         let wad = caco_core::db::get_wad(conn, wad_id, false).ok()??;
         let data_dir = caco_core::config::find_wad_data_dir(&wad.data_key, &wad.title)
             .unwrap_or_else(|| caco_core::config::get_wad_data_dir(&wad.data_key, &wad.title));
+        let maps: Vec<String> = caco_core::db::get_analysis(conn, wad_id)
+            .ok()
+            .flatten()
+            .map(|analysis| analysis.maps.into_iter().map(|map| map.lump).collect())
+            .unwrap_or_default();
+        let episode_names = demos::uses_episode_names(&maps, wad.custom_iwad.as_deref());
 
         let mut state = Self {
             wad_id,
@@ -74,6 +117,12 @@ impl WadDataDialogState {
             selected_demo: None,
             pending: None,
             status: None,
+            episode_names,
+            picker: None,
+            open_picker: false,
+            export_picker: None,
+            exporting: None,
+            export_asked: false,
         };
         state.reload();
         Some(state)
@@ -86,6 +135,47 @@ impl WadDataDialogState {
         self.pending = None;
         self.selected_backup = (!self.backups.is_empty()).then_some(0);
         self.selected_demo = (!self.demos.is_empty()).then_some(0);
+    }
+
+    /// Reload, and select the demo at `path` if it is there.
+    fn reload_selecting(&mut self, path: &std::path::Path) {
+        self.reload();
+        if let Some(idx) = self.demos.iter().position(|d| d.path == path) {
+            self.selected_demo = Some(idx);
+        }
+    }
+
+    /// Show the demos tab.
+    pub fn show_demos(mut self) -> Self {
+        self.tab = Tab::Demos;
+        self
+    }
+
+    /// Copy a demo from somewhere else in, from what the picker chose.
+    fn add_demo(&mut self, source: &std::path::Path) {
+        match demos::add_demo_from_file(&self.data_dir, source) {
+            Ok(added) => {
+                let name = added
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                self.reload_selecting(&added);
+                self.tab = Tab::Demos;
+                self.set_info(format!("Added {name}."));
+            }
+            Err(e) => self.set_error(e.to_string()),
+        }
+    }
+
+    /// Open the demos folder in the file manager, making it first if there are no demos yet.
+    fn open_folder(&mut self) {
+        let dir = demos::demos_dir(&self.data_dir);
+        let opened = std::fs::create_dir_all(&dir)
+            .map_err(|e| e.to_string())
+            .and_then(|()| open::that(&dir).map_err(|e| e.to_string()));
+        if let Err(e) = opened {
+            self.set_error(format!("Couldn't open the folder: {e}"));
+        }
     }
 
     fn set_error(&mut self, text: impl Into<String>) {
@@ -114,7 +204,164 @@ impl WadDataDialogState {
         }
     }
 
-    fn run_pending(&mut self) {
+    /// The demos an export takes: all of them, or the one selected.
+    fn export_scope(&self, all: bool) -> Vec<DemoFile> {
+        if all {
+            return self.demos.clone();
+        }
+        self.selected_demo
+            .and_then(|idx| self.demos.get(idx))
+            .cloned()
+            .into_iter()
+            .collect()
+    }
+
+    /// Ask which demos to export, and whether with the WAD's files.
+    fn start_export(&mut self, conn: &Connection) {
+        match export::plan_export(
+            conn,
+            self.wad_id,
+            &self.export_scope(false),
+            true,
+            self.episode_names,
+        ) {
+            Ok(preview) => {
+                self.status = None;
+                self.pending = Some(Pending::Export {
+                    all: false,
+                    with_wads: false,
+                    preview,
+                });
+            }
+            Err(e) => self.set_error(e.to_string()),
+        }
+    }
+
+    /// Plan the export as asked, and ask where it goes.
+    fn choose_export_destination(
+        &mut self,
+        ctx: &egui::Context,
+        conn: &Connection,
+        all: bool,
+        with_wads: bool,
+    ) {
+        let scope = self.export_scope(all);
+        let name = match scope.as_slice() {
+            [one] => format!(
+                "{}.zip",
+                std::path::Path::new(&one.name)
+                    .file_stem()
+                    .map_or_else(|| one.name.clone(), |s| s.to_string_lossy().into_owned())
+            ),
+            _ => format!("{}-demos.zip", demos::slug(&self.wad_title)),
+        };
+        match export::plan_export(conn, self.wad_id, &scope, with_wads, self.episode_names) {
+            Ok(plan) => {
+                let request = FileDialogRequest::save()
+                    .add_filter("Zip", &["zip"])
+                    .set_file_name(name);
+                let picker = spawn_file_dialog(Some(ctx.clone()), request);
+                self.export_picker = Some((plan, picker));
+            }
+            Err(e) => self.set_error(e.to_string()),
+        }
+    }
+
+    /// Write an export where the user said, on a worker, since the WAD can be large.
+    fn write_export(&mut self, ctx: &egui::Context, plan: ExportPlan, mut dest: PathBuf) {
+        if dest
+            .extension()
+            .is_none_or(|ext| !ext.eq_ignore_ascii_case("zip"))
+        {
+            dest.as_mut_os_string().push(".zip");
+        }
+        let (tx, rx) = mpsc::channel();
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let outcome = export::write_export(&plan, &dest)
+                .map(|_| export_summary(&plan, &dest))
+                .map_err(|e| format!("Couldn't export: {e}"));
+            let _ = tx.send(outcome);
+            ctx.request_repaint();
+        });
+        self.exporting = Some(rx);
+    }
+
+    /// Whatever an open export picker or a running export has to say.
+    fn poll_export(&mut self, ctx: &egui::Context) {
+        if let Some((_, picker)) = &self.export_picker
+            && let Ok(picked) = picker.try_recv()
+            && let Some((plan, _)) = self.export_picker.take()
+            && let Some(dest) = picked
+        {
+            self.write_export(ctx, plan, dest);
+        }
+        if let Some(exporting) = &self.exporting
+            && let Ok(outcome) = exporting.try_recv()
+        {
+            self.exporting = None;
+            match outcome {
+                Ok(said) => self.set_info(said),
+                Err(e) => self.set_error(e),
+            }
+        }
+    }
+
+    /// Which demos and what with, above the buttons, while an export is being asked about.
+    fn export_options(&mut self, ui: &mut egui::Ui, conn: &Connection) {
+        let demos = self.demos.len();
+        let Some(Pending::Export {
+            all,
+            with_wads,
+            preview,
+        }) = &mut self.pending
+        else {
+            return;
+        };
+        let was_all = *all;
+        ui.horizontal_wrapped(|ui| {
+            form_label(ui, "Export");
+            if demos > 1 {
+                ui.radio_value(all, false, "This demo");
+                ui.radio_value(all, true, format!("All {demos} demos"));
+                ui.add_space(8.0);
+            }
+            let size = format_size(preview.wad_files_size());
+            ui.checkbox(with_wads, format!("With the WAD's files ({size})"))
+                .on_hover_text(
+                    "The WAD, and anything else it was recorded with. IWADs and id24 resources \
+                     never go: they're id Software's to give.",
+                );
+        });
+        if *with_wads && !preview.missing.is_empty() {
+            ui.colored_label(
+                theme::TEXT_SECONDARY,
+                format!(
+                    "{} isn't on this machine, so it can't go with them.",
+                    preview.missing.join(", ")
+                ),
+            );
+        }
+        // Another scope can need other files.
+        let (all, with_wads) = (*all, *with_wads);
+        if all != was_all
+            && let Ok(preview) = export::plan_export(
+                conn,
+                self.wad_id,
+                &self.export_scope(all),
+                true,
+                self.episode_names,
+            )
+        {
+            self.pending = Some(Pending::Export {
+                all,
+                with_wads,
+                preview,
+            });
+        }
+    }
+
+    fn run_pending(&mut self, ctx: &egui::Context, conn: &Connection) {
         let Some(pending) = self.pending.take() else {
             return;
         };
@@ -148,7 +395,7 @@ impl WadDataDialogState {
                     return;
                 };
                 let (path, name) = (demo.path.clone(), demo.name.clone());
-                match std::fs::remove_file(&path) {
+                match demos::delete_demo(&path) {
                     Ok(()) => {
                         self.reload();
                         self.set_info(format!("Deleted {name}."));
@@ -160,6 +407,36 @@ impl WadDataDialogState {
                 let deleted = demos::clean_demo_files(&self.data_dir).len();
                 self.reload();
                 self.set_info(format!("Deleted {}.", count(deleted, "demo", "demos")));
+            }
+            Pending::RenameDemo { idx, name, .. } => {
+                let Some(demo) = self.demos.get(idx) else {
+                    return;
+                };
+                let old = demo.name.clone();
+                match demos::rename_demo(&demo.path.clone(), &name) {
+                    Ok(renamed) => {
+                        let new = renamed
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        self.reload_selecting(&renamed);
+                        if new != old {
+                            self.set_info(format!("Renamed {old} to {new}."));
+                        }
+                    }
+                    Err(e) => {
+                        // Keep asking, with what was typed, since the name is what was wrong.
+                        self.pending = Some(Pending::RenameDemo {
+                            idx,
+                            name,
+                            focused: false,
+                        });
+                        self.set_error(e.to_string());
+                    }
+                }
+            }
+            Pending::Export { all, with_wads, .. } => {
+                self.choose_export_destination(ctx, conn, all, with_wads);
             }
         }
     }
@@ -188,19 +465,60 @@ impl WadDataDialogState {
             Pending::CleanDemos => {
                 format!("Delete {}?", count(self.demos.len(), "demo", "demos"))
             }
+            // Asked by its fields, not in words.
+            Pending::RenameDemo { .. } | Pending::Export { .. } => return None,
         })
     }
 
-    /// What going ahead with the pending action is called, on its button.
-    fn pending_verb(&self) -> &'static str {
+    /// What going ahead with the pending action is, on its button.
+    fn pending_button(&self) -> Primary<'static> {
         match self.pending {
-            Some(Pending::RestoreBackup(_)) => "Restore",
-            _ => "Delete",
+            Some(Pending::RestoreBackup(_)) => Primary::danger("Restore"),
+            Some(Pending::RenameDemo { .. }) => Primary::new("Rename"),
+            Some(Pending::Export { .. }) => Primary::new("Export\u{2026}"),
+            _ => Primary::danger("Delete"),
         }
     }
 
-    pub fn render(&mut self, ctx: &egui::Context) -> WadDataResult {
+    /// The name a rename is asking for, in the footer. True if Enter was pressed in it.
+    fn rename_field(&mut self, ui: &mut egui::Ui) -> bool {
+        let Some(Pending::RenameDemo { name, focused, .. }) = &mut self.pending else {
+            return false;
+        };
+        let mut entered = false;
+        ui.horizontal(|ui| {
+            let label = form_label(ui, "New name");
+            let field = ui
+                .add(egui::TextEdit::singleline(name).desired_width(320.0))
+                .labelled_by(label.id);
+
+            if !*focused {
+                field.request_focus();
+                *focused = true;
+            }
+            entered = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        });
+        entered
+    }
+
+    pub fn render(&mut self, ctx: &egui::Context, conn: &Connection) -> WadDataResult {
         let mut result = WadDataResult::Open;
+        self.poll_export(ctx);
+        if std::mem::take(&mut self.open_picker) && self.picker.is_none() {
+            let request = FileDialogRequest::open()
+                .add_filter("Demos", &["lmp"])
+                .add_filter("All files", &["*"]);
+            self.picker = Some(spawn_file_dialog(Some(ctx.clone()), request));
+        }
+        if let Some(picker) = &self.picker
+            && let Ok(picked) = picker.try_recv()
+        {
+            self.picker = None;
+            if let Some(path) = picked {
+                self.add_demo(&path);
+            }
+        }
+        let mut entered = false;
         let tabs = [
             (Tab::Saves, format!("Saves ({})", self.saves.len())),
             (Tab::Backups, format!("Backups ({})", self.backups.len())),
@@ -221,19 +539,20 @@ impl WadDataDialogState {
                         if let Some(prompt) = self.pending_prompt() {
                             ui.colored_label(theme::COLOR_ERROR, prompt);
                         }
+                        entered = self.rename_field(ui);
+                        self.export_options(ui, conn);
                         if let Some(status) = &self.status {
                             status.show(ui);
                         }
                     })
                     .buttons(|row| {
                         if self.pending.is_some() {
-                            let verb = self.pending_verb();
-                            let ended = row.end(Some("Cancel"), Some(Primary::danger(verb)));
+                            let ended = row.end(Some("Cancel"), Some(self.pending_button()));
                             if ended.dismissed {
                                 self.pending = None;
                             }
-                            if ended.primary {
-                                self.run_pending();
+                            if ended.primary || entered {
+                                self.run_pending(ctx, conn);
                             }
                             return;
                         }
@@ -243,6 +562,10 @@ impl WadDataDialogState {
                         }
                     })
             });
+
+        if std::mem::take(&mut self.export_asked) {
+            self.start_export(conn);
+        }
 
         // Escape dismisses a pending confirmation before it closes the dialog.
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -279,21 +602,63 @@ impl WadDataDialogState {
                 }
             }
             Tab::Demos => {
-                if let Some(idx) = self.selected_demo {
-                    if ui.button("Play").clicked()
-                        && let Some(demo) = self.demos.get(idx)
-                    {
+                if let Some(idx) = self.selected_demo
+                    && let Some(demo) = self.demos.get(idx)
+                {
+                    if ui.button("Play").clicked() {
                         *result = WadDataResult::PlayDemo {
                             wad_id: self.wad_id,
                             demo: demo.name.clone(),
                         };
                     }
+                    if ui.button("Rename").clicked() {
+                        let name = demo
+                            .name
+                            .strip_suffix(demos::DEMO_EXTENSION)
+                            .unwrap_or(&demo.name)
+                            .to_string();
+                        self.status = None;
+                        self.pending = Some(Pending::RenameDemo {
+                            idx,
+                            name,
+                            focused: false,
+                        });
+                    }
                     if ui.button("Delete").clicked() {
                         self.pending = Some(Pending::DeleteDemo(idx));
                     }
+                    // A spinner while an export is being placed or written.
+                    if self.export_picker.is_some() || self.exporting.is_some() {
+                        ui.spinner();
+                    } else if ui
+                        .button("Export")
+                        .on_hover_text(
+                            "Zip it to share, with a note of what it needs and how to play it",
+                        )
+                        .clicked()
+                    {
+                        self.export_asked = true;
+                    }
                 }
-                if !self.demos.is_empty() && ui.button("Delete All").clicked() {
+                if self.demos.len() > 1 && ui.button("Delete All").clicked() {
                     self.pending = Some(Pending::CleanDemos);
+                }
+                // A spinner while the picker is open, which also stops it opening twice.
+                if self.picker.is_some() {
+                    ui.spinner();
+                } else if ui
+                    .button("Add From File")
+                    .on_hover_text("Copy a demo in: one from a speedrun archive, or one that came with the WAD")
+                    .clicked()
+                {
+                    self.open_picker = true;
+                }
+                if ui
+                    .button("Open Folder")
+                    .on_hover_text("Open the folder this WAD's demos are in")
+                    .clicked()
+                {
+                    self.open_folder();
                 }
             }
         }
@@ -356,29 +721,118 @@ impl WadDataDialogState {
         if self.demos.is_empty() {
             ui.colored_label(
                 theme::TEXT_SECONDARY,
-                "No demos yet. Record one by playing with demo recording turned on.",
+                "No demos yet. Play and Record (R) records one, and Add From File brings in \
+                 one from somewhere else.",
             );
             return;
         }
 
-        let rows: Vec<[String; 3]> = self
+        let rows: Vec<DemoRow> = self
             .demos
             .iter()
-            .map(|d| {
-                [
-                    d.name.clone(),
-                    format_size(d.size),
-                    format_timestamp(&d.mtime_iso),
-                ]
-            })
+            .map(|d| DemoRow::of(d, self.episode_names))
             .collect();
-        file_table(
-            ui,
-            height,
-            ["Demo", "Size", "Recorded"],
-            &rows,
-            Some(&mut self.selected_demo),
-        );
+        demo_table(ui, height, &rows, &mut self.selected_demo);
+    }
+}
+
+/// A demo as the table shows it.
+struct DemoRow {
+    cells: [String; 6],
+    /// What there is to say about it that doesn't fit in a column.
+    hint: String,
+}
+
+impl DemoRow {
+    fn of(demo: &DemoFile, episode_names: bool) -> Self {
+        let header = demo.header.as_ref();
+        let or_nothing = |text: Option<String>| text.unwrap_or_else(|| NOTHING.to_string());
+        let cells = [
+            demo.name.clone(),
+            or_nothing(header.and_then(|h| h.map_name(episode_names))),
+            or_nothing(header.and_then(|h| h.skill_name())),
+            or_nothing(
+                header
+                    .and_then(|h| h.duration_secs())
+                    .map(|secs| caco_core::player::format_duration(i64::from(secs))),
+            ),
+            or_nothing(demo.sourceport()),
+            or_nothing(demo.recorded_at().map(format_timestamp)),
+        ];
+        Self {
+            cells,
+            hint: demo_hint(demo),
+        }
+    }
+}
+
+/// What a row's tooltip says: the format, the players if there were more than one, and what a
+/// dsda-family sourceport says it was recorded with, which is all there is to go on for a demo
+/// from somewhere else.
+fn demo_hint(demo: &DemoFile) -> String {
+    let Some(header) = &demo.header else {
+        return "caco can't read what this demo says about itself.".to_string();
+    };
+    let mut lines = vec![match header.players {
+        0 | 1 => format!("{} demo", header.format.name()),
+        n => format!("{} demo, {n} players", header.format.name()),
+    }];
+    if demo.record.is_some() {
+        lines.push("caco recorded it, and plays it back the same way.".to_string());
+    } else if let Some(command_line) = header
+        .footer
+        .as_ref()
+        .and_then(|f| f.command_line.as_deref())
+    {
+        lines.push(format!("Recorded with {command_line}"));
+    }
+    lines.join("\n")
+}
+
+/// The demos, one a row, with the selected one marked.
+fn demo_table(ui: &mut egui::Ui, height: f32, rows: &[DemoRow], selection: &mut Option<usize>) {
+    const HEADERS: [&str; 6] = ["Demo", "Map", "Skill", "Length", "Sourceport", "Recorded"];
+    let row_height = ui.text_style_height(&egui::TextStyle::Body) + 6.0;
+    let mut clicked = None;
+    let selected = *selection;
+
+    dialog_table(ui, height - row_height)
+        .sense(egui::Sense::click())
+        .column(Column::remainder().at_least(140.0).clip(true))
+        .column(Column::initial(60.0).at_least(50.0).clip(true))
+        .column(Column::initial(48.0).at_least(40.0))
+        .column(Column::initial(64.0).at_least(50.0))
+        .column(Column::initial(120.0).at_least(70.0).clip(true))
+        .column(Column::initial(100.0).at_least(70.0).clip(true))
+        .header(row_height + 2.0, |mut header| {
+            for label in HEADERS {
+                header.col(|ui| {
+                    ui.label(theme::column_header(label));
+                });
+            }
+        })
+        .body(|body| {
+            body.rows(row_height, rows.len(), |mut row| {
+                let idx = row.index();
+                row.set_selected(selected == Some(idx));
+                for (column, cell) in rows[idx].cells.iter().enumerate() {
+                    row.col(|ui| {
+                        if column == 0 || cell != NOTHING {
+                            ui.label(cell);
+                        } else {
+                            ui.colored_label(theme::TEXT_SECONDARY, cell);
+                        }
+                    });
+                }
+                let response = row.response().on_hover_text(&rows[idx].hint);
+                if response.clicked() {
+                    clicked = Some(idx);
+                }
+            });
+        });
+
+    if let Some(idx) = clicked {
+        *selection = Some(idx);
     }
 }
 
@@ -435,4 +889,59 @@ fn format_timestamp(iso: &str) -> String {
             crate::relative_time::relative_time(&dt.with_timezone(&chrono::Local).naive_local())
         })
         .unwrap_or_else(|_| iso.to_string())
+}
+
+/// What the status line says once an export is written.
+fn export_summary(plan: &ExportPlan, dest: &std::path::Path) -> String {
+    let file = dest
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let what = count(plan.demos, "demo", "demos");
+    let with = if plan.wad_files.is_empty() {
+        String::new()
+    } else {
+        " and the WAD's files".to_string()
+    };
+    let missing = if plan.missing.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " {} wasn't here, so it isn't in it.",
+            plan.missing.join(", ")
+        )
+    };
+    format!("Exported {what}{with} to {file}.{missing}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use caco_core::demos::export::{EntrySource, ExportEntry};
+
+    fn plan(demos: usize, wad_files: &[&str], missing: &[&str]) -> ExportPlan {
+        ExportPlan {
+            entries: vec![ExportEntry {
+                name: "run.lmp".to_string(),
+                source: EntrySource::Text(String::new()),
+            }],
+            demos,
+            wad_files: wad_files.iter().map(|s| s.to_string()).collect(),
+            missing: missing.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn an_export_says_what_went_and_what_could_not() {
+        let dest = std::path::Path::new("/home/me/scythe-demos.zip");
+        assert_eq!(
+            export_summary(&plan(1, &[], &[]), dest),
+            "Exported 1 demo to scythe-demos.zip."
+        );
+        assert_eq!(
+            export_summary(&plan(3, &["scythe.zip"], &["fix.deh"]), dest),
+            "Exported 3 demos and the WAD's files to scythe-demos.zip. fix.deh wasn't here, so \
+             it isn't in it."
+        );
+    }
 }

@@ -103,6 +103,8 @@ pub struct SessionRecord {
     pub stats_after: Option<String>,
     /// What the sourceport loaded, by `crate::identity`'s content hash.
     pub content_sha256: Option<String>,
+    /// What every machine calls it, which a demo's record names it by.
+    pub uid: Option<String>,
 }
 
 impl SessionRecord {
@@ -119,6 +121,7 @@ impl SessionRecord {
             stats_before: row.get("stats_before")?,
             stats_after: row.get("stats_after")?,
             content_sha256: row.get("content_sha256")?,
+            uid: row.get("uid")?,
         })
     }
 }
@@ -147,6 +150,16 @@ fn session_has_map_progress(session: &SessionRecord, fallback_before: Option<&st
 /// prove actual map progress. Fast ZDoom maps can legitimately complete under
 /// `MIN_SESSION_SECONDS`, and hiding those makes session history look stale.
 pub fn get_sessions(conn: &Connection, wad_id: i64) -> Result<Vec<SessionRecord>> {
+    get_sessions_keeping(conn, wad_id, &std::collections::HashSet::new())
+}
+
+/// [`get_sessions`], keeping any session whose uid is in `keep` however short it was: one
+/// that recorded a demo, which a speedrun of one map can do in a minute.
+pub fn get_sessions_keeping(
+    conn: &Connection,
+    wad_id: i64,
+    keep: &std::collections::HashSet<String>,
+) -> Result<Vec<SessionRecord>> {
     let mut stmt =
         conn.prepare("SELECT * FROM sessions WHERE wad_id = ? ORDER BY started_at DESC")?;
     let rows = stmt
@@ -160,6 +173,7 @@ pub fn get_sessions(conn: &Connection, wad_id: i64) -> Result<Vec<SessionRecord>
                 .get(idx + 1)
                 .and_then(|prev| prev.stats_after.as_deref());
             if session.duration_seconds.unwrap_or(0) >= MIN_SESSION_SECONDS
+                || session.uid.as_ref().is_some_and(|uid| keep.contains(uid))
                 || session_has_map_progress(session, fallback_before)
             {
                 Some(session.clone())
@@ -778,6 +792,26 @@ mod tests {
         .unwrap();
 
         assert!(get_sessions(&conn, wad_id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_a_short_session_that_recorded_a_demo_is_kept() {
+        let conn = setup();
+        let wad_id = add_test_wad(&conn);
+        conn.execute(
+            "INSERT INTO sessions (wad_id, started_at, ended_at, duration_seconds) \
+             VALUES (?1, '2024-01-01T00:00:00', '2024-01-01T00:01:00', 60)",
+            [wad_id],
+        )
+        .unwrap();
+        let uid: String = conn
+            .query_row("SELECT uid FROM sessions", [], |row| row.get(0))
+            .unwrap();
+
+        let keep = std::collections::HashSet::from([uid.clone()]);
+        let kept = get_sessions_keeping(&conn, wad_id, &keep).unwrap();
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].uid.as_deref(), Some(uid.as_str()));
     }
 
     #[test]

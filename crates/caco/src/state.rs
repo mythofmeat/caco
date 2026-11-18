@@ -12,6 +12,7 @@ use rusqlite::Connection;
 use crate::dialogs::cacoward_link::CacowardLinkDialogState;
 use crate::dialogs::collections::CollectionsDialogState;
 use crate::dialogs::delete::DeleteDialogState;
+use crate::dialogs::demo_differs::DemoDiffersDialogState;
 use crate::dialogs::edit::EditDialogState;
 use crate::dialogs::enrich::EnrichDialogState;
 use crate::dialogs::file_changed::FileChangedDialogState;
@@ -68,6 +69,8 @@ pub enum ViewLayout {
 
 pub enum ActionRequest {
     Play(i64),
+    /// Play a WAD and record a demo of the session.
+    PlayAndRecord(i64),
     /// Change a WAD's status, in passing.
     SetStatus(i64, caco_core::db::Status),
     /// Change a WAD's rating, in passing, or take it away.
@@ -102,8 +105,13 @@ pub enum ActionRequest {
     MapStats(i64),
     /// Open the per-WAD saves / backups / demos dialog.
     WadData(i64),
-    /// Play back a demo file (by name) from a WAD's demos directory.
-    PlayDemo(i64, String),
+    /// Play back a demo file (by name) from a WAD's demos directory, as it was recorded
+    /// unless `opts` says the user chose otherwise.
+    PlayDemo {
+        wad_id: i64,
+        demo: String,
+        opts: caco_core::player::DemoOptions,
+    },
     /// Open the disk-management dialog on a given tab — cached files, cleanup,
     /// trash and the companion registry all live in there.
     Storage(StorageTab),
@@ -204,6 +212,8 @@ pub enum ActiveDialog {
     FileChanged(FileChangedDialogState),
     /// Asked before launching a WAD another machine has newer saves for.
     NewerSaves(NewerSavesDialogState),
+    /// Asked before playing a demo back in a way it wasn't recorded.
+    DemoDiffers(DemoDiffersDialogState),
     /// Which machines this library has heard from.
     Sync(Box<SyncDialogState>),
     /// Modal picker for choosing a library WAD to link to a Cacoward entry.
@@ -219,7 +229,28 @@ pub enum PlayState {
         wad_title: String,
         /// Its file wasn't here, and it is still on its way.
         downloading: bool,
+        activity: Activity,
     },
+}
+
+/// What is running, which is one thing at a time whatever it is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Activity {
+    Playing,
+    Recording,
+    /// Playing back a demo.
+    WatchingDemo,
+}
+
+impl Activity {
+    /// What the status bar says it is doing, before the WAD's title.
+    pub fn doing(&self) -> &'static str {
+        match self {
+            Activity::Playing => "Playing",
+            Activity::Recording => "Recording",
+            Activity::WatchingDemo => "Watching a demo of",
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -356,6 +387,10 @@ pub struct AppState {
 pub struct WadDetails {
     pub wad_id: i64,
     pub awards: Vec<CacowardRecord>,
+    /// How many demos it has.
+    pub demos: usize,
+    /// Whether the sourceport it launches with can record one.
+    pub can_record: bool,
 }
 
 /// How far through a WAD's maps a playthrough has got.
@@ -673,9 +708,17 @@ impl AppState {
         if self.details.as_ref().is_some_and(|d| d.wad_id == wad_id) {
             return;
         }
+        let wad = caco_core::db::get_wad(conn, wad_id, false).ok().flatten();
+        let demos = wad
+            .as_ref()
+            .and_then(|wad| caco_core::config::find_wad_data_dir(&wad.data_key, &wad.title))
+            .map(|dir| caco_core::demos::count_demos(&dir))
+            .unwrap_or(0);
         self.details = Some(WadDetails {
             wad_id,
             awards: caco_core::db::cacowards::cacowards_for_wad(conn, wad_id).unwrap_or_default(),
+            demos,
+            can_record: wad.as_ref().is_some_and(caco_core::player::can_record),
         });
     }
 

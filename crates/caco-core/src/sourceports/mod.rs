@@ -126,6 +126,22 @@ pub fn managed_binary(name: &str) -> Option<String> {
     Some(installed.binary_path().display().to_string())
 }
 
+/// The build caco made whose executable this is, if it is one of caco's builds: what a demo
+/// records as the version it was recorded with.
+pub fn managed_build_at(binary: &std::path::Path) -> Option<InstalledSourceport> {
+    list_installed(&crate::config::sourceport_prefix_root())
+        .into_iter()
+        .find(|installed| installed.binary_path() == binary)
+}
+
+/// Every usable build caco has made of `name`, newest first.
+pub fn managed_builds(name: &str) -> Vec<InstalledSourceport> {
+    list_installed(&crate::config::sourceport_prefix_root())
+        .into_iter()
+        .filter(|installed| installed.manifest.name == name && installed.is_usable())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

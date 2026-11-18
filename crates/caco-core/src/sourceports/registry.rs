@@ -14,6 +14,10 @@ pub struct SourceportFamily {
     pub data_arg: Option<&'static str>,
     pub save_arg: Option<&'static str>,
     pub complevel_arg: Option<&'static str>,
+    /// What records a demo, followed by a name without an extension, to which every family
+    /// here that records adds `.lmp` (chocolate's always, the rest when there is none). `None`
+    /// where caco does not know how a family records, so Record is not offered for it.
+    pub record_arg: Option<&'static str>,
     /// Config file extension (e.g. "cfg" or "ini").
     pub config_ext: &'static str,
 }
@@ -34,6 +38,7 @@ pub static FAMILIES: &[SourceportFamily] = &[
         data_arg: Some("-data"),
         save_arg: Some("-save"),
         complevel_arg: Some("-complevel"),
+        record_arg: Some("-record"),
         config_ext: "cfg",
     },
     SourceportFamily {
@@ -42,6 +47,7 @@ pub static FAMILIES: &[SourceportFamily] = &[
         data_arg: None,
         save_arg: Some("-savedir"),
         complevel_arg: None,
+        record_arg: Some("-record"),
         config_ext: "ini",
     },
     SourceportFamily {
@@ -50,6 +56,7 @@ pub static FAMILIES: &[SourceportFamily] = &[
         data_arg: None,
         save_arg: Some("-savedir"),
         complevel_arg: None,
+        record_arg: Some("-record"),
         config_ext: "cfg",
     },
     SourceportFamily {
@@ -58,6 +65,7 @@ pub static FAMILIES: &[SourceportFamily] = &[
         data_arg: Some("-data"),
         save_arg: Some("-save"),
         complevel_arg: Some("-complevel"),
+        record_arg: Some("-record"),
         config_ext: "cfg",
     },
     SourceportFamily {
@@ -66,6 +74,7 @@ pub static FAMILIES: &[SourceportFamily] = &[
         data_arg: None,
         save_arg: Some("-savedir"),
         complevel_arg: None,
+        record_arg: Some("-record"),
         config_ext: "cfg",
     },
     SourceportFamily {
@@ -74,6 +83,7 @@ pub static FAMILIES: &[SourceportFamily] = &[
         data_arg: None,
         save_arg: Some("-savedir"),
         complevel_arg: None,
+        record_arg: None,
         config_ext: "ini",
     },
 ];
@@ -170,6 +180,19 @@ pub fn get_complevel_args(executable: &str, complevel: i32) -> Vec<String> {
         },
         None => Vec::new(),
     }
+}
+
+/// Return CLI args to record a demo to `base`, a path without an extension, or `None` for a
+/// sourceport caco does not know how to record with: Helion, whose handling of the name has not
+/// been checked, and anything outside the families here.
+pub fn get_record_args(executable: &str, base: &str) -> Option<Vec<String>> {
+    let arg = identify_family(executable)?.record_arg?;
+    Some(vec![arg.to_string(), base.to_string()])
+}
+
+/// Whether caco can record a demo with this sourceport.
+pub fn can_record(executable: &str) -> bool {
+    identify_family(executable).is_some_and(|f| f.record_arg.is_some())
 }
 
 /// Get the config file extension for a sourceport (e.g. "cfg" or "ini").
@@ -287,6 +310,20 @@ mod tests {
         assert_eq!(get_complevel_args("woof", 21), vec!["-complevel", "21"]);
         assert!(get_complevel_args("gzdoom", 9).is_empty());
         assert!(get_complevel_args("unknown", 9).is_empty());
+    }
+
+    #[test]
+    fn test_get_record_args() {
+        assert_eq!(
+            get_record_args("/opt/nyan-doom", "/d/demos/run"),
+            Some(vec!["-record".to_string(), "/d/demos/run".to_string()])
+        );
+        assert!(can_record("uzdoom"));
+        assert!(can_record("crispy-doom"));
+        assert!(can_record("woof"));
+        assert!(!can_record("helion"));
+        assert!(!can_record("unknown-sourceport"));
+        assert_eq!(get_record_args("helion", "/d/demos/run"), None);
     }
 
     #[test]
