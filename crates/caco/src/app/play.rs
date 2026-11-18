@@ -1,14 +1,15 @@
 //! What the status bar says when a session ends, or a demo's playback does.
 
-use caco_core::player::{self, AutoCompleteResult, DemoResult, PlayResult};
+use caco_core::player::{self, AutoCompleteResult, DemoResult, PlayResult, Recorded};
 
+use crate::dialogs::count;
 use crate::message::Notification;
 
 /// The one line a finished session gets: a crash first, then a recording that came to nothing,
 /// then a finished WAD, then map exits that had to be read from a save or could not be read at
 /// all, then how long it was. What a session recorded is said after whichever of those it is.
 pub(super) fn play_notification(played: &PlayResult) -> Option<Notification> {
-    let recorded = recorded_note(played.recorded.as_deref());
+    let recorded = played.recorded.as_ref().and_then(recorded_note);
     if played.crashed() {
         let crashed = format!(
             "Sourceport crashed (exit code {})",
@@ -16,7 +17,11 @@ pub(super) fn play_notification(played: &PlayResult) -> Option<Notification> {
         );
         return Some(Notification::warning(then(crashed, recorded.as_deref())));
     }
-    if played.recorded.as_ref().is_some_and(Vec::is_empty) {
+    if played
+        .recorded
+        .as_ref()
+        .is_some_and(|r| r.demos.is_empty() && r.set_aside == 0)
+    {
         return Some(Notification::warning(
             "Nothing was recorded: the sourceport didn't write a demo.".to_string(),
         ));
@@ -79,12 +84,42 @@ pub(super) fn demo_notification(watched: &DemoResult) -> Notification {
     ))
 }
 
-/// What a session recorded, if it recorded anything.
-fn recorded_note(recorded: Option<&[String]>) -> Option<String> {
-    match recorded? {
+/// What a session recorded, if it recorded anything, and which maps it finished where that
+/// is known.
+fn recorded_note(recorded: &Recorded) -> Option<String> {
+    let mut finished: Vec<String> = Vec::new();
+    for map in recorded
+        .demos
+        .iter()
+        .flat_map(|d| d.exited.iter().flatten())
+    {
+        if !finished.iter().any(|m| m.eq_ignore_ascii_case(map)) {
+            finished.push(map.clone());
+        }
+    }
+    let which = if finished.is_empty() {
+        String::new()
+    } else {
+        format!(", which finished {}", maps(&finished))
+    };
+    let recorded_note = match recorded.demos.as_slice() {
         [] => None,
-        [one] => Some(format!("Recorded {one}.")),
-        many => Some(format!("Recorded {} demos.", many.len())),
+        [one] => Some(format!("Recorded {}{which}.", one.name)),
+        many => Some(format!("Recorded {} demos{which}.", many.len())),
+    };
+    let set_aside = (recorded.set_aside > 0).then(|| {
+        format!(
+            "{} went to the sourceport's failed_demos folder.",
+            count(
+                recorded.set_aside,
+                "unfinished attempt",
+                "unfinished attempts"
+            )
+        )
+    });
+    match (recorded_note, set_aside) {
+        (Some(note), Some(set_aside)) => Some(then(note, Some(&set_aside))),
+        (note, set_aside) => note.or(set_aside),
     }
 }
 
@@ -111,7 +146,7 @@ fn maps(lumps: &[String]) -> String {
 mod tests {
     use super::*;
     use crate::message::Severity;
-    use caco_core::player::StatsReport;
+    use caco_core::player::{RecordedDemo, StatsReport};
 
     fn session(stats: StatsReport) -> PlayResult {
         PlayResult {
@@ -210,10 +245,23 @@ mod tests {
         );
     }
 
+    fn recorded(demos: &[(&str, Option<&[&str]>)], set_aside: usize) -> Option<Recorded> {
+        Some(Recorded {
+            demos: demos
+                .iter()
+                .map(|(name, exited)| RecordedDemo {
+                    name: name.to_string(),
+                    exited: exited.map(lumps),
+                })
+                .collect(),
+            set_aside,
+        })
+    }
+
     #[test]
     fn test_a_recording_says_what_it_recorded_after_everything_else() {
         let mut played = session(StatsReport::default());
-        played.recorded = Some(lumps(&["scythe_20261118_090000.lmp"]));
+        played.recorded = recorded(&[("scythe_20261118_090000.lmp", None)], 0);
         assert_eq!(
             said(&played),
             Some((
@@ -228,14 +276,52 @@ mod tests {
             "All maps completed! Marked as finished. Recorded scythe_20261118_090000.lmp."
         );
 
-        played.recorded = Some(lumps(&["a.lmp", "a-00002.lmp"]));
+        played.recorded = recorded(&[("a.lmp", None), ("a-00002.lmp", None)], 0);
         assert!(said(&played).unwrap().1.ends_with("Recorded 2 demos."));
+    }
+
+    #[test]
+    fn test_a_recording_says_which_maps_it_finished() {
+        let mut played = session(StatsReport::default());
+        played.recorded = recorded(&[("run.lmp", Some(&["MAP07"]))], 0);
+        assert_eq!(
+            said(&played).unwrap().1,
+            "Played for 25m 0s. Recorded run.lmp, which finished MAP07."
+        );
+        played.recorded = recorded(
+            &[
+                ("run.lmp", Some(&[])),
+                ("run-00002.lmp", Some(&["MAP07", "MAP08"])),
+            ],
+            0,
+        );
+        assert_eq!(
+            said(&played).unwrap().1,
+            "Played for 25m 0s. Recorded 2 demos, which finished MAP07 and MAP08."
+        );
+        // What nyan-doom put aside is said, and isn't nothing.
+        played.recorded = recorded(&[("run.lmp", None)], 3);
+        assert_eq!(
+            said(&played).unwrap().1,
+            "Played for 25m 0s. Recorded run.lmp. 3 unfinished attempts went to the \
+             sourceport's failed_demos folder."
+        );
+        played.recorded = recorded(&[], 1);
+        assert_eq!(
+            said(&played),
+            Some((
+                Severity::Info,
+                "Played for 25m 0s. 1 unfinished attempt went to the sourceport's failed_demos \
+                 folder."
+                    .to_string()
+            ))
+        );
     }
 
     #[test]
     fn test_a_recording_that_came_to_nothing_is_a_warning() {
         let mut played = session(StatsReport::default());
-        played.recorded = Some(Vec::new());
+        played.recorded = recorded(&[], 0);
         assert_eq!(
             said(&played),
             Some((
@@ -246,7 +332,7 @@ mod tests {
 
         played.exit_code = Some(1);
         assert_eq!(said(&played).unwrap().1, "Sourceport crashed (exit code 1)");
-        played.recorded = Some(lumps(&["run.lmp"]));
+        played.recorded = recorded(&[("run.lmp", None)], 0);
         assert_eq!(
             said(&played).unwrap().1,
             "Sourceport crashed (exit code 1). Recorded run.lmp."

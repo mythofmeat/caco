@@ -81,6 +81,22 @@ pub enum StartMap {
     Named(String),
 }
 
+impl StartMap {
+    /// Whether this is the map a stats file or a WAD calls `lump`. A Doom II demo says
+    /// episode 1, as the game does, so `MAP07` is episode 1 map 7, and so is `E1M7`, which no
+    /// WAD has as well.
+    pub fn is(&self, lump: &str) -> bool {
+        match self {
+            StartMap::Named(name) => name.eq_ignore_ascii_case(lump.trim()),
+            StartMap::Numbers { episode, map } => match crate::sourceports::map_numbers(lump) {
+                Some((Some(e), m)) => (e, m) == (*episode, *map),
+                Some((None, m)) => *episode <= 1 && m == *map,
+                None => false,
+            },
+        }
+    }
+}
+
 /// What a dsda-family sourceport says about the demo it recorded.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DemoFooter {

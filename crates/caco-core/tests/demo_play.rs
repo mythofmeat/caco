@@ -28,8 +28,10 @@ use caco_core::player::{self, DemoOptions, PlayOptions, RecordStart};
 
 /// A dsda-family sourceport: writes its arguments to `$PLAY_ARGS`, one a line, and a Doom
 /// 1.9 demo of one second, at the skill and on the map it was told, to whatever follows
-/// `-record`, with `.lmp` added. As `dsda_InitDemoRecording` does, it stops with an error and
-/// writes nothing when it is told to record without a skill or a complevel.
+/// `-record`, with `.lmp` added, or `-00002.lmp` and on where that is taken. As `dsda_InitDemoRecording` does, it stops with an error and
+/// writes nothing when it is told to record without a skill or a complevel. With `$EXITS` set
+/// it says in its `stats.txt` that the map has been exited that many times, as one played to
+/// the end would.
 fn write_sourceport(path: &Path) {
     let script = r#"#!/bin/sh
 printf '%s\n' "$@" > "$PLAY_ARGS"
@@ -44,6 +46,7 @@ for arg in "$@"; do
         -skill) skill="$arg" ;;
         -complevel) complevel="$arg" ;;
         -warp) warp="$arg" ;;
+        -data) data="$arg" ;;
     esac
     prev="$arg"
 done
@@ -57,6 +60,13 @@ if [ -n "$record" ]; then
         exit 1
     fi
     byte() { printf "\\$(printf '%03o' "$1")"; }
+    # A name that is taken is numbered, as dsda_GenerateDemoName does.
+    out="$record.lmp"
+    n=2
+    while [ -e "$out" ]; do
+        out=$(printf '%s-%05d.lmp' "$record" "$n")
+        n=$((n + 1))
+    done
     {
         printf '\155'
         byte $((skill - 1))
@@ -65,7 +75,11 @@ if [ -n "$record" ]; then
         printf '\000\000\000\000\000\001\000\000\000'
         head -c 140 /dev/zero
         printf '\200'
-    } > "$record.lmp"
+    } > "$out"
+    if [ -n "$EXITS" ]; then
+        printf '1\n0\nMAP%02d 1 %d 4 1234 -1 -1 %d 0 0 0 0 -1 -1 -1\n' \
+            "$warp" "$warp" "$EXITS" > "$data/stats.txt"
+    fi
 fi
 "#;
     fs::write(path, script).unwrap();
@@ -155,7 +169,8 @@ fn a_demo_plays_back_as_it_was_recorded() {
     db::link_companion_to_wad(&conn, wad_id, companion).unwrap();
 
     // ---- Recording is a session with where it starts and -record last, under a name of
-    // the WAD's.
+    // the WAD's. This one is played to the exit.
+    set("EXITS", "1");
     let opts = PlayOptions {
         record: Some(RecordStart {
             map: Some("MAP07".to_string()),
@@ -163,10 +178,12 @@ fn a_demo_plays_back_as_it_was_recorded() {
         }),
         ..PlayOptions::default()
     };
-    let played = player::play(&conn, wad_id, opts).unwrap();
+    let played = player::play(&conn, wad_id, opts.clone()).unwrap();
     let recorded = played.recorded.clone().expect("asked to record");
-    assert_eq!(recorded.len(), 1, "{recorded:?}");
-    let name = &recorded[0];
+    assert_eq!(recorded.demos.len(), 1, "{recorded:?}");
+    assert_eq!(recorded.set_aside, 0);
+    let name = &recorded.demos[0].name;
+    assert_eq!(recorded.demos[0].exited, Some(vec!["MAP07".to_string()]));
     assert!(
         name.starts_with("scythe_") && name.ends_with(".lmp"),
         "{name}"
@@ -215,6 +232,7 @@ fn a_demo_plays_back_as_it_was_recorded() {
     assert_eq!(record.session.as_deref(), Some(session_uid.as_str()));
     assert_eq!(record.sourceport, "nyan-doom");
     assert_eq!(record.complevel, Some(9));
+    assert_eq!(record.exited, Some(vec!["MAP07".to_string()]));
     assert_eq!(
         record
             .files
@@ -231,6 +249,7 @@ fn a_demo_plays_back_as_it_was_recorded() {
     assert_eq!(header.map_name(false).as_deref(), Some("MAP07"));
     assert_eq!(header.skill_name().as_deref(), Some("UV"));
     assert_eq!(header.duration_secs(), Some(1));
+    assert_eq!(listed[0].finished(), demos::Finished::Yes);
 
     // ---- Exported to share, with the WAD and the companion, and a note of how to play it.
     let export = demos::export::plan_export(&conn, wad_id, &listed, true, false).unwrap();
@@ -342,4 +361,31 @@ fn a_demo_plays_back_as_it_was_recorded() {
     let args = ran_with(&args_file);
     assert_eq!(value_of(&args, "-complevel").as_deref(), Some("9"));
     assert_eq!(value_of(&args, "-deh"), None);
+
+    // ---- Another go at MAP07 that dies before the exit is a demo that didn't finish it, which
+    // is not the same as not knowing.
+    set("EXITS", "");
+    let again = player::play(
+        &conn,
+        wad_id,
+        PlayOptions {
+            accept_changed_file: true,
+            ..opts
+        },
+    )
+    .unwrap();
+    let recorded = again.recorded.expect("asked to record");
+    assert_eq!(recorded.demos.len(), 1, "{recorded:?}");
+    assert_eq!(recorded.demos[0].exited, Some(Vec::new()));
+    let second = demos::find_demo_files(demos_dir.parent().unwrap())
+        .into_iter()
+        .find(|d| d.name == recorded.demos[0].name)
+        .unwrap();
+    assert_eq!(second.finished(), demos::Finished::No);
+    // The one added from a file has nothing to say.
+    let added = demos::find_demo_files(demos_dir.parent().unwrap())
+        .into_iter()
+        .find(|d| d.name == added_name)
+        .unwrap();
+    assert_eq!(added.finished(), demos::Finished::Unknown);
 }

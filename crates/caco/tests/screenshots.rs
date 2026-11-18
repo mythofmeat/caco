@@ -575,6 +575,7 @@ impl Shooter {
             profile: "default".to_string(),
             args: Vec::new(),
             custom_args: Vec::new(),
+            exited: None,
             files: vec![
                 RecordedFile {
                     role: FileRole::Companion,

@@ -54,6 +54,21 @@ impl DemoFile {
             .and_then(|h| h.footer.as_ref())
             .and_then(|f| f.sourceport.clone())
     }
+
+    /// Whether it exited the map it started on, which is what makes a demo of a map.
+    pub fn finished(&self) -> Finished {
+        let start = self.header.as_ref().and_then(|h| h.start.as_ref());
+        match (start, self.record.as_ref().and_then(|r| r.exited.as_ref())) {
+            (Some(start), Some(exited)) => {
+                if exited.iter().any(|m| start.is(m)) {
+                    Finished::Yes
+                } else {
+                    Finished::No
+                }
+            }
+            _ => Finished::Unknown,
+        }
+    }
 }
 
 /// Return the demos subdirectory within a WAD's data directory.
@@ -225,17 +240,61 @@ pub fn names_in(dir: &Path) -> HashSet<String> {
 }
 
 /// What a session recorded: demo files in `dir` under the name it was given, `base`, that were
-/// not there before it.
+/// not there before it, in the order they were recorded where the names say
+/// ([`attempt_number`]).
 pub fn new_demos(dir: &Path, base: &str, before: &HashSet<String>) -> Vec<PathBuf> {
-    let base = base.to_lowercase();
-    let mut found: Vec<PathBuf> = names_in(dir)
+    let lower = base.to_lowercase();
+    let mut found: Vec<(Option<u32>, String)> = names_in(dir)
         .into_iter()
-        .filter(|name| !before.contains(name) && name.to_lowercase().starts_with(&base))
-        .map(|name| dir.join(name))
-        .filter(|path| path.metadata().is_ok_and(|m| m.len() > 0))
+        .filter(|name| !before.contains(name) && name.to_lowercase().starts_with(&lower))
+        .filter(|name| dir.join(name).metadata().is_ok_and(|m| m.len() > 0))
+        .map(|name| (attempt_number(&name, base), name))
         .collect();
-    found.sort();
-    found
+    // Unnumbered last, since nothing says when they were.
+    found.sort_by(|a, b| (a.0.is_none(), a.0, &a.1).cmp(&(b.0.is_none(), b.0, &b.1)));
+    found.into_iter().map(|(_, name)| dir.join(name)).collect()
+}
+
+/// Which attempt a session's demo was, from its name: `base.lmp` is the first, and dsda and
+/// crispy number the rest `base-00002.lmp` on (`dsda_GenerateDemoName`), as a restart in one
+/// session makes another. `None` for a name made some other way, such as dsda's names with an
+/// IL's time in them.
+pub fn attempt_number(name: &str, base: &str) -> Option<u32> {
+    let name = name.to_ascii_lowercase();
+    let stem = name
+        .strip_prefix(&base.to_ascii_lowercase())?
+        .strip_suffix(DEMO_EXTENSION)?;
+    if stem.is_empty() {
+        return Some(1);
+    }
+    let number = stem.strip_prefix('-')?;
+    if number.is_empty() || !number.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    number.parse().ok()
+}
+
+/// Which of a session's `demos` exited which maps, from the maps the session `exited`. Only a
+/// session's only demo can be credited with them. A restart while nyan-doom records ends that
+/// demo and starts the next on the map the first started on (`dsda_WatchLevelReload`), so one
+/// attempt can finish the map and the next start it again, and the session's stats can't say
+/// which got there. So several demos and any exit is `None`, which is never guessed at, and
+/// several with no exit exited nothing.
+pub fn attribute_exits(demos: usize, exited: &[String]) -> Option<Vec<Vec<String>>> {
+    match demos {
+        _ if exited.is_empty() => Some(vec![Vec::new(); demos]),
+        1 => Some(vec![exited.to_vec()]),
+        _ => None,
+    }
+}
+
+/// Whether a demo finished the map it started on, as far as anything says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Finished {
+    Yes,
+    No,
+    /// caco didn't record it, recorded it before it noted this, or couldn't tell.
+    Unknown,
 }
 
 /// A name a demo can be given: one file name, with nothing that would climb out of the folder.
@@ -433,14 +492,73 @@ mod tests {
         fs::write(demos.join("scythe_20261118_100001.lmp"), b"x").unwrap();
         fs::write(demos.join("scythe_20261118_100000-00003.lmp"), b"").unwrap();
 
+        // A name with an IL's time in it, which says nothing of when.
+        fs::write(demos.join("scythe_20261118_1000004712.lmp"), b"x").unwrap();
+        fs::write(demos.join("scythe_20261118_100000-00010.lmp"), b"x").unwrap();
+
         let found = new_demos(&demos, "scythe_20261118_100000", &before);
         assert_eq!(
             found,
             [
-                demos.join("scythe_20261118_100000-00002.lmp"),
                 demos.join("scythe_20261118_100000.lmp"),
+                demos.join("scythe_20261118_100000-00002.lmp"),
+                demos.join("scythe_20261118_100000-00010.lmp"),
+                demos.join("scythe_20261118_1000004712.lmp"),
             ]
         );
+    }
+
+    #[test]
+    fn test_an_attempt_is_numbered_as_dsda_numbers_it() {
+        let base = "scythe_20261118_100000";
+        assert_eq!(attempt_number("scythe_20261118_100000.lmp", base), Some(1));
+        assert_eq!(
+            attempt_number("Scythe_20261118_100000-00002.LMP", base),
+            Some(2)
+        );
+        assert_eq!(
+            attempt_number("scythe_20261118_100000-00123.lmp", base),
+            Some(123)
+        );
+        assert_eq!(attempt_number("scythe_20261118_1000004712.lmp", base), None);
+        assert_eq!(attempt_number("scythe_20261118_100000-.lmp", base), None);
+        assert_eq!(attempt_number("other.lmp", base), None);
+    }
+
+    fn numbers(episode: u8, map: u8) -> header::StartMap {
+        header::StartMap::Numbers { episode, map }
+    }
+
+    fn maps(names: &[&str]) -> Vec<String> {
+        names.iter().map(|m| m.to_string()).collect()
+    }
+
+    #[test]
+    fn test_a_sessions_only_demo_exited_whatever_the_session_did() {
+        assert_eq!(
+            attribute_exits(1, &maps(&["MAP07", "MAP08"])),
+            Some(vec![maps(&["MAP07", "MAP08"])])
+        );
+        // Exiting nothing is known too, however many attempts there were.
+        assert_eq!(attribute_exits(3, &[]), Some(vec![Vec::new(); 3]));
+    }
+
+    #[test]
+    fn test_of_several_attempts_nothing_says_which_got_to_the_exit() {
+        // A restart goes back to where the recording started, whether or not the attempt
+        // before it got there, so MAP07 could have been finished in either.
+        assert_eq!(attribute_exits(2, &maps(&["MAP07"])), None);
+    }
+
+    #[test]
+    fn test_a_start_is_the_map_a_stats_file_calls_it() {
+        assert!(numbers(1, 7).is("MAP07"));
+        assert!(numbers(1, 7).is("e1m7"));
+        assert!(numbers(3, 2).is("E3M2"));
+        assert!(!numbers(3, 2).is("MAP02"));
+        assert!(!numbers(1, 7).is("MAP08"));
+        assert!(header::StartMap::Named("BTW01".to_string()).is("btw01"));
+        assert!(!numbers(1, 1).is("BTW01"));
     }
 
     #[test]
@@ -561,6 +679,7 @@ mod tests {
             profile: "default".to_string(),
             args: Vec::new(),
             custom_args: Vec::new(),
+            exited: None,
             files: Vec::new(),
         }
     }

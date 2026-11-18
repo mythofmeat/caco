@@ -511,6 +511,7 @@ mod tests {
             profile: "default".to_string(),
             args: vec!["-nomusic".to_string()],
             custom_args: vec!["-fast".to_string()],
+            exited: None,
             files: vec![
                 RecordedFile {
                     role: FileRole::Companion,
