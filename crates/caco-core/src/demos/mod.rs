@@ -18,8 +18,6 @@ use std::path::{Path, PathBuf};
 pub use header::DemoHeader;
 pub use record::{DemoDifference, DemoRecord, FileRole, read_record, record_path, write_record};
 
-use crate::utils::system_time_to_rfc3339;
-
 /// Demo file extension.
 pub const DEMO_EXTENSION: &str = ".lmp";
 
@@ -28,8 +26,6 @@ pub const DEMO_EXTENSION: &str = ".lmp";
 pub struct DemoFile {
     pub path: PathBuf,
     pub name: String,
-    pub size: u64,
-    pub mtime_iso: String,
     /// What its own bytes say, if they can be read.
     pub header: Option<DemoHeader>,
     /// What caco recorded it with, if caco recorded it.
@@ -99,23 +95,15 @@ pub fn count_demos(data_dir: &Path) -> usize {
 pub fn find_demo_files(data_dir: &Path) -> Vec<DemoFile> {
     demo_paths(data_dir)
         .into_iter()
-        .filter_map(|path| {
-            let meta = path.metadata().ok()?;
-            Some(DemoFile {
-                name: path
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .into_owned(),
-                size: meta.len(),
-                mtime_iso: meta
-                    .modified()
-                    .map(system_time_to_rfc3339)
-                    .unwrap_or_default(),
-                header: DemoHeader::read_file(&path),
-                record: read_record(&path),
-                path,
-            })
+        .map(|path| DemoFile {
+            name: path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned(),
+            header: DemoHeader::read_file(&path),
+            record: read_record(&path),
+            path,
         })
         .collect()
 }

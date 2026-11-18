@@ -351,10 +351,18 @@ pub(crate) fn archive_stats_files(data_dir: &Path) {
 pub fn sourceport_for(wad: &db::WadRecord) -> String {
     let cfg = config::load_config();
     let zdoom_sourceport = config::get_zdoom_sourceport();
-    let installed_sourceports: Vec<(String, String)> = sourceports::detect_sourceports()
-        .into_iter()
-        .map(|(exe, _path, family)| (exe.to_string(), family.to_string()))
-        .collect();
+    // What is on PATH only decides anything for a WAD that needs a family and names no
+    // sourceport, so nothing else pays for looking: the details panel asks on every selection.
+    let looks_on_path = non_empty(wad.custom_sourceport.as_deref()).is_none()
+        && non_empty(wad.required_sourceport_family.as_deref()).is_some();
+    let installed_sourceports: Vec<(String, String)> = if looks_on_path {
+        sourceports::detect_sourceports()
+            .into_iter()
+            .map(|(exe, _path, family)| (exe.to_string(), family.to_string()))
+            .collect()
+    } else {
+        Vec::new()
+    };
     select_sourceport(
         wad.custom_sourceport.as_deref(),
         wad.required_sourceport_family.as_deref(),

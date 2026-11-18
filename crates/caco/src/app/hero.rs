@@ -49,7 +49,7 @@ pub(super) fn render_now_playing_hero(
         (Some(_), true) => "DOWNLOADING",
         (Some(Activity::Playing), false) => "NOW PLAYING",
         (Some(Activity::Recording), false) => "RECORDING",
-        (Some(Activity::WatchingDemo(_)), false) => "WATCHING A DEMO",
+        (Some(Activity::WatchingDemo), false) => "WATCHING A DEMO",
         (None, _) => "CONTINUE PLAYING",
     };
     let is_active = is_active.is_some();

@@ -136,8 +136,147 @@ impl Launch {
         match self {
             Launch::Play(opts) if opts.record => Activity::Recording,
             Launch::Play(_) => Activity::Playing,
-            Launch::Demo { demo, .. } => Activity::WatchingDemo(demo.clone()),
+            Launch::Demo { .. } => Activity::WatchingDemo,
         }
+    }
+}
+
+/// Why a launch did not run to the end, as far as what the UI does next goes.
+enum Failure {
+    /// The file is not on this machine and caco could not fetch it; says why when it tried.
+    Unavailable(Option<String>),
+    /// The launch itself said no, or failed: some of these the UI asks about.
+    Refused(caco_core::Error),
+    /// Anything else, which is a toast.
+    Message(String),
+}
+
+/// Open the library on the worker and make sure the WAD's file is here, fetching it when it
+/// is not and caco can. A demo needs the file as much as a session does, and Clean has usually
+/// taken a finished WAD's, which is when an old demo gets watched.
+fn file_here(
+    db_path: &std::path::Path,
+    wad_id: i64,
+    sender: &crate::workers::BackgroundSender,
+) -> Result<Connection, Failure> {
+    let conn = caco_core::db::open_connection(db_path)
+        .map_err(|e| Failure::Message(format!("DB open failed: {e}")))?;
+    let wad = caco_core::db::get_wad(&conn, wad_id, false)
+        .map_err(|e| Failure::Message(format!("DB error: {e}")))?
+        .ok_or_else(|| Failure::Message(format!("WAD #{wad_id} not found")))?;
+
+    // The startup check, for this one WAD: a file that has gone since is recorded as last
+    // seen there, and one that has come back is relinked.
+    let paths = caco_core::presence::StorePaths::from_config();
+    let presence = caco_core::presence::check_wad(&conn, &wad, &paths)
+        .map_err(|e| Failure::Message(format!("Checking the WAD file failed: {e}")))?;
+    if !presence.is_here() {
+        // Nothing to fetch it from: say so now, rather than announce a download that
+        // cannot start.
+        if !wad.retrievability().is_automatic() {
+            return Err(Failure::Unavailable(None));
+        }
+        sender.send(AppMessage::PlayDownloading(true));
+        let config = caco_core::config::load_config();
+        caco_sources::wad_fetch::fetch_missing_file(
+            &conn,
+            &wad,
+            &config.mirrors,
+            &paths,
+            config.download_mirror,
+        )
+        .map_err(|e| Failure::Unavailable(Some(e.to_string())))?;
+        sender.send(AppMessage::PlayDownloading(false));
+    }
+    Ok(conn)
+}
+
+/// What the UI does once a session's launch is over. A file that went missing opens the link
+/// dialog, a changed file and newer saves elsewhere ask, and anything else is a toast.
+fn session_ended(
+    wad_id: i64,
+    opts: caco_core::player::PlayOptions,
+    outcome: Result<caco_core::player::PlayResult, Failure>,
+) -> AppMessage {
+    use caco_core::Error;
+    match outcome {
+        Ok(played) => AppMessage::PlayFinished {
+            outcome: Ok(played),
+        },
+        // Gone between the check and the launch, or never here.
+        Err(Failure::Unavailable(reason)) => AppMessage::PlayUnavailable {
+            wad_id,
+            reason,
+            opts,
+        },
+        Err(Failure::Refused(Error::WadFileMissing { .. })) => AppMessage::PlayUnavailable {
+            wad_id,
+            reason: None,
+            opts,
+        },
+        Err(Failure::Refused(Error::WadFileChanged { title, change })) => {
+            AppMessage::PlayFileChanged {
+                wad_id,
+                title,
+                change,
+                opts,
+            }
+        }
+        Err(Failure::Refused(Error::NewerSavesElsewhere { title, saves })) => {
+            AppMessage::PlayNewerSaves {
+                wad_id,
+                title,
+                saves,
+                opts,
+            }
+        }
+        Err(Failure::Refused(Error::NoSourceport)) => no_sourceport(),
+        Err(Failure::Refused(e)) => AppMessage::PlayFinished {
+            outcome: Err(e.to_string()),
+        },
+        Err(Failure::Message(msg)) => AppMessage::PlayFinished { outcome: Err(msg) },
+    }
+}
+
+/// What the UI does once a demo's playback is over. One that can't be played as it was
+/// recorded asks. A file caco can't fetch is a toast rather than the link dialog, since that
+/// plays the WAD once it has a file, which is not what was asked for.
+fn demo_ended(
+    wad_id: i64,
+    outcome: Result<caco_core::player::DemoResult, Failure>,
+    demo: String,
+) -> AppMessage {
+    use caco_core::Error;
+    let failed = |text: String| AppMessage::DemoFinished { outcome: Err(text) };
+    match outcome {
+        Ok(watched) => AppMessage::DemoFinished {
+            outcome: Ok(watched),
+        },
+        Err(Failure::Refused(Error::DemoDiffers { title, differences })) => {
+            AppMessage::DemoDiffers {
+                wad_id,
+                title,
+                demo,
+                differences,
+            }
+        }
+        Err(Failure::Unavailable(reason)) => failed(reason.unwrap_or_else(|| {
+            "its file isn't here, and caco can't fetch it. Link it from Play first.".to_string()
+        })),
+        Err(Failure::Refused(Error::WadFileMissing { .. })) => {
+            failed("its file isn't here any more.".to_string())
+        }
+        Err(Failure::Refused(Error::NoSourceport)) => no_sourceport(),
+        Err(Failure::Refused(e)) => failed(e.to_string()),
+        Err(Failure::Message(msg)) => failed(msg),
+    }
+}
+
+fn no_sourceport() -> AppMessage {
+    AppMessage::PlayNeedsSetup {
+        text: "Nothing to play it with: caco couldn't find a sourceport on this machine."
+            .to_string(),
+        fix: NoticeAction::OpenSettings,
     }
 }
 
@@ -435,177 +574,25 @@ impl CacoApp {
             activity: launch.activity(),
         };
 
-        // Spawn play worker in a background thread
         let sender = self.bg.sender();
         let db_path = self.state.db_path.clone();
         std::thread::spawn(move || {
-            // Local error type that distinguishes the outcomes the UI acts on
-            // from errors that only surface as a toast. String errors from `?`
-            // default to Message; Unavailable is chosen explicitly where the
-            // file is not on this machine and caco cannot fetch it, and the
-            // rest are the launch's own refusals to go ahead without asking.
-            enum PlayError {
-                Message(String),
-                /// Says why when caco tried to fetch it and could not.
-                Unavailable(Option<String>),
-                Changed {
-                    title: String,
-                    change: caco_core::identity::ContentChange,
-                },
-                NewerSaves {
-                    title: String,
-                    saves: caco_core::sync::NewerSaves,
-                },
-                DemoDiffers {
-                    title: String,
-                    differences: Vec<caco_core::demos::DemoDifference>,
-                },
-                NoSourceport,
-            }
-            impl From<String> for PlayError {
-                fn from(s: String) -> Self {
-                    PlayError::Message(s)
-                }
-            }
-            impl From<caco_core::Error> for PlayError {
-                fn from(e: caco_core::Error) -> Self {
-                    match e {
-                        // Gone between the check below and the launch.
-                        caco_core::Error::WadFileMissing { .. } => PlayError::Unavailable(None),
-                        caco_core::Error::WadFileChanged { title, change } => {
-                            PlayError::Changed { title, change }
-                        }
-                        caco_core::Error::NewerSavesElsewhere { title, saves } => {
-                            PlayError::NewerSaves { title, saves }
-                        }
-                        caco_core::Error::DemoDiffers { title, differences } => {
-                            PlayError::DemoDiffers { title, differences }
-                        }
-                        caco_core::Error::NoSourceport => PlayError::NoSourceport,
-                        e => PlayError::Message(e.to_string()),
-                    }
-                }
-            }
-            enum Played {
-                Session(caco_core::player::PlayResult),
-                Demo(caco_core::player::DemoResult),
-            }
-
-            let outcome = (|| -> Result<Played, PlayError> {
-                let conn = caco_core::db::open_connection(&db_path)
-                    .map_err(|e| format!("DB open failed: {e}"))?;
-
-                let wad = caco_core::db::get_wad(&conn, wad_id, false)
-                    .map_err(|e| format!("DB error: {e}"))?
-                    .ok_or_else(|| format!("WAD #{wad_id} not found"))?;
-
-                // The startup check, for this one WAD: a file that has
-                // gone since is recorded as last seen there, and one
-                // that has come back is relinked. A demo needs the file as
-                // much as a session does, and Clean has usually taken a
-                // finished WAD's, which is when an old demo gets watched.
-                let paths = caco_core::presence::StorePaths::from_config();
-                let presence = caco_core::presence::check_wad(&conn, &wad, &paths)
-                    .map_err(|e| format!("Checking the WAD file failed: {e}"))?;
-                if !presence.is_here() {
-                    // Nothing to fetch it from: say so now, rather than
-                    // announce a download that cannot start.
-                    if !wad.retrievability().is_automatic() {
-                        return Err(PlayError::Unavailable(None));
-                    }
-                    sender.send(AppMessage::PlayDownloading(true));
-                    let config = caco_core::config::load_config();
-                    caco_sources::wad_fetch::fetch_missing_file(
-                        &conn,
-                        &wad,
-                        &config.mirrors,
-                        &paths,
-                        config.download_mirror,
-                    )
-                    .map_err(|e| PlayError::Unavailable(Some(e.to_string())))?;
-                    sender.send(AppMessage::PlayDownloading(false));
-                }
-
-                Ok(match &launch {
-                    Launch::Play(opts) => {
-                        Played::Session(caco_core::player::play(&conn, wad_id, *opts)?)
-                    }
-                    Launch::Demo { demo, opts } => {
-                        Played::Demo(caco_core::player::play_demo(&conn, wad_id, demo, *opts)?)
-                    }
-                })
-            })();
-
-            let message = match (outcome, launch) {
-                (Ok(Played::Session(pr)), _) => AppMessage::PlayFinished { outcome: Ok(pr) },
-                (Ok(Played::Demo(watched)), _) => AppMessage::DemoFinished {
-                    outcome: Ok(watched),
-                },
-                (Err(PlayError::Message(msg)), Launch::Demo { .. }) => {
-                    AppMessage::DemoFinished { outcome: Err(msg) }
-                }
-                (Err(PlayError::Message(msg)), Launch::Play(_)) => {
-                    AppMessage::PlayFinished { outcome: Err(msg) }
-                }
-                // The link dialog plays the WAD once it has a file, which is not what
-                // a demo was asked for.
-                (Err(PlayError::Unavailable(reason)), Launch::Demo { .. }) => {
-                    AppMessage::DemoFinished {
-                        outcome: Err(reason.unwrap_or_else(|| {
-                            "its file isn't here, and caco can't fetch it. Link it from Play \
-                             first."
-                                .to_string()
-                        })),
-                    }
-                }
-                (Err(PlayError::Unavailable(reason)), Launch::Play(opts)) => {
-                    AppMessage::PlayUnavailable {
-                        wad_id,
-                        reason,
-                        opts,
-                    }
-                }
-                (Err(PlayError::NoSourceport), _) => AppMessage::PlayNeedsSetup {
-                    text: "Nothing to play it with: caco couldn't find a sourceport on this \
-                           machine."
-                        .to_string(),
-                    fix: NoticeAction::OpenSettings,
-                },
-                (Err(PlayError::Changed { title, change }), Launch::Play(opts)) => {
-                    AppMessage::PlayFileChanged {
-                        wad_id,
-                        title,
-                        change,
-                        opts,
-                    }
-                }
-                (Err(PlayError::NewerSaves { title, saves }), Launch::Play(opts)) => {
-                    AppMessage::PlayNewerSaves {
-                        wad_id,
-                        title,
-                        saves,
-                        opts,
-                    }
-                }
-                (Err(PlayError::DemoDiffers { title, differences }), Launch::Demo { demo, .. }) => {
-                    AppMessage::DemoDiffers {
-                        wad_id,
-                        title,
-                        demo,
-                        differences,
-                    }
-                }
-                // Only a session is asked about its file and its saves, and only a
-                // demo about how it was recorded.
-                (
-                    Err(PlayError::Changed { title, .. } | PlayError::NewerSaves { title, .. }),
-                    Launch::Demo { .. },
-                )
-                | (Err(PlayError::DemoDiffers { title, .. }), Launch::Play(_)) => {
-                    AppMessage::PlayFinished {
-                        outcome: Err(format!("{title} stopped to ask something it shouldn't")),
-                    }
-                }
+            let message = match launch {
+                Launch::Play(opts) => session_ended(
+                    wad_id,
+                    opts,
+                    file_here(&db_path, wad_id, &sender).and_then(|conn| {
+                        caco_core::player::play(&conn, wad_id, opts).map_err(Failure::Refused)
+                    }),
+                ),
+                Launch::Demo { demo, opts } => demo_ended(
+                    wad_id,
+                    file_here(&db_path, wad_id, &sender).and_then(|conn| {
+                        caco_core::player::play_demo(&conn, wad_id, &demo, opts)
+                            .map_err(Failure::Refused)
+                    }),
+                    demo,
+                ),
             };
             sender.send(message);
         });

@@ -238,8 +238,8 @@ pub enum PlayState {
 pub enum Activity {
     Playing,
     Recording,
-    /// Playing back a demo, by file name.
-    WatchingDemo(String),
+    /// Playing back a demo.
+    WatchingDemo,
 }
 
 impl Activity {
@@ -248,7 +248,7 @@ impl Activity {
         match self {
             Activity::Playing => "Playing",
             Activity::Recording => "Recording",
-            Activity::WatchingDemo(_) => "Watching a demo of",
+            Activity::WatchingDemo => "Watching a demo of",
         }
     }
 }
