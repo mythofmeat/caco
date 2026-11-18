@@ -11,6 +11,7 @@ A personal Doom WAD library manager inspired by [beets](https://beets.io). Impor
 - **Sourceports from source** — build nyan-doom or uzdoom into caco's own prefix, no system install required.
 - **Companion files** — manage DEH patches, music WADs, and other companion files with automatic deduplication.
 - **Per-WAD isolation** — saves, stats, and configs are separated per WAD so nothing gets mixed up.
+- **Demos** — record any session with Play and Record (`R`), and play each demo back the way it was recorded, whatever the WAD is set to since. caco keeps what it was recorded with beside it, and says what has changed when it can't. See [Demos](#demos).
 - **On-demand downloads** — idgames WADs are cached when you play, with configurable auto-cleanup. WADs that cannot be re-downloaded are kept on the portable side instead, and destructive actions leave them alone by default.
 - **Get through your browser** — for a WAD behind a site that turns caco away, Get opens its page in your browser and watches your Downloads folder. When the file lands, caco asks if that's the one, then files it, hashes it and offers it to your mirror.
 - **Mirrors** — your own store of WAD files, a directory or an HTTP file server, for what idgames does not have. caco looks there first and offers to upload what it could not otherwise get back, so a mirror fills itself as you play.
@@ -113,7 +114,7 @@ the status bar says so rather than leaving progress quietly uncounted.
   with status and rating changed right there. `I` puts them away, and a window too small for both
   opens them in a dialog
 - WAD thumbnails scraped from the Doom Wiki (or extracted from TITLEPIC) with on-disk caching
-- Right-click context menu (play, details, status, rating, sessions, map stats, saves & demos, edit, delete, new playthrough, and get in browser for a WAD caco can't fetch)
+- Right-click context menu (play, play and record, details, status, rating, sessions, map stats, saves & demos, edit, delete, new playthrough, and get in browser for a WAD caco can't fetch)
 - A status bar that says how many WADs are showing, and what there is to press. What it tells you
   stays until it could have been read, an error until you dismiss it, and it offers what to do about
   it: Undo after a delete, Show after an import
@@ -130,7 +131,7 @@ the status bar says so rather than leaving progress quietly uncounted.
   you are, and your most played authors, sourceports, IWADs and complevels. A status, an author or a
   year goes to what it counts
 - Keyboard: `j/k` and the arrows, `Page Up/Down`, `g g`/`G`, `Home`/`End`, `Enter`, `I`, `E`,
-  `D`/`Delete`, `S`, `M`, `F`, `P`, `Esc`, `/` to search, `Ctrl+1`-`4` for the views, `Ctrl+Enter` for
+  `D`/`Delete`, `S`, `M`, `F`, `P`, `R`, `Esc`, `/` to search, `Ctrl+1`-`4` for the views, `Ctrl+Enter` for
   a dialog's main button, and `?` or `F1` for the list of them, and how to write a filter
 
 ### Dialogs
@@ -161,6 +162,32 @@ Sources tab shows the WAD's file: where it is (or was last seen), which of your
 mirrors have it, its size, SHA-256 and SHA-1, the WADs inside it, and any other
 WAD in the library that is the same file. It can also upload the file to a mirror
 that does not have it.
+
+### Demos
+
+**Play and Record** (`R`, the WAD's menu, or under Play beside the library) plays a WAD
+and records a demo of the session into its demos folder, named after the WAD and when.
+It is a session like any other: it is timed, its maps are counted, and caco asks the same
+questions first. Every sourceport family caco knows records except Helion.
+
+A demo only plays back as recorded with what it was recorded with: the same sourceport and
+build, IWAD, files in the same order, complevel and settings. So beside each demo it records,
+caco keeps a note of exactly that (`run.lmp.toml`), naming every file by its hash, and plays the
+demo back from it rather than from whatever the WAD is set to now. Change the complevel or add a
+companion afterwards and the demo still plays. Where this machine can't match the note, because
+the build has been updated, the WAD's file has changed or a companion has gone, caco says which
+before launching and lets you play it anyway. A demo that came from somewhere else plays with the
+WAD's current settings.
+
+The Demos tab in **Saves & Demos** lists each demo's map, skill, length and sourceport, read from
+the demo itself, and when it was recorded, from caco's note rather than the file's date. A demo
+recorded by dsda-doom or one of its relatives elsewhere says which sourceport and files it was
+recorded with, on hover. Demos can be renamed, added from a file (from a speedrun archive, or one
+that came with the WAD), and opened in their folder. **Sessions** marks a session that recorded a
+demo, with a button to play it, and the details panel counts a WAD's demos.
+
+Playing a demo back fetches the WAD's file first if Clean took it, and the status bar says how it
+ended. Clean keeps demos unless you untick Demos: a minute of vanilla demo is about 8 KB.
 
 ## Queries
 
