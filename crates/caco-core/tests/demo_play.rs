@@ -193,6 +193,36 @@ fn a_demo_plays_back_as_it_was_recorded() {
     assert_eq!(header.map_name(false).as_deref(), Some("MAP07"));
     assert_eq!(header.duration_secs(), Some(1));
 
+    // ---- Exported to share, with the WAD and the companion, and a note of how to play it.
+    let export = demos::export::plan_export(&conn, wad_id, &listed, true, false).unwrap();
+    let zipped = root.path().join("scythe-demos.zip");
+    demos::export::write_export(&export, &zipped).unwrap();
+    let mut zip = zip::ZipArchive::new(fs::File::open(&zipped).unwrap()).unwrap();
+    let mut in_zip: Vec<String> = zip
+        .file_names()
+        .map(|name| name.unwrap().into_owned())
+        .collect();
+    in_zip.sort();
+    let stem = name.trim_end_matches(".lmp");
+    let mut expected = vec![
+        name.clone(),
+        format!("{name}.toml"),
+        format!("{stem}.txt"),
+        "fix.deh".to_string(),
+        "scythe.wad".to_string(),
+    ];
+    expected.sort();
+    assert_eq!(in_zip, expected);
+    let mut note = String::new();
+    std::io::Read::read_to_string(&mut zip.by_name(&format!("{stem}.txt")).unwrap(), &mut note)
+        .unwrap();
+    assert!(
+        note.contains(&format!(
+            "nyan-doom -complevel 9 -deh fix.deh -file scythe.wad -playdemo {name}"
+        )),
+        "{note}"
+    );
+
     // ---- Changed since: another complevel, and a -record of the user's own.
     let update = WadUpdate::new().set_int("complevel", Some(11)).set_text(
         "custom_args",

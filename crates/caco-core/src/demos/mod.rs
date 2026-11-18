@@ -8,6 +8,7 @@
 //! taken (`-00002`), or that a restart in the same session made, which is why what a session
 //! recorded is found by its name's start rather than taken to be one file.
 
+pub mod export;
 pub mod header;
 pub mod record;
 
@@ -149,6 +150,12 @@ pub fn resolve_demo_path(data_dir: &Path, name: &str) -> crate::Result<PathBuf> 
 /// What to call the demos a session records: the WAD, then when, as the CLI named them, with
 /// nothing a sourceport could take for an extension or a folder.
 pub fn new_demo_base(title: &str, at: chrono::DateTime<chrono::Local>) -> String {
+    format!("{}_{}", slug(title), at.format("%Y%m%d_%H%M%S"))
+}
+
+/// A WAD's title as a file name: lower case, letters and digits, a dash for anything else, and
+/// nothing a sourceport could take for an extension or a folder.
+pub fn slug(title: &str) -> String {
     let mut slug = String::new();
     for c in title.chars() {
         if c.is_alphanumeric() {
@@ -157,17 +164,11 @@ pub fn new_demo_base(title: &str, at: chrono::DateTime<chrono::Local>) -> String
             slug.push('-');
         }
     }
-    let slug = slug.trim_end_matches('-');
-    let slug: String = if slug.is_empty() {
-        "demo".to_string()
-    } else {
-        slug.chars().take(40).collect()
-    };
-    format!(
-        "{}_{}",
-        slug.trim_end_matches('-'),
-        at.format("%Y%m%d_%H%M%S")
-    )
+    let slug: String = slug.trim_end_matches('-').chars().take(40).collect();
+    match slug.trim_end_matches('-') {
+        "" => "demo".to_string(),
+        slug => slug.to_string(),
+    }
 }
 
 /// Whether a WAD's maps go by episode (E1M1) rather than number (MAP01), for reading the
@@ -295,7 +296,8 @@ pub fn delete_demo(demo: &Path) -> crate::Result<()> {
 /// Copy a demo from somewhere else into a WAD's demos directory: one from a speedrun archive,
 /// or one that came in the WAD's zip. Refuses what is not a demo, unless it says it is one by
 /// its name, since a demo in a format nobody here reads is still a demo. Keeps its name, with a
-/// number added if that is taken. Returns where it went.
+/// number added if that is taken. A record beside it comes too, as one caco exported would
+/// have, so it plays back as it was recorded. Returns where it went.
 pub fn add_demo_from_file(data_dir: &Path, source: &Path) -> crate::Result<PathBuf> {
     if !is_demo_file(source) && DemoHeader::read_file(source).is_none() {
         return Err(crate::Error::Config(format!(
@@ -317,6 +319,9 @@ pub fn add_demo_from_file(data_dir: &Path, source: &Path) -> crate::Result<PathB
         n += 1;
     }
     fs::copy(source, &target)?;
+    if let Some(record) = read_record(source) {
+        write_record(&target, &record)?;
+    }
     Ok(target)
 }
 
@@ -509,6 +514,18 @@ mod tests {
         fs::write(&unnamed, &vanilla).unwrap();
         let added = add_demo_from_file(dir.path(), &unnamed).unwrap();
         assert_eq!(added, demos_dir(dir.path()).join("run.lmp"));
+    }
+
+    #[test]
+    fn test_a_demo_added_from_an_export_brings_its_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let unzipped = tempfile::tempdir().unwrap();
+        let source = unzipped.path().join("map07-uv.lmp");
+        fs::write(&source, b"demo").unwrap();
+        write_record(&source, &sample_record()).unwrap();
+
+        let added = add_demo_from_file(dir.path(), &source).unwrap();
+        assert_eq!(read_record(&added), Some(sample_record()));
     }
 
     #[test]

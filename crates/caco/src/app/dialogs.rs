@@ -201,7 +201,7 @@ pub(super) fn render_active_dialog(
                 }
                 WadStatsResult::Open => {}
             },
-            ActiveDialog::WadData(wad_data_state) => match wad_data_state.render(ctx) {
+            ActiveDialog::WadData(wad_data_state) => match wad_data_state.render(ctx, conn) {
                 WadDataResult::Closed => {
                     close_dialog = true;
                 }

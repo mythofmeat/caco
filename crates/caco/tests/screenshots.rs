@@ -1453,6 +1453,28 @@ fn shoot_every_surface() {
         "Rename left the record behind"
     );
     record(
+        "saves-demos-export",
+        s.shot_dialog_after(
+            "dlg-saves-demos-export",
+            ActionRequest::WadData(with_demos),
+            |s| {
+                s.harness.get_by_label("Demos (3)").click();
+                s.settle(2, Duration::ZERO);
+                s.harness.get_by_label("Export").click();
+                s.settle(2, Duration::ZERO);
+                s.harness.get_by_label("All 3 demos").click();
+                s.settle(2, Duration::ZERO);
+                s.harness
+                    .get_by_label_contains("With the WAD's files")
+                    .click();
+                s.settle(2, Duration::ZERO);
+                s.harness
+                    .get_by_label_contains("fix.deh isn't on this machine");
+                s.harness.get_by_label("Export\u{2026}");
+            },
+        ),
+    );
+    record(
         "sessions-demos",
         s.shot_dialog_after(
             "dlg-sessions-demos",

@@ -186,6 +186,13 @@ recorded with, on hover. Demos can be renamed, added from a file (from a speedru
 that came with the WAD), and opened in their folder. **Sessions** marks a session that recorded a
 demo, with a button to play it, and the details panel counts a WAD's demos.
 
+**Export** zips one demo or all of a WAD's to share. Each goes with a text file saying what it
+needs (the WAD, where to get it and its hash, the IWAD, the sourceport and build, the complevel and
+anything else that was loaded) and the command line that plays it back, and with caco's note of
+how it was recorded, so another caco that adds it from the zip plays it the same way. Tick **With
+the WAD's files** to put the WAD and its companions in too. IWADs and id24 resources never go in,
+since they're id Software's to give; the text file names them instead.
+
 Playing a demo back fetches the WAD's file first if Clean took it, and the status bar says how it
 ended. Clean keeps demos unless you untick Demos: a minute of vanilla demo is about 8 KB.
 
