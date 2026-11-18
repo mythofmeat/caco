@@ -721,8 +721,8 @@ impl WadDataDialogState {
         if self.demos.is_empty() {
             ui.colored_label(
                 theme::TEXT_SECONDARY,
-                "No demos yet. Play and Record (R) records one, and Add From File brings in \
-                 one from somewhere else.",
+                "No demos yet. Record Demo (R) records one, and Add From File brings in one \
+                 from somewhere else.",
             );
             return;
         }

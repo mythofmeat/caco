@@ -38,7 +38,7 @@ pub(super) fn render_help_dialog(ctx: &egui::Context) -> bool {
                         "Library",
                         &[
                             (&["Enter", "P"], "Play the selected WAD"),
-                            (&["R"], "Play it and record a demo"),
+                            (&["R"], "Record a demo of it, on a map you pick"),
                             (&["\u{2191}\u{2193}", "J K"], "Move up and down"),
                             (&["\u{2190}\u{2192}", "H L"], "Move across (in the grid)"),
                             (&["PgUp", "PgDn"], "Move by a page"),

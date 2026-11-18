@@ -25,7 +25,7 @@ pub struct LinkDialogState {
     /// each frame; resolves to `Some(path)` or `None` (cancelled).
     pending_picker: Option<FileDialogReceiver>,
     /// How the launch that found the file missing was going to play it, which is how it
-    /// plays once there is a file: Play and Record still records.
+    /// plays once there is a file: Record Demo still records.
     play_options: caco_core::player::PlayOptions,
 }
 

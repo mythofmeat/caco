@@ -74,6 +74,16 @@ impl DemoFormat {
     }
 }
 
+/// Doom's skills, from the easiest, as speedrunners write them and as the menu does. A demo
+/// numbers them from 0, and `-skill` from 1.
+pub const SKILLS: [(&str, &str); 5] = [
+    ("ITYTD", "I'm Too Young to Die"),
+    ("HNTR", "Hey, Not Too Rough"),
+    ("HMP", "Hurt Me Plenty"),
+    ("UV", "Ultra-Violence"),
+    ("NM", "Nightmare!"),
+];
+
 /// The map a demo starts on: by number, or by name in a ZDoom demo.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StartMap {
@@ -135,17 +145,11 @@ impl DemoHeader {
 
     /// The skill as speedrunners write it: UV, NM.
     pub fn skill_name(&self) -> Option<String> {
-        self.skill.map(|skill| {
-            match skill {
-                0 => "ITYTD",
-                1 => "HNTR",
-                2 => "HMP",
-                3 => "UV",
-                4 => "NM",
-                n => return format!("Skill {}", n + 1),
-            }
-            .to_string()
-        })
+        self.skill
+            .map(|skill| match SKILLS.get(usize::from(skill)) {
+                Some((short, _)) => short.to_string(),
+                None => format!("Skill {}", u16::from(skill) + 1),
+            })
     }
 
     /// The map it starts on, by lump name. A vanilla or Boom demo only has numbers, and Doom

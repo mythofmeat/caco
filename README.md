@@ -11,7 +11,7 @@ A personal Doom WAD library manager inspired by [beets](https://beets.io). Impor
 - **Sourceports from source** — build nyan-doom or uzdoom into caco's own prefix, no system install required.
 - **Companion files** — manage DEH patches, music WADs, and other companion files with automatic deduplication.
 - **Per-WAD isolation** — saves, stats, and configs are separated per WAD so nothing gets mixed up.
-- **Demos** — record any session with Play and Record (`R`), and play each demo back the way it was recorded, whatever the WAD is set to since. caco keeps what it was recorded with beside it, and says what has changed when it can't. See [Demos](#demos).
+- **Demos** — record a demo of any map at any skill with Record Demo (`R`), see which maps have one that got to the exit, and play each demo back the way it was recorded, whatever the WAD is set to since. caco keeps what it was recorded with beside it, and says what has changed when it can't. See [Demos](#demos).
 - **On-demand downloads** — idgames WADs are cached when you play, with configurable auto-cleanup. WADs that cannot be re-downloaded are kept on the portable side instead, and destructive actions leave them alone by default.
 - **Get through your browser** — for a WAD behind a site that turns caco away, Get opens its page in your browser and watches your Downloads folder. When the file lands, caco asks if that's the one, then files it, hashes it and offers it to your mirror.
 - **Mirrors** — your own store of WAD files, a directory or an HTTP file server, for what idgames does not have. caco looks there first and offers to upload what it could not otherwise get back, so a mirror fills itself as you play.
@@ -114,7 +114,7 @@ the status bar says so rather than leaving progress quietly uncounted.
   with status and rating changed right there. `I` puts them away, and a window too small for both
   opens them in a dialog
 - WAD thumbnails scraped from the Doom Wiki (or extracted from TITLEPIC) with on-disk caching
-- Right-click context menu (play, play and record, details, status, rating, sessions, map stats, saves & demos, edit, delete, new playthrough, and get in browser for a WAD caco can't fetch)
+- Right-click context menu (play, record demo, details, status, rating, sessions, map stats, saves & demos, edit, delete, new playthrough, and get in browser for a WAD caco can't fetch)
 - A status bar that says how many WADs are showing, and what there is to press. What it tells you
   stays until it could have been read, an error until you dismiss it, and it offers what to do about
   it: Undo after a delete, Show after an import
@@ -165,10 +165,25 @@ that does not have it.
 
 ### Demos
 
-**Play and Record** (`R`, the WAD's menu, or under Play beside the library) plays a WAD
-and records a demo of the session into its demos folder, named after the WAD and when.
+**Record Demo** (`R`, the WAD's menu, or under Play beside the library) asks which map and which
+skill, then plays the WAD from there recording a demo into its demos folder, named after the WAD
+and when. The maps are the ones caco read in the WAD, in order, each with how many demos start
+there and the skills of those that got to the exit, so it is easy to see which maps still need
+one. Up and Down pick a map, Left and Right a skill, and Enter records. Until caco has read the
+WAD's maps it offers the ones you have played, or a new game's start.
+
 It is a session like any other: it is timed, its maps are counted, and caco asks the same
-questions first. Every sourceport family caco knows records except Helion.
+questions first. Every sourceport family caco knows records except Helion. nyan-doom and the rest
+of the dsda family are sent to a map with `-warp`, which only names maps with Doom's own names
+(MAP07, E1M7); uzdoom takes any map by name. nyan-doom won't record a WAD with no complevel, so
+caco says to set one rather than launch.
+
+Whether a demo got to the exit comes from the session's stats, so caco only knows for the demos it
+records, and only for a session that made one. Restarting in nyan-doom while it records ends the
+demo and starts another from the first map, and the stats can't say which attempt got there, so a
+session with restarts says Can't tell rather than guess. With nyan-doom's "organize failed demos"
+on, the attempts that didn't finish go to its own failed_demos folder, and the status bar counts
+them.
 
 A demo only plays back as recorded with what it was recorded with: the same sourceport and
 build, IWAD, files in the same order, complevel and settings. So beside each demo it records,

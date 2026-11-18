@@ -274,11 +274,13 @@ fn demo_ended(
 
 fn no_sourceport() -> AppMessage {
     AppMessage::PlayNeedsSetup {
-        text: "Nothing to play it with: caco couldn't find a sourceport on this machine."
-            .to_string(),
+        text: NO_SOURCEPORT.to_string(),
         fix: NoticeAction::OpenSettings,
     }
 }
+
+const NO_SOURCEPORT: &str =
+    "Nothing to play it with: caco couldn't find a sourceport on this machine.";
 
 pub struct CacoApp {
     conn: Connection,
@@ -431,6 +433,37 @@ impl CacoApp {
             import::ImportAction::ImportForm(kind, values) => {
                 import::workers::spawn_import_form(sender, db_path, kind, values);
             }
+        }
+    }
+
+    /// Record Demo asks which map and skill, once there is something that can record: with
+    /// no sourceport, or one caco can't record with, the status bar says so instead.
+    fn open_record_demo(&mut self, wad_id: i64) {
+        let Ok(Some(wad)) = caco_core::db::get_wad(&self.conn, wad_id, false) else {
+            return;
+        };
+        // What there is to record with is said here rather than in a dialog that can't act.
+        let sourceport = caco_core::player::sourceport_for(&wad);
+        if sourceport.trim().is_empty() {
+            self.state.notification = Some(
+                Notification::error(NO_SOURCEPORT.to_string())
+                    .with_action(NoticeAction::OpenSettings),
+            );
+            return;
+        }
+        if !caco_core::sourceports::can_record(&sourceport) {
+            let name = std::path::Path::new(&sourceport)
+                .file_stem()
+                .map_or_else(|| sourceport.clone(), |s| s.to_string_lossy().into_owned());
+            self.state.notification = Some(Notification::warning(format!(
+                "caco can't record demos with {name}."
+            )));
+            return;
+        }
+        if let Some(dialog) =
+            crate::dialogs::record_demo::RecordDemoDialogState::new(&self.conn, wad_id)
+        {
+            self.state.active_dialog = Some(ActiveDialog::RecordDemo(Box::new(dialog)));
         }
     }
 
@@ -1095,16 +1128,7 @@ impl CacoApp {
                     Launch::Play(caco_core::player::PlayOptions::default()),
                 );
             }
-            ActionRequest::PlayAndRecord(wad_id) => {
-                let opts = caco_core::player::PlayOptions {
-                    record: Some(caco_core::player::RecordStart {
-                        map: None,
-                        skill: caco_core::player::RecordStart::DEFAULT_SKILL,
-                    }),
-                    ..caco_core::player::PlayOptions::default()
-                };
-                self.spawn_launch(wad_id, Launch::Play(opts));
-            }
+            ActionRequest::RecordDemo(wad_id) => self.open_record_demo(wad_id),
             ActionRequest::PlayWith(wad_id, opts) => {
                 self.spawn_launch(wad_id, Launch::Play(opts));
             }

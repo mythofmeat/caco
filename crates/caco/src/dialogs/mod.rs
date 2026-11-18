@@ -17,6 +17,7 @@ pub mod mirror_setup;
 pub mod mirrors;
 pub mod newer_saves;
 pub mod profiles;
+pub mod record_demo;
 pub mod resources;
 pub mod sessions;
 pub mod settings;

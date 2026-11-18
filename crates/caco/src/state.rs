@@ -21,6 +21,7 @@ use crate::dialogs::mirror_offer::MirrorOfferDialogState;
 use crate::dialogs::mirrors::MirrorsDialogState;
 use crate::dialogs::newer_saves::NewerSavesDialogState;
 use crate::dialogs::profiles::ProfilesDialogState;
+use crate::dialogs::record_demo::RecordDemoDialogState;
 use crate::dialogs::resources::ResourcesDialogState;
 use crate::dialogs::sessions::SessionsDialogState;
 use crate::dialogs::settings::SettingsDialogState;
@@ -69,8 +70,8 @@ pub enum ViewLayout {
 
 pub enum ActionRequest {
     Play(i64),
-    /// Play a WAD and record a demo of the session.
-    PlayAndRecord(i64),
+    /// Ask which map and skill to record a demo of a WAD at, then record it.
+    RecordDemo(i64),
     /// Change a WAD's status, in passing.
     SetStatus(i64, caco_core::db::Status),
     /// Change a WAD's rating, in passing, or take it away.
@@ -214,6 +215,8 @@ pub enum ActiveDialog {
     NewerSaves(NewerSavesDialogState),
     /// Asked before playing a demo back in a way it wasn't recorded.
     DemoDiffers(DemoDiffersDialogState),
+    /// Which map and skill a demo is recorded at.
+    RecordDemo(Box<RecordDemoDialogState>),
     /// Which machines this library has heard from.
     Sync(Box<SyncDialogState>),
     /// Modal picker for choosing a library WAD to link to a Cacoward entry.
