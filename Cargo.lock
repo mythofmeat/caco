@@ -597,7 +597,7 @@ checksum = "776dfebd015e2d8732c684a2c71003674ccb49457b539b9e82151ba38e96dd7c"
 
 [[package]]
 name = "caco"
-version = "4.6.1"
+version = "4.6.2"
 dependencies = [
  "caco-core",
  "caco-sources",
@@ -623,7 +623,7 @@ dependencies = [
 
 [[package]]
 name = "caco-core"
-version = "4.6.1"
+version = "4.6.2"
 dependencies = [
  "arc-swap",
  "chrono",
@@ -648,7 +648,7 @@ dependencies = [
 
 [[package]]
 name = "caco-sources"
-version = "4.6.1"
+version = "4.6.2"
 dependencies = [
  "caco-core",
  "cc",
